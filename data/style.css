@@ -20,40 +20,22 @@
 @define-color orange    #fe8019;
 @define-color accent    #689d6a;
 
-/* ── Window transparency (all windows) ── */
-/* GTK4 paints an opaque background on window.background by default.
-   Unsetting it makes the surface truly transparent so rounded corners
-   on child widgets don't have dark "bleed-through" rectangles. */
-window.background {
+/* ── Window transparency ── */
+/* GTK4 paints an opaque background on the window.background CSS node.
+   We must clear it AND use sub-1.0 opacity to force the compositor to
+   alpha-blend the surface, making rounded corners truly transparent. */
+window,
+window.background,
+window.background.csd {
+    background-color: transparent;
+    background-image: none;
     background: unset;
     box-shadow: none;
+    opacity: 0.999;
 }
 
 .panel {
     font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
-}
-
-.applet-btn {
-    background-color: @bg0;
-    background-image: linear-gradient(180deg, alpha(white, 0.06) 0%, alpha(black, 0.04) 100%);
-    color: @fg;
-    border-radius: 12px;
-    padding: 6px 10px;
-    min-width: 36px;
-    min-height: 36px;
-    font-size: 18px;
-    border: 1px solid alpha(@bg3, 0.3);
-    box-shadow:
-        0 2px 8px alpha(black, 0.35),
-        inset 0 1px 0 alpha(white, 0.06);
-    transition: all 150ms ease;
-}
-
-.applet-btn:hover {
-    background-color: @bg1;
-    box-shadow:
-        0 4px 12px alpha(black, 0.4),
-        inset 0 1px 0 alpha(white, 0.08);
 }
 
 .panel-outer {

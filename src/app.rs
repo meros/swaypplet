@@ -85,40 +85,6 @@ pub fn run() {
         let panel = Panel::new(window);
         panel.window.present();
 
-        // ── Applet toggle button ─────────────────────────────────────────────
-        let applet_window = gtk4::Window::builder()
-            .application(app)
-            .resizable(false)
-            .decorated(false)
-            .build();
-        applet_window.add_css_class("applet-window");
-
-        applet_window.init_layer_shell();
-        applet_window.set_layer(Layer::Top);
-        applet_window.set_namespace("swaypplet-applet");
-        applet_window.set_anchor(Edge::Bottom, true);
-        applet_window.set_anchor(Edge::Right, true);
-        applet_window.set_margin(Edge::Bottom, 4);
-        applet_window.set_margin(Edge::Right, 4);
-
-        let applet_btn = gtk4::Button::builder()
-            .label("\u{f013}") //  gear icon
-            .build();
-        applet_btn.add_css_class("applet-btn");
-
-        {
-            let sc = state_clone.clone();
-            applet_btn.connect_clicked(move |_| {
-                if let Some(ref p) = sc.borrow().panel {
-                    p.toggle();
-                }
-            });
-        }
-
-        make_surface_transparent(&applet_window);
-        applet_window.set_child(Some(&applet_btn));
-        applet_window.present();
-
         // ── Escape key to close panel ────────────────────────────────────────
         let key_controller = gtk4::EventControllerKey::new();
         {
@@ -142,9 +108,6 @@ pub fn run() {
     });
 
     // ── Command-line handling ────────────────────────────────────────────────
-    // First launch: no args → activate (creates panel)
-    // Subsequent: "osd --flag action" → trigger OSD
-    // Subsequent: no args → toggle panel
     let state_clone = state.clone();
     app.connect_command_line(move |app, cmdline| {
         let args: Vec<String> = cmdline
@@ -153,11 +116,9 @@ pub fn run() {
             .map(|a| a.to_string_lossy().to_string())
             .collect();
 
-        // Check for OSD subcommand (args[0] is binary name)
         if args.len() > 1 && args[1] == "osd" {
             let osd_args: Vec<String> = args[2..].to_vec();
             if let Some(cmd) = OsdCommand::parse(&osd_args) {
-                // Ensure windows are created
                 let st = state_clone.borrow();
                 if st.osd.is_none() {
                     drop(st);
@@ -173,7 +134,6 @@ pub fn run() {
                 log::warn!("Unknown OSD command: {:?}", &args[2..]);
             }
         } else {
-            // No OSD args → activate (toggle panel or create it)
             app.activate();
         }
 
