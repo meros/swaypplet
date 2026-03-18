@@ -1,4 +1,5 @@
 mod app;
+mod osd;
 mod panel;
 mod theme;
 mod widgets;

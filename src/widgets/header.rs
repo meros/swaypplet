@@ -183,30 +183,15 @@ impl HeaderSection {
                 let btn_clone = btn.clone();
                 spawn_toggle_command(
                     move || {
-                        if currently_active {
-                            // Kill gammastep
-                            Command::new("pkill")
-                                .args(["-x", "gammastep"])
-                                .spawn()
-                                .and_then(|mut c| c.wait())
-                                .map(|s| s.success())
-                                .unwrap_or_else(|e| {
-                                    log::warn!("pkill gammastep failed: {e}");
-                                    false
-                                })
-                        } else {
-                            // Start gammastep
-                            Command::new("gammastep").spawn().map(|_| true).unwrap_or_else(
-                                |e| {
-                                    if e.kind() == std::io::ErrorKind::NotFound {
-                                        log::warn!("gammastep not found");
-                                    } else {
-                                        log::warn!("Failed to start gammastep: {e}");
-                                    }
-                                    false
-                                },
-                            )
-                        }
+                        let action = if currently_active { "stop" } else { "start" };
+                        let result = Command::new("systemctl")
+                            .args(["--user", action, "gammastep.service"])
+                            .spawn()
+                            .and_then(|mut c| c.wait());
+                        result.map(|s| s.success()).unwrap_or_else(|e| {
+                            log::warn!("systemctl --user {action} gammastep.service failed: {e}");
+                            false
+                        })
                     },
                     move |success| {
                         if !success {
@@ -497,17 +482,21 @@ fn read_dnd_state() -> ToggleState {
 }
 
 fn read_night_state() -> ToggleState {
-    match Command::new("pgrep").args(["-x", "gammastep"]).output() {
+    match Command::new("systemctl")
+        .args(["--user", "is-active", "gammastep.service"])
+        .output()
+    {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            log::warn!("pgrep not found; Night Light toggle disabled");
+            log::warn!("systemctl not found; Night Light toggle disabled");
             ToggleState::Unavailable
         }
         Err(e) => {
-            log::warn!("pgrep -x gammastep failed: {e}");
+            log::warn!("systemctl --user is-active gammastep.service failed: {e}");
             ToggleState::Unavailable
         }
         Ok(out) => {
-            if out.status.success() {
+            let status = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if status == "active" {
                 ToggleState::Active
             } else {
                 ToggleState::Inactive

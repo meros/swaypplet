@@ -469,7 +469,8 @@ impl NetworkSection {
 
         let revealer_box = Box::builder()
             .orientation(Orientation::Vertical)
-            .spacing(4)
+            .spacing(8)
+            .margin_top(4)
             .build();
 
         // WiFi adapter warning (shown if no adapter, but nmcli exists)

@@ -20,10 +20,40 @@
 @define-color orange    #fe8019;
 @define-color accent    #689d6a;
 
-/* ── Panel window ── */
+/* ── Window transparency (all windows) ── */
+/* GTK4 paints an opaque background on window.background by default.
+   Unsetting it makes the surface truly transparent so rounded corners
+   on child widgets don't have dark "bleed-through" rectangles. */
+window.background {
+    background: unset;
+    box-shadow: none;
+}
+
 .panel {
-    background-color: transparent;
     font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
+}
+
+.applet-btn {
+    background-color: @bg0;
+    background-image: linear-gradient(180deg, alpha(white, 0.06) 0%, alpha(black, 0.04) 100%);
+    color: @fg;
+    border-radius: 12px;
+    padding: 6px 10px;
+    min-width: 36px;
+    min-height: 36px;
+    font-size: 18px;
+    border: 1px solid alpha(@bg3, 0.3);
+    box-shadow:
+        0 2px 8px alpha(black, 0.35),
+        inset 0 1px 0 alpha(white, 0.06);
+    transition: all 150ms ease;
+}
+
+.applet-btn:hover {
+    background-color: @bg1;
+    box-shadow:
+        0 4px 12px alpha(black, 0.4),
+        inset 0 1px 0 alpha(white, 0.08);
 }
 
 .panel-outer {
@@ -95,12 +125,14 @@
 
 .toggle-btn.active {
     background-color: @accent;
-    background-image: linear-gradient(180deg, alpha(white, 0.12) 0%, alpha(black, 0.08) 100%);
-    color: @bg0;
+    background-image: linear-gradient(180deg, alpha(white, 0.20) 0%, alpha(black, 0.05) 100%);
+    color: @bg0_h;
+    font-weight: 700;
     box-shadow:
-        inset 0 1px 0 alpha(white, 0.15),
-        inset 0 -1px 0 alpha(black, 0.2),
-        0 2px 8px alpha(@accent, 0.35);
+        inset 0 1px 0 alpha(white, 0.25),
+        inset 0 -1px 0 alpha(black, 0.15),
+        0 2px 10px alpha(@accent, 0.5),
+        0 0 20px alpha(@accent, 0.15);
 }
 
 .toggle-btn:disabled,
@@ -552,6 +584,186 @@ revealer {
     color: @fg;
     background-color: transparent;
     box-shadow: none;
+}
+
+/* ── Network section ── */
+.network-current {
+    padding: 4px 0;
+}
+
+.network-icon {
+    font-size: 18px;
+    color: @fg_dim;
+    min-width: 24px;
+}
+
+.network-ssid {
+    font-size: 13px;
+    color: @fg;
+}
+
+.network-ssid.network-active {
+    color: @accent;
+    font-weight: 600;
+}
+
+.network-signal {
+    font-size: 12px;
+    color: @fg_dim;
+}
+
+.network-toggle {
+    background-color: transparent;
+    box-shadow: none;
+    color: @fg_dim;
+    font-size: 12px;
+    padding: 4px 8px;
+    min-height: 24px;
+}
+
+.network-toggle:hover {
+    background-color: alpha(white, 0.04);
+    box-shadow: none;
+}
+
+.network-list {
+    background-color: @bg0_h;
+    border-radius: 8px;
+}
+
+.network-row {
+    padding: 6px 8px;
+    border-radius: 6px;
+    min-height: 32px;
+}
+
+.network-row:hover {
+    background-color: alpha(white, 0.04);
+}
+
+.network-subsection-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: @fg_dim;
+    margin-top: 10px;
+    margin-bottom: 4px;
+}
+
+.network-placeholder {
+    color: @fg_dim;
+    font-size: 12px;
+    font-style: italic;
+    padding: 4px 0;
+}
+
+.network-scan-status {
+    font-size: 11px;
+    color: @fg_dim;
+    font-style: italic;
+}
+
+.network-connect-btn {
+    font-size: 11px;
+    padding: 4px 12px;
+    min-height: 28px;
+}
+
+.network-password-entry {
+    font-size: 12px;
+    min-height: 32px;
+}
+
+.network-conn-status {
+    font-size: 11px;
+}
+
+.network-status-ok {
+    color: @green;
+}
+
+.network-status-err {
+    color: @red;
+}
+
+.network-show-all-btn {
+    background-color: transparent;
+    box-shadow: none;
+    color: @fg_dim;
+    font-size: 11px;
+    padding: 4px 8px;
+    min-height: 24px;
+}
+
+.network-show-all-btn:hover {
+    background-color: alpha(white, 0.04);
+    box-shadow: none;
+}
+
+.network-vpn-active {
+    color: @green;
+}
+
+.network-security {
+    font-size: 12px;
+    color: @fg_dim;
+    min-width: 16px;
+}
+
+/* ── OSD overlay ── */
+.osd-window,
+.osd-window decoration {
+    background-color: transparent;
+    box-shadow: none;
+}
+
+.osd-container {
+    background-color: alpha(@bg0, 0.92);
+    border-radius: 16px;
+    padding: 12px 20px;
+    border: 1px solid alpha(@bg3, 0.3);
+    box-shadow:
+        0 8px 32px alpha(black, 0.5),
+        inset 0 1px 0 alpha(white, 0.06);
+}
+
+.osd-icon {
+    font-size: 28px;
+    color: @fg;
+    min-width: 36px;
+}
+
+.osd-bar {
+    min-height: 8px;
+    border-radius: 4px;
+}
+
+.osd-bar trough {
+    background-color: @bg2;
+    border-radius: 4px;
+    min-height: 8px;
+}
+
+.osd-bar progress {
+    background-color: @accent;
+    border-radius: 4px;
+    min-height: 8px;
+}
+
+.osd-text {
+    font-size: 12px;
+    color: @fg_dim;
+    font-weight: 600;
+}
+
+.osd-indicator {
+    font-size: 16px;
+    font-weight: 700;
+    color: @fg_dim;
+}
+
+.osd-indicator.osd-indicator-active {
+    color: @accent;
 }
 
 /* ── Countdown / confirmation ── */

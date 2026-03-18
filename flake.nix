@@ -49,6 +49,13 @@
           fi
           SCRIPT
           chmod +x $out/bin/swaypplet-toggle
+
+          # OSD client — drop-in replacement for swayosd-client
+          cat > $out/bin/swaypplet-osd <<SCRIPT
+          #!/bin/sh
+          exec $out/bin/swaypplet osd "\$@"
+          SCRIPT
+          chmod +x $out/bin/swaypplet-osd
         '';
 
         meta = with pkgs.lib; {
