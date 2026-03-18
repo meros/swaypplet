@@ -1,0 +1,562 @@
+/* ══════════════════════════════════════════════════════
+   Swaypplet – Gruvbox Dark Theme
+   Matches waybar pill-style with raised surfaces
+   ══════════════════════════════════════════════════════ */
+
+/* ── Palette ── */
+@define-color bg0_h     #1d2021;
+@define-color bg0       #282828;
+@define-color bg1       #3c3836;
+@define-color bg2       #504945;
+@define-color bg3       #665c54;
+@define-color fg        #ebdbb2;
+@define-color fg_dim    #a89984;
+@define-color red       #fb4934;
+@define-color green     #b8bb26;
+@define-color yellow    #fabd2f;
+@define-color blue      #83a598;
+@define-color purple    #d3869b;
+@define-color aqua      #8ec07c;
+@define-color orange    #fe8019;
+@define-color accent    #689d6a;
+
+/* ── Panel window ── */
+.panel {
+    background-color: transparent;
+    font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
+}
+
+.panel-outer {
+    background-color: @bg0;
+    border-radius: 16px;
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.55),
+        0 2px 8px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    border: 1px solid alpha(@bg3, 0.3);
+}
+
+.panel-content {
+    padding: 12px;
+}
+
+/* ── Section cards ── */
+.section {
+    background-color: @bg1;
+    background-image: linear-gradient(180deg, alpha(white, 0.04) 0%, alpha(black, 0.04) 100%);
+    border-radius: 12px;
+    padding: 12px;
+    box-shadow:
+        inset 0 1px 0 alpha(white, 0.06),
+        inset 0 -1px 0 alpha(black, 0.15),
+        0 1px 3px alpha(black, 0.2);
+}
+
+.section-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: @fg_dim;
+    margin-bottom: 6px;
+}
+
+/* ── Quick toggle row (header) ── */
+.quick-toggles {
+    background-color: transparent;
+    padding: 0;
+    box-shadow: none;
+    background-image: none;
+}
+
+.toggle-btn {
+    background-color: @bg2;
+    background-image: linear-gradient(180deg, alpha(white, 0.06) 0%, alpha(black, 0.06) 100%);
+    color: @fg_dim;
+    border-radius: 12px;
+    padding: 10px 14px;
+    min-width: 64px;
+    min-height: 44px;
+    font-size: 18px;
+    box-shadow:
+        inset 0 1px 0 alpha(white, 0.06),
+        inset 0 -1px 0 alpha(black, 0.15),
+        0 1px 2px alpha(black, 0.2);
+    transition: all 150ms ease;
+}
+
+.toggle-btn:hover {
+    background-color: @bg3;
+    background-image: linear-gradient(180deg, alpha(white, 0.10) 0%, alpha(black, 0.02) 100%);
+    box-shadow:
+        inset 0 1px 0 alpha(white, 0.10),
+        inset 0 -1px 0 alpha(black, 0.15),
+        0 2px 6px alpha(black, 0.25);
+}
+
+.toggle-btn.active {
+    background-color: @accent;
+    background-image: linear-gradient(180deg, alpha(white, 0.12) 0%, alpha(black, 0.08) 100%);
+    color: @bg0;
+    box-shadow:
+        inset 0 1px 0 alpha(white, 0.15),
+        inset 0 -1px 0 alpha(black, 0.2),
+        0 2px 8px alpha(@accent, 0.35);
+}
+
+.toggle-btn:disabled,
+.toggle-btn.disabled {
+    opacity: 0.38;
+}
+
+.toggle-label {
+    font-size: 9px;
+    color: @fg_dim;
+    margin-top: 2px;
+}
+
+/* ── Volume / brightness sliders ── */
+scale {
+    min-height: 6px;
+    padding: 8px 0;
+}
+
+scale trough {
+    background-color: @bg2;
+    border-radius: 4px;
+    min-height: 6px;
+}
+
+scale highlight {
+    background-color: @accent;
+    border-radius: 4px;
+    min-height: 6px;
+}
+
+scale slider {
+    background-color: @fg;
+    border-radius: 50%;
+    min-width: 20px;
+    min-height: 20px;
+    margin: -7px;
+    box-shadow: 0 1px 4px alpha(black, 0.4);
+    transition: all 100ms ease;
+}
+
+scale slider:hover {
+    background-color: white;
+    min-width: 22px;
+    min-height: 22px;
+    margin: -8px;
+    box-shadow: 0 2px 6px alpha(black, 0.5);
+}
+
+/* ── Buttons (generic) ── */
+button {
+    background-color: @bg2;
+    color: @fg;
+    border-radius: 8px;
+    padding: 8px 12px;
+    min-height: 32px;
+    border: none;
+    box-shadow:
+        inset 0 1px 0 alpha(white, 0.05),
+        0 1px 2px alpha(black, 0.2);
+    transition: all 150ms ease;
+}
+
+button:hover {
+    background-color: @bg3;
+    box-shadow:
+        inset 0 1px 0 alpha(white, 0.08),
+        0 2px 4px alpha(black, 0.25);
+}
+
+button:active {
+    background-color: @bg1;
+    box-shadow:
+        inset 0 2px 4px alpha(black, 0.3);
+}
+
+button:disabled {
+    opacity: 0.38;
+}
+
+button.destructive {
+    background-color: alpha(@red, 0.2);
+    color: @red;
+}
+
+button.destructive:hover {
+    background-color: alpha(@red, 0.3);
+}
+
+button.suggested {
+    background-color: @accent;
+    color: @bg0;
+}
+
+button.suggested:hover {
+    background-color: #7dae71;
+}
+
+button.flat,
+.device-toggle {
+    background-color: transparent;
+    color: @fg_dim;
+    font-size: 11px;
+    padding: 4px 8px;
+    min-height: 28px;
+    box-shadow: none;
+    border: none;
+}
+
+button.flat:hover,
+.device-toggle:hover {
+    background-color: alpha(white, 0.04);
+    box-shadow: none;
+}
+
+/* ── Device rows (network/bluetooth) ── */
+.device-list {
+    background-color: transparent;
+}
+
+.device-row {
+    padding: 10px 10px;
+    border-radius: 8px;
+    min-height: 36px;
+    transition: background-color 150ms ease;
+}
+
+.device-row:hover {
+    background-color: alpha(white, 0.04);
+}
+
+.device-row-active {
+    background-color: alpha(@accent, 0.08);
+}
+
+.device-row-active:hover {
+    background-color: alpha(@accent, 0.12);
+}
+
+.device-name {
+    font-size: 13px;
+    color: @fg;
+}
+
+.device-status {
+    font-size: 11px;
+    color: @fg_dim;
+}
+
+.device-connected .device-name {
+    color: @accent;
+    font-weight: 600;
+}
+
+.device-active-dot {
+    color: @accent;
+    font-size: 8px;
+}
+
+.signal-icon {
+    font-size: 16px;
+    color: @fg_dim;
+    min-width: 24px;
+}
+
+/* ── Connecting / loading state ── */
+.connecting {
+    opacity: 0.6;
+}
+
+.error-text {
+    color: @red;
+    font-size: 11px;
+    margin-top: 4px;
+}
+
+.success-text {
+    color: @green;
+    font-size: 11px;
+    margin-top: 4px;
+}
+
+.status-text {
+    font-size: 11px;
+    color: @fg_dim;
+}
+
+/* ── Media controls ── */
+.media-info {
+    font-size: 12px;
+    color: @fg;
+    margin-bottom: 4px;
+}
+
+.media-controls {
+    margin-top: 4px;
+}
+
+.media-btn {
+    background-color: transparent;
+    box-shadow: none;
+    font-size: 18px;
+    min-width: 44px;
+    min-height: 44px;
+    border-radius: 50%;
+    padding: 0;
+}
+
+.media-btn:hover {
+    background-color: alpha(white, 0.06);
+    box-shadow: none;
+}
+
+.media-play-pause {
+    font-size: 24px;
+    min-width: 48px;
+    min-height: 48px;
+}
+
+/* ── Power / battery section ── */
+.battery-level {
+    font-size: 28px;
+    font-weight: 700;
+    color: @fg;
+}
+
+.battery-sub {
+    font-size: 11px;
+    color: @fg_dim;
+}
+
+.battery-icon {
+    font-size: 24px;
+    color: @fg_dim;
+    min-width: 32px;
+}
+
+.battery-icon.charging {
+    color: @green;
+}
+
+.battery-icon.low {
+    color: @red;
+}
+
+levelbar trough {
+    background-color: @bg2;
+    border-radius: 4px;
+    min-height: 8px;
+}
+
+levelbar block.filled {
+    background-color: @accent;
+    border-radius: 4px;
+}
+
+levelbar block.empty {
+    background-color: transparent;
+}
+
+levelbar.low block.filled {
+    background-color: @red;
+}
+
+levelbar.charging block.filled {
+    background-color: @green;
+}
+
+/* ── Governor / profile selector ── */
+.governor-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    min-height: 36px;
+    background-color: @bg2;
+    color: @fg_dim;
+    transition: all 150ms ease;
+}
+
+.governor-btn:hover {
+    background-color: @bg3;
+}
+
+.governor-btn.active {
+    background-color: @accent;
+    color: @bg0;
+    font-weight: 600;
+}
+
+.governor-btn.pending {
+    opacity: 0.5;
+}
+
+/* ── Power actions row ── */
+.power-actions-row {
+    margin-top: 4px;
+}
+
+.power-actions-row .toggle-btn {
+    min-width: 48px;
+    min-height: 44px;
+    font-size: 16px;
+    padding: 8px;
+}
+
+.power-actions-row .toggle-btn.confirm {
+    background-color: @red;
+    color: @fg;
+    font-size: 11px;
+}
+
+/* ── Spinner / loading states ── */
+spinner {
+    color: @accent;
+}
+
+.scanning-label {
+    font-size: 11px;
+    color: @fg_dim;
+    font-style: italic;
+}
+
+/* ── Separator ── */
+separator {
+    background-color: alpha(@bg3, 0.3);
+    min-height: 1px;
+    margin: 6px 0;
+}
+
+/* ── Entry (password fields) ── */
+entry {
+    background-color: @bg0_h;
+    color: @fg;
+    border: 1px solid @bg3;
+    border-radius: 8px;
+    padding: 8px 12px;
+    min-height: 36px;
+    caret-color: @accent;
+}
+
+entry:focus {
+    border-color: @accent;
+    box-shadow: 0 0 0 2px alpha(@accent, 0.2);
+}
+
+/* ── Dropdown ── */
+dropdown button {
+    background-color: @bg2;
+    border-radius: 8px;
+}
+
+dropdown button:hover {
+    background-color: @bg3;
+}
+
+/* ── Scrollbar styling ── */
+scrollbar slider {
+    background-color: alpha(@fg_dim, 0.3);
+    border-radius: 4px;
+    min-width: 4px;
+}
+
+scrollbar slider:hover {
+    background-color: alpha(@fg_dim, 0.5);
+}
+
+/* ── Icon sizing helpers ── */
+.icon-sm { font-size: 14px; }
+.icon-md { font-size: 18px; }
+.icon-lg { font-size: 24px; }
+
+/* ── Volume/brightness row ── */
+.volume-icon-btn {
+    background-color: transparent;
+    padding: 4px 8px;
+    box-shadow: none;
+    font-size: 20px;
+    color: @fg;
+    min-width: 36px;
+    min-height: 36px;
+}
+
+.volume-icon-btn:hover {
+    background-color: alpha(white, 0.06);
+}
+
+.volume-icon-btn.muted {
+    color: @red;
+}
+
+.volume-pct {
+    font-size: 13px;
+    font-weight: 600;
+    color: @fg;
+    min-width: 44px;
+}
+
+/* ── Revealer animation ── */
+revealer {
+    transition: all 200ms ease;
+}
+
+/* ── Placeholder / empty states ── */
+.placeholder {
+    color: @fg_dim;
+    font-size: 12px;
+    padding: 16px;
+}
+
+.unavailable {
+    color: @fg_dim;
+    font-size: 11px;
+    font-style: italic;
+    padding: 8px;
+}
+
+/* ── VPN section ── */
+.vpn-row {
+    padding: 8px 10px;
+    border-radius: 8px;
+    min-height: 36px;
+}
+
+.vpn-row:hover {
+    background-color: alpha(white, 0.04);
+}
+
+.vpn-connected {
+    color: @green;
+}
+
+.vpn-icon {
+    font-size: 16px;
+    min-width: 24px;
+}
+
+/* ── Password show/hide ── */
+.password-toggle {
+    background-color: transparent;
+    box-shadow: none;
+    min-width: 36px;
+    min-height: 36px;
+    font-size: 14px;
+    color: @fg_dim;
+    padding: 0;
+}
+
+.password-toggle:hover {
+    color: @fg;
+    background-color: transparent;
+    box-shadow: none;
+}
+
+/* ── Countdown / confirmation ── */
+.countdown {
+    font-size: 10px;
+    color: @red;
+    font-weight: 700;
+}

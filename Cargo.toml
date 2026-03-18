@@ -1,0 +1,13 @@
+[package]
+name = "swaypplet"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gtk4 = { version = "0.9", features = ["v4_12"] }
+gtk4-layer-shell = "0.4"
+glib = "0.20"
+gio = "0.20"
+gdk4 = "0.9"
+log = "0.4"
+env_logger = "0.11"
