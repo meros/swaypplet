@@ -57,18 +57,26 @@ impl Launcher {
         let window = layer_shell::create_layer_window(app, &LAUNCHER_CONFIG);
         window.add_css_class("launcher");
 
-        // Semi-transparent backdrop
+        // Semi-transparent backdrop — fills entire screen
         let backdrop = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
-            .halign(gtk4::Align::Center)
-            .valign(gtk4::Align::Start)
+            .halign(gtk4::Align::Fill)
+            .valign(gtk4::Align::Fill)
+            .hexpand(true)
+            .vexpand(true)
             .build();
         backdrop.add_css_class("launcher-backdrop");
 
-        // Content container
+        // Top spacer — positions content at ~25% from top (Spotlight-style)
+        let top_offset = monitor_top_offset();
+        let top_spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        top_spacer.set_height_request(top_offset);
+
+        // Content container — centered horizontally
         let container = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(0)
+            .halign(gtk4::Align::Center)
             .build();
         container.add_css_class("launcher-container");
 
@@ -88,6 +96,7 @@ impl Launcher {
 
         container.append(&entry);
         container.append(&results_box);
+        backdrop.append(&top_spacer);
         backdrop.append(&container);
         window.set_child(Some(&backdrop));
 
@@ -105,7 +114,6 @@ impl Launcher {
         };
 
         launcher.wire_search();
-        launcher.wire_entry_activate();
         launcher.wire_keyboard();
         launcher.wire_backdrop_click();
 
@@ -134,31 +142,6 @@ impl Launcher {
 
     pub fn hide(&self) {
         self.window.set_visible(false);
-    }
-
-    fn wire_entry_activate(&self) {
-        // SearchEntry swallows Enter — handle it here to activate the selected item
-        let state = self.state.clone();
-        let window = self.window.clone();
-        let entry = self.entry.clone();
-
-        self.entry.connect_activate(move |_| {
-            let s = state.borrow();
-            if let Some(item) = s.results.get(s.selected) {
-                let provider = item.provider.clone();
-                let identifier = item.identifier.clone();
-                let query = entry.text().to_string();
-                drop(s);
-
-                window.set_visible(false);
-
-                std::thread::spawn(move || {
-                    if let Err(e) = elephant::activate(&provider, &identifier, &query) {
-                        log::warn!("Elephant activate failed: {}", e);
-                    }
-                });
-            }
-        });
     }
 
     fn wire_search(&self) {
@@ -210,6 +193,8 @@ impl Launcher {
 
     fn wire_keyboard(&self) {
         let key_controller = gtk4::EventControllerKey::new();
+        // Capture phase: intercept Enter/Escape/arrows before SearchEntry consumes them
+        key_controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
         let state = self.state.clone();
         let results_box = self.results_box.clone();
         let window = self.window.clone();
@@ -474,6 +459,21 @@ fn update_selection(results_box: &gtk4::Box, old: usize, new: usize) {
         child = widget.next_sibling();
         i += 1;
     }
+}
+
+/// Calculate top offset as ~25% of the primary monitor height (Spotlight-style positioning).
+fn monitor_top_offset() -> i32 {
+    if let Some(display) = gtk4::gdk::Display::default() {
+        let monitors = display.monitors();
+        if let Some(obj) = monitors.item(0) {
+            if let Ok(monitor) = obj.downcast::<gtk4::gdk::Monitor>() {
+                let height = monitor.geometry().height();
+                return height / 4;
+            }
+        }
+    }
+    // Fallback for 1080p
+    270
 }
 
 fn provider_icon(provider: &str) -> &'static str {

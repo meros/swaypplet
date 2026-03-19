@@ -932,7 +932,6 @@ revealer {
 
 .launcher-backdrop {
     background-color: alpha(black, 0.5);
-    padding-top: 120px;
 }
 
 .launcher-container {
