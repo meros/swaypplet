@@ -62,7 +62,11 @@ impl BrightnessSection {
             .build();
         row.add_css_class("volume-row");
 
-        let icon = gtk4::Label::new(Some(icons::BRIGHTNESS));
+        let icon = gtk4::Label::builder()
+            .label(icons::BRIGHTNESS)
+            .halign(gtk4::Align::Center)
+            .valign(gtk4::Align::Center)
+            .build();
         icon.add_css_class("volume-icon-btn");
 
         let scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 1.0, 100.0, 1.0);

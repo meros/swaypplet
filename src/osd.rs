@@ -245,7 +245,10 @@ impl Osd {
         let icon_label = gtk4::Label::builder()
             .label("")
             .halign(gtk4::Align::Center)
+            .valign(gtk4::Align::Center)
             .xalign(0.5)
+            .yalign(0.5)
+            .justify(gtk4::Justification::Center)
             .build();
         icon_label.add_css_class("osd-icon");
 
