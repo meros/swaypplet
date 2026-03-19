@@ -5,12 +5,12 @@ use gtk4::prelude::*;
 
 pub struct HeaderSection {
     root: gtk4::Box,
-    wifi_btn: RefCell<gtk4::Button>,
-    bluetooth_btn: RefCell<gtk4::Button>,
-    dnd_btn: RefCell<gtk4::Button>,
-    night_btn: RefCell<gtk4::Button>,
-    idle_btn: RefCell<gtk4::Button>,
-    camera_btn: RefCell<gtk4::Button>,
+    wifi_btn: RefCell<gtk4::ToggleButton>,
+    bluetooth_btn: RefCell<gtk4::ToggleButton>,
+    dnd_btn: RefCell<gtk4::ToggleButton>,
+    night_btn: RefCell<gtk4::ToggleButton>,
+    idle_btn: RefCell<gtk4::ToggleButton>,
+    camera_btn: RefCell<gtk4::ToggleButton>,
     #[allow(dead_code)]
     color_btn: RefCell<gtk4::Button>,
 }
@@ -49,7 +49,7 @@ impl HeaderSection {
 
         let (idle_toggle, idle_btn) = make_toggle("󰈈", "Idle");
         let (camera_toggle, camera_btn) = make_toggle("󰄀", "Camera");
-        let (color_toggle, color_btn) = make_toggle("󰏘", "Color");
+        let (color_toggle, color_btn) = make_action_btn("󰏘", "Color");
 
         toggles_box2.append(&idle_toggle);
         toggles_box2.append(&camera_toggle);
@@ -62,18 +62,13 @@ impl HeaderSection {
         {
             let btn = wifi_btn.clone();
             wifi_btn.connect_clicked(move |_| {
-                if btn.has_css_class("disabled") {
-                    return;
-                }
-                let currently_active = btn.has_css_class("active");
-                // Optimistic UI: flip immediately
-                set_active(&btn, !currently_active);
-                update_wifi_tooltip(&btn, !currently_active);
+                let new_active = btn.is_active();
+                update_wifi_tooltip(&btn, new_active);
 
                 let btn_clone = btn.clone();
                 spawn_toggle_command(
                     move || {
-                        let arg = if currently_active { "off" } else { "on" };
+                        let arg = if new_active { "on" } else { "off" };
                         let result = Command::new("nmcli")
                             .args(["radio", "wifi", arg])
                             .spawn()
@@ -90,13 +85,12 @@ impl HeaderSection {
                     },
                     move |success| {
                         if !success {
-                            // Revert after 2 s
                             let b = btn_clone.clone();
                             glib::timeout_add_local_once(
                                 std::time::Duration::from_secs(2),
                                 move || {
-                                    set_active(&b, currently_active);
-                                    update_wifi_tooltip(&b, currently_active);
+                                    b.set_active(!new_active);
+                                    update_wifi_tooltip(&b, !new_active);
                                 },
                             );
                         }
@@ -108,17 +102,13 @@ impl HeaderSection {
         {
             let btn = bluetooth_btn.clone();
             bluetooth_btn.connect_clicked(move |_| {
-                if btn.has_css_class("disabled") {
-                    return;
-                }
-                let currently_active = btn.has_css_class("active");
-                set_active(&btn, !currently_active);
-                update_bluetooth_tooltip(&btn, !currently_active);
+                let new_active = btn.is_active();
+                update_bluetooth_tooltip(&btn, new_active);
 
                 let btn_clone = btn.clone();
                 spawn_toggle_command(
                     move || {
-                        let arg = if currently_active { "off" } else { "on" };
+                        let arg = if new_active { "on" } else { "off" };
                         let result = Command::new("bluetoothctl")
                             .args(["power", arg])
                             .spawn()
@@ -138,8 +128,8 @@ impl HeaderSection {
                             glib::timeout_add_local_once(
                                 std::time::Duration::from_secs(2),
                                 move || {
-                                    set_active(&b, currently_active);
-                                    update_bluetooth_tooltip(&b, currently_active);
+                                    b.set_active(!new_active);
+                                    update_bluetooth_tooltip(&b, !new_active);
                                 },
                             );
                         }
@@ -151,17 +141,13 @@ impl HeaderSection {
         {
             let btn = dnd_btn.clone();
             dnd_btn.connect_clicked(move |_| {
-                if btn.has_css_class("disabled") {
-                    return;
-                }
-                let currently_active = btn.has_css_class("active");
-                set_active(&btn, !currently_active);
-                update_dnd_tooltip(&btn, !currently_active);
+                let new_active = btn.is_active();
+                update_dnd_tooltip(&btn, new_active);
 
                 let btn_clone = btn.clone();
                 spawn_toggle_command(
                     move || {
-                        let flag = if currently_active { "-r" } else { "-a" };
+                        let flag = if new_active { "-a" } else { "-r" };
                         let result = Command::new("makoctl")
                             .args(["mode", flag, "do-not-disturb"])
                             .spawn()
@@ -181,8 +167,8 @@ impl HeaderSection {
                             glib::timeout_add_local_once(
                                 std::time::Duration::from_secs(2),
                                 move || {
-                                    set_active(&b, currently_active);
-                                    update_dnd_tooltip(&b, currently_active);
+                                    b.set_active(!new_active);
+                                    update_dnd_tooltip(&b, !new_active);
                                 },
                             );
                         }
@@ -194,17 +180,13 @@ impl HeaderSection {
         {
             let btn = night_btn.clone();
             night_btn.connect_clicked(move |_| {
-                if btn.has_css_class("disabled") {
-                    return;
-                }
-                let currently_active = btn.has_css_class("active");
-                set_active(&btn, !currently_active);
-                update_night_tooltip(&btn, !currently_active);
+                let new_active = btn.is_active();
+                update_night_tooltip(&btn, new_active);
 
                 let btn_clone = btn.clone();
                 spawn_toggle_command(
                     move || {
-                        let action = if currently_active { "stop" } else { "start" };
+                        let action = if new_active { "start" } else { "stop" };
                         let result = Command::new("systemctl")
                             .args(["--user", action, "gammastep.service"])
                             .spawn()
@@ -220,8 +202,8 @@ impl HeaderSection {
                             glib::timeout_add_local_once(
                                 std::time::Duration::from_secs(2),
                                 move || {
-                                    set_active(&b, currently_active);
-                                    update_night_tooltip(&b, currently_active);
+                                    b.set_active(!new_active);
+                                    update_night_tooltip(&b, !new_active);
                                 },
                             );
                         }
@@ -233,49 +215,13 @@ impl HeaderSection {
         {
             let btn = idle_btn.clone();
             idle_btn.connect_clicked(move |_| {
-                if btn.has_css_class("disabled") {
-                    return;
-                }
-                let currently_active = btn.has_css_class("active");
-                set_active(&btn, !currently_active);
-                update_idle_tooltip(&btn, !currently_active);
+                let new_active = btn.is_active();
+                update_idle_tooltip(&btn, new_active);
 
                 let btn_clone = btn.clone();
                 spawn_toggle_command(
                     move || {
-                        if currently_active {
-                            // Toggle off: read PID, kill process, remove file
-                            const PID_FILE: &str = "/tmp/swaypplet-idle-inhibit.pid";
-                            match std::fs::read_to_string(PID_FILE) {
-                                Ok(contents) => {
-                                    let pid_str = contents.trim().to_string();
-                                    match pid_str.parse::<u32>() {
-                                        Ok(pid) => {
-                                            let killed = Command::new("kill")
-                                                .arg(pid.to_string())
-                                                .spawn()
-                                                .and_then(|mut c| c.wait())
-                                                .map(|s| s.success())
-                                                .unwrap_or(false);
-                                            if killed {
-                                                let _ = std::fs::remove_file(PID_FILE);
-                                            } else {
-                                                log::warn!("Failed to kill idle inhibit process (pid {pid})");
-                                            }
-                                            killed
-                                        }
-                                        Err(e) => {
-                                            log::warn!("Failed to parse idle inhibit PID: {e}");
-                                            false
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    log::warn!("Failed to read idle inhibit PID file: {e}");
-                                    false
-                                }
-                            }
-                        } else {
+                        if new_active {
                             // Toggle on: spawn systemd-inhibit in background, save PID
                             match Command::new("systemd-inhibit")
                                 .args([
@@ -309,6 +255,38 @@ impl HeaderSection {
                                     false
                                 }
                             }
+                        } else {
+                            // Toggle off: read PID, kill process, remove file
+                            const PID_FILE: &str = "/tmp/swaypplet-idle-inhibit.pid";
+                            match std::fs::read_to_string(PID_FILE) {
+                                Ok(contents) => {
+                                    let pid_str = contents.trim().to_string();
+                                    match pid_str.parse::<u32>() {
+                                        Ok(pid) => {
+                                            let killed = Command::new("kill")
+                                                .arg(pid.to_string())
+                                                .spawn()
+                                                .and_then(|mut c| c.wait())
+                                                .map(|s| s.success())
+                                                .unwrap_or(false);
+                                            if killed {
+                                                let _ = std::fs::remove_file(PID_FILE);
+                                            } else {
+                                                log::warn!("Failed to kill idle inhibit process (pid {pid})");
+                                            }
+                                            killed
+                                        }
+                                        Err(e) => {
+                                            log::warn!("Failed to parse idle inhibit PID: {e}");
+                                            false
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to read idle inhibit PID file: {e}");
+                                    false
+                                }
+                            }
                         }
                     },
                     move |success| {
@@ -317,8 +295,8 @@ impl HeaderSection {
                             glib::timeout_add_local_once(
                                 std::time::Duration::from_secs(2),
                                 move || {
-                                    set_active(&b, currently_active);
-                                    update_idle_tooltip(&b, currently_active);
+                                    b.set_active(!new_active);
+                                    update_idle_tooltip(&b, !new_active);
                                 },
                             );
                         }
@@ -330,17 +308,13 @@ impl HeaderSection {
         {
             let btn = camera_btn.clone();
             camera_btn.connect_clicked(move |_| {
-                if btn.has_css_class("disabled") {
-                    return;
-                }
-                let currently_active = btn.has_css_class("active");
-                set_active(&btn, !currently_active);
-                update_camera_tooltip(&btn, !currently_active);
+                let new_active = btn.is_active();
+                update_camera_tooltip(&btn, new_active);
 
                 let btn_clone = btn.clone();
                 spawn_toggle_command(
                     move || {
-                        let action = if currently_active { "stop" } else { "start" };
+                        let action = if new_active { "start" } else { "stop" };
                         let result = Command::new("systemctl")
                             .args(["--user", action, "icamerasrc-v4l2loopback.service"])
                             .spawn()
@@ -362,8 +336,8 @@ impl HeaderSection {
                             glib::timeout_add_local_once(
                                 std::time::Duration::from_secs(2),
                                 move || {
-                                    set_active(&b, currently_active);
-                                    update_camera_tooltip(&b, currently_active);
+                                    b.set_active(!new_active);
+                                    update_camera_tooltip(&b, !new_active);
                                 },
                             );
                         }
@@ -445,21 +419,27 @@ impl HeaderSection {
                     ToggleState,
                     ToggleState,
                 )>,
-                wifi: gtk4::Button,
-                bt: gtk4::Button,
-                dnd: gtk4::Button,
-                night: gtk4::Button,
-                idle: gtk4::Button,
-                camera: gtk4::Button,
+                wifi: gtk4::ToggleButton,
+                bt: gtk4::ToggleButton,
+                dnd: gtk4::ToggleButton,
+                night: gtk4::ToggleButton,
+                idle: gtk4::ToggleButton,
+                camera: gtk4::ToggleButton,
             ) {
                 match rx.try_recv() {
                     Ok((ws, bs, ds, ns, is, cs)) => {
                         apply_toggle_state(&wifi, ws);
+                        update_wifi_tooltip(&wifi, matches!(ws, ToggleState::Active));
                         apply_toggle_state(&bt, bs);
+                        update_bluetooth_tooltip(&bt, matches!(bs, ToggleState::Active));
                         apply_toggle_state(&dnd, ds);
+                        update_dnd_tooltip(&dnd, matches!(ds, ToggleState::Active));
                         apply_toggle_state(&night, ns);
+                        update_night_tooltip(&night, matches!(ns, ToggleState::Active));
                         apply_toggle_state(&idle, is);
+                        update_idle_tooltip(&idle, matches!(is, ToggleState::Active));
                         apply_toggle_state(&camera, cs);
+                        update_camera_tooltip(&camera, matches!(cs, ToggleState::Active));
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => {
                         glib::idle_add_local_once(move || {
@@ -499,8 +479,43 @@ enum ToggleState {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Build a vertical Box containing a toggle Button and a Label beneath it.
-fn make_toggle(icon: &str, label_text: &str) -> (gtk4::Box, gtk4::Button) {
+/// Build a vertical Box containing a ToggleButton and a Label beneath it.
+fn make_toggle(icon: &str, label_text: &str) -> (gtk4::Box, gtk4::ToggleButton) {
+    let vbox = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .build();
+
+    let btn = gtk4::ToggleButton::builder().label(icon).build();
+    btn.add_css_class("toggle-btn");
+
+    let label = gtk4::Label::builder().label(label_text).build();
+    label.add_css_class("toggle-label");
+
+    vbox.append(&btn);
+    vbox.append(&label);
+
+    // Sync CSS classes with toggle state for styling
+    btn.connect_toggled(|btn| {
+        if btn.is_active() {
+            btn.add_css_class("active");
+        } else {
+            btn.remove_css_class("active");
+        }
+        if let Some(parent) = btn.parent() {
+            if btn.is_active() {
+                parent.add_css_class("toggle-on");
+            } else {
+                parent.remove_css_class("toggle-on");
+            }
+        }
+    });
+
+    (vbox, btn)
+}
+
+/// Build a vertical Box containing a regular Button and a Label beneath it
+/// (for one-shot actions like color picker).
+fn make_action_btn(icon: &str, label_text: &str) -> (gtk4::Box, gtk4::Button) {
     let vbox = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
         .build();
@@ -517,33 +532,19 @@ fn make_toggle(icon: &str, label_text: &str) -> (gtk4::Box, gtk4::Button) {
     (vbox, btn)
 }
 
-fn set_active(btn: &gtk4::Button, active: bool) {
-    if active {
-        btn.add_css_class("active");
-        btn.remove_css_class("inactive");
-    } else {
-        btn.remove_css_class("active");
-        btn.add_css_class("inactive");
-    }
-}
-
-fn apply_toggle_state(btn: &gtk4::Button, state: ToggleState) {
+fn apply_toggle_state(btn: &gtk4::ToggleButton, state: ToggleState) {
     match state {
         ToggleState::Active => {
-            btn.remove_css_class("disabled");
             btn.set_sensitive(true);
-            set_active(btn, true);
+            btn.set_active(true);
         }
         ToggleState::Inactive => {
-            btn.remove_css_class("disabled");
             btn.set_sensitive(true);
-            set_active(btn, false);
+            btn.set_active(false);
         }
         ToggleState::Unavailable => {
-            btn.add_css_class("disabled");
             btn.set_sensitive(false);
-            btn.remove_css_class("active");
-            btn.remove_css_class("inactive");
+            btn.set_active(false);
         }
     }
 }
@@ -583,7 +584,7 @@ where
 // Tooltip updaters
 // ---------------------------------------------------------------------------
 
-fn update_wifi_tooltip(btn: &gtk4::Button, active: bool) {
+fn update_wifi_tooltip(btn: &gtk4::ToggleButton, active: bool) {
     btn.set_tooltip_text(Some(if active {
         "Wi-Fi: enabled"
     } else {
@@ -591,7 +592,7 @@ fn update_wifi_tooltip(btn: &gtk4::Button, active: bool) {
     }));
 }
 
-fn update_bluetooth_tooltip(btn: &gtk4::Button, active: bool) {
+fn update_bluetooth_tooltip(btn: &gtk4::ToggleButton, active: bool) {
     btn.set_tooltip_text(Some(if active {
         "Bluetooth: powered on"
     } else {
@@ -599,7 +600,7 @@ fn update_bluetooth_tooltip(btn: &gtk4::Button, active: bool) {
     }));
 }
 
-fn update_dnd_tooltip(btn: &gtk4::Button, active: bool) {
+fn update_dnd_tooltip(btn: &gtk4::ToggleButton, active: bool) {
     btn.set_tooltip_text(Some(if active {
         "Do Not Disturb: active"
     } else {
@@ -607,7 +608,7 @@ fn update_dnd_tooltip(btn: &gtk4::Button, active: bool) {
     }));
 }
 
-fn update_night_tooltip(btn: &gtk4::Button, active: bool) {
+fn update_night_tooltip(btn: &gtk4::ToggleButton, active: bool) {
     btn.set_tooltip_text(Some(if active {
         "Night Light: active"
     } else {
@@ -615,7 +616,7 @@ fn update_night_tooltip(btn: &gtk4::Button, active: bool) {
     }));
 }
 
-fn update_idle_tooltip(btn: &gtk4::Button, active: bool) {
+fn update_idle_tooltip(btn: &gtk4::ToggleButton, active: bool) {
     btn.set_tooltip_text(Some(if active {
         "Idle Inhibitor: active"
     } else {
@@ -623,7 +624,7 @@ fn update_idle_tooltip(btn: &gtk4::Button, active: bool) {
     }));
 }
 
-fn update_camera_tooltip(btn: &gtk4::Button, active: bool) {
+fn update_camera_tooltip(btn: &gtk4::ToggleButton, active: bool) {
     btn.set_tooltip_text(Some(if active {
         "Camera: active"
     } else {

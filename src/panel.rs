@@ -25,19 +25,20 @@ impl Panel {
     pub fn new(window: gtk4::Window) -> Self {
         let outer_box = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
+            .vexpand(true)
             .build();
         outer_box.add_css_class("panel-outer");
 
         let scroll = gtk4::ScrolledWindow::builder()
             .vscrollbar_policy(gtk4::PolicyType::Automatic)
             .hscrollbar_policy(gtk4::PolicyType::Never)
-            .max_content_height(700)
-            .propagate_natural_height(true)
+            .vexpand(true)
             .build();
 
         let content_box = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(8)
+            .valign(gtk4::Align::End)
             .build();
         content_box.add_css_class("panel-content");
 

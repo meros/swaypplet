@@ -482,20 +482,12 @@ impl NetworkSection {
         no_adapter_label.set_visible(!wifi_adapter_present());
         revealer_box.append(&no_adapter_label);
 
-        let scroll = gtk4::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk4::PolicyType::Never)
-            .vscrollbar_policy(gtk4::PolicyType::Automatic)
-            .max_content_height(300)
-            .propagate_natural_height(true)
-            .build();
-
         let network_list_box = ListBox::builder()
             .selection_mode(gtk4::SelectionMode::None)
             .build();
         network_list_box.add_css_class("network-list");
 
-        scroll.set_child(Some(&network_list_box));
-        revealer_box.append(&scroll);
+        revealer_box.append(&network_list_box);
 
         // VPN subsection
         let vpn_title = Label::builder()

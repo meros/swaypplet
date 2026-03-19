@@ -57,15 +57,16 @@ pub fn run() {
         let window = gtk4::Window::builder()
             .application(app)
             .default_width(380)
-            .resizable(false)
             .build();
         window.add_css_class("panel");
 
         window.init_layer_shell();
         window.set_layer(Layer::Overlay);
         window.set_namespace("swaypplet");
+        window.set_anchor(Edge::Top, true);
         window.set_anchor(Edge::Bottom, true);
         window.set_anchor(Edge::Right, true);
+        window.set_margin(Edge::Top, 8);
         window.set_margin(Edge::Bottom, 48);
         window.set_margin(Edge::Right, 8);
         window.set_keyboard_mode(KeyboardMode::OnDemand);

@@ -9,6 +9,6 @@ pub fn load_css() {
     gtk4::style_context_add_provider_for_display(
         &Display::default().expect("Could not get default display"),
         &provider,
-        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        gtk4::STYLE_PROVIDER_PRIORITY_USER,
     );
 }
