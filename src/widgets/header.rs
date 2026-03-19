@@ -15,6 +15,7 @@ pub struct HeaderSection {
     night_btn: RefCell<gtk4::ToggleButton>,
     idle_btn: RefCell<gtk4::ToggleButton>,
     camera_btn: RefCell<gtk4::ToggleButton>,
+    touchpad_btn: RefCell<gtk4::ToggleButton>,
     #[allow(dead_code)]
     color_btn: RefCell<gtk4::Button>,
     store: Rc<RefCell<NotificationStore>>,
@@ -54,10 +55,12 @@ impl HeaderSection {
 
         let (idle_toggle, idle_btn) = make_toggle("󰈈", "Idle");
         let (camera_toggle, camera_btn) = make_toggle("󰄀", "Camera");
+        let (touchpad_toggle, touchpad_btn) = make_toggle("󰟸", "Touchpad");
         let (color_toggle, color_btn) = make_action_btn("󰏘", "Color");
 
         toggles_box2.append(&idle_toggle);
         toggles_box2.append(&camera_toggle);
+        toggles_box2.append(&touchpad_toggle);
         toggles_box2.append(&color_toggle);
 
         root.append(&toggles_box);
@@ -323,6 +326,42 @@ impl HeaderSection {
         }
 
         {
+            let btn = touchpad_btn.clone();
+            touchpad_btn.connect_clicked(move |_| {
+                let new_active = btn.is_active();
+                update_touchpad_tooltip(&btn, new_active);
+
+                let btn_clone = btn.clone();
+                spawn::spawn_work(
+                    move || {
+                        // enabled = touchpad on (active), disabled = touchpad off
+                        let events = if new_active { "enabled" } else { "disabled" };
+                        let result = Command::new("swaymsg")
+                            .args(["input", "type:touchpad", "events", events])
+                            .spawn()
+                            .and_then(|mut c| c.wait());
+                        result.map(|s| s.success()).unwrap_or_else(|e| {
+                            log::warn!("swaymsg input type:touchpad events {events} failed: {e}");
+                            false
+                        })
+                    },
+                    move |success| {
+                        if !success {
+                            let b = btn_clone.clone();
+                            glib::timeout_add_local_once(
+                                std::time::Duration::from_secs(2),
+                                move || {
+                                    b.set_active(!new_active);
+                                    update_touchpad_tooltip(&b, !new_active);
+                                },
+                            );
+                        }
+                    },
+                );
+            });
+        }
+
+        {
             // Color Picker: one-shot action, no toggle state
             color_btn.connect_clicked(move |_| {
                 match Command::new("hyprpicker").arg("-a").spawn() {
@@ -346,6 +385,7 @@ impl HeaderSection {
             night_btn: RefCell::new(night_btn),
             idle_btn: RefCell::new(idle_btn),
             camera_btn: RefCell::new(camera_btn),
+            touchpad_btn: RefCell::new(touchpad_btn),
             color_btn: RefCell::new(color_btn),
             store,
         };
@@ -363,6 +403,7 @@ impl HeaderSection {
         let night = self.night_btn.borrow().clone();
         let idle = self.idle_btn.borrow().clone();
         let camera = self.camera_btn.borrow().clone();
+        let touchpad = self.touchpad_btn.borrow().clone();
         let store = self.store.clone();
 
         // DND state comes from our own store (main thread), read it now
@@ -379,9 +420,10 @@ impl HeaderSection {
                     read_night_state(),
                     read_idle_state(),
                     read_camera_state(),
+                    read_touchpad_state(),
                 )
             },
-            move |(ws, bs, ns, is, cs)| {
+            move |(ws, bs, ns, is, cs, ts)| {
                 apply_toggle_state(&wifi, ws);
                 update_wifi_tooltip(&wifi, matches!(ws, ToggleState::Active));
                 apply_toggle_state(&bt, bs);
@@ -392,6 +434,8 @@ impl HeaderSection {
                 update_idle_tooltip(&idle, matches!(is, ToggleState::Active));
                 apply_toggle_state(&camera, cs);
                 update_camera_tooltip(&camera, matches!(cs, ToggleState::Active));
+                apply_toggle_state(&touchpad, ts);
+                update_touchpad_tooltip(&touchpad, matches!(ts, ToggleState::Active));
             },
         );
     }
@@ -545,6 +589,14 @@ fn update_camera_tooltip(btn: &gtk4::ToggleButton, active: bool) {
     }));
 }
 
+fn update_touchpad_tooltip(btn: &gtk4::ToggleButton, active: bool) {
+    btn.set_tooltip_text(Some(if active {
+        "Touchpad: enabled"
+    } else {
+        "Touchpad: disabled"
+    }));
+}
+
 // ---------------------------------------------------------------------------
 // State readers (blocking — always call from a background thread)
 // ---------------------------------------------------------------------------
@@ -642,6 +694,53 @@ fn read_idle_state() -> ToggleState {
             }
         }
         Err(_) => ToggleState::Inactive,
+    }
+}
+
+fn read_touchpad_state() -> ToggleState {
+    // Query sway for touchpad events status via `swaymsg -t get_inputs --raw`
+    match Command::new("swaymsg")
+        .args(["-t", "get_inputs", "--raw"])
+        .output()
+    {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            log::warn!("swaymsg not found; Touchpad toggle disabled");
+            ToggleState::Unavailable
+        }
+        Err(e) => {
+            log::warn!("swaymsg -t get_inputs failed: {e}");
+            ToggleState::Unavailable
+        }
+        Ok(out) => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            // Look for a touchpad input and check its send_events status
+            // Each input object has "type": "touchpad" and "send_events": "enabled"/"disabled"
+            let mut found_touchpad = false;
+            let mut in_touchpad = false;
+            for line in text.lines() {
+                let trimmed = line.trim();
+                if trimmed.contains("\"type\"") && trimmed.contains("\"touchpad\"") {
+                    in_touchpad = true;
+                    found_touchpad = true;
+                }
+                if in_touchpad && trimmed.contains("\"send_events\"") {
+                    if trimmed.contains("\"disabled\"") {
+                        return ToggleState::Inactive;
+                    } else {
+                        return ToggleState::Active;
+                    }
+                }
+                // Reset when hitting next input block
+                if in_touchpad && trimmed == "}," {
+                    in_touchpad = false;
+                }
+            }
+            if found_touchpad {
+                ToggleState::Active // default: enabled
+            } else {
+                ToggleState::Unavailable // no touchpad found
+            }
+        }
     }
 }
 

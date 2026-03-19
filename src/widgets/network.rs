@@ -45,11 +45,13 @@ struct WifiNetwork {
     security: String,
     in_use: bool,
     is_known: bool,
+    /// WiFi frequency in MHz (e.g. 2437 for 2.4GHz, 5180 for 5GHz)
+    freq_mhz: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
 enum ActiveConnection {
-    Wifi { ssid: String, signal: u8, device: String },
+    Wifi { ssid: String, signal: u8, device: String, freq_mhz: Option<u32> },
     Ethernet { device: String },
     Disconnected,
 }
@@ -85,8 +87,8 @@ fn wifi_adapter_present() -> bool {
 fn parse_wifi_list(output: &str, known_ssids: &[String]) -> Vec<WifiNetwork> {
     let mut networks: Vec<WifiNetwork> = Vec::new();
     for line in output.lines() {
-        // Format: SSID:SIGNAL:SECURITY:IN-USE (nmcli -t escapes colons as \:)
-        let parts: Vec<&str> = line.splitn(4, ':').collect();
+        // Format: SSID:SIGNAL:SECURITY:IN-USE:FREQ (nmcli -t escapes colons as \:)
+        let parts: Vec<&str> = line.splitn(5, ':').collect();
         if parts.len() < 4 {
             continue;
         }
@@ -98,11 +100,13 @@ fn parse_wifi_list(output: &str, known_ssids: &[String]) -> Vec<WifiNetwork> {
         let security = parts[2].trim().to_string();
         let in_use = parts[3].trim() == "*";
         let is_known = known_ssids.iter().any(|k| k == &ssid);
+        let freq_mhz: Option<u32> = parts.get(4).and_then(|s| s.trim().parse().ok());
 
         // Deduplicate: keep strongest signal per SSID, union in_use flag.
         if let Some(existing) = networks.iter_mut().find(|n| n.ssid == ssid) {
             if signal > existing.signal {
                 existing.signal = signal;
+                existing.freq_mhz = freq_mhz;
             }
             existing.in_use = existing.in_use || in_use;
             existing.is_known = existing.is_known || is_known;
@@ -115,6 +119,7 @@ fn parse_wifi_list(output: &str, known_ssids: &[String]) -> Vec<WifiNetwork> {
             security,
             in_use,
             is_known,
+            freq_mhz,
         });
     }
 
@@ -159,7 +164,7 @@ fn scan_wifi_raw() -> String {
         .args([
             "-t",
             "-f",
-            "SSID,SIGNAL,SECURITY,IN-USE",
+            "SSID,SIGNAL,SECURITY,IN-USE,FREQ",
             "device",
             "wifi",
             "list",
@@ -192,8 +197,8 @@ fn get_active_connection() -> ActiveConnection {
         match conn_type {
             "802-11-wireless" => {
                 let ssid = parts[0].replace("\\:", ":").trim().to_string();
-                let signal = get_active_wifi_signal(&ssid);
-                return ActiveConnection::Wifi { ssid, signal, device };
+                let (signal, freq_mhz) = get_active_wifi_info(&ssid);
+                return ActiveConnection::Wifi { ssid, signal, device, freq_mhz };
             }
             "802-3-ethernet" => {
                 return ActiveConnection::Ethernet { device };
@@ -204,25 +209,38 @@ fn get_active_connection() -> ActiveConnection {
     ActiveConnection::Disconnected
 }
 
-fn get_active_wifi_signal(ssid: &str) -> u8 {
+/// Returns (signal_strength, freq_mhz) for the active WiFi network.
+fn get_active_wifi_info(ssid: &str) -> (u8, Option<u32>) {
     let Ok(out) = Command::new("nmcli")
-        .args(["-t", "-f", "SSID,SIGNAL,IN-USE", "device", "wifi", "list"])
+        .args(["-t", "-f", "SSID,SIGNAL,IN-USE,FREQ", "device", "wifi", "list"])
         .output()
     else {
-        return 0;
+        return (0, None);
     };
     let text = String::from_utf8_lossy(&out.stdout);
     for line in text.lines() {
-        let parts: Vec<&str> = line.splitn(3, ':').collect();
+        let parts: Vec<&str> = line.splitn(4, ':').collect();
         if parts.len() < 3 {
             continue;
         }
         let line_ssid = parts[0].replace("\\:", ":").trim().to_string();
         if line_ssid == ssid {
-            return parts[1].trim().parse().unwrap_or(0);
+            let signal = parts[1].trim().parse().unwrap_or(0);
+            let freq = parts.get(3).and_then(|s| s.trim().parse().ok());
+            return (signal, freq);
         }
     }
-    0
+    (0, None)
+}
+
+fn freq_band_label(freq_mhz: u32) -> &'static str {
+    if freq_mhz < 3000 {
+        "2.4 GHz"
+    } else if freq_mhz < 6000 {
+        "5 GHz"
+    } else {
+        "6 GHz"
+    }
 }
 
 fn get_vpn_connections() -> Vec<VpnConnection> {
@@ -307,10 +325,20 @@ fn nmcli_connect_new_async(ssid: String, password: String, result: Arc<Mutex<Opt
     });
 }
 
-fn nmcli_vpn_up(name: String) {
+fn nmcli_forget_network(ssid: &str) {
     let _ = Command::new("nmcli")
-        .args(["connection", "up", &name])
-        .spawn();
+        .args(["connection", "delete", ssid])
+        .output();
+}
+
+fn nmcli_vpn_up_async(name: String, result: Arc<Mutex<Option<bool>>>) {
+    thread::spawn(move || {
+        let status = Command::new("nmcli")
+            .args(["connection", "up", &name])
+            .status();
+        let ok = status.map(|s| s.success()).unwrap_or(false);
+        *result.lock().unwrap() = Some(ok);
+    });
 }
 
 fn nmcli_vpn_down(name: String) {
@@ -636,11 +664,15 @@ impl NetworkSection {
 
     fn update_active_display(&self, active: &ActiveConnection) {
         let device = match active {
-            ActiveConnection::Wifi { ssid, signal, device } => {
+            ActiveConnection::Wifi { ssid, signal, device, freq_mhz } => {
                 self.current_icon_label.set_label(signal_icon(*signal));
                 self.current_ssid_label.set_label(ssid);
-                self.current_signal_label
-                    .set_label(&format!("{}%", signal));
+                let signal_text = if let Some(freq) = freq_mhz {
+                    format!("{}% · {}", signal, freq_band_label(*freq))
+                } else {
+                    format!("{}%", signal)
+                };
+                self.current_signal_label.set_label(&signal_text);
                 Some(device.as_str())
             }
             ActiveConnection::Ethernet { device } => {
@@ -781,6 +813,13 @@ impl NetworkSection {
                 .build();
             name_lbl.add_css_class("network-ssid");
 
+            let spinner = Spinner::new();
+            spinner.set_visible(false);
+
+            let status_lbl = Label::builder().label("").build();
+            status_lbl.add_css_class("network-conn-status");
+            status_lbl.set_visible(false);
+
             let btn_label = if vpn.active { "Disconnect" } else { "Connect" };
             let action_btn = Button::builder().label(btn_label).build();
             action_btn.add_css_class("network-connect-btn");
@@ -788,17 +827,62 @@ impl NetworkSection {
             {
                 let name_clone = vpn.name.clone();
                 let is_active = vpn.active;
+                let btn_c = action_btn.clone();
+                let spinner_c = spinner.clone();
+                let status_c = status_lbl.clone();
                 action_btn.connect_clicked(move |_| {
                     if is_active {
                         nmcli_vpn_down(name_clone.clone());
+                        btn_c.set_label("Connect");
                     } else {
-                        nmcli_vpn_up(name_clone.clone());
+                        btn_c.set_sensitive(false);
+                        spinner_c.set_visible(true);
+                        spinner_c.start();
+                        status_c.set_visible(false);
+
+                        let result: Arc<Mutex<Option<bool>>> = Arc::new(Mutex::new(None));
+                        nmcli_vpn_up_async(name_clone.clone(), result.clone());
+
+                        let btn_poll = btn_c.clone();
+                        let spinner_poll = spinner_c.clone();
+                        let status_poll = status_c.clone();
+                        glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
+                            let done = result.lock().unwrap().is_some();
+                            if !done {
+                                return glib::ControlFlow::Continue;
+                            }
+                            let ok = result.lock().unwrap().unwrap();
+                            spinner_poll.stop();
+                            spinner_poll.set_visible(false);
+                            btn_poll.set_sensitive(true);
+
+                            if ok {
+                                status_poll.set_label("✓");
+                                status_poll.add_css_class("network-status-ok");
+                                status_poll.remove_css_class("network-status-err");
+                                btn_poll.set_label("Disconnect");
+                            } else {
+                                status_poll.set_label("Failed");
+                                status_poll.add_css_class("network-status-err");
+                                status_poll.remove_css_class("network-status-ok");
+                            }
+                            status_poll.set_visible(true);
+
+                            let status_hide = status_poll.clone();
+                            glib::timeout_add_local_once(
+                                std::time::Duration::from_secs(4),
+                                move || { status_hide.set_visible(false); },
+                            );
+                            glib::ControlFlow::Break
+                        });
                     }
                 });
             }
 
             row_box.append(&icon_lbl);
             row_box.append(&name_lbl);
+            row_box.append(&spinner);
+            row_box.append(&status_lbl);
             row_box.append(&action_btn);
 
             let list_row = ListBoxRow::builder().build();
@@ -922,7 +1006,7 @@ fn build_wifi_row(network: &WifiNetwork) -> ListBoxRow {
             !network.security.is_empty() && network.security != "--" && !network.is_known;
 
         if network.is_known {
-            // Known network: single Connect button with feedback.
+            // Known network: Connect + Forget buttons with feedback.
             let btn_row = Box::builder()
                 .orientation(Orientation::Horizontal)
                 .halign(gtk4::Align::End)
@@ -936,11 +1020,25 @@ fn build_wifi_row(network: &WifiNetwork) -> ListBoxRow {
             status_lbl.add_css_class("network-conn-status");
             status_lbl.set_visible(false);
 
+            let forget_btn = Button::builder().label("Forget").build();
+            forget_btn.add_css_class("network-forget-btn");
+            {
+                let ssid = network.ssid.clone();
+                forget_btn.connect_clicked(move |btn| {
+                    nmcli_forget_network(&ssid);
+                    // Dim the row to indicate removal
+                    if let Some(row) = btn.ancestor(ListBoxRow::static_type()) {
+                        row.set_sensitive(false);
+                    }
+                });
+            }
+
             let connect_btn = Button::builder().label("Connect").build();
             connect_btn.add_css_class("network-connect-btn");
 
             btn_row.append(&spinner);
             btn_row.append(&status_lbl);
+            btn_row.append(&forget_btn);
             btn_row.append(&connect_btn);
             connect_area.append(&btn_row);
 
