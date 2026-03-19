@@ -757,8 +757,6 @@ revealer {
     font-size: 36px;
     color: @fg;
     margin-bottom: 14px;
-    min-width: 48px;
-    min-height: 48px;
     -gtk-icon-style: symbolic;
 }
 
