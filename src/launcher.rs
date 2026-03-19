@@ -233,14 +233,14 @@ impl Launcher {
                     if let Some(item) = s.results.get(s.selected) {
                         let provider = item.provider.clone();
                         let identifier = item.identifier.clone();
+                        let action = default_action(item);
                         let query = entry.text().to_string();
                         drop(s);
 
                         window.set_visible(false);
 
-                        // Activate on background thread
                         std::thread::spawn(move || {
-                            if let Err(e) = elephant::activate(&provider, &identifier, &query) {
+                            if let Err(e) = elephant::activate(&provider, &identifier, &action, &query) {
                                 log::warn!("Elephant activate failed: {}", e);
                             }
                         });
@@ -420,13 +420,14 @@ fn build_result_row(
     let gesture = gtk4::GestureClick::new();
     let provider = result.provider.clone();
     let identifier = result.identifier.clone();
+    let action = default_action(result);
     let query_str = query.to_string();
     gesture.connect_released(move |gesture, _, _, _| {
         let provider = provider.clone();
         let identifier = identifier.clone();
+        let action = action.clone();
         let query = query_str.clone();
 
-        // Hide the launcher window
         if let Some(widget) = gesture.widget() {
             if let Some(root) = widget.root() {
                 if let Ok(window) = root.downcast::<gtk4::Window>() {
@@ -436,7 +437,7 @@ fn build_result_row(
         }
 
         std::thread::spawn(move || {
-            if let Err(e) = elephant::activate(&provider, &identifier, &query) {
+            if let Err(e) = elephant::activate(&provider, &identifier, &action, &query) {
                 log::warn!("Elephant activate failed: {}", e);
             }
         });
@@ -459,6 +460,16 @@ fn update_selection(results_box: &gtk4::Box, old: usize, new: usize) {
         child = widget.next_sibling();
         i += 1;
     }
+}
+
+/// Get the default action for a search result — use the first action from elephant,
+/// or fall back to "start" for desktop apps.
+fn default_action(result: &SearchResult) -> String {
+    result
+        .actions
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "start".to_string())
 }
 
 /// Calculate top offset as ~25% of the primary monitor height (Spotlight-style positioning).

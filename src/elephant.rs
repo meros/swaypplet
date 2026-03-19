@@ -35,6 +35,7 @@ pub struct SearchResult {
     pub icon: String,
     pub provider: String,
     pub score: i32,
+    pub actions: Vec<String>,
 }
 
 // ── Socket path ─────────────────────────────────────────────────────────────
@@ -122,6 +123,7 @@ pub fn query(
                             icon: item.icon,
                             provider: item.provider,
                             score: item.score,
+                            actions: item.actions,
                         });
                     }
                 }
@@ -142,13 +144,13 @@ pub fn query(
 }
 
 /// Activate a search result item. This is a blocking call.
-pub fn activate(provider: &str, identifier: &str, query_text: &str) -> io::Result<()> {
+pub fn activate(provider: &str, identifier: &str, action: &str, query_text: &str) -> io::Result<()> {
     let mut stream = connect()?;
 
     let mut req = ActivateRequest::new();
     req.provider = provider.to_string();
     req.identifier = identifier.to_string();
-    req.action = "select".to_string();
+    req.action = action.to_string();
     req.query = query_text.to_string();
 
     let payload = req
