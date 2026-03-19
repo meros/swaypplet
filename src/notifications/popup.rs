@@ -285,11 +285,13 @@ fn build_popup_content(
     });
     hbox.append(&close_btn);
 
-    // Click on body = default action / dismiss
+    // Click on body = focus the app's window, then dismiss
     let gesture = gtk4::GestureClick::new();
     let id = notif.id;
+    let app_name = notif.app_name.clone();
     let store_c = store;
     gesture.connect_released(move |_, _, _, _| {
+        focus_app_window(&app_name);
         store::store_close(&store_c, id, CloseReason::Dismissed);
     });
     hbox.add_controller(gesture);
@@ -301,6 +303,97 @@ fn build_popup_content(
     wrapper.add_css_class("notification-popup-wrapper");
     wrapper.append(&hbox);
     window.set_child(Some(&wrapper));
+}
+
+/// Try to focus a Sway window matching the notification's app name.
+/// Uses `swaymsg -t get_tree` to find the window, then `[con_id=N] focus`.
+fn focus_app_window(app_name: &str) {
+    if app_name.is_empty() {
+        return;
+    }
+
+    let output = match std::process::Command::new("swaymsg")
+        .args(["-t", "get_tree", "--raw"])
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => {
+            log::warn!("swaymsg get_tree failed: {}", e);
+            return;
+        }
+    };
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let app_lower = app_name.to_lowercase();
+
+    // Parse the JSON tree to find a matching window con_id.
+    // We look for "app_id" or "class" matching the app_name (case-insensitive).
+    if let Some(con_id) = find_con_id_in_tree(&text, &app_lower) {
+        let cmd = format!("[con_id={}] focus", con_id);
+        let _ = std::process::Command::new("swaymsg")
+            .arg(&cmd)
+            .spawn()
+            .map_err(|e| log::warn!("swaymsg focus failed: {}", e));
+    }
+}
+
+/// Walk the swaymsg JSON tree (simple string scanning — avoids serde dependency)
+/// to find a container whose app_id or class matches `app_lower`.
+fn find_con_id_in_tree(json: &str, app_lower: &str) -> Option<u64> {
+    // Strategy: find "app_id":"<match>" or "class":"<match>" near an "id":<num>.
+    // We split by `{` to get rough "node" chunks and look for matches.
+    let mut best_id: Option<u64> = None;
+    let mut best_focused = false;
+
+    for chunk in json.split('{') {
+        // Check if this chunk has a matching app_id or window class
+        let matches = match_field(chunk, "app_id", app_lower)
+            || match_field(chunk, "class", app_lower);
+
+        if !matches {
+            continue;
+        }
+
+        // Extract the "id" field
+        if let Some(id) = extract_u64_field(chunk, "\"id\"") {
+            let focused = chunk.contains("\"focused\":true");
+            // Prefer focused window, otherwise take the first match
+            if best_id.is_none() || (focused && !best_focused) {
+                best_id = Some(id);
+                best_focused = focused;
+            }
+        }
+    }
+
+    best_id
+}
+
+fn match_field(chunk: &str, field: &str, app_lower: &str) -> bool {
+    let pattern = format!("\"{}\"", field);
+    if let Some(pos) = chunk.find(&pattern) {
+        let rest = &chunk[pos + pattern.len()..];
+        // Skip : and whitespace, find the quoted value
+        if let Some(q1) = rest.find('"') {
+            let after_q = &rest[q1 + 1..];
+            if let Some(q2) = after_q.find('"') {
+                let value = &after_q[..q2];
+                return value.to_lowercase().contains(app_lower)
+                    || app_lower.contains(&value.to_lowercase());
+            }
+        }
+    }
+    false
+}
+
+fn extract_u64_field(chunk: &str, field: &str) -> Option<u64> {
+    let pos = chunk.find(field)?;
+    let rest = &chunk[pos + field.len()..];
+    // Skip `:` and whitespace
+    let rest = rest.trim_start().strip_prefix(':')?;
+    let rest = rest.trim_start();
+    // Parse the number
+    let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    num_str.parse().ok()
 }
 
 fn update_popup_content(window: &gtk4::Window, notif: &Notification) {

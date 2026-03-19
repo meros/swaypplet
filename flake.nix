@@ -29,7 +29,7 @@
         version = "0.1.0";
         src = ./.;
 
-        cargoHash = "sha256-DgKx6MhwgQXL071CsW4GsskEQAezVItwDeYiil9mgdk=";
+        cargoHash = "sha256-48JDMfTZ/yudDxRT59WdA3gK7IQi0k30/qtUJq7iJmA=";
 
         nativeBuildInputs = with pkgs; [
           pkg-config
@@ -49,6 +49,18 @@
           fi
           SCRIPT
           chmod +x $out/bin/swaypplet-toggle
+
+          # Launcher toggle
+          cat > $out/bin/swaypplet-launcher <<'SCRIPT'
+          #!/bin/sh
+          PID=$(cat /tmp/swaypplet.pid 2>/dev/null)
+          if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+            kill -USR2 "$PID"
+          else
+            swaypplet launcher &
+          fi
+          SCRIPT
+          chmod +x $out/bin/swaypplet-launcher
 
           # OSD client — drop-in replacement for swayosd-client
           cat > $out/bin/swaypplet-osd <<SCRIPT

@@ -1,7 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::fs;
 use std::rc::Rc;
-use std::sync::mpsc;
 
 use gtk4::prelude::*;
 
@@ -10,8 +9,6 @@ use gtk4::prelude::*;
 // ---------------------------------------------------------------------------
 
 const CPU_GOVERNOR: &str = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor";
-const CPU_AVAIL_GOVERNORS: &str =
-    "/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors";
 
 fn read_sysfs(path: &str) -> Option<String> {
     match fs::read_to_string(path) {
@@ -92,14 +89,6 @@ impl GovernorProfile {
         }
     }
 
-    fn sysfs_name(&self) -> &str {
-        match self {
-            GovernorProfile::Performance => "performance",
-            GovernorProfile::Balanced => "schedutil",
-            GovernorProfile::Powersave => "powersave",
-            GovernorProfile::Other(s) => s.as_str(),
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -231,11 +220,6 @@ fn read_governor() -> GovernorProfile {
         .unwrap_or(GovernorProfile::Balanced)
 }
 
-fn read_available_governors() -> Vec<String> {
-    read_sysfs(CPU_AVAIL_GOVERNORS)
-        .map(|s| s.split_whitespace().map(str::to_owned).collect())
-        .unwrap_or_default()
-}
 
 // ---------------------------------------------------------------------------
 // Widget state
@@ -303,10 +287,8 @@ pub struct PowerSection {
     // Battery widget handles (only present when a battery was found).
     bat_handles: Option<Rc<BatteryHandles>>,
 
-    // Governor buttons
-    btn_performance: gtk4::Button,
-    btn_balanced: gtk4::Button,
-    btn_powersave: gtk4::Button,
+    // Governor info label
+    governor_label: gtk4::Label,
 }
 
 impl PowerSection {
@@ -403,39 +385,40 @@ impl PowerSection {
             None
         };
 
-        // ── CPU governor section ──────────────────────────────────────────
+        // ── CPU governor info (managed by auto-cpufreq) ─────────────────
         let cpu_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(6)
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(8)
             .build();
-        cpu_box.add_css_class("cpu-governor-section");
+        cpu_box.add_css_class("cpu-info-row");
 
-        let cpu_label = gtk4::Label::builder()
-            .label("CPU Profile")
+        let cpu_icon = gtk4::Label::builder()
+            .label("󰻠")
             .halign(gtk4::Align::Start)
             .build();
-        cpu_label.add_css_class("cpu-governor-label");
-        cpu_box.append(&cpu_label);
+        cpu_icon.add_css_class("cpu-info-icon");
 
-        let btn_row = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(4)
-            .homogeneous(true)
+        let cpu_text_box = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(2)
             .build();
-        btn_row.add_css_class("governor-btn-row");
 
-        let btn_performance = gtk4::Button::with_label("Performance");
-        let btn_balanced = gtk4::Button::with_label("Balanced");
-        let btn_powersave = gtk4::Button::with_label("Powersave");
+        let governor_label = gtk4::Label::builder()
+            .label(&format_governor_info(&state.governor))
+            .halign(gtk4::Align::Start)
+            .build();
+        governor_label.add_css_class("cpu-info-governor");
 
-        btn_performance.add_css_class("governor-btn");
-        btn_balanced.add_css_class("governor-btn");
-        btn_powersave.add_css_class("governor-btn");
+        let cpu_managed = gtk4::Label::builder()
+            .label("Managed by auto-cpufreq")
+            .halign(gtk4::Align::Start)
+            .build();
+        cpu_managed.add_css_class("cpu-info-managed");
 
-        btn_row.append(&btn_performance);
-        btn_row.append(&btn_balanced);
-        btn_row.append(&btn_powersave);
-        cpu_box.append(&btn_row);
+        cpu_text_box.append(&governor_label);
+        cpu_text_box.append(&cpu_managed);
+        cpu_box.append(&cpu_icon);
+        cpu_box.append(&cpu_text_box);
         root.append(&cpu_box);
 
         // ── Power actions separator ───────────────────────────────────────
@@ -605,37 +588,6 @@ impl PowerSection {
         actions_row.append(&col_shutdown);
         root.append(&actions_row);
 
-        // Apply initial active governor class.
-        Self::apply_governor_active_class(
-            &state.governor,
-            &btn_performance,
-            &btn_balanced,
-            &btn_powersave,
-        );
-
-        // ── Governor button click handlers ────────────────────────────────
-        connect_governor_btn(
-            &btn_performance,
-            GovernorProfile::Performance,
-            &btn_performance,
-            &btn_balanced,
-            &btn_powersave,
-        );
-        connect_governor_btn(
-            &btn_balanced,
-            GovernorProfile::Balanced,
-            &btn_performance,
-            &btn_balanced,
-            &btn_powersave,
-        );
-        connect_governor_btn(
-            &btn_powersave,
-            GovernorProfile::Powersave,
-            &btn_performance,
-            &btn_balanced,
-            &btn_powersave,
-        );
-
         // ── Periodic battery refresh every 30 s ───────────────────────────
         if let Some(ref handles) = bat_handles {
             let handles_weak = Rc::downgrade(handles);
@@ -661,9 +613,7 @@ impl PowerSection {
             bat_path,
             state: RefCell::new(state),
             bat_handles,
-            btn_performance,
-            btn_balanced,
-            btn_powersave,
+            governor_label,
         }
     }
 
@@ -675,12 +625,8 @@ impl PowerSection {
             handles.apply(bat);
         }
 
-        Self::apply_governor_active_class(
-            &new_state.governor,
-            &self.btn_performance,
-            &self.btn_balanced,
-            &self.btn_powersave,
-        );
+        self.governor_label
+            .set_label(&format_governor_info(&new_state.governor));
 
         *self.state.borrow_mut() = new_state;
     }
@@ -689,31 +635,11 @@ impl PowerSection {
         &self.root
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────
-
-    fn apply_governor_active_class(
-        active: &GovernorProfile,
-        btn_perf: &gtk4::Button,
-        btn_bal: &gtk4::Button,
-        btn_save: &gtk4::Button,
-    ) {
-        set_active(btn_perf, *active == GovernorProfile::Performance);
-        set_active(btn_bal, *active == GovernorProfile::Balanced);
-        set_active(btn_save, *active == GovernorProfile::Powersave);
-    }
 }
 
 // ---------------------------------------------------------------------------
 // Standalone helpers
 // ---------------------------------------------------------------------------
-
-fn set_active(btn: &gtk4::Button, active: bool) {
-    if active {
-        btn.add_css_class("active");
-    } else {
-        btn.remove_css_class("active");
-    }
-}
 
 /// Walk up the widget hierarchy to find the containing `gtk4::Window` and
 /// hide it. Used by Lock and Suspend to close the panel before acting.
@@ -725,123 +651,11 @@ fn hide_panel_for_widget(widget: &gtk4::Widget) {
     }
 }
 
-/// Wire up a governor button: show "pending" state while pkexec runs, then
-/// re-read the actual governor and update the active class for all three
-/// buttons regardless of success or failure.
-fn connect_governor_btn(
-    target_btn: &gtk4::Button,
-    profile: GovernorProfile,
-    b_perf: &gtk4::Button,
-    b_bal: &gtk4::Button,
-    b_save: &gtk4::Button,
-) {
-    let b_perf = b_perf.clone();
-    let b_bal = b_bal.clone();
-    let b_save = b_save.clone();
-
-    target_btn.connect_clicked(move |btn| {
-        // Show pending state immediately.
-        btn.add_css_class("pending");
-        btn.set_sensitive(false);
-
-        let b_perf_c = b_perf.clone();
-        let b_bal_c = b_bal.clone();
-        let b_save_c = b_save.clone();
-        let btn_c = btn.clone();
-
-        spawn_set_governor(profile.clone(), move |_success| {
-            btn_c.remove_css_class("pending");
-            btn_c.set_sensitive(true);
-            // Re-read the actual governor to reflect reality (pkexec may have
-            // been cancelled, or the kernel may have rejected the value).
-            let actual = read_governor();
-            PowerSection::apply_governor_active_class(&actual, &b_perf_c, &b_bal_c, &b_save_c);
-        });
-    });
-}
-
-/// Spawn `pkexec` in a background thread to write the chosen governor to all
-/// CPU cores. Calls `on_done(success)` back on the main thread via GLib's
-/// idle queue when the process exits.
-///
-/// The available governors list is checked before spawning so we only attempt
-/// governors the kernel actually supports.
-fn spawn_set_governor<F>(profile: GovernorProfile, on_done: F)
-where
-    F: FnOnce(bool) + 'static,
-{
-    let available = read_available_governors();
-    let target = profile.sysfs_name();
-
-    let governor = if available.iter().any(|g| g == target) {
-        target.to_owned()
-    } else if profile == GovernorProfile::Balanced && available.iter().any(|g| g == "ondemand") {
-        "ondemand".to_owned()
-    } else {
-        log::warn!(
-            "Governor '{}' not available (available: {}). Skipping.",
-            target,
-            available.join(", ")
-        );
-        on_done(false);
-        return;
-    };
-
-    let cmd = format!(
-        "echo {} | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
-        governor
-    );
-
-    log::info!("Requesting CPU governor change to '{}'", governor);
-
-    // Use a channel: the worker thread sends the result; a GLib idle source on
-    // the main thread drains it and calls `on_done`.  This keeps `on_done`
-    // (which holds GTK widget handles, i.e. non-Send Rc) on the main thread.
-    let (tx, rx) = mpsc::channel::<bool>();
-
-    std::thread::spawn(move || {
-        let success = match std::process::Command::new("pkexec")
-            .args(["sh", "-c", &cmd])
-            .status()
-        {
-            Ok(status) => {
-                if status.success() {
-                    log::info!("Governor changed to '{}'", governor);
-                    true
-                } else {
-                    log::warn!(
-                        "pkexec exited with status {:?} for governor '{}'",
-                        status.code(),
-                        governor
-                    );
-                    false
-                }
-            }
-            Err(e) => {
-                log::error!("Failed to spawn pkexec for governor change: {}", e);
-                false
-            }
-        };
-        let _ = tx.send(success);
-    });
-
-    // `on_done` is non-Send (may capture Rc<…>) so we wrap it in Option and
-    // drive it from a main-thread idle callback that polls the channel.
-    let mut on_done = Some(on_done);
-    glib::idle_add_local(move || match rx.try_recv() {
-        Ok(success) => {
-            if let Some(f) = on_done.take() {
-                f(success);
-            }
-            glib::ControlFlow::Break
-        }
-        Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-        Err(mpsc::TryRecvError::Disconnected) => {
-            // Worker thread panicked or channel broken.
-            if let Some(f) = on_done.take() {
-                f(false);
-            }
-            glib::ControlFlow::Break
-        }
-    });
+fn format_governor_info(gov: &GovernorProfile) -> String {
+    match gov {
+        GovernorProfile::Performance => "Performance".to_owned(),
+        GovernorProfile::Balanced => "Balanced".to_owned(),
+        GovernorProfile::Powersave => "Powersave".to_owned(),
+        GovernorProfile::Other(s) => s.clone(),
+    }
 }

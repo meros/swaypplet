@@ -8,6 +8,7 @@ use gtk4::prelude::*;
 use gtk4::Application;
 use gtk4_layer_shell::Edge;
 
+use crate::launcher::Launcher;
 use crate::layer_shell::{self, LayerShellConfig};
 use crate::notifications::store::NotificationStore;
 use crate::notifications::{dbus, popup::PopupManager};
@@ -33,6 +34,7 @@ static PANEL_CONFIG: LayerShellConfig = LayerShellConfig {
 struct AppState {
     panel: Option<Panel>,
     osd: Option<Osd>,
+    launcher: Option<Launcher>,
 }
 
 pub fn run() {
@@ -44,6 +46,7 @@ pub fn run() {
     let state: Rc<RefCell<AppState>> = Rc::new(RefCell::new(AppState {
         panel: None,
         osd: None,
+        launcher: None,
     }));
 
     // Shared notification store — lives on the GTK main thread (Rc, no Arc)
@@ -63,6 +66,15 @@ pub fn run() {
         unix_signal_add_local(10 /* SIGUSR1 */, move || {
             if let Some(ref panel) = s.borrow().panel {
                 panel.toggle();
+            }
+            glib::ControlFlow::Continue
+        });
+
+        // SIGUSR2 toggles launcher
+        let s = state_clone.clone();
+        unix_signal_add_local(12 /* SIGUSR2 */, move || {
+            if let Some(ref launcher) = s.borrow().launcher {
+                launcher.toggle();
             }
             glib::ControlFlow::Continue
         });
@@ -91,8 +103,12 @@ pub fn run() {
         // ── OSD overlay ──────────────────────────────────────────────────────
         let osd = Osd::new(app);
 
+        // ── Launcher ────────────────────────────────────────────────────────
+        let launcher = Launcher::new(app);
+
         st.panel = Some(panel);
         st.osd = Some(osd);
+        st.launcher = Some(launcher);
     });
 
     // ── Command-line handling ────────────────────────────────────────────────
@@ -104,7 +120,19 @@ pub fn run() {
             .map(|a| a.to_string_lossy().to_string())
             .collect();
 
-        if args.len() > 1 && args[1] == "osd" {
+        if args.len() > 1 && args[1] == "launcher" {
+            let st = state_clone.borrow();
+            if st.launcher.is_none() {
+                drop(st);
+                app.activate();
+                let st = state_clone.borrow();
+                if let Some(ref launcher) = st.launcher {
+                    launcher.toggle();
+                }
+            } else if let Some(ref launcher) = st.launcher {
+                launcher.toggle();
+            }
+        } else if args.len() > 1 && args[1] == "osd" {
             let osd_args: Vec<String> = args[2..].to_vec();
             if let Some(cmd) = OsdCommand::parse(&osd_args) {
                 let st = state_clone.borrow();

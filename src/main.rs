@@ -1,5 +1,7 @@
 mod app;
+mod elephant;
 mod icons;
+mod launcher;
 mod layer_shell;
 mod notifications;
 mod osd;

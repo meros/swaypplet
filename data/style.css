@@ -402,29 +402,26 @@ levelbar.charging block.filled {
     background-color: @green;
 }
 
-/* ── Governor / profile selector ── */
-.governor-btn {
-    padding: 8px 16px;
-    border-radius: 8px;
-    font-size: 12px;
-    min-height: 36px;
-    background-color: @bg2;
+/* ── CPU info row ── */
+.cpu-info-row {
+    padding: 4px 0;
+}
+
+.cpu-info-icon {
+    font-size: 20px;
     color: @fg_dim;
-    transition: all 150ms ease;
+    min-width: 28px;
 }
 
-.governor-btn:hover {
-    background-color: @bg3;
-}
-
-.governor-btn.active {
-    background-color: @accent;
-    color: @bg0;
+.cpu-info-governor {
+    font-size: 13px;
     font-weight: 600;
+    color: @fg;
 }
 
-.governor-btn.pending {
-    opacity: 0.5;
+.cpu-info-managed {
+    font-size: 10px;
+    color: @fg_dim;
 }
 
 /* ── Power actions row ── */
@@ -675,6 +672,16 @@ revealer {
     padding: 4px 0;
 }
 
+.network-ip-info {
+    padding: 0 0 2px 32px;
+}
+
+.network-ip {
+    font-size: 11px;
+    color: @fg_dim;
+    font-family: monospace;
+}
+
 .network-scan-status {
     font-size: 11px;
     color: @fg_dim;
@@ -751,6 +758,7 @@ revealer {
     color: @fg;
     margin-bottom: 14px;
     min-width: 48px;
+    -gtk-icon-style: symbolic;
 }
 
 .osd-bar {
@@ -915,4 +923,89 @@ revealer {
     font-size: 10px;
     color: @red;
     font-weight: 700;
+}
+
+/* ── Launcher ── */
+.launcher {
+    font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
+}
+
+.launcher-backdrop {
+    background-color: alpha(black, 0.5);
+    padding-top: 120px;
+}
+
+.launcher-container {
+    background-color: alpha(@bg0_h, 0.92);
+    border-radius: 16px;
+    border: 1px solid alpha(@aqua, 0.35);
+    box-shadow:
+        0 12px 40px alpha(black, 0.6),
+        0 4px 12px alpha(black, 0.3);
+    min-width: 560px;
+    max-width: 560px;
+    padding: 16px;
+}
+
+.launcher-entry {
+    background-color: alpha(@bg0, 0.85);
+    color: @fg;
+    border: 1px solid alpha(@aqua, 0.25);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 16px;
+    min-height: 40px;
+    caret-color: @fg;
+}
+
+.launcher-entry:focus {
+    border-color: alpha(@aqua, 0.5);
+}
+
+.launcher-results {
+    margin-top: 8px;
+}
+
+.launcher-result {
+    padding: 10px 12px;
+    border-radius: 10px;
+    transition: background-color 100ms ease;
+}
+
+.launcher-result:hover {
+    background-color: alpha(white, 0.04);
+}
+
+.launcher-result.selected {
+    background-color: alpha(@aqua, 0.25);
+}
+
+.launcher-result-icon {
+    font-size: 20px;
+    color: @fg_dim;
+    min-width: 32px;
+}
+
+.launcher-result-icon-img {
+    min-width: 32px;
+}
+
+.launcher-result-name {
+    font-size: 14px;
+    color: @fg;
+}
+
+.launcher-result.selected .launcher-result-name {
+    font-weight: 600;
+}
+
+.launcher-result-sub {
+    font-size: 11px;
+    color: @fg_dim;
+}
+
+.launcher-result-badge {
+    font-size: 9px;
+    color: @fg_dim;
+    opacity: 0.6;
 }

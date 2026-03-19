@@ -48,9 +48,8 @@ struct WifiNetwork {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 enum ActiveConnection {
-    Wifi { ssid: String, signal: u8 },
+    Wifi { ssid: String, signal: u8, device: String },
     Ethernet { device: String },
     Disconnected,
 }
@@ -194,7 +193,7 @@ fn get_active_connection() -> ActiveConnection {
             "802-11-wireless" => {
                 let ssid = parts[0].replace("\\:", ":").trim().to_string();
                 let signal = get_active_wifi_signal(&ssid);
-                return ActiveConnection::Wifi { ssid, signal };
+                return ActiveConnection::Wifi { ssid, signal, device };
             }
             "802-3-ethernet" => {
                 return ActiveConnection::Ethernet { device };
@@ -320,6 +319,43 @@ fn nmcli_vpn_down(name: String) {
         .spawn();
 }
 
+/// Get the IPv4 address for a network device via `ip -4 addr show <dev>`.
+fn get_device_ip(device: &str) -> Option<String> {
+    let out = Command::new("ip")
+        .args(["-4", "-o", "addr", "show", device])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    // Format: "2: wlp0s20f3    inet 192.168.1.5/24 brd ..."
+    for line in text.lines() {
+        if let Some(inet_pos) = line.find("inet ") {
+            let rest = &line[inet_pos + 5..];
+            if let Some(slash) = rest.find('/') {
+                return Some(rest[..slash].trim().to_string());
+            }
+            return Some(rest.split_whitespace().next()?.to_string());
+        }
+    }
+    None
+}
+
+/// Get the default gateway via `ip route`.
+fn get_default_gateway() -> Option<String> {
+    let out = Command::new("ip")
+        .args(["-4", "route", "show", "default"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    // Format: "default via 192.168.1.1 dev wlp0s20f3 ..."
+    for line in text.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 3 && parts[0] == "default" && parts[1] == "via" {
+            return Some(parts[2].to_string());
+        }
+    }
+    None
+}
+
 // ── Internal state ────────────────────────────────────────────────────────────
 
 struct NetworkState {
@@ -341,6 +377,9 @@ pub struct NetworkSection {
     current_icon_label: Label,
     current_ssid_label: Label,
     current_signal_label: Label,
+    // IP info
+    ip_label: Label,
+    gateway_label: Label,
     // Scan status
     scan_spinner: Spinner,
     scan_status_label: Label,
@@ -390,6 +429,8 @@ impl NetworkSection {
                 current_icon_label: Label::new(None),
                 current_ssid_label: Label::new(None),
                 current_signal_label: Label::new(None),
+                ip_label: Label::new(None),
+                gateway_label: Label::new(None),
                 scan_spinner: Spinner::new(),
                 scan_status_label: Label::new(None),
                 toggle_button: Button::new(),
@@ -430,6 +471,29 @@ impl NetworkSection {
         current_row.append(&current_ssid_label);
         current_row.append(&current_signal_label);
         root.append(&current_row);
+
+        // ── IP info row ──────────────────────────────────────────────────────
+        let ip_box = Box::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(2)
+            .build();
+        ip_box.add_css_class("network-ip-info");
+
+        let ip_label = Label::builder()
+            .label("")
+            .halign(gtk4::Align::Start)
+            .build();
+        ip_label.add_css_class("network-ip");
+
+        let gateway_label = Label::builder()
+            .label("")
+            .halign(gtk4::Align::Start)
+            .build();
+        gateway_label.add_css_class("network-ip");
+
+        ip_box.append(&ip_label);
+        ip_box.append(&gateway_label);
+        root.append(&ip_box);
 
         // ── Scan status row (spinner + label) ─────────────────────────────────
         let scan_row = Box::builder()
@@ -535,6 +599,8 @@ impl NetworkSection {
             current_icon_label,
             current_ssid_label,
             current_signal_label,
+            ip_label,
+            gateway_label,
             scan_spinner,
             scan_status_label,
             toggle_button,
@@ -569,23 +635,44 @@ impl NetworkSection {
     }
 
     fn update_active_display(&self, active: &ActiveConnection) {
-        match active {
-            ActiveConnection::Wifi { ssid, signal } => {
+        let device = match active {
+            ActiveConnection::Wifi { ssid, signal, device } => {
                 self.current_icon_label.set_label(signal_icon(*signal));
                 self.current_ssid_label.set_label(ssid);
                 self.current_signal_label
                     .set_label(&format!("{}%", signal));
+                Some(device.as_str())
             }
-            ActiveConnection::Ethernet { .. } => {
+            ActiveConnection::Ethernet { device } => {
                 self.current_icon_label.set_label(ICON_ETHERNET);
                 self.current_ssid_label.set_label("Ethernet");
                 self.current_signal_label.set_label("");
+                Some(device.as_str())
             }
             ActiveConnection::Disconnected => {
                 self.current_icon_label.set_label(ICON_DISCONNECTED);
                 self.current_ssid_label.set_label("Disconnected");
                 self.current_signal_label.set_label("");
+                None
             }
+        };
+
+        if let Some(dev) = device {
+            if let Some(ip) = get_device_ip(dev) {
+                self.ip_label.set_label(&format!("IP: {}", ip));
+                self.ip_label.set_visible(true);
+            } else {
+                self.ip_label.set_visible(false);
+            }
+            if let Some(gw) = get_default_gateway() {
+                self.gateway_label.set_label(&format!("Gateway: {}", gw));
+                self.gateway_label.set_visible(true);
+            } else {
+                self.gateway_label.set_visible(false);
+            }
+        } else {
+            self.ip_label.set_visible(false);
+            self.gateway_label.set_visible(false);
         }
     }
 
