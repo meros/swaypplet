@@ -322,14 +322,74 @@ button.flat:hover {
 }
 
 /* ── Media controls ── */
-.media-info {
-    font-size: 12px;
-    color: @fg;
-    margin-bottom: 4px;
+/* ── Media: album art ── */
+.media-art-frame {
+    min-width: 56px;
+    min-height: 56px;
+    border-radius: 8px;
+    overflow: hidden;
+    background-color: alpha(@bg3, 0.3);
 }
 
+.media-art {
+    min-width: 56px;
+    min-height: 56px;
+}
+
+.media-art-fallback {
+    font-size: 28px;
+    min-width: 56px;
+    min-height: 56px;
+    color: @fg_dim;
+}
+
+/* ── Media: track info ── */
+.media-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: @fg;
+}
+
+.media-artist {
+    font-size: 11px;
+    color: @fg_dim;
+}
+
+.media-player-badge {
+    font-size: 9px;
+    color: @fg_dim;
+    opacity: 0.7;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+/* ── Media: progress ── */
+.media-progress {
+    min-height: 4px;
+    border-radius: 2px;
+}
+
+.media-progress trough {
+    background-color: alpha(@bg3, 0.4);
+    border-radius: 2px;
+    min-height: 4px;
+}
+
+.media-progress progress {
+    background-color: @accent;
+    border-radius: 2px;
+    min-height: 4px;
+}
+
+.media-time {
+    font-size: 9px;
+    color: @fg_dim;
+    opacity: 0.7;
+}
+
+/* ── Media: controls ── */
 .media-controls {
-    margin-top: 4px;
+    margin-top: 2px;
 }
 
 .media-btn {
@@ -363,6 +423,12 @@ button.flat:hover {
 .battery-sub {
     font-size: 11px;
     color: @fg_dim;
+}
+
+.battery-health {
+    font-size: 10px;
+    color: @fg_dim;
+    opacity: 0.7;
 }
 
 .battery-icon {
@@ -924,7 +990,7 @@ revealer {
     font-weight: 700;
 }
 
-/* ── Launcher ── */
+/* ── Launcher — matches OSD visual language ── */
 .launcher {
     font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
 }
@@ -934,21 +1000,22 @@ revealer {
 }
 
 .launcher-container {
-    background-color: alpha(@bg0_h, 0.92);
-    border-radius: 16px;
-    border: 1px solid alpha(@aqua, 0.35);
+    background-color: alpha(@bg0_h, 0.88);
+    border-radius: 20px;
+    border: 1px solid alpha(@bg3, 0.25);
     box-shadow:
         0 12px 40px alpha(black, 0.6),
-        0 4px 12px alpha(black, 0.3);
+        0 4px 12px alpha(black, 0.3),
+        inset 0 1px 0 alpha(white, 0.08);
     min-width: 560px;
     max-width: 560px;
     padding: 16px;
 }
 
 .launcher-entry {
-    background-color: alpha(@bg0, 0.85);
+    background-color: alpha(@bg0, 0.6);
     color: @fg;
-    border: 1px solid alpha(@aqua, 0.25);
+    border: 1px solid alpha(@bg3, 0.3);
     border-radius: 10px;
     padding: 10px 14px;
     font-size: 16px;
@@ -957,7 +1024,7 @@ revealer {
 }
 
 .launcher-entry:focus {
-    border-color: alpha(@aqua, 0.5);
+    border-color: alpha(@accent, 0.5);
 }
 
 .launcher-results {
@@ -975,7 +1042,7 @@ revealer {
 }
 
 .launcher-result.selected {
-    background-color: alpha(@aqua, 0.25);
+    background-color: alpha(@accent, 0.2);
 }
 
 .launcher-result-icon {

@@ -13,6 +13,9 @@ type ChangeCb = Rc<dyn Fn()>;
 /// **Callback safety:** Mutating methods (`add`, `close`, `clear_all`) do NOT
 /// fire callbacks directly — they return deferred work via `PendingCallbacks`.
 /// The caller must call `.fire()` *after* releasing the `RefCell` borrow.
+/// Maximum number of notifications to keep in history.
+const MAX_NOTIFICATIONS: usize = 50;
+
 pub struct NotificationStore {
     notifications: Vec<Notification>,
     next_id: u32,
@@ -118,6 +121,11 @@ impl NotificationStore {
         }
 
         let id = notif.id;
+
+        // Trim oldest notifications if over the limit
+        while self.notifications.len() > MAX_NOTIFICATIONS {
+            self.notifications.remove(0);
+        }
 
         let mut pending = PendingCallbacks::new();
         for cb in &self.on_notify {

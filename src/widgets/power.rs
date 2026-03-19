@@ -69,6 +69,8 @@ struct BatteryState {
     energy_now_wh: Option<f64>,
     /// Wh at full
     energy_full_wh: Option<f64>,
+    /// Battery health as percentage of design capacity (energy_full / energy_full_design * 100)
+    health_pct: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -123,12 +125,24 @@ fn read_battery(bat_path: &str) -> Option<BatteryState> {
         .and_then(|s| s.parse::<u64>().ok())
         .map(|uwh| uwh as f64 / 1_000_000.0);
 
+    let energy_full_design_wh = read_sysfs(&format!("{}/energy_full_design", bat_path))
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(|uwh| uwh as f64 / 1_000_000.0);
+
+    let health_pct = match (energy_full_wh, energy_full_design_wh) {
+        (Some(full), Some(design)) if design > 0.0 => {
+            Some(((full / design) * 100.0).round().min(100.0) as u8)
+        }
+        _ => None,
+    };
+
     Some(BatteryState {
         capacity,
         charging,
         power_w,
         energy_now_wh,
         energy_full_wh,
+        health_pct,
     })
 }
 
@@ -250,6 +264,7 @@ struct BatteryHandles {
     icon_lbl: gtk4::Label,
     level_lbl: gtk4::Label,
     sub_lbl: gtk4::Label,
+    health_lbl: gtk4::Label,
     level_bar: gtk4::LevelBar,
 }
 
@@ -260,6 +275,13 @@ impl BatteryHandles {
         self.level_lbl.set_label(&format!("{}%", bat.capacity));
         self.sub_lbl.set_label(&battery_sub_text(bat));
         self.level_bar.set_value(bat.capacity as f64 / 100.0);
+
+        if let Some(health) = bat.health_pct {
+            self.health_lbl.set_label(&format!("Health: {}%", health));
+            self.health_lbl.set_visible(true);
+        } else {
+            self.health_lbl.set_visible(false);
+        }
 
         if bat.capacity < 20 {
             self.level_bar.add_css_class("low");
@@ -355,6 +377,17 @@ impl PowerSection {
                 .build();
             sub_lbl.add_css_class("battery-sub");
 
+            // Health label
+            let health_lbl = gtk4::Label::builder()
+                .halign(gtk4::Align::Start)
+                .visible(false)
+                .build();
+            health_lbl.add_css_class("battery-health");
+            if let Some(health) = bat.health_pct {
+                health_lbl.set_label(&format!("Health: {}%", health));
+                health_lbl.set_visible(true);
+            }
+
             // Level bar
             let level_bar = gtk4::LevelBar::builder()
                 .min_value(0.0)
@@ -371,6 +404,7 @@ impl PowerSection {
 
             bat_row.append(&top_row);
             bat_row.append(&sub_lbl);
+            bat_row.append(&health_lbl);
             bat_row.append(&level_bar);
             root.append(&bat_row);
 
@@ -379,6 +413,7 @@ impl PowerSection {
                 icon_lbl,
                 level_lbl,
                 sub_lbl,
+                health_lbl,
                 level_bar,
             }))
         } else {
