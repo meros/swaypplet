@@ -489,7 +489,9 @@ impl NetworkSection {
             .propagate_natural_height(true)
             .build();
 
-        let network_list_box = ListBox::builder().build();
+        let network_list_box = ListBox::builder()
+            .selection_mode(gtk4::SelectionMode::None)
+            .build();
         network_list_box.add_css_class("network-list");
 
         scroll.set_child(Some(&network_list_box));
@@ -503,7 +505,9 @@ impl NetworkSection {
         vpn_title.add_css_class("network-subsection-title");
         revealer_box.append(&vpn_title);
 
-        let vpn_list_box = ListBox::builder().build();
+        let vpn_list_box = ListBox::builder()
+            .selection_mode(gtk4::SelectionMode::None)
+            .build();
         vpn_list_box.add_css_class("network-list");
         revealer_box.append(&vpn_list_box);
 

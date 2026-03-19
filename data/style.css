@@ -20,20 +20,16 @@
 @define-color orange    #fe8019;
 @define-color accent    #689d6a;
 
-/* ── Window transparency ── */
-/* GTK4 paints an opaque background on the window.background CSS node.
-   We must clear it AND use sub-1.0 opacity to force the compositor to
-   alpha-blend the surface, making rounded corners truly transparent. */
-window,
-window.background,
-window.background.csd {
+/* ── Window: force transparent so rounded corners work ── */
+window {
     background-color: transparent;
-    background-image: none;
-    background: unset;
-    box-shadow: none;
-    opacity: 0.999;
 }
 
+scrolledwindow, viewport {
+    background-color: transparent;
+}
+
+/* ── Panel window ── */
 .panel {
     font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
 }
@@ -613,10 +609,27 @@ revealer {
     border-radius: 8px;
 }
 
+.network-list row {
+    background-color: transparent;
+    padding: 0;
+    margin: 0;
+    border: none;
+    outline: none;
+    box-shadow: none;
+}
+
+.network-list row:hover,
+.network-list row:focus,
+.network-list row:selected {
+    background-color: transparent;
+    outline: none;
+    box-shadow: none;
+}
+
 .network-row {
-    padding: 6px 8px;
+    padding: 4px 8px;
     border-radius: 6px;
-    min-height: 32px;
+    min-height: 28px;
 }
 
 .network-row:hover {
@@ -693,55 +706,55 @@ revealer {
 }
 
 /* ── OSD overlay ── */
-.osd-window,
-.osd-window decoration {
-    background-color: transparent;
-    box-shadow: none;
-}
-
 .osd-container {
-    background-color: alpha(@bg0, 0.92);
-    border-radius: 16px;
-    padding: 12px 20px;
-    border: 1px solid alpha(@bg3, 0.3);
+    background-color: alpha(@bg0_h, 0.88);
+    border-radius: 20px;
+    border: 1px solid alpha(@bg3, 0.25);
     box-shadow:
-        0 8px 32px alpha(black, 0.5),
-        inset 0 1px 0 alpha(white, 0.06);
+        0 12px 40px alpha(black, 0.6),
+        0 4px 12px alpha(black, 0.3),
+        inset 0 1px 0 alpha(white, 0.08);
+    padding: 20px 28px 16px;
+    min-width: 160px;
 }
 
 .osd-icon {
-    font-size: 28px;
+    font-size: 36px;
     color: @fg;
-    min-width: 36px;
+    margin-bottom: 14px;
 }
 
 .osd-bar {
-    min-height: 8px;
-    border-radius: 4px;
+    min-height: 6px;
+    border-radius: 3px;
 }
 
 .osd-bar trough {
-    background-color: @bg2;
-    border-radius: 4px;
-    min-height: 8px;
+    background-color: alpha(@bg3, 0.5);
+    border-radius: 3px;
+    min-height: 6px;
 }
 
 .osd-bar progress {
     background-color: @accent;
-    border-radius: 4px;
-    min-height: 8px;
+    border-radius: 3px;
+    min-height: 6px;
+    box-shadow: 0 0 8px alpha(@accent, 0.3);
 }
 
 .osd-text {
-    font-size: 12px;
-    color: @fg_dim;
-    font-weight: 600;
+    font-size: 22px;
+    font-weight: 700;
+    color: @fg;
+    letter-spacing: 0.5px;
 }
 
 .osd-indicator {
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 700;
     color: @fg_dim;
+    margin-top: 8px;
+    letter-spacing: 1px;
 }
 
 .osd-indicator.osd-indicator-active {

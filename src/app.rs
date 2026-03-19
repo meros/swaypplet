@@ -12,17 +12,6 @@ use crate::osd::{Osd, OsdCommand};
 use crate::panel::Panel;
 use crate::theme;
 
-/// Tell the compositor this window surface may have transparent pixels,
-/// so alpha compositing is applied (needed for rounded corners).
-fn make_surface_transparent(window: &gtk4::Window) {
-    window.connect_realize(|win| {
-        if let Some(surface) = win.surface() {
-            use gdk4::prelude::SurfaceExt;
-            surface.set_opaque_region(None::<&cairo::Region>);
-        }
-    });
-}
-
 const APP_ID: &str = "dev.swaypplet.panel";
 
 struct AppState {
@@ -81,7 +70,9 @@ pub fn run() {
         window.set_margin(Edge::Right, 8);
         window.set_keyboard_mode(KeyboardMode::OnDemand);
 
-        make_surface_transparent(&window);
+        // Workaround for Sway bug #8904: fully transparent layer-shell
+        // surfaces never get mapped. Near-zero opacity is imperceptible.
+        window.set_opacity(0.005);
         let panel = Panel::new(window);
         panel.window.present();
 
@@ -127,8 +118,34 @@ pub fn run() {
                     if let Some(ref osd) = st.osd {
                         osd.trigger(&cmd);
                     }
-                } else if let Some(ref osd) = st.osd {
-                    osd.trigger(&cmd);
+                    // Sync panel sliders with the new value
+                    if let Some(ref panel) = st.panel {
+                        match cmd {
+                            OsdCommand::OutputVolumeRaise
+                            | OsdCommand::OutputVolumeLower
+                            | OsdCommand::OutputVolumeMuteToggle
+                            | OsdCommand::InputVolumeMuteToggle => panel.refresh_audio(),
+                            OsdCommand::BrightnessRaise
+                            | OsdCommand::BrightnessLower => panel.refresh_brightness(),
+                            _ => {}
+                        }
+                    }
+                } else {
+                    if let Some(ref osd) = st.osd {
+                        osd.trigger(&cmd);
+                    }
+                    // Sync panel sliders with the new value
+                    if let Some(ref panel) = st.panel {
+                        match cmd {
+                            OsdCommand::OutputVolumeRaise
+                            | OsdCommand::OutputVolumeLower
+                            | OsdCommand::OutputVolumeMuteToggle
+                            | OsdCommand::InputVolumeMuteToggle => panel.refresh_audio(),
+                            OsdCommand::BrightnessRaise
+                            | OsdCommand::BrightnessLower => panel.refresh_brightness(),
+                            _ => {}
+                        }
+                    }
                 }
             } else {
                 log::warn!("Unknown OSD command: {:?}", &args[2..]);

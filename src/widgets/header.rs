@@ -9,16 +9,21 @@ pub struct HeaderSection {
     bluetooth_btn: RefCell<gtk4::Button>,
     dnd_btn: RefCell<gtk4::Button>,
     night_btn: RefCell<gtk4::Button>,
+    idle_btn: RefCell<gtk4::Button>,
+    camera_btn: RefCell<gtk4::Button>,
+    #[allow(dead_code)]
+    color_btn: RefCell<gtk4::Button>,
 }
 
 impl HeaderSection {
     pub fn new() -> Self {
         let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
+            .orientation(gtk4::Orientation::Vertical)
             .build();
         root.add_css_class("section");
         root.add_css_class("quick-toggles");
 
+        // Row 1
         let toggles_box = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .spacing(8)
@@ -35,7 +40,23 @@ impl HeaderSection {
         toggles_box.append(&dnd_toggle);
         toggles_box.append(&night_toggle);
 
+        // Row 2
+        let toggles_box2 = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(8)
+            .homogeneous(true)
+            .build();
+
+        let (idle_toggle, idle_btn) = make_toggle("󰈈", "Idle");
+        let (camera_toggle, camera_btn) = make_toggle("󰄀", "Camera");
+        let (color_toggle, color_btn) = make_toggle("󰏘", "Color");
+
+        toggles_box2.append(&idle_toggle);
+        toggles_box2.append(&camera_toggle);
+        toggles_box2.append(&color_toggle);
+
         root.append(&toggles_box);
+        root.append(&toggles_box2);
 
         // Wire up click handlers
         {
@@ -209,12 +230,173 @@ impl HeaderSection {
             });
         }
 
+        {
+            let btn = idle_btn.clone();
+            idle_btn.connect_clicked(move |_| {
+                if btn.has_css_class("disabled") {
+                    return;
+                }
+                let currently_active = btn.has_css_class("active");
+                set_active(&btn, !currently_active);
+                update_idle_tooltip(&btn, !currently_active);
+
+                let btn_clone = btn.clone();
+                spawn_toggle_command(
+                    move || {
+                        if currently_active {
+                            // Toggle off: read PID, kill process, remove file
+                            const PID_FILE: &str = "/tmp/swaypplet-idle-inhibit.pid";
+                            match std::fs::read_to_string(PID_FILE) {
+                                Ok(contents) => {
+                                    let pid_str = contents.trim().to_string();
+                                    match pid_str.parse::<u32>() {
+                                        Ok(pid) => {
+                                            let killed = Command::new("kill")
+                                                .arg(pid.to_string())
+                                                .spawn()
+                                                .and_then(|mut c| c.wait())
+                                                .map(|s| s.success())
+                                                .unwrap_or(false);
+                                            if killed {
+                                                let _ = std::fs::remove_file(PID_FILE);
+                                            } else {
+                                                log::warn!("Failed to kill idle inhibit process (pid {pid})");
+                                            }
+                                            killed
+                                        }
+                                        Err(e) => {
+                                            log::warn!("Failed to parse idle inhibit PID: {e}");
+                                            false
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to read idle inhibit PID file: {e}");
+                                    false
+                                }
+                            }
+                        } else {
+                            // Toggle on: spawn systemd-inhibit in background, save PID
+                            match Command::new("systemd-inhibit")
+                                .args([
+                                    "--what=idle:sleep",
+                                    "--who=swaypplet",
+                                    "--why=User toggled",
+                                    "sleep",
+                                    "infinity",
+                                ])
+                                .spawn()
+                            {
+                                Ok(child) => {
+                                    let pid = child.id();
+                                    match std::fs::write(
+                                        "/tmp/swaypplet-idle-inhibit.pid",
+                                        pid.to_string(),
+                                    ) {
+                                        Ok(_) => true,
+                                        Err(e) => {
+                                            log::warn!("Failed to write idle inhibit PID file: {e}");
+                                            false
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    if e.kind() == std::io::ErrorKind::NotFound {
+                                        log::warn!("systemd-inhibit not found");
+                                    } else {
+                                        log::warn!("systemd-inhibit spawn failed: {e}");
+                                    }
+                                    false
+                                }
+                            }
+                        }
+                    },
+                    move |success| {
+                        if !success {
+                            let b = btn_clone.clone();
+                            glib::timeout_add_local_once(
+                                std::time::Duration::from_secs(2),
+                                move || {
+                                    set_active(&b, currently_active);
+                                    update_idle_tooltip(&b, currently_active);
+                                },
+                            );
+                        }
+                    },
+                );
+            });
+        }
+
+        {
+            let btn = camera_btn.clone();
+            camera_btn.connect_clicked(move |_| {
+                if btn.has_css_class("disabled") {
+                    return;
+                }
+                let currently_active = btn.has_css_class("active");
+                set_active(&btn, !currently_active);
+                update_camera_tooltip(&btn, !currently_active);
+
+                let btn_clone = btn.clone();
+                spawn_toggle_command(
+                    move || {
+                        let action = if currently_active { "stop" } else { "start" };
+                        let result = Command::new("systemctl")
+                            .args(["--user", action, "icamerasrc-v4l2loopback.service"])
+                            .spawn()
+                            .and_then(|mut c| c.wait());
+                        result.map(|s| s.success()).unwrap_or_else(|e| {
+                            if e.kind() == std::io::ErrorKind::NotFound {
+                                log::warn!("systemctl not found");
+                            } else {
+                                log::warn!(
+                                    "systemctl --user {action} icamerasrc-v4l2loopback.service failed: {e}"
+                                );
+                            }
+                            false
+                        })
+                    },
+                    move |success| {
+                        if !success {
+                            let b = btn_clone.clone();
+                            glib::timeout_add_local_once(
+                                std::time::Duration::from_secs(2),
+                                move || {
+                                    set_active(&b, currently_active);
+                                    update_camera_tooltip(&b, currently_active);
+                                },
+                            );
+                        }
+                    },
+                );
+            });
+        }
+
+        {
+            // Color Picker: one-shot action, no toggle state
+            color_btn.connect_clicked(move |_| {
+                match Command::new("hyprpicker").arg("-a").spawn() {
+                    Ok(_) => {}
+                    Err(e) => {
+                        if e.kind() == std::io::ErrorKind::NotFound {
+                            log::warn!("hyprpicker not found");
+                        } else {
+                            log::warn!("hyprpicker -a failed: {e}");
+                        }
+                    }
+                }
+            });
+        }
+
         let section = Self {
             root,
             wifi_btn: RefCell::new(wifi_btn),
             bluetooth_btn: RefCell::new(bluetooth_btn),
             dnd_btn: RefCell::new(dnd_btn),
             night_btn: RefCell::new(night_btn),
+            idle_btn: RefCell::new(idle_btn),
+            camera_btn: RefCell::new(camera_btn),
+            color_btn: RefCell::new(color_btn),
         };
 
         // Initialise states off the main thread, then apply results on it
@@ -228,8 +410,17 @@ impl HeaderSection {
         let bt = self.bluetooth_btn.borrow().clone();
         let dnd = self.dnd_btn.borrow().clone();
         let night = self.night_btn.borrow().clone();
+        let idle = self.idle_btn.borrow().clone();
+        let camera = self.camera_btn.borrow().clone();
 
-        let (tx, rx) = std::sync::mpsc::channel::<(ToggleState, ToggleState, ToggleState, ToggleState)>();
+        let (tx, rx) = std::sync::mpsc::channel::<(
+            ToggleState,
+            ToggleState,
+            ToggleState,
+            ToggleState,
+            ToggleState,
+            ToggleState,
+        )>();
 
         std::thread::spawn(move || {
             let states = (
@@ -237,6 +428,8 @@ impl HeaderSection {
                 read_bluetooth_state(),
                 read_dnd_state(),
                 read_night_state(),
+                read_idle_state(),
+                read_camera_state(),
             );
             let _ = tx.send(states);
         });
@@ -244,26 +437,39 @@ impl HeaderSection {
         glib::idle_add_local_once(move || {
             // Poll until the thread finishes (usually instant)
             fn poll(
-                rx: std::sync::mpsc::Receiver<(ToggleState, ToggleState, ToggleState, ToggleState)>,
+                rx: std::sync::mpsc::Receiver<(
+                    ToggleState,
+                    ToggleState,
+                    ToggleState,
+                    ToggleState,
+                    ToggleState,
+                    ToggleState,
+                )>,
                 wifi: gtk4::Button,
                 bt: gtk4::Button,
                 dnd: gtk4::Button,
                 night: gtk4::Button,
+                idle: gtk4::Button,
+                camera: gtk4::Button,
             ) {
                 match rx.try_recv() {
-                    Ok((ws, bs, ds, ns)) => {
+                    Ok((ws, bs, ds, ns, is, cs)) => {
                         apply_toggle_state(&wifi, ws);
                         apply_toggle_state(&bt, bs);
                         apply_toggle_state(&dnd, ds);
                         apply_toggle_state(&night, ns);
+                        apply_toggle_state(&idle, is);
+                        apply_toggle_state(&camera, cs);
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => {
-                        glib::idle_add_local_once(move || poll(rx, wifi, bt, dnd, night));
+                        glib::idle_add_local_once(move || {
+                            poll(rx, wifi, bt, dnd, night, idle, camera)
+                        });
                     }
                     Err(_) => {}
                 }
             }
-            poll(rx, wifi, bt, dnd, night);
+            poll(rx, wifi, bt, dnd, night, idle, camera);
         });
     }
 
@@ -409,6 +615,22 @@ fn update_night_tooltip(btn: &gtk4::Button, active: bool) {
     }));
 }
 
+fn update_idle_tooltip(btn: &gtk4::Button, active: bool) {
+    btn.set_tooltip_text(Some(if active {
+        "Idle Inhibitor: active"
+    } else {
+        "Idle Inhibitor: off"
+    }));
+}
+
+fn update_camera_tooltip(btn: &gtk4::Button, active: bool) {
+    btn.set_tooltip_text(Some(if active {
+        "Camera: active"
+    } else {
+        "Camera: off"
+    }));
+}
+
 // ---------------------------------------------------------------------------
 // State readers (blocking — always call from a background thread)
 // ---------------------------------------------------------------------------
@@ -492,6 +714,59 @@ fn read_night_state() -> ToggleState {
         }
         Err(e) => {
             log::warn!("systemctl --user is-active gammastep.service failed: {e}");
+            ToggleState::Unavailable
+        }
+        Ok(out) => {
+            let status = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if status == "active" {
+                ToggleState::Active
+            } else {
+                ToggleState::Inactive
+            }
+        }
+    }
+}
+
+fn read_idle_state() -> ToggleState {
+    const PID_FILE: &str = "/tmp/swaypplet-idle-inhibit.pid";
+    match std::fs::read_to_string(PID_FILE) {
+        Ok(contents) => {
+            let pid_str = contents.trim().to_string();
+            match pid_str.parse::<u32>() {
+                Ok(pid) => {
+                    // Check if process is alive via /proc/{pid}
+                    let alive = std::path::Path::new(&format!("/proc/{pid}")).exists();
+                    if alive {
+                        ToggleState::Active
+                    } else {
+                        // Stale PID file — clean it up
+                        let _ = std::fs::remove_file(PID_FILE);
+                        ToggleState::Inactive
+                    }
+                }
+                Err(_) => {
+                    let _ = std::fs::remove_file(PID_FILE);
+                    ToggleState::Inactive
+                }
+            }
+        }
+        Err(_) => ToggleState::Inactive,
+    }
+}
+
+fn read_camera_state() -> ToggleState {
+    match Command::new("systemctl")
+        .args(["--user", "is-active", "icamerasrc-v4l2loopback.service"])
+        .output()
+    {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            log::warn!("systemctl not found; Camera toggle disabled");
+            ToggleState::Unavailable
+        }
+        Err(e) => {
+            log::warn!(
+                "systemctl --user is-active icamerasrc-v4l2loopback.service failed: {e}"
+            );
             ToggleState::Unavailable
         }
         Ok(out) => {

@@ -237,44 +237,38 @@ impl Osd {
             .application(app)
             .resizable(false)
             .decorated(false)
-            .default_width(280)
-            .default_height(56)
+            .default_width(200)
+            .default_height(120)
             .build();
-        window.add_css_class("osd-window");
-
-        // Transparent surface for rounded corners
-        window.connect_realize(|win| {
-            if let Some(surface) = win.surface() {
-                use gdk4::prelude::SurfaceExt;
-                surface.set_opaque_region(None::<&cairo::Region>);
-            }
-        });
+        // Workaround for Sway bug #8904: fully transparent layer-shell
+        // surfaces never get mapped. Near-zero opacity is imperceptible.
+        window.set_opacity(0.005);
 
         window.init_layer_shell();
         window.set_layer(Layer::Overlay);
         window.set_namespace("swaypplet-osd");
         window.set_anchor(Edge::Bottom, true);
-        // Not anchored to left or right → centered horizontally
         window.set_margin(Edge::Bottom, 120);
         window.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::None);
 
+        // Vertical layout: icon → bar → percentage
         let outer = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(12)
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(0)
+            .halign(gtk4::Align::Center)
             .build();
         outer.add_css_class("osd-container");
 
         let icon_label = gtk4::Label::builder()
             .label("")
+            .halign(gtk4::Align::Center)
             .build();
         icon_label.add_css_class("osd-icon");
 
-        // Bar mode: progress bar + text
+        // Bar mode: bar + percentage below
         let bar_box = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
-            .spacing(2)
-            .hexpand(true)
-            .valign(gtk4::Align::Center)
+            .spacing(8)
             .build();
 
         let bar = gtk4::ProgressBar::builder()
@@ -284,17 +278,17 @@ impl Osd {
 
         let text_label = gtk4::Label::builder()
             .label("")
-            .halign(gtk4::Align::End)
+            .halign(gtk4::Align::Center)
             .build();
         text_label.add_css_class("osd-text");
 
         bar_box.append(&bar);
         bar_box.append(&text_label);
 
-        // Indicator mode: big label
+        // Indicator mode (caps lock etc.)
         let indicator_label = gtk4::Label::builder()
             .label("")
-            .hexpand(true)
+            .halign(gtk4::Align::Center)
             .build();
         indicator_label.add_css_class("osd-indicator");
         indicator_label.set_visible(false);

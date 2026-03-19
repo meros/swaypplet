@@ -105,4 +105,12 @@ impl Panel {
         self.bluetooth.refresh();
         self.power.refresh();
     }
+
+    pub fn refresh_audio(&self) {
+        self.audio.refresh();
+    }
+
+    pub fn refresh_brightness(&self) {
+        self.brightness.refresh();
+    }
 }
