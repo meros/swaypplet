@@ -6,12 +6,8 @@ use std::thread;
 use gtk4::prelude::*;
 use log::{error, warn};
 
-// ── Nerd Font icons ───────────────────────────────────────────────────────────
-const ICON_SPEAKER_NORMAL: &str = "󰕾";
-const ICON_SPEAKER_LOW: &str = "󰕿";
-const ICON_SPEAKER_MUTED: &str = "󰖁";
-const ICON_MIC_NORMAL: &str = "󰍬";
-const ICON_MIC_MUTED: &str = "󰍭";
+use crate::icons;
+
 const ICON_ACTIVE_CHECK: &str = "●";
 
 // ── Data types ────────────────────────────────────────────────────────────────
@@ -261,15 +257,7 @@ fn read_state_blocking() -> FetchedState {
 // ── Widget helpers ────────────────────────────────────────────────────────────
 
 fn volume_icon(state: &VolumeState, is_mic: bool) -> &'static str {
-    if is_mic {
-        if state.muted { ICON_MIC_MUTED } else { ICON_MIC_NORMAL }
-    } else if state.muted {
-        ICON_SPEAKER_MUTED
-    } else if state.volume < 0.34 {
-        ICON_SPEAKER_LOW
-    } else {
-        ICON_SPEAKER_NORMAL
-    }
+    icons::volume_icon(state.volume, state.muted, is_mic)
 }
 
 fn pct_text(vol: f64) -> String {
@@ -294,9 +282,9 @@ impl VolumeRow {
         container.add_css_class("volume-row");
 
         let icon_btn = gtk4::Button::with_label(if is_mic {
-            ICON_MIC_NORMAL
+            icons::MIC
         } else {
-            ICON_SPEAKER_NORMAL
+            icons::SPEAKER_HIGH
         });
         icon_btn.add_css_class("volume-icon-btn");
         icon_btn.set_focusable(true);
@@ -485,8 +473,11 @@ impl AudioSection {
             .reveal_child(false)
             .child(&sink_devices.container)
             .build();
-        let sink_toggle = gtk4::Button::with_label("▸ Output Devices");
-        sink_toggle.add_css_class("device-toggle");
+        let sink_toggle = gtk4::Button::builder()
+            .label("▸ Output Devices")
+            .hexpand(true)
+            .build();
+        sink_toggle.add_css_class("section-expander");
         {
             let rev = sink_revealer.clone();
             sink_toggle.connect_clicked(move |btn| {
@@ -520,8 +511,11 @@ impl AudioSection {
             .reveal_child(false)
             .child(&source_devices.container)
             .build();
-        let source_toggle = gtk4::Button::with_label("▸ Input Devices");
-        source_toggle.add_css_class("device-toggle");
+        let source_toggle = gtk4::Button::builder()
+            .label("▸ Input Devices")
+            .hexpand(true)
+            .build();
+        source_toggle.add_css_class("section-expander");
         {
             let rev = source_revealer.clone();
             source_toggle.connect_clicked(move |btn| {

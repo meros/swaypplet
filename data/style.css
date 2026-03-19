@@ -33,14 +33,14 @@ scrolledwindow, viewport {
 }
 
 /* ── Panel window: background + rounded corners on the window itself ── */
-.panel {
+window.panel {
     font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
-    background-color: alpha(@bg0, 0.99);
-    border-radius: 16px;
-    border: 1px solid alpha(@bg3, 0.3);
 }
 
 .panel-outer {
+    background-color: alpha(@bg0, 0.88);
+    border-radius: 16px;
+    border: 1px solid alpha(@bg3, 0.3);
 }
 
 .panel-content {
@@ -234,8 +234,7 @@ button.suggested:hover {
     background-color: #7dae71;
 }
 
-button.flat,
-.device-toggle {
+button.flat {
     background-color: transparent;
     color: @fg_dim;
     font-size: 11px;
@@ -245,8 +244,7 @@ button.flat,
     border: none;
 }
 
-button.flat:hover,
-.device-toggle:hover {
+button.flat:hover {
     background-color: alpha(white, 0.04);
     box-shadow: none;
 }
@@ -615,16 +613,17 @@ revealer {
     color: @fg_dim;
 }
 
-.network-toggle {
+.section-expander {
     background-color: transparent;
     box-shadow: none;
     color: @fg_dim;
     font-size: 12px;
-    padding: 4px 8px;
-    min-height: 24px;
+    padding: 6px 8px;
+    min-height: 28px;
+    border: none;
 }
 
-.network-toggle:hover {
+.section-expander:hover {
     background-color: alpha(white, 0.04);
     box-shadow: none;
 }
@@ -730,6 +729,11 @@ revealer {
 }
 
 /* ── OSD overlay ── */
+.osd-wrapper {
+    /* Transparent margin gives room for drop shadow to render */
+    padding: 48px;
+}
+
 .osd-container {
     background-color: alpha(@bg0_h, 0.88);
     border-radius: 20px;
@@ -746,6 +750,7 @@ revealer {
     font-size: 36px;
     color: @fg;
     margin-bottom: 14px;
+    min-width: 48px;
 }
 
 .osd-bar {
@@ -783,6 +788,126 @@ revealer {
 
 .osd-indicator.osd-indicator-active {
     color: @accent;
+}
+
+/* ── Notification popups ── */
+.notification-popup {
+    font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
+}
+
+.notification-popup-wrapper {
+    /* Transparent padding gives room for drop shadow to render */
+    padding: 32px;
+}
+
+.notification-popup-content {
+    background-color: alpha(@bg0_h, 0.92);
+    border-radius: 16px;
+    border: 1px solid alpha(@bg3, 0.3);
+    box-shadow:
+        0 8px 32px alpha(black, 0.5),
+        0 2px 8px alpha(black, 0.3),
+        inset 0 1px 0 alpha(white, 0.08);
+    padding: 12px 14px;
+}
+
+.notification-popup.critical .notification-popup-content {
+    border-color: alpha(@red, 0.6);
+    box-shadow:
+        0 8px 32px alpha(black, 0.5),
+        0 0 16px alpha(@red, 0.2),
+        inset 0 1px 0 alpha(white, 0.08);
+}
+
+.notification-app-name {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: @fg_dim;
+}
+
+.notification-summary {
+    font-size: 13px;
+    font-weight: 700;
+    color: @fg;
+}
+
+.notification-body {
+    font-size: 11px;
+    color: @fg_dim;
+}
+
+.notification-time {
+    font-size: 10px;
+    color: @fg_dim;
+}
+
+.notification-progress {
+    min-height: 4px;
+    margin-top: 4px;
+}
+
+.notification-progress trough {
+    background-color: alpha(@bg3, 0.5);
+    border-radius: 2px;
+    min-height: 4px;
+}
+
+.notification-progress progress {
+    background-color: @accent;
+    border-radius: 2px;
+    min-height: 4px;
+}
+
+.notification-actions {
+    margin-top: 4px;
+}
+
+.notification-action-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    min-height: 24px;
+}
+
+.notification-close-btn,
+.notification-dismiss-btn {
+    font-size: 12px;
+    padding: 2px;
+    min-width: 24px;
+    min-height: 24px;
+    color: @fg_dim;
+}
+
+.notification-close-btn:hover,
+.notification-dismiss-btn:hover {
+    color: @red;
+}
+
+.notification-clear-btn {
+    font-size: 14px;
+    padding: 2px 6px;
+    min-height: 24px;
+    color: @fg_dim;
+}
+
+.notification-clear-btn:hover {
+    color: @red;
+}
+
+/* ── Notification center (panel section) ── */
+.notification-center {
+    /* inherits from .section */
+}
+
+.notification-entry {
+    padding: 8px 10px;
+    border-radius: 8px;
+    min-height: 36px;
+    transition: background-color 150ms ease;
+}
+
+.notification-entry:hover {
+    background-color: alpha(white, 0.04);
 }
 
 /* ── Countdown / confirmation ── */

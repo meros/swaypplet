@@ -264,8 +264,11 @@ impl BluetoothSection {
         root.append(&connected_list);
 
         // ── Revealer toggle button ────────────────────────────────────────────
-        let toggle_btn = Button::with_label("▸ Available Devices");
-        toggle_btn.add_css_class("revealer-toggle");
+        let toggle_btn = Button::builder()
+            .label("▸ Available Devices")
+            .hexpand(true)
+            .build();
+        toggle_btn.add_css_class("section-expander");
         root.append(&toggle_btn);
 
         // ── Revealer content ──────────────────────────────────────────────────

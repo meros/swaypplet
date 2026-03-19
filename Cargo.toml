@@ -10,5 +10,7 @@ glib = "0.20"
 gio = "0.20"
 gdk4 = "0.9"
 cairo-rs = "0.20"
+zbus = { version = "4", default-features = false, features = ["tokio"] }
+tokio = { version = "1", features = ["rt", "net", "time", "macros"] }
 log = "0.4"
 env_logger = "0.11"

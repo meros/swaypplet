@@ -1,5 +1,9 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use gtk4::prelude::*;
 
+use crate::notifications::store::NotificationStore;
 use crate::widgets::{
     audio::AudioSection,
     bluetooth::BluetoothSection,
@@ -7,12 +11,14 @@ use crate::widgets::{
     header::HeaderSection,
     media::MediaSection,
     network::NetworkSection,
+    notifications::NotificationsSection,
     power::PowerSection,
 };
 
 pub struct Panel {
     pub window: gtk4::Window,
     header: HeaderSection,
+    notifications: NotificationsSection,
     media: MediaSection,
     audio: AudioSection,
     brightness: BrightnessSection,
@@ -22,27 +28,27 @@ pub struct Panel {
 }
 
 impl Panel {
-    pub fn new(window: gtk4::Window) -> Self {
+    pub fn new(window: gtk4::Window, store: Rc<RefCell<NotificationStore>>) -> Self {
         let outer_box = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
-            .vexpand(true)
+            .valign(gtk4::Align::End)
             .build();
         outer_box.add_css_class("panel-outer");
 
         let scroll = gtk4::ScrolledWindow::builder()
             .vscrollbar_policy(gtk4::PolicyType::Automatic)
             .hscrollbar_policy(gtk4::PolicyType::Never)
-            .vexpand(true)
+            .propagate_natural_height(true)
             .build();
 
         let content_box = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(8)
-            .valign(gtk4::Align::End)
             .build();
         content_box.add_css_class("panel-content");
 
-        let header = HeaderSection::new();
+        let header = HeaderSection::new(store.clone());
+        let notifications = NotificationsSection::new(store);
         let media = MediaSection::new();
         let audio = AudioSection::new();
         let brightness = BrightnessSection::new();
@@ -51,6 +57,7 @@ impl Panel {
         let power = PowerSection::new();
 
         content_box.append(header.widget());
+        content_box.append(notifications.widget());
         content_box.append(media.widget());
         content_box.append(audio.widget());
         content_box.append(brightness.widget());
@@ -79,6 +86,7 @@ impl Panel {
         Self {
             window,
             header,
+            notifications,
             media,
             audio,
             brightness,
@@ -99,6 +107,7 @@ impl Panel {
 
     pub fn refresh(&self) {
         self.header.refresh();
+        self.notifications.refresh();
         self.media.refresh();
         self.audio.refresh();
         self.brightness.refresh();

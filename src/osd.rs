@@ -3,7 +3,9 @@ use std::process::Command;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4_layer_shell::{Edge, Layer, LayerShell};
+use gtk4_layer_shell::Edge;
+
+use crate::layer_shell::{self, LayerShellConfig};
 
 const OSD_TIMEOUT_MS: u32 = 1500;
 const VOLUME_STEP_PLUS: &str = "5%+";
@@ -11,18 +13,7 @@ const VOLUME_STEP_MINUS: &str = "5%-";
 const BRIGHTNESS_STEP_UP: &str = "5%+";
 const BRIGHTNESS_STEP_DOWN: &str = "5%-";
 
-// ── Nerd Font icons ──────────────────────────────────────────────────────────
-const ICON_VOL_MUTED: &str = "󰖁";
-const ICON_VOL_LOW: &str = "󰕿";
-const ICON_VOL_MED: &str = "󰖀";
-const ICON_VOL_HIGH: &str = "󰕾";
-const ICON_MIC: &str = "󰍬";
-const ICON_MIC_MUTED: &str = "󰍭";
-const ICON_BRIGHTNESS: &str = "󰃟";
-const ICON_CAPS_ON: &str = "A";
-const ICON_CAPS_OFF: &str = "a";
-const ICON_NUM_ON: &str = "1";
-const ICON_NUM_OFF: &str = "#";
+use crate::icons;
 
 // ── Commands ─────────────────────────────────────────────────────────────────
 
@@ -125,8 +116,8 @@ fn execute_command(cmd: &OsdCommand) -> OsdDisplay {
                 .output();
             read_brightness_display()
         }
-        OsdCommand::CapsLock => read_lock_display("capslock", ICON_CAPS_ON, ICON_CAPS_OFF, "CAPS"),
-        OsdCommand::NumLock => read_lock_display("numlock", ICON_NUM_ON, ICON_NUM_OFF, "NUM"),
+        OsdCommand::CapsLock => read_lock_display("capslock", icons::CAPS_ON, icons::CAPS_OFF, "CAPS"),
+        OsdCommand::NumLock => read_lock_display("numlock", icons::NUM_ON, icons::NUM_OFF, "NUM"),
         OsdCommand::ScrollLock => read_lock_display("scrolllock", "S", "s", "SCROLL"),
     }
 }
@@ -148,17 +139,7 @@ fn read_volume_display(target: &str, is_mic: bool) -> OsdDisplay {
         })
         .unwrap_or((0.0, false));
 
-    let icon = if is_mic {
-        if muted { ICON_MIC_MUTED } else { ICON_MIC }
-    } else if muted {
-        ICON_VOL_MUTED
-    } else if volume < 0.34 {
-        ICON_VOL_LOW
-    } else if volume < 0.67 {
-        ICON_VOL_MED
-    } else {
-        ICON_VOL_HIGH
-    };
+    let icon = icons::volume_icon(volume, muted, is_mic);
 
     let pct = (volume * 100.0).round() as u32;
     let fraction = if muted { 0.0 } else { volume.min(1.5) / 1.5 };
@@ -187,7 +168,7 @@ fn read_brightness_display() -> OsdDisplay {
         .unwrap_or(0);
 
     OsdDisplay::Bar {
-        icon: ICON_BRIGHTNESS.to_string(),
+        icon: icons::BRIGHTNESS.to_string(),
         fraction: pct as f64 / 100.0,
         text: format!("{}%", pct),
     }
@@ -233,23 +214,25 @@ pub struct Osd {
 
 impl Osd {
     pub fn new(app: &gtk4::Application) -> Self {
-        let window = gtk4::Window::builder()
-            .application(app)
-            .resizable(false)
-            .decorated(false)
-            .default_width(200)
-            .default_height(120)
-            .build();
-        // Workaround for Sway bug #8904: fully transparent layer-shell
-        // surfaces never get mapped. Near-zero opacity is imperceptible.
-        window.set_opacity(0.005);
+        static OSD_CONFIG: LayerShellConfig = LayerShellConfig {
+            namespace: "swaypplet-osd",
+            default_width: None,
+            default_height: None,
+            anchors: &[(Edge::Bottom, true)],
+            margins: &[(Edge::Bottom, 72)],
+            keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
+        };
+        let window = layer_shell::create_layer_window(app, &OSD_CONFIG);
+        window.set_resizable(false);
+        window.set_decorated(false);
 
-        window.init_layer_shell();
-        window.set_layer(Layer::Overlay);
-        window.set_namespace("swaypplet-osd");
-        window.set_anchor(Edge::Bottom, true);
-        window.set_margin(Edge::Bottom, 120);
-        window.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::None);
+        // Shadow wrapper — transparent padding gives room for drop shadow
+        let wrapper = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .halign(gtk4::Align::Center)
+            .valign(gtk4::Align::Center)
+            .build();
+        wrapper.add_css_class("osd-wrapper");
 
         // Vertical layout: icon → bar → percentage
         let outer = gtk4::Box::builder()
@@ -262,6 +245,7 @@ impl Osd {
         let icon_label = gtk4::Label::builder()
             .label("")
             .halign(gtk4::Align::Center)
+            .xalign(0.5)
             .build();
         icon_label.add_css_class("osd-icon");
 
@@ -297,7 +281,8 @@ impl Osd {
         outer.append(&bar_box);
         outer.append(&indicator_label);
 
-        window.set_child(Some(&outer));
+        wrapper.append(&outer);
+        window.set_child(Some(&wrapper));
 
         Osd {
             window,

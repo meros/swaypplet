@@ -455,9 +455,9 @@ impl NetworkSection {
         // ── Toggle button ─────────────────────────────────────────────────────
         let toggle_button = Button::builder()
             .label("▸ Available Networks")
-            .halign(gtk4::Align::Start)
+            .hexpand(true)
             .build();
-        toggle_button.add_css_class("network-toggle");
+        toggle_button.add_css_class("section-expander");
         root.append(&toggle_button);
 
         // ── Revealer ──────────────────────────────────────────────────────────
@@ -518,17 +518,14 @@ impl NetworkSection {
         // ── Wire up toggle ────────────────────────────────────────────────────
         {
             let revealer_c = revealer.clone();
-            let toggle_c = toggle_button.clone();
-            let state_c = state.clone();
-            toggle_button.connect_clicked(move |_| {
-                let mut s = state_c.borrow_mut();
-                s.list_visible = !s.list_visible;
-                revealer_c.set_reveal_child(s.list_visible);
-                if s.list_visible {
-                    toggle_c.set_label("▾ Available Networks");
+            toggle_button.connect_clicked(move |btn| {
+                let revealed = !revealer_c.reveals_child();
+                revealer_c.set_reveal_child(revealed);
+                btn.set_label(if revealed {
+                    "▾ Available Networks"
                 } else {
-                    toggle_c.set_label("▸ Available Networks");
-                }
+                    "▸ Available Networks"
+                });
             });
         }
 

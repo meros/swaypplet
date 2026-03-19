@@ -6,13 +6,29 @@ use gio::prelude::*;
 use glib::unix_signal_add_local;
 use gtk4::prelude::*;
 use gtk4::Application;
-use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use gtk4_layer_shell::Edge;
 
+use crate::layer_shell::{self, LayerShellConfig};
+use crate::notifications::store::NotificationStore;
+use crate::notifications::{dbus, popup::PopupManager};
 use crate::osd::{Osd, OsdCommand};
 use crate::panel::Panel;
 use crate::theme;
 
 const APP_ID: &str = "dev.swaypplet.panel";
+
+static PANEL_CONFIG: LayerShellConfig = LayerShellConfig {
+    namespace: "swaypplet",
+    default_width: Some(380),
+    default_height: None,
+    anchors: &[
+        (Edge::Top, true),
+        (Edge::Bottom, true),
+        (Edge::Right, true),
+    ],
+    margins: &[(Edge::Top, 8), (Edge::Bottom, 48), (Edge::Right, 8)],
+    keyboard_mode: gtk4_layer_shell::KeyboardMode::OnDemand,
+};
 
 struct AppState {
     panel: Option<Panel>,
@@ -30,10 +46,17 @@ pub fn run() {
         osd: None,
     }));
 
+    // Shared notification store — lives on the GTK main thread (Rc, no Arc)
+    let store = Rc::new(RefCell::new(NotificationStore::new()));
+
     let state_clone = state.clone();
+    let store_startup = store.clone();
     app.connect_startup(move |_app| {
         let _ = fs::write("/tmp/swaypplet.pid", std::process::id().to_string());
         theme::load_css();
+
+        // Start D-Bus notification server
+        dbus::start_server(store_startup.clone());
 
         // SIGUSR1 toggles panel visibility
         let s = state_clone.clone();
@@ -46,6 +69,7 @@ pub fn run() {
     });
 
     let state_clone = state.clone();
+    let store_activate = store.clone();
     app.connect_activate(move |app| {
         let mut st = state_clone.borrow_mut();
         if let Some(ref panel) = st.panel {
@@ -54,26 +78,15 @@ pub fn run() {
         }
 
         // ── Main panel window ────────────────────────────────────────────────
-        let window = gtk4::Window::builder()
-            .application(app)
-            .default_width(380)
-            .build();
+        let window = layer_shell::create_layer_window(app, &PANEL_CONFIG);
         window.add_css_class("panel");
 
-        window.init_layer_shell();
-        window.set_layer(Layer::Overlay);
-        window.set_namespace("swaypplet");
-        window.set_anchor(Edge::Top, true);
-        window.set_anchor(Edge::Bottom, true);
-        window.set_anchor(Edge::Right, true);
-        window.set_margin(Edge::Top, 8);
-        window.set_margin(Edge::Bottom, 48);
-        window.set_margin(Edge::Right, 8);
-        window.set_keyboard_mode(KeyboardMode::OnDemand);
-
-        let panel = Panel::new(window);
+        let panel = Panel::new(window, store_activate.clone());
         panel.window.present();
         panel.window.set_visible(false);
+
+        // ── Popup manager ────────────────────────────────────────────────────
+        PopupManager::register(app, store_activate.clone());
 
         // ── OSD overlay ──────────────────────────────────────────────────────
         let osd = Osd::new(app);

@@ -1,7 +1,11 @@
 use std::cell::RefCell;
 use std::process::Command;
+use std::rc::Rc;
 
 use gtk4::prelude::*;
+
+use crate::notifications::store::NotificationStore;
+use crate::spawn;
 
 pub struct HeaderSection {
     root: gtk4::Box,
@@ -13,10 +17,11 @@ pub struct HeaderSection {
     camera_btn: RefCell<gtk4::ToggleButton>,
     #[allow(dead_code)]
     color_btn: RefCell<gtk4::Button>,
+    store: Rc<RefCell<NotificationStore>>,
 }
 
 impl HeaderSection {
-    pub fn new() -> Self {
+    pub fn new(store: Rc<RefCell<NotificationStore>>) -> Self {
         let root = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .build();
@@ -66,7 +71,7 @@ impl HeaderSection {
                 update_wifi_tooltip(&btn, new_active);
 
                 let btn_clone = btn.clone();
-                spawn_toggle_command(
+                spawn::spawn_work(
                     move || {
                         let arg = if new_active { "on" } else { "off" };
                         let result = Command::new("nmcli")
@@ -106,7 +111,7 @@ impl HeaderSection {
                 update_bluetooth_tooltip(&btn, new_active);
 
                 let btn_clone = btn.clone();
-                spawn_toggle_command(
+                spawn::spawn_work(
                     move || {
                         let arg = if new_active { "on" } else { "off" };
                         let result = Command::new("bluetoothctl")
@@ -140,40 +145,11 @@ impl HeaderSection {
 
         {
             let btn = dnd_btn.clone();
+            let store_dnd = store.clone();
             dnd_btn.connect_clicked(move |_| {
                 let new_active = btn.is_active();
                 update_dnd_tooltip(&btn, new_active);
-
-                let btn_clone = btn.clone();
-                spawn_toggle_command(
-                    move || {
-                        let flag = if new_active { "-a" } else { "-r" };
-                        let result = Command::new("makoctl")
-                            .args(["mode", flag, "do-not-disturb"])
-                            .spawn()
-                            .and_then(|mut c| c.wait());
-                        result.map(|s| s.success()).unwrap_or_else(|e| {
-                            if e.kind() == std::io::ErrorKind::NotFound {
-                                log::warn!("makoctl not found");
-                            } else {
-                                log::warn!("makoctl mode {flag} do-not-disturb failed: {e}");
-                            }
-                            false
-                        })
-                    },
-                    move |success| {
-                        if !success {
-                            let b = btn_clone.clone();
-                            glib::timeout_add_local_once(
-                                std::time::Duration::from_secs(2),
-                                move || {
-                                    b.set_active(!new_active);
-                                    update_dnd_tooltip(&b, !new_active);
-                                },
-                            );
-                        }
-                    },
-                );
+                store_dnd.borrow_mut().set_dnd(new_active);
             });
         }
 
@@ -184,7 +160,7 @@ impl HeaderSection {
                 update_night_tooltip(&btn, new_active);
 
                 let btn_clone = btn.clone();
-                spawn_toggle_command(
+                spawn::spawn_work(
                     move || {
                         let action = if new_active { "start" } else { "stop" };
                         let result = Command::new("systemctl")
@@ -219,7 +195,7 @@ impl HeaderSection {
                 update_idle_tooltip(&btn, new_active);
 
                 let btn_clone = btn.clone();
-                spawn_toggle_command(
+                spawn::spawn_work(
                     move || {
                         if new_active {
                             // Toggle on: spawn systemd-inhibit in background, save PID
@@ -312,7 +288,7 @@ impl HeaderSection {
                 update_camera_tooltip(&btn, new_active);
 
                 let btn_clone = btn.clone();
-                spawn_toggle_command(
+                spawn::spawn_work(
                     move || {
                         let action = if new_active { "start" } else { "stop" };
                         let result = Command::new("systemctl")
@@ -371,6 +347,7 @@ impl HeaderSection {
             idle_btn: RefCell::new(idle_btn),
             camera_btn: RefCell::new(camera_btn),
             color_btn: RefCell::new(color_btn),
+            store,
         };
 
         // Initialise states off the main thread, then apply results on it
@@ -386,71 +363,37 @@ impl HeaderSection {
         let night = self.night_btn.borrow().clone();
         let idle = self.idle_btn.borrow().clone();
         let camera = self.camera_btn.borrow().clone();
+        let store = self.store.clone();
 
-        let (tx, rx) = std::sync::mpsc::channel::<(
-            ToggleState,
-            ToggleState,
-            ToggleState,
-            ToggleState,
-            ToggleState,
-            ToggleState,
-        )>();
+        // DND state comes from our own store (main thread), read it now
+        let dnd_active = store.borrow().is_dnd();
+        apply_toggle_state(&dnd, if dnd_active { ToggleState::Active } else { ToggleState::Inactive });
+        update_dnd_tooltip(&dnd, dnd_active);
 
-        std::thread::spawn(move || {
-            let states = (
-                read_wifi_state(),
-                read_bluetooth_state(),
-                read_dnd_state(),
-                read_night_state(),
-                read_idle_state(),
-                read_camera_state(),
-            );
-            let _ = tx.send(states);
-        });
-
-        glib::idle_add_local_once(move || {
-            // Poll until the thread finishes (usually instant)
-            fn poll(
-                rx: std::sync::mpsc::Receiver<(
-                    ToggleState,
-                    ToggleState,
-                    ToggleState,
-                    ToggleState,
-                    ToggleState,
-                    ToggleState,
-                )>,
-                wifi: gtk4::ToggleButton,
-                bt: gtk4::ToggleButton,
-                dnd: gtk4::ToggleButton,
-                night: gtk4::ToggleButton,
-                idle: gtk4::ToggleButton,
-                camera: gtk4::ToggleButton,
-            ) {
-                match rx.try_recv() {
-                    Ok((ws, bs, ds, ns, is, cs)) => {
-                        apply_toggle_state(&wifi, ws);
-                        update_wifi_tooltip(&wifi, matches!(ws, ToggleState::Active));
-                        apply_toggle_state(&bt, bs);
-                        update_bluetooth_tooltip(&bt, matches!(bs, ToggleState::Active));
-                        apply_toggle_state(&dnd, ds);
-                        update_dnd_tooltip(&dnd, matches!(ds, ToggleState::Active));
-                        apply_toggle_state(&night, ns);
-                        update_night_tooltip(&night, matches!(ns, ToggleState::Active));
-                        apply_toggle_state(&idle, is);
-                        update_idle_tooltip(&idle, matches!(is, ToggleState::Active));
-                        apply_toggle_state(&camera, cs);
-                        update_camera_tooltip(&camera, matches!(cs, ToggleState::Active));
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => {
-                        glib::idle_add_local_once(move || {
-                            poll(rx, wifi, bt, dnd, night, idle, camera)
-                        });
-                    }
-                    Err(_) => {}
-                }
-            }
-            poll(rx, wifi, bt, dnd, night, idle, camera);
-        });
+        // Other states require blocking I/O — read on a background thread
+        spawn::spawn_work(
+            move || {
+                (
+                    read_wifi_state(),
+                    read_bluetooth_state(),
+                    read_night_state(),
+                    read_idle_state(),
+                    read_camera_state(),
+                )
+            },
+            move |(ws, bs, ns, is, cs)| {
+                apply_toggle_state(&wifi, ws);
+                update_wifi_tooltip(&wifi, matches!(ws, ToggleState::Active));
+                apply_toggle_state(&bt, bs);
+                update_bluetooth_tooltip(&bt, matches!(bs, ToggleState::Active));
+                apply_toggle_state(&night, ns);
+                update_night_tooltip(&night, matches!(ns, ToggleState::Active));
+                apply_toggle_state(&idle, is);
+                update_idle_tooltip(&idle, matches!(is, ToggleState::Active));
+                apply_toggle_state(&camera, cs);
+                update_camera_tooltip(&camera, matches!(cs, ToggleState::Active));
+            },
+        );
     }
 
     pub fn refresh(&self) {
@@ -549,36 +492,6 @@ fn apply_toggle_state(btn: &gtk4::ToggleButton, state: ToggleState) {
     }
 }
 
-/// Spawn `work` on a background thread. When it finishes, call `on_done` on
-/// the GTK main thread via `glib::idle_add_local_once`.
-///
-/// `on_done` may capture `!Send` GTK objects. It is never called from the
-/// background thread — only from the GTK main thread inside idle callbacks.
-fn spawn_toggle_command<W, D>(work: W, on_done: D)
-where
-    W: FnOnce() -> bool + Send + 'static,
-    D: FnOnce(bool) + 'static,
-{
-    let (tx, rx) = std::sync::mpsc::channel::<bool>();
-
-    std::thread::spawn(move || {
-        let success = work();
-        let _ = tx.send(success);
-    });
-
-    glib::idle_add_local_once(move || {
-        fn poll(rx: std::sync::mpsc::Receiver<bool>, on_done: impl FnOnce(bool) + 'static) {
-            match rx.try_recv() {
-                Ok(success) => on_done(success),
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    glib::idle_add_local_once(move || poll(rx, on_done));
-                }
-                Err(_) => {}
-            }
-        }
-        poll(rx, on_done);
-    });
-}
 
 // ---------------------------------------------------------------------------
 // Tooltip updaters
@@ -673,29 +586,6 @@ fn read_bluetooth_state() -> ToggleState {
                 .lines()
                 .any(|l| l.trim().eq_ignore_ascii_case("Powered: yes"));
             if powered {
-                ToggleState::Active
-            } else {
-                ToggleState::Inactive
-            }
-        }
-    }
-}
-
-fn read_dnd_state() -> ToggleState {
-    match Command::new("makoctl").arg("mode").output() {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            log::warn!("makoctl not found; DND toggle disabled");
-            ToggleState::Unavailable
-        }
-        Err(e) => {
-            log::warn!("makoctl mode failed: {e}");
-            ToggleState::Unavailable
-        }
-        Ok(out) => {
-            let active = String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .any(|l| l.trim() == "do-not-disturb");
-            if active {
                 ToggleState::Active
             } else {
                 ToggleState::Inactive

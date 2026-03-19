@@ -4,8 +4,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-// ── Nerd Font icon ────────────────────────────────────────────────────────────
-const ICON_BRIGHTNESS: &str = "󰃟";
+use crate::icons;
 
 // ── brightnessctl helpers ─────────────────────────────────────────────────────
 
@@ -63,7 +62,7 @@ impl BrightnessSection {
             .build();
         row.add_css_class("volume-row");
 
-        let icon = gtk4::Label::new(Some(ICON_BRIGHTNESS));
+        let icon = gtk4::Label::new(Some(icons::BRIGHTNESS));
         icon.add_css_class("volume-icon-btn");
 
         let scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 1.0, 100.0, 1.0);
