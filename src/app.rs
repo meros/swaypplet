@@ -70,26 +70,9 @@ pub fn run() {
         window.set_margin(Edge::Right, 8);
         window.set_keyboard_mode(KeyboardMode::OnDemand);
 
-        // Workaround for Sway bug #8904: fully transparent layer-shell
-        // surfaces never get mapped. Near-zero opacity is imperceptible.
-        window.set_opacity(0.005);
         let panel = Panel::new(window);
         panel.window.present();
-
-        // ── Escape key to close panel ────────────────────────────────────────
-        let key_controller = gtk4::EventControllerKey::new();
-        {
-            let window_clone = panel.window.clone();
-            key_controller.connect_key_pressed(move |_, key, _, _| {
-                if key == gtk4::gdk::Key::Escape {
-                    window_clone.set_visible(false);
-                    glib::Propagation::Stop
-                } else {
-                    glib::Propagation::Proceed
-                }
-            });
-        }
-        panel.window.add_controller(key_controller);
+        panel.window.set_visible(false);
 
         // ── OSD overlay ──────────────────────────────────────────────────────
         let osd = Osd::new(app);

@@ -20,28 +20,27 @@
 @define-color orange    #fe8019;
 @define-color accent    #689d6a;
 
-/* ── Window: force transparent so rounded corners work ── */
-window {
+/* ── Window: transparent so compositor alpha-blends ── */
+window, window.background, window.csd, decoration {
     background-color: transparent;
+    background: none;
+    box-shadow: none;
+    border: none;
 }
 
 scrolledwindow, viewport {
     background-color: transparent;
 }
 
-/* ── Panel window ── */
+/* ── Panel window: background + rounded corners on the window itself ── */
 .panel {
     font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
+    background-color: alpha(@bg0, 0.99);
+    border-radius: 16px;
+    border: 1px solid alpha(@bg3, 0.3);
 }
 
 .panel-outer {
-    background-color: @bg0;
-    border-radius: 16px;
-    box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.55),
-        0 2px 8px rgba(0, 0, 0, 0.35),
-        inset 0 1px 0 rgba(255, 255, 255, 0.06);
-    border: 1px solid alpha(@bg3, 0.3);
 }
 
 .panel-content {
