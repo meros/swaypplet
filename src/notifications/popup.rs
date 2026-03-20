@@ -331,10 +331,17 @@ fn focus_app_window(app_name: &str) {
     let text = String::from_utf8_lossy(&output.stdout);
     let app_lower = app_name.to_lowercase();
 
-    // Parse the JSON tree to find a matching window con_id.
+    // Parse the JSON tree to find a matching window con_id and its workspace.
     // We look for "app_id" or "class" matching the app_name (case-insensitive).
-    if let Some(con_id) = find_con_id_in_tree(&text, &app_lower) {
-        let cmd = format!("[con_id={}] focus", con_id);
+    if let Some((con_id, workspace)) = find_con_id_in_tree(&text, &app_lower) {
+        // Switch to the workspace first, then focus the container.
+        // Just `[con_id=N] focus` alone only highlights the workspace without switching.
+        let cmd = if let Some(ws) = workspace {
+            format!("workspace {}; [con_id={}] focus", ws, con_id)
+        } else {
+            format!("[con_id={}] focus", con_id)
+        };
+        log::debug!("Focusing app '{}': swaymsg {}", app_name, cmd);
         let _ = std::process::Command::new("swaymsg")
             .arg(&cmd)
             .spawn()
@@ -344,61 +351,114 @@ fn focus_app_window(app_name: &str) {
 
 /// Walk the swaymsg JSON tree (simple string scanning — avoids serde dependency)
 /// to find a container whose app_id or class matches `app_lower`.
-fn find_con_id_in_tree(json: &str, app_lower: &str) -> Option<u64> {
-    // Strategy: find "app_id":"<match>" or "class":"<match>" near an "id":<num>.
-    // We split by `{` to get rough "node" chunks and look for matches.
-    let mut best_id: Option<u64> = None;
-    let mut best_focused = false;
+/// Returns `(con_id, Option<workspace_name>)`.
+fn find_con_id_in_tree(json: &str, app_lower: &str) -> Option<(u64, Option<String>)> {
+    // Strategy: scan for "app_id":"<match>" or "class":"<match>", then search
+    // backwards/around that position for the nearest "id":<num> field and
+    // the enclosing workspace name.
+    let mut best: Option<(u64, Option<String>, bool)> = None;
 
-    for chunk in json.split('{') {
-        // Check if this chunk has a matching app_id or window class
-        let matches = match_field(chunk, "app_id", app_lower)
-            || match_field(chunk, "class", app_lower);
+    for field_name in &["app_id", "class"] {
+        let pattern = format!("\"{}\"", field_name);
+        let mut search_from = 0;
 
-        if !matches {
-            continue;
-        }
+        while let Some(pos) = json[search_from..].find(&pattern) {
+            let abs_pos = search_from + pos;
+            search_from = abs_pos + pattern.len();
 
-        // Extract the "id" field
-        if let Some(id) = extract_u64_field(chunk, "\"id\"") {
-            let focused = chunk.contains("\"focused\":true");
-            // Prefer focused window, otherwise take the first match
-            if best_id.is_none() || (focused && !best_focused) {
-                best_id = Some(id);
-                best_focused = focused;
+            // Extract the field value
+            let rest = &json[abs_pos + pattern.len()..];
+            let value = match extract_json_string(rest) {
+                Some(v) => v,
+                None => continue,
+            };
+
+            let value_lower = value.to_lowercase();
+            if !value_lower.contains(app_lower) && !app_lower.contains(&value_lower) {
+                continue;
+            }
+
+            // Found a match — look for "id" in the surrounding node.
+            // The node might have inner objects (rect, etc.), so we need to
+            // search backwards through multiple `{` until we find one with "id".
+            let mut search_pos = abs_pos;
+            let mut id = None;
+            let mut node_start = 0;
+            while let Some(brace_pos) = json[..search_pos].rfind('{') {
+                let slice = &json[brace_pos..];
+                if let Some(found_id) = extract_json_u64(slice, "\"id\"") {
+                    // Make sure this "id" is before our app_id match (same node)
+                    let id_abs = brace_pos + slice.find("\"id\"").unwrap();
+                    if id_abs < abs_pos {
+                        id = Some(found_id);
+                        node_start = brace_pos;
+                        break;
+                    }
+                }
+                search_pos = brace_pos;
+                if search_pos == 0 {
+                    break;
+                }
+            }
+
+            let id = match id {
+                Some(id) => id,
+                None => continue,
+            };
+
+            let node_slice = &json[node_start..];
+            let focused = node_slice
+                .get(..2000)
+                .unwrap_or(node_slice)
+                .contains("\"focused\":true");
+
+            // Find the workspace: scan backwards for "type":"workspace" then grab its "name"
+            let workspace = find_enclosing_workspace(json, node_start);
+
+            if best.is_none() || (focused && !best.as_ref().map_or(false, |b| b.2)) {
+                best = Some((id, workspace, focused));
             }
         }
     }
 
-    best_id
+    best.map(|(id, ws, _)| (id, ws))
 }
 
-fn match_field(chunk: &str, field: &str, app_lower: &str) -> bool {
-    let pattern = format!("\"{}\"", field);
-    if let Some(pos) = chunk.find(&pattern) {
-        let rest = &chunk[pos + pattern.len()..];
-        // Skip : and whitespace, find the quoted value
-        if let Some(q1) = rest.find('"') {
-            let after_q = &rest[q1 + 1..];
-            if let Some(q2) = after_q.find('"') {
-                let value = &after_q[..q2];
-                return value.to_lowercase().contains(app_lower)
-                    || app_lower.contains(&value.to_lowercase());
-            }
-        }
-    }
-    false
+/// Find the workspace name that encloses the node at `node_pos`.
+fn find_enclosing_workspace(json: &str, node_pos: usize) -> Option<String> {
+    // Search backwards from node_pos for "type":"workspace"
+    let before = &json[..node_pos];
+    let ws_type_pos = before.rfind("\"type\":\"workspace\"")?;
+    // The workspace node starts at the `{` before this type field
+    let ws_start = before[..ws_type_pos].rfind('{')?;
+    let ws_slice = &json[ws_start..];
+    extract_json_string_field(ws_slice, "\"name\"")
 }
 
-fn extract_u64_field(chunk: &str, field: &str) -> Option<u64> {
-    let pos = chunk.find(field)?;
-    let rest = &chunk[pos + field.len()..];
-    // Skip `:` and whitespace
+/// Extract a JSON string value after a `"key":` pattern (skipping `: "` and reading to closing `"`).
+fn extract_json_string(after_key: &str) -> Option<String> {
+    let rest = after_key.trim_start();
+    let rest = rest.strip_prefix(':')?;
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+/// Extract a u64 value for a given key from a JSON slice.
+fn extract_json_u64(slice: &str, key: &str) -> Option<u64> {
+    let pos = slice.find(key)?;
+    let rest = &slice[pos + key.len()..];
     let rest = rest.trim_start().strip_prefix(':')?;
     let rest = rest.trim_start();
-    // Parse the number
     let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
     num_str.parse().ok()
+}
+
+/// Extract a string value for a given key from a JSON slice.
+fn extract_json_string_field(slice: &str, key: &str) -> Option<String> {
+    let pos = slice.find(key)?;
+    extract_json_string(&slice[pos + key.len()..])
 }
 
 fn update_popup_content(window: &gtk4::Window, notif: &Notification) {
