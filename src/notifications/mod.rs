@@ -1,4 +1,5 @@
 pub mod dbus;
+pub mod markup;
 pub mod popup;
 pub mod store;
 

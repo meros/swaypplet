@@ -201,11 +201,16 @@ fn build_entry(
     vbox.append(&header_row);
 
     if !notif.body.is_empty() {
+        let markup = crate::notifications::markup::sanitize(&notif.body);
         let body = gtk4::Label::builder()
-            .label(&notif.body)
+            .label(&markup)
+            .use_markup(true)
             .halign(gtk4::Align::Start)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .wrap(true)
+            .wrap_mode(gtk4::pango::WrapMode::WordChar)
             .max_width_chars(50)
+            .lines(3)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
             .build();
         body.add_css_class("notification-body");
         vbox.append(&body);

@@ -11,7 +11,7 @@ use crate::layer_shell::{self, LayerShellConfig};
 use super::store::{self, NotificationStore};
 use super::{CloseReason, Notification, Urgency};
 
-const POPUP_CONTENT_HEIGHT: i32 = 80;
+const POPUP_CONTENT_HEIGHT: i32 = 100;
 const SHADOW_PAD: i32 = 32;
 // Total window height including shadow padding on both sides
 const POPUP_WINDOW_HEIGHT: i32 = POPUP_CONTENT_HEIGHT + 2 * SHADOW_PAD;
@@ -219,11 +219,16 @@ fn build_popup_content(
     vbox.append(&summary);
 
     if !notif.body.is_empty() {
+        let markup = super::markup::sanitize(&notif.body);
         let body = gtk4::Label::builder()
-            .label(&notif.body)
+            .label(&markup)
+            .use_markup(true)
             .halign(gtk4::Align::Start)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .wrap(true)
+            .wrap_mode(gtk4::pango::WrapMode::WordChar)
             .max_width_chars(50)
+            .lines(3)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
             .build();
         body.add_css_class("notification-body");
         vbox.append(&body);
@@ -436,9 +441,15 @@ fn update_popup_content(window: &gtk4::Window, notif: &Notification) {
     text_box.append(&summary);
 
     if !notif.body.is_empty() {
+        let markup = super::markup::sanitize(&notif.body);
         let body = gtk4::Label::builder()
-            .label(&notif.body)
+            .label(&markup)
+            .use_markup(true)
             .halign(gtk4::Align::Start)
+            .wrap(true)
+            .wrap_mode(gtk4::pango::WrapMode::WordChar)
+            .max_width_chars(50)
+            .lines(3)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
             .build();
         body.add_css_class("notification-body");
