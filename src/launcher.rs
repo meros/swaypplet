@@ -77,6 +77,7 @@ impl Launcher {
             .orientation(gtk4::Orientation::Vertical)
             .spacing(0)
             .halign(gtk4::Align::Center)
+            .width_request(560)
             .build();
         container.add_css_class("launcher-container");
 

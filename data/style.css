@@ -327,7 +327,6 @@ button.flat:hover {
     min-width: 56px;
     min-height: 56px;
     border-radius: 8px;
-    overflow: hidden;
     background-color: alpha(@bg3, 0.3);
 }
 
@@ -1068,8 +1067,6 @@ revealer {
         0 12px 40px alpha(black, 0.6),
         0 4px 12px alpha(black, 0.3),
         inset 0 1px 0 alpha(white, 0.08);
-    min-width: 560px;
-    max-width: 560px;
     padding: 16px;
 }
 

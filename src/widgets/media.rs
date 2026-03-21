@@ -171,6 +171,7 @@ impl MediaSection {
             .orientation(gtk4::Orientation::Vertical)
             .halign(gtk4::Align::Center)
             .valign(gtk4::Align::Center)
+            .overflow(gtk4::Overflow::Hidden)
             .build();
         art_frame.add_css_class("media-art-frame");
 
