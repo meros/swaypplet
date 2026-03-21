@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::thread;
 
 use gtk4::prelude::*;
-use log::{error, warn};
+use log::{debug, error, warn};
 
 const ICON_CLIPBOARD: &str = "󰅍";
 const MAX_ENTRIES: usize = 10;
@@ -32,7 +32,7 @@ fn cliphist_list_blocking() -> FetchedState {
         .arg("list")
         .output()
         .map_err(|e| {
-            warn!("cliphist spawn error: {e}");
+            debug!("cliphist spawn error: {e}");
         });
 
     let out = match out {
@@ -312,7 +312,7 @@ impl ClipboardSection {
     fn apply_fetched(w: &Rc<Widgets>, fetched: FetchedState) {
         match fetched {
             FetchedState::Unavailable(msg) => {
-                error!("Clipboard section: {msg}");
+                debug!("Clipboard section: {msg}");
 
                 // Replace entry list content with an unavailable notice.
                 while let Some(child) = w.entry_list.first_child() {
