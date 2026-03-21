@@ -53,11 +53,10 @@ impl BrightnessSection {
         root.add_css_class("section");
 
         // ── Summary row (always visible) ──────────────────────────────────────
-        let summary_row = gtk4::Box::builder()
+        let summary_content = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .spacing(6)
             .build();
-        summary_row.add_css_class("section-summary");
 
         let summary_icon = gtk4::Label::builder()
             .label(icons::BRIGHTNESS)
@@ -81,9 +80,14 @@ impl BrightnessSection {
             .build();
         summary_arrow.add_css_class("section-expand-arrow");
 
-        summary_row.append(&summary_icon);
-        summary_row.append(&summary_text);
-        summary_row.append(&summary_arrow);
+        summary_content.append(&summary_icon);
+        summary_content.append(&summary_text);
+        summary_content.append(&summary_arrow);
+
+        let summary_btn = gtk4::Button::builder()
+            .child(&summary_content)
+            .build();
+        summary_btn.add_css_class("section-summary");
 
         // ── Detail revealer ───────────────────────────────────────────────────
         let detail_revealer = gtk4::Revealer::builder()
@@ -125,16 +129,14 @@ impl BrightnessSection {
         {
             let revealer = detail_revealer.clone();
             let arrow = summary_arrow.clone();
-            let gesture = gtk4::GestureClick::new();
-            gesture.connect_released(move |_, _, _, _| {
+            summary_btn.connect_clicked(move |_| {
                 let expanded = !revealer.reveals_child();
                 revealer.set_reveal_child(expanded);
                 arrow.set_text(if expanded { "▾" } else { "▸" });
             });
-            summary_row.add_controller(gesture);
         }
 
-        root.append(&summary_row);
+        root.append(&summary_btn);
         root.append(&detail_revealer);
 
         let updating = Rc::new(RefCell::new(false));

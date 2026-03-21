@@ -55,12 +55,11 @@ impl ScreenshotSection {
         root.add_css_class("section");
 
         // ── Summary row (always visible) ──────────────────────────────────
-        let summary_row = gtk4::Box::builder()
+        let summary_content = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .spacing(8)
             .valign(gtk4::Align::Center)
             .build();
-        summary_row.add_css_class("section-summary");
 
         let summary_icon = gtk4::Label::builder()
             .label("󰹑")
@@ -82,10 +81,15 @@ impl ScreenshotSection {
             .build();
         summary_arrow.add_css_class("section-expand-arrow");
 
-        summary_row.append(&summary_icon);
-        summary_row.append(&summary_text);
-        summary_row.append(&summary_arrow);
-        root.append(&summary_row);
+        summary_content.append(&summary_icon);
+        summary_content.append(&summary_text);
+        summary_content.append(&summary_arrow);
+
+        let summary_btn = gtk4::Button::builder()
+            .child(&summary_content)
+            .build();
+        summary_btn.add_css_class("section-summary");
+        root.append(&summary_btn);
 
         // ── Detail revealer ───────────────────────────────────────────────
         let detail_revealer = gtk4::Revealer::builder()
@@ -226,17 +230,15 @@ impl ScreenshotSection {
         detail_revealer.set_child(Some(&actions_row));
         root.append(&detail_revealer);
 
-        // ── Toggle detail on summary row click ────────────────────────────
+        // ── Toggle detail on summary button click ─────────────────────────
         {
             let revealer_c = detail_revealer.clone();
             let arrow_c = summary_arrow.clone();
-            let gesture = gtk4::GestureClick::new();
-            gesture.connect_released(move |_, _, _, _| {
+            summary_btn.connect_clicked(move |_| {
                 let expanded = !revealer_c.reveals_child();
                 revealer_c.set_reveal_child(expanded);
                 arrow_c.set_label(if expanded { "▾" } else { "▸" });
             });
-            summary_row.add_controller(gesture);
         }
 
         Self {

@@ -450,11 +450,10 @@ impl AudioSection {
         root.add_css_class("section");
 
         // ── Summary row (always visible, toggles detail revealer) ─────────────
-        let summary_row = gtk4::Box::builder()
+        let summary_content = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .spacing(6)
             .build();
-        summary_row.add_css_class("section-summary");
 
         let summary_icon = gtk4::Label::new(Some(icons::SPEAKER_HIGH));
         summary_icon.add_css_class("section-summary-icon");
@@ -468,9 +467,14 @@ impl AudioSection {
         let summary_arrow = gtk4::Label::new(Some("▸"));
         summary_arrow.add_css_class("section-expand-arrow");
 
-        summary_row.append(&summary_icon);
-        summary_row.append(&summary_text);
-        summary_row.append(&summary_arrow);
+        summary_content.append(&summary_icon);
+        summary_content.append(&summary_text);
+        summary_content.append(&summary_arrow);
+
+        let summary_btn = gtk4::Button::builder()
+            .child(&summary_content)
+            .build();
+        summary_btn.add_css_class("section-summary");
 
         // ── Detail revealer (collapsed by default) ───────────────────────────
         let detail_revealer = gtk4::Revealer::builder()
@@ -479,20 +483,18 @@ impl AudioSection {
             .reveal_child(false)
             .build();
 
-        // Wire the summary row click to toggle the detail revealer.
+        // Wire the summary button click to toggle the detail revealer.
         {
             let rev = detail_revealer.clone();
             let arrow = summary_arrow.clone();
-            let gesture = gtk4::GestureClick::new();
-            gesture.connect_released(move |_, _, _, _| {
+            summary_btn.connect_clicked(move |_| {
                 let revealed = rev.reveals_child();
                 rev.set_reveal_child(!revealed);
                 arrow.set_label(if revealed { "▸" } else { "▾" });
             });
-            summary_row.add_controller(gesture);
         }
 
-        root.append(&summary_row);
+        root.append(&summary_btn);
         root.append(&detail_revealer);
 
         // ── Detail content box ────────────────────────────────────────────────

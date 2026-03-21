@@ -432,11 +432,10 @@ impl NetworkSection {
         root.add_css_class("section");
 
         // ── Summary row (always visible) ──────────────────────────────────────
-        let summary_row = Box::builder()
+        let summary_content = Box::builder()
             .orientation(Orientation::Horizontal)
             .spacing(8)
             .build();
-        summary_row.add_css_class("section-summary");
 
         let summary_icon = Label::builder()
             .label(ICON_DISCONNECTED)
@@ -456,10 +455,13 @@ impl NetworkSection {
             .build();
         summary_arrow.add_css_class("section-expand-arrow");
 
-        summary_row.append(&summary_icon);
-        summary_row.append(&summary_text);
-        summary_row.append(&summary_arrow);
-        root.append(&summary_row);
+        summary_content.append(&summary_icon);
+        summary_content.append(&summary_text);
+        summary_content.append(&summary_arrow);
+
+        let summary_btn = Button::builder().child(&summary_content).build();
+        summary_btn.add_css_class("section-summary");
+        root.append(&summary_btn);
 
         // ── nmcli / adapter guard ─────────────────────────────────────────────
         if !nmcli_available() {
@@ -657,13 +659,11 @@ impl NetworkSection {
         {
             let detail_revealer_c = detail_revealer.clone();
             let arrow_c = summary_arrow.clone();
-            let click = GestureClick::new();
-            click.connect_released(move |_, _, _, _| {
+            summary_btn.connect_clicked(move |_| {
                 let revealed = !detail_revealer_c.reveals_child();
                 detail_revealer_c.set_reveal_child(revealed);
                 arrow_c.set_label(if revealed { "▾" } else { "▸" });
             });
-            summary_row.add_controller(click);
         }
 
         // ── Wire up toggle ────────────────────────────────────────────────────

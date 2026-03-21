@@ -2,7 +2,7 @@ use std::process::Command;
 use std::sync::mpsc;
 
 use gtk4::prelude::*;
-use gtk4::{Box, Button, GestureClick, Label, Orientation, Revealer, RevealerTransitionType};
+use gtk4::{Box, Button, Label, Orientation, Revealer, RevealerTransitionType};
 
 // ── Nerd Font icons ───────────────────────────────────────────────────────────
 const ICON_DISPLAY: &str = "󰍹";
@@ -264,12 +264,11 @@ impl DisplaySection {
         root.add_css_class("section");
 
         // ── Summary row (always visible) ──────────────────────────────────────
-        let summary_row = Box::builder()
+        let summary_content = Box::builder()
             .orientation(Orientation::Horizontal)
             .spacing(8)
             .hexpand(true)
             .build();
-        summary_row.add_css_class("section-summary");
 
         let summary_icon = Label::builder().label(ICON_DISPLAY).build();
         summary_icon.add_css_class("section-summary-icon");
@@ -285,10 +284,13 @@ impl DisplaySection {
         let summary_arrow = Label::builder().label("▸").build();
         summary_arrow.add_css_class("section-expand-arrow");
 
-        summary_row.append(&summary_icon);
-        summary_row.append(&summary_text);
-        summary_row.append(&summary_arrow);
-        root.append(&summary_row);
+        summary_content.append(&summary_icon);
+        summary_content.append(&summary_text);
+        summary_content.append(&summary_arrow);
+
+        let summary_btn = Button::builder().child(&summary_content).build();
+        summary_btn.add_css_class("section-summary");
+        root.append(&summary_btn);
 
         // ── Detail revealer ───────────────────────────────────────────────────
         let detail_revealer = Revealer::builder()
@@ -310,13 +312,11 @@ impl DisplaySection {
         {
             let detail_revealer_c = detail_revealer.clone();
             let summary_arrow_c = summary_arrow.clone();
-            let gesture = GestureClick::new();
-            gesture.connect_released(move |_, _, _, _| {
+            summary_btn.connect_clicked(move |_| {
                 let revealed = !detail_revealer_c.reveals_child();
                 detail_revealer_c.set_reveal_child(revealed);
                 summary_arrow_c.set_label(if revealed { "▾" } else { "▸" });
             });
-            summary_row.add_controller(gesture);
         }
 
         let section = Self {
