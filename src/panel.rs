@@ -8,11 +8,14 @@ use crate::widgets::{
     audio::AudioSection,
     bluetooth::BluetoothSection,
     brightness::BrightnessSection,
+    clipboard::ClipboardSection,
+    display::DisplaySection,
     header::HeaderSection,
     media::MediaSection,
     network::NetworkSection,
     notifications::NotificationsSection,
     power::PowerSection,
+    screenshot::ScreenshotSection,
 };
 
 pub struct Panel {
@@ -22,8 +25,11 @@ pub struct Panel {
     media: MediaSection,
     audio: AudioSection,
     brightness: BrightnessSection,
+    display: DisplaySection,
     network: NetworkSection,
     bluetooth: BluetoothSection,
+    clipboard: ClipboardSection,
+    screenshot: ScreenshotSection,
     power: PowerSection,
 }
 
@@ -52,8 +58,11 @@ impl Panel {
         let media = MediaSection::new();
         let audio = AudioSection::new();
         let brightness = BrightnessSection::new();
+        let display = DisplaySection::new();
         let network = NetworkSection::new();
         let bluetooth = BluetoothSection::new();
+        let clipboard = ClipboardSection::new();
+        let screenshot = ScreenshotSection::new();
         let power = PowerSection::new();
 
         content_box.append(header.widget());
@@ -61,8 +70,11 @@ impl Panel {
         content_box.append(media.widget());
         content_box.append(audio.widget());
         content_box.append(brightness.widget());
+        content_box.append(display.widget());
         content_box.append(network.widget());
         content_box.append(bluetooth.widget());
+        content_box.append(clipboard.widget());
+        content_box.append(screenshot.widget());
         content_box.append(power.widget());
 
         scroll.set_child(Some(&content_box));
@@ -90,8 +102,11 @@ impl Panel {
             media,
             audio,
             brightness,
+            display,
             network,
             bluetooth,
+            clipboard,
+            screenshot,
             power,
         }
     }
@@ -111,8 +126,11 @@ impl Panel {
         self.media.refresh();
         self.audio.refresh();
         self.brightness.refresh();
+        self.display.refresh();
         self.network.refresh();
         self.bluetooth.refresh();
+        self.clipboard.refresh();
+        self.screenshot.refresh();
         self.power.refresh();
     }
 

@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::sync::mpsc;
 
 use gtk4::prelude::*;
-use gtk4::{Box, Button, Label, Orientation, Revealer, RevealerTransitionType, Spinner};
+use gtk4::{Box, Button, GestureClick, Label, Orientation, Revealer, RevealerTransitionType, Spinner};
 
 // ── Nerd Font icons ───────────────────────────────────────────────────────────
 const ICON_HEADPHONES: &str = "󰋋";
@@ -13,6 +13,7 @@ const ICON_MOUSE: &str = "󰍽";
 const ICON_PHONE: &str = "󰏲";
 const ICON_COMPUTER: &str = "󰍹";
 const ICON_BLUETOOTH: &str = "󰂯";
+const ICON_BLUETOOTH_OFF: &str = "󰂲";
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
@@ -209,6 +210,10 @@ struct State {
 #[allow(dead_code)] // Fields kept alive for GObject ref-counting
 pub struct BluetoothSection {
     root: Box,
+    summary_icon: Label,
+    summary_text: Label,
+    summary_arrow: Label,
+    detail_revealer: Revealer,
     connected_list: Box,
     available_list: Box,
     revealer: Revealer,
@@ -227,24 +232,67 @@ impl BluetoothSection {
             .build();
         root.add_css_class("section");
 
-        // ── Section title ─────────────────────────────────────────────────────
-        let title = Label::builder().label("BLUETOOTH").xalign(0.0).build();
-        title.add_css_class("section-title");
-        root.append(&title);
+        // ── Summary row (always visible) ──────────────────────────────────────
+        let summary_row = Box::builder()
+            .orientation(Orientation::Horizontal)
+            .spacing(8)
+            .hexpand(true)
+            .build();
+        summary_row.add_css_class("section-summary");
+
+        let summary_icon = Label::builder().label(ICON_BLUETOOTH).build();
+        summary_icon.add_css_class("section-summary-icon");
+
+        let summary_text = Label::builder()
+            .label("")
+            .xalign(0.0)
+            .hexpand(true)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .build();
+        summary_text.add_css_class("section-summary-label");
+
+        let summary_arrow = Label::builder().label("▸").build();
+        summary_arrow.add_css_class("section-expand-arrow");
+
+        summary_row.append(&summary_icon);
+        summary_row.append(&summary_text);
+        summary_row.append(&summary_arrow);
+        root.append(&summary_row);
+
+        // ── Detail revealer ───────────────────────────────────────────────────
+        let detail_revealer = Revealer::builder()
+            .transition_type(RevealerTransitionType::SlideDown)
+            .transition_duration(200)
+            .reveal_child(false)
+            .build();
 
         // ── Early-exit if BlueZ unavailable ───────────────────────────────────
         if !bt_available() {
-            let msg = Label::builder()
-                .label("BlueZ not available")
-                .xalign(0.0)
-                .build();
-            msg.add_css_class("bt-unavailable");
-            root.append(&msg);
+            summary_icon.set_label(ICON_BLUETOOTH_OFF);
+            summary_text.set_label("Unavailable");
 
-            // Return a stub with no real functionality.
+            // Wire up toggle so the arrow still works (no-op detail revealer).
+            {
+                let detail_revealer_c = detail_revealer.clone();
+                let summary_arrow_c = summary_arrow.clone();
+                let gesture = GestureClick::new();
+                gesture.connect_released(move |_, _, _, _| {
+                    let revealed = !detail_revealer_c.reveals_child();
+                    detail_revealer_c.set_reveal_child(revealed);
+                    summary_arrow_c.set_label(if revealed { "▾" } else { "▸" });
+                });
+                summary_row.add_controller(gesture);
+            }
+
+            root.append(&detail_revealer);
+
             let state = Rc::new(RefCell::new(State { scanning: false }));
             return Self {
                 root,
+                summary_icon,
+                summary_text,
+                summary_arrow,
+                detail_revealer,
                 connected_list: Box::new(Orientation::Vertical, 0),
                 available_list: Box::new(Orientation::Vertical, 0),
                 revealer: Revealer::new(),
@@ -255,23 +303,29 @@ impl BluetoothSection {
             };
         }
 
+        // ── Detail content box (lives inside detail_revealer) ─────────────────
+        let detail_box = Box::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(4)
+            .build();
+
         // ── Connected devices list ────────────────────────────────────────────
         let connected_list = Box::builder()
             .orientation(Orientation::Vertical)
             .spacing(2)
             .build();
         connected_list.add_css_class("device-list");
-        root.append(&connected_list);
+        detail_box.append(&connected_list);
 
-        // ── Revealer toggle button ────────────────────────────────────────────
+        // ── Revealer toggle button (available devices) ────────────────────────
         let toggle_btn = Button::builder()
             .label("▸ Available Devices")
             .hexpand(true)
             .build();
         toggle_btn.add_css_class("section-expander");
-        root.append(&toggle_btn);
+        detail_box.append(&toggle_btn);
 
-        // ── Revealer content ──────────────────────────────────────────────────
+        // ── Revealer content (available devices) ──────────────────────────────
         let revealer = Revealer::builder()
             .transition_type(RevealerTransitionType::SlideDown)
             .transition_duration(200)
@@ -313,9 +367,25 @@ impl BluetoothSection {
         revealer_box.append(&available_list);
 
         revealer.set_child(Some(&revealer_box));
-        root.append(&revealer);
+        detail_box.append(&revealer);
 
-        // ── Wire up toggle ────────────────────────────────────────────────────
+        detail_revealer.set_child(Some(&detail_box));
+        root.append(&detail_revealer);
+
+        // ── Wire up summary row toggle ────────────────────────────────────────
+        {
+            let detail_revealer_c = detail_revealer.clone();
+            let summary_arrow_c = summary_arrow.clone();
+            let gesture = GestureClick::new();
+            gesture.connect_released(move |_, _, _, _| {
+                let revealed = !detail_revealer_c.reveals_child();
+                detail_revealer_c.set_reveal_child(revealed);
+                summary_arrow_c.set_label(if revealed { "▾" } else { "▸" });
+            });
+            summary_row.add_controller(gesture);
+        }
+
+        // ── Wire up available-devices toggle ──────────────────────────────────
         {
             let revealer_c = revealer.clone();
             let toggle_btn_c = toggle_btn.clone();
@@ -404,6 +474,10 @@ impl BluetoothSection {
 
         let section = Self {
             root,
+            summary_icon,
+            summary_text,
+            summary_arrow,
+            detail_revealer,
             connected_list,
             available_list,
             revealer,
@@ -433,6 +507,10 @@ impl BluetoothSection {
             self.scan_btn.set_visible(false);
             self.scan_status_lbl.set_label("Bluetooth is off");
             self.connected_list.set_visible(false);
+
+            // Update summary row.
+            self.summary_icon.set_label(ICON_BLUETOOTH_OFF);
+            self.summary_text.set_label("Bluetooth off");
             return;
         }
 
@@ -450,19 +528,39 @@ impl BluetoothSection {
         }
 
         let macs = bt_list_macs();
-        let mut has_connected = false;
+        let mut connected_devices: Vec<BtDevice> = Vec::new();
 
         for mac in &macs {
             let Some(dev) = bt_info(mac) else { continue };
 
             if dev.connected {
-                has_connected = true;
+                connected_devices.push(dev.clone());
                 self.connected_list
                     .append(&make_connected_row(&dev, &self.connected_list));
             }
         }
 
+        let has_connected = !connected_devices.is_empty();
         self.connected_list.set_visible(has_connected);
+
+        // Update summary row based on connected device state.
+        self.summary_icon.set_label(ICON_BLUETOOTH);
+        match connected_devices.len() {
+            0 => {
+                self.summary_text.set_label("No devices");
+            }
+            1 => {
+                let dev = &connected_devices[0];
+                let text = match dev.battery {
+                    Some(pct) => format!("{} {}%", dev.name, pct),
+                    None => dev.name.clone(),
+                };
+                self.summary_text.set_label(&text);
+            }
+            n => {
+                self.summary_text.set_label(&format!("{n} devices connected"));
+            }
+        }
 
         populate_available_list(&self.available_list);
     }

@@ -36,6 +36,9 @@ pub struct BrightnessSection {
     root: gtk4::Box,
     scale: gtk4::Scale,
     pct_label: gtk4::Label,
+    summary_text: gtk4::Label,
+    summary_arrow: gtk4::Label,
+    detail_revealer: gtk4::Revealer,
     /// Guard flag: true while `refresh()` is programmatically updating the scale
     /// so the value-changed handler does not call `brightnessctl set` in response.
     updating: Rc<RefCell<bool>>,
@@ -49,13 +52,47 @@ impl BrightnessSection {
             .build();
         root.add_css_class("section");
 
-        // ── Section title ────────────────────────────────────────────────────
-        let title = gtk4::Label::new(Some("DISPLAY"));
-        title.add_css_class("section-title");
-        title.set_xalign(0.0);
-        root.append(&title);
+        // ── Summary row (always visible) ──────────────────────────────────────
+        let summary_row = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(6)
+            .build();
+        summary_row.add_css_class("section-summary");
 
-        // ── Brightness row ───────────────────────────────────────────────────
+        let summary_icon = gtk4::Label::builder()
+            .label(icons::BRIGHTNESS)
+            .halign(gtk4::Align::Center)
+            .valign(gtk4::Align::Center)
+            .build();
+        summary_icon.add_css_class("section-summary-icon");
+
+        let summary_text = gtk4::Label::builder()
+            .label("0%")
+            .halign(gtk4::Align::Start)
+            .hexpand(true)
+            .xalign(0.0)
+            .build();
+        summary_text.add_css_class("section-summary-label");
+
+        let summary_arrow = gtk4::Label::builder()
+            .label("▸")
+            .halign(gtk4::Align::Center)
+            .valign(gtk4::Align::Center)
+            .build();
+        summary_arrow.add_css_class("section-expand-arrow");
+
+        summary_row.append(&summary_icon);
+        summary_row.append(&summary_text);
+        summary_row.append(&summary_arrow);
+
+        // ── Detail revealer ───────────────────────────────────────────────────
+        let detail_revealer = gtk4::Revealer::builder()
+            .transition_type(gtk4::RevealerTransitionType::SlideDown)
+            .transition_duration(200)
+            .reveal_child(false)
+            .build();
+
+        // ── Brightness row (inside revealer) ──────────────────────────────────
         let row = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .spacing(6)
@@ -81,11 +118,28 @@ impl BrightnessSection {
         row.append(&icon);
         row.append(&scale);
         row.append(&pct_label);
-        root.append(&row);
+
+        detail_revealer.set_child(Some(&row));
+
+        // ── Toggle gesture ────────────────────────────────────────────────────
+        {
+            let revealer = detail_revealer.clone();
+            let arrow = summary_arrow.clone();
+            let gesture = gtk4::GestureClick::new();
+            gesture.connect_released(move |_, _, _, _| {
+                let expanded = !revealer.reveals_child();
+                revealer.set_reveal_child(expanded);
+                arrow.set_text(if expanded { "▾" } else { "▸" });
+            });
+            summary_row.add_controller(gesture);
+        }
+
+        root.append(&summary_row);
+        root.append(&detail_revealer);
 
         let updating = Rc::new(RefCell::new(false));
 
-        // ── Scale signal ─────────────────────────────────────────────────────
+        // ── Scale signal ──────────────────────────────────────────────────────
         {
             let upd = updating.clone();
             let lbl = pct_label.clone();
@@ -99,7 +153,15 @@ impl BrightnessSection {
             });
         }
 
-        let section = BrightnessSection { root, scale, pct_label, updating };
+        let section = BrightnessSection {
+            root,
+            scale,
+            pct_label,
+            summary_text,
+            summary_arrow,
+            detail_revealer,
+            updating,
+        };
         section.refresh();
         section
     }
@@ -110,6 +172,7 @@ impl BrightnessSection {
             *self.updating.borrow_mut() = true;
             self.scale.set_value(pct as f64);
             self.pct_label.set_text(&format!("{}%", pct));
+            self.summary_text.set_text(&format!("{}%", pct));
             *self.updating.borrow_mut() = false;
         }
     }

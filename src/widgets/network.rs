@@ -6,7 +6,7 @@ use std::thread;
 
 use gtk4::prelude::*;
 use gtk4::{
-    Box, Button, Label, ListBox, ListBoxRow, Orientation, PasswordEntry, Revealer,
+    Box, Button, GestureClick, Label, ListBox, ListBoxRow, Orientation, PasswordEntry, Revealer,
     RevealerTransitionType, Spinner,
 };
 
@@ -401,7 +401,12 @@ struct NetworkState {
 pub struct NetworkSection {
     root: Box,
     state: Rc<RefCell<NetworkState>>,
-    // Status row widgets
+    // Summary row widgets (always visible)
+    summary_icon: Label,
+    summary_text: Label,
+    summary_arrow: Label,
+    detail_revealer: Revealer,
+    // Status row widgets (inside detail_revealer)
     current_icon_label: Label,
     current_ssid_label: Label,
     current_signal_label: Label,
@@ -426,13 +431,35 @@ impl NetworkSection {
             .build();
         root.add_css_class("section");
 
-        // ── Section title ─────────────────────────────────────────────────────
-        let title = Label::builder()
-            .label("NETWORK")
-            .halign(gtk4::Align::Start)
+        // ── Summary row (always visible) ──────────────────────────────────────
+        let summary_row = Box::builder()
+            .orientation(Orientation::Horizontal)
+            .spacing(8)
             .build();
-        title.add_css_class("section-title");
-        root.append(&title);
+        summary_row.add_css_class("section-summary");
+
+        let summary_icon = Label::builder()
+            .label(ICON_DISCONNECTED)
+            .build();
+        summary_icon.add_css_class("section-summary-icon");
+
+        let summary_text = Label::builder()
+            .label("Disconnected")
+            .hexpand(true)
+            .xalign(0.0)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .build();
+        summary_text.add_css_class("section-summary-label");
+
+        let summary_arrow = Label::builder()
+            .label("▸")
+            .build();
+        summary_arrow.add_css_class("section-expand-arrow");
+
+        summary_row.append(&summary_icon);
+        summary_row.append(&summary_text);
+        summary_row.append(&summary_arrow);
+        root.append(&summary_row);
 
         // ── nmcli / adapter guard ─────────────────────────────────────────────
         if !nmcli_available() {
@@ -454,6 +481,10 @@ impl NetworkSection {
                     show_all: false,
                     scanning: false,
                 })),
+                summary_icon,
+                summary_text,
+                summary_arrow,
+                detail_revealer: Revealer::new(),
                 current_icon_label: Label::new(None),
                 current_ssid_label: Label::new(None),
                 current_signal_label: Label::new(None),
@@ -467,6 +498,18 @@ impl NetworkSection {
                 vpn_list_box: ListBox::new(),
             };
         }
+
+        // ── Detail revealer (collapsed by default) ────────────────────────────
+        let detail_revealer = Revealer::builder()
+            .transition_type(RevealerTransitionType::SlideDown)
+            .transition_duration(200)
+            .reveal_child(false)
+            .build();
+
+        let detail_box = Box::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(6)
+            .build();
 
         // ── Current connection row ────────────────────────────────────────────
         let current_row = Box::builder()
@@ -498,7 +541,7 @@ impl NetworkSection {
         current_row.append(&current_icon_label);
         current_row.append(&current_ssid_label);
         current_row.append(&current_signal_label);
-        root.append(&current_row);
+        detail_box.append(&current_row);
 
         // ── IP info row ──────────────────────────────────────────────────────
         let ip_box = Box::builder()
@@ -521,7 +564,7 @@ impl NetworkSection {
 
         ip_box.append(&ip_label);
         ip_box.append(&gateway_label);
-        root.append(&ip_box);
+        detail_box.append(&ip_box);
 
         // ── Scan status row (spinner + label) ─────────────────────────────────
         let scan_row = Box::builder()
@@ -542,7 +585,7 @@ impl NetworkSection {
 
         scan_row.append(&scan_spinner);
         scan_row.append(&scan_status_label);
-        root.append(&scan_row);
+        detail_box.append(&scan_row);
 
         // ── Toggle button ─────────────────────────────────────────────────────
         let toggle_button = Button::builder()
@@ -550,7 +593,7 @@ impl NetworkSection {
             .hexpand(true)
             .build();
         toggle_button.add_css_class("section-expander");
-        root.append(&toggle_button);
+        detail_box.append(&toggle_button);
 
         // ── Revealer ──────────────────────────────────────────────────────────
         let revealer = Revealer::builder()
@@ -596,7 +639,10 @@ impl NetworkSection {
         revealer_box.append(&vpn_list_box);
 
         revealer.set_child(Some(&revealer_box));
-        root.append(&revealer);
+        detail_box.append(&revealer);
+
+        detail_revealer.set_child(Some(&detail_box));
+        root.append(&detail_revealer);
 
         let state = Rc::new(RefCell::new(NetworkState {
             active: ActiveConnection::Disconnected,
@@ -606,6 +652,19 @@ impl NetworkSection {
             show_all: false,
             scanning: false,
         }));
+
+        // ── Wire up summary row click to toggle detail_revealer ───────────────
+        {
+            let detail_revealer_c = detail_revealer.clone();
+            let arrow_c = summary_arrow.clone();
+            let click = GestureClick::new();
+            click.connect_released(move |_, _, _, _| {
+                let revealed = !detail_revealer_c.reveals_child();
+                detail_revealer_c.set_reveal_child(revealed);
+                arrow_c.set_label(if revealed { "▾" } else { "▸" });
+            });
+            summary_row.add_controller(click);
+        }
 
         // ── Wire up toggle ────────────────────────────────────────────────────
         {
@@ -624,6 +683,10 @@ impl NetworkSection {
         let section = Self {
             root,
             state,
+            summary_icon,
+            summary_text,
+            summary_arrow,
+            detail_revealer,
             current_icon_label,
             current_ssid_label,
             current_signal_label,
@@ -665,6 +728,7 @@ impl NetworkSection {
     fn update_active_display(&self, active: &ActiveConnection) {
         let device = match active {
             ActiveConnection::Wifi { ssid, signal, device, freq_mhz } => {
+                // Update detail row
                 self.current_icon_label.set_label(signal_icon(*signal));
                 self.current_ssid_label.set_label(ssid);
                 let signal_text = if let Some(freq) = freq_mhz {
@@ -673,18 +737,34 @@ impl NetworkSection {
                     format!("{}%", signal)
                 };
                 self.current_signal_label.set_label(&signal_text);
+                // Update summary row
+                self.summary_icon.set_label(signal_icon(*signal));
+                let summary_label = if let Some(freq) = freq_mhz {
+                    format!("{} · {}", ssid, freq_band_label(*freq))
+                } else {
+                    ssid.clone()
+                };
+                self.summary_text.set_label(&summary_label);
                 Some(device.as_str())
             }
             ActiveConnection::Ethernet { device } => {
+                // Update detail row
                 self.current_icon_label.set_label(ICON_ETHERNET);
                 self.current_ssid_label.set_label("Ethernet");
                 self.current_signal_label.set_label("");
+                // Update summary row
+                self.summary_icon.set_label(ICON_ETHERNET);
+                self.summary_text.set_label("Wired");
                 Some(device.as_str())
             }
             ActiveConnection::Disconnected => {
+                // Update detail row
                 self.current_icon_label.set_label(ICON_DISCONNECTED);
                 self.current_ssid_label.set_label("Disconnected");
                 self.current_signal_label.set_label("");
+                // Update summary row
+                self.summary_icon.set_label(ICON_DISCONNECTED);
+                self.summary_text.set_label("Disconnected");
                 None
             }
         };

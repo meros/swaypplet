@@ -691,6 +691,42 @@ revealer {
     box-shadow: none;
 }
 
+/* ── Section summary row (collapsible header) ── */
+.section-summary {
+    padding: 4px 2px;
+    border-radius: 8px;
+    min-height: 28px;
+    transition: background-color 150ms ease;
+}
+
+.section-summary:hover {
+    background-color: alpha(white, 0.04);
+}
+
+.section-summary-icon {
+    font-size: 18px;
+    color: @fg_dim;
+    min-width: 28px;
+}
+
+.section-summary-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: @fg;
+}
+
+.section-summary-sub {
+    font-size: 11px;
+    color: @fg_dim;
+}
+
+.section-expand-arrow {
+    font-size: 10px;
+    color: @fg_dim;
+    min-width: 16px;
+    transition: all 200ms ease;
+}
+
 .network-list {
     background-color: transparent;
 }

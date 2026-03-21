@@ -416,6 +416,11 @@ impl UnavailableBanner {
 // ── AudioSection ──────────────────────────────────────────────────────────────
 
 struct Widgets {
+    // Summary row (always visible)
+    summary_icon: gtk4::Label,
+    summary_text: gtk4::Label,
+    summary_arrow: gtk4::Label,
+    detail_revealer: gtk4::Revealer,
     // Output (sink)
     sink_row: VolumeRow,
     sink_devices: DeviceList,
@@ -424,7 +429,7 @@ struct Widgets {
     source_row_container: gtk4::Box, // wraps source_row + source_devices, shown/hidden
     source_devices: DeviceList,
     // Content containers
-    content: gtk4::Box,           // shown when wpctl is available
+    content: gtk4::Box,             // shown when wpctl is available
     unavailable: UnavailableBanner, // shown when wpctl is unavailable
 }
 
@@ -444,16 +449,63 @@ impl AudioSection {
             .build();
         root.add_css_class("section");
 
-        // ── Section title ────────────────────────────────────────────────────
-        let title = gtk4::Label::new(Some("AUDIO"));
-        title.add_css_class("section-title");
-        title.set_xalign(0.0);
-        root.append(&title);
+        // ── Summary row (always visible, toggles detail revealer) ─────────────
+        let summary_row = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(6)
+            .build();
+        summary_row.add_css_class("section-summary");
+
+        let summary_icon = gtk4::Label::new(Some(icons::SPEAKER_HIGH));
+        summary_icon.add_css_class("section-summary-icon");
+
+        let summary_text = gtk4::Label::new(Some("—"));
+        summary_text.add_css_class("section-summary-label");
+        summary_text.set_hexpand(true);
+        summary_text.set_xalign(0.0);
+        summary_text.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+
+        let summary_arrow = gtk4::Label::new(Some("▸"));
+        summary_arrow.add_css_class("section-expand-arrow");
+
+        summary_row.append(&summary_icon);
+        summary_row.append(&summary_text);
+        summary_row.append(&summary_arrow);
+
+        // ── Detail revealer (collapsed by default) ───────────────────────────
+        let detail_revealer = gtk4::Revealer::builder()
+            .transition_type(gtk4::RevealerTransitionType::SlideDown)
+            .transition_duration(200)
+            .reveal_child(false)
+            .build();
+
+        // Wire the summary row click to toggle the detail revealer.
+        {
+            let rev = detail_revealer.clone();
+            let arrow = summary_arrow.clone();
+            let gesture = gtk4::GestureClick::new();
+            gesture.connect_released(move |_, _, _, _| {
+                let revealed = rev.reveals_child();
+                rev.set_reveal_child(!revealed);
+                arrow.set_label(if revealed { "▸" } else { "▾" });
+            });
+            summary_row.add_controller(gesture);
+        }
+
+        root.append(&summary_row);
+        root.append(&detail_revealer);
+
+        // ── Detail content box ────────────────────────────────────────────────
+        let detail_box = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(6)
+            .build();
+        detail_revealer.set_child(Some(&detail_box));
 
         // ── Unavailable banner (hidden by default) ───────────────────────────
         let unavailable = UnavailableBanner::new();
         unavailable.label.set_visible(false);
-        root.append(&unavailable.label);
+        detail_box.append(&unavailable.label);
 
         // ── Content box (all normal UI lives here) ───────────────────────────
         let content = gtk4::Box::builder()
@@ -532,9 +584,13 @@ impl AudioSection {
         source_row_container.append(&source_revealer);
 
         content.append(&source_row_container);
-        root.append(&content);
+        detail_box.append(&content);
 
         let widgets = Rc::new(Widgets {
+            summary_icon,
+            summary_text,
+            summary_arrow,
+            detail_revealer,
             sink_row,
             sink_devices,
             source_row,
@@ -687,6 +743,8 @@ impl AudioSection {
                 w.content.set_visible(false);
                 w.unavailable.label.set_text(&msg);
                 w.unavailable.label.set_visible(true);
+                w.summary_icon.set_label(icons::SPEAKER_MUTED);
+                w.summary_text.set_label("Unavailable");
             }
             FetchedState::Ok(state) => {
                 w.unavailable.label.set_visible(false);
@@ -701,6 +759,18 @@ impl AudioSection {
 
         if let Some(ref sink_state) = s.sink {
             w.sink_row.update(sink_state, false);
+
+            // Update the summary row.
+            let pct = (sink_state.volume * 100.0).round() as u32;
+            let default_sink_name = s
+                .sinks
+                .iter()
+                .find(|d| d.is_default)
+                .map(|d| d.name.as_str())
+                .unwrap_or("Output");
+            w.summary_icon.set_label(volume_icon(sink_state, false));
+            w.summary_text
+                .set_label(&format!("{pct}% · {default_sink_name}"));
         }
 
         // Device selectors for sinks

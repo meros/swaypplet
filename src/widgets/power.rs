@@ -224,6 +224,12 @@ fn battery_sub_text(bat: &BatteryState) -> String {
     }
 }
 
+/// Build the summary text for the summary row from battery state.
+/// Format: "85% · Charging — 30m to full" or "85% · 3h 20m remaining"
+fn battery_summary_text(bat: &BatteryState) -> String {
+    format!("{}% · {}", bat.capacity, battery_sub_text(bat))
+}
+
 // ---------------------------------------------------------------------------
 // Governor helpers
 // ---------------------------------------------------------------------------
@@ -261,19 +267,23 @@ impl PowerState {
 /// updates without borrowing `PowerSection`.
 struct BatteryHandles {
     bat_path: String,
-    icon_lbl: gtk4::Label,
-    level_lbl: gtk4::Label,
-    sub_lbl: gtk4::Label,
+    /// Summary row icon label (always visible).
+    summary_icon: gtk4::Label,
+    /// Summary row text label (always visible).
+    summary_text: gtk4::Label,
+    /// Detail: battery level bar (inside revealer).
     health_lbl: gtk4::Label,
     level_bar: gtk4::LevelBar,
 }
 
 impl BatteryHandles {
     fn apply(&self, bat: &BatteryState) {
-        self.icon_lbl
+        // Update summary row.
+        self.summary_icon
             .set_label(battery_icon(bat.capacity, bat.charging));
-        self.level_lbl.set_label(&format!("{}%", bat.capacity));
-        self.sub_lbl.set_label(&battery_sub_text(bat));
+        self.summary_text.set_label(&battery_summary_text(bat));
+
+        // Update detail widgets.
         self.level_bar.set_value(bat.capacity as f64 / 100.0);
 
         if let Some(health) = bat.health_pct {
@@ -309,8 +319,20 @@ pub struct PowerSection {
     // Battery widget handles (only present when a battery was found).
     bat_handles: Option<Rc<BatteryHandles>>,
 
-    // Governor info label
+    // Summary labels (always visible).
+    summary_icon: gtk4::Label,
+    summary_text: gtk4::Label,
+    // Stored to allow toggling arrow glyph; mutated only via cloned handle in closure.
+    #[allow(dead_code)]
+    summary_arrow: gtk4::Label,
+
+    // Governor info label (inside revealer).
     governor_label: gtk4::Label,
+
+    // Revealer for detail content.
+    // Stored for ownership; toggled via cloned handle in gesture closure.
+    #[allow(dead_code)]
+    detail_revealer: gtk4::Revealer,
 }
 
 impl PowerSection {
@@ -322,14 +344,6 @@ impl PowerSection {
             .build();
         root.add_css_class("section");
 
-        // ── Section title ─────────────────────────────────────────────────
-        let title = gtk4::Label::builder()
-            .label("POWER")
-            .halign(gtk4::Align::Start)
-            .build();
-        title.add_css_class("section-title");
-        root.append(&title);
-
         // ── Discover battery path ────────────────────────────────────────
         let bat_path = find_battery_path();
         if bat_path.is_none() {
@@ -339,43 +353,72 @@ impl PowerSection {
         // ── Read initial state ────────────────────────────────────────────
         let state = PowerState::read(bat_path.as_deref());
 
-        // ── Battery row (conditional) ─────────────────────────────────────
+        // ── Summary row (always visible) ──────────────────────────────────
+        let summary_row = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(8)
+            .valign(gtk4::Align::Center)
+            .build();
+        summary_row.add_css_class("section-summary");
+
+        // Determine initial icon and text for the summary.
+        let (initial_icon, initial_text) = if let Some(ref bat) = state.battery {
+            (
+                battery_icon(bat.capacity, bat.charging).to_owned(),
+                battery_summary_text(bat),
+            )
+        } else {
+            (
+                "󰻠".to_owned(),
+                format_governor_info(&state.governor),
+            )
+        };
+
+        let summary_icon = gtk4::Label::builder()
+            .label(&initial_icon)
+            .halign(gtk4::Align::Start)
+            .build();
+        summary_icon.add_css_class("section-summary-icon");
+
+        let summary_text = gtk4::Label::builder()
+            .label(&initial_text)
+            .halign(gtk4::Align::Start)
+            .hexpand(true)
+            .xalign(0.0)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .build();
+        summary_text.add_css_class("section-summary-label");
+
+        let summary_arrow = gtk4::Label::builder()
+            .label("▸")
+            .halign(gtk4::Align::End)
+            .build();
+        summary_arrow.add_css_class("section-expand-arrow");
+
+        summary_row.append(&summary_icon);
+        summary_row.append(&summary_text);
+        summary_row.append(&summary_arrow);
+        root.append(&summary_row);
+
+        // ── Detail revealer ───────────────────────────────────────────────
+        let detail_revealer = gtk4::Revealer::builder()
+            .transition_type(gtk4::RevealerTransitionType::SlideDown)
+            .transition_duration(200)
+            .reveal_child(false)
+            .build();
+
+        let detail_box = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(8)
+            .build();
+
+        // ── Battery detail widgets (conditional) ──────────────────────────
         let bat_handles: Option<Rc<BatteryHandles>> = if let Some(ref bat) = state.battery {
-            let bat_row = gtk4::Box::builder()
+            let bat_detail = gtk4::Box::builder()
                 .orientation(gtk4::Orientation::Vertical)
                 .spacing(4)
                 .build();
-            bat_row.add_css_class("battery-row");
-
-            // Top line: icon + percentage
-            let top_row = gtk4::Box::builder()
-                .orientation(gtk4::Orientation::Horizontal)
-                .spacing(8)
-                .valign(gtk4::Align::Center)
-                .build();
-
-            let icon_lbl = gtk4::Label::builder()
-                .label(battery_icon(bat.capacity, bat.charging))
-                .halign(gtk4::Align::Start)
-                .build();
-            icon_lbl.add_css_class("battery-icon");
-
-            let level_lbl = gtk4::Label::builder()
-                .label(&format!("{}%", bat.capacity))
-                .halign(gtk4::Align::Start)
-                .build();
-            level_lbl.add_css_class("battery-level");
-
-            top_row.append(&icon_lbl);
-            top_row.append(&level_lbl);
-
-            // Sub text: charging/time
-            let sub_lbl = gtk4::Label::builder()
-                .label(&battery_sub_text(bat))
-                .halign(gtk4::Align::Start)
-                .wrap(true)
-                .build();
-            sub_lbl.add_css_class("battery-sub");
+            bat_detail.add_css_class("battery-row");
 
             // Health label
             let health_lbl = gtk4::Label::builder()
@@ -402,17 +445,14 @@ impl PowerSection {
                 level_bar.add_css_class("charging");
             }
 
-            bat_row.append(&top_row);
-            bat_row.append(&sub_lbl);
-            bat_row.append(&health_lbl);
-            bat_row.append(&level_bar);
-            root.append(&bat_row);
+            bat_detail.append(&level_bar);
+            bat_detail.append(&health_lbl);
+            detail_box.append(&bat_detail);
 
             Some(Rc::new(BatteryHandles {
                 bat_path: bat_path.as_deref().unwrap_or("").to_owned(),
-                icon_lbl,
-                level_lbl,
-                sub_lbl,
+                summary_icon: summary_icon.clone(),
+                summary_text: summary_text.clone(),
                 health_lbl,
                 level_bar,
             }))
@@ -454,13 +494,29 @@ impl PowerSection {
         cpu_text_box.append(&cpu_managed);
         cpu_box.append(&cpu_icon);
         cpu_box.append(&cpu_text_box);
-        root.append(&cpu_box);
+        detail_box.append(&cpu_box);
 
-        // ── Power actions separator ───────────────────────────────────────
+        // ── Separator (inside detail, before power actions conceptually) ──
         let sep = gtk4::Separator::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .build();
-        root.append(&sep);
+        detail_box.append(&sep);
+
+        detail_revealer.set_child(Some(&detail_box));
+        root.append(&detail_revealer);
+
+        // ── Toggle detail on summary row click ────────────────────────────
+        {
+            let revealer_c = detail_revealer.clone();
+            let arrow_c = summary_arrow.clone();
+            let gesture = gtk4::GestureClick::new();
+            gesture.connect_released(move |_, _, _, _| {
+                let expanded = !revealer_c.reveals_child();
+                revealer_c.set_reveal_child(expanded);
+                arrow_c.set_label(if expanded { "▾" } else { "▸" });
+            });
+            summary_row.add_controller(gesture);
+        }
 
         // ── Power actions row ─────────────────────────────────────────────
         let actions_row = gtk4::Box::builder()
@@ -648,7 +704,11 @@ impl PowerSection {
             bat_path,
             state: RefCell::new(state),
             bat_handles,
+            summary_icon,
+            summary_text,
+            summary_arrow,
             governor_label,
+            detail_revealer,
         }
     }
 
@@ -657,7 +717,13 @@ impl PowerSection {
         let new_state = PowerState::read(self.bat_path.as_deref());
 
         if let (Some(bat), Some(handles)) = (&new_state.battery, &self.bat_handles) {
+            // BatteryHandles::apply updates summary_icon and summary_text as well.
             handles.apply(bat);
+        } else if new_state.battery.is_none() {
+            // Desktop without battery: show governor in summary.
+            self.summary_icon.set_label("󰻠");
+            self.summary_text
+                .set_label(&format_governor_info(&new_state.governor));
         }
 
         self.governor_label
