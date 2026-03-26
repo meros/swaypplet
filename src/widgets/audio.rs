@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::process::Command;
 use std::rc::Rc;
 use std::thread;
+use std::time::Duration;
 
 use gtk4::prelude::*;
 use log::{error, warn};
@@ -234,6 +235,31 @@ fn parse_status_blocking() -> Option<(Vec<Device>, Vec<Device>)> {
     }
 
     Some((sinks, sources))
+}
+
+/// Get the PipeWire node ID for a default target (e.g. "@DEFAULT_AUDIO_SINK@").
+/// Returns just the numeric ID string — cheap to call for change detection.
+fn get_default_id(target: &str) -> Option<String> {
+    let out = wpctl_blocking(&["inspect", target])?;
+    // First line: "id 56, type PipeWire:Interface:Node"
+    let first_line = out.lines().next()?;
+    let rest = first_line.strip_prefix("id ")?;
+    let id = rest.split(',').next()?.trim();
+    Some(id.to_string())
+}
+
+/// Snapshot of default device IDs for change detection.
+#[derive(Clone, Default, PartialEq)]
+struct DefaultIds {
+    sink: Option<String>,
+    source: Option<String>,
+}
+
+fn read_default_ids_blocking() -> DefaultIds {
+    DefaultIds {
+        sink: get_default_id("@DEFAULT_AUDIO_SINK@"),
+        source: get_default_id("@DEFAULT_AUDIO_SOURCE@"),
+    }
 }
 
 /// Collect the full audio state. Called on a background thread.
@@ -612,8 +638,42 @@ impl AudioSection {
 
         section.connect_signals();
         section.refresh();
+        section.start_default_monitor();
 
         section
+    }
+
+    /// Poll for default sink/source changes every 2 seconds. When the default
+    /// device changes (e.g. headphones plugged in), trigger a full refresh so
+    /// the volume slider and device list reflect the new default.
+    fn start_default_monitor(&self) {
+        let w = self.widgets.clone();
+        let updating = self.updating.clone();
+        let last_ids: Rc<RefCell<DefaultIds>> = Rc::new(RefCell::new(DefaultIds::default()));
+
+        glib::timeout_add_local(Duration::from_secs(2), move || {
+            let w2 = w.clone();
+            let upd2 = updating.clone();
+            let last = last_ids.clone();
+
+            let (tx, rx) = std::sync::mpsc::channel::<DefaultIds>();
+            thread::spawn(move || {
+                let _ = tx.send(read_default_ids_blocking());
+            });
+
+            // Poll result back on main thread.
+            glib::idle_add_local_once(move || {
+                if let Ok(new_ids) = rx.recv() {
+                    let mut prev = last.borrow_mut();
+                    if *prev != new_ids {
+                        *prev = new_ids;
+                        AudioSection::schedule_refresh(w2, upd2);
+                    }
+                }
+            });
+
+            glib::ControlFlow::Continue
+        });
     }
 
     fn connect_signals(&self) {

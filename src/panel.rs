@@ -18,8 +18,7 @@ use crate::widgets::{
     screenshot::ScreenshotSection,
 };
 
-pub struct Panel {
-    pub window: gtk4::Window,
+struct Sections {
     header: HeaderSection,
     notifications: NotificationsSection,
     media: MediaSection,
@@ -31,6 +30,27 @@ pub struct Panel {
     clipboard: ClipboardSection,
     screenshot: ScreenshotSection,
     power: PowerSection,
+}
+
+impl Sections {
+    fn refresh(&self) {
+        self.header.refresh();
+        self.notifications.refresh();
+        self.media.refresh();
+        self.audio.refresh();
+        self.brightness.refresh();
+        self.display.refresh();
+        self.network.refresh();
+        self.bluetooth.refresh();
+        self.clipboard.refresh();
+        self.screenshot.refresh();
+        self.power.refresh();
+    }
+}
+
+pub struct Panel {
+    pub window: gtk4::Window,
+    sections: Rc<Sections>,
 }
 
 impl Panel {
@@ -95,8 +115,7 @@ impl Panel {
         }
         window.add_controller(key_controller);
 
-        Self {
-            window,
+        let sections = Rc::new(Sections {
             header,
             notifications,
             media,
@@ -108,37 +127,36 @@ impl Panel {
             clipboard,
             screenshot,
             power,
-        }
+        });
+
+        Self { window, sections }
     }
 
     pub fn toggle(&self) {
         if self.window.is_visible() {
             self.window.set_visible(false);
         } else {
-            self.refresh();
             self.window.set_visible(true);
+            // Defer refresh to the next main-loop iteration so GTK can
+            // paint the window immediately — sections that spawn blocking
+            // subprocesses (bluetoothctl, nmcli, swaymsg, …) won't delay
+            // the window appearing.
+            let sections = self.sections.clone();
+            glib::idle_add_local_once(move || {
+                sections.refresh();
+            });
         }
     }
 
     pub fn refresh(&self) {
-        self.header.refresh();
-        self.notifications.refresh();
-        self.media.refresh();
-        self.audio.refresh();
-        self.brightness.refresh();
-        self.display.refresh();
-        self.network.refresh();
-        self.bluetooth.refresh();
-        self.clipboard.refresh();
-        self.screenshot.refresh();
-        self.power.refresh();
+        self.sections.refresh();
     }
 
     pub fn refresh_audio(&self) {
-        self.audio.refresh();
+        self.sections.audio.refresh();
     }
 
     pub fn refresh_brightness(&self) {
-        self.brightness.refresh();
+        self.sections.brightness.refresh();
     }
 }
