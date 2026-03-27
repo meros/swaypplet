@@ -675,6 +675,12 @@ revealer {
     color: @fg_dim;
 }
 
+.network-signal-excellent { color: @green; }
+.network-signal-good      { color: @accent; }
+.network-signal-ok        { color: @yellow; }
+.network-signal-weak      { color: @orange; }
+.network-signal-none      { color: @red; }
+
 .section-expander {
     background-color: transparent;
     box-shadow: none;
@@ -754,7 +760,6 @@ revealer {
 .network-list row:hover,
 .network-list row:focus,
 .network-list row:selected {
-    background-color: transparent;
     outline: none;
     box-shadow: none;
 }
@@ -767,6 +772,20 @@ revealer {
 
 .network-row:hover {
     background-color: alpha(white, 0.04);
+}
+
+.network-row-active {
+    background-color: alpha(@accent, 0.08);
+}
+
+.network-row-active:hover {
+    background-color: alpha(@accent, 0.12);
+}
+
+.network-active-dot {
+    color: @accent;
+    font-size: 8px;
+    margin-end: 2px;
 }
 
 .network-subsection-title {
@@ -859,6 +878,59 @@ revealer {
     font-size: 12px;
     color: @fg_dim;
     min-width: 16px;
+}
+
+.network-vpn-connected {
+    background-color: alpha(@green, 0.06);
+}
+
+.network-vpn-connected:hover {
+    background-color: alpha(@green, 0.10);
+}
+
+.network-connecting {
+    opacity: 0.7;
+    transition: opacity 300ms ease;
+}
+
+.network-forget-confirm-btn {
+    color: @red;
+    font-weight: 600;
+    font-size: 11px;
+    padding: 4px 8px;
+    min-height: 28px;
+    background-color: alpha(@red, 0.1);
+    box-shadow: none;
+}
+
+.network-forget-confirm-btn:hover {
+    background-color: alpha(@red, 0.2);
+    box-shadow: none;
+}
+
+.network-rescan-btn {
+    background-color: transparent;
+    box-shadow: none;
+    color: @fg_dim;
+    font-size: 14px;
+    padding: 4px 8px;
+    min-height: 28px;
+    min-width: 28px;
+}
+
+.network-rescan-btn:hover {
+    background-color: alpha(white, 0.06);
+    box-shadow: none;
+    color: @fg;
+}
+
+.network-band {
+    font-size: 9px;
+    color: @fg_dim;
+    opacity: 0.7;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background-color: alpha(@bg3, 0.3);
 }
 
 /* ── OSD overlay ── */
