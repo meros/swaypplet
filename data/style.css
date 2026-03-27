@@ -861,6 +861,37 @@ revealer {
     min-width: 16px;
 }
 
+/* ── Network: switch rows (WiFi radio, power saving) ── */
+.network-switch-row {
+    padding: 6px 8px;
+    border-radius: 8px;
+    min-height: 32px;
+}
+
+.network-switch-row:hover {
+    background-color: alpha(white, 0.03);
+}
+
+/* ── Network: connectivity indicator ── */
+.network-connectivity {
+    font-size: 11px;
+    padding: 2px 8px;
+}
+
+.network-connectivity-ok {
+    color: @accent;
+}
+
+.network-connectivity-warn {
+    color: @yellow;
+    font-weight: 600;
+}
+
+/* ── Network: hidden network form ── */
+.network-hidden-form {
+    padding: 4px 8px;
+}
+
 /* ── OSD overlay ── */
 .osd-wrapper {
     /* Transparent margin gives room for drop shadow to render */
