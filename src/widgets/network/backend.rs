@@ -43,6 +43,16 @@ pub fn signal_icon(strength: u8) -> &'static str {
     }
 }
 
+pub fn signal_css_class(strength: u8) -> &'static str {
+    match strength {
+        0..=20 => "network-signal-none",
+        21..=40 => "network-signal-weak",
+        41..=60 => "network-signal-ok",
+        61..=80 => "network-signal-good",
+        _ => "network-signal-excellent",
+    }
+}
+
 // ── Data types ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -289,6 +299,16 @@ pub fn freq_band_label(freq_mhz: u32) -> &'static str {
     }
 }
 
+pub fn freq_band_short(freq_mhz: u32) -> &'static str {
+    if freq_mhz < 3000 {
+        "2.4G"
+    } else if freq_mhz < 6000 {
+        "5G"
+    } else {
+        "6G"
+    }
+}
+
 // ── VPN ───────────────────────────────────────────────────────────────────────
 
 pub fn get_vpn_connections() -> Vec<VpnConnection> {
@@ -415,6 +435,20 @@ pub fn forget_network(ssid: &str) {
     let _ = Command::new("nmcli")
         .args(["connection", "delete", ssid])
         .output();
+}
+
+pub fn forget_network_async(ssid: String, tx: mpsc::Sender<NmResult>) {
+    thread::spawn(move || {
+        let out = Command::new("nmcli")
+            .args(["connection", "delete", &ssid])
+            .output();
+        let result = match out {
+            Ok(o) if o.status.success() => NmResult::Success,
+            Ok(o) => NmResult::Failure(String::from_utf8_lossy(&o.stderr).trim().to_string()),
+            Err(e) => NmResult::Failure(e.to_string()),
+        };
+        let _ = tx.send(result);
+    });
 }
 
 // ── Interface management ──────────────────────────────────────────────────────
