@@ -31,66 +31,144 @@ pub struct PollerWidgets {
     pub vpn_list_box: ListBox,
 }
 
-struct PreviousState {
+/// State returned from the background polling thread.
+struct PolledState {
     active: ActiveConnection,
     connectivity: ConnectivityState,
     wifi_radio: bool,
 }
 
-/// Start a 5-second periodic poller. Only triggers UI updates when state changes.
+/// Cached previous state for change detection, plus polling cadence control.
+struct CachedState {
+    active: ActiveConnection,
+    connectivity: ConnectivityState,
+    wifi_radio: bool,
+    accelerated: bool,
+}
+
+/// Start a periodic poller that checks network state every 5s (or 2s after changes).
+/// Blocking nmcli calls run on a background thread to avoid blocking the GTK main thread.
 pub fn start_periodic_poller(state: Rc<RefCell<NetworkState>>, w: PollerWidgets) {
-    let prev = Rc::new(RefCell::new(PreviousState {
+    let w = Rc::new(w);
+    let cached = Rc::new(RefCell::new(CachedState {
         active: ActiveConnection::Disconnected,
         connectivity: ConnectivityState::Unknown,
         wifi_radio: true,
+        accelerated: false,
     }));
 
-    glib::timeout_add_local(std::time::Duration::from_secs(5), move || {
-        let active = get_active_connection();
-        let connectivity = check_connectivity();
-        let wifi_radio = wifi_radio_enabled();
+    schedule_next(state, w, cached);
+}
 
-        let mut prev_s = prev.borrow_mut();
-        let active_changed = active != prev_s.active;
-        let conn_changed = connectivity != prev_s.connectivity;
-        let radio_changed = wifi_radio != prev_s.wifi_radio;
+fn schedule_next(
+    state: Rc<RefCell<NetworkState>>,
+    w: Rc<PollerWidgets>,
+    cached: Rc<RefCell<CachedState>>,
+) {
+    let interval = if cached.borrow().accelerated {
+        std::time::Duration::from_secs(2)
+    } else {
+        std::time::Duration::from_secs(5)
+    };
 
-        if active_changed {
-            prev_s.active = active.clone();
-            update_active_display(&active, &w.display);
-            state.borrow_mut().active = active;
+    glib::timeout_add_local_once(interval, move || {
+        let (tx, rx) = std::sync::mpsc::channel::<PolledState>();
 
-            let interfaces = get_network_interfaces();
-            state.borrow_mut().interfaces = interfaces;
-            super::interfaces::rebuild_iface_list(&w.iface_list_box, &state);
+        std::thread::spawn(move || {
+            let polled = PolledState {
+                active: get_active_connection(),
+                connectivity: check_connectivity(),
+                wifi_radio: wifi_radio_enabled(),
+            };
+            let _ = tx.send(polled);
+        });
 
-            let vpns = get_vpn_connections();
-            state.borrow_mut().vpns = vpns;
-            super::vpn::rebuild_vpn_list(&w.vpn_list_box, &state);
-        }
+        let state_poll = state.clone();
+        let w_poll = w.clone();
+        let cached_poll = cached.clone();
 
-        if conn_changed {
-            prev_s.connectivity = connectivity.clone();
-            update_connectivity_display(
-                &connectivity,
-                &w.connectivity_label,
-                &w.portal_btn,
-                &w.display.summary_text,
-            );
-        }
+        let state_resched = state;
+        let w_resched = w;
+        let cached_resched = cached;
 
-        if radio_changed {
-            prev_s.wifi_radio = wifi_radio;
-            state.borrow_mut().wifi_radio_enabled = wifi_radio;
-            w.wifi_switch.set_state(wifi_radio);
-            w.wifi_controls_box.set_visible(wifi_radio);
-            w.power_save_row.set_visible(
-                wifi_radio && matches!(state.borrow().active, ActiveConnection::Wifi { .. }),
-            );
-        }
+        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            match rx.try_recv() {
+                Ok(polled) => {
+                    let changed =
+                        apply_polled_state(&polled, &state_poll, &cached_poll, &w_poll);
+                    cached_poll.borrow_mut().accelerated = changed;
 
-        glib::ControlFlow::Continue
+                    schedule_next(
+                        state_resched.clone(),
+                        w_resched.clone(),
+                        cached_resched.clone(),
+                    );
+                    glib::ControlFlow::Break
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    schedule_next(
+                        state_resched.clone(),
+                        w_resched.clone(),
+                        cached_resched.clone(),
+                    );
+                    glib::ControlFlow::Break
+                }
+            }
+        });
     });
+}
+
+/// Compare polled state with cached state, update widgets for changed fields.
+/// Returns `true` if any state changed (used to accelerate next poll).
+fn apply_polled_state(
+    polled: &PolledState,
+    state: &Rc<RefCell<NetworkState>>,
+    cached: &Rc<RefCell<CachedState>>,
+    w: &PollerWidgets,
+) -> bool {
+    let mut prev = cached.borrow_mut();
+    let mut changed = false;
+
+    if polled.active != prev.active {
+        prev.active = polled.active.clone();
+        update_active_display(&polled.active, &w.display);
+        state.borrow_mut().active = polled.active.clone();
+
+        let interfaces = get_network_interfaces();
+        state.borrow_mut().interfaces = interfaces;
+        super::interfaces::rebuild_iface_list(&w.iface_list_box, state);
+
+        let vpns = get_vpn_connections();
+        state.borrow_mut().vpns = vpns;
+        super::vpn::rebuild_vpn_list(&w.vpn_list_box, state);
+
+        changed = true;
+    }
+
+    if polled.connectivity != prev.connectivity {
+        prev.connectivity = polled.connectivity.clone();
+        update_connectivity_display(
+            &polled.connectivity,
+            &w.connectivity_label,
+            &w.portal_btn,
+            &w.display.summary_text,
+        );
+        changed = true;
+    }
+
+    if polled.wifi_radio != prev.wifi_radio {
+        prev.wifi_radio = polled.wifi_radio;
+        state.borrow_mut().wifi_radio_enabled = polled.wifi_radio;
+        w.wifi_switch.set_state(polled.wifi_radio);
+        w.wifi_controls_box.set_visible(polled.wifi_radio);
+        w.power_save_row.set_visible(
+            polled.wifi_radio && matches!(state.borrow().active, ActiveConnection::Wifi { .. }),
+        );
+        changed = true;
+    }
+
+    changed
 }
 
 // ── Display update helpers ────────────────────────────────────────────────────
