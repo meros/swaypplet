@@ -4,6 +4,8 @@ use std::sync::mpsc;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, Orientation, Revealer, RevealerTransitionType};
 
+use crate::spawn::spawn_work;
+
 // ── Nerd Font icons ───────────────────────────────────────────────────────────
 const ICON_DISPLAY: &str = "󰍹";
 
@@ -229,16 +231,20 @@ fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) 
 
 // ── List population ───────────────────────────────────────────────────────────
 
-/// Clear `list` and rebuild it from the current `swaymsg` output.
+/// Clear `list` and rebuild it from the current `swaymsg` output (synchronous).
 fn populate_output_list(list: &Box) {
+    populate_output_list_with_data(list, &get_outputs());
+}
+
+/// Clear `list` and rebuild it from pre-fetched output data.
+fn populate_output_list_with_data(list: &Box, outputs: &[OutputInfo]) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
 
-    let outputs = get_outputs();
     let active_count = outputs.iter().filter(|o| o.active).count();
 
-    for output in &outputs {
+    for output in outputs {
         list.append(&make_output_row(output, active_count, list));
     }
 }
@@ -332,18 +338,28 @@ impl DisplaySection {
     }
 
     /// Re-query swaymsg and rebuild the output list and summary label.
+    ///
+    /// The blocking `swaymsg` call runs on a background thread; the UI is
+    /// updated on the GTK main thread once the result arrives.
     pub fn refresh(&self) {
-        populate_output_list(&self.output_list);
+        let output_list = self.output_list.clone();
+        let summary_text = self.summary_text.clone();
 
-        let outputs = get_outputs();
-        let active: Vec<&OutputInfo> = outputs.iter().filter(|o| o.active).collect();
+        spawn_work(get_outputs, move |outputs| {
+            populate_output_list_with_data(&output_list, &outputs);
 
-        let summary = match active.len() {
-            0 => "No displays".to_string(),
-            1 => active[0].name.clone(),
-            n => format!("{n} displays"),
-        };
-        self.summary_text.set_label(&summary);
+            let active_count = outputs.iter().filter(|o| o.active).count();
+            let summary = match active_count {
+                0 => "No displays".to_string(),
+                1 => outputs
+                    .iter()
+                    .find(|o| o.active)
+                    .map(|o| o.name.clone())
+                    .unwrap_or_default(),
+                n => format!("{n} displays"),
+            };
+            summary_text.set_label(&summary);
+        });
     }
 
     /// Return a reference to the root widget for embedding in the panel.
