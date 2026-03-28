@@ -168,15 +168,26 @@ impl BrightnessSection {
         section
     }
 
-    /// Re-reads brightness from `brightnessctl` and updates the UI.
+    /// Re-reads brightness from `brightnessctl` on a background thread and
+    /// updates the UI when the result arrives.
     pub fn refresh(&self) {
-        if let Some(pct) = read_brightness() {
-            *self.updating.borrow_mut() = true;
-            self.scale.set_value(pct as f64);
-            self.pct_label.set_text(&format!("{}%", pct));
-            self.summary_text.set_text(&format!("{}%", pct));
-            *self.updating.borrow_mut() = false;
-        }
+        let updating = self.updating.clone();
+        let scale = self.scale.clone();
+        let pct_label = self.pct_label.clone();
+        let summary_text = self.summary_text.clone();
+
+        crate::spawn::spawn_work(
+            || read_brightness(),
+            move |pct_opt| {
+                if let Some(pct) = pct_opt {
+                    *updating.borrow_mut() = true;
+                    scale.set_value(pct as f64);
+                    pct_label.set_text(&format!("{}%", pct));
+                    summary_text.set_text(&format!("{}%", pct));
+                    *updating.borrow_mut() = false;
+                }
+            },
+        );
     }
 
     pub fn widget(&self) -> &gtk4::Box {
