@@ -4,6 +4,8 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use crate::spawn::spawn_work;
+
 // ── Nerd Font icons ───────────────────────────────────────────────────────────
 const ICON_PREV: &str = "󰒮";
 const ICON_PLAY: &str = "󰐊";
@@ -292,8 +294,13 @@ impl MediaSection {
             let root_ref = root.clone();
             let pt = progress_timer.clone();
             prev_btn.connect_clicked(move |_| {
-                playerctl(&["previous"]);
-                Self::schedule_refresh(root_ref.clone(), w.clone(), s.clone(), pt.clone());
+                Self::send_command_and_refresh(
+                    "previous",
+                    root_ref.clone(),
+                    w.clone(),
+                    s.clone(),
+                    pt.clone(),
+                );
             });
         }
 
@@ -303,8 +310,13 @@ impl MediaSection {
             let root_ref = root.clone();
             let pt = progress_timer.clone();
             play_pause_btn_for_signal.connect_clicked(move |_| {
-                playerctl(&["play-pause"]);
-                Self::schedule_refresh(root_ref.clone(), w.clone(), s.clone(), pt.clone());
+                Self::send_command_and_refresh(
+                    "play-pause",
+                    root_ref.clone(),
+                    w.clone(),
+                    s.clone(),
+                    pt.clone(),
+                );
             });
         }
 
@@ -314,8 +326,13 @@ impl MediaSection {
             let root_ref = root.clone();
             let pt = progress_timer.clone();
             next_btn.connect_clicked(move |_| {
-                playerctl(&["next"]);
-                Self::schedule_refresh(root_ref.clone(), w.clone(), s.clone(), pt.clone());
+                Self::send_command_and_refresh(
+                    "next",
+                    root_ref.clone(),
+                    w.clone(),
+                    s.clone(),
+                    pt.clone(),
+                );
             });
         }
 
@@ -335,11 +352,30 @@ impl MediaSection {
         state: Rc<RefCell<Option<MediaState>>>,
         progress_timer: Rc<RefCell<Option<glib::SourceId>>>,
     ) {
-        glib::idle_add_local_once(move || {
-            let new_state = read_state();
+        spawn_work(read_state, move |new_state| {
             Self::apply_state(&root, &w, &new_state, &progress_timer);
             *state.borrow_mut() = new_state;
         });
+    }
+
+    /// Run a playerctl command on a background thread, then refresh state.
+    fn send_command_and_refresh(
+        command: &'static str,
+        root: gtk4::Box,
+        w: Rc<Widgets>,
+        state: Rc<RefCell<Option<MediaState>>>,
+        progress_timer: Rc<RefCell<Option<glib::SourceId>>>,
+    ) {
+        spawn_work(
+            move || {
+                playerctl(&[command]);
+                read_state()
+            },
+            move |new_state| {
+                Self::apply_state(&root, &w, &new_state, &progress_timer);
+                *state.borrow_mut() = new_state;
+            },
+        );
     }
 
     fn apply_state(
@@ -411,25 +447,36 @@ impl MediaSection {
                     if ms.status == PlaybackStatus::Playing {
                         let w_c = w.clone();
                         let len_c = len;
-                        let pt_c = progress_timer.clone();
+                        let cancelled = Rc::new(std::cell::Cell::new(false));
+                        let cancelled_c = cancelled.clone();
                         let id = glib::timeout_add_local(
                             std::time::Duration::from_millis(500),
                             move || {
-                                let pos = playerctl(&["position"])
-                                    .and_then(|s| s.parse::<f64>().ok());
-                                if let Some(pos) = pos {
-                                    let frac = (pos / len_c).clamp(0.0, 1.0);
-                                    w_c.progress_bar.set_fraction(frac);
-                                    w_c.time_label.set_label(&format!(
-                                        "{} / {}",
-                                        format_time(pos),
-                                        format_time(len_c)
-                                    ));
-                                    glib::ControlFlow::Continue
-                                } else {
-                                    *pt_c.borrow_mut() = None;
-                                    glib::ControlFlow::Break
+                                if cancelled_c.get() {
+                                    return glib::ControlFlow::Break;
                                 }
+                                let w_inner = w_c.clone();
+                                let cancelled_inner = cancelled_c.clone();
+                                spawn_work(
+                                    || {
+                                        playerctl(&["position"])
+                                            .and_then(|s| s.parse::<f64>().ok())
+                                    },
+                                    move |pos| {
+                                        if let Some(pos) = pos {
+                                            let frac = (pos / len_c).clamp(0.0, 1.0);
+                                            w_inner.progress_bar.set_fraction(frac);
+                                            w_inner.time_label.set_label(&format!(
+                                                "{} / {}",
+                                                format_time(pos),
+                                                format_time(len_c)
+                                            ));
+                                        } else {
+                                            cancelled_inner.set(true);
+                                        }
+                                    },
+                                );
+                                glib::ControlFlow::Continue
                             },
                         );
                         *progress_timer.borrow_mut() = Some(id);
@@ -454,9 +501,12 @@ impl MediaSection {
     // ── Public API ────────────────────────────────────────────────────────────
 
     pub fn refresh(&self) {
-        let new_state = read_state();
-        Self::apply_state(&self.root, &self.widgets, &new_state, &self.progress_timer);
-        *self.state.borrow_mut() = new_state;
+        Self::schedule_refresh(
+            self.root.clone(),
+            self.widgets.clone(),
+            self.state.clone(),
+            self.progress_timer.clone(),
+        );
     }
 
     pub fn widget(&self) -> &gtk4::Box {
