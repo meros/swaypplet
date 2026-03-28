@@ -173,8 +173,37 @@ fn apply_polled_state(
 
 // ── Display update helpers ────────────────────────────────────────────────────
 
+/// Update active connection display, fetching IP info synchronously.
+/// Used by the periodic poller (which already runs on a background thread).
 pub fn update_active_display(active: &ActiveConnection, w: &DisplayWidgets) {
-    let device = match active {
+    let device = update_active_labels(active, w);
+
+    if let Some(dev) = device {
+        let ip = get_device_ip(dev);
+        let gateway = get_default_gateway();
+        let dns = get_dns_servers(dev);
+        apply_ip_info(w, &ip, &gateway, &dns);
+    } else {
+        apply_ip_info(w, &None, &None, &[]);
+    }
+}
+
+/// Update active connection display with pre-fetched IP info.
+/// Used by the async refresh path where IP info was fetched on the background thread.
+pub fn update_active_display_with_ip(
+    active: &ActiveConnection,
+    w: &DisplayWidgets,
+    ip: &Option<String>,
+    gateway: &Option<String>,
+    dns: &[String],
+) {
+    update_active_labels(active, w);
+    apply_ip_info(w, ip, gateway, dns);
+}
+
+/// Set connection labels (icon, SSID, signal, summary). Returns the device name if connected.
+fn update_active_labels<'a>(active: &'a ActiveConnection, w: &DisplayWidgets) -> Option<&'a str> {
+    match active {
         ActiveConnection::Wifi { ssid, signal, device, freq_mhz } => {
             w.current_icon.set_label(signal_icon(*signal));
             w.current_ssid.set_label(ssid);
@@ -207,34 +236,30 @@ pub fn update_active_display(active: &ActiveConnection, w: &DisplayWidgets) {
             w.summary_text.set_label("Disconnected");
             None
         }
-    };
+    }
+}
 
-    if let Some(dev) = device {
-        match get_device_ip(dev) {
-            Some(ip) => {
-                w.ip_label.set_label(&format!("IP: {}", ip));
-                w.ip_label.set_visible(true);
-            }
-            None => w.ip_label.set_visible(false),
+/// Apply pre-fetched IP / gateway / DNS info to the display widgets.
+fn apply_ip_info(w: &DisplayWidgets, ip: &Option<String>, gateway: &Option<String>, dns: &[String]) {
+    match ip {
+        Some(ip) => {
+            w.ip_label.set_label(&format!("IP: {}", ip));
+            w.ip_label.set_visible(true);
         }
-        match get_default_gateway() {
-            Some(gw) => {
-                w.gateway_label.set_label(&format!("Gateway: {}", gw));
-                w.gateway_label.set_visible(true);
-            }
-            None => w.gateway_label.set_visible(false),
+        None => w.ip_label.set_visible(false),
+    }
+    match gateway {
+        Some(gw) => {
+            w.gateway_label.set_label(&format!("Gateway: {}", gw));
+            w.gateway_label.set_visible(true);
         }
-        let dns_servers = get_dns_servers(dev);
-        if dns_servers.is_empty() {
-            w.dns_label.set_visible(false);
-        } else {
-            w.dns_label.set_label(&format!("DNS: {}", dns_servers.join(", ")));
-            w.dns_label.set_visible(true);
-        }
-    } else {
-        w.ip_label.set_visible(false);
-        w.gateway_label.set_visible(false);
+        None => w.gateway_label.set_visible(false),
+    }
+    if dns.is_empty() {
         w.dns_label.set_visible(false);
+    } else {
+        w.dns_label.set_label(&format!("DNS: {}", dns.join(", ")));
+        w.dns_label.set_visible(true);
     }
 }
 
