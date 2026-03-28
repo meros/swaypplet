@@ -6,6 +6,8 @@ use std::sync::mpsc;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, Orientation, Revealer, RevealerTransitionType, Spinner};
 
+use crate::spawn::spawn_work;
+
 // ── Nerd Font icons ───────────────────────────────────────────────────────────
 const ICON_HEADPHONES: &str = "󰋋";
 const ICON_KEYBOARD: &str = "󰌌";
@@ -199,6 +201,43 @@ fn device_icon(hint: Option<&str>) -> &'static str {
     }
 }
 
+// ── Background state fetch ───────────────────────────────────────────────────
+
+/// All Bluetooth state fetched from a background thread.
+struct BluetoothState {
+    available: bool,
+    powered: bool,
+    devices: Vec<BtDevice>,
+}
+
+/// Fetch all Bluetooth state by running blocking subprocess calls.
+/// Must be called from a background thread — never the GTK main thread.
+fn read_bt_state_blocking() -> BluetoothState {
+    if !bt_available() {
+        return BluetoothState {
+            available: false,
+            powered: false,
+            devices: Vec::new(),
+        };
+    }
+
+    let powered = bt_is_powered();
+    let devices = if powered {
+        bt_list_macs()
+            .iter()
+            .filter_map(|mac| bt_info(mac))
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    BluetoothState {
+        available: true,
+        powered,
+        devices,
+    }
+}
+
 // ── Internal state ────────────────────────────────────────────────────────────
 
 struct State {
@@ -224,7 +263,7 @@ pub struct BluetoothSection {
 }
 
 impl BluetoothSection {
-    pub fn new() -> Self {
+    pub fn new() -> Rc<Self> {
         // ── Root section box ──────────────────────────────────────────────────
         let root = Box::builder()
             .orientation(Orientation::Vertical)
@@ -267,41 +306,6 @@ impl BluetoothSection {
             .transition_duration(200)
             .reveal_child(false)
             .build();
-
-        // ── Early-exit if BlueZ unavailable ───────────────────────────────────
-        if !bt_available() {
-            summary_icon.set_label(ICON_BLUETOOTH_OFF);
-            summary_text.set_label("Unavailable");
-
-            // Wire up toggle so the arrow still works (no-op detail revealer).
-            {
-                let detail_revealer_c = detail_revealer.clone();
-                let summary_arrow_c = summary_arrow.clone();
-                summary_btn.connect_clicked(move |_| {
-                    let revealed = !detail_revealer_c.reveals_child();
-                    detail_revealer_c.set_reveal_child(revealed);
-                    summary_arrow_c.set_label(if revealed { "▾" } else { "▸" });
-                });
-            }
-
-            root.append(&detail_revealer);
-
-            let state = Rc::new(RefCell::new(State { scanning: false }));
-            return Self {
-                root,
-                summary_icon,
-                summary_text,
-                summary_arrow,
-                detail_revealer,
-                connected_list: Box::new(Orientation::Vertical, 0),
-                available_list: Box::new(Orientation::Vertical, 0),
-                revealer: Revealer::new(),
-                scan_spinner: Spinner::new(),
-                scan_btn: Button::new(),
-                scan_status_lbl: Label::new(None),
-                state,
-            };
-        }
 
         // ── Detail content box (lives inside detail_revealer) ─────────────────
         let detail_box = Box::builder()
@@ -419,7 +423,7 @@ impl BluetoothSection {
                     scan_btn_c.set_label("Scan");
                     scan_status_c.set_label("");
                     state_c.borrow_mut().scanning = false;
-                    populate_available_list(&available_list_c);
+                    schedule_populate_available(&available_list_c);
                     return;
                 }
 
@@ -452,7 +456,7 @@ impl BluetoothSection {
                     status_tick.set_label(&format!("Scanning{dots}"));
 
                     // Refresh available list with newly found devices.
-                    populate_available_list(&list_tick);
+                    schedule_populate_available(&list_tick);
 
                     if ticks >= 5 {
                         // 10 seconds elapsed — stop.
@@ -470,7 +474,7 @@ impl BluetoothSection {
             });
         }
 
-        let section = Self {
+        let section = Rc::new(Self {
             root,
             summary_icon,
             summary_text,
@@ -483,30 +487,38 @@ impl BluetoothSection {
             scan_btn,
             scan_status_lbl,
             state,
-        };
+        });
 
-        section.refresh();
+        section.schedule_refresh();
         section
     }
 
-    /// Re-query bluetoothctl and rebuild both device lists.
-    pub fn refresh(&self) {
-        // Verify Bluetooth is powered on before populating.
-        if !bt_is_powered() {
-            // Clear connected list and show "Bluetooth is off" message.
-            while let Some(child) = self.connected_list.first_child() {
-                self.connected_list.remove(&child);
-            }
-            while let Some(child) = self.available_list.first_child() {
-                self.available_list.remove(&child);
-            }
+    /// Schedule an async refresh: fetch Bluetooth state on a background thread,
+    /// then apply the result on the GTK main thread.
+    pub fn schedule_refresh(self: &Rc<Self>) {
+        let section = Rc::clone(self);
+        spawn_work(read_bt_state_blocking, move |state| {
+            section.apply_state(state);
+        });
+    }
 
-            // Show a single informational label in place of the scan button.
+    /// Apply pre-fetched Bluetooth state to the UI (runs on the main thread).
+    fn apply_state(&self, state: BluetoothState) {
+        if !state.available {
+            self.summary_icon.set_label(ICON_BLUETOOTH_OFF);
+            self.summary_text.set_label("Unavailable");
+            return;
+        }
+
+        if !state.powered {
+            // Clear both lists.
+            clear_box(&self.connected_list);
+            clear_box(&self.available_list);
+
             self.scan_btn.set_visible(false);
             self.scan_status_lbl.set_label("Bluetooth is off");
             self.connected_list.set_visible(false);
 
-            // Update summary row.
             self.summary_icon.set_label(ICON_BLUETOOTH_OFF);
             self.summary_text.set_label("Bluetooth off");
             return;
@@ -518,37 +530,33 @@ impl BluetoothSection {
         }
 
         // Clear existing rows.
-        while let Some(child) = self.connected_list.first_child() {
-            self.connected_list.remove(&child);
-        }
-        while let Some(child) = self.available_list.first_child() {
-            self.available_list.remove(&child);
-        }
+        clear_box(&self.connected_list);
+        clear_box(&self.available_list);
 
-        let macs = bt_list_macs();
-        let mut connected_devices: Vec<BtDevice> = Vec::new();
+        let mut connected_devices: Vec<&BtDevice> = Vec::new();
 
-        for mac in &macs {
-            let Some(dev) = bt_info(mac) else { continue };
-
+        for dev in &state.devices {
             if dev.connected {
-                connected_devices.push(dev.clone());
+                connected_devices.push(dev);
                 self.connected_list
-                    .append(&make_connected_row(&dev, &self.connected_list));
+                    .append(&make_connected_row(dev, &self.connected_list));
+            } else {
+                self.available_list
+                    .append(&make_available_row(dev, &self.available_list));
             }
         }
 
         let has_connected = !connected_devices.is_empty();
         self.connected_list.set_visible(has_connected);
 
-        // Update summary row based on connected device state.
+        // Update summary row.
         self.summary_icon.set_label(ICON_BLUETOOTH);
         match connected_devices.len() {
             0 => {
                 self.summary_text.set_label("No devices");
             }
             1 => {
-                let dev = &connected_devices[0];
+                let dev = connected_devices[0];
                 let text = match dev.battery {
                     Some(pct) => format!("{} {}%", dev.name, pct),
                     None => dev.name.clone(),
@@ -559,8 +567,6 @@ impl BluetoothSection {
                 self.summary_text.set_label(&format!("{n} devices connected"));
             }
         }
-
-        populate_available_list(&self.available_list);
     }
 
     /// Return a reference to the root widget for embedding in the panel.
@@ -829,16 +835,29 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
     row
 }
 
-/// Clear `list` and repopulate it with every non-connected known device.
-fn populate_available_list(list: &Box) {
-    while let Some(child) = list.first_child() {
-        list.remove(&child);
+/// Remove all children from a GTK Box.
+fn clear_box(b: &Box) {
+    while let Some(child) = b.first_child() {
+        b.remove(&child);
     }
+}
 
-    for mac in bt_list_macs() {
-        let Some(dev) = bt_info(&mac) else { continue };
-        if !dev.connected {
-            list.append(&make_available_row(&dev, list));
-        }
-    }
+/// Re-fetch available devices on a background thread and repopulate the list.
+fn schedule_populate_available(list: &Box) {
+    let list_c = list.clone();
+    spawn_work(
+        || {
+            bt_list_macs()
+                .iter()
+                .filter_map(|mac| bt_info(mac))
+                .filter(|dev| !dev.connected)
+                .collect::<Vec<_>>()
+        },
+        move |devices| {
+            clear_box(&list_c);
+            for dev in &devices {
+                list_c.append(&make_available_row(dev, &list_c));
+            }
+        },
+    );
 }

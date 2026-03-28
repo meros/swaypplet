@@ -26,7 +26,7 @@ struct Sections {
     brightness: BrightnessSection,
     display: DisplaySection,
     network: NetworkSection,
-    bluetooth: BluetoothSection,
+    bluetooth: Rc<BluetoothSection>,
     clipboard: ClipboardSection,
     screenshot: ScreenshotSection,
     power: PowerSection,
@@ -41,7 +41,7 @@ impl Sections {
         self.brightness.refresh();
         self.display.refresh();
         self.network.refresh();
-        self.bluetooth.refresh();
+        self.bluetooth.schedule_refresh();
         self.clipboard.refresh();
         self.screenshot.refresh();
         self.power.refresh();
