@@ -196,6 +196,7 @@ impl ScreenshotSection {
             let recording_pid_c = recording_pid.clone();
             let icon_c = record_icon_lbl.clone();
             let text_c = record_text_lbl.clone();
+            let root_c = root.clone();
             btn_record.connect_clicked(move |btn| {
                 let current_pid = *recording_pid_c.borrow();
                 if let Some(pid) = current_pid {
@@ -207,6 +208,7 @@ impl ScreenshotSection {
                     icon_c.set_label("󰑋");
                     text_c.set_label("Record");
                     btn.remove_css_class("active");
+                    root_c.remove_css_class("recording-active");
                 } else {
                     // Start recording.
                     let filename = make_screenshot_path("mp4");
@@ -217,6 +219,7 @@ impl ScreenshotSection {
                             icon_c.set_label("󰻃");
                             text_c.set_label("Stop");
                             btn.add_css_class("active");
+                            root_c.add_css_class("recording-active");
                         }
                         Err(e) => {
                             log::error!("Failed to spawn wf-recorder: {}", e);
@@ -262,6 +265,7 @@ impl ScreenshotSection {
             if !still_running {
                 log::info!("wf-recorder (pid {}) has exited; clearing recording state.", pid);
                 *pid_ref = None;
+                self.root.remove_css_class("recording-active");
             }
         }
     }
