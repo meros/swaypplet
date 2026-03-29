@@ -20,13 +20,13 @@ use crate::widgets::{
 
 struct Sections {
     header: HeaderSection,
-    notifications: NotificationsSection,
     media: MediaSection,
     audio: AudioSection,
     brightness: BrightnessSection,
-    display: DisplaySection,
+    notifications: NotificationsSection,
     network: NetworkSection,
     bluetooth: Rc<BluetoothSection>,
+    display: DisplaySection,
     clipboard: ClipboardSection,
     screenshot: ScreenshotSection,
     power: PowerSection,
@@ -35,13 +35,13 @@ struct Sections {
 impl Sections {
     fn refresh(&self) {
         self.header.refresh();
-        self.notifications.refresh();
         self.media.refresh();
         self.audio.refresh();
         self.brightness.refresh();
-        self.display.refresh();
+        self.notifications.refresh();
         self.network.refresh();
         self.bluetooth.schedule_refresh();
+        self.display.refresh();
         self.clipboard.refresh();
         self.screenshot.refresh();
         self.power.refresh();
@@ -74,25 +74,25 @@ impl Panel {
         content_box.add_css_class("panel-content");
 
         let header = HeaderSection::new(store.clone());
-        let notifications = NotificationsSection::new(store);
         let media = MediaSection::new();
         let audio = AudioSection::new();
         let brightness = BrightnessSection::new();
-        let display = DisplaySection::new();
+        let notifications = NotificationsSection::new(store);
         let network = NetworkSection::new();
         let bluetooth = BluetoothSection::new();
+        let display = DisplaySection::new();
         let clipboard = ClipboardSection::new();
         let screenshot = ScreenshotSection::new();
         let power = PowerSection::new();
 
         content_box.append(header.widget());
-        content_box.append(notifications.widget());
         content_box.append(media.widget());
         content_box.append(audio.widget());
         content_box.append(brightness.widget());
-        content_box.append(display.widget());
+        content_box.append(notifications.widget());
         content_box.append(network.widget());
         content_box.append(bluetooth.widget());
+        content_box.append(display.widget());
         content_box.append(clipboard.widget());
         content_box.append(screenshot.widget());
         content_box.append(power.widget());
@@ -117,13 +117,13 @@ impl Panel {
 
         let sections = Rc::new(Sections {
             header,
-            notifications,
             media,
             audio,
             brightness,
-            display,
+            notifications,
             network,
             bluetooth,
+            display,
             clipboard,
             screenshot,
             power,
