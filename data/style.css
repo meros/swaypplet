@@ -518,6 +518,16 @@ spinner {
     font-style: italic;
 }
 
+/* ── Screenshot: recording indicator ── */
+.recording-active .section-summary-label {
+    color: @red;
+    font-weight: 700;
+}
+
+.recording-active .section-summary-icon {
+    color: @red;
+}
+
 /* ── Separator ── */
 separator {
     background-color: alpha(@bg3, 0.3);
