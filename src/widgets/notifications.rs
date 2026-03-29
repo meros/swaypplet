@@ -12,6 +12,9 @@ pub struct NotificationsSection {
     root: gtk4::Box,
     list_box: gtk4::Box,
     empty_label: gtk4::Label,
+    summary_text: gtk4::Label,
+    summary_arrow: gtk4::Label,
+    detail_revealer: gtk4::Revealer,
     store: Rc<RefCell<NotificationStore>>,
 }
 
@@ -22,6 +25,57 @@ impl NotificationsSection {
             .build();
         root.add_css_class("section");
         root.add_css_class("notification-center");
+
+        // Summary row (always visible, toggles detail revealer)
+        let summary_content = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(6)
+            .build();
+
+        let summary_icon = gtk4::Label::new(Some(icons::NOTIFICATION));
+        summary_icon.add_css_class("section-summary-icon");
+
+        let summary_text = gtk4::Label::new(Some("No notifications"));
+        summary_text.add_css_class("section-summary-label");
+        summary_text.set_hexpand(true);
+        summary_text.set_xalign(0.0);
+        summary_text.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+
+        let summary_arrow = gtk4::Label::new(Some("▸"));
+        summary_arrow.add_css_class("section-expand-arrow");
+
+        summary_content.append(&summary_icon);
+        summary_content.append(&summary_text);
+        summary_content.append(&summary_arrow);
+
+        let summary_btn = gtk4::Button::builder()
+            .child(&summary_content)
+            .build();
+        summary_btn.add_css_class("section-summary");
+
+        let detail_revealer = gtk4::Revealer::builder()
+            .transition_type(gtk4::RevealerTransitionType::SlideDown)
+            .transition_duration(200)
+            .reveal_child(false)
+            .build();
+
+        {
+            let rev = detail_revealer.clone();
+            let arrow = summary_arrow.clone();
+            summary_btn.connect_clicked(move |_| {
+                let revealed = rev.reveals_child();
+                rev.set_reveal_child(!revealed);
+                arrow.set_label(if revealed { "▸" } else { "▾" });
+            });
+        }
+
+        root.append(&summary_btn);
+        root.append(&detail_revealer);
+
+        // Detail box (inside revealer)
+        let detail_box = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .build();
 
         // Header row: title + clear all button
         let header = gtk4::Box::builder()
@@ -50,7 +104,7 @@ impl NotificationsSection {
 
         header.append(&title);
         header.append(&clear_btn);
-        root.append(&header);
+        detail_box.append(&header);
 
         // Scrollable list area
         let scroll = gtk4::ScrolledWindow::builder()
@@ -73,21 +127,39 @@ impl NotificationsSection {
         list_box.append(&empty_label);
 
         scroll.set_child(Some(&list_box));
-        root.append(&scroll);
+        detail_box.append(&scroll);
+
+        detail_revealer.set_child(Some(&detail_box));
 
         let section = Self {
             root,
             list_box,
             empty_label,
+            summary_text,
+            summary_arrow,
+            detail_revealer,
             store: store.clone(),
         };
 
         // Subscribe to changes for live updates
         let list_box_c = section.list_box.clone();
         let empty_label_c = section.empty_label.clone();
+        let summary_text_c = section.summary_text.clone();
+        let summary_arrow_c = section.summary_arrow.clone();
+        let detail_revealer_c = section.detail_revealer.clone();
         let store_change = store.clone();
         store.borrow_mut().connect_change(move || {
-            rebuild_list(&list_box_c, &empty_label_c, &store_change);
+            let has_notifications = rebuild_list(
+                &list_box_c,
+                &empty_label_c,
+                &summary_text_c,
+                &store_change,
+            );
+            // Auto-expand when new notifications arrive
+            if has_notifications && !detail_revealer_c.reveals_child() {
+                detail_revealer_c.set_reveal_child(true);
+                summary_arrow_c.set_label("▾");
+            }
         });
 
         section.rebuild();
@@ -103,15 +175,23 @@ impl NotificationsSection {
     }
 
     fn rebuild(&self) {
-        rebuild_list(&self.list_box, &self.empty_label, &self.store);
+        rebuild_list(
+            &self.list_box,
+            &self.empty_label,
+            &self.summary_text,
+            &self.store,
+        );
     }
 }
 
+/// Rebuilds the notification list and updates the summary text.
+/// Returns `true` if there are notifications (used to auto-expand).
 fn rebuild_list(
     list_box: &gtk4::Box,
     empty_label: &gtk4::Label,
+    summary_text: &gtk4::Label,
     store: &Rc<RefCell<NotificationStore>>,
-) {
+) -> bool {
     // Remove all children except the empty label
     while let Some(child) = list_box.last_child() {
         if child == *empty_label {
@@ -127,9 +207,18 @@ fn rebuild_list(
         store_ref.all().to_vec()
     };
 
+    let count = notifications.len();
+
+    // Update summary text
+    match count {
+        0 => summary_text.set_label("No notifications"),
+        1 => summary_text.set_label("1 notification"),
+        n => summary_text.set_label(&format!("{n} notifications")),
+    }
+
     if notifications.is_empty() {
         empty_label.set_visible(true);
-        return;
+        return false;
     }
     empty_label.set_visible(false);
 
@@ -158,6 +247,8 @@ fn rebuild_list(
             list_box.append(&entry);
         }
     }
+
+    true
 }
 
 fn build_entry(
