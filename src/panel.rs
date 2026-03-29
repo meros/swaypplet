@@ -50,6 +50,7 @@ impl Sections {
 
 pub struct Panel {
     pub window: gtk4::Window,
+    scroll: gtk4::ScrolledWindow,
     sections: Rc<Sections>,
 }
 
@@ -65,6 +66,7 @@ impl Panel {
             .vscrollbar_policy(gtk4::PolicyType::Automatic)
             .hscrollbar_policy(gtk4::PolicyType::Never)
             .propagate_natural_height(true)
+            .max_content_height(800)
             .build();
 
         let content_box = gtk4::Box::builder()
@@ -129,7 +131,7 @@ impl Panel {
             power,
         });
 
-        Self { window, sections }
+        Self { window, scroll, sections }
     }
 
     pub fn toggle(&self) {
@@ -137,6 +139,9 @@ impl Panel {
             self.window.set_visible(false);
         } else {
             self.window.set_visible(true);
+            // Reset scroll to top
+            let adj = self.scroll.vadjustment();
+            adj.set_value(0.0);
             // Defer refresh to the next main-loop iteration so GTK can
             // paint the window immediately — sections that spawn blocking
             // subprocesses (bluetoothctl, nmcli, swaymsg, …) won't delay
