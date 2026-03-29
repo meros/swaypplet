@@ -73,6 +73,7 @@ impl HeaderSection {
                 let new_active = btn.is_active();
                 update_wifi_tooltip(&btn, new_active);
 
+                btn.add_css_class("loading");
                 let btn_clone = btn.clone();
                 spawn::spawn_work(
                     move || {
@@ -92,6 +93,7 @@ impl HeaderSection {
                         success
                     },
                     move |success| {
+                        btn_clone.remove_css_class("loading");
                         if !success {
                             let b = btn_clone.clone();
                             glib::timeout_add_local_once(
@@ -113,6 +115,7 @@ impl HeaderSection {
                 let new_active = btn.is_active();
                 update_bluetooth_tooltip(&btn, new_active);
 
+                btn.add_css_class("loading");
                 let btn_clone = btn.clone();
                 spawn::spawn_work(
                     move || {
@@ -131,6 +134,7 @@ impl HeaderSection {
                         })
                     },
                     move |success| {
+                        btn_clone.remove_css_class("loading");
                         if !success {
                             let b = btn_clone.clone();
                             glib::timeout_add_local_once(
@@ -162,6 +166,7 @@ impl HeaderSection {
                 let new_active = btn.is_active();
                 update_night_tooltip(&btn, new_active);
 
+                btn.add_css_class("loading");
                 let btn_clone = btn.clone();
                 spawn::spawn_work(
                     move || {
@@ -176,6 +181,7 @@ impl HeaderSection {
                         })
                     },
                     move |success| {
+                        btn_clone.remove_css_class("loading");
                         if !success {
                             let b = btn_clone.clone();
                             glib::timeout_add_local_once(
@@ -197,6 +203,7 @@ impl HeaderSection {
                 let new_active = btn.is_active();
                 update_idle_tooltip(&btn, new_active);
 
+                btn.add_css_class("loading");
                 let btn_clone = btn.clone();
                 spawn::spawn_work(
                     move || {
@@ -269,6 +276,7 @@ impl HeaderSection {
                         }
                     },
                     move |success| {
+                        btn_clone.remove_css_class("loading");
                         if !success {
                             let b = btn_clone.clone();
                             glib::timeout_add_local_once(
@@ -290,6 +298,7 @@ impl HeaderSection {
                 let new_active = btn.is_active();
                 update_camera_tooltip(&btn, new_active);
 
+                btn.add_css_class("loading");
                 let btn_clone = btn.clone();
                 spawn::spawn_work(
                     move || {
@@ -310,6 +319,7 @@ impl HeaderSection {
                         })
                     },
                     move |success| {
+                        btn_clone.remove_css_class("loading");
                         if !success {
                             let b = btn_clone.clone();
                             glib::timeout_add_local_once(
@@ -331,6 +341,7 @@ impl HeaderSection {
                 let new_active = btn.is_active();
                 update_touchpad_tooltip(&btn, new_active);
 
+                btn.add_css_class("loading");
                 let btn_clone = btn.clone();
                 spawn::spawn_work(
                     move || {
@@ -346,6 +357,7 @@ impl HeaderSection {
                         })
                     },
                     move |success| {
+                        btn_clone.remove_css_class("loading");
                         if !success {
                             let b = btn_clone.clone();
                             glib::timeout_add_local_once(

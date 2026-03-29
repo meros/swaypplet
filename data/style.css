@@ -135,6 +135,11 @@ window.panel {
     opacity: 0.38;
 }
 
+.toggle-btn.loading {
+    opacity: 0.6;
+    transition: opacity 150ms ease;
+}
+
 /* ── Focus indicators for keyboard navigation ── */
 .toggle-btn:focus-visible,
 button:focus-visible,
