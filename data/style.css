@@ -133,9 +133,23 @@ window.panel {
     opacity: 0.38;
 }
 
-.toggle-btn:focus-visible {
-    outline: 2px solid @aqua;
+/* ── Focus indicators for keyboard navigation ── */
+.toggle-btn:focus-visible,
+button:focus-visible,
+.section-summary:focus-visible,
+.device-row:focus-visible,
+.section-expander:focus-visible {
+    outline: 2px solid alpha(@aqua, 0.6);
     outline-offset: 2px;
+}
+
+scale:focus-visible slider {
+    box-shadow: 0 0 0 3px alpha(@aqua, 0.3), 0 1px 4px alpha(black, 0.4);
+}
+
+entry:focus-visible {
+    outline: 2px solid alpha(@aqua, 0.6);
+    outline-offset: 1px;
 }
 
 .toggle-label {
