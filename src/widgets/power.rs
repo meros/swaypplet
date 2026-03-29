@@ -293,15 +293,24 @@ impl BatteryHandles {
             self.health_lbl.set_visible(false);
         }
 
-        if bat.capacity < 20 {
-            self.level_bar.add_css_class("low");
-        } else {
-            self.level_bar.remove_css_class("low");
-        }
         if bat.charging {
             self.level_bar.add_css_class("charging");
         } else {
             self.level_bar.remove_css_class("charging");
+        }
+
+        if bat.capacity > 60 {
+            self.level_bar.add_css_class("battery-high");
+            self.level_bar.remove_css_class("battery-medium");
+            self.level_bar.remove_css_class("battery-low");
+        } else if bat.capacity >= 20 {
+            self.level_bar.add_css_class("battery-medium");
+            self.level_bar.remove_css_class("battery-high");
+            self.level_bar.remove_css_class("battery-low");
+        } else {
+            self.level_bar.add_css_class("battery-low");
+            self.level_bar.remove_css_class("battery-high");
+            self.level_bar.remove_css_class("battery-medium");
         }
     }
 }
@@ -442,11 +451,15 @@ impl PowerSection {
                 .value(bat.capacity as f64 / 100.0)
                 .build();
             level_bar.add_css_class("battery-bar");
-            if bat.capacity < 20 {
-                level_bar.add_css_class("low");
-            }
             if bat.charging {
                 level_bar.add_css_class("charging");
+            }
+            if bat.capacity > 60 {
+                level_bar.add_css_class("battery-high");
+            } else if bat.capacity >= 20 {
+                level_bar.add_css_class("battery-medium");
+            } else {
+                level_bar.add_css_class("battery-low");
             }
 
             bat_detail.append(&level_bar);
@@ -679,7 +692,7 @@ impl PowerSection {
             });
         }
         actions_row.append(&col_shutdown);
-        root.append(&actions_row);
+        detail_box.append(&actions_row);
 
         // ── Periodic battery refresh every 30 s ───────────────────────────
         if let Some(ref handles) = bat_handles {
