@@ -340,7 +340,7 @@ impl PowerSection {
         // ── Root section box ────────────────────────────────────────────────
         let root = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
-            .spacing(12)
+            .spacing(6)
             .build();
         root.add_css_class("section");
 
