@@ -179,6 +179,7 @@ scale highlight {
     background-color: @accent;
     border-radius: 4px;
     min-height: 6px;
+    transition: background-color 100ms ease;
 }
 
 scale slider {
@@ -197,6 +198,21 @@ scale slider:hover {
     min-height: 22px;
     margin: -8px;
     box-shadow: 0 2px 6px alpha(black, 0.5);
+}
+
+/* ── Over-amplification warning (> 100% volume) ── */
+scale.overamplified highlight {
+    background-color: @orange;
+}
+
+scale.overamplified slider {
+    background-color: @orange;
+    box-shadow: 0 1px 4px alpha(@orange, 0.4);
+}
+
+scale.overamplified slider:hover {
+    background-color: #ff9633;
+    box-shadow: 0 2px 6px alpha(@orange, 0.5);
 }
 
 /* ── Buttons (generic) ── */
