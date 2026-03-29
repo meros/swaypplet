@@ -491,12 +491,20 @@ levelbar block.empty {
     background-color: transparent;
 }
 
-levelbar.low block.filled {
-    background-color: @red;
-}
-
 levelbar.charging block.filled {
     background-color: @green;
+}
+
+levelbar.battery-high block.filled {
+    background-color: @green;
+}
+
+levelbar.battery-medium block.filled {
+    background-color: @yellow;
+}
+
+levelbar.battery-low block.filled {
+    background-color: @red;
 }
 
 /* ── CPU info row ── */
