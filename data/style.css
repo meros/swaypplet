@@ -1214,7 +1214,7 @@ revealer {
 }
 
 .launcher-backdrop {
-    background-color: alpha(black, 0.5);
+    background-color: transparent;
 }
 
 .launcher-container {
@@ -1244,7 +1244,6 @@ revealer {
 }
 
 .launcher-results {
-    margin-top: 8px;
 }
 
 .launcher-result {
@@ -1289,4 +1288,248 @@ revealer {
     font-size: 9px;
     color: @fg_dim;
     opacity: 0.6;
+}
+
+/* ══════════════════════════════════════════════════════
+   Polkit auth modal — matches OSD/launcher visual language
+   ══════════════════════════════════════════════════════ */
+
+.polkit {
+    font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
+}
+
+.polkit-backdrop {
+    background-color: alpha(black, 0.45);
+}
+
+.polkit-container {
+    background-color: alpha(@bg0_h, 0.94);
+    border-radius: 22px;
+    border: 1px solid alpha(@bg3, 0.3);
+    box-shadow:
+        0 18px 56px alpha(black, 0.6),
+        0 6px 16px alpha(black, 0.35),
+        inset 0 1px 0 alpha(white, 0.08);
+    padding: 28px 30px 24px 30px;
+}
+
+/* Polkit-provided icon (image) */
+.polkit-icon {
+    color: @fg;
+    margin-bottom: 4px;
+}
+
+/* Nerd Font glyph fallback */
+.polkit-icon-glyph {
+    font-size: 52px;
+    color: @accent;
+    margin-bottom: 4px;
+    text-shadow: 0 2px 8px alpha(@accent, 0.35);
+}
+
+.polkit-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: @fg;
+    letter-spacing: 0.2px;
+}
+
+.polkit-message {
+    font-size: 13px;
+    color: @fg_dim;
+    line-height: 1.4;
+    margin-bottom: 6px;
+}
+
+/* ── Fingerprint pill ── */
+.polkit-fp-pill {
+    background-color: alpha(@accent, 0.15);
+    border: 1px solid alpha(@accent, 0.45);
+    border-radius: 999px;
+    padding: 10px 18px;
+    margin: 4px 0;
+    transition: all 220ms ease;
+}
+
+.polkit-fp-pill.polkit-fp-active {
+    animation: polkit-fp-pulse 1.6s ease-in-out infinite;
+}
+
+.polkit-fp-glyph {
+    font-size: 22px;
+    color: @accent;
+}
+
+.polkit-fp-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: @fg;
+}
+
+@keyframes polkit-fp-pulse {
+    0%, 100% {
+        background-color: alpha(@accent, 0.12);
+        border-color: alpha(@accent, 0.35);
+    }
+    50% {
+        background-color: alpha(@accent, 0.26);
+        border-color: alpha(@accent, 0.7);
+    }
+}
+
+/* ── Password entry ── */
+.polkit-entry {
+    background-color: alpha(@bg0, 0.65);
+    color: @fg;
+    border: 1px solid alpha(@bg3, 0.35);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 15px;
+    min-height: 40px;
+    caret-color: @fg;
+}
+
+.polkit-entry:focus,
+.polkit-entry:focus-within {
+    border-color: alpha(@accent, 0.6);
+    background-color: alpha(@bg0, 0.85);
+}
+
+.polkit-entry text {
+    color: @fg;
+}
+
+.polkit-entry text selection {
+    background-color: alpha(@accent, 0.4);
+}
+
+/* ── Identity picker ── */
+.polkit-identity-row {
+    margin-top: 2px;
+}
+
+.polkit-identity-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: @fg_dim;
+    letter-spacing: 0.6px;
+}
+
+.polkit-identity-combo {
+    background-color: alpha(@bg0, 0.6);
+    border-radius: 8px;
+    border: 1px solid alpha(@bg3, 0.3);
+    padding: 4px 8px;
+    color: @fg;
+}
+
+/* ── Status line ── */
+.polkit-status {
+    font-size: 12px;
+    margin-top: 2px;
+}
+
+.polkit-status-info {
+    color: @fg_dim;
+}
+
+.polkit-status-error {
+    color: @red;
+    font-weight: 600;
+}
+
+.polkit-status-success {
+    color: @accent;
+    font-weight: 600;
+}
+
+/* ── Details revealer ── */
+.polkit-details-toggle {
+    background: transparent;
+    border: none;
+    color: @fg_dim;
+    font-size: 11px;
+    padding: 4px 6px;
+    margin-top: 4px;
+    box-shadow: none;
+}
+
+.polkit-details-toggle:hover {
+    color: @fg;
+    background-color: alpha(white, 0.04);
+    border-radius: 6px;
+}
+
+.polkit-details {
+    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: @fg_dim;
+    background-color: alpha(@bg0, 0.5);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-top: 4px;
+}
+
+/* ── Action buttons ── */
+.polkit-actions {
+    margin-top: 8px;
+}
+
+.polkit-cancel {
+    background-color: alpha(@bg0, 0.6);
+    color: @fg;
+    border: 1px solid alpha(@bg3, 0.35);
+    border-radius: 10px;
+    padding: 8px 18px;
+    font-weight: 600;
+}
+
+.polkit-cancel:hover {
+    background-color: alpha(@bg1, 0.8);
+}
+
+.polkit-auth-btn {
+    background-color: @accent;
+    background-image: linear-gradient(180deg, alpha(white, 0.10) 0%, alpha(black, 0.10) 100%);
+    color: @bg0_h;
+    border: 1px solid alpha(black, 0.3);
+    border-radius: 10px;
+    padding: 8px 18px;
+    font-weight: 700;
+    box-shadow:
+        inset 0 1px 0 alpha(white, 0.2),
+        0 2px 6px alpha(@accent, 0.35);
+}
+
+.polkit-auth-btn:hover {
+    background-color: shade(@accent, 1.08);
+}
+
+.polkit-auth-btn:disabled {
+    opacity: 0.5;
+}
+
+/* ── Shake on error ── */
+@keyframes polkit-shake {
+    0%, 100% { margin-left: 0; margin-right: 0; }
+    15%      { margin-left: -8px; margin-right: 8px; }
+    30%      { margin-left: 7px; margin-right: -7px; }
+    45%      { margin-left: -5px; margin-right: 5px; }
+    60%      { margin-left: 4px; margin-right: -4px; }
+    75%      { margin-left: -2px; margin-right: 2px; }
+}
+
+.polkit-container.polkit-shake {
+    animation: polkit-shake 420ms cubic-bezier(.36,.07,.19,.97);
+}
+
+/* ── Success flash ── */
+.polkit-container.polkit-success {
+    border-color: alpha(@accent, 0.85);
+    box-shadow:
+        0 0 0 2px alpha(@accent, 0.4),
+        0 18px 56px alpha(black, 0.6),
+        0 6px 16px alpha(black, 0.35),
+        inset 0 1px 0 alpha(white, 0.12);
+    transition: all 200ms ease;
 }
