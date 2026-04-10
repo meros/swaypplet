@@ -30,7 +30,7 @@ mod dialog;
 mod helper;
 mod session;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::os::fd::RawFd;
 use std::rc::Rc;
@@ -48,10 +48,25 @@ use helper::{Helper, HelperEvent};
 
 const APP_ID: &str = "dev.swaypplet.polkit";
 
+/// Shared handle to the fd-watcher's `SourceId`. The watcher closure
+/// holds one clone and the orchestrator holds another (via
+/// `ActiveSession::fd_source`). Whichever side wants to dispose of the
+/// source calls `cancel_fd_source`, which atomically claims ownership
+/// and routes through `SourceId::remove()` exactly once — the other
+/// side sees `None` and does nothing. This prevents the non-unwinding
+/// panic from glib when two paths race to remove the same source.
+type SourceHandle = Rc<Cell<Option<glib::SourceId>>>;
+
+fn cancel_fd_source(handle: &SourceHandle) {
+    if let Some(id) = handle.take() {
+        id.remove();
+    }
+}
+
 struct ActiveSession {
     request: AuthRequest,
     helper: Option<Helper>,
-    fd_source: Option<glib::SourceId>,
+    fd_source: Option<SourceHandle>,
     reply: Option<oneshot::Sender<AuthOutcome>>,
     selected_uid: u32,
     /// True after PAM_PROMPT_ECHO_OFF/ON until the user submits a response.
@@ -60,8 +75,8 @@ struct ActiveSession {
 
 impl ActiveSession {
     fn finish(&mut self, outcome: AuthOutcome) {
-        if let Some(source) = self.fd_source.take() {
-            source.remove();
+        if let Some(handle) = self.fd_source.take() {
+            cancel_fd_source(&handle);
         }
         // Drop helper (sends SIGKILL via Drop) before resolving reply.
         self.helper.take();
@@ -232,6 +247,10 @@ fn spawn_helper(state: &Rc<RefCell<PolkitState>>, username: &str) {
 
 fn install_fd_watch(state: &Rc<RefCell<PolkitState>>, fd: RawFd) {
     let state_weak = Rc::downgrade(state);
+    // Shared slot for the source id. The closure and the orchestrator
+    // both hold a clone; whichever calls `.take()` first owns the remove.
+    let handle: SourceHandle = Rc::new(Cell::new(None));
+    let handle_cb = handle.clone();
     let source = glib::unix_fd_add_local(
         fd,
         glib::IOCondition::IN | glib::IOCondition::HUP | glib::IOCondition::ERR,
@@ -243,12 +262,16 @@ fn install_fd_watch(state: &Rc<RefCell<PolkitState>>, fd: RawFd) {
             if drained {
                 glib::ControlFlow::Continue
             } else {
+                // Claim the SourceId so no other path tries to remove
+                // it later. glib will auto-remove on Break.
+                handle_cb.take();
                 glib::ControlFlow::Break
             }
         },
     );
+    handle.set(Some(source));
     if let Some(active) = state.borrow_mut().active.as_mut() {
-        active.fd_source = Some(source);
+        active.fd_source = Some(handle);
     }
 }
 
@@ -295,10 +318,17 @@ fn drain_helper(state: &Rc<RefCell<PolkitState>>) -> bool {
                 })
                 .unwrap_or_default();
             if !username.is_empty() {
-                // Tear down current helper before respawn.
+                // Tear down current helper before respawn. We're running
+                // inside the watcher callback and will return
+                // ControlFlow::Break below, which auto-removes the
+                // source — so we just claim ownership of the SourceId
+                // (via cancel_fd_source's take) to prevent any later
+                // path from trying to remove it.
                 if let Some(active) = state.borrow_mut().active.as_mut() {
-                    if let Some(src) = active.fd_source.take() {
-                        src.remove();
+                    if let Some(handle) = active.fd_source.take() {
+                        // Just drop the SourceId; glib will remove it
+                        // via the pending Break return from this callback.
+                        handle.take();
                     }
                     active.helper.take();
                 }
@@ -407,8 +437,8 @@ fn handle_identity_change(state: &Rc<RefCell<PolkitState>>, uid: u32) {
     {
         let mut s = state.borrow_mut();
         if let Some(active) = s.active.as_mut() {
-            if let Some(src) = active.fd_source.take() {
-                src.remove();
+            if let Some(handle) = active.fd_source.take() {
+                cancel_fd_source(&handle);
             }
             active.helper.take();
             active.selected_uid = uid;
