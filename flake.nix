@@ -21,6 +21,7 @@
         graphene
         hicolor-icon-theme
         adwaita-icon-theme
+        polkit
       ];
     in
     {
@@ -29,7 +30,7 @@
         version = "0.1.0";
         src = ./.;
 
-        cargoHash = "sha256-48JDMfTZ/yudDxRT59WdA3gK7IQi0k30/qtUJq7iJmA=";
+        cargoHash = "sha256-HH+Kd5usZX84RcHfCI61rY/zBpfQeU//H8cAPo41JLk=";
 
         nativeBuildInputs = with pkgs; [
           pkg-config
@@ -68,6 +69,13 @@
           exec $out/bin/swaypplet osd "\$@"
           SCRIPT
           chmod +x $out/bin/swaypplet-osd
+
+          # Polkit authentication agent — runs as its own process
+          cat > $out/bin/swaypplet-polkit-agent <<SCRIPT
+          #!/bin/sh
+          exec $out/bin/swaypplet polkit-agent "\$@"
+          SCRIPT
+          chmod +x $out/bin/swaypplet-polkit-agent
         '';
 
         meta = with pkgs.lib; {
