@@ -63,6 +63,7 @@ pub struct NetworkSection {
     root: Box,
     state: Rc<RefCell<NetworkState>>,
     // Summary row
+    summary_btn: Button,
     summary_icon: Label,
     summary_text: Label,
     summary_arrow: Label,
@@ -455,6 +456,7 @@ impl NetworkSection {
             let section = Self {
                 root,
                 state: state_ref,
+                summary_btn,
                 summary_icon,
                 summary_text,
                 summary_arrow,
@@ -747,6 +749,16 @@ impl NetworkSection {
                 wifi::rebuild_wifi_list(&network_list_box_c, &state_c);
             },
         );
+    }
+
+    /// Switch into page mode: reveal detail immediately, hide the summary
+    /// toggle row. The wifi list toggle stays interactive.
+    pub fn expand_for_page(&self) {
+        self.summary_btn.set_visible(false);
+        self.detail_revealer.set_transition_duration(0);
+        self.detail_revealer.set_reveal_child(true);
+        self.detail_revealer.set_transition_duration(200);
+        self.summary_arrow.set_label("▾");
     }
 
     pub fn widget(&self) -> &gtk4::Box {

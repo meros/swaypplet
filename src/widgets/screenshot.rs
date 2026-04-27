@@ -39,6 +39,8 @@ fn hide_panel_for_widget(widget: &gtk4::Widget) {
 pub struct ScreenshotSection {
     root: gtk4::Box,
     #[allow(dead_code)]
+    summary_btn: gtk4::Button,
+    #[allow(dead_code)]
     summary_arrow: gtk4::Label,
     #[allow(dead_code)]
     detail_revealer: gtk4::Revealer,
@@ -246,6 +248,7 @@ impl ScreenshotSection {
 
         Self {
             root,
+            summary_btn,
             summary_arrow,
             detail_revealer,
             recording_pid,
@@ -268,6 +271,16 @@ impl ScreenshotSection {
                 self.root.remove_css_class("recording-active");
             }
         }
+    }
+
+    /// Switch into page mode: reveal detail immediately, hide the summary
+    /// toggle row.
+    pub fn expand_for_page(&self) {
+        self.summary_btn.set_visible(false);
+        self.detail_revealer.set_transition_duration(0);
+        self.detail_revealer.set_reveal_child(true);
+        self.detail_revealer.set_transition_duration(200);
+        self.summary_arrow.set_label("▾");
     }
 
     pub fn widget(&self) -> &gtk4::Box {

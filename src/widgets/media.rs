@@ -486,13 +486,17 @@ impl MediaSection {
                     w.time_label.set_visible(false);
                 }
 
-                // Play/pause button icon + "suggested" class
+                // Play/pause button icon + "suggested" class.
+                // Also toggles `.playing` on the section root so descendants
+                // (e.g. `.media-art-frame`) can drive the breathing animation.
                 if ms.status == PlaybackStatus::Playing {
                     w.play_pause_btn.set_label(ICON_PAUSE);
                     w.play_pause_btn.add_css_class("suggested");
+                    root.add_css_class("playing");
                 } else {
                     w.play_pause_btn.set_label(ICON_PLAY);
                     w.play_pause_btn.remove_css_class("suggested");
+                    root.remove_css_class("playing");
                 }
             }
         }

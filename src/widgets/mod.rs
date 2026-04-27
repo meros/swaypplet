@@ -1,11 +1,13 @@
 pub mod audio;
 pub mod bluetooth;
-pub mod display;
 pub mod brightness;
 pub mod clipboard;
+pub mod display;
 pub mod header;
 pub mod media;
 pub mod network;
 pub mod notifications;
+pub mod page_frame;
 pub mod power;
+pub mod quickinfo;
 pub mod screenshot;

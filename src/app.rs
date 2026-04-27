@@ -20,15 +20,16 @@ const APP_ID: &str = "dev.swaypplet.panel";
 
 static PANEL_CONFIG: LayerShellConfig = LayerShellConfig {
     namespace: "swaypplet",
-    default_width: Some(380),
+    default_width: None,
     default_height: None,
     anchors: &[
         (Edge::Top, true),
         (Edge::Bottom, true),
+        (Edge::Left, true),
         (Edge::Right, true),
     ],
-    margins: &[(Edge::Top, 8), (Edge::Bottom, 48), (Edge::Right, 8)],
-    keyboard_mode: gtk4_layer_shell::KeyboardMode::OnDemand,
+    margins: &[],
+    keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
 };
 
 struct AppState {
