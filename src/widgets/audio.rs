@@ -443,6 +443,7 @@ impl UnavailableBanner {
 
 struct Widgets {
     // Summary row (always visible)
+    summary_btn: gtk4::Button,
     summary_icon: gtk4::Label,
     summary_text: gtk4::Label,
     summary_arrow: gtk4::Label,
@@ -615,6 +616,7 @@ impl AudioSection {
         detail_box.append(&content);
 
         let widgets = Rc::new(Widgets {
+            summary_btn,
             summary_icon,
             summary_text,
             summary_arrow,
@@ -875,6 +877,16 @@ impl AudioSection {
     /// via the GLib main loop once the background thread completes.
     pub fn refresh(&self) {
         Self::schedule_refresh(self.widgets.clone(), self.updating.clone());
+    }
+
+    /// Switch into page mode: reveal detail immediately, hide the summary
+    /// toggle row (the lane strip icon replaces it as the page identifier).
+    pub fn expand_for_page(&self) {
+        self.widgets.summary_btn.set_visible(false);
+        self.widgets.detail_revealer.set_transition_duration(0);
+        self.widgets.detail_revealer.set_reveal_child(true);
+        self.widgets.detail_revealer.set_transition_duration(200);
+        self.widgets.summary_arrow.set_label("▾");
     }
 
     pub fn widget(&self) -> &gtk4::Box {

@@ -5,20 +5,28 @@
 
 /* ── Palette ── */
 @define-color bg0_h     #1d2021;
-@define-color bg0       #282828;
-@define-color bg1       #3c3836;
+@define-color bg0       #32302f;   /* dark0_soft — matches waybar background */
+@define-color bg1       #3c3836;   /* matches waybar surface */
 @define-color bg2       #504945;
 @define-color bg3       #665c54;
-@define-color fg        #ebdbb2;
-@define-color fg_dim    #a89984;
-@define-color red       #fb4934;
-@define-color green     #b8bb26;
-@define-color yellow    #fabd2f;
-@define-color blue      #83a598;
-@define-color purple    #d3869b;
-@define-color aqua      #8ec07c;
-@define-color orange    #fe8019;
-@define-color accent    #689d6a;
+@define-color fg        #ebdbb2;   /* matches waybar text */
+@define-color fg_dim    #a89984;   /* matches waybar muted */
+
+/* Semantic accents — mirrors waybar accent semantics */
+@define-color accent           #689d6a;  /* accentPrimary (green/cyan) */
+@define-color accent_secondary #d79921;  /* accentSecondary (yellow) */
+@define-color accent_tertiary  #458588;  /* accentTertiary (blue) */
+@define-color accent_quaternary #b16286; /* accentQuaternary (magenta) */
+@define-color accent_quinary   #cc241d;  /* accentQuinary (red) */
+
+/* Legacy aliases — keep so existing class references keep working */
+@define-color red     #cc241d;   /* matches waybar accentQuinary */
+@define-color green   #b8bb26;
+@define-color yellow  #d79921;   /* matches waybar accentSecondary */
+@define-color blue    #458588;   /* matches waybar accentTertiary */
+@define-color purple  #b16286;   /* matches waybar accentQuaternary */
+@define-color aqua    #689d6a;   /* collapsed onto accent (accentPrimary) */
+@define-color orange  #fe8019;   /* keep for over-amplification warning */
 
 /* ── Window: transparent so compositor alpha-blends ── */
 window, window.background, window.csd, decoration {
@@ -35,29 +43,390 @@ scrolledwindow, viewport {
 /* ── Panel window: background + rounded corners on the window itself ── */
 window.panel {
     font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
+    font-size: 10pt;
 }
 
-.panel-outer {
-    background-color: alpha(@bg0, 0.88);
-    border-radius: 16px;
+/* ── State-driven motion (verbatim from waybar) ── */
+@keyframes battery-critical-pulse {
+    from {
+        background-color: @accent_quinary;
+        box-shadow:
+            inset 0 1px 0 alpha(white, 0.08),
+            inset 0 -1px 0 alpha(black, 0.20),
+            0 1px 2px alpha(black, 0.25),
+            0 3px 8px alpha(black, 0.30);
+    }
+    to {
+        background-color: @accent_quinary;
+        box-shadow:
+            inset 0 1px 0 alpha(white, 0.18),
+            inset 0 -1px 0 alpha(black, 0.25),
+            0 2px 6px alpha(black, 0.35),
+            0 0 14px alpha(#cc241d, 0.60);
+    }
+}
+
+@keyframes media-breathing {
+    from {
+        box-shadow:
+            inset 0 1px 0 alpha(white, 0.08),
+            inset 0 -1px 0 alpha(black, 0.20),
+            0 1px 2px alpha(black, 0.25),
+            0 3px 8px alpha(black, 0.30);
+    }
+    to {
+        box-shadow:
+            inset 0 1px 0 alpha(white, 0.16),
+            inset 0 -1px 0 alpha(black, 0.25),
+            0 2px 6px alpha(black, 0.35),
+            0 0 14px alpha(#689d6a, 0.45);
+    }
+}
+
+@keyframes workspace-urgent-glow {
+    from {
+        box-shadow:
+            inset 0 1px 0 alpha(white, 0.10),
+            inset 0 -1px 0 alpha(black, 0.25),
+            0 2px 6px alpha(black, 0.35),
+            0 0 4px alpha(#cc241d, 0.15);
+    }
+    to {
+        box-shadow:
+            inset 0 1px 0 alpha(white, 0.10),
+            inset 0 -1px 0 alpha(black, 0.25),
+            0 2px 6px alpha(black, 0.35),
+            0 0 16px alpha(#cc241d, 0.65);
+    }
+}
+
+/* ── New control-panel container classes ── */
+.panel-backdrop {
+    background-color: alpha(black, 0.35);
+}
+
+.panel-container {
+    background-color: alpha(@bg0_h, 0.92);
+    border-radius: 22px;
+    border: 1px solid alpha(@bg3, 0.30);
+    box-shadow:
+        0 18px 56px alpha(black, 0.60),
+        0 6px 16px alpha(black, 0.35),
+        inset 0 1px 0 alpha(white, 0.08);
+    padding: 18px;
+    min-width: 880px;
+}
+
+/* ══════════════════════════════════════════════════════
+   Dispatch Board — sidebar lanes + quickinfo strip + content stack
+   ══════════════════════════════════════════════════════ */
+
+/* ── Keyframes ── */
+@keyframes lane-mount {
+    from { opacity: 0; transform: translateX(-12px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes lane-active-glow {
+    from { box-shadow: inset 0 0 0 0 alpha(@accent, 0.0); }
+    to   { box-shadow: 0 0 18px alpha(@accent, 0.35), inset 0 1px 0 alpha(white, 0.10); }
+}
+
+/* ── Dispatch shell override ── */
+.dispatch-shell {
+    min-width:  960px;
+    min-height: 720px;
+    padding:    0;
+}
+
+/* ── Quick-info strip ── */
+.dispatch-quickinfo {
+    min-height: 44px;
+    padding:    6px 12px;
+    background-color: alpha(@bg0_h, 0.60);
+    border-bottom: 1px solid alpha(@bg3, 0.20);
+}
+
+.qi-pill {
+    background-color: @bg1;
+    background-image: linear-gradient(180deg, alpha(white, 0.06) 0%, alpha(black, 0.06) 100%);
+    color: @fg;
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 10pt;
+    margin-right: 4px;
+    box-shadow:
+        inset 0 1px 0 alpha(white, 0.08),
+        inset 0 -1px 0 alpha(black, 0.20),
+        0 1px 2px alpha(black, 0.25),
+        0 3px 8px alpha(black, 0.30);
+    transition: all 150ms ease;
+}
+
+.qi-clock {
+    font-weight: 700;
+}
+
+/* Battery state tints */
+.qi-pill.qi-battery.warning {
+    background-color: alpha(@accent_secondary, 0.25);
+    background-image: linear-gradient(180deg, alpha(white, 0.04) 0%, alpha(black, 0.08) 100%);
+    color: @accent_secondary;
+}
+
+.qi-pill.qi-battery.critical {
+    background-color: @accent_quinary;
+    background-image: none;
+    color: @fg;
+    animation: battery-critical-pulse 0.7s steps(24) infinite alternate;
+}
+
+/* Muted volume */
+.qi-pill.qi-volume.muted {
+    color: @fg_dim;
+    opacity: 0.5;
+}
+
+/* Search button */
+.qi-search-btn {
+    background-color: @bg1;
+    background-image: linear-gradient(180deg, alpha(white, 0.06) 0%, alpha(black, 0.06) 100%);
+    color: @fg_dim;
+    border-radius: 8px;
+    padding: 0;
+    min-width:  32px;
+    min-height: 32px;
+    font-size: 16px;
+    box-shadow:
+        inset 0 1px 0 alpha(white, 0.08),
+        inset 0 -1px 0 alpha(black, 0.20),
+        0 1px 2px alpha(black, 0.25),
+        0 3px 8px alpha(black, 0.30);
+    transition: all 150ms ease;
+}
+
+.qi-search-btn:hover {
+    background-color: @bg2;
+    color: @fg;
+}
+
+/* Search entry — hidden by default; shown in search-active mode */
+.qi-search-entry {
+    background-color: alpha(@bg0, 0.6);
+    color: @fg;
     border: 1px solid alpha(@bg3, 0.3);
-    box-shadow: 0 8px 32px alpha(black, 0.4), 0 2px 8px alpha(black, 0.2);
+    border-radius: 10px;
+    padding: 4px 12px;
+    font-size: 14px;
+    min-height: 32px;
+    caret-color: @fg;
 }
 
-.panel-content {
-    padding: 12px;
+.qi-search-entry:focus {
+    border-color: alpha(@accent, 0.5);
+    box-shadow: 0 0 0 2px alpha(@accent, 0.15);
+}
+
+/* Search-active: hide pills + search button, show entry */
+.dispatch-quickinfo.qi-search-active .qi-pill,
+.dispatch-quickinfo.qi-search-active .qi-search-btn {
+    /* GTK4 doesn't reliably honor display:none from CSS;
+       rely on .set_visible() from Rust side. CSS provides
+       min-size=0 + opacity=0 as belt-and-suspenders fallback. */
+    min-width:  0;
+    min-height: 0;
+    opacity:    0;
+    padding:    0;
+    margin:     0;
+}
+
+/* ── Dispatch body (horizontal flex wrapper) ── */
+.dispatch-body {
+    background-color: transparent;
+    margin: 0;
+    padding: 0;
+}
+
+/* ── Lane strip ── */
+.dispatch-lanes {
+    background-color: transparent;
+    min-width: 64px;
+    padding: 4px 6px;
+}
+
+/* Reset GTK listbox default selection/focus chrome */
+.dispatch-lanes > row {
+    background-color: transparent;
+    padding: 0;
+    margin: 0;
+    border: none;
+    outline: none;
+    box-shadow: none;
+}
+
+.dispatch-lanes > row:selected,
+.dispatch-lanes > row:focus,
+.dispatch-lanes > row:hover {
+    background-color: transparent;
+    outline: none;
+    box-shadow: none;
+}
+
+/* ── Individual lane ── */
+.dispatch-lane {
+    background-color: transparent;
+    border-radius: 10px;
+    padding: 8px 4px;
+    min-height: 48px;
+    margin-bottom: 4px;
+    transition: background-color 150ms ease, box-shadow 150ms ease;
+    animation: lane-mount 220ms ease-out 1;
+}
+
+.dispatch-lane:hover {
+    background-color: alpha(white, 0.04);
+}
+
+.dispatch-lane:hover .dispatch-lane-icon {
+    color: @fg;
+}
+
+/* Selected state — raised pill, tinted bg, left accent stripe, soft glow */
+.dispatch-lane:selected,
+.dispatch-lane.selected {
+    background-color: alpha(@accent, 0.16);
+    background-image: linear-gradient(180deg, alpha(white, 0.08) 0%, alpha(black, 0.04) 100%);
+    border-left: 4px solid @accent;
+    padding-left: 0;
+    box-shadow:
+        inset 0 1px 0 alpha(white, 0.12),
+        inset 0 -1px 0 alpha(black, 0.20),
+        0 1px 2px alpha(black, 0.25),
+        0 3px 10px alpha(black, 0.30),
+        0 0 14px alpha(@accent, 0.20);
+}
+
+.dispatch-lane:selected .dispatch-lane-icon,
+.dispatch-lane.selected .dispatch-lane-icon {
+    color: @accent;
+}
+
+.dispatch-lane:selected .dispatch-lane-dot,
+.dispatch-lane.selected .dispatch-lane-dot {
+    background-color: @accent;
+}
+
+/* Active state — accent fill, soft glow */
+.dispatch-lane.active {
+    background-color: alpha(@accent, 0.18);
+    background-image: none;
+    border-left: 3px solid @accent;
+    box-shadow:
+        0 0 12px alpha(@accent, 0.25),
+        inset 0 1px 0 alpha(white, 0.08),
+        inset 0 -1px 0 alpha(black, 0.15);
+}
+
+.dispatch-lane.active .dispatch-lane-icon {
+    color: @accent;
+}
+
+.dispatch-lane.active .dispatch-lane-dot {
+    background-color: @accent;
+}
+
+/* Media lane — icon breathes when playing */
+.dispatch-lane.media-active .dispatch-lane-icon {
+    animation: media-breathing 2s ease-in-out infinite alternate;
+}
+
+/* Warning state — yellow dot + icon, no bg fill */
+.dispatch-lane.warning .dispatch-lane-icon {
+    color: @accent_secondary;
+}
+
+.dispatch-lane.warning .dispatch-lane-dot {
+    background-color: @accent_secondary;
+}
+
+/* Alerting state — red pulsing dot + red icon */
+.dispatch-lane.alerting .dispatch-lane-icon {
+    color: @accent_quinary;
+}
+
+.dispatch-lane.alerting .dispatch-lane-dot {
+    background-color: @accent_quinary;
+    animation: battery-critical-pulse 0.7s steps(24) infinite alternate;
+}
+
+/* Dim state — faded for hidden/non-matching lanes */
+.dispatch-lane.dim {
+    opacity: 0.35;
+}
+
+/* ── Lane icon ── */
+.dispatch-lane-icon {
+    font-size: 18px;
+    color: @fg_dim;
+    transition: color 200ms ease;
+    min-width: 24px;
+}
+
+/* ── Lane state dot (6×6px LED) ── */
+.dispatch-lane-dot {
+    min-width:  6px;
+    min-height: 6px;
+    border-radius: 50%;
+    background-color: transparent;
+    margin-top: 4px;
+    transition: all 200ms ease;
+}
+
+/* ── Content stack ── */
+.dispatch-stack {
+    background-color: transparent;
+    padding: 0;
+}
+
+.dispatch-stack > * {
+    min-height: 0;
+}
+
+/* ── Page frame (title + optional subtitle above each lane's content) ── */
+.page-frame {
+    padding: 16px 20px 8px;
+}
+
+.page-frame-header {
+    margin-bottom: 8px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid alpha(@bg3, 0.30);
+}
+
+.page-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: @fg;
+    letter-spacing: 0.2px;
+}
+
+.page-subtitle {
+    font-size: 11px;
+    color: @fg_dim;
+    letter-spacing: 0.3px;
 }
 
 /* ── Section cards ── */
 .section {
     background-color: @bg1;
-    background-image: linear-gradient(180deg, alpha(white, 0.04) 0%, alpha(black, 0.04) 100%);
+    background-image: linear-gradient(180deg, alpha(white, 0.06) 0%, alpha(black, 0.06) 100%);
     border-radius: 12px;
     padding: 12px;
     box-shadow:
-        inset 0 1px 0 alpha(white, 0.06),
-        inset 0 -1px 0 alpha(black, 0.15),
-        0 1px 3px alpha(black, 0.2);
+        inset 0 1px 0 alpha(white, 0.08),
+        inset 0 -1px 0 alpha(black, 0.20),
+        0 1px 2px alpha(black, 0.25),
+        0 3px 8px alpha(black, 0.30);
     transition: box-shadow 200ms ease;
 }
 
@@ -88,19 +457,21 @@ window.panel {
     min-height: 44px;
     font-size: 18px;
     box-shadow:
-        inset 0 1px 0 alpha(white, 0.06),
-        inset 0 -1px 0 alpha(black, 0.15),
-        0 1px 2px alpha(black, 0.2);
+        inset 0 1px 0 alpha(white, 0.08),
+        inset 0 -1px 0 alpha(black, 0.20),
+        0 1px 2px alpha(black, 0.25),
+        0 3px 8px alpha(black, 0.30);
     transition: all 150ms ease;
 }
 
 .toggle-btn:hover {
     background-color: @bg3;
-    background-image: linear-gradient(180deg, alpha(white, 0.10) 0%, alpha(black, 0.02) 100%);
+    background-image: linear-gradient(180deg, alpha(white, 0.14) 0%, alpha(black, 0.02) 100%);
     box-shadow:
-        inset 0 1px 0 alpha(white, 0.10),
-        inset 0 -1px 0 alpha(black, 0.15),
-        0 2px 6px alpha(black, 0.25);
+        inset 0 1px 0 alpha(white, 0.14),
+        inset 0 -1px 0 alpha(black, 0.20),
+        0 2px 4px alpha(black, 0.30),
+        0 6px 14px alpha(black, 0.30);
 }
 
 .toggle-btn:checked,
@@ -117,11 +488,11 @@ window.panel {
 
 .toggle-btn:checked:hover,
 .toggle-btn.active:hover {
-    background-color: #a3d4a0;
+    background-color: shade(@accent, 1.15);
     background-image: none;
     box-shadow:
-        0 3px 14px alpha(@aqua, 0.6),
-        0 0 28px alpha(@aqua, 0.2);
+        0 3px 14px alpha(@accent, 0.6),
+        0 0 28px alpha(@accent, 0.2);
 }
 
 .toggle-btn:checked:active,
@@ -218,29 +589,35 @@ scale.overamplified slider {
 }
 
 scale.overamplified slider:hover {
-    background-color: #ff9633;
+    background-color: shade(@orange, 1.10);
     box-shadow: 0 2px 6px alpha(@orange, 0.5);
 }
 
 /* ── Buttons (generic) ── */
 button {
     background-color: @bg2;
+    background-image: linear-gradient(180deg, alpha(white, 0.06) 0%, alpha(black, 0.06) 100%);
     color: @fg;
     border-radius: 8px;
     padding: 8px 12px;
     min-height: 32px;
     border: none;
     box-shadow:
-        inset 0 1px 0 alpha(white, 0.05),
-        0 1px 2px alpha(black, 0.2);
+        inset 0 1px 0 alpha(white, 0.08),
+        inset 0 -1px 0 alpha(black, 0.20),
+        0 1px 2px alpha(black, 0.25),
+        0 3px 8px alpha(black, 0.30);
     transition: all 150ms ease;
 }
 
 button:hover {
     background-color: @bg3;
+    background-image: linear-gradient(180deg, alpha(white, 0.14) 0%, alpha(black, 0.02) 100%);
     box-shadow:
-        inset 0 1px 0 alpha(white, 0.08),
-        0 2px 4px alpha(black, 0.25);
+        inset 0 1px 0 alpha(white, 0.14),
+        inset 0 -1px 0 alpha(black, 0.20),
+        0 2px 4px alpha(black, 0.30),
+        0 6px 14px alpha(black, 0.30);
 }
 
 button:active {
@@ -268,7 +645,7 @@ button.suggested {
 }
 
 button.suggested:hover {
-    background-color: #7dae71;
+    background-color: shade(@accent, 1.12);
 }
 
 button.flat {
@@ -365,6 +742,10 @@ button.flat:hover {
     min-height: 56px;
     border-radius: 8px;
     background-color: alpha(@bg3, 0.3);
+}
+
+.playing .media-art-frame {
+    animation: media-breathing 2s ease-in-out infinite alternate;
 }
 
 .media-art {
@@ -479,6 +860,7 @@ button.flat:hover {
 
 .battery-icon.low {
     color: @red;
+    animation: battery-critical-pulse 0.7s steps(24) infinite alternate;
 }
 
 levelbar trough {
@@ -550,6 +932,7 @@ levelbar.battery-low block.filled {
     background-color: @red;
     color: @fg;
     font-size: 11px;
+    animation: battery-critical-pulse 0.7s steps(24) infinite alternate;
 }
 
 /* ── Spinner / loading states ── */
@@ -840,7 +1223,7 @@ revealer {
 .network-active-dot {
     color: @accent;
     font-size: 8px;
-    margin-end: 2px;
+    margin-right: 2px;
 }
 
 .network-subsection-title {
@@ -1023,6 +1406,7 @@ revealer {
 .osd-wrapper {
     /* Transparent margin gives room for drop shadow to render */
     padding: 48px;
+    font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
 }
 
 .osd-container {
@@ -1108,6 +1492,7 @@ revealer {
         0 8px 32px alpha(black, 0.5),
         0 0 16px alpha(@red, 0.2),
         inset 0 1px 0 alpha(white, 0.08);
+    animation: battery-critical-pulse 0.7s steps(24) infinite alternate;
 }
 
 .notification-app-name {
@@ -1148,6 +1533,7 @@ revealer {
     background-color: @accent;
     border-radius: 2px;
     min-height: 4px;
+    animation: media-breathing 2s ease-in-out infinite alternate;
 }
 
 .notification-actions {

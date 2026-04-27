@@ -12,6 +12,7 @@ pub struct NotificationsSection {
     root: gtk4::Box,
     list_box: gtk4::Box,
     empty_label: gtk4::Label,
+    summary_btn: gtk4::Button,
     summary_text: gtk4::Label,
     summary_arrow: gtk4::Label,
     detail_revealer: gtk4::Revealer,
@@ -135,6 +136,7 @@ impl NotificationsSection {
             root,
             list_box,
             empty_label,
+            summary_btn,
             summary_text,
             summary_arrow,
             detail_revealer,
@@ -168,6 +170,16 @@ impl NotificationsSection {
 
     pub fn refresh(&self) {
         self.rebuild();
+    }
+
+    /// Switch into page mode: reveal detail immediately, hide the summary
+    /// toggle row.
+    pub fn expand_for_page(&self) {
+        self.summary_btn.set_visible(false);
+        self.detail_revealer.set_transition_duration(0);
+        self.detail_revealer.set_reveal_child(true);
+        self.detail_revealer.set_transition_duration(200);
+        self.summary_arrow.set_label("▾");
     }
 
     pub fn widget(&self) -> &gtk4::Box {

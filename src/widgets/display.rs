@@ -254,6 +254,7 @@ fn populate_output_list_with_data(list: &Box, outputs: &[OutputInfo]) {
 #[allow(dead_code)]
 pub struct DisplaySection {
     root: Box,
+    summary_btn: Button,
     summary_text: Label,
     summary_arrow: Label,
     detail_revealer: Revealer,
@@ -327,6 +328,7 @@ impl DisplaySection {
 
         let section = Self {
             root,
+            summary_btn,
             summary_text,
             summary_arrow,
             detail_revealer,
@@ -360,6 +362,16 @@ impl DisplaySection {
             };
             summary_text.set_label(&summary);
         });
+    }
+
+    /// Switch into page mode: reveal detail immediately, hide the summary
+    /// toggle row.
+    pub fn expand_for_page(&self) {
+        self.summary_btn.set_visible(false);
+        self.detail_revealer.set_transition_duration(0);
+        self.detail_revealer.set_reveal_child(true);
+        self.detail_revealer.set_transition_duration(200);
+        self.summary_arrow.set_label("▾");
     }
 
     /// Return a reference to the root widget for embedding in the panel.

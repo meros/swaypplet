@@ -37,6 +37,7 @@ pub struct BrightnessSection {
     scale: gtk4::Scale,
     pct_label: gtk4::Label,
     summary_text: gtk4::Label,
+    summary_btn: gtk4::Button,
     summary_arrow: gtk4::Label,
     detail_revealer: gtk4::Revealer,
     /// Guard flag: true while `refresh()` is programmatically updating the scale
@@ -160,6 +161,7 @@ impl BrightnessSection {
             scale,
             pct_label,
             summary_text,
+            summary_btn,
             summary_arrow,
             detail_revealer,
             updating,
@@ -188,6 +190,16 @@ impl BrightnessSection {
                 }
             },
         );
+    }
+
+    /// Switch into page mode: reveal detail immediately, hide the summary
+    /// toggle row.
+    pub fn expand_for_page(&self) {
+        self.summary_btn.set_visible(false);
+        self.detail_revealer.set_transition_duration(0);
+        self.detail_revealer.set_reveal_child(true);
+        self.detail_revealer.set_transition_duration(200);
+        self.summary_arrow.set_label("▾");
     }
 
     pub fn widget(&self) -> &gtk4::Box {

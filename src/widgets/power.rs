@@ -328,7 +328,9 @@ pub struct PowerSection {
     // Battery widget handles (only present when a battery was found).
     bat_handles: Option<Rc<BatteryHandles>>,
 
-    // Summary labels (always visible).
+    // Summary row button + labels (always visible).
+    #[allow(dead_code)]
+    summary_btn: gtk4::Button,
     summary_icon: gtk4::Label,
     summary_text: gtk4::Label,
     // Stored to allow toggling arrow glyph; mutated only via cloned handle in closure.
@@ -717,6 +719,7 @@ impl PowerSection {
         Self {
             root,
             bat_path,
+            summary_btn,
             state: RefCell::new(state),
             bat_handles,
             summary_icon,
@@ -745,6 +748,16 @@ impl PowerSection {
             .set_label(&format_governor_info(&new_state.governor));
 
         *self.state.borrow_mut() = new_state;
+    }
+
+    /// Switch into page mode: reveal detail immediately, hide the summary
+    /// toggle row.
+    pub fn expand_for_page(&self) {
+        self.summary_btn.set_visible(false);
+        self.detail_revealer.set_transition_duration(0);
+        self.detail_revealer.set_reveal_child(true);
+        self.detail_revealer.set_transition_duration(200);
+        self.summary_arrow.set_label("▾");
     }
 
     pub fn widget(&self) -> &gtk4::Box {
