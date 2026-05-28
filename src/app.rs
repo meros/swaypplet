@@ -18,17 +18,19 @@ use crate::theme;
 
 const APP_ID: &str = "dev.swaypplet.panel";
 
+// Start-menu popup: bottom-left anchored, ~780x640, clearing the waybar.
 static PANEL_CONFIG: LayerShellConfig = LayerShellConfig {
     namespace: "swaypplet",
-    default_width: None,
-    default_height: None,
+    default_width: Some(780),
+    default_height: Some(640),
     anchors: &[
-        (Edge::Top, true),
         (Edge::Bottom, true),
         (Edge::Left, true),
-        (Edge::Right, true),
     ],
-    margins: &[],
+    margins: &[
+        (Edge::Bottom, 48),
+        (Edge::Left, 8),
+    ],
     keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
 };
 

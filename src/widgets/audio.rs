@@ -441,6 +441,7 @@ impl UnavailableBanner {
 
 // ── AudioSection ──────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 struct Widgets {
     // Summary row (always visible)
     summary_btn: gtk4::Button,
@@ -460,6 +461,7 @@ struct Widgets {
     unavailable: UnavailableBanner, // shown when wpctl is unavailable
 }
 
+#[allow(dead_code)]
 pub struct AudioSection {
     root: gtk4::Box,
     widgets: Rc<Widgets>,
@@ -879,17 +881,15 @@ impl AudioSection {
         Self::schedule_refresh(self.widgets.clone(), self.updating.clone());
     }
 
-    /// Switch into page mode: reveal detail immediately, hide the summary
-    /// toggle row (the lane strip icon replaces it as the page identifier).
-    pub fn expand_for_page(&self) {
-        self.widgets.summary_btn.set_visible(false);
-        self.widgets.detail_revealer.set_transition_duration(0);
-        self.widgets.detail_revealer.set_reveal_child(true);
-        self.widgets.detail_revealer.set_transition_duration(200);
-        self.widgets.summary_arrow.set_label("▾");
-    }
-
+    #[allow(dead_code)]
     pub fn widget(&self) -> &gtk4::Box {
         &self.root
+    }
+
+    /// Clone of the output (sink) volume `gtk4::Scale` (range 0–150) so it can
+    /// be hoisted to the start-menu top level. The clone shares the same
+    /// underlying `GtkAdjustment`, so it stays in sync with this section.
+    pub fn output_volume_scale(&self) -> gtk4::Scale {
+        self.widgets.sink_row.scale.clone()
     }
 }

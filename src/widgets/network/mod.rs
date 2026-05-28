@@ -751,16 +751,6 @@ impl NetworkSection {
         );
     }
 
-    /// Switch into page mode: reveal detail immediately, hide the summary
-    /// toggle row. The wifi list toggle stays interactive.
-    pub fn expand_for_page(&self) {
-        self.summary_btn.set_visible(false);
-        self.detail_revealer.set_transition_duration(0);
-        self.detail_revealer.set_reveal_child(true);
-        self.detail_revealer.set_transition_duration(200);
-        self.summary_arrow.set_label("▾");
-    }
-
     pub fn widget(&self) -> &gtk4::Box {
         &self.root
     }

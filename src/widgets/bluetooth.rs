@@ -571,16 +571,6 @@ impl BluetoothSection {
         }
     }
 
-    /// Switch into page mode: reveal detail immediately, hide the summary
-    /// toggle row.
-    pub fn expand_for_page(&self) {
-        self.summary_btn.set_visible(false);
-        self.detail_revealer.set_transition_duration(0);
-        self.detail_revealer.set_reveal_child(true);
-        self.detail_revealer.set_transition_duration(200);
-        self.summary_arrow.set_label("▾");
-    }
-
     /// Return a reference to the root widget for embedding in the panel.
     pub fn widget(&self) -> &Box {
         &self.root

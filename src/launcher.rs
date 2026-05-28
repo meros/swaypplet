@@ -1,4 +1,8 @@
-//! Full-screen launcher powered by the elephant search daemon.
+//! App launcher powered by the elephant search daemon.
+//!
+//! [`LauncherView`] is an embeddable widget (search entry + results list +
+//! search/keyboard wiring) with no window of its own. Both the standalone
+//! full-screen [`Launcher`] and the start-menu popup mount the same view.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -45,11 +49,194 @@ struct LauncherState {
     query_generation: u64,
 }
 
-pub struct Launcher {
-    window: gtk4::Window,
+// ── Embeddable launcher view ────────────────────────────────────────────────
+
+/// Search entry + scrolled results list, wired to elephant. Mountable inside
+/// any container. Calls the registered `on_activate` callback (if any) right
+/// after firing the activation, so a host popup can hide itself.
+pub struct LauncherView {
+    root: gtk4::Box,
     entry: gtk4::SearchEntry,
     results_box: gtk4::Box,
     state: Rc<RefCell<LauncherState>>,
+    on_activate: Rc<RefCell<Option<Box<dyn Fn()>>>>,
+}
+
+impl LauncherView {
+    pub fn new() -> Self {
+        let root = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(0)
+            .build();
+        root.add_css_class("launcher-view");
+
+        let entry = gtk4::SearchEntry::builder()
+            .placeholder_text("Search")
+            .hexpand(true)
+            .build();
+        entry.add_css_class("launcher-entry");
+
+        let results_box = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(0)
+            .build();
+        results_box.add_css_class("launcher-results");
+
+        let scroller = gtk4::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk4::PolicyType::Never)
+            .vscrollbar_policy(gtk4::PolicyType::Automatic)
+            .vexpand(true)
+            .child(&results_box)
+            .build();
+        scroller.add_css_class("launcher-scroller");
+
+        root.append(&entry);
+        root.append(&scroller);
+
+        let view = LauncherView {
+            root,
+            entry,
+            results_box,
+            state: Rc::new(RefCell::new(LauncherState {
+                results: Vec::new(),
+                selected: 0,
+                query_generation: 0,
+            })),
+            on_activate: Rc::new(RefCell::new(None)),
+        };
+
+        view.wire_search();
+        view
+    }
+
+    pub fn widget(&self) -> &gtk4::Box {
+        &self.root
+    }
+
+    /// Register a callback invoked right after an item is activated (used by
+    /// the start menu to hide itself).
+    pub fn set_on_activate<F: Fn() + 'static>(&self, f: F) {
+        *self.on_activate.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// Reset to the empty-query state (cleared input + default app list).
+    pub fn reset(&self) {
+        self.entry.set_text("");
+        {
+            let mut s = self.state.borrow_mut();
+            s.results.clear();
+            s.selected = 0;
+        }
+        // Empty query shows the default desktop-application list.
+        run_search(
+            String::new(),
+            bump_generation(&self.state),
+            self.state.clone(),
+            self.results_box.clone(),
+            self.on_activate.clone(),
+        );
+    }
+
+    pub fn focus_entry(&self) {
+        self.entry.grab_focus();
+    }
+
+    /// Attach a Capture-phase key controller to `widget` so Enter/Escape/arrows
+    /// reach the launcher before the SearchEntry consumes them. `on_escape` is
+    /// called when Escape is pressed (e.g. to hide the host popup).
+    pub fn install_key_controller<E: Fn() + 'static>(
+        &self,
+        widget: &impl IsA<gtk4::Widget>,
+        on_escape: E,
+    ) {
+        let key_controller = gtk4::EventControllerKey::new();
+        key_controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
+
+        let view_state = self.state.clone();
+        let results_box = self.results_box.clone();
+        let entry = self.entry.clone();
+        let on_activate = self.on_activate.clone();
+
+        key_controller.connect_key_pressed(move |_, key, _, _| {
+            match key {
+                gtk4::gdk::Key::Escape => {
+                    on_escape();
+                    glib::Propagation::Stop
+                }
+                gtk4::gdk::Key::Down => {
+                    move_selection_state(&view_state, &results_box, 1);
+                    glib::Propagation::Stop
+                }
+                gtk4::gdk::Key::Up => {
+                    move_selection_state(&view_state, &results_box, -1);
+                    glib::Propagation::Stop
+                }
+                gtk4::gdk::Key::Return | gtk4::gdk::Key::KP_Enter => {
+                    let s = view_state.borrow();
+                    if let Some(item) = s.results.get(s.selected) {
+                        let provider = item.provider.clone();
+                        let identifier = item.identifier.clone();
+                        let action = default_action(item);
+                        let query = entry.text().to_string();
+                        drop(s);
+                        activate_async(provider, identifier, action, query);
+                        if let Some(cb) = on_activate.borrow().as_ref() {
+                            cb();
+                        }
+                    }
+                    glib::Propagation::Stop
+                }
+                _ => glib::Propagation::Proceed,
+            }
+        });
+        widget.add_controller(key_controller);
+    }
+
+    fn wire_search(&self) {
+        let results_box = self.results_box.clone();
+        let state = self.state.clone();
+        let entry = self.entry.clone();
+        let on_activate = self.on_activate.clone();
+
+        let debounce_id: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+
+        entry.connect_search_changed(move |entry| {
+            let query = entry.text().to_string();
+
+            if let Some(id) = debounce_id.borrow_mut().take() {
+                id.remove();
+            }
+
+            let results_box_c = results_box.clone();
+            let state_c = state.clone();
+            let on_activate_c = on_activate.clone();
+
+            let generation = bump_generation(&state_c);
+
+            let debounce_id_c = debounce_id.clone();
+            let id = glib::timeout_add_local_once(
+                std::time::Duration::from_millis(DEBOUNCE_MS),
+                move || {
+                    *debounce_id_c.borrow_mut() = None;
+                    run_search(query, generation, state_c, results_box_c, on_activate_c);
+                },
+            );
+            *debounce_id.borrow_mut() = Some(id);
+        });
+    }
+}
+
+impl Default for LauncherView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── Standalone full-screen launcher window ──────────────────────────────────
+
+pub struct Launcher {
+    window: gtk4::Window,
+    view: LauncherView,
 }
 
 impl Launcher {
@@ -57,7 +244,6 @@ impl Launcher {
         let window = layer_shell::create_layer_window(app, &LAUNCHER_CONFIG);
         window.add_css_class("launcher");
 
-        // Semi-transparent backdrop — fills entire screen
         let backdrop = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .halign(gtk4::Align::Fill)
@@ -67,205 +253,99 @@ impl Launcher {
             .build();
         backdrop.add_css_class("launcher-backdrop");
 
-        // Top spacer — positions content at ~25% from top (Spotlight-style)
         let top_offset = monitor_top_offset();
         let top_spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
         top_spacer.set_height_request(top_offset);
 
-        // Content container — centered horizontally
         let container = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(0)
             .halign(gtk4::Align::Center)
             .width_request(560)
+            .height_request(520)
             .build();
         container.add_css_class("launcher-container");
 
-        // Search entry
-        let entry = gtk4::SearchEntry::builder()
-            .placeholder_text("Search")
-            .hexpand(true)
-            .build();
-        entry.add_css_class("launcher-entry");
+        let view = LauncherView::new();
+        container.append(view.widget());
 
-        // Results list
-        let results_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(0)
-            .build();
-        results_box.add_css_class("launcher-results");
-
-        container.append(&entry);
-        container.append(&results_box);
         backdrop.append(&top_spacer);
         backdrop.append(&container);
         window.set_child(Some(&backdrop));
 
-        let state = Rc::new(RefCell::new(LauncherState {
-            results: Vec::new(),
-            selected: 0,
-            query_generation: 0,
-        }));
+        // Hide the window after a result is activated.
+        {
+            let window_c = window.clone();
+            view.set_on_activate(move || window_c.set_visible(false));
+        }
 
-        let launcher = Launcher {
-            window,
-            entry,
-            results_box,
-            state,
-        };
+        // Esc / arrows / Enter handled on the window in capture phase.
+        {
+            let window_c = window.clone();
+            view.install_key_controller(&window, move || window_c.set_visible(false));
+        }
 
-        launcher.wire_search();
-        launcher.wire_keyboard();
-        launcher.wire_backdrop_click();
+        // Backdrop click → dismiss.
+        let gesture = gtk4::GestureClick::new();
+        {
+            let window_c = window.clone();
+            gesture.connect_released(move |_, _, _, _| {
+                window_c.set_visible(false);
+            });
+        }
+        window.add_controller(gesture);
 
-        launcher
+        Launcher { window, view }
     }
 
     pub fn toggle(&self) {
         if self.window.is_visible() {
-            self.hide();
+            self.window.set_visible(false);
         } else {
-            self.show();
+            self.view.reset();
+            self.window.set_visible(true);
+            self.view.focus_entry();
         }
     }
+}
 
-    pub fn show(&self) {
-        self.entry.set_text("");
-        {
-            let mut s = self.state.borrow_mut();
-            s.results.clear();
-            s.selected = 0;
+// ── Shared helpers ──────────────────────────────────────────────────────────
+
+fn bump_generation(state: &Rc<RefCell<LauncherState>>) -> u64 {
+    let mut s = state.borrow_mut();
+    s.query_generation += 1;
+    s.query_generation
+}
+
+fn move_selection_state(
+    state: &Rc<RefCell<LauncherState>>,
+    results_box: &gtk4::Box,
+    delta: i32,
+) {
+    let mut s = state.borrow_mut();
+    if s.results.is_empty() {
+        return;
+    }
+    let old = s.selected;
+    let len = s.results.len();
+    let new = if delta < 0 {
+        old.saturating_sub((-delta) as usize)
+    } else {
+        (old + delta as usize).min(len - 1)
+    };
+    if new != old {
+        s.selected = new;
+        drop(s);
+        update_selection(results_box, old, new);
+    }
+}
+
+fn activate_async(provider: String, identifier: String, action: String, query: String) {
+    std::thread::spawn(move || {
+        if let Err(e) = elephant::activate(&provider, &identifier, &action, &query) {
+            log::warn!("Elephant activate failed: {}", e);
         }
-        self.clear_results_ui();
-        self.window.set_visible(true);
-        self.entry.grab_focus();
-    }
-
-    pub fn hide(&self) {
-        self.window.set_visible(false);
-    }
-
-    fn wire_search(&self) {
-        let results_box = self.results_box.clone();
-        let state = self.state.clone();
-        let entry = self.entry.clone();
-
-        // Debounced search
-        let debounce_id: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
-
-        entry.connect_search_changed(move |entry| {
-            let query = entry.text().to_string();
-
-            // Cancel previous debounce timer
-            if let Some(id) = debounce_id.borrow_mut().take() {
-                id.remove();
-            }
-
-            let results_box_c = results_box.clone();
-            let state_c = state.clone();
-
-            // Bump generation to discard stale results
-            {
-                let mut s = state_c.borrow_mut();
-                s.query_generation += 1;
-            }
-            let generation = state_c.borrow().query_generation;
-
-            if query.is_empty() {
-                // Clear results immediately
-                let mut s = state_c.borrow_mut();
-                s.results.clear();
-                s.selected = 0;
-                clear_results_box(&results_box_c);
-                return;
-            }
-
-            let debounce_id_c = debounce_id.clone();
-            let id = glib::timeout_add_local_once(
-                std::time::Duration::from_millis(DEBOUNCE_MS),
-                move || {
-                    *debounce_id_c.borrow_mut() = None;
-                    run_search(query, generation, state_c, results_box_c);
-                },
-            );
-            *debounce_id.borrow_mut() = Some(id);
-        });
-    }
-
-    fn wire_keyboard(&self) {
-        let key_controller = gtk4::EventControllerKey::new();
-        // Capture phase: intercept Enter/Escape/arrows before SearchEntry consumes them
-        key_controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
-        let state = self.state.clone();
-        let results_box = self.results_box.clone();
-        let window = self.window.clone();
-        let entry = self.entry.clone();
-
-        key_controller.connect_key_pressed(move |_, key, _, _| {
-            match key {
-                gtk4::gdk::Key::Escape => {
-                    window.set_visible(false);
-                    glib::Propagation::Stop
-                }
-                gtk4::gdk::Key::Down => {
-                    let mut s = state.borrow_mut();
-                    if !s.results.is_empty() && s.selected < s.results.len() - 1 {
-                        let old = s.selected;
-                        s.selected += 1;
-                        let new = s.selected;
-                        drop(s);
-                        update_selection(&results_box, old, new);
-                    }
-                    glib::Propagation::Stop
-                }
-                gtk4::gdk::Key::Up => {
-                    let mut s = state.borrow_mut();
-                    if s.selected > 0 {
-                        let old = s.selected;
-                        s.selected -= 1;
-                        let new = s.selected;
-                        drop(s);
-                        update_selection(&results_box, old, new);
-                    }
-                    glib::Propagation::Stop
-                }
-                gtk4::gdk::Key::Return | gtk4::gdk::Key::KP_Enter => {
-                    let s = state.borrow();
-                    if let Some(item) = s.results.get(s.selected) {
-                        let provider = item.provider.clone();
-                        let identifier = item.identifier.clone();
-                        let action = default_action(item);
-                        let query = entry.text().to_string();
-                        drop(s);
-
-                        window.set_visible(false);
-
-                        std::thread::spawn(move || {
-                            if let Err(e) = elephant::activate(&provider, &identifier, &action, &query) {
-                                log::warn!("Elephant activate failed: {}", e);
-                            }
-                        });
-                    }
-                    glib::Propagation::Stop
-                }
-                _ => glib::Propagation::Proceed,
-            }
-        });
-        self.window.add_controller(key_controller);
-    }
-
-    fn wire_backdrop_click(&self) {
-        let gesture = gtk4::GestureClick::new();
-        let window = self.window.clone();
-        gesture.connect_released(move |_, _, _, _| {
-            window.set_visible(false);
-        });
-        self.window.add_controller(gesture);
-    }
-
-    fn clear_results_ui(&self) {
-        clear_results_box(&self.results_box);
-    }
+    });
 }
 
 fn clear_results_box(results_box: &gtk4::Box) {
@@ -279,13 +359,21 @@ fn run_search(
     generation: u64,
     state: Rc<RefCell<LauncherState>>,
     results_box: gtk4::Box,
+    on_activate: Rc<RefCell<Option<Box<dyn Fn()>>>>,
 ) {
     let result_holder: Arc<Mutex<Option<Vec<SearchResult>>>> = Arc::new(Mutex::new(None));
     let result_writer = result_holder.clone();
 
+    // Empty query → default desktop-application list only.
+    let providers: Vec<&str> = if query.is_empty() {
+        vec!["desktopapplications"]
+    } else {
+        DEFAULT_PROVIDERS.to_vec()
+    };
+
     let query_c = query.clone();
     std::thread::spawn(move || {
-        match elephant::query(&query_c, DEFAULT_PROVIDERS, MAX_VISIBLE_RESULTS as i32) {
+        match elephant::query(&query_c, &providers, MAX_VISIBLE_RESULTS as i32) {
             Ok(results) => {
                 *result_writer.lock().unwrap() = Some(results);
             }
@@ -296,29 +384,25 @@ fn run_search(
         }
     });
 
-    // Poll for results
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
         let done = result_holder.lock().unwrap().is_some();
         if !done {
             return glib::ControlFlow::Continue;
         }
 
-        // Check if this is still the current query generation
         let current_gen = state.borrow().query_generation;
         if generation != current_gen {
             return glib::ControlFlow::Break;
         }
 
         let results = result_holder.lock().unwrap().take().unwrap();
-
         {
             let mut s = state.borrow_mut();
             s.results = results;
             s.selected = 0;
         }
 
-        rebuild_results_ui(&results_box, &state, &query);
-
+        rebuild_results_ui(&results_box, &state, &query, &on_activate);
         glib::ControlFlow::Break
     });
 }
@@ -327,6 +411,7 @@ fn rebuild_results_ui(
     results_box: &gtk4::Box,
     state: &Rc<RefCell<LauncherState>>,
     query: &str,
+    on_activate: &Rc<RefCell<Option<Box<dyn Fn()>>>>,
 ) {
     clear_results_box(results_box);
 
@@ -334,7 +419,7 @@ fn rebuild_results_ui(
     let selected = s.selected;
 
     for (i, result) in s.results.iter().enumerate() {
-        let row = build_result_row(result, i == selected, i, state, query);
+        let row = build_result_row(result, i == selected, query, on_activate);
         results_box.append(&row);
     }
 }
@@ -342,9 +427,8 @@ fn rebuild_results_ui(
 fn build_result_row(
     result: &SearchResult,
     selected: bool,
-    _index: usize,
-    _state: &Rc<RefCell<LauncherState>>,
     query: &str,
+    on_activate: &Rc<RefCell<Option<Box<dyn Fn()>>>>,
 ) -> gtk4::Box {
     let row = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
@@ -355,7 +439,6 @@ fn build_result_row(
         row.add_css_class("selected");
     }
 
-    // Icon
     let icon_label = gtk4::Label::builder()
         .label(provider_icon(&result.provider))
         .halign(gtk4::Align::Center)
@@ -363,7 +446,6 @@ fn build_result_row(
         .build();
     icon_label.add_css_class("launcher-result-icon");
 
-    // Try to load the icon as a GTK icon if it looks like an icon name
     if !result.icon.is_empty() && !result.icon.contains('/') {
         let theme = gtk4::IconTheme::for_display(&gtk4::gdk::Display::default().unwrap());
         if theme.has_icon(&result.icon) {
@@ -380,7 +462,6 @@ fn build_result_row(
         row.append(&icon_label);
     }
 
-    // Text content
     let text_box = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
         .spacing(2)
@@ -408,7 +489,6 @@ fn build_result_row(
 
     row.append(&text_box);
 
-    // Provider badge
     let badge = gtk4::Label::builder()
         .label(&result.provider)
         .halign(gtk4::Align::End)
@@ -417,31 +497,23 @@ fn build_result_row(
     badge.add_css_class("launcher-result-badge");
     row.append(&badge);
 
-    // Click to activate
+    // Click to activate.
     let gesture = gtk4::GestureClick::new();
     let provider = result.provider.clone();
     let identifier = result.identifier.clone();
     let action = default_action(result);
     let query_str = query.to_string();
-    gesture.connect_released(move |gesture, _, _, _| {
-        let provider = provider.clone();
-        let identifier = identifier.clone();
-        let action = action.clone();
-        let query = query_str.clone();
-
-        if let Some(widget) = gesture.widget() {
-            if let Some(root) = widget.root() {
-                if let Ok(window) = root.downcast::<gtk4::Window>() {
-                    window.set_visible(false);
-                }
-            }
+    let on_activate = on_activate.clone();
+    gesture.connect_released(move |_, _, _, _| {
+        activate_async(
+            provider.clone(),
+            identifier.clone(),
+            action.clone(),
+            query_str.clone(),
+        );
+        if let Some(cb) = on_activate.borrow().as_ref() {
+            cb();
         }
-
-        std::thread::spawn(move || {
-            if let Err(e) = elephant::activate(&provider, &identifier, &action, &query) {
-                log::warn!("Elephant activate failed: {}", e);
-            }
-        });
     });
     row.add_controller(gesture);
 
@@ -463,8 +535,7 @@ fn update_selection(results_box: &gtk4::Box, old: usize, new: usize) {
     }
 }
 
-/// Get the default action for a search result — use the first action from elephant,
-/// or fall back to "start" for desktop apps.
+/// Default action for a result — the first elephant action, or "start".
 fn default_action(result: &SearchResult) -> String {
     result
         .actions
@@ -473,7 +544,7 @@ fn default_action(result: &SearchResult) -> String {
         .unwrap_or_else(|| "start".to_string())
 }
 
-/// Calculate top offset as ~25% of the primary monitor height (Spotlight-style positioning).
+/// Top offset ~25% of the primary monitor height (Spotlight-style).
 fn monitor_top_offset() -> i32 {
     if let Some(display) = gtk4::gdk::Display::default() {
         let monitors = display.monitors();
@@ -484,7 +555,6 @@ fn monitor_top_offset() -> i32 {
             }
         }
     }
-    // Fallback for 1080p
     270
 }
 

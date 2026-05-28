@@ -2,3 +2,6 @@
 /result
 *.swp
 *.swo
+
+# Claude Code local session dir
+.claude/
