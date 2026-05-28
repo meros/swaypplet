@@ -32,6 +32,7 @@ fn set_brightness(value: u32) {
 
 // ── BrightnessSection ─────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 pub struct BrightnessSection {
     root: gtk4::Box,
     scale: gtk4::Scale,
@@ -192,17 +193,15 @@ impl BrightnessSection {
         );
     }
 
-    /// Switch into page mode: reveal detail immediately, hide the summary
-    /// toggle row.
-    pub fn expand_for_page(&self) {
-        self.summary_btn.set_visible(false);
-        self.detail_revealer.set_transition_duration(0);
-        self.detail_revealer.set_reveal_child(true);
-        self.detail_revealer.set_transition_duration(200);
-        self.summary_arrow.set_label("▾");
-    }
-
+    #[allow(dead_code)]
     pub fn widget(&self) -> &gtk4::Box {
         &self.root
+    }
+
+    /// Clone of the brightness `gtk4::Scale` (range 1–100) so it can be hoisted
+    /// to the start-menu top level. The clone shares the same underlying
+    /// `GtkAdjustment`, so reads/writes stay in sync with this section.
+    pub fn brightness_scale(&self) -> gtk4::Scale {
+        self.scale.clone()
     }
 }
