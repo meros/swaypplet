@@ -30,7 +30,12 @@
         version = "0.1.0";
         src = ./.;
 
-        cargoHash = "sha256-HH+Kd5usZX84RcHfCI61rY/zBpfQeU//H8cAPo41JLk=";
+        # Vendor per-crate via importCargoLock (each crate a fetchurl FOD,
+        # almost all already in the store / on cache.nixos.org) instead of
+        # buildRustPackage's default bulk cargo-vendor fetcher, which hits
+        # the crates.io API and now 403s (blocked/rate-limited User-Agent).
+        # No git deps in Cargo.lock, so lockFile alone suffices.
+        cargoLock.lockFile = ./Cargo.lock;
 
         nativeBuildInputs = with pkgs; [
           pkg-config
