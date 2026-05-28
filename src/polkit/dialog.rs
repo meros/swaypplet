@@ -105,7 +105,7 @@ impl PolkitDialog {
         let card = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(14)
-            .width_request(440)
+            .width_request(400)
             .build();
         card.add_css_class("polkit-container");
 
@@ -115,7 +115,7 @@ impl PolkitDialog {
             .halign(gtk4::Align::Center)
             .build();
         let icon_image = gtk4::Image::builder()
-            .pixel_size(56)
+            .pixel_size(44)
             .visible(false)
             .build();
         icon_image.add_css_class("polkit-icon");
@@ -370,7 +370,13 @@ impl PolkitDialog {
         self.password_entry.set_sensitive(true);
         self.auth_btn.set_sensitive(true);
         self.set_status("", StatusKind::Info);
-        self.show_fingerprint(false, "Touch fingerprint reader");
+        // Start with both auth affordances hidden; the first PAM prompt reveals
+        // the right one (fingerprint pill or password entry), so the card shows
+        // a single clear action instead of every control at once.
+        self.fp_pill.set_visible(false);
+        self.fp_pill.remove_css_class("polkit-fp-active");
+        self.password_entry.set_visible(false);
+        self.auth_btn.set_visible(false);
         self.card.remove_css_class("polkit-shake");
         self.card.remove_css_class("polkit-success");
 
@@ -412,7 +418,6 @@ impl PolkitDialog {
         };
 
         self.window.set_visible(true);
-        self.password_entry.grab_focus();
     }
 
     pub fn hide(&self) {
@@ -446,6 +451,12 @@ impl PolkitDialog {
         if active {
             self.fp_label.set_label(label);
             self.fp_pill.add_css_class("polkit-fp-active");
+            // Fingerprint is the active method: hide the password fallback so
+            // the card shows one clear action. PAM isn't waiting on a password
+            // here, so a stray keystroke can't desync the conversation. The
+            // entry reappears via set_password_prompt() if PAM falls back to it.
+            self.password_entry.set_visible(false);
+            self.auth_btn.set_visible(false);
         } else {
             self.fp_pill.remove_css_class("polkit-fp-active");
         }
@@ -463,6 +474,10 @@ impl PolkitDialog {
             cleaned
         };
         self.password_entry.set_placeholder_text(Some(&placeholder));
+        // PAM is requesting a password — reveal the entry and focus it.
+        self.password_entry.set_visible(true);
+        self.auth_btn.set_visible(true);
+        self.password_entry.grab_focus();
     }
 
     pub fn shake(&self) {
