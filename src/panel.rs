@@ -154,28 +154,28 @@ impl Panel {
         let mut row_i = 0i32;
 
         // Wi-Fi (with inline device-list reveal).
-        let (wifi_tile, _) = tile_with_reveal(&specs[0], network.widget(), &right, &mut tile_pairs);
+        let wifi_tile = tile_with_reveal(&specs[0], network.widget(), &right, &mut tile_pairs);
         grid_place(&grid, &wifi_tile, &mut col, &mut row_i);
 
         // Bluetooth (with inline device-list reveal).
-        let (bt_tile, _) = tile_with_reveal(&specs[1], bluetooth.widget(), &right, &mut tile_pairs);
+        let bt_tile = tile_with_reveal(&specs[1], bluetooth.widget(), &right, &mut tile_pairs);
         grid_place(&grid, &bt_tile, &mut col, &mut row_i);
 
         // DND (store-backed).
-        let (dnd_tile, _) = tiles::build_dnd_tile(store.clone());
+        let dnd_tile = tiles::build_dnd_tile(store.clone());
         grid_place(&grid, &dnd_tile, &mut col, &mut row_i);
 
         // Night Light.
-        let (night_tile, night_btn) = tiles::build_tile(&specs[2]);
+        let night_btn = tiles::build_tile(&specs[2]);
         tiles::init_tile_state(&night_btn, &specs[2]);
+        grid_place(&grid, &night_btn, &mut col, &mut row_i);
         tile_pairs.push((night_btn, copy_spec(&specs[2])));
-        grid_place(&grid, &night_tile, &mut col, &mut row_i);
 
         // Idle.
-        let (idle_tile, idle_btn) = tiles::build_tile(&specs[3]);
+        let idle_btn = tiles::build_tile(&specs[3]);
         tiles::init_tile_state(&idle_btn, &specs[3]);
+        grid_place(&grid, &idle_btn, &mut col, &mut row_i);
         tile_pairs.push((idle_btn, copy_spec(&specs[3])));
-        grid_place(&grid, &idle_tile, &mut col, &mut row_i);
 
         // Display — reveal-only tile (no radio); chevron + button reveal the
         // output/monitor controls inline, matching the Wi-Fi/Bluetooth pattern.
@@ -229,6 +229,7 @@ impl Panel {
             .spacing(6)
             .hexpand(true)
             .halign(gtk4::Align::Start)
+            .valign(gtk4::Align::Center)
             .build();
         actions.append(&footer_action("󰄀", "Screenshot region", &window, screenshot_region));
 
@@ -352,7 +353,7 @@ impl Panel {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /// Attach `child` to the 2-column grid, advancing the cursor.
-fn grid_place(grid: &gtk4::Grid, child: &gtk4::Box, col: &mut i32, row_i: &mut i32) {
+fn grid_place(grid: &gtk4::Grid, child: &impl IsA<gtk4::Widget>, col: &mut i32, row_i: &mut i32) {
     grid.attach(child, *col, *row_i, 1, 1);
     *col += 1;
     if *col >= 2 {
@@ -380,6 +381,14 @@ fn slider_row(icon: &str, scale: gtk4::Scale) -> gtk4::Box {
     scale.set_hexpand(true);
     scale.set_draw_value(false);
 
+    // The scale is hoisted from its owning section, where it already has a
+    // parent. GTK4 does not auto-reparent — append would hit the
+    // `gtk_widget_get_parent == NULL` assertion and silently drop it (the
+    // slider would never show). Detach it from its old parent first.
+    if scale.parent().is_some() {
+        scale.unparent();
+    }
+
     row.append(&icon_lbl);
     row.append(&scale);
     row
@@ -393,8 +402,8 @@ fn tile_with_reveal(
     section_widget: &gtk4::Box,
     right_column: &gtk4::Box,
     tile_pairs: &mut Vec<(gtk4::ToggleButton, tiles::TileSpec)>,
-) -> (gtk4::Box, gtk4::ToggleButton) {
-    let (vbox, btn) = tiles::build_tile(spec);
+) -> gtk4::Overlay {
+    let btn = tiles::build_tile(spec);
     tiles::init_tile_state(&btn, spec);
     tile_pairs.push((btn.clone(), copy_spec(spec)));
 
@@ -406,19 +415,19 @@ fn tile_with_reveal(
     revealer.set_child(Some(section_widget));
     right_column.append(&revealer);
 
-    let chevron = gtk4::Button::builder().label("▸").build();
-    chevron.add_css_class("startmenu-tile-chevron");
+    // Chevron floats at the tile's right edge; tapping the tile body toggles the
+    // radio, tapping the chevron reveals the device list inline below.
+    let (cell, chevron) = tiles::wrap_with_chevron(&btn);
     {
         let revealer_c = revealer.clone();
         chevron.connect_clicked(move |b| {
             let open = !revealer_c.reveals_child();
             revealer_c.set_reveal_child(open);
-            b.set_label(if open { "▾" } else { "▸" });
+            tiles::set_chevron_open(b, open);
         });
     }
-    vbox.append(&chevron);
 
-    (vbox, btn)
+    cell
 }
 
 /// A reveal-only tile: a non-radio toggle + chevron that both reveal the given
@@ -429,20 +438,8 @@ fn reveal_only_tile(
     label: &str,
     section_widget: &gtk4::Box,
     right_column: &gtk4::Box,
-) -> gtk4::Box {
-    let vbox = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .build();
-    vbox.add_css_class("startmenu-tile");
-
-    let btn = gtk4::ToggleButton::builder().label(icon).build();
-    btn.add_css_class("toggle-btn");
-
-    let label_w = gtk4::Label::builder().label(label).build();
-    label_w.add_css_class("toggle-label");
-
-    vbox.append(&btn);
-    vbox.append(&label_w);
+) -> gtk4::Overlay {
+    let btn = tiles::build_reveal_tile(icon, label);
 
     let revealer = gtk4::Revealer::builder()
         .transition_type(gtk4::RevealerTransitionType::SlideDown)
@@ -452,10 +449,10 @@ fn reveal_only_tile(
     revealer.set_child(Some(section_widget));
     right_column.append(&revealer);
 
-    let chevron = gtk4::Button::builder().label("▸").build();
-    chevron.add_css_class("startmenu-tile-chevron");
+    let (cell, chevron) = tiles::wrap_with_chevron(&btn);
 
-    // Both the toggle button and the chevron drive the same reveal.
+    // Reveal-only (no radio): both the toggle body and the chevron drive the
+    // same reveal. The button's toggled handler manages its `.active` class.
     let sync = {
         let revealer_c = revealer.clone();
         let btn_c = btn.clone();
@@ -463,12 +460,7 @@ fn reveal_only_tile(
         move |open: bool| {
             revealer_c.set_reveal_child(open);
             btn_c.set_active(open);
-            if open {
-                btn_c.add_css_class("active");
-            } else {
-                btn_c.remove_css_class("active");
-            }
-            chevron_c.set_label(if open { "▾" } else { "▸" });
+            tiles::set_chevron_open(&chevron_c, open);
         }
     };
     {
@@ -480,9 +472,8 @@ fn reveal_only_tile(
         let revealer_c = revealer.clone();
         chevron.connect_clicked(move |_| sync(!revealer_c.reveals_child()));
     }
-    vbox.append(&chevron);
 
-    vbox
+    cell
 }
 
 /// `TileSpec` holds only `Copy` fields (str slices + fn pointers); duplicate one

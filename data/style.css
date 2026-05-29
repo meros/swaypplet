@@ -28,6 +28,23 @@
 @define-color aqua    #689d6a;   /* collapsed onto accent (accentPrimary) */
 @define-color orange  #fe8019;   /* keep for over-amplification warning */
 
+/* ── Semantic surface + state roles (the design system) ──
+   Three surface levels build depth without heavy shadows; active state is an
+   accent TINT (not a saturated fill), so the panel stays calm.
+   Spacing scale (use these literals consistently): 4 / 8 / 12 / 16 / 20.
+   Radius scale: 10 (controls) / 14 (cards, tiles) / 18 (panel). */
+@define-color surface        alpha(#1d2021, 0.97);  /* panel base            */
+@define-color surface_raised #32302f;               /* cards, tiles          */
+@define-color surface_hover  #3c3836;               /* hover / inactive fill */
+@define-color surface_track  #45403d;               /* slider trough, wells  */
+@define-color border_subtle  alpha(#a89984, 0.14);  /* hairline separators   */
+@define-color border_strong  alpha(#a89984, 0.22);  /* card edges            */
+@define-color text_faint     #7c6f64;               /* tertiary text         */
+@define-color accent_tint    alpha(#689d6a, 0.20);  /* active tile/control bg*/
+@define-color accent_tint_hi alpha(#689d6a, 0.30);  /* active hover          */
+@define-color danger         #cc241d;
+@define-color danger_tint    alpha(#fb4934, 0.16);  /* destructive hover     */
+
 /* ── Window: transparent so compositor alpha-blends ── */
 window, window.background, window.csd, decoration {
     background-color: transparent;
@@ -100,334 +117,14 @@ window.panel {
     }
 }
 
-/* ── New control-panel container classes ── */
-.panel-backdrop {
-    background-color: alpha(black, 0.35);
-}
-
-.panel-container {
-    background-color: alpha(@bg0_h, 0.92);
-    border-radius: 22px;
-    border: 1px solid alpha(@bg3, 0.30);
-    box-shadow:
-        0 18px 56px alpha(black, 0.60),
-        0 6px 16px alpha(black, 0.35),
-        inset 0 1px 0 alpha(white, 0.08);
-    padding: 18px;
-    min-width: 880px;
-}
-
-/* ══════════════════════════════════════════════════════
-   Dispatch Board — sidebar lanes + quickinfo strip + content stack
-   ══════════════════════════════════════════════════════ */
-
-/* ── Keyframes ── */
-@keyframes lane-mount {
-    from { opacity: 0; transform: translateX(-12px); }
-    to   { opacity: 1; transform: translateX(0); }
-}
-
-@keyframes lane-active-glow {
-    from { box-shadow: inset 0 0 0 0 alpha(@accent, 0.0); }
-    to   { box-shadow: 0 0 18px alpha(@accent, 0.35), inset 0 1px 0 alpha(white, 0.10); }
-}
-
-/* ── Dispatch shell override ── */
-.dispatch-shell {
-    min-width:  960px;
-    min-height: 720px;
-    padding:    0;
-}
-
-/* ── Quick-info strip ── */
-.dispatch-quickinfo {
-    min-height: 44px;
-    padding:    6px 12px;
-    background-color: alpha(@bg0_h, 0.60);
-    border-bottom: 1px solid alpha(@bg3, 0.20);
-}
-
-.qi-pill {
-    background-color: @bg1;
-    background-image: linear-gradient(180deg, alpha(white, 0.06) 0%, alpha(black, 0.06) 100%);
-    color: @fg;
-    border-radius: 8px;
-    padding: 4px 10px;
-    font-size: 10pt;
-    margin-right: 4px;
-    box-shadow:
-        inset 0 1px 0 alpha(white, 0.08),
-        inset 0 -1px 0 alpha(black, 0.20),
-        0 1px 2px alpha(black, 0.25),
-        0 3px 8px alpha(black, 0.30);
-    transition: all 150ms ease;
-}
-
-.qi-clock {
-    font-weight: 700;
-}
-
-/* Battery state tints */
-.qi-pill.qi-battery.warning {
-    background-color: alpha(@accent_secondary, 0.25);
-    background-image: linear-gradient(180deg, alpha(white, 0.04) 0%, alpha(black, 0.08) 100%);
-    color: @accent_secondary;
-}
-
-.qi-pill.qi-battery.critical {
-    background-color: @accent_quinary;
-    background-image: none;
-    color: @fg;
-    animation: battery-critical-pulse 0.7s steps(24) infinite alternate;
-}
-
-/* Muted volume */
-.qi-pill.qi-volume.muted {
-    color: @fg_dim;
-    opacity: 0.5;
-}
-
-/* Search button */
-.qi-search-btn {
-    background-color: @bg1;
-    background-image: linear-gradient(180deg, alpha(white, 0.06) 0%, alpha(black, 0.06) 100%);
-    color: @fg_dim;
-    border-radius: 8px;
-    padding: 0;
-    min-width:  32px;
-    min-height: 32px;
-    font-size: 16px;
-    box-shadow:
-        inset 0 1px 0 alpha(white, 0.08),
-        inset 0 -1px 0 alpha(black, 0.20),
-        0 1px 2px alpha(black, 0.25),
-        0 3px 8px alpha(black, 0.30);
-    transition: all 150ms ease;
-}
-
-.qi-search-btn:hover {
-    background-color: @bg2;
-    color: @fg;
-}
-
-/* Search entry — hidden by default; shown in search-active mode */
-.qi-search-entry {
-    background-color: alpha(@bg0, 0.6);
-    color: @fg;
-    border: 1px solid alpha(@bg3, 0.3);
-    border-radius: 10px;
-    padding: 4px 12px;
-    font-size: 14px;
-    min-height: 32px;
-    caret-color: @fg;
-}
-
-.qi-search-entry:focus {
-    border-color: alpha(@accent, 0.5);
-    box-shadow: 0 0 0 2px alpha(@accent, 0.15);
-}
-
-/* Search-active: hide pills + search button, show entry */
-.dispatch-quickinfo.qi-search-active .qi-pill,
-.dispatch-quickinfo.qi-search-active .qi-search-btn {
-    /* GTK4 doesn't reliably honor display:none from CSS;
-       rely on .set_visible() from Rust side. CSS provides
-       min-size=0 + opacity=0 as belt-and-suspenders fallback. */
-    min-width:  0;
-    min-height: 0;
-    opacity:    0;
-    padding:    0;
-    margin:     0;
-}
-
-/* ── Dispatch body (horizontal flex wrapper) ── */
-.dispatch-body {
-    background-color: transparent;
-    margin: 0;
-    padding: 0;
-}
-
-/* ── Lane strip ── */
-.dispatch-lanes {
-    background-color: transparent;
-    min-width: 64px;
-    padding: 4px 6px;
-}
-
-/* Reset GTK listbox default selection/focus chrome */
-.dispatch-lanes > row {
-    background-color: transparent;
-    padding: 0;
-    margin: 0;
-    border: none;
-    outline: none;
-    box-shadow: none;
-}
-
-.dispatch-lanes > row:selected,
-.dispatch-lanes > row:focus,
-.dispatch-lanes > row:hover {
-    background-color: transparent;
-    outline: none;
-    box-shadow: none;
-}
-
-/* ── Individual lane ── */
-.dispatch-lane {
-    background-color: transparent;
-    border-radius: 10px;
-    padding: 8px 4px;
-    min-height: 48px;
-    margin-bottom: 4px;
-    transition: background-color 150ms ease, box-shadow 150ms ease;
-    animation: lane-mount 220ms ease-out 1;
-}
-
-.dispatch-lane:hover {
-    background-color: alpha(white, 0.04);
-}
-
-.dispatch-lane:hover .dispatch-lane-icon {
-    color: @fg;
-}
-
-/* Selected state — raised pill, tinted bg, left accent stripe, soft glow */
-.dispatch-lane:selected,
-.dispatch-lane.selected {
-    background-color: alpha(@accent, 0.16);
-    background-image: linear-gradient(180deg, alpha(white, 0.08) 0%, alpha(black, 0.04) 100%);
-    border-left: 4px solid @accent;
-    padding-left: 0;
-    box-shadow:
-        inset 0 1px 0 alpha(white, 0.12),
-        inset 0 -1px 0 alpha(black, 0.20),
-        0 1px 2px alpha(black, 0.25),
-        0 3px 10px alpha(black, 0.30),
-        0 0 14px alpha(@accent, 0.20);
-}
-
-.dispatch-lane:selected .dispatch-lane-icon,
-.dispatch-lane.selected .dispatch-lane-icon {
-    color: @accent;
-}
-
-.dispatch-lane:selected .dispatch-lane-dot,
-.dispatch-lane.selected .dispatch-lane-dot {
-    background-color: @accent;
-}
-
-/* Active state — accent fill, soft glow */
-.dispatch-lane.active {
-    background-color: alpha(@accent, 0.18);
-    background-image: none;
-    border-left: 3px solid @accent;
-    box-shadow:
-        0 0 12px alpha(@accent, 0.25),
-        inset 0 1px 0 alpha(white, 0.08),
-        inset 0 -1px 0 alpha(black, 0.15);
-}
-
-.dispatch-lane.active .dispatch-lane-icon {
-    color: @accent;
-}
-
-.dispatch-lane.active .dispatch-lane-dot {
-    background-color: @accent;
-}
-
-/* Media lane — icon breathes when playing */
-.dispatch-lane.media-active .dispatch-lane-icon {
-    animation: media-breathing 2s ease-in-out infinite alternate;
-}
-
-/* Warning state — yellow dot + icon, no bg fill */
-.dispatch-lane.warning .dispatch-lane-icon {
-    color: @accent_secondary;
-}
-
-.dispatch-lane.warning .dispatch-lane-dot {
-    background-color: @accent_secondary;
-}
-
-/* Alerting state — red pulsing dot + red icon */
-.dispatch-lane.alerting .dispatch-lane-icon {
-    color: @accent_quinary;
-}
-
-.dispatch-lane.alerting .dispatch-lane-dot {
-    background-color: @accent_quinary;
-    animation: battery-critical-pulse 0.7s steps(24) infinite alternate;
-}
-
-/* Dim state — faded for hidden/non-matching lanes */
-.dispatch-lane.dim {
-    opacity: 0.35;
-}
-
-/* ── Lane icon ── */
-.dispatch-lane-icon {
-    font-size: 18px;
-    color: @fg_dim;
-    transition: color 200ms ease;
-    min-width: 24px;
-}
-
-/* ── Lane state dot (6×6px LED) ── */
-.dispatch-lane-dot {
-    min-width:  6px;
-    min-height: 6px;
-    border-radius: 50%;
-    background-color: transparent;
-    margin-top: 4px;
-    transition: all 200ms ease;
-}
-
-/* ── Content stack ── */
-.dispatch-stack {
-    background-color: transparent;
-    padding: 0;
-}
-
-.dispatch-stack > * {
-    min-height: 0;
-}
-
-/* ── Page frame (title + optional subtitle above each lane's content) ── */
-.page-frame {
-    padding: 16px 20px 8px;
-}
-
-.page-frame-header {
-    margin-bottom: 8px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid alpha(@bg3, 0.30);
-}
-
-.page-title {
-    font-size: 20px;
-    font-weight: 700;
-    color: @fg;
-    letter-spacing: 0.2px;
-}
-
-.page-subtitle {
-    font-size: 11px;
-    color: @fg_dim;
-    letter-spacing: 0.3px;
-}
-
 /* ── Section cards ── */
 .section {
-    background-color: @bg1;
-    background-image: linear-gradient(180deg, alpha(white, 0.06) 0%, alpha(black, 0.06) 100%);
-    border-radius: 12px;
+    background-color: @surface_raised;
+    border-radius: 14px;
     padding: 12px;
-    box-shadow:
-        inset 0 1px 0 alpha(white, 0.08),
-        inset 0 -1px 0 alpha(black, 0.20),
-        0 1px 2px alpha(black, 0.25),
-        0 3px 8px alpha(black, 0.30);
-    transition: box-shadow 200ms ease;
+    border: 1px solid @border_subtle;
+    box-shadow: none;
+    transition: border-color 200ms ease;
 }
 
 .section-title {
@@ -439,67 +136,57 @@ window.panel {
 }
 
 /* ── Quick toggle row (header) ── */
-.quick-toggles {
-    background-color: transparent;
-    padding: 0;
+.toggle-btn {
+    background-color: @surface_raised;
+    color: @fg;
+    border-radius: 14px;
+    border: 1px solid @border_subtle;
+    padding: 0 14px;
+    min-height: 48px;
     box-shadow: none;
-    background-image: none;
+    transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
 }
 
-.toggle-btn {
-    background-color: @bg2;
-    background-image: linear-gradient(180deg, alpha(white, 0.06) 0%, alpha(black, 0.06) 100%);
-    color: @fg_dim;
-    border-radius: 12px;
-    border: 1px solid alpha(@bg3, 0.4);
-    padding: 10px 14px;
-    min-width: 64px;
-    min-height: 44px;
+/* Reveal tiles reserve space at the right for the floating chevron overlay. */
+.toggle-btn.has-chevron {
+    padding-right: 40px;
+}
+
+/* Tile internals: glyph + label, laid out horizontally inside the button. */
+.tile-icon {
     font-size: 18px;
-    box-shadow:
-        inset 0 1px 0 alpha(white, 0.08),
-        inset 0 -1px 0 alpha(black, 0.20),
-        0 1px 2px alpha(black, 0.25),
-        0 3px 8px alpha(black, 0.30);
-    transition: all 150ms ease;
+}
+
+.toggle-label {
+    font-size: 13px;
+    font-weight: 500;
 }
 
 .toggle-btn:hover {
-    background-color: @bg3;
-    background-image: linear-gradient(180deg, alpha(white, 0.14) 0%, alpha(black, 0.02) 100%);
-    box-shadow:
-        inset 0 1px 0 alpha(white, 0.14),
-        inset 0 -1px 0 alpha(black, 0.20),
-        0 2px 4px alpha(black, 0.30),
-        0 6px 14px alpha(black, 0.30);
+    background-color: @surface_hover;
+    border-color: @border_strong;
 }
 
+/* Active = calm accent tint + accent glyph, no saturated fill, no glow. */
 .toggle-btn:checked,
 .toggle-btn.active {
-    background-color: @aqua;
-    background-image: none;
-    color: @bg0_h;
+    background-color: @accent_tint;
+    color: @accent;
     font-weight: 700;
-    border: 1px solid alpha(white, 0.2);
-    box-shadow:
-        0 2px 12px alpha(@aqua, 0.5),
-        0 0 24px alpha(@aqua, 0.15);
+    border: 1px solid alpha(@accent, 0.45);
+    box-shadow: none;
 }
 
 .toggle-btn:checked:hover,
 .toggle-btn.active:hover {
-    background-color: shade(@accent, 1.15);
-    background-image: none;
-    box-shadow:
-        0 3px 14px alpha(@accent, 0.6),
-        0 0 28px alpha(@accent, 0.2);
+    background-color: @accent_tint_hi;
+    border-color: alpha(@accent, 0.55);
 }
 
 .toggle-btn:checked:active,
 .toggle-btn.active:active {
-    background-color: @accent;
-    background-image: none;
-    box-shadow: inset 0 2px 4px alpha(black, 0.3);
+    background-color: @accent_tint_hi;
+    box-shadow: inset 0 1px 3px alpha(black, 0.2);
 }
 
 .toggle-btn:disabled {
@@ -530,33 +217,22 @@ entry:focus-visible {
     outline-offset: 1px;
 }
 
-.toggle-label {
-    font-size: 9px;
-    color: @fg_dim;
-    margin-top: 2px;
-    transition: color 150ms ease;
-}
-
-.toggle-on .toggle-label {
-    color: @aqua;
-}
-
 /* ── Volume / brightness sliders ── */
 scale {
-    min-height: 6px;
-    padding: 8px 0;
+    min-height: 10px;
+    padding: 10px 0;
 }
 
 scale trough {
-    background-color: @bg2;
-    border-radius: 4px;
-    min-height: 6px;
+    background-color: @surface_track;
+    border-radius: 999px;
+    min-height: 10px;
 }
 
 scale highlight {
     background-color: @accent;
-    border-radius: 4px;
-    min-height: 6px;
+    border-radius: 999px;
+    min-height: 10px;
     transition: background-color 100ms ease;
 }
 
@@ -697,42 +373,14 @@ button.flat:hover {
     color: @fg_dim;
 }
 
-.device-connected .device-name {
-    color: @accent;
-    font-weight: 600;
-}
-
 .device-active-dot {
     color: @accent;
     font-size: 8px;
 }
 
-.signal-icon {
-    font-size: 16px;
-    color: @fg_dim;
-    min-width: 24px;
-}
-
 /* ── Connecting / loading state ── */
 .connecting {
     opacity: 0.6;
-}
-
-.error-text {
-    color: @red;
-    font-size: 11px;
-    margin-top: 4px;
-}
-
-.success-text {
-    color: @green;
-    font-size: 11px;
-    margin-top: 4px;
-}
-
-.status-text {
-    font-size: 11px;
-    color: @fg_dim;
 }
 
 /* ── Media controls ── */
@@ -831,47 +479,21 @@ button.flat:hover {
 }
 
 /* ── Power / battery section ── */
-.battery-level {
-    font-size: 28px;
-    font-weight: 700;
-    color: @fg;
-}
-
-.battery-sub {
-    font-size: 11px;
-    color: @fg_dim;
-}
-
 .battery-health {
     font-size: 10px;
     color: @fg_dim;
     opacity: 0.7;
 }
 
-.battery-icon {
-    font-size: 24px;
-    color: @fg_dim;
-    min-width: 32px;
-}
-
-.battery-icon.charging {
-    color: @green;
-}
-
-.battery-icon.low {
-    color: @red;
-    animation: battery-critical-pulse 0.7s steps(24) infinite alternate;
-}
-
 levelbar trough {
-    background-color: @bg2;
-    border-radius: 4px;
-    min-height: 8px;
+    background-color: @surface_track;
+    border-radius: 999px;
+    min-height: 5px;
 }
 
 levelbar block.filled {
     background-color: @accent;
-    border-radius: 4px;
+    border-radius: 999px;
 }
 
 levelbar block.empty {
@@ -883,7 +505,7 @@ levelbar.charging block.filled {
 }
 
 levelbar.battery-high block.filled {
-    background-color: @green;
+    background-color: @accent;
 }
 
 levelbar.battery-medium block.filled {
@@ -940,22 +562,6 @@ spinner {
     color: @accent;
 }
 
-.scanning-label {
-    font-size: 11px;
-    color: @fg_dim;
-    font-style: italic;
-}
-
-/* ── Screenshot: recording indicator ── */
-.recording-active .section-summary-label {
-    color: @red;
-    font-weight: 700;
-}
-
-.recording-active .section-summary-icon {
-    color: @red;
-}
-
 /* ── Separator ── */
 separator {
     background-color: alpha(@bg3, 0.3);
@@ -1000,11 +606,6 @@ scrollbar slider:hover {
     background-color: alpha(@fg_dim, 0.5);
 }
 
-/* ── Icon sizing helpers ── */
-.icon-sm { font-size: 14px; }
-.icon-md { font-size: 18px; }
-.icon-lg { font-size: 24px; }
-
 /* ── Volume/brightness row ── */
 .volume-icon-btn {
     background-color: transparent;
@@ -1048,43 +649,6 @@ revealer {
     font-size: 11px;
     font-style: italic;
     padding: 8px;
-}
-
-/* ── VPN section ── */
-.vpn-row {
-    padding: 8px 10px;
-    border-radius: 8px;
-    min-height: 36px;
-}
-
-.vpn-row:hover {
-    background-color: alpha(white, 0.04);
-}
-
-.vpn-connected {
-    color: @green;
-}
-
-.vpn-icon {
-    font-size: 16px;
-    min-width: 24px;
-}
-
-/* ── Password show/hide ── */
-.password-toggle {
-    background-color: transparent;
-    box-shadow: none;
-    min-width: 36px;
-    min-height: 36px;
-    font-size: 14px;
-    color: @fg_dim;
-    padding: 0;
-}
-
-.password-toggle:hover {
-    color: @fg;
-    background-color: transparent;
-    box-shadow: none;
 }
 
 /* ── Network section ── */
@@ -1168,11 +732,6 @@ revealer {
     font-size: 13px;
     font-weight: 600;
     color: @fg;
-}
-
-.section-summary-sub {
-    font-size: 11px;
-    color: @fg_dim;
 }
 
 .section-expand-arrow {
@@ -1377,22 +936,6 @@ revealer {
     box-shadow: none;
 }
 
-.network-rescan-btn {
-    background-color: transparent;
-    box-shadow: none;
-    color: @fg_dim;
-    font-size: 14px;
-    padding: 4px 8px;
-    min-height: 28px;
-    min-width: 28px;
-}
-
-.network-rescan-btn:hover {
-    background-color: alpha(white, 0.06);
-    box-shadow: none;
-    color: @fg;
-}
-
 .network-band {
     font-size: 9px;
     color: @fg_dim;
@@ -1585,13 +1128,6 @@ revealer {
 
 .notification-entry:hover {
     background-color: alpha(white, 0.04);
-}
-
-/* ── Countdown / confirmation ── */
-.countdown {
-    font-size: 10px;
-    color: @red;
-    font-weight: 700;
 }
 
 /* ── Launcher — matches OSD visual language ── */
@@ -1969,22 +1505,28 @@ revealer {
     margin: 4px 0;
 }
 
-/* Reuse .toggle-btn / .toggle-label styling; tiles add a tight wrapper. */
+/* Horizontal tile: toggle button (+ optional reveal chevron beside it). */
 .startmenu-tile {
-    padding: 2px;
+    padding: 0;
 }
 
+/* Reveal chevron — floats at the tile's right edge (GtkOverlay), takes no
+   layout width so chevron and plain tiles stay the same size. */
 .startmenu-tile-chevron {
-    background: transparent;
-    border: none;
+    background-color: alpha(@surface_hover, 0.7);
     color: @fg_dim;
-    font-size: 10px;
+    border: none;
+    border-radius: 9px;
+    margin-right: 6px;
+    min-width: 26px;
+    min-height: 34px;
     padding: 0;
-    min-height: 12px;
-    margin-top: -2px;
+    font-size: 13px;
+    transition: background-color 140ms ease, color 140ms ease;
 }
 
 .startmenu-tile-chevron:hover {
+    background-color: @bg3;
     color: @fg;
 }
 
