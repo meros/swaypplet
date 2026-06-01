@@ -17,7 +17,7 @@ use crate::widgets::{
     media::MediaSection,
     network::NetworkSection,
     notifications::NotificationsSection,
-    power::PowerSection,
+    power::{self, PowerSection},
     tiles,
 };
 
@@ -201,13 +201,15 @@ impl Panel {
         notif_scroller.set_child(Some(notifications.widget()));
         right.append(&notif_scroller);
 
-        body.append(&left);
-        body.append(&right_scroller);
+        // 6. Power status card (battery + governor). Session *actions* now live
+        //    in the left rail; this card is the at-a-glance status readout.
+        power.expand_for_page();
+        right.append(power.widget());
 
         // ── Full-width clipboard reveal (beneath the body) ───────────────────
         // Clipboard rows are wide, so the ClipboardSection (cliphist history
         // with click-to-copy) lives in a full-width Revealer rather than the
-        // narrow right column. Toggled by the footer Clipboard button.
+        // narrow right column. Toggled by the rail Clipboard button.
         clipboard.expand_for_page();
         let clipboard_revealer = gtk4::Revealer::builder()
             .transition_type(gtk4::RevealerTransitionType::SlideDown)
@@ -217,26 +219,24 @@ impl Panel {
         clipboard_revealer.add_css_class("startmenu-clipboard");
         clipboard_revealer.set_child(Some(clipboard.widget()));
 
-        // ── Footer ─────────────────────────────────────────────────────────
-        let footer = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(8)
-            .build();
-        footer.add_css_class("startmenu-footer");
-
-        let actions = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
+        // ── Left rail: utilities (top) + session actions (bottom) ────────────
+        // The rail absorbs the formerly-orphaned utility buttons and the power
+        // session actions into a single far-left zone, leaving the centre stage
+        // purely for launching and the right column purely for quick settings.
+        let rail = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
             .spacing(6)
-            .hexpand(true)
-            .halign(gtk4::Align::Start)
-            .valign(gtk4::Align::Center)
             .build();
-        actions.append(&footer_action("󰄀", "Screenshot region", &window, screenshot_region));
+        rail.add_css_class("startmenu-rail");
+
+        rail.append(&rail_action("󰄀", "Screenshot region", &window, screenshot_region));
 
         // Clipboard — toggles the inline full-width history reveal (does NOT
         // hide the menu).
-        let clip_btn = gtk4::Button::builder().label("󰅍").build();
-        clip_btn.add_css_class("startmenu-footer-btn");
+        let clip_btn = gtk4::Button::builder()
+            .child(&gtk4::Label::new(Some("󰅍")))
+            .build();
+        clip_btn.add_css_class("rail-btn");
         clip_btn.set_tooltip_text(Some("Clipboard history"));
         {
             let revealer_c = clipboard_revealer.clone();
@@ -250,25 +250,29 @@ impl Panel {
                 }
             });
         }
-        actions.append(&clip_btn);
+        rail.append(&clip_btn);
 
-        actions.append(&footer_action("󰏘", "Color picker", &window, color_pick));
-        footer.append(&actions);
+        rail.append(&rail_action("󰏘", "Color picker", &window, color_pick));
 
-        // Right: power/session actions (reuse PowerSection; expand its detail so
-        // the lock/suspend/reboot/shutdown buttons show).
-        power.expand_for_page();
-        let power_box = gtk4::Box::builder()
+        // Spacer pushes the session actions to the bottom of the rail.
+        let rail_spacer = gtk4::Box::builder().vexpand(true).build();
+        rail.append(&rail_spacer);
+
+        let rail_divider = gtk4::Separator::builder()
             .orientation(gtk4::Orientation::Horizontal)
-            .halign(gtk4::Align::End)
             .build();
-        power_box.add_css_class("startmenu-power");
-        power_box.append(power.widget());
-        footer.append(&power_box);
+        rail_divider.add_css_class("startmenu-rail-divider");
+        rail.append(&rail_divider);
+
+        rail.append(&power::build_session_rail());
+
+        // ── Assemble body: rail | launcher (stage) | quick settings ──────────
+        body.append(&rail);
+        body.append(&left);
+        body.append(&right_scroller);
 
         root.append(&body);
         root.append(&clipboard_revealer);
-        root.append(&footer);
         backdrop.append(&root);
         window.set_child(Some(&backdrop));
 
@@ -489,10 +493,12 @@ fn copy_spec(spec: &tiles::TileSpec) -> tiles::TileSpec {
     }
 }
 
-/// A footer icon button that hides the menu, then runs `action`.
-fn footer_action(icon: &str, tooltip: &str, window: &gtk4::Window, action: fn()) -> gtk4::Button {
-    let btn = gtk4::Button::builder().label(icon).build();
-    btn.add_css_class("startmenu-footer-btn");
+/// A rail icon button that hides the menu, then runs `action`.
+fn rail_action(icon: &str, tooltip: &str, window: &gtk4::Window, action: fn()) -> gtk4::Button {
+    let btn = gtk4::Button::builder()
+        .child(&gtk4::Label::new(Some(icon)))
+        .build();
+    btn.add_css_class("rail-btn");
     btn.set_tooltip_text(Some(tooltip));
     let window_c = window.clone();
     btn.connect_clicked(move |_| {
