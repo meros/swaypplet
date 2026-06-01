@@ -27,8 +27,12 @@ static PANEL_CONFIG: LayerShellConfig = LayerShellConfig {
         (Edge::Bottom, true),
         (Edge::Left, true),
     ],
+    // The compositor already lifts this Overlay surface above waybar's
+    // exclusive zone, so the bottom margin only needs to be a small visual gap
+    // — not the bar's full height (a 48px margin double-counted it and left a
+    // large gap above the bar).
     margins: &[
-        (Edge::Bottom, 48),
+        (Edge::Bottom, 6),
         (Edge::Left, 8),
     ],
     keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,

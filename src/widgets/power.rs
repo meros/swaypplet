@@ -515,12 +515,6 @@ impl PowerSection {
         cpu_box.append(&cpu_text_box);
         detail_box.append(&cpu_box);
 
-        // ── Separator (inside detail, before power actions conceptually) ──
-        let sep = gtk4::Separator::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .build();
-        detail_box.append(&sep);
-
         detail_revealer.set_child(Some(&detail_box));
         root.append(&detail_revealer);
 
@@ -534,167 +528,6 @@ impl PowerSection {
                 arrow_c.set_label(if expanded { "▾" } else { "▸" });
             });
         }
-
-        // ── Power actions row ─────────────────────────────────────────────
-        let actions_row = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(4)
-            .homogeneous(true)
-            .build();
-        actions_row.add_css_class("power-actions-row");
-
-        // Helper: build one icon-button + label column.
-        // Returns (column_box, button, icon_label, text_label).
-        let make_action_btn = |icon: &str, name: &str, destructive: bool| {
-            let col = gtk4::Box::builder()
-                .orientation(gtk4::Orientation::Vertical)
-                .spacing(4)
-                .halign(gtk4::Align::Center)
-                .build();
-
-            let icon_lbl = gtk4::Label::builder().label(icon).build();
-            let btn = gtk4::Button::builder().child(&icon_lbl).build();
-            btn.add_css_class("toggle-btn");
-            if destructive {
-                btn.add_css_class("destructive");
-            }
-
-            let text_lbl = gtk4::Label::builder().label(name).build();
-            text_lbl.add_css_class("toggle-label");
-
-            col.append(&btn);
-            col.append(&text_lbl);
-            (col, btn, icon_lbl, text_lbl)
-        };
-
-        // ── Lock — hide panel first, then lock ────────────────────────────
-        let (col_lock, btn_lock, _, _) = make_action_btn("󰌾", "Lock", false);
-        btn_lock.connect_clicked(|btn| {
-            hide_panel_for_widget(btn.upcast_ref());
-            let _ = std::process::Command::new("loginctl")
-                .arg("lock-session")
-                .spawn()
-                .map_err(|e| log::error!("Failed to spawn loginctl lock-session: {}", e));
-        });
-        actions_row.append(&col_lock);
-
-        // ── Suspend — hide panel first, then suspend ──────────────────────
-        let (col_suspend, btn_suspend, _, _) = make_action_btn("󰤄", "Suspend", false);
-        btn_suspend.connect_clicked(|btn| {
-            hide_panel_for_widget(btn.upcast_ref());
-            let _ = std::process::Command::new("systemctl")
-                .arg("suspend")
-                .spawn()
-                .map_err(|e| log::error!("Failed to spawn systemctl suspend: {}", e));
-        });
-        actions_row.append(&col_suspend);
-
-        // ── Logout ────────────────────────────────────────────────────────
-        let (col_logout, btn_logout, _, _) = make_action_btn("󰍃", "Logout", false);
-        btn_logout.connect_clicked(|_| {
-            let _ = std::process::Command::new("swaymsg")
-                .arg("exit")
-                .spawn()
-                .map_err(|e| log::error!("Failed to spawn swaymsg exit: {}", e));
-        });
-        actions_row.append(&col_logout);
-
-        // ── Reboot (destructive — needs confirmation with countdown) ──────
-        let (col_reboot, btn_reboot, reboot_icon_lbl, reboot_text_lbl) =
-            make_action_btn("󰜉", "Reboot", true);
-        {
-            let pending = Rc::new(Cell::new(false));
-            let countdown = Rc::new(Cell::new(0u32));
-            btn_reboot.connect_clicked(move |btn| {
-                if pending.get() {
-                    // Second click within the window — execute.
-                    let _ = std::process::Command::new("systemctl")
-                        .arg("reboot")
-                        .spawn()
-                        .map_err(|e| log::error!("Failed to spawn systemctl reboot: {}", e));
-                } else {
-                    // First click — start 3-second confirmation countdown.
-                    pending.set(true);
-                    countdown.set(3);
-                    reboot_icon_lbl.set_label("?");
-                    reboot_text_lbl.set_label("Reboot? (3)");
-                    btn.add_css_class("confirming");
-
-                    let pending_c = pending.clone();
-                    let countdown_c = countdown.clone();
-                    let icon_c = reboot_icon_lbl.clone();
-                    let text_c = reboot_text_lbl.clone();
-                    let btn_c = btn.clone();
-                    glib::timeout_add_seconds_local(1, move || {
-                        if !pending_c.get() {
-                            return glib::ControlFlow::Break;
-                        }
-                        let n = countdown_c.get().saturating_sub(1);
-                        countdown_c.set(n);
-                        if n == 0 {
-                            pending_c.set(false);
-                            icon_c.set_label("󰜉");
-                            text_c.set_label("Reboot");
-                            btn_c.remove_css_class("confirming");
-                            glib::ControlFlow::Break
-                        } else {
-                            text_c.set_label(&format!("Reboot? ({})", n));
-                            glib::ControlFlow::Continue
-                        }
-                    });
-                }
-            });
-        }
-        actions_row.append(&col_reboot);
-
-        // ── Shutdown (destructive — needs confirmation with countdown) ────
-        let (col_shutdown, btn_shutdown, shutdown_icon_lbl, shutdown_text_lbl) =
-            make_action_btn("󰐥", "Shutdown", true);
-        {
-            let pending = Rc::new(Cell::new(false));
-            let countdown = Rc::new(Cell::new(0u32));
-            btn_shutdown.connect_clicked(move |btn| {
-                if pending.get() {
-                    // Second click within the window — execute.
-                    let _ = std::process::Command::new("systemctl")
-                        .arg("poweroff")
-                        .spawn()
-                        .map_err(|e| log::error!("Failed to spawn systemctl poweroff: {}", e));
-                } else {
-                    // First click — start 3-second confirmation countdown.
-                    pending.set(true);
-                    countdown.set(3);
-                    shutdown_icon_lbl.set_label("?");
-                    shutdown_text_lbl.set_label("Shutdown? (3)");
-                    btn.add_css_class("confirming");
-
-                    let pending_c = pending.clone();
-                    let countdown_c = countdown.clone();
-                    let icon_c = shutdown_icon_lbl.clone();
-                    let text_c = shutdown_text_lbl.clone();
-                    let btn_c = btn.clone();
-                    glib::timeout_add_seconds_local(1, move || {
-                        if !pending_c.get() {
-                            return glib::ControlFlow::Break;
-                        }
-                        let n = countdown_c.get().saturating_sub(1);
-                        countdown_c.set(n);
-                        if n == 0 {
-                            pending_c.set(false);
-                            icon_c.set_label("󰐥");
-                            text_c.set_label("Shutdown");
-                            btn_c.remove_css_class("confirming");
-                            glib::ControlFlow::Break
-                        } else {
-                            text_c.set_label(&format!("Shutdown? ({})", n));
-                            glib::ControlFlow::Continue
-                        }
-                    });
-                }
-            });
-        }
-        actions_row.append(&col_shutdown);
-        detail_box.append(&actions_row);
 
         // ── Periodic battery refresh every 30 s ───────────────────────────
         if let Some(ref handles) = bat_handles {
@@ -786,5 +619,103 @@ fn format_governor_info(gov: &GovernorProfile) -> String {
         GovernorProfile::Balanced => "Balanced".to_owned(),
         GovernorProfile::Powersave => "Powersave".to_owned(),
         GovernorProfile::Other(s) => s.clone(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Session rail — icon-only Lock / Suspend / Logout / Reboot / Shutdown
+// ---------------------------------------------------------------------------
+
+/// Build the vertical session-action rail used in the start-menu's left rail.
+/// Buttons are icon-only (label via tooltip). Reboot and Shutdown are
+/// destructive, so they require a confirming second click within 3 s — shown
+/// as a red `.confirming` pulse plus a "Click again…" tooltip, since there is
+/// no text label to render a countdown into.
+pub fn build_session_rail() -> gtk4::Box {
+    let col = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .spacing(6)
+        .build();
+    col.add_css_class("rail-session");
+
+    // Lock — hide the panel first, then lock the session.
+    let lock = rail_btn("󰌾", "Lock", false);
+    lock.connect_clicked(|b| {
+        hide_panel_for_widget(b.upcast_ref());
+        spawn_session_cmd("loginctl", &["lock-session"]);
+    });
+    col.append(&lock);
+
+    // Suspend — hide the panel first, then suspend.
+    let suspend = rail_btn("󰤄", "Suspend", false);
+    suspend.connect_clicked(|b| {
+        hide_panel_for_widget(b.upcast_ref());
+        spawn_session_cmd("systemctl", &["suspend"]);
+    });
+    col.append(&suspend);
+
+    // Logout.
+    let logout = rail_btn("󰍃", "Logout", false);
+    logout.connect_clicked(|_| spawn_session_cmd("swaymsg", &["exit"]));
+    col.append(&logout);
+
+    // Reboot (destructive — confirm).
+    let reboot = rail_btn("󰜉", "Reboot", true);
+    wire_confirm(&reboot, "Reboot", || {
+        spawn_session_cmd("systemctl", &["reboot"])
+    });
+    col.append(&reboot);
+
+    // Shutdown (destructive — confirm).
+    let shutdown = rail_btn("󰐥", "Shutdown", true);
+    wire_confirm(&shutdown, "Shutdown", || {
+        spawn_session_cmd("systemctl", &["poweroff"])
+    });
+    col.append(&shutdown);
+
+    col
+}
+
+/// One icon-only rail button: a glyph child + tooltip, `.rail-btn` styling
+/// (plus `.rail-btn-danger` for destructive actions).
+fn rail_btn(icon: &str, tooltip: &str, danger: bool) -> gtk4::Button {
+    let lbl = gtk4::Label::new(Some(icon));
+    let btn = gtk4::Button::builder().child(&lbl).build();
+    btn.add_css_class("rail-btn");
+    if danger {
+        btn.add_css_class("rail-btn-danger");
+    }
+    btn.set_tooltip_text(Some(tooltip));
+    btn
+}
+
+/// Arm a two-click confirmation on `btn`: the first click starts a 3 s window
+/// (`.confirming` pulse + "Click again…" tooltip); a second click inside the
+/// window runs `exec`. The window auto-clears after 3 s.
+fn wire_confirm<F: Fn() + 'static>(btn: &gtk4::Button, verb: &'static str, exec: F) {
+    let pending = Rc::new(Cell::new(false));
+    btn.connect_clicked(move |b| {
+        if pending.get() {
+            exec();
+            return;
+        }
+        pending.set(true);
+        b.add_css_class("confirming");
+        b.set_tooltip_text(Some(&format!("Click again to {}", verb.to_lowercase())));
+
+        let pending_c = pending.clone();
+        let b_c = b.clone();
+        glib::timeout_add_seconds_local(3, move || {
+            pending_c.set(false);
+            b_c.remove_css_class("confirming");
+            b_c.set_tooltip_text(Some(verb));
+            glib::ControlFlow::Break
+        });
+    });
+}
+
+fn spawn_session_cmd(cmd: &str, args: &[&str]) {
+    if let Err(e) = std::process::Command::new(cmd).args(args).spawn() {
+        log::error!("Failed to spawn {} {:?}: {}", cmd, args, e);
     }
 }

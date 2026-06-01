@@ -489,13 +489,18 @@ fn build_result_row(
 
     row.append(&text_box);
 
-    let badge = gtk4::Label::builder()
-        .label(&result.provider)
-        .halign(gtk4::Align::End)
-        .valign(gtk4::Align::Center)
-        .build();
-    badge.add_css_class("launcher-result-badge");
-    row.append(&badge);
+    // Only badge non-default providers (websearch, calc, …). The dominant
+    // "desktopapplications" source is implied by the surface, so badging every
+    // row with it is pure visual noise.
+    if result.provider != "desktopapplications" {
+        let badge = gtk4::Label::builder()
+            .label(&result.provider)
+            .halign(gtk4::Align::End)
+            .valign(gtk4::Align::Center)
+            .build();
+        badge.add_css_class("launcher-result-badge");
+        row.append(&badge);
+    }
 
     // Click to activate.
     let gesture = gtk4::GestureClick::new();
