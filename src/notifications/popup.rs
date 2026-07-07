@@ -265,6 +265,7 @@ fn build_popup_content(
             let key_c = key.clone();
             btn.connect_clicked(move |_| {
                 log::info!("Action invoked: notification {id}, action {key_c}");
+                store::store_action_invoked(&store_c, id, &key_c);
                 store::store_close(&store_c, id, CloseReason::Dismissed);
             });
             actions_box.append(&btn);

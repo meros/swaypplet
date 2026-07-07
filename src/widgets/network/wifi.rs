@@ -143,6 +143,8 @@ fn build_wifi_row(network: &WifiNetwork) -> ListBoxRow {
                 let confirmed = Rc::new(Cell::new(false));
                 let confirmed_c = confirmed.clone();
                 let btn_c = forget_btn.clone();
+                let spinner_c = spinner.clone();
+                let status_c = status_lbl.clone();
                 forget_btn.connect_clicked(move |btn| {
                     if !confirmed.get() {
                         confirmed.set(true);
@@ -162,10 +164,43 @@ fn build_wifi_row(network: &WifiNetwork) -> ListBoxRow {
                         });
                     } else {
                         confirmed.set(false);
-                        forget_network(&ssid);
-                        if let Some(row) = btn.ancestor(ListBoxRow::static_type()) {
-                            row.set_sensitive(false);
-                        }
+                        btn.set_sensitive(false);
+                        spinner_c.set_visible(true);
+                        spinner_c.start();
+                        status_c.set_visible(false);
+
+                        let (tx, rx) = mpsc::channel::<NmResult>();
+                        forget_network_async(ssid.clone(), tx);
+
+                        let btn_poll = btn.clone();
+                        let spinner_poll = spinner_c.clone();
+                        let status_poll = status_c.clone();
+                        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+                            match rx.try_recv() {
+                                Ok(result) => {
+                                    spinner_poll.stop();
+                                    spinner_poll.set_visible(false);
+                                    match &result {
+                                        NmResult::Success => {
+                                            if let Some(row) = btn_poll.ancestor(ListBoxRow::static_type()) {
+                                                row.set_sensitive(false);
+                                            }
+                                        }
+                                        NmResult::Failure(_) => btn_poll.set_sensitive(true),
+                                    }
+                                    apply_nm_result(&status_poll, &result);
+                                    auto_hide_status(&status_poll);
+                                    glib::ControlFlow::Break
+                                }
+                                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                                    spinner_poll.stop();
+                                    spinner_poll.set_visible(false);
+                                    btn_poll.set_sensitive(true);
+                                    glib::ControlFlow::Break
+                                }
+                            }
+                        });
                     }
                 });
             }

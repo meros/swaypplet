@@ -196,7 +196,20 @@ impl Helper {
 impl Drop for Helper {
     fn drop(&mut self) {
         let _ = self.child.kill();
-        let _ = self.child.wait();
+        // Don't block the GTK main thread on reaping: the SUID helper can
+        // sit in uninterruptible PAM/fingerprint I/O even after SIGKILL.
+        // Reap inline only if it's already gone; otherwise hand the zombie
+        // to a detached reaper thread.
+        match self.child.try_wait() {
+            Ok(Some(_)) => {}
+            _ => {
+                let pid = self.child.id() as libc::pid_t;
+                std::thread::spawn(move || unsafe {
+                    let mut status: libc::c_int = 0;
+                    libc::waitpid(pid, &mut status, 0);
+                });
+            }
+        }
     }
 }
 

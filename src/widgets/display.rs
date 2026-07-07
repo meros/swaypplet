@@ -198,6 +198,15 @@ fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) 
         let toggle_btn_c = toggle_btn.clone();
 
         toggle_btn.connect_clicked(move |btn| {
+            // Re-validate against the freshest state before disabling: the
+            // row's `can_disable` was computed at last list-populate time,
+            // so two rapid Disable clicks on two active displays could both
+            // pass the stale check and leave zero active outputs.
+            if active && get_outputs().iter().filter(|o| o.active).count() <= 1 {
+                btn.set_tooltip_text(Some("Cannot disable the only active display"));
+                return;
+            }
+
             btn.set_sensitive(false);
 
             let rx = toggle_output_async(name.clone(), !active);

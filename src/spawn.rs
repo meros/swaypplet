@@ -25,7 +25,11 @@ pub fn poll_channel<T: 'static>(rx: Receiver<T>, on_done: impl FnOnce(T) + 'stat
     match rx.try_recv() {
         Ok(value) => on_done(value),
         Err(std::sync::mpsc::TryRecvError::Empty) => {
-            glib::idle_add_local_once(move || poll_channel(rx, on_done));
+            // Re-arm on a timeout, not an idle source — idle sources have a
+            // 0ms timeout and busy-spin a core for the job's whole lifetime.
+            glib::timeout_add_local_once(std::time::Duration::from_millis(30), move || {
+                poll_channel(rx, on_done)
+            });
         }
         Err(_) => {} // sender dropped
     }

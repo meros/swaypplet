@@ -1,7 +1,11 @@
 use std::collections::HashSet;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
+use std::time::{Duration, Instant};
+
+/// Max time to wait for `nmcli device wifi list --rescan yes` before killing it.
+const WIFI_SCAN_TIMEOUT: Duration = Duration::from_secs(15);
 
 // ── Nerd Font icons ───────────────────────────────────────────────────────────
 pub const ICON_SIGNAL_NONE: &str = "󰤯";
@@ -225,13 +229,33 @@ pub fn get_known_ssids() -> Vec<String> {
         .collect()
 }
 
-pub fn scan_wifi_raw() -> String {
-    let out = Command::new("nmcli")
+/// Run the rescanning `nmcli` list with a bounded wait, killing it on timeout.
+/// A hung nmcli process (e.g. a stuck driver) must not wedge scanning forever.
+pub fn scan_wifi_raw() -> Result<String, String> {
+    let mut child = Command::new("nmcli")
         .args(["-t", "-f", "SSID,SIGNAL,SECURITY,IN-USE,FREQ", "device", "wifi", "list", "--rescan", "yes"])
-        .output();
-    match out {
-        Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
-        Err(_) => String::new(),
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    let deadline = Instant::now() + WIFI_SCAN_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                let out = child.wait_with_output().map_err(|e| e.to_string())?;
+                return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
+            }
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err("WiFi scan timed out".to_string());
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
     }
 }
 
@@ -429,12 +453,6 @@ pub fn connect_new_async(ssid: String, password: String, hidden: bool, tx: mpsc:
         };
         let _ = tx.send(result);
     });
-}
-
-pub fn forget_network(ssid: &str) {
-    let _ = Command::new("nmcli")
-        .args(["connection", "delete", ssid])
-        .output();
 }
 
 pub fn forget_network_async(ssid: String, tx: mpsc::Sender<NmResult>) {

@@ -665,19 +665,47 @@ impl AudioSection {
                 let _ = tx.send(read_default_ids_blocking());
             });
 
-            // Poll result back on main thread.
-            glib::idle_add_local_once(move || {
-                if let Ok(new_ids) = rx.recv() {
-                    let mut prev = last.borrow_mut();
-                    if *prev != new_ids {
-                        *prev = new_ids;
-                        AudioSection::schedule_refresh(w2, upd2);
-                    }
-                }
+            // Poll the one-shot channel from the GLib main loop (non-blocking).
+            glib::idle_add_local_once(move || match rx.try_recv() {
+                Ok(new_ids) => Self::apply_default_ids(&w2, &upd2, &last, new_ids),
+                Err(_) => Self::poll_default_ids(w2, upd2, last, rx),
             });
 
             glib::ControlFlow::Continue
         });
+    }
+
+    /// Re-queue itself (non-blocking) until the background thread delivers
+    /// the new default-device IDs.
+    fn poll_default_ids(
+        w: Rc<Widgets>,
+        updating: Rc<RefCell<bool>>,
+        last: Rc<RefCell<DefaultIds>>,
+        rx: std::sync::mpsc::Receiver<DefaultIds>,
+    ) {
+        glib::idle_add_local_once(move || match rx.try_recv() {
+            Ok(new_ids) => Self::apply_default_ids(&w, &updating, &last, new_ids),
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                Self::poll_default_ids(w, updating, last, rx);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                error!("default-device monitor background thread disconnected unexpectedly");
+            }
+        });
+    }
+
+    fn apply_default_ids(
+        w: &Rc<Widgets>,
+        updating: &Rc<RefCell<bool>>,
+        last: &Rc<RefCell<DefaultIds>>,
+        new_ids: DefaultIds,
+    ) {
+        let mut prev = last.borrow_mut();
+        if *prev != new_ids {
+            *prev = new_ids;
+            drop(prev);
+            Self::schedule_refresh(w.clone(), updating.clone());
+        }
     }
 
     fn connect_signals(&self) {

@@ -6,6 +6,7 @@ use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
 use crate::layer_shell::{self, LayerShellConfig};
+use crate::spawn::spawn_work;
 
 const OSD_TIMEOUT_MS: u32 = 1500;
 const VOLUME_STEP_PLUS: &str = "5%+";
@@ -17,6 +18,7 @@ use crate::icons;
 
 // ── Commands ─────────────────────────────────────────────────────────────────
 
+#[derive(Clone, Copy)]
 pub enum OsdCommand {
     OutputVolumeRaise,
     OutputVolumeLower,
@@ -201,6 +203,7 @@ fn read_lock_display(lock_name: &str, icon_on: &str, icon_off: &str, label: &str
 
 // ── OSD Widget ───────────────────────────────────────────────────────────────
 
+#[derive(Clone)]
 pub struct Osd {
     window: gtk4::Window,
     icon_label: gtk4::Label,
@@ -297,8 +300,11 @@ impl Osd {
     }
 
     pub fn trigger(&self, cmd: &OsdCommand) {
-        let display = execute_command(cmd);
-        self.show_display(&display);
+        // wpctl/brightnessctl can hang; run off the GTK main thread so a
+        // stuck command doesn't freeze the panel.
+        let cmd = *cmd;
+        let osd = self.clone();
+        spawn_work(move || execute_command(&cmd), move |display| osd.show_display(&display));
     }
 
     fn show_display(&self, display: &OsdDisplay) {

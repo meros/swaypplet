@@ -273,10 +273,7 @@ impl ClipboardSection {
         {
             let w = widgets.clone();
             widgets.clear_btn.connect_clicked(move |_| {
-                thread::spawn(|| {
-                    cliphist_wipe_blocking();
-                });
-                Self::schedule_refresh(w.clone());
+                Self::schedule_wipe_and_refresh(w.clone());
             });
         }
 
@@ -288,10 +285,23 @@ impl ClipboardSection {
     // ── Async refresh machinery ───────────────────────────────────────────────
 
     fn schedule_refresh(w: Rc<Widgets>) {
+        Self::spawn_state_fetch(w, cliphist_list_blocking);
+    }
+
+    /// Wipe then list on the same background thread, so the refresh can
+    /// never observe a list fetched before the wipe finished.
+    fn schedule_wipe_and_refresh(w: Rc<Widgets>) {
+        Self::spawn_state_fetch(w, || {
+            cliphist_wipe_blocking();
+            cliphist_list_blocking()
+        });
+    }
+
+    fn spawn_state_fetch(w: Rc<Widgets>, fetch: impl FnOnce() -> FetchedState + Send + 'static) {
         let (tx, rx) = std::sync::mpsc::channel::<FetchedState>();
 
         thread::spawn(move || {
-            let state = cliphist_list_blocking();
+            let state = fetch();
             let _ = tx.send(state);
         });
 
