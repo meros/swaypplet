@@ -1,6 +1,10 @@
 /* ══════════════════════════════════════════════════════
    Swaypplet – Gruvbox Dark Theme
-   Matches waybar pill-style with raised surfaces
+   Matches the waybar design language: flat surfaces,
+   hairline borders, single soft shadows, no gradients or
+   bevel highlights. Saturated color is reserved for state.
+   Nested radii are concentric (inner = outer − gap) where
+   corners sit close together (gap ≤ ~8px).
    ══════════════════════════════════════════════════════ */
 
 /* ── Palette ── */
@@ -32,13 +36,14 @@
    Three surface levels build depth without heavy shadows; active state is an
    accent TINT (not a saturated fill), so the panel stays calm.
    Spacing scale (use these literals consistently): 4 / 8 / 12 / 16 / 20.
-   Radius scale: 10 (controls) / 14 (cards, tiles) / 18 (panel). */
+   Radius scale: 8 (buttons) / 10 (controls, entries) / 14 (cards, tiles)
+   / 18 (floating surfaces: panel, OSD, launcher, popups, dialogs). */
 @define-color surface        alpha(#1d2021, 0.97);  /* panel base            */
 @define-color surface_raised #32302f;               /* cards, tiles          */
 @define-color surface_hover  #3c3836;               /* hover / inactive fill */
 @define-color surface_track  #45403d;               /* slider trough, wells  */
-@define-color border_subtle  alpha(#a89984, 0.14);  /* hairline separators   */
-@define-color border_strong  alpha(#a89984, 0.22);  /* card edges            */
+@define-color border_subtle  alpha(#ebdbb2, 0.08);  /* hairline separators — waybar card border */
+@define-color border_strong  alpha(#ebdbb2, 0.14);  /* card edges            */
 @define-color text_faint     #7c6f64;               /* tertiary text         */
 @define-color accent_tint    alpha(#689d6a, 0.20);  /* active tile/control bg*/
 @define-color accent_tint_hi alpha(#689d6a, 0.30);  /* active hover          */
@@ -63,58 +68,30 @@ window.panel {
     font-size: 10pt;
 }
 
-/* ── State-driven motion (verbatim from waybar) ── */
+/* ── State-driven motion (matches waybar) ──
+   Pure outer glow, no bevel layers. Box-shadow animations replace the
+   element's whole box-shadow each frame, so use them only on shadowless
+   elements; bordered cards animate border-color instead. */
 @keyframes battery-critical-pulse {
     from {
         background-color: @accent_quinary;
-        box-shadow:
-            inset 0 1px 0 alpha(white, 0.08),
-            inset 0 -1px 0 alpha(black, 0.20),
-            0 1px 2px alpha(black, 0.25),
-            0 3px 8px alpha(black, 0.30);
+        box-shadow: 0 0 2px alpha(@accent_quinary, 0.0);
     }
     to {
         background-color: @accent_quinary;
-        box-shadow:
-            inset 0 1px 0 alpha(white, 0.18),
-            inset 0 -1px 0 alpha(black, 0.25),
-            0 2px 6px alpha(black, 0.35),
-            0 0 14px alpha(#cc241d, 0.60);
+        box-shadow: 0 0 12px alpha(@accent_quinary, 0.6);
     }
 }
 
 @keyframes media-breathing {
-    from {
-        box-shadow:
-            inset 0 1px 0 alpha(white, 0.08),
-            inset 0 -1px 0 alpha(black, 0.20),
-            0 1px 2px alpha(black, 0.25),
-            0 3px 8px alpha(black, 0.30);
-    }
-    to {
-        box-shadow:
-            inset 0 1px 0 alpha(white, 0.16),
-            inset 0 -1px 0 alpha(black, 0.25),
-            0 2px 6px alpha(black, 0.35),
-            0 0 14px alpha(#689d6a, 0.45);
-    }
+    from { box-shadow: 0 0 0 alpha(@accent, 0.0); }
+    to   { box-shadow: 0 0 10px alpha(@accent, 0.40); }
 }
 
-@keyframes workspace-urgent-glow {
-    from {
-        box-shadow:
-            inset 0 1px 0 alpha(white, 0.10),
-            inset 0 -1px 0 alpha(black, 0.25),
-            0 2px 6px alpha(black, 0.35),
-            0 0 4px alpha(#cc241d, 0.15);
-    }
-    to {
-        box-shadow:
-            inset 0 1px 0 alpha(white, 0.10),
-            inset 0 -1px 0 alpha(black, 0.25),
-            0 2px 6px alpha(black, 0.35),
-            0 0 16px alpha(#cc241d, 0.65);
-    }
+/* For bordered cards with a drop shadow (e.g. critical notifications). */
+@keyframes critical-border-pulse {
+    from { border-color: alpha(@accent_quinary, 0.35); }
+    to   { border-color: alpha(@accent_quinary, 0.85); }
 }
 
 /* ── Section cards ── */
@@ -269,37 +246,28 @@ scale.overamplified slider:hover {
     box-shadow: 0 2px 6px alpha(@orange, 0.5);
 }
 
-/* ── Buttons (generic) ── */
+/* ── Buttons (generic) — flat translucent pills, matches waybar modules ── */
 button {
-    background-color: @bg2;
-    background-image: linear-gradient(180deg, alpha(white, 0.06) 0%, alpha(black, 0.06) 100%);
+    background-color: @surface_hover;
+    background-image: none;
     color: @fg;
     border-radius: 8px;
     padding: 8px 12px;
     min-height: 32px;
     border: none;
-    box-shadow:
-        inset 0 1px 0 alpha(white, 0.08),
-        inset 0 -1px 0 alpha(black, 0.20),
-        0 1px 2px alpha(black, 0.25),
-        0 3px 8px alpha(black, 0.30);
-    transition: all 150ms ease;
+    box-shadow: none;
+    transition: background-color 150ms ease;
 }
 
 button:hover {
-    background-color: @bg3;
-    background-image: linear-gradient(180deg, alpha(white, 0.14) 0%, alpha(black, 0.02) 100%);
-    box-shadow:
-        inset 0 1px 0 alpha(white, 0.14),
-        inset 0 -1px 0 alpha(black, 0.20),
-        0 2px 4px alpha(black, 0.30),
-        0 6px 14px alpha(black, 0.30);
+    background-color: @bg2;
+    background-image: none;
+    box-shadow: none;
 }
 
 button:active {
     background-color: @bg1;
-    box-shadow:
-        inset 0 2px 4px alpha(black, 0.3);
+    box-shadow: inset 0 1px 3px alpha(black, 0.2);
 }
 
 button:disabled {
@@ -954,12 +922,9 @@ revealer {
 
 .osd-container {
     background-color: alpha(@bg0_h, 0.88);
-    border-radius: 20px;
-    border: 1px solid alpha(@bg3, 0.25);
-    box-shadow:
-        0 12px 40px alpha(black, 0.6),
-        0 4px 12px alpha(black, 0.3),
-        inset 0 1px 0 alpha(white, 0.08);
+    border-radius: 18px;
+    border: 1px solid @border_strong;
+    box-shadow: 0 12px 40px alpha(black, 0.55);
     padding: 20px 28px 16px;
     min-width: 160px;
 }
@@ -1020,22 +985,21 @@ revealer {
 
 .notification-popup-content {
     background-color: alpha(@bg0_h, 0.92);
-    border-radius: 16px;
-    border: 1px solid alpha(@bg3, 0.3);
-    box-shadow:
-        0 8px 32px alpha(black, 0.5),
-        0 2px 8px alpha(black, 0.3),
-        inset 0 1px 0 alpha(white, 0.08);
+    border-radius: 18px;
+    border: 1px solid @border_strong;
+    box-shadow: 0 8px 32px alpha(black, 0.5);
     padding: 12px 14px;
 }
 
+/* Border pulse, not box-shadow: an animated box-shadow would clobber the
+   card's drop shadow, and battery-critical-pulse would paint the whole
+   card solid red. */
 .notification-popup.critical .notification-popup-content {
     border-color: alpha(@red, 0.6);
     box-shadow:
         0 8px 32px alpha(black, 0.5),
-        0 0 16px alpha(@red, 0.2),
-        inset 0 1px 0 alpha(white, 0.08);
-    animation: battery-critical-pulse 0.7s steps(24) infinite alternate;
+        0 0 16px alpha(@red, 0.2);
+    animation: critical-border-pulse 0.7s steps(12) infinite alternate;
 }
 
 .notification-app-name {
@@ -1141,19 +1105,16 @@ revealer {
 
 .launcher-container {
     background-color: alpha(@bg0_h, 0.88);
-    border-radius: 20px;
-    border: 1px solid alpha(@bg3, 0.25);
-    box-shadow:
-        0 12px 40px alpha(black, 0.6),
-        0 4px 12px alpha(black, 0.3),
-        inset 0 1px 0 alpha(white, 0.08);
+    border-radius: 18px;
+    border: 1px solid @border_strong;
+    box-shadow: 0 12px 40px alpha(black, 0.55);
     padding: 16px;
 }
 
 .launcher-entry {
     background-color: alpha(@bg0, 0.6);
     color: @fg;
-    border: 1px solid alpha(@bg3, 0.3);
+    border: 1px solid @border_strong;
     border-radius: 10px;
     padding: 10px 14px;
     font-size: 16px;
@@ -1233,7 +1194,7 @@ revealer {
 .polkit-container {
     background-color: alpha(@bg0_h, 0.97);
     border-radius: 18px;
-    border: 1px solid alpha(@bg3, 0.22);
+    border: 1px solid @border_strong;
     box-shadow: 0 12px 40px alpha(black, 0.5);
     padding: 26px 28px 20px 28px;
 }
@@ -1299,7 +1260,7 @@ revealer {
 .polkit-entry {
     background-color: alpha(@bg0, 0.7);
     color: @fg;
-    border: 1px solid alpha(@bg3, 0.3);
+    border: 1px solid @border_strong;
     border-radius: 10px;
     padding: 11px 14px;
     font-size: 14px;
@@ -1337,7 +1298,7 @@ revealer {
 .polkit-identity-combo {
     background-color: alpha(@bg0, 0.6);
     border-radius: 8px;
-    border: 1px solid alpha(@bg3, 0.3);
+    border: 1px solid @border_strong;
     padding: 4px 8px;
     color: @fg;
 }
@@ -1387,7 +1348,7 @@ revealer {
 .polkit-cancel {
     background-color: transparent;
     color: @fg_dim;
-    border: 1px solid alpha(@bg3, 0.3);
+    border: 1px solid @border_strong;
     border-radius: 10px;
     padding: 9px 18px;
     font-weight: 500;
@@ -1463,7 +1424,7 @@ revealer {
 .startmenu-root {
     background-color: alpha(@bg0_h, 0.97);
     border-radius: 18px;
-    border: 1px solid alpha(@bg3, 0.22);
+    border: 1px solid @border_strong;
     box-shadow: 0 18px 56px alpha(black, 0.55);
     padding: 16px;
 }
@@ -1475,7 +1436,7 @@ revealer {
 /* ── Centre stage: launcher (between the rail and quick settings) ── */
 .startmenu-launcher {
     padding: 0 14px;
-    border-right: 1px solid alpha(@bg3, 0.18);
+    border-right: 1px solid @border_subtle;
 }
 
 .launcher-view .launcher-entry {
@@ -1516,7 +1477,8 @@ revealer {
     background-color: alpha(@surface_hover, 0.7);
     color: @fg_dim;
     border: none;
-    border-radius: 9px;
+    /* Concentric with the 14px tile: 14 − 6 margin − 1 border = 7. */
+    border-radius: 7px;
     margin-right: 6px;
     min-width: 26px;
     min-height: 34px;
@@ -1539,7 +1501,7 @@ revealer {
 .startmenu-rail {
     padding-right: 12px;
     margin-right: 2px;
-    border-right: 1px solid alpha(@bg3, 0.18);
+    border-right: 1px solid @border_subtle;
 }
 
 .startmenu-rail-divider {
@@ -1611,6 +1573,6 @@ revealer {
 /* Full-width clipboard history reveal, beneath the two-column body. */
 .startmenu-clipboard {
     margin-top: 10px;
-    border-top: 1px solid alpha(@bg3, 0.18);
+    border-top: 1px solid @border_subtle;
     padding-top: 10px;
 }

@@ -537,7 +537,10 @@ impl PowerSection {
                     return glib::ControlFlow::Break;
                 };
                 // Only refresh when the widget is visible (mapped to screen).
-                if !h.level_bar.is_mapped() {
+                // The level bar lives inside the collapsed-by-default detail
+                // revealer, which unmaps it; check the always-visible summary
+                // icon instead so the badge keeps refreshing while collapsed.
+                if !h.summary_icon.is_mapped() {
                     return glib::ControlFlow::Continue;
                 }
                 if let Some(bat) = read_battery(&h.bat_path) {
@@ -570,12 +573,14 @@ impl PowerSection {
         if let (Some(bat), Some(handles)) = (&new_state.battery, &self.bat_handles) {
             // BatteryHandles::apply updates summary_icon and summary_text as well.
             handles.apply(bat);
-        } else if new_state.battery.is_none() {
+        } else if self.bat_handles.is_none() {
             // Desktop without battery: show governor in summary.
             self.summary_icon.set_label("󰻠");
             self.summary_text
                 .set_label(&format_governor_info(&new_state.governor));
         }
+        // else: machine has a battery but this read failed transiently —
+        // keep the last-known battery display rather than clobbering it.
 
         self.governor_label
             .set_label(&format_governor_info(&new_state.governor));

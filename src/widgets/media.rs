@@ -124,7 +124,7 @@ pub struct MediaSection {
     root: gtk4::Box,
     widgets: Rc<Widgets>,
     state: Rc<RefCell<Option<MediaState>>>,
-    progress_timer: Rc<RefCell<Option<glib::SourceId>>>,
+    progress_timer: Rc<RefCell<Option<(glib::SourceId, Rc<std::cell::Cell<bool>>)>>>,
 }
 
 impl MediaSection {
@@ -285,7 +285,8 @@ impl MediaSection {
         });
 
         let state: Rc<RefCell<Option<MediaState>>> = Rc::new(RefCell::new(None));
-        let progress_timer: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+        let progress_timer: Rc<RefCell<Option<(glib::SourceId, Rc<std::cell::Cell<bool>>)>>> =
+            Rc::new(RefCell::new(None));
 
         // ── Button signals ────────────────────────────────────────────────
         {
@@ -350,7 +351,7 @@ impl MediaSection {
         root: gtk4::Box,
         w: Rc<Widgets>,
         state: Rc<RefCell<Option<MediaState>>>,
-        progress_timer: Rc<RefCell<Option<glib::SourceId>>>,
+        progress_timer: Rc<RefCell<Option<(glib::SourceId, Rc<std::cell::Cell<bool>>)>>>,
     ) {
         spawn_work(read_state, move |new_state| {
             Self::apply_state(&root, &w, &new_state, &progress_timer);
@@ -364,7 +365,7 @@ impl MediaSection {
         root: gtk4::Box,
         w: Rc<Widgets>,
         state: Rc<RefCell<Option<MediaState>>>,
-        progress_timer: Rc<RefCell<Option<glib::SourceId>>>,
+        progress_timer: Rc<RefCell<Option<(glib::SourceId, Rc<std::cell::Cell<bool>>)>>>,
     ) {
         spawn_work(
             move || {
@@ -382,10 +383,14 @@ impl MediaSection {
         root: &gtk4::Box,
         w: &Rc<Widgets>,
         state: &Option<MediaState>,
-        progress_timer: &Rc<RefCell<Option<glib::SourceId>>>,
+        progress_timer: &Rc<RefCell<Option<(glib::SourceId, Rc<std::cell::Cell<bool>>)>>>,
     ) {
-        // Cancel existing progress timer
-        if let Some(id) = progress_timer.borrow_mut().take() {
+        // Cancel existing progress timer. Mark it cancelled first so any
+        // in-flight spawn_work callback from the old timer (already
+        // dispatched to the background thread) drops its stale result
+        // instead of overwriting the new track's just-applied state.
+        if let Some((id, cancelled)) = progress_timer.borrow_mut().take() {
+            cancelled.set(true);
             id.remove();
         }
 
@@ -463,6 +468,12 @@ impl MediaSection {
                                             .and_then(|s| s.parse::<f64>().ok())
                                     },
                                     move |pos| {
+                                        // A track change since this was dispatched marks
+                                        // `cancelled`; drop the stale result rather than
+                                        // applying it over the new track's state.
+                                        if cancelled_inner.get() {
+                                            return;
+                                        }
                                         if let Some(pos) = pos {
                                             let frac = (pos / len_c).clamp(0.0, 1.0);
                                             w_inner.progress_bar.set_fraction(frac);
@@ -479,7 +490,7 @@ impl MediaSection {
                                 glib::ControlFlow::Continue
                             },
                         );
-                        *progress_timer.borrow_mut() = Some(id);
+                        *progress_timer.borrow_mut() = Some((id, cancelled));
                     }
                 } else {
                     w.progress_bar.set_visible(false);

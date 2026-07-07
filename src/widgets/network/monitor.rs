@@ -36,6 +36,10 @@ struct PolledState {
     active: ActiveConnection,
     connectivity: ConnectivityState,
     wifi_radio: bool,
+    /// Fetched every cycle (cheap nmcli calls) so `apply_polled_state` never
+    /// has to call back into nmcli from the GTK main thread.
+    interfaces: Vec<NetworkInterface>,
+    vpns: Vec<VpnConnection>,
 }
 
 /// Cached previous state for change detection, plus polling cadence control.
@@ -79,6 +83,8 @@ fn schedule_next(
                 active: get_active_connection(),
                 connectivity: check_connectivity(),
                 wifi_radio: wifi_radio_enabled(),
+                interfaces: get_network_interfaces(),
+                vpns: get_vpn_connections(),
             };
             let _ = tx.send(polled);
         });
@@ -135,12 +141,10 @@ fn apply_polled_state(
         update_active_display(&polled.active, &w.display);
         state.borrow_mut().active = polled.active.clone();
 
-        let interfaces = get_network_interfaces();
-        state.borrow_mut().interfaces = interfaces;
+        state.borrow_mut().interfaces = polled.interfaces.clone();
         super::interfaces::rebuild_iface_list(&w.iface_list_box, state);
 
-        let vpns = get_vpn_connections();
-        state.borrow_mut().vpns = vpns;
+        state.borrow_mut().vpns = polled.vpns.clone();
         super::vpn::rebuild_vpn_list(&w.vpn_list_box, state);
 
         changed = true;

@@ -236,10 +236,16 @@ fn spawn_helper(state: &Rc<RefCell<PolkitState>>, username: &str) {
             );
             dialog.lock_inputs();
             // Give the user a moment to read the error before the modal
-            // disappears.
+            // disappears. Guarded by cookie so that if this session ends
+            // meanwhile (cancel) and a queued one becomes active, the timer
+            // doesn't error out the wrong session.
             let s = state.clone();
             glib::timeout_add_local_once(Duration::from_secs(3), move || {
-                end_session(&s, AuthOutcome::Error("polkit helper unavailable".into()));
+                let same_session =
+                    s.borrow().active.as_ref().map(|a| &a.request.cookie) == Some(&cookie);
+                if same_session {
+                    end_session(&s, AuthOutcome::Error("polkit helper unavailable".into()));
+                }
             });
         }
     }
@@ -333,6 +339,13 @@ fn drain_helper(state: &Rc<RefCell<PolkitState>>) -> bool {
                     active.helper.take();
                 }
                 spawn_helper(state, &username);
+            } else {
+                // No identity to respawn for — resolve the request instead
+                // of leaving a dead dialog that can never complete.
+                end_session(
+                    state,
+                    AuthOutcome::Error("authentication helper exited".into()),
+                );
             }
         }
         return false;
@@ -379,10 +392,22 @@ fn apply_helper_event(state: &Rc<RefCell<PolkitState>>, event: HelperEvent) -> b
             dialog.show_fingerprint(false, "");
             dialog.set_status("Authenticated", StatusKind::Success);
             dialog.flash_success();
-            // Brief celebratory hold before dismissing.
+            // Brief celebratory hold before dismissing. Guarded by cookie:
+            // the user can cancel during the hold, which pops a queued
+            // request into `active` — ending *that* session with Success
+            // here would approve an unrelated action.
             let s = state.clone();
+            let cookie = state
+                .borrow()
+                .active
+                .as_ref()
+                .map(|a| a.request.cookie.clone());
             glib::timeout_add_local_once(Duration::from_millis(450), move || {
-                end_session(&s, AuthOutcome::Success);
+                let same_session =
+                    s.borrow().active.as_ref().map(|a| &a.request.cookie) == cookie.as_ref();
+                if same_session {
+                    end_session(&s, AuthOutcome::Success);
+                }
             });
             false
         }

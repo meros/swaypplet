@@ -25,6 +25,13 @@ const RESP_QUERY_ASYNC_ITEM: u8 = 1;
 const RESP_QUERY_NO_RESULTS: u8 = 254;
 const RESP_QUERY_DONE: u8 = 255;
 
+/// Cap on a single response frame's declared length, to guard against an
+/// allocation bomb from a desynced or misbehaving daemon.
+const MAX_FRAME_LEN: u32 = 4 * 1024 * 1024;
+/// Overall wall-clock budget for a query, since the per-read socket timeout
+/// resets on every frame and won't catch a daemon that streams without DONE.
+const QUERY_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
 // ── Public types ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -95,8 +102,16 @@ pub fn query(
     send_message(&mut stream, MSG_TYPE_QUERY, &payload)?;
 
     let mut results = Vec::new();
+    let deadline = std::time::Instant::now() + QUERY_DEADLINE;
 
     loop {
+        if std::time::Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "elephant query exceeded overall deadline",
+            ));
+        }
+
         let (status, length) = match read_response_header(&mut stream) {
             Ok(h) => h,
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
@@ -109,6 +124,12 @@ pub fn query(
             RESP_QUERY_ITEM | RESP_QUERY_ASYNC_ITEM => {
                 if length == 0 {
                     continue;
+                }
+                if length > MAX_FRAME_LEN {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("elephant response frame too large ({length} bytes)"),
+                    ));
                 }
                 let mut payload = vec![0u8; length as usize];
                 stream.read_exact(&mut payload)?;
@@ -131,6 +152,12 @@ pub fn query(
             _ => {
                 // Unknown status — skip the payload
                 if length > 0 {
+                    if length > MAX_FRAME_LEN {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("elephant response frame too large ({length} bytes)"),
+                        ));
+                    }
                     let mut skip = vec![0u8; length as usize];
                     let _ = stream.read_exact(&mut skip);
                 }

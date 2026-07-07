@@ -446,19 +446,22 @@ fn build_result_row(
         .build();
     icon_label.add_css_class("launcher-result-icon");
 
+    let mut used_themed_icon = false;
     if !result.icon.is_empty() && !result.icon.contains('/') {
-        let theme = gtk4::IconTheme::for_display(&gtk4::gdk::Display::default().unwrap());
-        if theme.has_icon(&result.icon) {
-            let image = gtk4::Image::builder()
-                .icon_name(&result.icon)
-                .pixel_size(24)
-                .build();
-            image.add_css_class("launcher-result-icon-img");
-            row.append(&image);
-        } else {
-            row.append(&icon_label);
+        if let Some(display) = gtk4::gdk::Display::default() {
+            let theme = gtk4::IconTheme::for_display(&display);
+            if theme.has_icon(&result.icon) {
+                let image = gtk4::Image::builder()
+                    .icon_name(&result.icon)
+                    .pixel_size(24)
+                    .build();
+                image.add_css_class("launcher-result-icon-img");
+                row.append(&image);
+                used_themed_icon = true;
+            }
         }
-    } else {
+    }
+    if !used_themed_icon {
         row.append(&icon_label);
     }
 

@@ -21,6 +21,8 @@ pub fn sanitize(input: &str) -> String {
     let bytes = input.as_bytes();
     let len = bytes.len();
     let mut i = 0;
+    // Stack of currently-open allowed tags, innermost last.
+    let mut open_tags: Vec<String> = Vec::new();
 
     while i < len {
         if bytes[i] == b'&' {
@@ -37,7 +39,7 @@ pub fn sanitize(input: &str) -> String {
             // Try to match a tag: <...>
             if let Some(end) = find_tag_end(bytes, i + 1) {
                 let tag_content = &input[i + 1..end]; // between < and >
-                handle_tag(tag_content, &mut out);
+                handle_tag(tag_content, &mut out, &mut open_tags);
                 i = end + 1;
             } else {
                 out.push_str("&lt;");
@@ -49,6 +51,13 @@ pub fn sanitize(input: &str) -> String {
             out.push(ch);
             i += ch.len_utf8();
         }
+    }
+
+    // Close whatever is left open so Pango always gets balanced markup.
+    while let Some(tag) = open_tags.pop() {
+        out.push_str("</");
+        out.push_str(&tag);
+        out.push('>');
     }
 
     out
@@ -80,8 +89,16 @@ fn find_entity_end(input: &str, start: usize) -> Option<usize> {
 }
 
 fn is_valid_entity(name: &str) -> bool {
-    matches!(name, "amp" | "lt" | "gt" | "quot" | "apos")
-        || (name.starts_with('#') && name.len() > 1)
+    if matches!(name, "amp" | "lt" | "gt" | "quot" | "apos") {
+        return true;
+    }
+    let Some(rest) = name.strip_prefix('#') else {
+        return false;
+    };
+    match rest.strip_prefix('x').or_else(|| rest.strip_prefix('X')) {
+        Some(hex) => !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit()),
+        None => !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()),
+    }
 }
 
 /// Find the `>` that closes a tag starting after `<` at position `start`.
@@ -100,7 +117,9 @@ fn find_tag_end(bytes: &[u8], start: usize) -> Option<usize> {
 }
 
 /// Process a parsed tag (content between < and >) and emit safe markup.
-fn handle_tag(tag: &str, out: &mut String) {
+/// `open_tags` tracks currently-open allowed tags so closing tags can be
+/// matched against the innermost one instead of trusted blindly.
+fn handle_tag(tag: &str, out: &mut String, open_tags: &mut Vec<String>) {
     let tag_trimmed = tag.trim();
     if tag_trimmed.is_empty() {
         return;
@@ -133,7 +152,10 @@ fn handle_tag(tag: &str, out: &mut String) {
     }
 
     if is_closing {
-        if ALLOWED_PAIRED.contains(&tag_name.as_str()) {
+        // Only close the innermost open tag. A mismatched or stray closing
+        // tag (e.g. `<i>x</b>`) would otherwise break Pango's parser.
+        if open_tags.last().map(String::as_str) == Some(tag_name.as_str()) {
+            open_tags.pop();
             out.push('<');
             out.push('/');
             out.push_str(&tag_name);
@@ -151,6 +173,8 @@ fn handle_tag(tag: &str, out: &mut String) {
         }
         if is_self_closing {
             out.push('/');
+        } else {
+            open_tags.push(tag_name);
         }
         out.push('>');
     }
@@ -255,5 +279,20 @@ mod tests {
             sanitize("<b>ok</b><span>nope</span>"),
             "<b>ok</b>nope"
         );
+    }
+
+    #[test]
+    fn mismatched_closing_tag_dropped_and_unclosed_tag_closed() {
+        // `</b>` doesn't match the innermost open tag (`i`), so it's dropped;
+        // the still-open `<i>` is closed automatically at the end.
+        assert_eq!(sanitize("<i>x</b>"), "<i>x</i>");
+    }
+
+    #[test]
+    fn invalid_numeric_entity_escaped() {
+        assert_eq!(sanitize("&#zz;"), "&amp;#zz;");
+        assert_eq!(sanitize("&#65;"), "&#65;");
+        assert_eq!(sanitize("&#x41;"), "&#x41;");
+        assert_eq!(sanitize("&#x;"), "&amp;#x;");
     }
 }

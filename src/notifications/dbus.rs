@@ -16,6 +16,14 @@ enum DbusEvent {
     Close(u32),
 }
 
+/// Outgoing signal requested by the GTK thread, forwarded to the D-Bus thread.
+/// Uses a `tokio::sync::mpsc` channel because `UnboundedSender::send` is a
+/// plain sync call, so the GTK thread can use it without touching the runtime.
+enum SignalEvent {
+    Closed(u32, u32),
+    ActionInvoked(u32, String),
+}
+
 /// Thread-safe sender for D-Bus → main thread communication.
 struct EventSender {
     tx: std::sync::mpsc::Sender<DbusEvent>,
@@ -120,11 +128,12 @@ impl NotificationServer {
         }
 
         // Wait for the main thread to process and return the ID
-        let id = reply_rx
-            .recv_timeout(std::time::Duration::from_secs(5))
-            .unwrap_or(0);
-
-        Ok(id)
+        match reply_rx.recv_timeout(std::time::Duration::from_secs(5)) {
+            Ok(id) => Ok(id),
+            Err(_) => Err(zbus::fdo::Error::Failed(
+                "Timed out waiting for notification store".to_string(),
+            )),
+        }
     }
 
     async fn close_notification(&self, id: u32) -> zbus::fdo::Result<()> {
@@ -155,6 +164,7 @@ impl NotificationServer {
 /// updated (keeping it safely `Rc<RefCell<>>`).
 pub fn start_server(store: Rc<RefCell<NotificationStore>>) {
     let (tx, rx) = std::sync::mpsc::channel::<DbusEvent>();
+    let (signal_tx, mut signal_rx) = tokio::sync::mpsc::unbounded_channel::<SignalEvent>();
 
     let sender = Arc::new(Mutex::new(EventSender { tx }));
     let server = NotificationServer { sender };
@@ -181,7 +191,37 @@ pub fn start_server(store: Rc<RefCell<NotificationStore>>) {
                     match conn.request_name("org.freedesktop.Notifications").await {
                         Ok(_) => {
                             log::info!("Notification D-Bus server started");
-                            std::future::pending::<()>().await;
+
+                            let iface_ref = match conn
+                                .object_server()
+                                .interface::<_, NotificationServer>(
+                                    "/org/freedesktop/Notifications",
+                                )
+                                .await
+                            {
+                                Ok(r) => r,
+                                Err(e) => {
+                                    log::error!("Failed to look up notification interface: {e}");
+                                    return;
+                                }
+                            };
+
+                            // Emit signals the GTK thread asks for, for as long as it's alive.
+                            while let Some(event) = signal_rx.recv().await {
+                                let ctxt = iface_ref.signal_context();
+                                let result = match event {
+                                    SignalEvent::Closed(id, reason) => {
+                                        NotificationServer::notification_closed(ctxt, id, reason)
+                                            .await
+                                    }
+                                    SignalEvent::ActionInvoked(id, key) => {
+                                        NotificationServer::action_invoked(ctxt, id, &key).await
+                                    }
+                                };
+                                if let Err(e) = result {
+                                    log::warn!("Failed to emit notification signal: {e}");
+                                }
+                            }
                         }
                         Err(e) => {
                             log::error!("Failed to acquire org.freedesktop.Notifications: {e}");
@@ -197,6 +237,19 @@ pub fn start_server(store: Rc<RefCell<NotificationStore>>) {
             }
         });
     });
+
+    // Forward store close/action events to the D-Bus thread as outgoing signals.
+    {
+        let tx = signal_tx.clone();
+        store.borrow_mut().connect_close(move |id, reason| {
+            let _ = tx.send(SignalEvent::Closed(id, reason as u32));
+        });
+    }
+    {
+        store.borrow_mut().connect_action(move |id, key| {
+            let _ = signal_tx.send(SignalEvent::ActionInvoked(id, key.to_string()));
+        });
+    }
 
     // Poll the channel on the GTK main thread
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {

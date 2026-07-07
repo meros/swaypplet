@@ -490,8 +490,6 @@ impl NetworkSection {
             let wifi_controls_init = section.wifi_controls_box.clone();
             let power_save_init = section.power_save_row.clone();
             let state_init = section.state.clone();
-            let summary_icon_init = section.summary_icon.clone();
-            let summary_text_init = section.summary_text.clone();
 
             // Clones for the WiFi radio toggle callback (wired inside the async callback).
             let wifi_switch_radio = section.wifi_switch.clone();
@@ -540,6 +538,7 @@ impl NetworkSection {
                         }
 
                         // Wire WiFi radio toggle now that we know adapter is present.
+                        let wifi_switch_revert = wifi_switch_radio.clone();
                         wifi_switch_radio.connect_state_set(move |_sw, active| {
                             let (tx, rx) = mpsc::channel::<NmResult>();
                             set_wifi_radio_async(active, tx);
@@ -549,6 +548,7 @@ impl NetworkSection {
                             let ps_poll = power_save_radio.clone();
                             let si_poll = summary_icon_radio.clone();
                             let st_poll = summary_text_radio.clone();
+                            let sw_poll = wifi_switch_revert.clone();
                             glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
                                 match rx.try_recv() {
                                     Ok(NmResult::Success) => {
@@ -561,9 +561,15 @@ impl NetworkSection {
                                         }
                                         glib::ControlFlow::Break
                                     }
-                                    Ok(NmResult::Failure(_)) => glib::ControlFlow::Break,
+                                    Ok(NmResult::Failure(_)) => {
+                                        sw_poll.set_state(!active);
+                                        glib::ControlFlow::Break
+                                    }
                                     Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                                    Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+                                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                                        sw_poll.set_state(!active);
+                                        glib::ControlFlow::Break
+                                    }
                                 }
                             });
 
@@ -730,23 +736,30 @@ impl NetworkSection {
 
         spawn_work(
             || {
-                let raw = scan_wifi_raw();
+                let raw = scan_wifi_raw()?;
                 let known = get_known_ssids();
-                parse_wifi_list(&raw, &known)
+                Ok(parse_wifi_list(&raw, &known))
             },
-            move |networks| {
+            move |result: Result<Vec<WifiNetwork>, String>| {
                 scan_spinner_c.stop();
                 scan_spinner_c.set_visible(false);
-                scan_status_c.set_visible(false);
+                state_c.borrow_mut().scanning = false;
 
-                {
-                    let mut s = state_c.borrow_mut();
-                    s.networks = networks;
-                    s.scanning = false;
-                    s.show_all = false;
+                match result {
+                    Ok(networks) => {
+                        scan_status_c.set_visible(false);
+                        {
+                            let mut s = state_c.borrow_mut();
+                            s.networks = networks;
+                            s.show_all = false;
+                        }
+                        wifi::rebuild_wifi_list(&network_list_box_c, &state_c);
+                    }
+                    Err(msg) => {
+                        scan_status_c.set_label(&msg);
+                        auto_hide_status(&scan_status_c);
+                    }
                 }
-
-                wifi::rebuild_wifi_list(&network_list_box_c, &state_c);
             },
         );
     }

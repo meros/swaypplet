@@ -30,10 +30,11 @@ static PANEL_CONFIG: LayerShellConfig = LayerShellConfig {
     // The compositor already lifts this Overlay surface above waybar's
     // exclusive zone, so the bottom margin only needs to be a small visual gap
     // — not the bar's full height (a 48px margin double-counted it and left a
-    // large gap above the bar).
+    // large gap above the bar). 4px matches the sway window gaps and waybar's
+    // screen-edge margins, so the menu aligns with the bar's left edge.
     margins: &[
-        (Edge::Bottom, 6),
-        (Edge::Left, 8),
+        (Edge::Bottom, 4),
+        (Edge::Left, 4),
     ],
     keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
 };
@@ -62,7 +63,6 @@ pub fn run() {
     let state_clone = state.clone();
     let store_startup = store.clone();
     app.connect_startup(move |_app| {
-        let _ = fs::write("/tmp/swaypplet.pid", std::process::id().to_string());
         theme::load_css();
 
         // Start D-Bus notification server
@@ -85,6 +85,11 @@ pub fn run() {
             }
             glib::ControlFlow::Continue
         });
+
+        // Written only after both signal handlers are installed, so a
+        // `kill -USR1/-USR2` that lands as soon as the pid file exists can't
+        // hit the default (terminating) disposition.
+        let _ = fs::write("/tmp/swaypplet.pid", std::process::id().to_string());
     });
 
     let state_clone = state.clone();

@@ -5,6 +5,7 @@ use super::{CloseReason, Notification, Urgency};
 type NotifyCb = Rc<dyn Fn(&Notification)>;
 type CloseCb = Rc<dyn Fn(u32, CloseReason)>;
 type ChangeCb = Rc<dyn Fn()>;
+type ActionCb = Rc<dyn Fn(u32, &str)>;
 
 /// Single source of truth for all notification state.
 ///
@@ -18,11 +19,16 @@ const MAX_NOTIFICATIONS: usize = 50;
 
 pub struct NotificationStore {
     notifications: Vec<Notification>,
+    /// IDs currently considered "open" by a D-Bus client — a superset of
+    /// `notifications`, since transient notifications get an ID but are
+    /// never stored in history. Used to tell a real close from a no-op.
+    open_ids: std::collections::HashSet<u32>,
     next_id: u32,
     dnd_enabled: bool,
     on_notify: Vec<NotifyCb>,
     on_close: Vec<CloseCb>,
     on_change: Vec<ChangeCb>,
+    on_action: Vec<ActionCb>,
 }
 
 /// Deferred callbacks that must be fired after releasing the store's `RefCell`.
@@ -30,6 +36,7 @@ pub struct PendingCallbacks {
     notify: Vec<(NotifyCb, Notification)>,
     close: Vec<(CloseCb, u32, CloseReason)>,
     change: Vec<ChangeCb>,
+    action: Vec<(ActionCb, u32, String)>,
 }
 
 impl PendingCallbacks {
@@ -38,6 +45,7 @@ impl PendingCallbacks {
             notify: Vec::new(),
             close: Vec::new(),
             change: Vec::new(),
+            action: Vec::new(),
         }
     }
 
@@ -52,6 +60,9 @@ impl PendingCallbacks {
         for cb in self.change {
             cb();
         }
+        for (cb, id, key) in self.action {
+            cb(id, &key);
+        }
     }
 }
 
@@ -59,11 +70,13 @@ impl NotificationStore {
     pub fn new() -> Self {
         Self {
             notifications: Vec::new(),
+            open_ids: std::collections::HashSet::new(),
             next_id: 1,
             dnd_enabled: false,
             on_notify: Vec::new(),
             on_close: Vec::new(),
             on_change: Vec::new(),
+            on_action: Vec::new(),
         }
     }
 
@@ -79,6 +92,10 @@ impl NotificationStore {
 
     pub fn connect_change(&mut self, cb: impl Fn() + 'static) {
         self.on_change.push(Rc::new(cb));
+    }
+
+    pub fn connect_action(&mut self, cb: impl Fn(u32, &str) + 'static) {
+        self.on_action.push(Rc::new(cb));
     }
 
     // ── DND ──────────────────────────────────────────────────────────────
@@ -98,13 +115,18 @@ impl NotificationStore {
     pub fn add(&mut self, mut notif: Notification) -> (u32, PendingCallbacks) {
         // Assign ID
         if notif.replaces_id > 0 {
-            if let Some(existing) = self
+            if let Some(pos) = self
                 .notifications
-                .iter_mut()
-                .find(|n| n.id == notif.replaces_id)
+                .iter()
+                .position(|n| n.id == notif.replaces_id)
             {
-                notif.id = existing.id;
-                *existing = notif.clone();
+                notif.id = notif.replaces_id;
+                if notif.transient {
+                    // A transient update must not leave a persistent entry behind.
+                    self.notifications.remove(pos);
+                } else {
+                    self.notifications[pos] = notif.clone();
+                }
             } else {
                 notif.id = self.next_id;
                 self.next_id += 1;
@@ -121,6 +143,7 @@ impl NotificationStore {
         }
 
         let id = notif.id;
+        self.open_ids.insert(id);
 
         // Trim oldest notifications if over the limit
         while self.notifications.len() > MAX_NOTIFICATIONS {
@@ -138,13 +161,16 @@ impl NotificationStore {
 
     /// Close a notification by ID. Returns `PendingCallbacks`.
     pub fn close(&mut self, id: u32, reason: CloseReason) -> PendingCallbacks {
-        self.notifications.retain(|n| n.id != id);
-
         let mut pending = PendingCallbacks::new();
-        for cb in &self.on_close {
-            pending.close.push((cb.clone(), id, reason));
+        // `open_ids` covers transient notifications too, so this is the only
+        // reliable way to tell a real close from a no-op on an unknown id.
+        if self.open_ids.remove(&id) {
+            self.notifications.retain(|n| n.id != id);
+            for cb in &self.on_close {
+                pending.close.push((cb.clone(), id, reason));
+            }
+            self.collect_change(&mut pending);
         }
-        self.collect_change(&mut pending);
         pending
     }
 
@@ -152,6 +178,9 @@ impl NotificationStore {
     pub fn clear_all(&mut self) -> PendingCallbacks {
         let ids: Vec<u32> = self.notifications.iter().map(|n| n.id).collect();
         self.notifications.clear();
+        for id in &ids {
+            self.open_ids.remove(id);
+        }
 
         let mut pending = PendingCallbacks::new();
         for id in ids {
@@ -160,6 +189,16 @@ impl NotificationStore {
             }
         }
         self.collect_change(&mut pending);
+        pending
+    }
+
+    /// Notify observers (e.g. the D-Bus layer) that an action was invoked.
+    /// Does not mutate notification state.
+    pub fn action_invoked(&self, id: u32, key: &str) -> PendingCallbacks {
+        let mut pending = PendingCallbacks::new();
+        for cb in &self.on_action {
+            pending.action.push((cb.clone(), id, key.to_string()));
+        }
         pending
     }
 
@@ -207,6 +246,11 @@ pub fn store_add(store: &StoreRef, notif: Notification) -> u32 {
 
 pub fn store_close(store: &StoreRef, id: u32, reason: CloseReason) {
     let pending = store.borrow_mut().close(id, reason);
+    pending.fire();
+}
+
+pub fn store_action_invoked(store: &StoreRef, id: u32, key: &str) {
+    let pending = store.borrow().action_invoked(id, key);
     pending.fire();
 }
 
