@@ -110,11 +110,16 @@ impl Panel {
         left.add_css_class("startmenu-launcher");
         left.append(launcher.widget());
 
-        // RIGHT column — quick settings (~40%).
+        // RIGHT column — quick settings (~40%). propagate_natural_height lets
+        // the window grow to fit the whole column (its natural height would
+        // otherwise be near-zero, squeezing it to the left column's height and
+        // slicing the last card at the viewport edge); the scrollbar only
+        // appears when the column outgrows the monitor.
         let right_scroller = gtk4::ScrolledWindow::builder()
             .hscrollbar_policy(gtk4::PolicyType::Never)
             .vscrollbar_policy(gtk4::PolicyType::Automatic)
             .vexpand(true)
+            .propagate_natural_height(true)
             .width_request(300)
             .build();
         let right = gtk4::Box::builder()
@@ -189,17 +194,15 @@ impl Panel {
         // 4. Media mini-card (MediaSection hides itself when nothing plays).
         right.append(media.widget());
 
-        // 5. Notifications — compact, height-limited scroll.
+        // 5. Notifications — compact, height-limited via the section's own
+        //    scroller (a second wrapping ScrolledWindow would nest three
+        //    vertical scrollers and clip the cards below).
         notifications.expand_for_page();
-        let notif_scroller = gtk4::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk4::PolicyType::Never)
-            .vscrollbar_policy(gtk4::PolicyType::Automatic)
-            .max_content_height(200)
-            .propagate_natural_height(true)
-            .build();
-        notif_scroller.add_css_class("startmenu-notifications");
-        notif_scroller.set_child(Some(notifications.widget()));
-        right.append(&notif_scroller);
+        notifications.set_list_max_height(200);
+        notifications
+            .widget()
+            .add_css_class("startmenu-notifications");
+        right.append(notifications.widget());
 
         // 6. Power status card (battery + governor). Session *actions* now live
         //    in the left rail; this card is the at-a-glance status readout.
@@ -229,7 +232,12 @@ impl Panel {
             .build();
         rail.add_css_class("startmenu-rail");
 
-        rail.append(&rail_action("󰄀", "Screenshot region", &window, screenshot_region));
+        rail.append(&rail_action(
+            "󰄀",
+            "Screenshot region",
+            &window,
+            screenshot_region,
+        ));
 
         // Clipboard — toggles the inline full-width history reveal (does NOT
         // hide the menu).
@@ -525,7 +533,6 @@ fn screenshot_region() {
         log::error!("Failed to spawn grim/slurp region capture: {e}");
     }
 }
-
 
 fn color_pick() {
     use std::process::Command;

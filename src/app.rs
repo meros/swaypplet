@@ -4,8 +4,8 @@ use std::rc::Rc;
 
 use gio::prelude::*;
 use glib::unix_signal_add_local;
-use gtk4::prelude::*;
 use gtk4::Application;
+use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
 use crate::launcher::Launcher;
@@ -18,24 +18,18 @@ use crate::theme;
 
 const APP_ID: &str = "dev.swaypplet.panel";
 
-// Start-menu popup: bottom-left anchored, ~780x640, clearing the waybar.
+// Start-menu popup: bottom-left anchored, ~780x700, clearing the waybar.
 static PANEL_CONFIG: LayerShellConfig = LayerShellConfig {
     namespace: "swaypplet",
     default_width: Some(780),
-    default_height: Some(640),
-    anchors: &[
-        (Edge::Bottom, true),
-        (Edge::Left, true),
-    ],
+    default_height: Some(700),
+    anchors: &[(Edge::Bottom, true), (Edge::Left, true)],
     // The compositor already lifts this Overlay surface above waybar's
     // exclusive zone, so the bottom margin only needs to be a small visual gap
     // — not the bar's full height (a 48px margin double-counted it and left a
     // large gap above the bar). 4px matches the sway window gaps and waybar's
     // screen-edge margins, so the menu aligns with the bar's left edge.
-    margins: &[
-        (Edge::Bottom, 4),
-        (Edge::Left, 4),
-    ],
+    margins: &[(Edge::Bottom, 4), (Edge::Left, 4)],
     keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
 };
 
@@ -162,8 +156,9 @@ pub fn run() {
                             | OsdCommand::OutputVolumeLower
                             | OsdCommand::OutputVolumeMuteToggle
                             | OsdCommand::InputVolumeMuteToggle => panel.refresh_audio(),
-                            OsdCommand::BrightnessRaise
-                            | OsdCommand::BrightnessLower => panel.refresh_brightness(),
+                            OsdCommand::BrightnessRaise | OsdCommand::BrightnessLower => {
+                                panel.refresh_brightness()
+                            }
                             _ => {}
                         }
                     }
@@ -178,8 +173,9 @@ pub fn run() {
                             | OsdCommand::OutputVolumeLower
                             | OsdCommand::OutputVolumeMuteToggle
                             | OsdCommand::InputVolumeMuteToggle => panel.refresh_audio(),
-                            OsdCommand::BrightnessRaise
-                            | OsdCommand::BrightnessLower => panel.refresh_brightness(),
+                            OsdCommand::BrightnessRaise | OsdCommand::BrightnessLower => {
+                                panel.refresh_brightness()
+                            }
                             _ => {}
                         }
                     }

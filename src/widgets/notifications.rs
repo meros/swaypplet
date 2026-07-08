@@ -5,8 +5,8 @@ use std::time::SystemTime;
 use gtk4::prelude::*;
 
 use crate::icons;
-use crate::notifications::store::{self, NotificationStore};
 use crate::notifications::CloseReason;
+use crate::notifications::store::{self, NotificationStore};
 
 pub struct NotificationsSection {
     root: gtk4::Box,
@@ -16,6 +16,7 @@ pub struct NotificationsSection {
     summary_text: gtk4::Label,
     summary_arrow: gtk4::Label,
     detail_revealer: gtk4::Revealer,
+    list_scroller: gtk4::ScrolledWindow,
     store: Rc<RefCell<NotificationStore>>,
 }
 
@@ -49,9 +50,7 @@ impl NotificationsSection {
         summary_content.append(&summary_text);
         summary_content.append(&summary_arrow);
 
-        let summary_btn = gtk4::Button::builder()
-            .child(&summary_content)
-            .build();
+        let summary_btn = gtk4::Button::builder().child(&summary_content).build();
         summary_btn.add_css_class("section-summary");
 
         let detail_revealer = gtk4::Revealer::builder()
@@ -140,6 +139,7 @@ impl NotificationsSection {
             summary_text,
             summary_arrow,
             detail_revealer,
+            list_scroller: scroll.clone(),
             store: store.clone(),
         };
 
@@ -151,12 +151,8 @@ impl NotificationsSection {
         let detail_revealer_c = section.detail_revealer.clone();
         let store_change = store.clone();
         store.borrow_mut().connect_change(move || {
-            let has_notifications = rebuild_list(
-                &list_box_c,
-                &empty_label_c,
-                &summary_text_c,
-                &store_change,
-            );
+            let has_notifications =
+                rebuild_list(&list_box_c, &empty_label_c, &summary_text_c, &store_change);
             // Auto-expand when new notifications arrive
             if has_notifications && !detail_revealer_c.reveals_child() {
                 detail_revealer_c.set_reveal_child(true);
@@ -184,6 +180,13 @@ impl NotificationsSection {
 
     pub fn widget(&self) -> &gtk4::Box {
         &self.root
+    }
+
+    /// Cap the internal list scroller. Embedding contexts (start menu) use
+    /// this instead of wrapping the section in a second ScrolledWindow —
+    /// nested scrollers fight over scroll events and clip each other.
+    pub fn set_list_max_height(&self, px: i32) {
+        self.list_scroller.set_max_content_height(px);
     }
 
     fn rebuild(&self) {
