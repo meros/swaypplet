@@ -38,7 +38,7 @@
    Spacing scale (use these literals consistently): 4 / 8 / 12 / 16 / 20.
    Radius scale: 8 (buttons) / 10 (controls, entries) / 14 (cards, tiles)
    / 18 (floating surfaces: panel, OSD, launcher, popups, dialogs). */
-@define-color surface        alpha(#1d2021, 0.97);  /* panel base            */
+@define-color surface        alpha(#32302f, 0.72);  /* panel base — waybar card fill; swayfx layer_effects blurs behind it */
 @define-color surface_raised #32302f;               /* cards, tiles          */
 @define-color surface_hover  #3c3836;               /* hover / inactive fill */
 @define-color surface_track  #45403d;               /* slider trough, wells  */
@@ -197,7 +197,21 @@ entry:focus-visible {
 /* ── Volume / brightness sliders ── */
 scale {
     min-height: 10px;
-    padding: 10px 0;
+    /* Horizontal padding absorbs the knob's negative-margin overhang
+       (22px hover knob on a 10px trough) so the knob never clips at the
+       widget edge. */
+    padding: 10px 8px;
+}
+
+/* Tick labels under marked scales (volume 0/50/100/150). Explicit size and
+   breathing room so the label row is measured and not clipped by the row. */
+scale marks label {
+    color: @text_faint;
+    font-size: 9px;
+}
+
+scale.marks-after {
+    padding-bottom: 4px;
 }
 
 scale trough {
@@ -921,7 +935,7 @@ revealer {
 }
 
 .osd-container {
-    background-color: alpha(@bg0_h, 0.88);
+    background-color: @surface;
     border-radius: 18px;
     border: 1px solid @border_strong;
     box-shadow: 0 12px 40px alpha(black, 0.55);
@@ -984,7 +998,7 @@ revealer {
 }
 
 .notification-popup-content {
-    background-color: alpha(@bg0_h, 0.92);
+    background-color: @surface;
     border-radius: 18px;
     border: 1px solid @border_strong;
     box-shadow: 0 8px 32px alpha(black, 0.5);
@@ -1104,7 +1118,7 @@ revealer {
 }
 
 .launcher-container {
-    background-color: alpha(@bg0_h, 0.88);
+    background-color: @surface;
     border-radius: 18px;
     border: 1px solid @border_strong;
     box-shadow: 0 12px 40px alpha(black, 0.55);
@@ -1192,7 +1206,7 @@ revealer {
 }
 
 .polkit-container {
-    background-color: alpha(@bg0_h, 0.97);
+    background-color: @surface;
     border-radius: 18px;
     border: 1px solid @border_strong;
     box-shadow: 0 12px 40px alpha(black, 0.5);
@@ -1422,7 +1436,7 @@ revealer {
 
 /* The menu surface itself. */
 .startmenu-root {
-    background-color: alpha(@bg0_h, 0.97);
+    background-color: @surface;
     border-radius: 18px;
     border: 1px solid @border_strong;
     box-shadow: 0 18px 56px alpha(black, 0.55);
@@ -1453,7 +1467,7 @@ revealer {
 }
 
 .startmenu-slider {
-    padding: 4px 2px;
+    padding: 4px 2px 6px;
 }
 
 .startmenu-slider-icon {
