@@ -2,6 +2,7 @@
 name = "swaypplet"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [dependencies]
 gtk4 = { version = "0.9", features = ["v4_12"] }
