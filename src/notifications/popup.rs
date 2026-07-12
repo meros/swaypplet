@@ -12,16 +12,16 @@ use super::store::{self, NotificationStore};
 use super::{CloseReason, Notification, Urgency};
 
 const POPUP_CONTENT_HEIGHT: i32 = 100;
-const SHADOW_PAD: i32 = 32;
-// Total window height including shadow padding on both sides
-const POPUP_WINDOW_HEIGHT: i32 = POPUP_CONTENT_HEIGHT + 2 * SHADOW_PAD;
-// Gap between visible notification pills (shadow areas overlap)
+const APRON_PAD: i32 = 32;
+// Total window height including the transparent apron on both sides
+const POPUP_WINDOW_HEIGHT: i32 = POPUP_CONTENT_HEIGHT + 2 * APRON_PAD;
+// Gap between visible notification pills (apron areas overlap)
 const POPUP_GAP: i32 = 4;
-// Stacking step = content height + visual gap (shadow pads overlap)
+// Stacking step = content height + visual gap (aprons overlap)
 const POPUP_STEP: i32 = POPUP_CONTENT_HEIGHT + POPUP_GAP;
 const POPUP_TOP_MARGIN: i32 = 8;
 const POPUP_RIGHT_MARGIN: i32 = 8;
-const POPUP_WIDTH: i32 = 360 + 2 * SHADOW_PAD;
+const POPUP_WIDTH: i32 = 360 + 2 * APRON_PAD;
 const MAX_POPUPS: usize = 5;
 const BASE_TIMEOUT_MS: u64 = 5000;
 const PER_CHAR_MS: u64 = 40;
@@ -123,8 +123,9 @@ impl PopupManager {
 
     fn restack(&self) {
         for (i, slot) in self.slots.iter().enumerate() {
-            // Each popup window includes shadow padding in the wrapper CSS.
-            // Stack by content height + visual gap; shadow areas overlap.
+            // Each popup window includes the transparent apron in the
+            // wrapper CSS. Stack by content height + visual gap; aprons
+            // overlap.
             slot.window.set_margin(Edge::Top, (i as i32) * POPUP_STEP);
         }
     }
@@ -302,7 +303,8 @@ fn build_popup_content(
     });
     hbox.add_controller(gesture);
 
-    // Wrapper provides transparent padding for drop shadow room
+    // Transparent apron around the pill; must stay alpha-0 so
+    // compositor blur clips to the card
     let wrapper = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
         .build();
