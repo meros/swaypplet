@@ -1,8 +1,8 @@
 /* ══════════════════════════════════════════════════════
    Swaypplet – Gruvbox Dark Theme
-   Matches the waybar design language: flat surfaces,
-   hairline borders, single soft shadows, no gradients or
-   bevel highlights. Saturated color is reserved for state.
+   Matches the waybar design language: flat frosted surfaces,
+   hairline borders, no gradients or bevel highlights.
+   Saturated color is reserved for state.
    Nested radii are concentric (inner = outer − gap) where
    corners sit close together (gap ≤ ~8px).
    ══════════════════════════════════════════════════════ */
@@ -50,7 +50,13 @@
 @define-color danger         #cc241d;
 @define-color danger_tint    alpha(#fb4934, 0.16);  /* destructive hover     */
 
-/* ── Window: transparent so compositor alpha-blends ── */
+/* ── Window: transparent so compositor alpha-blends ──
+   No outer drop shadows on floating cards: swayfx blur_ignore_transparent
+   only skips pixels with alpha exactly 0, so a shadow overhanging the
+   transparent apron around a card gets frosted by the compositor — a
+   blurred halo the size of the whole window. Depth comes from the
+   hairline border + the frosted contrast instead. Inner shadows
+   (insets, knobs, glows over opaque fills) are fine. */
 window, window.background, window.csd, decoration {
     background-color: transparent;
     background: none;
@@ -929,7 +935,9 @@ revealer {
 
 /* ── OSD overlay ── */
 .osd-wrapper {
-    /* Transparent margin gives room for drop shadow to render */
+    /* Transparent apron — kept for window geometry (positioning was
+       tuned with it); must stay fully alpha-0 so compositor blur clips
+       to the card (see the window comment). */
     padding: 48px;
     font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
 }
@@ -938,7 +946,7 @@ revealer {
     background-color: @surface;
     border-radius: 18px;
     border: 1px solid @border_strong;
-    box-shadow: 0 12px 40px alpha(black, 0.55);
+    box-shadow: none;
     padding: 20px 28px 16px;
     min-width: 160px;
 }
@@ -993,7 +1001,9 @@ revealer {
 }
 
 .notification-popup-wrapper {
-    /* Transparent padding gives room for drop shadow to render */
+    /* Transparent apron — the stacking math in popup.rs includes it;
+       must stay fully alpha-0 so compositor blur clips to the card
+       (see the window comment). */
     padding: 32px;
 }
 
@@ -1001,18 +1011,14 @@ revealer {
     background-color: @surface;
     border-radius: 18px;
     border: 1px solid @border_strong;
-    box-shadow: 0 8px 32px alpha(black, 0.5);
+    box-shadow: none;
     padding: 12px 14px;
 }
 
-/* Border pulse, not box-shadow: an animated box-shadow would clobber the
-   card's drop shadow, and battery-critical-pulse would paint the whole
-   card solid red. */
+/* Border pulse, not box-shadow: a glow would overhang into the
+   transparent apron and get frosted (see the window comment). */
 .notification-popup.critical .notification-popup-content {
     border-color: alpha(@red, 0.6);
-    box-shadow:
-        0 8px 32px alpha(black, 0.5),
-        0 0 16px alpha(@red, 0.2);
     animation: critical-border-pulse 0.7s steps(12) infinite alternate;
 }
 
@@ -1121,7 +1127,7 @@ revealer {
     background-color: @surface;
     border-radius: 18px;
     border: 1px solid @border_strong;
-    box-shadow: 0 12px 40px alpha(black, 0.55);
+    box-shadow: none;
     padding: 16px;
 }
 
@@ -1439,7 +1445,7 @@ revealer {
     background-color: @surface;
     border-radius: 18px;
     border: 1px solid @border_strong;
-    box-shadow: 0 18px 56px alpha(black, 0.55);
+    box-shadow: none;
     padding: 16px;
 }
 

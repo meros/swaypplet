@@ -229,7 +229,8 @@ impl Osd {
         window.set_resizable(false);
         window.set_decorated(false);
 
-        // Shadow wrapper — transparent padding gives room for drop shadow
+        // Transparent apron around the card (48px CSS padding); must stay
+        // alpha-0 so compositor blur clips to the card
         let wrapper = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .halign(gtk4::Align::Center)
