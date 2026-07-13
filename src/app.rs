@@ -18,6 +18,14 @@ use crate::theme;
 
 const APP_ID: &str = "dev.swaypplet.panel";
 
+/// Pid file lives in the per-user runtime dir (mode 0700), so no other user
+/// can forge or clobber it. The /tmp fallback matches the wrapper scripts'
+/// `$XDG_RUNTIME_DIR/swaypplet.pid` with the same /tmp fallback.
+fn pid_file_path() -> std::path::PathBuf {
+    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+    std::path::Path::new(&dir).join("swaypplet.pid")
+}
+
 // Start-menu popup: bottom-left anchored, ~780x700, clearing the waybar.
 static PANEL_CONFIG: LayerShellConfig = LayerShellConfig {
     namespace: "swaypplet",
@@ -83,7 +91,7 @@ pub fn run() {
         // Written only after both signal handlers are installed, so a
         // `kill -USR1/-USR2` that lands as soon as the pid file exists can't
         // hit the default (terminating) disposition.
-        let _ = fs::write("/tmp/swaypplet.pid", std::process::id().to_string());
+        let _ = fs::write(pid_file_path(), std::process::id().to_string());
     });
 
     let state_clone = state.clone();
@@ -191,7 +199,7 @@ pub fn run() {
     });
 
     app.connect_shutdown(|_| {
-        let _ = fs::remove_file("/tmp/swaypplet.pid");
+        let _ = fs::remove_file(pid_file_path());
     });
 
     app.run();

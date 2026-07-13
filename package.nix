@@ -53,7 +53,7 @@ rustPlatform.buildRustPackage {
   postInstall = ''
     cat > $out/bin/swaypplet-toggle <<'SCRIPT'
     #!/bin/sh
-    PID=$(cat /tmp/swaypplet.pid 2>/dev/null)
+    PID=$(cat "''${XDG_RUNTIME_DIR:-/tmp}/swaypplet.pid" 2>/dev/null)
     if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
       kill -USR1 "$PID"
     else
@@ -65,7 +65,7 @@ rustPlatform.buildRustPackage {
     # Launcher toggle
     cat > $out/bin/swaypplet-launcher <<'SCRIPT'
     #!/bin/sh
-    PID=$(cat /tmp/swaypplet.pid 2>/dev/null)
+    PID=$(cat "''${XDG_RUNTIME_DIR:-/tmp}/swaypplet.pid" 2>/dev/null)
     if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
       kill -USR2 "$PID"
     else

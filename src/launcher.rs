@@ -375,17 +375,17 @@ fn run_search(
     std::thread::spawn(move || {
         match elephant::query(&query_c, &providers, MAX_VISIBLE_RESULTS as i32) {
             Ok(results) => {
-                *result_writer.lock().unwrap() = Some(results);
+                *result_writer.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(results);
             }
             Err(e) => {
                 log::warn!("Elephant query failed: {}", e);
-                *result_writer.lock().unwrap() = Some(Vec::new());
+                *result_writer.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Vec::new());
             }
         }
     });
 
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-        let done = result_holder.lock().unwrap().is_some();
+        let done = result_holder.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some();
         if !done {
             return glib::ControlFlow::Continue;
         }
@@ -395,7 +395,7 @@ fn run_search(
             return glib::ControlFlow::Break;
         }
 
-        let results = result_holder.lock().unwrap().take().unwrap();
+        let results = result_holder.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take().unwrap();
         {
             let mut s = state.borrow_mut();
             s.results = results;
