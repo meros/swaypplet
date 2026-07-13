@@ -146,7 +146,7 @@ impl Panel {
         right.append(&slider_row(ICON_BRIGHTNESS, brightness.brightness_scale()));
 
         // 3. Toggle tiles — declarative spec → one factory.
-        let specs = tiles::tile_specs(); // [wifi, bluetooth, night, idle]
+        let specs = tiles::tile_specs(); // [wifi, bluetooth, night, caffeine]
         let grid = gtk4::Grid::builder()
             .row_spacing(8)
             .column_spacing(8)
@@ -176,11 +176,11 @@ impl Panel {
         grid_place(&grid, &night_btn, &mut col, &mut row_i);
         tile_pairs.push((night_btn, copy_spec(&specs[2])));
 
-        // Idle.
-        let idle_btn = tiles::build_tile(&specs[3]);
-        tiles::init_tile_state(&idle_btn, &specs[3]);
-        grid_place(&grid, &idle_btn, &mut col, &mut row_i);
-        tile_pairs.push((idle_btn, copy_spec(&specs[3])));
+        // Caffeine.
+        let caffeine_btn = tiles::build_tile(&specs[3]);
+        tiles::init_tile_state(&caffeine_btn, &specs[3]);
+        grid_place(&grid, &caffeine_btn, &mut col, &mut row_i);
+        tile_pairs.push((caffeine_btn, copy_spec(&specs[3])));
 
         // Display — reveal-only tile (no radio); chevron + button reveal the
         // output/monitor controls inline, matching the Wi-Fi/Bluetooth pattern.

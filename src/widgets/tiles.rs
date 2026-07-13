@@ -38,8 +38,8 @@ pub struct TileSpec {
 }
 
 /// The declarative tile set for the quick strip: Wi-Fi, Bluetooth, DND,
-/// Night Light, Idle. DND is store-backed and handled specially by the panel;
-/// the rest drive external tools.
+/// Night Light, Caffeine. DND is store-backed and handled specially by the
+/// panel; the rest drive external tools.
 pub fn tile_specs() -> Vec<TileSpec> {
     vec![
         TileSpec {
@@ -76,13 +76,23 @@ pub fn tile_specs() -> Vec<TileSpec> {
             },
             read_state: read_night_state,
         },
+        // Caffeine stops swayidle itself: idle timeouts (lock, screen blank)
+        // come from swayidle, which ignores logind idle inhibitors, so a
+        // systemd-inhibit approach would be a no-op here. Inverted mapping:
+        // tile active = swayidle stopped.
         TileSpec {
-            icon: "󰈈",
-            label: "Idle",
-            tooltip_on: "Idle Inhibitor: active",
-            tooltip_off: "Idle Inhibitor: off",
-            action: toggle_idle,
-            read_state: read_idle_state,
+            icon: "󰅶",
+            label: "Caffeine",
+            tooltip_on: "Caffeine: idle lock and screen blank suspended",
+            tooltip_off: "Caffeine: off",
+            action: |on| {
+                run_ok(Command::new("systemctl").args([
+                    "--user",
+                    if on { "stop" } else { "start" },
+                    "swayidle.service",
+                ]))
+            },
+            read_state: read_caffeine_state,
         },
     ]
 }
@@ -345,82 +355,38 @@ fn read_night_state() -> TileState {
     }
 }
 
-const IDLE_PID_FILE: &str = "/tmp/swaypplet-idle-inhibit.pid";
-
-fn toggle_idle(on: bool) -> bool {
-    if on {
-        match Command::new("systemd-inhibit")
-            .args([
-                "--what=idle:sleep",
-                "--who=swaypplet",
-                "--why=User toggled",
-                "sleep",
-                "infinity",
-            ])
-            .spawn()
-        {
-            Ok(child) => match std::fs::write(IDLE_PID_FILE, child.id().to_string()) {
-                Ok(_) => true,
-                Err(e) => {
-                    log::warn!("Failed to write idle inhibit PID file: {e}");
-                    false
-                }
-            },
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    log::warn!("systemd-inhibit not found");
-                } else {
-                    log::warn!("systemd-inhibit spawn failed: {e}");
-                }
-                false
-            }
+/// Caffeine state, inverted: Active = swayidle stopped. LoadState guards the
+/// "unit doesn't exist" case, where `is-active` would also say "inactive" and
+/// wrongly light the tile up.
+fn read_caffeine_state() -> TileState {
+    match Command::new("systemctl")
+        .args(["--user", "show", "-p", "LoadState", "-p", "ActiveState", "swayidle.service"])
+        .output()
+    {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            log::warn!("systemctl not found; Caffeine toggle disabled");
+            TileState::Unavailable
         }
-    } else {
-        match std::fs::read_to_string(IDLE_PID_FILE) {
-            Ok(contents) => match contents.trim().parse::<u32>() {
-                Ok(pid) => {
-                    let killed = Command::new("kill")
-                        .arg(pid.to_string())
-                        .spawn()
-                        .and_then(|mut c| c.wait())
-                        .map(|s| s.success())
-                        .unwrap_or(false);
-                    if killed {
-                        let _ = std::fs::remove_file(IDLE_PID_FILE);
-                    } else {
-                        log::warn!("Failed to kill idle inhibit process (pid {pid})");
-                    }
-                    killed
-                }
-                Err(e) => {
-                    log::warn!("Failed to parse idle inhibit PID: {e}");
-                    false
-                }
-            },
-            Err(e) => {
-                log::warn!("Failed to read idle inhibit PID file: {e}");
-                false
-            }
+        Err(e) => {
+            log::warn!("systemctl --user show swayidle.service failed: {e}");
+            TileState::Unavailable
         }
-    }
-}
-
-fn read_idle_state() -> TileState {
-    match std::fs::read_to_string(IDLE_PID_FILE) {
-        Ok(contents) => match contents.trim().parse::<u32>() {
-            Ok(pid) => {
-                if std::path::Path::new(&format!("/proc/{pid}")).exists() {
-                    TileState::Active
-                } else {
-                    let _ = std::fs::remove_file(IDLE_PID_FILE);
-                    TileState::Inactive
-                }
-            }
-            Err(_) => {
-                let _ = std::fs::remove_file(IDLE_PID_FILE);
+        Ok(out) => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            let prop = |key: &str| {
+                text.lines()
+                    .find_map(|l| l.strip_prefix(key)?.strip_prefix('='))
+                    .unwrap_or("")
+                    .to_string()
+            };
+            if prop("LoadState") != "loaded" {
+                log::warn!("swayidle.service not found; Caffeine toggle disabled");
+                TileState::Unavailable
+            } else if prop("ActiveState") == "active" {
                 TileState::Inactive
+            } else {
+                TileState::Active
             }
-        },
-        Err(_) => TileState::Inactive,
+        }
     }
 }
