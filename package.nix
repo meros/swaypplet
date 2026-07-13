@@ -14,6 +14,7 @@
   hicolor-icon-theme,
   adwaita-icon-theme,
   polkit,
+  pam,
 }:
 
 let
@@ -29,6 +30,7 @@ let
     hicolor-icon-theme
     adwaita-icon-theme
     polkit
+    pam
   ];
 in
 rustPlatform.buildRustPackage {
@@ -46,6 +48,8 @@ rustPlatform.buildRustPackage {
   nativeBuildInputs = [
     pkg-config
     wrapGAppsHook4
+    # pam-sys generates its libpam bindings at build time
+    rustPlatform.bindgenHook
   ];
 
   buildInputs = runtimeDeps;
@@ -87,6 +91,13 @@ rustPlatform.buildRustPackage {
     exec $out/bin/swaypplet polkit-agent "\$@"
     SCRIPT
     chmod +x $out/bin/swaypplet-polkit-agent
+
+    # Session locker — swaylock replacement (ext-session-lock-v1 + PAM)
+    cat > $out/bin/swaypplet-lock <<SCRIPT
+    #!/bin/sh
+    exec $out/bin/swaypplet lock "\$@"
+    SCRIPT
+    chmod +x $out/bin/swaypplet-lock
   '';
 
   meta = {

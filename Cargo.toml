@@ -7,6 +7,10 @@ license = "MIT"
 [dependencies]
 gtk4 = { version = "0.9", features = ["v4_12"] }
 gtk4-layer-shell = "0.4"
+# 0.1.2 is the only release matching gtk4 0.9 / glib 0.20 (0.2+ need gtk4 0.10/0.11).
+# The missing `monitor` signal binding is connected generically at runtime.
+gtk4-session-lock = "0.1.2"
+pam = "0.8"
 glib = "0.20"
 gio = "0.20"
 gdk4 = "0.9"
