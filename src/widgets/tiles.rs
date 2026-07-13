@@ -76,10 +76,10 @@ pub fn tile_specs() -> Vec<TileSpec> {
             },
             read_state: read_night_state,
         },
-        // Caffeine stops swayidle itself: idle timeouts (lock, screen blank)
-        // come from swayidle, which ignores logind idle inhibitors, so a
-        // systemd-inhibit approach would be a no-op here. Inverted mapping:
-        // tile active = swayidle stopped.
+        // Caffeine stops the idle manager itself: idle timeouts (lock, screen
+        // blank) come from `swaypplet idle`, which only honors wayland
+        // idle-inhibit, so a logind systemd-inhibit approach would be a no-op
+        // here. Inverted mapping: tile active = idle manager stopped.
         TileSpec {
             icon: "󰅶",
             label: "Caffeine",
@@ -89,7 +89,7 @@ pub fn tile_specs() -> Vec<TileSpec> {
                 run_ok(Command::new("systemctl").args([
                     "--user",
                     if on { "stop" } else { "start" },
-                    "swayidle.service",
+                    "swaypplet-idle.service",
                 ]))
             },
             read_state: read_caffeine_state,
@@ -355,12 +355,12 @@ fn read_night_state() -> TileState {
     }
 }
 
-/// Caffeine state, inverted: Active = swayidle stopped. LoadState guards the
-/// "unit doesn't exist" case, where `is-active` would also say "inactive" and
-/// wrongly light the tile up.
+/// Caffeine state, inverted: Active = idle manager stopped. LoadState guards
+/// the "unit doesn't exist" case, where `is-active` would also say "inactive"
+/// and wrongly light the tile up.
 fn read_caffeine_state() -> TileState {
     match Command::new("systemctl")
-        .args(["--user", "show", "-p", "LoadState", "-p", "ActiveState", "swayidle.service"])
+        .args(["--user", "show", "-p", "LoadState", "-p", "ActiveState", "swaypplet-idle.service"])
         .output()
     {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -368,7 +368,7 @@ fn read_caffeine_state() -> TileState {
             TileState::Unavailable
         }
         Err(e) => {
-            log::warn!("systemctl --user show swayidle.service failed: {e}");
+            log::warn!("systemctl --user show swaypplet-idle.service failed: {e}");
             TileState::Unavailable
         }
         Ok(out) => {
@@ -380,7 +380,7 @@ fn read_caffeine_state() -> TileState {
                     .to_string()
             };
             if prop("LoadState") != "loaded" {
-                log::warn!("swayidle.service not found; Caffeine toggle disabled");
+                log::warn!("swaypplet-idle.service not found; Caffeine toggle disabled");
                 TileState::Unavailable
             } else if prop("ActiveState") == "active" {
                 TileState::Inactive
