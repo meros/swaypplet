@@ -81,6 +81,49 @@ pub fn run(component: &str) {
             return;
         }
 
+        // Polkit dialog: present the real layer-shell dialog (works under the
+        // nested-sway harness) with a fake request. Both auth affordances are
+        // shown so one screenshot covers fingerprint pill + password entry.
+        // Password "ok" flashes success; anything else shakes.
+        if component == "polkit" {
+            use crate::polkit::dialog::PolkitDialog;
+            let dialog = PolkitDialog::new(app);
+            let request = crate::polkit::agent::AuthRequest {
+                action_id: "org.freedesktop.policykit.exec".into(),
+                message: "Authentication is required to run a program as another user".into(),
+                icon_name: String::new(),
+                details: std::collections::HashMap::from([(
+                    "command_line".to_string(),
+                    "/run/current-system/sw/bin/true".to_string(),
+                )]),
+                cookie: "preview".into(),
+                identities: Vec::new(),
+            };
+            let d = dialog.clone();
+            dialog.present(
+                &request,
+                Box::new(move |password: String| {
+                    if password == "ok" {
+                        d.set_status("Authenticated", crate::polkit::dialog::StatusKind::Success);
+                        d.flash_success();
+                    } else {
+                        d.set_status(
+                            "Authentication failed",
+                            crate::polkit::dialog::StatusKind::Error,
+                        );
+                        d.shake();
+                        d.set_verifying(false);
+                    }
+                }),
+                Box::new(|| std::process::exit(0)),
+                Box::new(|_uid| {}),
+            );
+            dialog.show_fingerprint(true, "Touch fingerprint reader");
+            dialog.set_password_prompt("Password");
+            std::mem::forget(dialog);
+            return;
+        }
+
         // Single component: wrap its widget in a small window carrying the panel
         // surface classes so it inherits the same styling context.
         let window = ApplicationWindow::builder()
@@ -166,7 +209,7 @@ pub fn run(component: &str) {
             }
             other => {
                 host.append(&gtk4::Label::new(Some(&format!(
-                    "unknown preview component: {other}\n\nknown: panel, lock, tiles, audio, \
+                    "unknown preview component: {other}\n\nknown: panel, lock, polkit, tiles, audio, \
                      brightness, network, bluetooth, display, media, notifications, clipboard, power"
                 ))));
             }

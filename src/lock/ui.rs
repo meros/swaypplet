@@ -35,10 +35,12 @@ impl Default for WakeCmd {
 impl WakeCmd {
     fn poke(&self) {
         let Some(cmd) = &self.cmd else { return };
-        if let Some(t) = self.last.get() {
-            if t.elapsed() < Duration::from_secs(2) {
-                return;
-            }
+        if self
+            .last
+            .get()
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(2))
+        {
+            return;
         }
         self.last.set(Some(Instant::now()));
         let cmd = cmd.clone();
