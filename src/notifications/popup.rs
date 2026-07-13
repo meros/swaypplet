@@ -714,10 +714,15 @@ fn focus_app_window(app_name: &str) {
     if let Some((con_id, workspace)) = find_con_id_in_tree(&text, &app_lower) {
         // Switch to the workspace first, then focus the container.
         // Just `[con_id=N] focus` alone only highlights the workspace without switching.
-        let cmd = if let Some(ws) = workspace {
-            format!("workspace {}; [con_id={}] focus", ws, con_id)
-        } else {
-            format!("[con_id={}] focus", con_id)
+        // The name is quoted so a renamed workspace can't inject extra sway
+        // commands (`;` splits, quotes group). Names containing quote chars
+        // themselves fall back to the bare focus rather than trusting sway's
+        // escape handling.
+        let cmd = match workspace {
+            Some(ws) if !ws.contains(['"', '\\']) => {
+                format!("workspace \"{}\"; [con_id={}] focus", ws, con_id)
+            }
+            _ => format!("[con_id={}] focus", con_id),
         };
         log::debug!("Focusing app '{}': swaymsg {}", app_name, cmd);
         let _ = std::process::Command::new("swaymsg")
