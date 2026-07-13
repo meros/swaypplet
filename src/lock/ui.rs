@@ -6,10 +6,52 @@
 //! deregister themselves on destroy (the compositor unmaps/destroys lock
 //! surfaces when a monitor is unplugged or the session unlocks).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use gtk4::prelude::*;
+
+/// Runs `SWAYPPLET_LOCK_WAKE_CMD` (throttled) on any key or pointer activity.
+/// The lock script blanks outputs after locking, and swayidle resume events
+/// only fire for timeouts that already expired — right after a manual lock
+/// none has, so without this the first keypress can't re-power the screen.
+struct WakeCmd {
+    cmd: Option<String>,
+    last: Cell<Option<Instant>>,
+}
+
+impl Default for WakeCmd {
+    fn default() -> Self {
+        Self {
+            cmd: std::env::var("SWAYPPLET_LOCK_WAKE_CMD")
+                .ok()
+                .filter(|c| !c.is_empty()),
+            last: Cell::new(None),
+        }
+    }
+}
+
+impl WakeCmd {
+    fn poke(&self) {
+        let Some(cmd) = &self.cmd else { return };
+        if let Some(t) = self.last.get() {
+            if t.elapsed() < Duration::from_secs(2) {
+                return;
+            }
+        }
+        self.last.set(Some(Instant::now()));
+        let cmd = cmd.clone();
+        crate::spawn::spawn_work(
+            move || std::process::Command::new("sh").args(["-c", &cmd]).status(),
+            |result| {
+                if !matches!(&result, Ok(s) if s.success()) {
+                    log::warn!("wake command failed: {result:?}");
+                }
+            },
+        );
+    }
+}
 
 pub enum StatusKind {
     Info,
@@ -31,6 +73,7 @@ struct Surface {
 #[derive(Clone, Default)]
 pub struct SurfaceSet {
     inner: Rc<RefCell<Vec<Surface>>>,
+    wake: Rc<WakeCmd>,
 }
 
 impl SurfaceSet {
@@ -57,11 +100,16 @@ impl SurfaceSet {
     ) -> gtk4::Widget {
         let overlay = gtk4::Overlay::new();
 
-        // Wallpaper (optional) + scrim for contrast; solid palette bg otherwise.
+        // Wallpaper (optional, frosted) + scrim for contrast; solid palette
+        // bg otherwise. The blur is baked into the texture — swayfx blur only
+        // covers layer-shell surfaces, not ext-session-lock ones.
         let backdrop = gtk4::Box::builder().hexpand(true).vexpand(true).build();
         backdrop.add_css_class("lock-backdrop");
         if let Some(path) = wallpaper_path() {
-            let picture = gtk4::Picture::for_filename(&path);
+            let picture = match blurred_wallpaper(&path) {
+                Some(texture) => gtk4::Picture::for_paintable(&texture),
+                None => gtk4::Picture::for_filename(&path),
+            };
             picture.set_content_fit(gtk4::ContentFit::Cover);
             picture.set_hexpand(true);
             picture.set_vexpand(true);
@@ -108,7 +156,7 @@ impl SurfaceSet {
             .visible(false)
             .build();
         fp_pill.add_css_class("lock-fp-pill");
-        let fp_glyph = gtk4::Label::builder().label("\u{f0577}").build();
+        let fp_glyph = gtk4::Label::builder().label("\u{f0237}").build();
         fp_glyph.add_css_class("lock-fp-glyph");
         let fp_label = gtk4::Label::builder()
             .label("Touch fingerprint reader")
@@ -156,6 +204,21 @@ impl SurfaceSet {
             e.grab_focus();
         });
         window.add_controller(click);
+
+        // Any input re-powers blanked outputs (capture phase so the entry
+        // still receives the key afterwards).
+        let key = gtk4::EventControllerKey::new();
+        key.set_propagation_phase(gtk4::PropagationPhase::Capture);
+        let wake = self.wake.clone();
+        key.connect_key_pressed(move |_, _, _, _| {
+            wake.poke();
+            glib::Propagation::Proceed
+        });
+        window.add_controller(key);
+        let motion = gtk4::EventControllerMotion::new();
+        let wake = self.wake.clone();
+        motion.connect_motion(move |_, _, _| wake.poke());
+        window.add_controller(motion);
 
         let surface = Surface {
             window: window.clone(),
@@ -272,6 +335,18 @@ impl SurfaceSet {
             s.entry.grab_focus();
         }
     }
+}
+
+/// Frosted-glass backdrop: decode straight to a thumbnail, then repeatedly
+/// double it back up with bilinear passes — a gaussian-pyramid expansion that
+/// reads as a wide blur at a fraction of a real convolution's cost.
+fn blurred_wallpaper(path: &str) -> Option<gdk4::Texture> {
+    use gtk4::gdk_pixbuf::{InterpType, Pixbuf};
+    let mut img = Pixbuf::from_file_at_scale(path, 64, 64, true).ok()?;
+    while img.width() < 512 {
+        img = img.scale_simple(img.width() * 2, img.height() * 2, InterpType::Bilinear)?;
+    }
+    Some(gdk4::Texture::for_pixbuf(&img))
 }
 
 fn wallpaper_path() -> Option<String> {
