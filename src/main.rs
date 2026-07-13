@@ -4,6 +4,7 @@ mod dmenu;
 mod elephant;
 mod greet;
 mod icons;
+mod idle;
 mod launcher;
 mod layer_shell;
 mod lock;
@@ -30,6 +31,8 @@ fn main() {
         Some("lock") => lock::run(),
         // greetd greeter — standalone process reusing the lock UI.
         Some("greet") => greet::run(),
+        // idle manager (swayidle replacement) — standalone process, no GTK.
+        Some("idle") => idle::run(),
         // dmenu-style picker — standalone process; it owns stdin/stdout.
         Some("dmenu") => dmenu::run(args),
         // Dev-only: render one component (or the whole panel) in a plain window
