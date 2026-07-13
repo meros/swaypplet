@@ -102,16 +102,15 @@ impl SurfaceSet {
     ) -> gtk4::Widget {
         let overlay = gtk4::Overlay::new();
 
-        // Wallpaper (optional, frosted) + scrim for contrast; solid palette
-        // bg otherwise. The blur is baked into the texture — swayfx blur only
-        // covers layer-shell surfaces, not ext-session-lock ones.
+        // Wallpaper (optional, crisp) + scrim for contrast; solid palette bg
+        // otherwise. Only the card region reads frosted — the GlassPane
+        // around the card re-draws this texture blurred behind it (swayfx
+        // blur covers neither ext-session-lock surfaces nor own content).
         let backdrop = gtk4::Box::builder().hexpand(true).vexpand(true).build();
         backdrop.add_css_class("lock-backdrop");
-        if let Some(path) = wallpaper_path() {
-            let picture = match blurred_wallpaper(&path) {
-                Some(texture) => gtk4::Picture::for_paintable(&texture),
-                None => gtk4::Picture::for_filename(&path),
-            };
+        let wallpaper = wallpaper_path().and_then(|p| gdk4::Texture::from_filename(p).ok());
+        if let Some(ref texture) = wallpaper {
+            let picture = gtk4::Picture::for_paintable(texture);
             picture.set_content_fit(gtk4::ContentFit::Cover);
             picture.set_hexpand(true);
             picture.set_vexpand(true);
@@ -139,9 +138,15 @@ impl SurfaceSet {
             .orientation(gtk4::Orientation::Vertical)
             .spacing(14)
             .width_request(360)
-            .margin_top(48)
             .build();
         card.add_css_class("lock-card");
+
+        // Frosted pane hugging the card exactly (margin lives on the pane so
+        // the glass doesn't extend into the gap below the clock).
+        let pane = super::glass::GlassPane::new();
+        pane.set_margin_top(48);
+        pane.set_child(&card);
+        pane.set_texture(wallpaper.clone());
 
         let entry = gtk4::PasswordEntry::builder()
             .show_peek_icon(false)
@@ -189,7 +194,7 @@ impl SurfaceSet {
 
         column.append(&clock);
         column.append(&date);
-        column.append(&card);
+        column.append(&pane);
         overlay.add_overlay(&column);
 
         entry.connect_activate(move |e| on_submit(e.text().to_string()));
@@ -337,18 +342,6 @@ impl SurfaceSet {
             s.entry.grab_focus();
         }
     }
-}
-
-/// Frosted-glass backdrop: decode straight to a thumbnail, then repeatedly
-/// double it back up with bilinear passes — a gaussian-pyramid expansion that
-/// reads as a wide blur at a fraction of a real convolution's cost.
-fn blurred_wallpaper(path: &str) -> Option<gdk4::Texture> {
-    use gtk4::gdk_pixbuf::{InterpType, Pixbuf};
-    let mut img = Pixbuf::from_file_at_scale(path, 64, 64, true).ok()?;
-    while img.width() < 512 {
-        img = img.scale_simple(img.width() * 2, img.height() * 2, InterpType::Bilinear)?;
-    }
-    Some(gdk4::Texture::for_pixbuf(&img))
 }
 
 fn wallpaper_path() -> Option<String> {
