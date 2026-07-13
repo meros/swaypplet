@@ -136,8 +136,19 @@ impl PopupManager {
         let window = layer_shell::create_layer_window(app, &POPUP_CONFIG);
         window.add_css_class("notification-popup");
 
+        // The canvas must not drive the surface size: GtkFixed reports its
+        // children's transformed extents as its minimum size, so the entry
+        // slide (x_off past the right margin) would grow the surface — and a
+        // top+right-anchored surface grows leftward, dragging every visible
+        // card with it. Hosting the canvas as a non-measured, clipped overlay
+        // child keeps the surface at its default size; the slide overshoot is
+        // clipped at the screen edge, where it was never visible anyway.
         let canvas = gtk4::Fixed::new();
-        window.set_child(Some(&canvas));
+        let clipper = gtk4::Overlay::new();
+        clipper.add_overlay(&canvas);
+        clipper.set_measure_overlay(&canvas, false);
+        clipper.set_clip_overlay(&canvas, true);
+        window.set_child(Some(&clipper));
 
         let state = Rc::new(RefCell::new(State {
             window: window.clone(),
