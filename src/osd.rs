@@ -213,7 +213,9 @@ pub struct Osd {
     // For indicator mode (caps lock etc.)
     indicator_label: gtk4::Label,
     bar_box: gtk4::Box,
-    fade: anim::Fade,
+    wrapper: gtk4::Box,
+    spacer: gtk4::Box,
+    revealer: gtk4::Revealer,
     timeout_id: Rc<RefCell<Option<glib::SourceId>>>,
 }
 
@@ -289,7 +291,35 @@ impl Osd {
         outer.append(&indicator_label);
 
         wrapper.append(&outer);
-        window.set_child(Some(&wrapper));
+
+        // Enter/exit is a revealer wipe (geometry behind a clip), never an
+        // opacity fade — see the glass rule in anim.rs. The invisible spacer
+        // is kept at the card's measured size so the auto-sized layer surface
+        // stays constant while the revealer's natural height animates.
+        let spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+
+        let revealer = gtk4::Revealer::builder()
+            .transition_type(gtk4::RevealerTransitionType::SlideUp)
+            .transition_duration(anim::ENTER_MS as u32)
+            .reveal_child(false)
+            .valign(gtk4::Align::End)
+            .build();
+        revealer.set_child(Some(&wrapper));
+
+        let overlay = gtk4::Overlay::new();
+        overlay.set_child(Some(&spacer));
+        overlay.add_overlay(&revealer);
+        window.set_child(Some(&overlay));
+
+        // Unmap only once the exit wipe has fully closed.
+        {
+            let window_c = window.clone();
+            revealer.connect_child_revealed_notify(move |r| {
+                if !r.is_child_revealed() && !r.reveals_child() {
+                    window_c.set_visible(false);
+                }
+            });
+        }
 
         Osd {
             window,
@@ -298,7 +328,9 @@ impl Osd {
             text_label,
             indicator_label,
             bar_box,
-            fade: anim::Fade::new(&outer),
+            wrapper,
+            spacer,
+            revealer,
             timeout_id: Rc::new(RefCell::new(None)),
         }
     }
@@ -333,35 +365,35 @@ impl Osd {
             }
         }
 
-        // Appear at full opacity: swayfx renders blur at full strength for any
-        // surface alpha > 0, so an opacity ramp-in shows fully blurred glass
-        // with no UI for the first frames. Retriggering mid-fade-out still
-        // redirects the fade back up from the current opacity.
-        if !self.window.is_visible() {
-            self.fade.jump(1.0);
-            self.window.set_visible(true);
-        } else {
-            self.fade.to(1.0, anim::EXIT_MS, None);
-        }
+        // Pin the surface to the card's size before the wipe so the layer
+        // surface doesn't resize per animation frame (content just changed,
+        // so re-measure every show).
+        let (_, nat_w, _, _) = self.wrapper.measure(gtk4::Orientation::Horizontal, -1);
+        let (_, nat_h, _, _) = self.wrapper.measure(gtk4::Orientation::Vertical, nat_w);
+        self.spacer.set_size_request(nat_w, nat_h);
+
+        // Rise from the bottom edge at full opacity (the glass rule,
+        // anim.rs). Retriggering mid-exit reverses the wipe from its
+        // current position.
+        self.revealer.set_transition_duration(anim::ENTER_MS as u32);
+        self.window.set_visible(true);
+        self.revealer.set_reveal_child(true);
 
         // Cancel previous timeout
         if let Some(id) = self.timeout_id.borrow_mut().take() {
             id.remove();
         }
 
-        // Auto-hide after timeout: fade out, then unmap
-        let window_c = self.window.clone();
-        let fade_c = self.fade.clone();
+        // Auto-hide after timeout: sink behind the bottom clip, then unmap
+        // (the child-revealed handler hides the window when the wipe ends)
+        let revealer_c = self.revealer.clone();
         let timeout_ref = self.timeout_id.clone();
         let id = glib::timeout_add_local_once(
             std::time::Duration::from_millis(OSD_TIMEOUT_MS as u64),
             move || {
                 *timeout_ref.borrow_mut() = None;
-                fade_c.to(
-                    0.0,
-                    anim::EXIT_MS,
-                    Some(Box::new(move || window_c.set_visible(false))),
-                );
+                revealer_c.set_transition_duration(anim::EXIT_MS as u32);
+                revealer_c.set_reveal_child(false);
             },
         );
         *self.timeout_id.borrow_mut() = Some(id);

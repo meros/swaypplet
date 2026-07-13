@@ -33,9 +33,13 @@ const PEEK_OPACITY_STEP: f64 = 0.15;
 const MAX_POPUPS: usize = 5;
 
 // ── Animation (durations and easing come from crate::anim) ──
-// Entry slides in from past the screen edge; exit slides back out
-const ENTRY_SLIDE: f64 = 64.0;
-const EXIT_SLIDE: f64 = 48.0;
+// Entry and exit slide the card fully past the clipped canvas's right edge
+// at constant opacity — geometry only, never an opacity fade (the glass
+// rule, anim.rs). A card's left edge reaches the window edge at
+// x_off = width + EDGE_MARGIN, so beyond that it is entirely clipped.
+fn slide_off(width: f64) -> f64 {
+    width + EDGE_MARGIN as f64
+}
 
 const BASE_TIMEOUT_MS: u64 = 5000;
 const PER_CHAR_MS: u64 = 40;
@@ -269,15 +273,17 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
             // Enter at full opacity (position slide only): swayfx renders blur
             // at full strength for any surface alpha > 0, so an opacity ramp-in
             // flashes fully blurred glass before the content is legible.
+            // Placeholder pose — reflow() measures the card and re-poses the
+            // newborn before the first frame.
             cur: Pose {
                 y: 0.0,
-                x_off: ENTRY_SLIDE,
+                x_off: slide_off(CARD_WIDTH as f64),
                 scale: 1.0,
                 opacity: 1.0,
             },
             from: Pose {
                 y: 0.0,
-                x_off: ENTRY_SLIDE,
+                x_off: slide_off(CARD_WIDTH as f64),
                 scale: 1.0,
                 opacity: 1.0,
             },
@@ -313,9 +319,10 @@ fn start_exit(st: &Rc<RefCell<State>>, id: u32) -> bool {
             Some(card) => {
                 cancel_timer(&mut card.timer);
                 card.exiting = true;
+                // Slide fully past the clip at whatever tint the card has —
+                // no opacity fade on glass (anim.rs).
                 let to = Pose {
-                    x_off: EXIT_SLIDE,
-                    opacity: 0.0,
+                    x_off: slide_off(card.width),
                     ..card.cur
                 };
                 card.retarget(to, anim::EXIT_MS, now);
@@ -385,12 +392,13 @@ fn reflow(st: &Rc<RefCell<State>>) {
 
             if card.newborn {
                 card.newborn = false;
-                // Enter at the final slot, sliding in from the screen edge
+                // Enter at the final slot, sliding in from fully past the
+                // clip edge at target opacity (no fade on glass, anim.rs)
                 card.cur = Pose {
                     y: to.y,
-                    x_off: ENTRY_SLIDE,
+                    x_off: slide_off(card.width),
                     scale: to.scale,
-                    opacity: 0.0,
+                    opacity: to.opacity,
                 };
                 card.from = card.cur;
                 card.to = to;
