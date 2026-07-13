@@ -68,9 +68,10 @@ pub struct Panel {
     pub window: gtk4::Window,
     sections: Rc<Sections>,
     launcher: Rc<LauncherView>,
-    /// Enter/exit wipe for the glass menu — geometry behind a clip, never
-    /// an opacity fade (the glass rule, anim.rs). `reveals_child()` is the
-    /// shown/hidden intent flag; the window unmaps when the wipe closes.
+    /// Enter/exit crossfade for the glass menu, paired with a short
+    /// [`anim::SlideBin`] settle (motion on glass, anim.rs).
+    /// `reveals_child()` is the shown/hidden intent flag; the window unmaps
+    /// when the fade finishes.
     revealer: gtk4::Revealer,
 }
 
@@ -96,14 +97,16 @@ impl Panel {
             .build();
         root.add_css_class("startmenu-root");
 
-        // The menu rises from the bottom edge (a wipe at the window's bottom,
-        // 4px above the bar) and sinks back on dismiss — geometry behind a
-        // clip, never an opacity fade (the glass rule, anim.rs). The window
-        // is a fixed 780x700 layer surface, so only internal layout animates;
-        // the surface itself never resizes. Created here so rail buttons can
-        // reference it; `root` is attached as its child further down.
+        // The menu fades in while settling up SLIDE_PX from below the
+        // window's bottom edge (4px above the bar), and fades out sinking
+        // back — a crossfade plus a short slide (motion on glass, anim.rs).
+        // The window is a fixed 780x700 layer surface, so only internal
+        // layout animates; the surface itself never resizes, and the settle
+        // overshoot is clipped at its bottom edge. Created here so rail
+        // buttons can reference it; `root` is attached (wrapped in the
+        // SlideBin) further down.
         let menu_revealer = gtk4::Revealer::builder()
-            .transition_type(gtk4::RevealerTransitionType::SlideUp)
+            .transition_type(gtk4::RevealerTransitionType::Crossfade)
             .transition_duration(anim::ENTER_MS as u32)
             .reveal_child(false)
             .build();
@@ -298,11 +301,34 @@ impl Panel {
 
         root.append(&body);
         root.append(&clipboard_revealer);
-        menu_revealer.set_child(Some(&root));
+
+        // The settle half of the enter/exit motion: the revealer crossfades
+        // while the SlideBin translates the menu between SLIDE_PX below its
+        // resting spot and 0. Driven off `reveal-child` so every open/close
+        // path (bar toggle, backdrop click, Esc, rail actions) animates the
+        // same way; the intent flip happens before the window unmaps, so
+        // snapping the reveal shut on an unmapped window jumps instead.
+        let slide = anim::SlideBin::new();
+        slide.set_child(&root);
+        slide.jump_to(anim::SLIDE_PX);
+        menu_revealer.set_child(Some(&slide));
         backdrop.append(&menu_revealer);
         window.set_child(Some(&backdrop));
 
-        // Unmap only once the exit wipe has fully closed.
+        {
+            let slide_c = slide.clone();
+            let window_c = window.clone();
+            menu_revealer.connect_reveal_child_notify(move |r| {
+                let target = if r.reveals_child() { 0.0 } else { anim::SLIDE_PX };
+                if window_c.is_visible() {
+                    slide_c.slide_to(target, r.transition_duration() as f64);
+                } else {
+                    slide_c.jump_to(target);
+                }
+            });
+        }
+
+        // Unmap only once the exit fade has fully finished.
         {
             let window_c = window.clone();
             menu_revealer.connect_child_revealed_notify(move |r| {
@@ -312,7 +338,7 @@ impl Panel {
             });
         }
 
-        // Shared dismiss path: sink the menu, then unmap (handler above).
+        // Shared dismiss path: fade the menu out, then unmap (handler above).
         let hide_menu = {
             let revealer_c = menu_revealer.clone();
             Rc::new(move || {
@@ -379,8 +405,9 @@ impl Panel {
         } else {
             // Instant-hide paths (rail actions, power session actions) unmap
             // the window without closing the reveal; snap it shut (state
-            // changes on an unmapped revealer are instantaneous) so the
-            // enter wipe animates from the bottom instead of skipping.
+            // changes on an unmapped revealer are instantaneous, and the
+            // SlideBin jumps back down) so the enter fade+settle plays
+            // instead of skipping.
             self.revealer.set_reveal_child(false);
             self.launcher.reset();
             self.revealer

@@ -292,14 +292,14 @@ impl Osd {
 
         wrapper.append(&outer);
 
-        // Enter/exit is a revealer wipe (geometry behind a clip), never an
-        // opacity fade — see the glass rule in anim.rs. The invisible spacer
-        // is kept at the card's measured size so the auto-sized layer surface
-        // stays constant while the revealer's natural height animates.
+        // Enter/exit is a pure crossfade (motion on glass, anim.rs) — the
+        // frost pops in first, then the content resolves. The invisible
+        // spacer is kept at the card's measured size so the auto-sized layer
+        // surface stays constant while the revealer hides its child.
         let spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
         let revealer = gtk4::Revealer::builder()
-            .transition_type(gtk4::RevealerTransitionType::SlideUp)
+            .transition_type(gtk4::RevealerTransitionType::Crossfade)
             .transition_duration(anim::ENTER_MS as u32)
             .reveal_child(false)
             .valign(gtk4::Align::End)
@@ -311,7 +311,7 @@ impl Osd {
         overlay.add_overlay(&revealer);
         window.set_child(Some(&overlay));
 
-        // Unmap only once the exit wipe has fully closed.
+        // Unmap only once the exit fade has fully finished.
         {
             let window_c = window.clone();
             revealer.connect_child_revealed_notify(move |r| {
@@ -372,9 +372,8 @@ impl Osd {
         let (_, nat_h, _, _) = self.wrapper.measure(gtk4::Orientation::Vertical, nat_w);
         self.spacer.set_size_request(nat_w, nat_h);
 
-        // Rise from the bottom edge at full opacity (the glass rule,
-        // anim.rs). Retriggering mid-exit reverses the wipe from its
-        // current position.
+        // Fade in (motion on glass, anim.rs). Retriggering mid-exit
+        // reverses the fade from its current opacity.
         self.revealer.set_transition_duration(anim::ENTER_MS as u32);
         self.window.set_visible(true);
         self.revealer.set_reveal_child(true);
@@ -384,8 +383,8 @@ impl Osd {
             id.remove();
         }
 
-        // Auto-hide after timeout: sink behind the bottom clip, then unmap
-        // (the child-revealed handler hides the window when the wipe ends)
+        // Auto-hide after timeout: fade out, then unmap (the child-revealed
+        // handler hides the window when the fade ends)
         let revealer_c = self.revealer.clone();
         let timeout_ref = self.timeout_id.clone();
         let id = glib::timeout_add_local_once(
