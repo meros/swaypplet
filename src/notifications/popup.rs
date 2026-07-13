@@ -160,10 +160,17 @@ impl PopupManager {
         }
         canvas.add_controller(motion);
 
-        // The input region only exists once the surface is mapped
+        // The input region only exists once the surface is mapped.
+        // try_borrow: map can fire synchronously from present() while the
+        // caller still holds the state borrow; the region is recomputed by
+        // the reflow that always follows, so skipping here is safe.
         {
             let st = state.clone();
-            window.connect_map(move |_| update_input_region(&st.borrow()));
+            window.connect_map(move |_| {
+                if let Ok(s) = st.try_borrow() {
+                    update_input_region(&s);
+                }
+            });
         }
 
         {
@@ -228,11 +235,18 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     set_critical_class(&card, notif);
     populate_card(&card, notif, &store);
 
+    // present() maps the window and the map signal fires synchronously —
+    // its handler borrows the state, so present outside any borrow.
+    let window = {
+        let s = st.borrow();
+        (!s.window.is_visible()).then(|| s.window.clone())
+    };
+    if let Some(window) = window {
+        window.present();
+    }
+
     {
         let mut s = st.borrow_mut();
-        if !s.window.is_visible() {
-            s.window.present();
-        }
         s.canvas.put(&card, 0.0, 0.0);
         let timer = make_timer(&store, notif, s.hovered);
         s.cards.push(Card {
