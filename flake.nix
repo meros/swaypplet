@@ -28,6 +28,7 @@
           hicolor-icon-theme
           adwaita-icon-theme
           polkit
+          pam
         ];
     in
     {
@@ -61,6 +62,8 @@
               clippy
               rustfmt
               pkg-config
+              # pam-sys generates its libpam bindings at build time
+              rustPlatform.bindgenHook
             ];
 
             buildInputs = runtimeDeps;

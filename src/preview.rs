@@ -51,6 +51,36 @@ pub fn run(component: &str) {
             return;
         }
 
+        // Lock screen: full-window content in a plain toplevel — no session
+        // lock is taken, so it's safe to iterate on styling while unlocked.
+        // Submitting "ok" flashes success; anything else shakes.
+        if component == "lock" {
+            let window: gtk4::Window = ApplicationWindow::builder()
+                .application(app)
+                .default_width(1280)
+                .default_height(800)
+                .build()
+                .upcast();
+            window.add_css_class("lock");
+            let set = crate::lock::ui::SurfaceSet::new();
+            let feedback = set.clone();
+            let content = set.build_content(
+                &window,
+                Rc::new(move |password: String| {
+                    if password == "ok" {
+                        feedback.flash_success();
+                    } else {
+                        feedback.set_status("Wrong password", crate::lock::ui::StatusKind::Error);
+                        feedback.shake();
+                    }
+                }),
+            );
+            window.set_child(Some(&content));
+            window.present();
+            std::mem::forget(set);
+            return;
+        }
+
         // Single component: wrap its widget in a small window carrying the panel
         // surface classes so it inherits the same styling context.
         let window = ApplicationWindow::builder()
@@ -136,8 +166,8 @@ pub fn run(component: &str) {
             }
             other => {
                 host.append(&gtk4::Label::new(Some(&format!(
-                    "unknown preview component: {other}\n\nknown: panel, tiles, audio, brightness, \
-                     network, bluetooth, display, media, notifications, clipboard, power"
+                    "unknown preview component: {other}\n\nknown: panel, lock, tiles, audio, \
+                     brightness, network, bluetooth, display, media, notifications, clipboard, power"
                 ))));
             }
         }

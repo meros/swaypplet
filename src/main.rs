@@ -4,6 +4,7 @@ mod elephant;
 mod icons;
 mod launcher;
 mod layer_shell;
+mod lock;
 mod notifications;
 mod osd;
 mod panel;
@@ -23,6 +24,8 @@ fn main() {
     let _argv0 = args.next();
     match args.next().as_deref() {
         Some("polkit-agent") => polkit::run(),
+        // ext-session-lock screen locker — standalone process, no GApplication.
+        Some("lock") => lock::run(),
         // Dev-only: render one component (or the whole panel) in a plain window
         // for visual validation. See src/preview.rs and dev/render.sh.
         Some("--preview") => preview::run(args.next().as_deref().unwrap_or("panel")),
