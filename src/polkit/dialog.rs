@@ -147,7 +147,7 @@ impl PolkitDialog {
             .visible(false)
             .build();
         fp_pill.add_css_class("polkit-fp-pill");
-        let fp_glyph = gtk4::Label::builder().label("\u{f0577}").build();
+        let fp_glyph = gtk4::Label::builder().label("\u{f0237}").build();
         fp_glyph.add_css_class("polkit-fp-glyph");
         let fp_label = gtk4::Label::builder().label("Touch fingerprint reader").build();
         fp_label.add_css_class("polkit-fp-label");
