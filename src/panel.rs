@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use crate::anim;
 use crate::launcher::LauncherView;
 use crate::notifications::store::NotificationStore;
 use crate::widgets::{
@@ -67,6 +68,10 @@ pub struct Panel {
     pub window: gtk4::Window,
     sections: Rc<Sections>,
     launcher: Rc<LauncherView>,
+    /// Enter/exit wipe for the glass menu — geometry behind a clip, never
+    /// an opacity fade (the glass rule, anim.rs). `reveals_child()` is the
+    /// shown/hidden intent flag; the window unmaps when the wipe closes.
+    revealer: gtk4::Revealer,
 }
 
 impl Panel {
@@ -90,6 +95,18 @@ impl Panel {
             .valign(gtk4::Align::End)
             .build();
         root.add_css_class("startmenu-root");
+
+        // The menu rises from the bottom edge (a wipe at the window's bottom,
+        // 4px above the bar) and sinks back on dismiss — geometry behind a
+        // clip, never an opacity fade (the glass rule, anim.rs). The window
+        // is a fixed 780x700 layer surface, so only internal layout animates;
+        // the surface itself never resizes. Created here so rail buttons can
+        // reference it; `root` is attached as its child further down.
+        let menu_revealer = gtk4::Revealer::builder()
+            .transition_type(gtk4::RevealerTransitionType::SlideUp)
+            .transition_duration(anim::ENTER_MS as u32)
+            .reveal_child(false)
+            .build();
 
         // ── Body: two columns ─────────────────────────────────────────────────
         let body = gtk4::Box::builder()
@@ -281,8 +298,28 @@ impl Panel {
 
         root.append(&body);
         root.append(&clipboard_revealer);
-        backdrop.append(&root);
+        menu_revealer.set_child(Some(&root));
+        backdrop.append(&menu_revealer);
         window.set_child(Some(&backdrop));
+
+        // Unmap only once the exit wipe has fully closed.
+        {
+            let window_c = window.clone();
+            menu_revealer.connect_child_revealed_notify(move |r| {
+                if !r.is_child_revealed() && !r.reveals_child() {
+                    window_c.set_visible(false);
+                }
+            });
+        }
+
+        // Shared dismiss path: sink the menu, then unmap (handler above).
+        let hide_menu = {
+            let revealer_c = menu_revealer.clone();
+            Rc::new(move || {
+                revealer_c.set_transition_duration(anim::EXIT_MS as u32);
+                revealer_c.set_reveal_child(false);
+            })
+        };
 
         // ── Sections bundle ──────────────────────────────────────────────────
         let sections = Rc::new(Sections {
@@ -300,21 +337,21 @@ impl Panel {
 
         // ── Launcher activation + Esc hide the menu ──────────────────────────
         {
-            let window_c = window.clone();
-            launcher.set_on_activate(move || window_c.set_visible(false));
+            let hide = hide_menu.clone();
+            launcher.set_on_activate(move || hide());
         }
         {
-            let window_c = window.clone();
-            launcher.install_key_controller(&window, move || window_c.set_visible(false));
+            let hide = hide_menu.clone();
+            launcher.install_key_controller(&window, move || hide());
         }
 
         // ── Backdrop click → dismiss; clicks on the menu are claimed ─────────
         let backdrop_gesture = gtk4::GestureClick::new();
         backdrop_gesture.set_propagation_phase(gtk4::PropagationPhase::Bubble);
         {
-            let window_c = window.clone();
+            let hide = hide_menu.clone();
             backdrop_gesture.connect_released(move |_, _, _, _| {
-                window_c.set_visible(false);
+                hide();
             });
         }
         backdrop.add_controller(backdrop_gesture);
@@ -330,15 +367,26 @@ impl Panel {
             window,
             sections,
             launcher,
+            revealer: menu_revealer,
         }
     }
 
     pub fn toggle(&self) {
-        if self.window.is_visible() {
-            self.window.set_visible(false);
+        if self.revealer.reveals_child() && self.window.is_visible() {
+            self.revealer
+                .set_transition_duration(anim::EXIT_MS as u32);
+            self.revealer.set_reveal_child(false);
         } else {
+            // Instant-hide paths (rail actions, power session actions) unmap
+            // the window without closing the reveal; snap it shut (state
+            // changes on an unmapped revealer are instantaneous) so the
+            // enter wipe animates from the bottom instead of skipping.
+            self.revealer.set_reveal_child(false);
             self.launcher.reset();
+            self.revealer
+                .set_transition_duration(anim::ENTER_MS as u32);
             self.window.set_visible(true);
+            self.revealer.set_reveal_child(true);
             let sections = self.sections.clone();
             let launcher = self.launcher.clone();
             glib::idle_add_local_once(move || {
@@ -501,7 +549,9 @@ fn copy_spec(spec: &tiles::TileSpec) -> tiles::TileSpec {
     }
 }
 
-/// A rail icon button that hides the menu, then runs `action`.
+/// A rail icon button that hides the menu instantly (no exit wipe — the
+/// action may capture the screen), then runs `action`. The stale reveal
+/// state this leaves behind is healed by `Panel::toggle`.
 fn rail_action(icon: &str, tooltip: &str, window: &gtk4::Window, action: fn()) -> gtk4::Button {
     let btn = gtk4::Button::builder()
         .child(&gtk4::Label::new(Some(icon)))
