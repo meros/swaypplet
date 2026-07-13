@@ -206,21 +206,24 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
 
     let id = notif.id;
 
-    // Replacing an existing popup: rebuild its content in place
-    let replaced = {
+    // Replacing an existing popup: rebuild its content in place.
+    // populate_card unparents the old children, which can synthesize pointer
+    // crossing events whose handlers borrow the state — run it unborrowed.
+    let existing = {
         let mut s = st.borrow_mut();
         let hovered = s.hovered;
-        if let Some(card) = s.cards.iter_mut().find(|c| c.id == id && !c.exiting) {
-            populate_card(&card.widget, notif, &store);
-            set_critical_class(&card.widget, notif);
-            cancel_timer(&mut card.timer);
-            card.timer = make_timer(&store, notif, hovered);
-            true
-        } else {
-            false
-        }
+        s.cards
+            .iter_mut()
+            .find(|c| c.id == id && !c.exiting)
+            .map(|card| {
+                cancel_timer(&mut card.timer);
+                card.timer = make_timer(&store, notif, hovered);
+                card.widget.clone()
+            })
     };
-    if replaced {
+    if let Some(widget) = existing {
+        populate_card(&widget, notif, &store);
+        set_critical_class(&widget, notif);
         reflow(st);
         return;
     }
@@ -257,10 +260,17 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
         window.present();
     }
 
+    // Parenting the card can synthesize a pointer enter whose handler
+    // borrows the state — put it on the canvas before taking the borrow.
+    let (canvas, hovered) = {
+        let s = st.borrow();
+        (s.canvas.clone(), s.hovered)
+    };
+    canvas.put(&card, 0.0, 0.0);
+
     {
         let mut s = st.borrow_mut();
-        s.canvas.put(&card, 0.0, 0.0);
-        let timer = make_timer(&store, notif, s.hovered);
+        let timer = make_timer(&store, notif, hovered);
         s.cards.push(Card {
             id,
             widget: card,
@@ -341,11 +351,13 @@ fn reflow(st: &Rc<RefCell<State>>) {
         let now = glib::monotonic_time();
         let canvas = s.canvas.clone();
 
-        // Measure natural sizes (bodies are line-capped, so this is bounded)
+        // Cards are fixed-width: GtkFixed clamps a child's allocation to the
+        // canvas width, so anchoring on a wider natural measure would place
+        // the card for a box that never gets allocated (clipped at the left
+        // screen edge, right edge short of the margin).
         for card in s.cards.iter_mut().filter(|c| !c.exiting) {
-            let (_, nat_w, _, _) = card.widget.measure(gtk4::Orientation::Horizontal, -1);
-            card.width = nat_w.max(CARD_WIDTH) as f64;
-            let (_, nat_h, _, _) = card.widget.measure(gtk4::Orientation::Vertical, nat_w);
+            card.width = CARD_WIDTH as f64;
+            let (_, nat_h, _, _) = card.widget.measure(gtk4::Orientation::Vertical, CARD_WIDTH);
             card.height = nat_h as f64;
         }
 
@@ -439,6 +451,7 @@ fn ensure_tick(st: &Rc<RefCell<State>>) {
         let mut s = st.borrow_mut();
         let now = glib::monotonic_time();
         let canvas = s.canvas.clone();
+        let window = s.window.clone();
         let mut any_running = false;
         let mut finished_exits = Vec::new();
 
@@ -459,18 +472,29 @@ fn ensure_tick(st: &Rc<RefCell<State>>) {
             }
         }
 
-        for &i in finished_exits.iter().rev() {
-            let card = s.cards.remove(i);
-            canvas.remove(&card.widget);
+        let removed: Vec<_> = finished_exits
+            .iter()
+            .rev()
+            .map(|&i| s.cards.remove(i).widget)
+            .collect();
+        let hide = !any_running && s.cards.is_empty();
+        if !any_running {
+            s.ticking = false;
+        }
+        // Unparenting and unmapping synthesize pointer crossing events whose
+        // handlers (pause/resume_timers) borrow the state — release it first,
+        // or a hover during the last exit aborts on a nested borrow.
+        drop(s);
+        for widget in &removed {
+            canvas.remove(widget);
+        }
+        if hide {
+            window.set_visible(false);
         }
 
         if any_running {
             glib::ControlFlow::Continue
         } else {
-            s.ticking = false;
-            if s.cards.is_empty() {
-                s.window.set_visible(false);
-            }
             glib::ControlFlow::Break
         }
     });
@@ -612,12 +636,18 @@ fn populate_card(card: &gtk4::Box, notif: &Notification, store: &Rc<RefCell<Noti
         .valign(gtk4::Align::Center)
         .build();
 
+    // max_width_chars(1) collapses each label's natural width so the card's
+    // CARD_WIDTH size request is what drives allocation — a larger cap
+    // becomes the natural width and can push the card past the window (see
+    // reflow). Fill + xalign(0) makes the label span that allocation and
+    // ellipsize/wrap there instead of shrinking to the collapsed natural.
     if !notif.app_name.is_empty() {
         let app_label = gtk4::Label::builder()
             .label(notif.app_name.to_uppercase())
-            .halign(gtk4::Align::Start)
+            .halign(gtk4::Align::Fill)
+            .xalign(0.0)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .max_width_chars(40)
+            .max_width_chars(1)
             .build();
         app_label.add_css_class("notification-app-name");
         vbox.append(&app_label);
@@ -625,9 +655,10 @@ fn populate_card(card: &gtk4::Box, notif: &Notification, store: &Rc<RefCell<Noti
 
     let summary = gtk4::Label::builder()
         .label(&notif.summary)
-        .halign(gtk4::Align::Start)
+        .halign(gtk4::Align::Fill)
+        .xalign(0.0)
         .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .max_width_chars(40)
+        .max_width_chars(1)
         .build();
     summary.add_css_class("notification-summary");
     vbox.append(&summary);
@@ -637,10 +668,11 @@ fn populate_card(card: &gtk4::Box, notif: &Notification, store: &Rc<RefCell<Noti
         let body = gtk4::Label::builder()
             .label(&markup)
             .use_markup(true)
-            .halign(gtk4::Align::Start)
+            .halign(gtk4::Align::Fill)
+            .xalign(0.0)
             .wrap(true)
             .wrap_mode(gtk4::pango::WrapMode::WordChar)
-            .max_width_chars(40)
+            .max_width_chars(1)
             .lines(3)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
             .build();
