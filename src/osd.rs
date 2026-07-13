@@ -5,6 +5,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
+use crate::anim;
 use crate::layer_shell::{self, LayerShellConfig};
 use crate::spawn::spawn_work;
 
@@ -212,6 +213,7 @@ pub struct Osd {
     // For indicator mode (caps lock etc.)
     indicator_label: gtk4::Label,
     bar_box: gtk4::Box,
+    fade: anim::Fade,
     timeout_id: Rc<RefCell<Option<glib::SourceId>>>,
 }
 
@@ -296,6 +298,7 @@ impl Osd {
             text_label,
             indicator_label,
             bar_box,
+            fade: anim::Fade::new(&outer),
             timeout_id: Rc::new(RefCell::new(None)),
         }
     }
@@ -330,21 +333,32 @@ impl Osd {
             }
         }
 
-        self.window.set_visible(true);
+        // Fade the card in on first show; retriggering mid-fade-out
+        // redirects the fade from the current opacity
+        if !self.window.is_visible() {
+            self.fade.jump(0.0);
+            self.window.set_visible(true);
+        }
+        self.fade.to(1.0, anim::EXIT_MS, None);
 
         // Cancel previous timeout
         if let Some(id) = self.timeout_id.borrow_mut().take() {
             id.remove();
         }
 
-        // Auto-hide after timeout
+        // Auto-hide after timeout: fade out, then unmap
         let window_c = self.window.clone();
+        let fade_c = self.fade.clone();
         let timeout_ref = self.timeout_id.clone();
         let id = glib::timeout_add_local_once(
             std::time::Duration::from_millis(OSD_TIMEOUT_MS as u64),
             move || {
-                window_c.set_visible(false);
                 *timeout_ref.borrow_mut() = None;
+                fade_c.to(
+                    0.0,
+                    anim::EXIT_MS,
+                    Some(Box::new(move || window_c.set_visible(false))),
+                );
             },
         );
         *self.timeout_id.borrow_mut() = Some(id);

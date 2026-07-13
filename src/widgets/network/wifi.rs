@@ -218,7 +218,7 @@ fn build_wifi_row(network: &WifiNetwork) -> ListBoxRow {
         } else if needs_password {
             let pw_revealer = Revealer::builder()
                 .transition_type(RevealerTransitionType::SlideDown)
-                .transition_duration(150)
+                .transition_duration(200)
                 .reveal_child(false)
                 .build();
 
@@ -326,7 +326,7 @@ fn build_hidden_network_row(list: &ListBox, _state: &Rc<RefCell<NetworkState>>) 
 
     let hidden_revealer = Revealer::builder()
         .transition_type(RevealerTransitionType::SlideDown)
-        .transition_duration(150)
+        .transition_duration(200)
         .reveal_child(false)
         .build();
 
