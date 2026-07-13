@@ -22,7 +22,7 @@ use zbus::proxy;
     default_service = "net.reactivated.Fprint",
     default_path = "/net/reactivated/Fprint/Manager"
 )]
-trait Manager {
+pub(crate) trait Manager {
     fn get_default_device(&self) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
 }
 
@@ -30,7 +30,7 @@ trait Manager {
     interface = "net.reactivated.Fprint.Device",
     default_service = "net.reactivated.Fprint"
 )]
-trait Device {
+pub(crate) trait Device {
     /// Empty username = the calling user (polkit-gated to active local sessions).
     fn claim(&self, username: &str) -> zbus::Result<()>;
     fn release(&self) -> zbus::Result<()>;

@@ -17,7 +17,7 @@
 //! PAM success or a fingerprint match.
 
 mod auth;
-mod fprint;
+pub(crate) mod fprint;
 pub mod glass;
 pub mod ui;
 
