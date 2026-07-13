@@ -65,6 +65,7 @@ pub struct PolkitDialog {
     fp_pill: gtk4::Box,
     fp_label: gtk4::Label,
     password_entry: gtk4::PasswordEntry,
+    caps_label: gtk4::Label,
     identity_row: gtk4::Box,
     identity_combo: gtk4::DropDown,
     status_label: gtk4::Label,
@@ -162,6 +163,14 @@ impl PolkitDialog {
             .build();
         password_entry.add_css_class("polkit-entry");
 
+        // ── Caps Lock warning (parity with the lock screen) ───────────
+        let caps_label = gtk4::Label::builder()
+            .label("\u{f0632}  Caps Lock is on")
+            .halign(gtk4::Align::Center)
+            .visible(false)
+            .build();
+        caps_label.add_css_class("polkit-caps");
+
         // ── Identity picker (hidden when only one identity) ───────────
         let identity_row = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
@@ -240,6 +249,7 @@ impl PolkitDialog {
         card.append(&message_label);
         card.append(&fp_pill);
         card.append(&password_entry);
+        card.append(&caps_label);
         card.append(&identity_row);
         card.append(&status_label);
         card.append(&details_toggle);
@@ -262,6 +272,7 @@ impl PolkitDialog {
             fp_pill,
             fp_label,
             password_entry: password_entry.clone(),
+            caps_label: caps_label.clone(),
             identity_row,
             identity_combo: identity_combo.clone(),
             status_label,
@@ -353,6 +364,15 @@ impl PolkitDialog {
             window.add_controller(key);
         }
 
+        // Caps Lock indicator tracks the keyboard device directly; the
+        // initial state is applied on each present().
+        if let Some(keyboard) = keyboard_device() {
+            let caps = caps_label.clone();
+            keyboard.connect_caps_lock_state_notify(move |kb| {
+                caps.set_visible(kb.is_caps_locked());
+            });
+        }
+
         dialog
     }
 
@@ -379,6 +399,10 @@ impl PolkitDialog {
         self.auth_btn.set_visible(false);
         self.card.remove_css_class("polkit-shake");
         self.card.remove_css_class("polkit-success");
+        self.card.remove_css_class("polkit-verifying");
+        self.caps_label.set_visible(
+            keyboard_device().is_some_and(|kb| kb.is_caps_locked()),
+        );
 
         // Title + message
         self.title_label.set_label("Authentication Required");
@@ -499,6 +523,20 @@ impl PolkitDialog {
         self.auth_btn.set_sensitive(false);
     }
 
+    /// Grey out input while the helper verifies a response; re-enable after.
+    pub fn set_verifying(&self, verifying: bool) {
+        self.password_entry.set_sensitive(!verifying);
+        self.auth_btn.set_sensitive(!verifying);
+        if verifying {
+            self.card.add_css_class("polkit-verifying");
+        } else {
+            self.card.remove_css_class("polkit-verifying");
+            if self.password_entry.is_visible() {
+                self.password_entry.grab_focus();
+            }
+        }
+    }
+
     fn set_icon(&self, icon_name: &str, action_id: &str) {
         // Try the icon name from polkit first.
         if !icon_name.is_empty() {
@@ -515,6 +553,12 @@ impl PolkitDialog {
         self.icon_label.set_visible(true);
         self.icon_label.set_label(glyph_for_action(action_id));
     }
+}
+
+fn keyboard_device() -> Option<gdk4::Device> {
+    gdk4::Display::default()
+        .and_then(|d| d.default_seat())
+        .and_then(|seat| seat.keyboard())
 }
 
 fn glyph_for_action(action_id: &str) -> &'static str {

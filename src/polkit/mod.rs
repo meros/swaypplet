@@ -25,8 +25,8 @@
 //! tokens — everything routes through whatever PAM stack the host
 //! configures.
 
-mod agent;
-mod dialog;
+pub(crate) mod agent;
+pub(crate) mod dialog;
 mod helper;
 mod session;
 
@@ -368,6 +368,7 @@ fn apply_helper_event(state: &Rc<RefCell<PolkitState>>, event: HelperEvent) -> b
                 dialog.set_password_prompt(&prompt);
                 dialog.set_status("", StatusKind::Info);
             }
+            dialog.set_verifying(false);
             if let Some(active) = state.borrow_mut().active.as_mut() {
                 active.waiting_password = true;
             }
@@ -384,6 +385,7 @@ fn apply_helper_event(state: &Rc<RefCell<PolkitState>>, event: HelperEvent) -> b
             true
         }
         HelperEvent::Error(msg) => {
+            dialog.set_verifying(false);
             dialog.set_status(&msg, StatusKind::Error);
             dialog.shake();
             true
@@ -412,6 +414,7 @@ fn apply_helper_event(state: &Rc<RefCell<PolkitState>>, event: HelperEvent) -> b
             false
         }
         HelperEvent::Failure => {
+            dialog.set_verifying(false);
             dialog.set_status("Authentication failed", StatusKind::Error);
             dialog.shake();
             // The helper exits after FAILURE. The eof branch in
@@ -437,6 +440,11 @@ fn handle_user_password(state: &Rc<RefCell<PolkitState>>, password: String) {
         log::error!("polkit: failed to send password to helper: {e}");
     }
     active.waiting_password = false;
+    // Grey the card out while the helper runs PAM; any next helper event
+    // (prompt, error, failure) clears it. Success closes the dialog anyway.
+    let dialog = s.dialog.clone();
+    drop(s);
+    dialog.set_verifying(true);
 }
 
 fn handle_identity_change(state: &Rc<RefCell<PolkitState>>, uid: u32) {
