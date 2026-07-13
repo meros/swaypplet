@@ -5,6 +5,11 @@
    Saturated color is reserved for state.
    Nested radii are concentric (inner = outer − gap) where
    corners sit close together (gap ≤ ~8px).
+   Motion scale (Rust side in src/anim.rs): micro
+   interactions 150ms ease, structural reveal/collapse
+   200ms, exits/fades 200ms, enter/move 300ms ease-out.
+   Deliberate attention loops (pulses, shake, breathing)
+   sit outside the scale.
    ══════════════════════════════════════════════════════ */
 
 /* ── Palette ── */
@@ -127,7 +132,7 @@ window.panel {
     padding: 0 14px;
     min-height: 48px;
     box-shadow: none;
-    transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
+    transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
 }
 
 /* Reveal tiles reserve space at the right for the floating chevron overlay. */
@@ -230,7 +235,7 @@ scale highlight {
     background-color: @accent;
     border-radius: 999px;
     min-height: 10px;
-    transition: background-color 100ms ease;
+    transition: background-color 150ms ease;
 }
 
 scale slider {
@@ -240,7 +245,7 @@ scale slider {
     min-height: 20px;
     margin: -7px;
     box-shadow: 0 1px 4px alpha(black, 0.4);
-    transition: all 100ms ease;
+    transition: all 150ms ease;
 }
 
 scale slider:hover {
@@ -906,7 +911,7 @@ revealer {
 
 .network-connecting {
     opacity: 0.7;
-    transition: opacity 300ms ease;
+    transition: opacity 200ms ease;
 }
 
 .network-forget-confirm-btn {
@@ -1000,13 +1005,10 @@ revealer {
     font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
 }
 
-.notification-popup-wrapper {
-    /* Transparent apron — the stacking math in popup.rs includes it;
-       must stay fully alpha-0 so compositor blur clips to the card
-       (see the window comment). */
-    padding: 32px;
-}
-
+/* Cards live on a transparent GtkFixed canvas (positioned via child
+   transforms in popup.rs); everything outside the cards must stay
+   fully alpha-0 so compositor blur clips to the cards
+   (see the window comment). */
 .notification-popup-content {
     background-color: @surface;
     border-radius: 18px;
@@ -1016,8 +1018,8 @@ revealer {
 }
 
 /* Border pulse, not box-shadow: a glow would overhang into the
-   transparent apron and get frosted (see the window comment). */
-.notification-popup.critical .notification-popup-content {
+   transparent canvas and get frosted (see the window comment). */
+.notification-popup-content.critical {
     border-color: alpha(@red, 0.6);
     animation: critical-border-pulse 0.7s steps(12) infinite alternate;
 }
@@ -1152,7 +1154,7 @@ revealer {
 .launcher-result {
     padding: 10px 12px;
     border-radius: 10px;
-    transition: background-color 100ms ease;
+    transition: background-color 150ms ease;
 }
 
 .launcher-result:hover {
@@ -1252,7 +1254,7 @@ revealer {
     border-radius: 12px;
     padding: 13px 18px;
     margin: 2px 0;
-    transition: border-color 220ms ease;
+    transition: border-color 200ms ease;
 }
 
 .polkit-fp-pill.polkit-fp-active {
@@ -1504,7 +1506,7 @@ revealer {
     min-height: 34px;
     padding: 0;
     font-size: 13px;
-    transition: background-color 140ms ease, color 140ms ease;
+    transition: background-color 150ms ease, color 150ms ease;
 }
 
 .startmenu-tile-chevron:hover {
@@ -1543,7 +1545,7 @@ revealer {
     min-height: 44px;
     padding: 0;
     box-shadow: none;
-    transition: background-color 130ms ease, border-color 130ms ease, color 130ms ease;
+    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
 .rail-btn:hover {

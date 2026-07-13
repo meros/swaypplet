@@ -1,197 +1,577 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gtk4::prelude::*;
-use gtk4_layer_shell::{Edge, LayerShell};
+use gtk4::{graphene, gsk};
+use gtk4_layer_shell::Edge;
 
+use crate::anim::{self, ease_out_cubic};
 use crate::icons;
 use crate::layer_shell::{self, LayerShellConfig};
 
 use super::store::{self, NotificationStore};
 use super::{CloseReason, Notification, Urgency};
 
-const POPUP_CONTENT_HEIGHT: i32 = 100;
-const APRON_PAD: i32 = 32;
-// Total window height including the transparent apron on both sides
-const POPUP_WINDOW_HEIGHT: i32 = POPUP_CONTENT_HEIGHT + 2 * APRON_PAD;
-// Gap between visible notification pills (apron areas overlap)
-const POPUP_GAP: i32 = 4;
-// Stacking step = content height + visual gap (aprons overlap)
-const POPUP_STEP: i32 = POPUP_CONTENT_HEIGHT + POPUP_GAP;
-const POPUP_TOP_MARGIN: i32 = 8;
-const POPUP_RIGHT_MARGIN: i32 = 8;
-const POPUP_WIDTH: i32 = 360 + 2 * APRON_PAD;
+// ── Stack geometry ──
+const CARD_WIDTH: i32 = 360;
+// Offset of the card column from the screen's top/right corner
+const EDGE_MARGIN: i32 = 12;
+// The window is a fixed-size transparent canvas; cards animate inside it.
+// Layer-shell margins jump discretely per commit (double-buffered protocol
+// state), so the surface itself never moves — only child transforms do.
+const WINDOW_WIDTH: i32 = CARD_WIDTH + 2 * EDGE_MARGIN;
+const WINDOW_HEIGHT: i32 = 720;
+// Cards shown at full size before older ones collapse behind the stack
+const FULL_VISIBLE: usize = 3;
+// Vertical gap between fully visible cards
+const GAP: f64 = 8.0;
+// Collapsed cards peek out below the last full card by this much per level
+const PEEK: f64 = 12.0;
+const PEEK_SCALE_STEP: f64 = 0.05;
+const PEEK_OPACITY_STEP: f64 = 0.15;
 const MAX_POPUPS: usize = 5;
+
+// ── Animation (durations and easing come from crate::anim) ──
+// Entry slides in from past the screen edge; exit slides back out
+const ENTRY_SLIDE: f64 = 64.0;
+const EXIT_SLIDE: f64 = 48.0;
+
 const BASE_TIMEOUT_MS: u64 = 5000;
 const PER_CHAR_MS: u64 = 40;
 
 static POPUP_CONFIG: LayerShellConfig = LayerShellConfig {
     namespace: "swaypplet-notification",
-    default_width: Some(POPUP_WIDTH),
-    default_height: Some(POPUP_WINDOW_HEIGHT),
+    default_width: Some(WINDOW_WIDTH),
+    default_height: Some(WINDOW_HEIGHT),
     anchors: &[(Edge::Top, true), (Edge::Right, true)],
-    // No margin — the CSS padding inside the wrapper provides visual spacing
     margins: &[],
     keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
 };
 
-struct PopupSlot {
-    id: u32,
-    window: gtk4::Window,
-    timeout_id: Option<glib::SourceId>,
+/// Animated properties of a card. `y` is the visual top edge, `x_off` a
+/// horizontal slide offset (entry/exit), `scale` shrinks collapsed cards.
+#[derive(Clone, Copy, PartialEq)]
+struct Pose {
+    y: f64,
+    x_off: f64,
+    scale: f64,
+    opacity: f64,
 }
 
-/// Manages popup notification windows stacked at the top-right.
-pub struct PopupManager {
-    app: gtk4::Application,
-    slots: Vec<PopupSlot>,
-    store: Rc<RefCell<NotificationStore>>,
+fn lerp_pose(a: Pose, b: Pose, t: f64) -> Pose {
+    let l = |a: f64, b: f64| a + (b - a) * t;
+    Pose {
+        y: l(a.y, b.y),
+        x_off: l(a.x_off, b.x_off),
+        scale: l(a.scale, b.scale),
+        opacity: l(a.opacity, b.opacity),
+    }
 }
+
+enum Timer {
+    None,
+    Running {
+        source: glib::SourceId,
+        deadline: Instant,
+    },
+    Paused {
+        remaining: Duration,
+    },
+}
+
+struct Card {
+    id: u32,
+    widget: gtk4::Box,
+    timer: Timer,
+    // Measured natural size (width can exceed CARD_WIDTH slightly for
+    // wide content; cards are right-aligned so it stays invisible)
+    width: f64,
+    height: f64,
+    cur: Pose,
+    from: Pose,
+    to: Pose,
+    anim_start: i64, // glib::monotonic_time() µs
+    anim_ms: f64,
+    animating: bool,
+    exiting: bool,
+    newborn: bool,
+}
+
+impl Card {
+    fn retarget(&mut self, to: Pose, ms: f64, now: i64) {
+        if self.animating && self.to == to {
+            return;
+        }
+        if !self.animating && self.cur == to {
+            return;
+        }
+        self.from = self.cur;
+        self.to = to;
+        self.anim_start = now;
+        self.anim_ms = ms;
+        self.animating = true;
+    }
+}
+
+struct State {
+    window: gtk4::Window,
+    canvas: gtk4::Fixed,
+    // Oldest → newest; matches child paint order, so the newest card
+    // draws on top where collapsed cards overlap.
+    cards: Vec<Card>,
+    store: Rc<RefCell<NotificationStore>>,
+    ticking: bool,
+    hovered: bool,
+}
+
+/// Manages the popup notification stack at the top-right: newest on top,
+/// up to FULL_VISIBLE cards fully expanded, older ones collapsed behind
+/// the last full card with peeking edges.
+pub struct PopupManager;
 
 impl PopupManager {
-    /// Create a `PopupManager` and wire it to the store's `on_notify` callback.
+    /// Create the stack window and wire it to the store's callbacks.
     pub fn register(app: &gtk4::Application, store: Rc<RefCell<NotificationStore>>) {
-        let manager = Rc::new(RefCell::new(Self {
-            app: app.clone(),
-            slots: Vec::new(),
+        let window = layer_shell::create_layer_window(app, &POPUP_CONFIG);
+        window.add_css_class("notification-popup");
+
+        let canvas = gtk4::Fixed::new();
+        window.set_child(Some(&canvas));
+
+        let state = Rc::new(RefCell::new(State {
+            window: window.clone(),
+            canvas: canvas.clone(),
+            cards: Vec::new(),
             store: store.clone(),
+            ticking: false,
+            hovered: false,
         }));
 
-        // Subscribe to new notifications
-        let mgr = manager.clone();
-        store.borrow_mut().connect_notify(move |notif| {
-            mgr.borrow_mut().show(notif);
-        });
+        // Hovering the stack pauses auto-dismiss timers
+        let motion = gtk4::EventControllerMotion::new();
+        {
+            let st = state.clone();
+            motion.connect_enter(move |_, _, _| pause_timers(&st));
+        }
+        {
+            let st = state.clone();
+            motion.connect_leave(move |_| resume_timers(&st));
+        }
+        canvas.add_controller(motion);
 
-        // Subscribe to closes (e.g. from CloseNotification D-Bus call)
-        let mgr = manager.clone();
-        store.borrow_mut().connect_close(move |id, _reason| {
-            mgr.borrow_mut().dismiss(id);
-        });
-    }
-
-    fn show(&mut self, notif: &Notification) {
-        if !self.store.borrow().should_popup(notif) {
-            return;
+        // The input region only exists once the surface is mapped
+        {
+            let st = state.clone();
+            window.connect_map(move |_| update_input_region(&st.borrow()));
         }
 
-        let id = notif.id;
-
-        // If replacing an existing popup, update it in-place
-        if let Some(slot) = self.slots.iter_mut().find(|s| s.id == id) {
-            update_popup_content(&slot.window, notif);
-            // Reset timeout
-            if let Some(tid) = slot.timeout_id.take() {
-                tid.remove();
-            }
-            // Schedule new timeout (can't call self method while borrowing slots)
-            let new_timeout = schedule_auto_dismiss_static(&self.store, notif);
-            slot.timeout_id = new_timeout;
-            return;
+        {
+            let st = state.clone();
+            store.borrow_mut().connect_notify(move |notif| show(&st, notif));
         }
-
-        // Limit visible popups
-        if self.slots.len() >= MAX_POPUPS {
-            // Dismiss the oldest
-            let oldest_id = self.slots[0].id;
-            self.dismiss(oldest_id);
+        {
+            let st = state.clone();
+            store
+                .borrow_mut()
+                .connect_close(move |id, _reason| dismiss(&st, id));
         }
-
-        let window = self.create_popup_window(notif);
-        let timeout_id = self.schedule_auto_dismiss(notif);
-
-        self.slots.push(PopupSlot {
-            id,
-            window,
-            timeout_id,
-        });
-
-        self.restack();
-    }
-
-    fn dismiss(&mut self, id: u32) {
-        if let Some(pos) = self.slots.iter().position(|s| s.id == id) {
-            let slot = self.slots.remove(pos);
-            if let Some(tid) = slot.timeout_id {
-                tid.remove();
-            }
-            slot.window.close();
-            self.restack();
-        }
-    }
-
-    fn restack(&self) {
-        for (i, slot) in self.slots.iter().enumerate() {
-            // Each popup window includes the transparent apron in the
-            // wrapper CSS. Stack by content height + visual gap; aprons
-            // overlap.
-            slot.window.set_margin(Edge::Top, (i as i32) * POPUP_STEP);
-        }
-    }
-
-    fn schedule_auto_dismiss(&self, notif: &Notification) -> Option<glib::SourceId> {
-        schedule_auto_dismiss_static(&self.store, notif)
     }
 }
 
-fn schedule_auto_dismiss_static(
-    store: &Rc<RefCell<NotificationStore>>,
-    notif: &Notification,
-) -> Option<glib::SourceId> {
+fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
+    let store = st.borrow().store.clone();
+    if !store.borrow().should_popup(notif) {
+        return;
+    }
+
+    let id = notif.id;
+
+    // Replacing an existing popup: rebuild its content in place
+    let replaced = {
+        let mut s = st.borrow_mut();
+        let hovered = s.hovered;
+        if let Some(card) = s.cards.iter_mut().find(|c| c.id == id && !c.exiting) {
+            populate_card(&card.widget, notif, &store);
+            set_critical_class(&card.widget, notif);
+            cancel_timer(&mut card.timer);
+            card.timer = make_timer(&store, notif, hovered);
+            true
+        } else {
+            false
+        }
+    };
+    if replaced {
+        reflow(st);
+        return;
+    }
+
+    // Evict the oldest popup when full (popup only — the notification
+    // stays open in the store/history)
+    let evict = {
+        let s = st.borrow();
+        if s.cards.iter().filter(|c| !c.exiting).count() >= MAX_POPUPS {
+            s.cards.iter().find(|c| !c.exiting).map(|c| c.id)
+        } else {
+            None
+        }
+    };
+    if let Some(old_id) = evict {
+        start_exit(st, old_id);
+    }
+
+    let card = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .build();
+    card.add_css_class("notification-popup-content");
+    card.set_size_request(CARD_WIDTH, -1);
+    set_critical_class(&card, notif);
+    populate_card(&card, notif, &store);
+
+    {
+        let mut s = st.borrow_mut();
+        if !s.window.is_visible() {
+            s.window.present();
+        }
+        s.canvas.put(&card, 0.0, 0.0);
+        let timer = make_timer(&store, notif, s.hovered);
+        s.cards.push(Card {
+            id,
+            widget: card,
+            timer,
+            width: CARD_WIDTH as f64,
+            height: 0.0,
+            cur: Pose {
+                y: 0.0,
+                x_off: ENTRY_SLIDE,
+                scale: 1.0,
+                opacity: 0.0,
+            },
+            from: Pose {
+                y: 0.0,
+                x_off: ENTRY_SLIDE,
+                scale: 1.0,
+                opacity: 0.0,
+            },
+            to: Pose {
+                y: 0.0,
+                x_off: 0.0,
+                scale: 1.0,
+                opacity: 1.0,
+            },
+            anim_start: 0,
+            anim_ms: anim::ENTER_MS,
+            animating: false,
+            exiting: false,
+            newborn: true,
+        });
+    }
+
+    reflow(st);
+}
+
+fn dismiss(st: &Rc<RefCell<State>>, id: u32) {
+    if start_exit(st, id) {
+        reflow(st);
+    }
+}
+
+/// Begin the exit animation for a card. Returns false if no such card.
+fn start_exit(st: &Rc<RefCell<State>>, id: u32) -> bool {
+    let started = {
+        let mut s = st.borrow_mut();
+        let now = glib::monotonic_time();
+        match s.cards.iter_mut().find(|c| c.id == id && !c.exiting) {
+            Some(card) => {
+                cancel_timer(&mut card.timer);
+                card.exiting = true;
+                let to = Pose {
+                    x_off: EXIT_SLIDE,
+                    opacity: 0.0,
+                    ..card.cur
+                };
+                card.retarget(to, anim::EXIT_MS, now);
+                true
+            }
+            None => false,
+        }
+    };
+    if started {
+        ensure_tick(st);
+    }
+    started
+}
+
+/// Recompute layout targets for all active cards and retarget their
+/// animations. Newest card sits at the top; cards beyond FULL_VISIBLE
+/// collapse behind the last full card with peeking bottom edges.
+fn reflow(st: &Rc<RefCell<State>>) {
+    {
+        let mut s = st.borrow_mut();
+        let now = glib::monotonic_time();
+        let canvas = s.canvas.clone();
+
+        // Measure natural sizes (bodies are line-capped, so this is bounded)
+        for card in s.cards.iter_mut().filter(|c| !c.exiting) {
+            let (_, nat_w, _, _) = card.widget.measure(gtk4::Orientation::Horizontal, -1);
+            card.width = nat_w.max(CARD_WIDTH) as f64;
+            let (_, nat_h, _, _) = card.widget.measure(gtk4::Orientation::Vertical, nat_w);
+            card.height = nat_h as f64;
+        }
+
+        // Walk newest → oldest assigning stack positions
+        let mut y = EDGE_MARGIN as f64;
+        let mut full_top = EDGE_MARGIN as f64;
+        let mut full_bottom = EDGE_MARGIN as f64;
+        let active: Vec<usize> = (0..s.cards.len())
+            .rev()
+            .filter(|&i| !s.cards[i].exiting)
+            .collect();
+        for (rank, &i) in active.iter().enumerate() {
+            let card = &mut s.cards[i];
+            let to = if rank < FULL_VISIBLE {
+                let pose = Pose {
+                    y,
+                    x_off: 0.0,
+                    scale: 1.0,
+                    opacity: 1.0,
+                };
+                full_top = y;
+                full_bottom = y + card.height;
+                y += card.height + GAP;
+                pose
+            } else {
+                let k = (rank - FULL_VISIBLE + 1) as f64;
+                let scale = 1.0 - PEEK_SCALE_STEP * k;
+                let visual_h = card.height * scale;
+                // Bottom edge peeks PEEK px per level below the last full
+                // card; clamp so a tall collapsed card can't poke out above
+                let ty = (full_bottom + PEEK * k - visual_h).max(full_top + 2.0 * k);
+                Pose {
+                    y: ty,
+                    x_off: 0.0,
+                    scale,
+                    opacity: 1.0 - PEEK_OPACITY_STEP * k,
+                }
+            };
+
+            if card.newborn {
+                card.newborn = false;
+                // Enter at the final slot, sliding in from the screen edge
+                card.cur = Pose {
+                    y: to.y,
+                    x_off: ENTRY_SLIDE,
+                    scale: to.scale,
+                    opacity: 0.0,
+                };
+                card.from = card.cur;
+                card.to = to;
+                card.anim_start = now;
+                card.anim_ms = anim::ENTER_MS;
+                card.animating = true;
+                apply_pose(&canvas, card);
+            } else {
+                card.retarget(to, anim::MOVE_MS, now);
+            }
+        }
+
+        update_input_region(&s);
+    }
+    ensure_tick(st);
+}
+
+/// Apply a card's current pose as a Fixed child transform.
+fn apply_pose(canvas: &gtk4::Fixed, card: &Card) {
+    let right_x = (WINDOW_WIDTH - EDGE_MARGIN) as f64;
+    // Right-align the visual box; collapsed cards shrink toward the
+    // column's horizontal center
+    let tx = right_x - card.width * (1.0 + card.cur.scale) / 2.0 + card.cur.x_off;
+    let transform = gsk::Transform::new()
+        .translate(&graphene::Point::new(tx as f32, card.cur.y as f32))
+        .scale(card.cur.scale as f32, card.cur.scale as f32);
+    canvas.set_child_transform(&card.widget, Some(&transform));
+    card.widget.set_opacity(card.cur.opacity);
+}
+
+fn ensure_tick(st: &Rc<RefCell<State>>) {
+    let canvas = {
+        let mut s = st.borrow_mut();
+        if s.ticking || !s.cards.iter().any(|c| c.animating) {
+            return;
+        }
+        s.ticking = true;
+        s.canvas.clone()
+    };
+
+    let st = st.clone();
+    canvas.add_tick_callback(move |_, _| {
+        let mut s = st.borrow_mut();
+        let now = glib::monotonic_time();
+        let canvas = s.canvas.clone();
+        let mut any_running = false;
+        let mut finished_exits = Vec::new();
+
+        for (i, card) in s.cards.iter_mut().enumerate() {
+            if !card.animating {
+                continue;
+            }
+            let t = (((now - card.anim_start) as f64 / 1000.0) / card.anim_ms).clamp(0.0, 1.0);
+            card.cur = lerp_pose(card.from, card.to, ease_out_cubic(t));
+            apply_pose(&canvas, card);
+            if t >= 1.0 {
+                card.animating = false;
+                if card.exiting {
+                    finished_exits.push(i);
+                }
+            } else {
+                any_running = true;
+            }
+        }
+
+        for &i in finished_exits.iter().rev() {
+            let card = s.cards.remove(i);
+            canvas.remove(&card.widget);
+        }
+
+        if any_running {
+            glib::ControlFlow::Continue
+        } else {
+            s.ticking = false;
+            if s.cards.is_empty() {
+                s.window.set_visible(false);
+            }
+            glib::ControlFlow::Break
+        }
+    });
+}
+
+/// Restrict pointer input to the area the cards occupy (current and
+/// target extents), so the rest of the transparent canvas clicks through.
+fn update_input_region(s: &State) {
+    let Some(surface) = s.window.surface() else {
+        return;
+    };
+    let region = cairo::Region::create();
+    let right_x = (WINDOW_WIDTH - EDGE_MARGIN) as f64;
+    for card in s.cards.iter().filter(|c| !c.exiting) {
+        for pose in [card.cur, card.to] {
+            let x0 = right_x - card.width * (1.0 + pose.scale) / 2.0 + pose.x_off;
+            let w = card.width * pose.scale;
+            let h = card.height * pose.scale;
+            let rect = cairo::RectangleInt::new(
+                x0.floor() as i32,
+                pose.y.floor() as i32,
+                w.ceil() as i32,
+                h.ceil() as i32,
+            );
+            let _ = region.union_rectangle(&rect);
+        }
+    }
+    surface.set_input_region(&region);
+}
+
+// ── Auto-dismiss timers ──
+
+fn cancel_timer(timer: &mut Timer) {
+    if let Timer::Running { source, .. } = std::mem::replace(timer, Timer::None) {
+        source.remove();
+    }
+}
+
+fn timeout_for(notif: &Notification) -> Option<u64> {
     // Critical notifications with no explicit timeout are persistent
     if notif.urgency == Urgency::Critical && notif.expire_timeout <= 0 {
         return None;
     }
-
     // Timeout 0 means persistent (spec: server decides; we honor 0 as "never")
     if notif.expire_timeout == 0 {
         return None;
     }
-
-    let timeout_ms = if notif.expire_timeout > 0 {
-        notif.expire_timeout as u64
+    if notif.expire_timeout > 0 {
+        Some(notif.expire_timeout as u64)
     } else {
-        // -1 means server decides
+        // -1 means server decides: scale with content length
         let char_count = notif.summary.len() + notif.body.len();
-        BASE_TIMEOUT_MS + (char_count as u64) * PER_CHAR_MS
-    };
-
-    let id = notif.id;
-    let store = store.clone();
-    Some(glib::timeout_add_local_once(
-        Duration::from_millis(timeout_ms),
-        move || {
-            store::store_close(&store, id, CloseReason::Expired);
-        },
-    ))
-}
-
-impl PopupManager {
-    fn create_popup_window(&self, notif: &Notification) -> gtk4::Window {
-        let window = layer_shell::create_layer_window(&self.app, &POPUP_CONFIG);
-        window.add_css_class("notification-popup");
-
-        if notif.urgency == Urgency::Critical {
-            window.add_css_class("critical");
-        }
-
-        build_popup_content(&window, notif, self.store.clone());
-        window.present();
-        window
+        Some(BASE_TIMEOUT_MS + (char_count as u64) * PER_CHAR_MS)
     }
 }
 
-fn build_popup_content(
-    window: &gtk4::Window,
-    notif: &Notification,
-    store: Rc<RefCell<NotificationStore>>,
-) {
+fn make_timer(store: &Rc<RefCell<NotificationStore>>, notif: &Notification, hovered: bool) -> Timer {
+    let Some(ms) = timeout_for(notif) else {
+        return Timer::None;
+    };
+    let remaining = Duration::from_millis(ms);
+    if hovered {
+        return Timer::Paused { remaining };
+    }
+    schedule_close(store, notif.id, remaining)
+}
+
+fn schedule_close(store: &Rc<RefCell<NotificationStore>>, id: u32, after: Duration) -> Timer {
+    let store = store.clone();
+    let source = glib::timeout_add_local_once(after, move || {
+        store::store_close(&store, id, CloseReason::Expired);
+    });
+    Timer::Running {
+        source,
+        deadline: Instant::now() + after,
+    }
+}
+
+fn pause_timers(st: &Rc<RefCell<State>>) {
+    let mut s = st.borrow_mut();
+    s.hovered = true;
+    let now = Instant::now();
+    for card in &mut s.cards {
+        if matches!(card.timer, Timer::Running { .. }) {
+            if let Timer::Running { source, deadline } = std::mem::replace(&mut card.timer, Timer::None)
+            {
+                source.remove();
+                card.timer = Timer::Paused {
+                    remaining: deadline.saturating_duration_since(now),
+                };
+            }
+        }
+    }
+}
+
+fn resume_timers(st: &Rc<RefCell<State>>) {
+    let mut s = st.borrow_mut();
+    s.hovered = false;
+    let store = s.store.clone();
+    for card in &mut s.cards {
+        let Timer::Paused { remaining } = card.timer else {
+            continue;
+        };
+        // Give a short grace period so a timer that expired mid-hover
+        // doesn't vanish the instant the pointer leaves
+        let after = remaining.max(Duration::from_millis(500));
+        card.timer = schedule_close(&store, card.id, after);
+    }
+}
+
+// ── Card content ──
+
+fn set_critical_class(card: &gtk4::Box, notif: &Notification) {
+    if notif.urgency == Urgency::Critical {
+        card.add_css_class("critical");
+    } else {
+        card.remove_css_class("critical");
+    }
+}
+
+/// (Re)build a card's content. The card box itself persists across
+/// `replaces_id` updates (keeping its z-order and transform); everything
+/// inside — including gesture handlers — is rebuilt with fresh store refs.
+fn populate_card(card: &gtk4::Box, notif: &Notification, store: &Rc<RefCell<NotificationStore>>) {
+    while let Some(child) = card.first_child() {
+        card.remove(&child);
+    }
+
     let hbox = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(10)
         .build();
-    hbox.add_css_class("notification-popup-content");
 
     // Text content
     let vbox = gtk4::Box::builder()
@@ -206,6 +586,7 @@ fn build_popup_content(
             .label(notif.app_name.to_uppercase())
             .halign(gtk4::Align::Start)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .max_width_chars(40)
             .build();
         app_label.add_css_class("notification-app-name");
         vbox.append(&app_label);
@@ -215,6 +596,7 @@ fn build_popup_content(
         .label(&notif.summary)
         .halign(gtk4::Align::Start)
         .ellipsize(gtk4::pango::EllipsizeMode::End)
+        .max_width_chars(40)
         .build();
     summary.add_css_class("notification-summary");
     vbox.append(&summary);
@@ -227,7 +609,7 @@ fn build_popup_content(
             .halign(gtk4::Align::Start)
             .wrap(true)
             .wrap_mode(gtk4::pango::WrapMode::WordChar)
-            .max_width_chars(50)
+            .max_width_chars(40)
             .lines(3)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
             .build();
@@ -296,21 +678,14 @@ fn build_popup_content(
     let gesture = gtk4::GestureClick::new();
     let id = notif.id;
     let app_name = notif.app_name.clone();
-    let store_c = store;
+    let store_c = store.clone();
     gesture.connect_released(move |_, _, _, _| {
         focus_app_window(&app_name);
         store::store_close(&store_c, id, CloseReason::Dismissed);
     });
     hbox.add_controller(gesture);
 
-    // Transparent apron around the pill; must stay alpha-0 so
-    // compositor blur clips to the card
-    let wrapper = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .build();
-    wrapper.add_css_class("notification-popup-wrapper");
-    wrapper.append(&hbox);
-    window.set_child(Some(&wrapper));
+    card.append(&hbox);
 }
 
 /// Try to focus a Sway window matching the notification's app name.
@@ -462,78 +837,4 @@ fn extract_json_u64(slice: &str, key: &str) -> Option<u64> {
 fn extract_json_string_field(slice: &str, key: &str) -> Option<String> {
     let pos = slice.find(key)?;
     extract_json_string(&slice[pos + key.len()..])
-}
-
-fn update_popup_content(window: &gtk4::Window, notif: &Notification) {
-    // For simplicity on replace, just rebuild the content
-    if let Some(child) = window.child() {
-        window.set_child(None::<&gtk4::Widget>);
-        let _ = child;
-    }
-    // We need a store reference — but for in-place updates we just rebuild.
-    // The close/action buttons won't work without a store ref, but replaces_id
-    // updates are typically for progress bars where actions aren't needed.
-    let vbox = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(10)
-        .build();
-    vbox.add_css_class("notification-popup-content");
-
-    let text_box = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(2)
-        .hexpand(true)
-        .valign(gtk4::Align::Center)
-        .build();
-
-    if !notif.app_name.is_empty() {
-        let app_label = gtk4::Label::builder()
-            .label(notif.app_name.to_uppercase())
-            .halign(gtk4::Align::Start)
-            .build();
-        app_label.add_css_class("notification-app-name");
-        text_box.append(&app_label);
-    }
-
-    let summary = gtk4::Label::builder()
-        .label(&notif.summary)
-        .halign(gtk4::Align::Start)
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .build();
-    summary.add_css_class("notification-summary");
-    text_box.append(&summary);
-
-    if !notif.body.is_empty() {
-        let markup = super::markup::sanitize(&notif.body);
-        let body = gtk4::Label::builder()
-            .label(&markup)
-            .use_markup(true)
-            .halign(gtk4::Align::Start)
-            .wrap(true)
-            .wrap_mode(gtk4::pango::WrapMode::WordChar)
-            .max_width_chars(50)
-            .lines(3)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .build();
-        body.add_css_class("notification-body");
-        text_box.append(&body);
-    }
-
-    if let Some(progress) = notif.progress {
-        let bar = gtk4::ProgressBar::builder()
-            .fraction(progress as f64 / 100.0)
-            .hexpand(true)
-            .build();
-        bar.add_css_class("notification-progress");
-        text_box.append(&bar);
-    }
-
-    vbox.append(&text_box);
-
-    let wrapper = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .build();
-    wrapper.add_css_class("notification-popup-wrapper");
-    wrapper.append(&vbox);
-    window.set_child(Some(&wrapper));
 }

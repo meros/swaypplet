@@ -192,7 +192,7 @@ impl PolkitDialog {
         details_toggle.add_css_class("polkit-details-toggle");
         let details_revealer = gtk4::Revealer::builder()
             .transition_type(gtk4::RevealerTransitionType::SlideDown)
-            .transition_duration(180)
+            .transition_duration(200)
             .reveal_child(false)
             .build();
         let details_label = gtk4::Label::builder()
