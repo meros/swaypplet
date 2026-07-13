@@ -18,6 +18,7 @@
 
 mod auth;
 mod fprint;
+pub mod glass;
 pub mod ui;
 
 use std::cell::RefCell;
