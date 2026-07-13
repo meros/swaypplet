@@ -63,6 +63,7 @@ pub enum StatusKind {
 struct Surface {
     window: gtk4::Window,
     card: gtk4::Box,
+    user_entry: Option<gtk4::Entry>,
     entry: gtk4::PasswordEntry,
     status: gtk4::Label,
     fp_pill: gtk4::Box,
@@ -76,6 +77,9 @@ struct Surface {
 pub struct SurfaceSet {
     inner: Rc<RefCell<Vec<Surface>>>,
     wake: Rc<WakeCmd>,
+    /// `Some(prefill)` adds an editable username row above the password
+    /// entry (greeter mode); `None` is the lock's implicit current user.
+    user_field: Rc<RefCell<Option<String>>>,
 }
 
 impl SurfaceSet {
@@ -148,6 +152,18 @@ impl SurfaceSet {
         pane.set_child(&card);
         pane.set_texture(wallpaper.clone());
 
+        // Username row (greeter mode only) — the lock authenticates the
+        // session user implicitly and never shows it.
+        let user_entry = self.user_field.borrow().as_ref().map(|prefill| {
+            let ue = gtk4::Entry::builder()
+                .placeholder_text("Username")
+                .text(prefill)
+                .hexpand(true)
+                .build();
+            ue.add_css_class("lock-entry");
+            ue
+        });
+
         let entry = gtk4::PasswordEntry::builder()
             .show_peek_icon(false)
             .placeholder_text("Password")
@@ -187,6 +203,13 @@ impl SurfaceSet {
             .build();
         status.add_css_class("lock-status");
 
+        if let Some(ue) = &user_entry {
+            card.append(ue);
+            let pw = entry.clone();
+            ue.connect_activate(move |_| {
+                pw.grab_focus();
+            });
+        }
         card.append(&entry);
         card.append(&fp_pill);
         card.append(&caps);
@@ -230,6 +253,7 @@ impl SurfaceSet {
         let surface = Surface {
             window: window.clone(),
             card,
+            user_entry,
             entry,
             status,
             fp_pill,
@@ -272,6 +296,32 @@ impl SurfaceSet {
         }
     }
 
+    /// Greeter mode: show an editable username row (prefilled) above the
+    /// password entry. Call before any `build_surface`.
+    pub fn enable_user_field(&self, prefill: &str) {
+        *self.user_field.borrow_mut() = Some(prefill.to_string());
+    }
+
+    /// Current username text (greeter mode). All surfaces mirror state, but
+    /// the username is typed on one — read whichever is non-default first.
+    pub fn username(&self) -> Option<String> {
+        let surfaces = self.inner.borrow();
+        surfaces
+            .iter()
+            .filter_map(|s| s.user_entry.as_ref())
+            .map(|ue| ue.text().trim().to_string())
+            .find(|t| !t.is_empty())
+    }
+
+    /// True while every password entry is empty — the greeter reads this as
+    /// "not mid-typing" before arming the fingerprint reader.
+    pub fn password_empty(&self) -> bool {
+        self.inner
+            .borrow()
+            .iter()
+            .all(|s| s.entry.text().is_empty())
+    }
+
     pub fn set_status(&self, text: &str, kind: StatusKind) {
         for s in self.inner.borrow().iter() {
             s.status.set_visible(!text.is_empty());
@@ -289,6 +339,9 @@ impl SurfaceSet {
     pub fn set_verifying(&self, verifying: bool) {
         for s in self.inner.borrow().iter() {
             s.entry.set_sensitive(!verifying);
+            if let Some(ue) = &s.user_entry {
+                ue.set_sensitive(!verifying);
+            }
             if verifying {
                 s.card.add_css_class("lock-verifying");
             } else {

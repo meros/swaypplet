@@ -21,6 +21,7 @@ protobuf = "3.7"
 log = "0.4"
 env_logger = "0.11"
 libc = "0.2"
+greetd_ipc = { version = "0.10.3", features = ["sync-codec"] }
 
 [build-dependencies]
 protobuf-codegen = "3.7"

@@ -2,6 +2,7 @@ mod anim;
 mod app;
 mod dmenu;
 mod elephant;
+mod greet;
 mod icons;
 mod launcher;
 mod layer_shell;
@@ -27,6 +28,8 @@ fn main() {
         Some("polkit-agent") => polkit::run(),
         // ext-session-lock screen locker — standalone process, no GApplication.
         Some("lock") => lock::run(),
+        // greetd greeter — standalone process reusing the lock UI.
+        Some("greet") => greet::run(),
         // dmenu-style picker — standalone process; it owns stdin/stdout.
         Some("dmenu") => dmenu::run(args),
         // Dev-only: render one component (or the whole panel) in a plain window
