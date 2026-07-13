@@ -625,6 +625,12 @@ scrollbar slider:hover {
     min-width: 44px;
 }
 
+/* Per-application mixer rows */
+.stream-name {
+    font-size: 13px;
+    color: @fg_dim;
+}
+
 /* ── Revealer animation ── */
 revealer {
     transition: all 200ms ease;
