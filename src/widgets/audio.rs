@@ -26,6 +26,14 @@ struct Device {
     is_default: bool,
 }
 
+/// A per-application playback stream (PipeWire `Stream/Output/Audio` node).
+#[derive(Clone, Debug)]
+struct Stream {
+    id: String,
+    name: String,
+    vol: VolumeState,
+}
+
 /// Result of a full state read. `None` means wpctl was unavailable.
 #[derive(Clone, Debug)]
 enum FetchedState {
@@ -39,6 +47,7 @@ struct AudioState {
     source: Option<VolumeState>,
     sinks: Vec<Device>,
     sources: Vec<Device>,
+    streams: Vec<Stream>,
 }
 
 // ── Device name cleanup ───────────────────────────────────────────────────────
@@ -138,7 +147,11 @@ fn get_volume_blocking(target: &str) -> Option<VolumeState> {
     parse_volume_line(&out)
 }
 
-/// Parse `wpctl status` to extract audio sinks and sources.
+/// (sinks, sources, playback streams as `(id, name)`).
+type StatusSnapshot = (Vec<Device>, Vec<Device>, Vec<(String, String)>);
+
+/// Parse `wpctl status` to extract audio sinks, sources, and playback
+/// streams (as `(id, name)` — volumes are fetched separately).
 ///
 /// The relevant section looks like:
 /// ```
@@ -146,20 +159,33 @@ fn get_volume_blocking(target: &str) -> Option<VolumeState> {
 ///   ├─ Sinks:
 ///   │   41. Headphones           [vol: 1.00]
 ///   │ * 42. Speakers             [vol: 0.80]
-///   └─ Sources:
-///       43. Microphone           [vol: 1.00]
+///   ├─ Sources:
+///   │   43. Microphone           [vol: 1.00]
+///   └─ Streams:
+///        97. Firefox
+///             98. output_FL    > Speakers:playback_FL    [active]
 /// ```
-fn parse_status_blocking() -> Option<(Vec<Device>, Vec<Device>)> {
+///
+/// Stream port lines link with `>` for playback and `<` for capture; only
+/// streams with a `>` port are kept (a capture stream in the mixer would just
+/// duplicate the mic row).
+fn parse_status_blocking() -> Option<StatusSnapshot> {
     let out = wpctl_blocking(&["status"])?;
+    Some(parse_status(&out))
+}
 
+fn parse_status(out: &str) -> StatusSnapshot {
     let mut sinks: Vec<Device> = Vec::new();
     let mut sources: Vec<Device> = Vec::new();
+    // (id, name, has_playback_port)
+    let mut streams: Vec<(String, String, bool)> = Vec::new();
 
     #[derive(PartialEq)]
     enum Section {
         None,
         Sinks,
         Sources,
+        Streams,
     }
 
     let mut section = Section::None;
@@ -193,7 +219,11 @@ fn parse_status_blocking() -> Option<(Vec<Device>, Vec<Device>)> {
             section = Section::Sources;
             continue;
         }
-        // Lines that are section headers for other things (Filters, Streams…) end our interest.
+        if stripped.contains("Streams:") {
+            section = Section::Streams;
+            continue;
+        }
+        // Lines that are section headers for other things (Devices, Filters…) end our interest.
         if stripped.ends_with(':') {
             section = Section::None;
             continue;
@@ -211,6 +241,18 @@ fn parse_status_blocking() -> Option<(Vec<Device>, Vec<Device>)> {
 
         let is_default = stripped.contains('*');
 
+        if section == Section::Streams {
+            // Port lines link the stream to a device: `>` playback, `<` capture.
+            if clean.contains('>') || clean.contains('<') {
+                if clean.contains('>')
+                    && let Some(last) = streams.last_mut()
+                {
+                    last.2 = true;
+                }
+                continue;
+            }
+        }
+
         // "42. Speakers  [vol: 0.80]"
         if let Some(dot_pos) = clean.find(". ") {
             let id_str = &clean[..dot_pos];
@@ -220,21 +262,35 @@ fn parse_status_blocking() -> Option<(Vec<Device>, Vec<Device>)> {
                 let raw_name = rest.split('[').next().unwrap_or(rest).trim();
                 let name = clean_device_name(raw_name);
 
-                let dev = Device {
-                    id: id_str.to_string(),
-                    name,
-                    is_default,
-                };
                 match section {
-                    Section::Sinks => sinks.push(dev),
-                    Section::Sources => sources.push(dev),
+                    Section::Sinks | Section::Sources => {
+                        let dev = Device {
+                            id: id_str.to_string(),
+                            name,
+                            is_default,
+                        };
+                        if section == Section::Sinks {
+                            sinks.push(dev);
+                        } else {
+                            sources.push(dev);
+                        }
+                    }
+                    Section::Streams => {
+                        streams.push((id_str.to_string(), name, false));
+                    }
                     Section::None => {}
                 }
             }
         }
     }
 
-    Some((sinks, sources))
+    let playback_streams = streams
+        .into_iter()
+        .filter(|(_, _, playback)| *playback)
+        .map(|(id, name, _)| (id, name))
+        .collect();
+
+    (sinks, sources, playback_streams)
 }
 
 /// Get the PipeWire node ID for a default target (e.g. "@DEFAULT_AUDIO_SINK@").
@@ -267,16 +323,23 @@ fn read_state_blocking() -> FetchedState {
     let sink = get_volume_blocking("@DEFAULT_AUDIO_SINK@");
     let source = get_volume_blocking("@DEFAULT_AUDIO_SOURCE@");
 
-    let Some((sinks, sources)) = parse_status_blocking() else {
+    let Some((sinks, sources, stream_nodes)) = parse_status_blocking() else {
         error!("wpctl status unavailable — WirePlumber may not be running");
         return FetchedState::Unavailable("WirePlumber not available".to_string());
     };
+
+    // A stream can vanish between the status read and the volume read — skip.
+    let streams = stream_nodes
+        .into_iter()
+        .filter_map(|(id, name)| get_volume_blocking(&id).map(|vol| Stream { id, name, vol }))
+        .collect();
 
     FetchedState::Ok(AudioState {
         sink,
         source,
         sinks,
         sources,
+        streams,
     })
 }
 
@@ -452,6 +515,10 @@ struct Widgets {
     // Output (sink)
     sink_row: VolumeRow,
     sink_devices: DeviceList,
+    // Per-application playback streams
+    streams_container: gtk4::Box, // wraps toggle + revealer, hidden when no streams
+    streams_revealer: gtk4::Revealer,
+    streams_list: gtk4::Box,
     // Input (source)
     source_row: VolumeRow,
     source_row_container: gtk4::Box, // wraps source_row + source_devices, shown/hidden
@@ -576,6 +643,44 @@ impl AudioSection {
         content.append(&sink_toggle);
         content.append(&sink_revealer);
 
+        // ── Per-application streams (collapsible, hidden when empty) ─────────
+        let streams_list = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(2)
+            .build();
+        streams_list.add_css_class("stream-list");
+        let streams_revealer = gtk4::Revealer::builder()
+            .transition_type(gtk4::RevealerTransitionType::SlideDown)
+            .transition_duration(200)
+            .reveal_child(false)
+            .child(&streams_list)
+            .build();
+        let streams_toggle = gtk4::Button::builder()
+            .label("▸ Applications")
+            .hexpand(true)
+            .build();
+        streams_toggle.add_css_class("section-expander");
+        {
+            let rev = streams_revealer.clone();
+            streams_toggle.connect_clicked(move |btn| {
+                let revealed = rev.reveals_child();
+                rev.set_reveal_child(!revealed);
+                btn.set_label(if revealed {
+                    "▸ Applications"
+                } else {
+                    "▾ Applications"
+                });
+            });
+        }
+        let streams_container = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(6)
+            .visible(false)
+            .build();
+        streams_container.append(&streams_toggle);
+        streams_container.append(&streams_revealer);
+        content.append(&streams_container);
+
         // ── Input section (conditionally visible) ────────────────────────────
         let source_row_container = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
@@ -625,6 +730,9 @@ impl AudioSection {
             detail_revealer,
             sink_row,
             sink_devices,
+            streams_container,
+            streams_revealer,
+            streams_list,
             source_row,
             source_row_container,
             source_devices,
@@ -879,6 +987,10 @@ impl AudioSection {
             });
         }
 
+        // Per-application playback streams
+        w.streams_container.set_visible(!s.streams.is_empty());
+        Self::rebuild_streams(w, updating, &s.streams);
+
         // Source section visibility
         let has_source = s.source.is_some();
         w.source_row_container.set_visible(has_source);
@@ -901,6 +1013,88 @@ impl AudioSection {
         *updating.borrow_mut() = false;
     }
 
+    /// Rebuild the per-application mixer rows. Rows are recreated from scratch
+    /// on every refresh, so each slider is wired to its stream id directly and
+    /// needs no `updating` guard: the initial value is set before the handler
+    /// is connected.
+    fn rebuild_streams(w: &Rc<Widgets>, updating: &Rc<RefCell<bool>>, streams: &[Stream]) {
+        while let Some(child) = w.streams_list.first_child() {
+            w.streams_list.remove(&child);
+        }
+
+        for stream in streams {
+            let row = gtk4::Box::builder()
+                .orientation(gtk4::Orientation::Horizontal)
+                .spacing(6)
+                .build();
+            row.add_css_class("volume-row");
+            row.add_css_class("stream-row");
+
+            let mute_btn = gtk4::Button::with_label(volume_icon(&stream.vol, false));
+            mute_btn.add_css_class("volume-icon-btn");
+            if stream.vol.muted {
+                mute_btn.add_css_class("muted");
+            }
+            {
+                let id = stream.id.clone();
+                let w2 = w.clone();
+                let upd2 = updating.clone();
+                mute_btn.connect_clicked(move |_| {
+                    let id = id.clone();
+                    thread::spawn(move || {
+                        wpctl_blocking(&["set-mute", &id, "toggle"]);
+                    });
+                    Self::schedule_refresh(w2.clone(), upd2.clone());
+                });
+            }
+
+            let name = gtk4::Label::new(Some(&stream.name));
+            name.add_css_class("stream-name");
+            name.set_width_chars(10);
+            name.set_max_width_chars(14);
+            name.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+            name.set_xalign(0.0);
+
+            let scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 150.0, 1.0);
+            scale.set_hexpand(true);
+            scale.set_draw_value(false);
+            if stream.vol.volume > 1.0 {
+                scale.add_css_class("overamplified");
+            }
+
+            let pct_label = gtk4::Label::new(Some(&pct_text(stream.vol.volume)));
+            pct_label.add_css_class("volume-pct");
+            pct_label.set_width_chars(5);
+            pct_label.set_xalign(1.0);
+
+            scale.set_value((stream.vol.volume * 100.0).round());
+            {
+                let id = stream.id.clone();
+                let pct2 = pct_label.clone();
+                scale.connect_value_changed(move |scale| {
+                    let frac = scale.value() / 100.0;
+                    let val_str = format!("{frac:.2}");
+                    let id = id.clone();
+                    thread::spawn(move || {
+                        wpctl_blocking(&["set-volume", &id, &val_str]);
+                    });
+                    pct2.set_text(&pct_text(frac));
+                    if frac > 1.0 {
+                        scale.add_css_class("overamplified");
+                    } else {
+                        scale.remove_css_class("overamplified");
+                    }
+                });
+            }
+
+            row.append(&mute_btn);
+            row.append(&name);
+            row.append(&scale);
+            row.append(&pct_label);
+            w.streams_list.append(&row);
+        }
+    }
+
     // ── Public API ────────────────────────────────────────────────────────────
 
     /// Kick off a non-blocking state refresh. The UI is updated asynchronously
@@ -914,10 +1108,83 @@ impl AudioSection {
         &self.root
     }
 
+    /// Dev-preview helper: reveal the detail pane and the mixer rows so a
+    /// single headless screenshot shows them (see src/preview.rs).
+    pub fn expand_for_preview(&self) {
+        self.widgets.detail_revealer.set_reveal_child(true);
+        self.widgets.summary_arrow.set_label("▾");
+        self.widgets.streams_revealer.set_reveal_child(true);
+    }
+
     /// Clone of the output (sink) volume `gtk4::Scale` (range 0–150) so it can
     /// be hoisted to the start-menu top level. The clone shares the same
     /// underlying `GtkAdjustment`, so it stays in sync with this section.
     pub fn output_volume_scale(&self) -> gtk4::Scale {
         self.widgets.sink_row.scale.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Captured from a real `wpctl status` (Lunar Lake laptop, ffplay running,
+    // plus a synthetic capture stream to exercise the `<` exclusion).
+    const STATUS: &str = "\
+Audio
+ ├─ Devices:
+ │      50. Lunar Lake-M HD Audio Controller    [alsa]
+ │
+ ├─ Sinks:
+ │     125. Lunar Lake-M HD Audio Controller HDMI / DisplayPort 1 Output [vol: 1.00]
+ │  *  128. Internal Speakers                   [vol: 1.00]
+ │     194. Lunar Lake-M HD Audio Controller Headphones [vol: 0.00 MUTED]
+ │
+ ├─ Sources:
+ │  *  130. Lunar Lake-M HD Audio Controller Digital Microphone [vol: 1.00]
+ │
+ ├─ Filters:
+ │
+ └─ Streams:
+       186. SDL Application
+             57. output_FR       > Pro 2:playback_AUX1\t[active]
+            124. output_FL       > Pro 2:playback_AUX0\t[active]
+       201. Chromium
+            202. input_MONO      < Digital Microphone:capture_MONO\t[active]
+
+Video
+ └─ Streams:
+
+Settings
+ └─ Default Configured Devices:
+         0. Audio/Sink    bluez_output.80_99_E7_E0_16_FC.1
+         1. Audio/Source  alsa_input.pci-0000_00_1f.3-platform-sof_sdw.HiFi__Mic__source
+";
+
+    #[test]
+    fn parses_sinks_sources_and_playback_streams() {
+        let (sinks, sources, streams) = parse_status(STATUS);
+
+        assert_eq!(sinks.len(), 3);
+        assert_eq!(sinks[1].id, "128");
+        assert_eq!(sinks[1].name, "Internal Speakers");
+        assert!(sinks[1].is_default);
+        assert!(!sinks[0].is_default);
+        // clean_device_name strips the controller prefix
+        assert_eq!(sinks[0].name, "HDMI / DisplayPort 1 Output");
+
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].id, "130");
+        assert!(sources[0].is_default);
+
+        // Only the playback stream survives; the capture stream (`<` ports)
+        // and the Video/Settings blocks are ignored.
+        assert_eq!(streams, vec![("186".to_string(), "SDL Application".to_string())]);
+    }
+
+    #[test]
+    fn empty_streams_section() {
+        let (_, _, streams) = parse_status("Audio\n ├─ Sinks:\n │  *  1. X [vol: 1.0]\n └─ Streams:\n\nVideo\n");
+        assert!(streams.is_empty());
     }
 }

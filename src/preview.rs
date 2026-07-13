@@ -168,6 +168,7 @@ pub fn run(component: &str) {
             }
             "audio" => {
                 let s = Box::leak(Box::new(AudioSection::new()));
+                s.expand_for_preview();
                 host.append(s.widget());
             }
             "brightness" => {
