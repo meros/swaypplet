@@ -333,13 +333,16 @@ impl Osd {
             }
         }
 
-        // Fade the card in on first show; retriggering mid-fade-out
-        // redirects the fade from the current opacity
+        // Appear at full opacity: swayfx renders blur at full strength for any
+        // surface alpha > 0, so an opacity ramp-in shows fully blurred glass
+        // with no UI for the first frames. Retriggering mid-fade-out still
+        // redirects the fade back up from the current opacity.
         if !self.window.is_visible() {
-            self.fade.jump(0.0);
+            self.fade.jump(1.0);
             self.window.set_visible(true);
+        } else {
+            self.fade.to(1.0, anim::EXIT_MS, None);
         }
-        self.fade.to(1.0, anim::EXIT_MS, None);
 
         // Cancel previous timeout
         if let Some(id) = self.timeout_id.borrow_mut().take() {
