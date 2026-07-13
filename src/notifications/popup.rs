@@ -241,17 +241,20 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
             timer,
             width: CARD_WIDTH as f64,
             height: 0.0,
+            // Enter at full opacity (position slide only): swayfx renders blur
+            // at full strength for any surface alpha > 0, so an opacity ramp-in
+            // flashes fully blurred glass before the content is legible.
             cur: Pose {
                 y: 0.0,
                 x_off: ENTRY_SLIDE,
                 scale: 1.0,
-                opacity: 0.0,
+                opacity: 1.0,
             },
             from: Pose {
                 y: 0.0,
                 x_off: ENTRY_SLIDE,
                 scale: 1.0,
-                opacity: 0.0,
+                opacity: 1.0,
             },
             to: Pose {
                 y: 0.0,
