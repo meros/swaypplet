@@ -1509,6 +1509,11 @@ revealer {
     min-height: 360px;
 }
 
+/* dmenu mode: the card hugs its (usually short) item list */
+.dmenu .launcher-scroller {
+    min-height: 0;
+}
+
 /* ── Right column: quick settings ── */
 .startmenu-quick {
     padding-left: 12px;

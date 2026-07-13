@@ -1,5 +1,6 @@
 mod anim;
 mod app;
+mod dmenu;
 mod elephant;
 mod icons;
 mod launcher;
@@ -26,6 +27,8 @@ fn main() {
         Some("polkit-agent") => polkit::run(),
         // ext-session-lock screen locker — standalone process, no GApplication.
         Some("lock") => lock::run(),
+        // dmenu-style picker — standalone process; it owns stdin/stdout.
+        Some("dmenu") => dmenu::run(args),
         // Dev-only: render one component (or the whole panel) in a plain window
         // for visual validation. See src/preview.rs and dev/render.sh.
         Some("--preview") => preview::run(args.next().as_deref().unwrap_or("panel")),
