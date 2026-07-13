@@ -137,8 +137,10 @@ pub fn run() {
         log::info!("swaypplet polkit agent shutting down");
     });
 
-    // Force activation even with no command-line args.
-    app.run();
+    // Empty argv: run() would parse std::env::args and treat the
+    // `polkit-agent` subcommand word as a file to open, which FLAGS_NONE
+    // rejects ("This application can not open files.", exit status 1).
+    app.run_with_args::<&str>(&[]);
 }
 
 // ────────────────────────────────────────────────────────────────────────
