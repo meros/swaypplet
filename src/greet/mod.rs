@@ -22,9 +22,12 @@
 //! * A password submitted while armed can only wait — it auto-submits the
 //!   moment pam_fprintd times out and pam_unix asks.
 //!
-//! Env: SWAYPPLET_GREET_USER (prefilled username), SWAYPPLET_GREET_CMD
-//! (session command, default "sway"), SWAYPPLET_LOCK_WALLPAPER (shared with
-//! the lock UI).
+//! Env: SWAYPPLET_GREET_USER (prefilled username), SWAYPPLET_GREET_USERS
+//! (comma-separated users shown as clickable chips; first one is the
+//! default unless SWAYPPLET_GREET_USER says otherwise), SWAYPPLET_GREET_CMD
+//! (session command, default "sway" — runs as whichever user authenticated,
+//! so a dispatcher script can pick a per-user session),
+//! SWAYPPLET_LOCK_WALLPAPER (shared with the lock UI).
 
 mod fpblock;
 mod ipc;
@@ -102,7 +105,18 @@ pub fn run() -> ! {
     }
     crate::theme::load_css();
 
-    let default_user = std::env::var("SWAYPPLET_GREET_USER").unwrap_or_default();
+    let users: Vec<String> = std::env::var("SWAYPPLET_GREET_USERS")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .map(str::to_string)
+        .collect();
+    let default_user = std::env::var("SWAYPPLET_GREET_USER")
+        .ok()
+        .filter(|u| !u.is_empty())
+        .or_else(|| users.first().cloned())
+        .unwrap_or_default();
     let session_cmd = std::env::var("SWAYPPLET_GREET_CMD").unwrap_or_else(|_| "sway".to_string());
 
     let (tx, rx) = ipc::start();
@@ -126,6 +140,11 @@ pub fn run() -> ! {
         fp_block: None,
         fp_held_once: false,
     }));
+
+    if users.len() > 1 {
+        let st = st.clone();
+        surfaces.enable_user_chips(&users, Rc::new(move |user| switch_user(&st, user)));
+    }
 
     let on_submit: Rc<dyn Fn(String)> = {
         let st = st.clone();
@@ -215,6 +234,40 @@ fn submit(st: &Rc<RefCell<State>>, password: String) {
         s.surfaces.set_status("", StatusKind::Info);
         start_dance(&mut s, user);
     }
+}
+
+/// A user chip was clicked: mirror the name everywhere and restart the
+/// greetd conversation for that user so the right PAM stack (fingerprint
+/// included) is armed. If greetd can't hear us right now (request in
+/// flight, e.g. the reader is armed for the old user), just switching the
+/// entry text is enough — `submit` notices the mismatch and runs the
+/// cancel/recreate dance with the password riding along.
+fn switch_user(st: &Rc<RefCell<State>>, user: String) {
+    let mut s = st.borrow_mut();
+    let already_current = s.session_user.as_deref() == Some(user.as_str())
+        && s.username().as_deref() == Some(user.as_str());
+    if already_current {
+        return;
+    }
+    s.default_user = user.clone();
+    s.surfaces.set_username(&user);
+    s.pending = None;
+    s.surfaces.set_status("", StatusKind::Info);
+    s.surfaces.set_verifying(false);
+    if s.canceling {
+        // A dance is mid-flight; just retarget the recreate.
+        s.recreate_user = Some(user);
+        return;
+    }
+    if s.blocked {
+        return;
+    }
+    s.prompt = None;
+    s.canceling = true;
+    s.recreate_user = Some(user);
+    s.fp_held_once = false;
+    s.surfaces.show_fp(false, "");
+    s.send(ipc::Req::Cancel);
 }
 
 /// Cancel the current session and recreate it with the fprintd device

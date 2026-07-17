@@ -1289,6 +1289,32 @@ revealer {
     50%      { border-color: alpha(@accent, 0.72); }
 }
 
+/* ── User chips (greeter mode) ── */
+.lock-user-chip {
+    background-color: alpha(@bg0, 0.7);
+    color: @fg_dim;
+    border: 1px solid @border_strong;
+    border-radius: 999px;
+    padding: 8px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    outline: none;
+    box-shadow: none;
+    transition: border-color 150ms ease, background-color 150ms ease,
+        color 150ms ease;
+}
+
+.lock-user-chip:hover {
+    background-color: alpha(@bg0, 0.85);
+    color: @fg;
+}
+
+.lock-user-chip.active {
+    border-color: @accent;
+    background-color: alpha(@bg0, 0.92);
+    color: @fg;
+}
+
 /* ── Password entry ── */
 .polkit-entry,
 .lock-entry {
