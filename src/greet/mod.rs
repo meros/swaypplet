@@ -26,8 +26,11 @@
 //! (comma-separated users shown as clickable chips; first one is the
 //! default unless SWAYPPLET_GREET_USER says otherwise), SWAYPPLET_GREET_CMD
 //! (session command, default "sway" — runs as whichever user authenticated,
-//! so a dispatcher script can pick a per-user session),
-//! SWAYPPLET_LOCK_WALLPAPER (shared with the lock UI).
+//! so a dispatcher script can pick a per-user session), SWAYPPLET_GREET_ENV
+//! (whitespace-separated KEY=VALUE pairs put into the session's PAM
+//! environment via greetd — e.g. XDG_SESSION_TYPE=wayland so logind
+//! registers a graphical session, which GNOME requires; values cannot
+//! contain whitespace), SWAYPPLET_LOCK_WALLPAPER (shared with the lock UI).
 
 mod fpblock;
 mod ipc;
@@ -69,6 +72,8 @@ struct State {
     surfaces: SurfaceSet,
     default_user: String,
     session_cmd: String,
+    /// KEY=VALUE pairs for start_session (SWAYPPLET_GREET_ENV).
+    session_env: Vec<String>,
     /// User the live greetd session was created for.
     session_user: Option<String>,
     prompt: Option<Prompt>,
@@ -118,6 +123,12 @@ pub fn run() -> ! {
         .or_else(|| users.first().cloned())
         .unwrap_or_default();
     let session_cmd = std::env::var("SWAYPPLET_GREET_CMD").unwrap_or_else(|_| "sway".to_string());
+    let session_env: Vec<String> = std::env::var("SWAYPPLET_GREET_ENV")
+        .unwrap_or_default()
+        .split_whitespace()
+        .filter(|e| e.contains('='))
+        .map(str::to_string)
+        .collect();
 
     let (tx, rx) = ipc::start();
     let main_loop = glib::MainLoop::new(None, false);
@@ -131,6 +142,7 @@ pub fn run() -> ! {
         surfaces: surfaces.clone(),
         default_user,
         session_cmd,
+        session_env,
         session_user: None,
         prompt: None,
         blocked: false,
@@ -343,7 +355,8 @@ fn handle_event(
             s.fp_block = None;
             s.surfaces.flash_success();
             let cmd = s.session_cmd.clone();
-            s.send(ipc::Req::Start { cmd });
+            let env = s.session_env.clone();
+            s.send(ipc::Req::Start { cmd, env });
         }
         ipc::Ev::SessionStarted => {
             *code.borrow_mut() = EXIT_STARTED;
