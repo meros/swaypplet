@@ -21,7 +21,7 @@ pub enum Req {
     Create { username: String },
     Respond(Option<String>),
     Cancel,
-    Start { cmd: String },
+    Start { cmd: String, env: Vec<String> },
 }
 
 pub enum Ev {
@@ -61,10 +61,10 @@ pub fn start() -> (mpsc::Sender<Req>, mpsc::Receiver<Ev>) {
                     (Request::PostAuthMessageResponse { response }, false, false)
                 }
                 Req::Cancel => (Request::CancelSession, true, false),
-                Req::Start { cmd } => (
+                Req::Start { cmd, env } => (
                     Request::StartSession {
                         cmd: vec![cmd],
-                        env: vec![],
+                        env,
                     },
                     false,
                     true,
