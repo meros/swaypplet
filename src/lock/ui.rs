@@ -64,6 +64,7 @@ struct Surface {
     window: gtk4::Window,
     card: gtk4::Box,
     user_entry: Option<gtk4::Entry>,
+    user_chips: Vec<(String, gtk4::Button)>,
     entry: gtk4::PasswordEntry,
     status: gtk4::Label,
     fp_pill: gtk4::Box,
@@ -80,6 +81,10 @@ pub struct SurfaceSet {
     /// `Some(prefill)` adds an editable username row above the password
     /// entry (greeter mode); `None` is the lock's implicit current user.
     user_field: Rc<RefCell<Option<String>>>,
+    /// Greeter mode: known users rendered as clickable chips above the
+    /// username row (only when more than one).
+    users: Rc<RefCell<Vec<String>>>,
+    on_user_select: Rc<RefCell<Option<Rc<dyn Fn(String)>>>>,
 }
 
 impl SurfaceSet {
@@ -152,6 +157,38 @@ impl SurfaceSet {
         pane.set_child(&card);
         pane.set_texture(wallpaper.clone());
 
+        // User chips (greeter mode with several known users) — the kid
+        // clicks a name instead of typing it.
+        let users = self.users.borrow().clone();
+        let mut user_chips: Vec<(String, gtk4::Button)> = Vec::new();
+        let chip_row = (users.len() > 1).then(|| {
+            let row = gtk4::Box::builder()
+                .orientation(gtk4::Orientation::Horizontal)
+                .spacing(10)
+                .halign(gtk4::Align::Center)
+                .build();
+            row.add_css_class("lock-user-row");
+            let active = self.user_field.borrow().clone().unwrap_or_default();
+            for user in &users {
+                let chip = gtk4::Button::with_label(user);
+                chip.add_css_class("lock-user-chip");
+                if *user == active {
+                    chip.add_css_class("active");
+                }
+                let cb = self.on_user_select.clone();
+                let u = user.clone();
+                chip.connect_clicked(move |_| {
+                    let cb = cb.borrow().clone();
+                    if let Some(cb) = cb {
+                        cb(u.clone());
+                    }
+                });
+                row.append(&chip);
+                user_chips.push((user.clone(), chip));
+            }
+            row
+        });
+
         // Username row (greeter mode only) — the lock authenticates the
         // session user implicitly and never shows it.
         let user_entry = self.user_field.borrow().as_ref().map(|prefill| {
@@ -203,6 +240,9 @@ impl SurfaceSet {
             .build();
         status.add_css_class("lock-status");
 
+        if let Some(row) = &chip_row {
+            card.append(row);
+        }
         if let Some(ue) = &user_entry {
             card.append(ue);
             let pw = entry.clone();
@@ -254,6 +294,7 @@ impl SurfaceSet {
             window: window.clone(),
             card,
             user_entry,
+            user_chips,
             entry,
             status,
             fp_pill,
@@ -300,6 +341,35 @@ impl SurfaceSet {
     /// password entry. Call before any `build_surface`.
     pub fn enable_user_field(&self, prefill: &str) {
         *self.user_field.borrow_mut() = Some(prefill.to_string());
+    }
+
+    /// Greeter mode: show clickable user chips above the username row.
+    /// Call before any `build_surface`, alongside `enable_user_field`.
+    pub fn enable_user_chips(&self, users: &[String], on_select: Rc<dyn Fn(String)>) {
+        *self.users.borrow_mut() = users.to_vec();
+        *self.on_user_select.borrow_mut() = Some(on_select);
+    }
+
+    /// Greeter mode: switch every surface to `user` — entry text, chip
+    /// highlight, the prefill new surfaces start from — and put focus in
+    /// the password entry.
+    pub fn set_username(&self, user: &str) {
+        *self.user_field.borrow_mut() = Some(user.to_string());
+        for s in self.inner.borrow().iter() {
+            if let Some(ue) = &s.user_entry {
+                if ue.text() != user {
+                    ue.set_text(user);
+                }
+            }
+            for (name, chip) in &s.user_chips {
+                if name == user {
+                    chip.add_css_class("active");
+                } else {
+                    chip.remove_css_class("active");
+                }
+            }
+            s.entry.grab_focus();
+        }
     }
 
     /// Current username text (greeter mode). All surfaces mirror state, but

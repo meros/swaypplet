@@ -63,6 +63,20 @@ pub fn run(component: &str) {
                 .upcast();
             window.add_css_class("lock");
             let set = crate::lock::ui::SurfaceSet::new();
+            // Greeter-mode preview: SWAYPPLET_GREET_USERS=meros,melvin adds
+            // the user chips + username row on top of the lock card.
+            let users: Vec<String> = std::env::var("SWAYPPLET_GREET_USERS")
+                .unwrap_or_default()
+                .split(',')
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+                .map(str::to_string)
+                .collect();
+            if let Some(first) = users.first() {
+                set.enable_user_field(first);
+                let sel = set.clone();
+                set.enable_user_chips(&users, Rc::new(move |u| sel.set_username(&u)));
+            }
             let feedback = set.clone();
             let content = set.build_content(
                 &window,
