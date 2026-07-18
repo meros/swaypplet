@@ -384,11 +384,14 @@ fn handle_event(
     s.blocked = false;
     // A chip click landed while the previous request was in flight; greetd
     // can hear a cancel again only now. Restart the conversation for the new
-    // user instead of serving the old one's message. Only AuthMessage needs
-    // this: Error already recreates for the selected name, and SessionReady
-    // means the old user's fingerprint verified — they win.
+    // user instead of serving the old one's message. Error needs no special
+    // case (it already recreates for the selected name). SessionReady here
+    // means the OLD user's fingerprint verified after someone else was
+    // selected — the UI already shows the new user, so starting the old
+    // session would open A's desktop under B's name. The person at the
+    // keyboard wins; the verified auth is discarded.
     if let Some(user) = s.switch_pending.take() {
-        if matches!(ev, ipc::Ev::AuthMessage { .. }) {
+        if matches!(ev, ipc::Ev::AuthMessage { .. } | ipc::Ev::SessionReady) {
             s.prompt = None;
             s.canceling = true;
             s.recreate_user = Some(user);
