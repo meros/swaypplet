@@ -20,6 +20,7 @@ use crate::widgets::{
     notifications::NotificationsSection,
     power::{self, PowerSection},
     tiles,
+    users::UserSection,
 };
 
 // Quick-strip glyphs.
@@ -39,6 +40,7 @@ struct Sections {
     notifications: NotificationsSection,
     clipboard: ClipboardSection,
     power: PowerSection,
+    users: UserSection,
     /// Quick-strip toggle tiles (Wi-Fi, Bluetooth, Night Light, Idle) paired
     /// with their spec so state can be re-read on refresh. DND is store-backed
     /// and refreshed separately.
@@ -56,6 +58,7 @@ impl Sections {
         self.notifications.refresh();
         self.clipboard.refresh();
         self.power.refresh();
+        self.users.refresh();
         for (btn, spec) in self.tiles.borrow().iter() {
             tiles::init_tile_state(btn, spec);
         }
@@ -159,6 +162,7 @@ impl Panel {
         let notifications = NotificationsSection::new(store.clone());
         let clipboard = ClipboardSection::new();
         let power = PowerSection::new();
+        let users = UserSection::new();
 
         // 1. Volume slider (hoisted from AudioSection).
         right.append(&slider_row(ICON_SPEAKER, audio.output_volume_scale()));
@@ -228,6 +232,10 @@ impl Panel {
         //    in the left rail; this card is the at-a-glance status readout.
         power.expand_for_page();
         right.append(power.widget());
+
+        // 7. Session-aware user switcher (avatars + presence). Hidden unless the
+        //    host exposes SWAYPPLET_SWITCH_USER_CMD; rows are filled on refresh.
+        right.append(users.widget());
 
         // ── Full-width clipboard reveal (beneath the body) ───────────────────
         // Clipboard rows are wide, so the ClipboardSection (cliphist history
@@ -358,6 +366,7 @@ impl Panel {
             notifications,
             clipboard,
             power,
+            users,
             tiles: RefCell::new(tile_pairs),
         });
 

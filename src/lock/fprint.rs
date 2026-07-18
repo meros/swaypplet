@@ -34,6 +34,9 @@ pub(crate) trait Device {
     /// Empty username = the calling user (polkit-gated to active local sessions).
     fn claim(&self, username: &str) -> zbus::Result<()>;
     fn release(&self) -> zbus::Result<()>;
+    /// Enrolled finger names for `username` (empty = the calling user). Errors
+    /// with `net.reactivated.Fprint.Error.NoEnrolledPrints` when none exist.
+    fn list_enrolled_fingers(&self, username: &str) -> zbus::Result<Vec<String>>;
     fn verify_start(&self, finger_name: &str) -> zbus::Result<()>;
     fn verify_stop(&self) -> zbus::Result<()>;
 
@@ -64,6 +67,15 @@ pub enum Verify {
     Error,
     /// done=false: verify session continues; optionally show a hint.
     Hint(Option<&'static str>),
+}
+
+/// True when the D-Bus error is fprintd's "this user has no enrolled prints".
+fn is_no_enrolled_prints(e: &zbus::Error) -> bool {
+    if let zbus::Error::MethodError(name, _, _) = e {
+        name.as_str() == "net.reactivated.Fprint.Error.NoEnrolledPrints"
+    } else {
+        false
+    }
 }
 
 /// Pure mapping from fprintd's (result, done) to what we do about it.
@@ -162,6 +174,25 @@ async fn run(tx: mpsc::Sender<FpEvent>) {
             return;
         }
     };
+
+    // Skip the reader entirely for an unenrolled user: no pill, no 3s claim
+    // spin. fprintd resolves "" to the calling user.
+    match device.list_enrolled_fingers("").await {
+        Ok(fingers) if fingers.is_empty() => {
+            send!(FpEvent::Unavailable("no enrolled fingerprints".into()));
+            return;
+        }
+        Ok(_) => {}
+        Err(e) if is_no_enrolled_prints(&e) => {
+            send!(FpEvent::Unavailable("no enrolled fingerprints".into()));
+            return;
+        }
+        Err(e) => {
+            // Transient (device busy, fprintd restarting) — let the claim loop
+            // retry rather than permanently disabling the reader.
+            log::warn!("list_enrolled_fingers failed, proceeding: {e}");
+        }
+    }
 
     let mut claimed = false;
     let mut reported_down = false;

@@ -1315,6 +1315,21 @@ revealer {
     color: @fg;
 }
 
+/* ── Round avatar + presence dot (greeter chips, lock strip, users panel) ── */
+.user-avatar.active {
+    /* outline, not border: a border would shrink the avatar's draw area */
+    outline: 2px solid @accent;
+    outline-offset: 1px;
+}
+
+.user-dot {
+    min-width: 9px;
+    min-height: 9px;
+    border-radius: 999px;
+    background-color: @green;
+    border: 2px solid @bg0;
+}
+
 /* ── Switch user (lock, unobtrusive secondary action) ── */
 .lock-switch-user {
     background: none;

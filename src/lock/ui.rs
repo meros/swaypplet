@@ -12,6 +12,33 @@ use std::time::{Duration, Instant};
 
 use gtk4::prelude::*;
 
+use crate::avatar::avatar;
+use crate::switch_user;
+
+/// Data for one greeter user chip. Sourced from `SWAYPPLET_SWITCH_USER_CMD
+/// --list` when available (avatar + presence), otherwise just a name.
+#[derive(Clone)]
+pub struct UserChip {
+    pub user: String,
+    pub logged_in: bool,
+    pub icon: Option<String>,
+}
+
+impl UserChip {
+    /// A bare-name chip (no avatar image, no presence) for the
+    /// SWAYPPLET_GREET_USERS fallback.
+    pub fn plain(user: &str) -> Self {
+        Self {
+            user: user.to_string(),
+            logged_in: false,
+            icon: None,
+        }
+    }
+}
+
+/// Avatar diameter for lock/greeter chips.
+const CHIP_AVATAR_SIZE: i32 = 36;
+
 /// Runs `SWAYPPLET_LOCK_WAKE_CMD` (throttled) on any key or pointer activity.
 /// The lock script blanks outputs after locking, and swayidle resume events
 /// only fire for timeouts that already expired — right after a manual lock
@@ -83,7 +110,7 @@ pub struct SurfaceSet {
     user_field: Rc<RefCell<Option<String>>>,
     /// Greeter mode: known users rendered as clickable chips above the
     /// username row (only when more than one).
-    users: Rc<RefCell<Vec<String>>>,
+    users: Rc<RefCell<Vec<UserChip>>>,
     on_user_select: Rc<RefCell<Option<Rc<dyn Fn(String)>>>>,
 }
 
@@ -157,11 +184,14 @@ impl SurfaceSet {
         pane.set_child(&card);
         pane.set_texture(wallpaper.clone());
 
-        // User chips (greeter mode with several known users) — the kid
-        // clicks a name instead of typing it.
+        let greet_mode = self.user_field.borrow().is_some();
+
+        // User chips (greeter mode with several known users) — the kid clicks
+        // an avatar instead of typing a name. Data (avatar, presence) comes
+        // from the host `--list` when the greeter has it, else bare names.
         let users = self.users.borrow().clone();
         let mut user_chips: Vec<(String, gtk4::Button)> = Vec::new();
-        let chip_row = (users.len() > 1).then(|| {
+        let chip_row = (greet_mode && users.len() > 1).then(|| {
             let row = gtk4::Box::builder()
                 .orientation(gtk4::Orientation::Horizontal)
                 .spacing(10)
@@ -169,25 +199,30 @@ impl SurfaceSet {
                 .build();
             row.add_css_class("lock-user-row");
             let active = self.user_field.borrow().clone().unwrap_or_default();
-            for user in &users {
-                let chip = gtk4::Button::with_label(user);
-                chip.add_css_class("lock-user-chip");
-                if *user == active {
-                    chip.add_css_class("active");
-                }
+            for u in &users {
+                let chip = avatar_chip(&u.user, u.icon.as_deref(), u.logged_in, u.user == active);
                 let cb = self.on_user_select.clone();
-                let u = user.clone();
+                let name = u.user.clone();
                 chip.connect_clicked(move |_| {
                     let cb = cb.borrow().clone();
                     if let Some(cb) = cb {
-                        cb(u.clone());
+                        cb(name.clone());
                     }
                 });
                 row.append(&chip);
-                user_chips.push((user.clone(), chip));
+                user_chips.push((u.user.clone(), chip));
             }
             row
         });
+
+        // Lock mode: a horizontal strip of user chips replaces the lone
+        // "Switch user" button. Filled asynchronously so locking never blocks
+        // on the `--list` subprocess; `--list` failure falls back to the
+        // single legacy button (cycle).
+        let lock_strip = (!greet_mode)
+            .then(switch_user::cmd)
+            .flatten()
+            .map(|cmd| build_lock_strip(cmd));
 
         // Username row (greeter mode only) — the lock authenticates the
         // session user implicitly and never shows it.
@@ -240,31 +275,6 @@ impl SurfaceSet {
             .build();
         status.add_css_class("lock-status");
 
-        // Switch user (lock mode only) — the host command VT-switches to a
-        // greeter for another user; this lock keeps running behind it. Greeter
-        // mode switches users via the chip row instead, so it is skipped there.
-        let switch_user = self
-            .user_field
-            .borrow()
-            .is_none()
-            .then(|| {
-                std::env::var("SWAYPPLET_SWITCH_USER_CMD")
-                    .ok()
-                    .filter(|c| !c.is_empty())
-            })
-            .flatten()
-            .map(|cmd| {
-                let btn = gtk4::Button::with_label("󰓤  Switch user");
-                btn.add_css_class("lock-switch-user");
-                btn.set_halign(gtk4::Align::Center);
-                btn.connect_clicked(move |_| {
-                    if let Err(e) = std::process::Command::new(&cmd).spawn() {
-                        log::error!("failed to spawn switch-user command {cmd}: {e}");
-                    }
-                });
-                btn
-            });
-
         if let Some(row) = &chip_row {
             card.append(row);
         }
@@ -279,8 +289,8 @@ impl SurfaceSet {
         card.append(&fp_pill);
         card.append(&caps);
         card.append(&status);
-        if let Some(btn) = &switch_user {
-            card.append(btn);
+        if let Some(row) = &lock_strip {
+            card.append(row);
         }
 
         column.append(&clock);
@@ -373,7 +383,7 @@ impl SurfaceSet {
 
     /// Greeter mode: show clickable user chips above the username row.
     /// Call before any `build_surface`, alongside `enable_user_field`.
-    pub fn enable_user_chips(&self, users: &[String], on_select: Rc<dyn Fn(String)>) {
+    pub fn enable_user_chips(&self, users: &[UserChip], on_select: Rc<dyn Fn(String)>) {
         *self.users.borrow_mut() = users.to_vec();
         *self.on_user_select.borrow_mut() = Some(on_select);
     }
@@ -493,6 +503,72 @@ impl SurfaceSet {
             s.entry.grab_focus();
         }
     }
+}
+
+/// One pill-shaped user chip: round avatar (with presence dot) + name. The
+/// caller wires the click; `active` marks the current user (accent ring via
+/// the `.lock-user-chip.active` CSS descendant selector).
+fn avatar_chip(user: &str, icon: Option<&str>, logged_in: bool, active: bool) -> gtk4::Button {
+    let content = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(10)
+        .valign(gtk4::Align::Center)
+        .build();
+    content.append(&avatar(user, icon, CHIP_AVATAR_SIZE, logged_in));
+
+    let name = gtk4::Label::new(Some(user));
+    name.add_css_class("lock-user-name");
+    content.append(&name);
+
+    let chip = gtk4::Button::builder().child(&content).build();
+    chip.add_css_class("lock-user-chip");
+    if active {
+        chip.add_css_class("active");
+    }
+    chip
+}
+
+/// Lock-mode user strip container, populated asynchronously from `--list`.
+/// Clicking another user's chip switches to their session (the host command
+/// locks this one first). The current user is shown but inert.
+fn build_lock_strip(cmd: String) -> gtk4::Box {
+    let row = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(10)
+        .halign(gtk4::Align::Center)
+        .build();
+    row.add_css_class("lock-user-row");
+
+    let row_c = row.clone();
+    crate::spawn::spawn_work(switch_user::list, move |users| {
+        while let Some(child) = row_c.first_child() {
+            row_c.remove(&child);
+        }
+        match users {
+            Some(users) if !users.is_empty() => {
+                for u in &users {
+                    let chip = avatar_chip(&u.user, u.icon.as_deref(), u.logged_in, u.current);
+                    if !u.current {
+                        let cmd = cmd.clone();
+                        let user = u.user.clone();
+                        chip.connect_clicked(move |_| switch_user::switch_to(&cmd, &user));
+                    }
+                    // Current user: shown, marked, no action.
+                    row_c.append(&chip);
+                }
+            }
+            _ => {
+                let btn = gtk4::Button::with_label("󰓤  Switch user");
+                btn.add_css_class("lock-switch-user");
+                btn.set_halign(gtk4::Align::Center);
+                let cmd = cmd.clone();
+                btn.connect_clicked(move |_| switch_user::cycle(&cmd));
+                row_c.append(&btn);
+            }
+        }
+    });
+
+    row
 }
 
 fn wallpaper_path() -> Option<String> {
