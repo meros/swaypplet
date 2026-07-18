@@ -206,6 +206,10 @@ struct State {
     visible: Vec<usize>,
     /// Index into `visible`.
     selected: usize,
+    /// The query `visible` was built from. SearchEntry debounces
+    /// search_changed (~150 ms), so on accept the list can lag the entry
+    /// text — a fast type-then-Enter must resync before selecting.
+    query: String,
 }
 
 struct Picker {
@@ -248,6 +252,9 @@ fn present_picker(
     let entry = gtk4::SearchEntry::builder()
         .placeholder_text(placeholder)
         .hexpand(true)
+        // The default ~150 ms search_changed debounce is for expensive
+        // searches; filtering a local list should track every keystroke.
+        .search_delay(0)
         .build();
     entry.add_css_class("launcher-entry");
 
@@ -281,6 +288,7 @@ fn present_picker(
             items,
             visible: Vec::new(),
             selected: 0,
+            query: String::new(),
         }),
         done: RefCell::new(Some(Box::new(on_done))),
     });
@@ -345,7 +353,14 @@ impl Picker {
     }
 
     /// Accept the selection (or, with nothing matching, the raw query).
-    fn accept(&self) {
+    fn accept(self: &Rc<Self>) {
+        // Enter can outrun the SearchEntry's debounced search_changed;
+        // resync so the accept sees the list for what's on screen. A no-op
+        // when the list is current, so arrow-key selection survives.
+        let stale = self.state.borrow().query != self.entry.text().as_str();
+        if stale {
+            self.refilter(&self.entry.text());
+        }
         let reply = {
             let s = self.state.borrow();
             if let Some(&idx) = s.visible.get(s.selected) {
@@ -360,6 +375,7 @@ impl Picker {
 
     fn refilter(self: &Rc<Self>, query: &str) {
         let mut s = self.state.borrow_mut();
+        s.query = query.to_string();
         s.visible = s
             .items
             .iter()
