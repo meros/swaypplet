@@ -41,6 +41,10 @@ trait Session {
     fn lock(&self) -> zbus::Result<()>;
     #[zbus(signal)]
     fn unlock(&self) -> zbus::Result<()>;
+    /// Whether this session owns the seat right now (fast user switching /
+    /// VT changes flip it).
+    #[zbus(property)]
+    fn active(&self) -> zbus::Result<bool>;
 }
 
 /// Handle for the main loop to command the logind thread.
@@ -102,9 +106,18 @@ async fn run(
     let mut prepare = manager.receive_prepare_for_sleep().await?;
     let mut lock_sig = session.receive_lock().await?;
     let mut unlock_sig = session.receive_unlock().await?;
+    let mut active_changes = session.receive_active_changed().await;
+    if let Ok(a) = session.active().await {
+        let _ = ev.send(Ev::SessionActive(a));
+    }
 
     loop {
         tokio::select! {
+            Some(change) = active_changes.next() => {
+                if let Ok(a) = change.get().await {
+                    let _ = ev.send(Ev::SessionActive(a));
+                }
+            }
             Some(sig) = prepare.next() => {
                 let start = sig.args()?.start;
                 if !start && inhibitor.is_none() {

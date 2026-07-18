@@ -70,7 +70,7 @@ pub enum Verify {
 }
 
 /// True when the D-Bus error is fprintd's "this user has no enrolled prints".
-fn is_no_enrolled_prints(e: &zbus::Error) -> bool {
+pub(crate) fn is_no_enrolled_prints(e: &zbus::Error) -> bool {
     if let zbus::Error::MethodError(name, _, _) = e {
         name.as_str() == "net.reactivated.Fprint.Error.NoEnrolledPrints"
     } else {
@@ -137,6 +137,18 @@ async fn run(tx: mpsc::Sender<FpEvent>) {
             return;
         }
     };
+    // Gate the claim on our own session being active: with fast user
+    // switching, a backgrounded locker holding the reader would starve the
+    // greeter (or the active user's locker). Release while inactive,
+    // reclaim on return. `watch_session_active` never returns, so `active`
+    // stays selectable without a closed-channel guard.
+    let (active_tx, mut active) = tokio::sync::watch::channel(true);
+    tokio::spawn(crate::fp_agent::watch_session_active(
+        conn.clone(),
+        Some(std::process::id()),
+        active_tx,
+    ));
+
     let manager = match ManagerProxy::new(&conn).await {
         Ok(m) => m,
         Err(e) => {
@@ -198,6 +210,17 @@ async fn run(tx: mpsc::Sender<FpEvent>) {
     let mut reported_down = false;
     loop {
         if !claimed {
+            // Park while our session is in the background (user switched
+            // away) — whoever is on the active VT owns the reader.
+            if !*active.borrow_and_update() {
+                send!(FpEvent::Unavailable("session inactive".into()));
+                reported_down = true;
+                while !*active.borrow_and_update() {
+                    if active.changed().await.is_err() {
+                        break; // watcher gone; fall back to ungated
+                    }
+                }
+            }
             match device.claim("").await {
                 Ok(()) => {
                     claimed = true;
@@ -226,9 +249,34 @@ async fn run(tx: mpsc::Sender<FpEvent>) {
             continue;
         }
 
-        // One verify session: wait for statuses until a done=true result.
+        // One verify session: wait for statuses until a done=true result,
+        // or until our session goes inactive (release the reader for the
+        // now-active VT; the outer loop reclaims when we're back).
         loop {
-            let Some(signal) = status_stream.next().await else {
+            let next = tokio::select! {
+                sig = status_stream.next() => sig,
+                r = active.changed() => {
+                    if r.is_err() {
+                        // Watcher gone (parks forever, so this can't happen)
+                        // — pin the gate open rather than spinning on a
+                        // closed channel.
+                        let (tx, rx) = tokio::sync::watch::channel(true);
+                        std::mem::forget(tx);
+                        active = rx;
+                        continue;
+                    }
+                    if !*active.borrow() {
+                        let _ = device.verify_stop().await;
+                        let _ = device.release().await;
+                        claimed = false;
+                        send!(FpEvent::Unavailable("session inactive".into()));
+                        reported_down = true;
+                        break;
+                    }
+                    continue;
+                }
+            };
+            let Some(signal) = next else {
                 // Stream ended — device object vanished; reclaim from scratch.
                 claimed = false;
                 break;
