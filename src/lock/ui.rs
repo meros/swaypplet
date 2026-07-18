@@ -421,15 +421,6 @@ impl SurfaceSet {
             .find(|t| !t.is_empty())
     }
 
-    /// True while every password entry is empty — the greeter reads this as
-    /// "not mid-typing" before arming the fingerprint reader.
-    pub fn password_empty(&self) -> bool {
-        self.inner
-            .borrow()
-            .iter()
-            .all(|s| s.entry.text().is_empty())
-    }
-
     pub fn set_status(&self, text: &str, kind: StatusKind) {
         for s in self.inner.borrow().iter() {
             s.status.set_visible(!text.is_empty());

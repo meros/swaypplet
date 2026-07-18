@@ -3,6 +3,7 @@ mod app;
 mod avatar;
 mod dmenu;
 mod elephant;
+mod fp_agent;
 mod greet;
 mod icons;
 mod idle;
@@ -35,6 +36,10 @@ fn main() {
         Some("greet") => greet::run(),
         // idle manager (swayidle replacement) — standalone process, no GTK.
         Some("idle") => idle::run(),
+        // Root fingerprint agent for the greeter (see src/fp_agent.rs) and
+        // its pam_exec token-check counterpart in greetd's PAM stack.
+        Some("fp-agent") => fp_agent::run_agent(),
+        Some("fp-check") => fp_agent::run_check(),
         // dmenu-style picker — thin client to the panel's picker server,
         // with a standalone GTK fallback when no panel is listening.
         Some("dmenu") => dmenu::run(args),

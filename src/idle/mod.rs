@@ -27,6 +27,15 @@
 //! an UNLOCKED desktop. LockerUp is only emitted after the child survived its
 //! settle window.
 //!
+//! Fast user switching adds a second rule: the post-lock blank is deferred
+//! (BLANK_DELAY) and skipped when the session has gone inactive by then — a
+//! switch-away lock races the VT change, and blanking mid-handover leaves
+//! the returning user staring at powered-off outputs. Correspondingly,
+//! SessionActive(true) on a locked session re-powers the outputs, and
+//! SessionActive(false) locks the session behind any departure (including a
+//! bare Ctrl+Alt+Fn that skipped the switcher script). The sleep path keeps
+//! its immediate blank.
+//!
 //! The locker child inherits this process's env (SWAYPPLET_LOCK_WALLPAPER,
 //! SWAYPPLET_LOCK_WAKE_CMD set by the service unit) plus
 //! SWAYPPLET_LOCK_REASON=idle|manual|sleep for future locker-side use.
@@ -56,6 +65,9 @@ pub enum Ev {
     UnlockSignal,
     /// The supervised locker child is up (survived its settle window).
     LockerUp,
+    /// logind session Active property changed (VT switch / fast user
+    /// switch). Also sent once at startup with the initial value.
+    SessionActive(bool),
     /// The supervisor gave up: clean unlock (rc=0), lock unavailable (rc=2),
     /// or spawn failure (rc=-1). Crash-while-locked relaunches internally and
     /// never reaches here.
@@ -67,6 +79,11 @@ pub enum Ev {
 /// anyway. Suspend must not hang on a locker that fails to start.
 const SLEEP_RELEASE_MAX: Duration = Duration::from_secs(3);
 
+/// Post-lock blank delay: long enough for a user-switch VT change to land
+/// (the blank is then skipped), short enough to be invisible on a plain
+/// idle/manual lock.
+const BLANK_DELAY: Duration = Duration::from_millis(600);
+
 pub fn run() -> ! {
     let (tx, rx) = mpsc::channel::<Ev>();
     wayland::start(tx.clone());
@@ -77,6 +94,10 @@ pub fn run() -> ! {
     // flight. Some(_) means PrepareForSleep(true) arrived and we still hold
     // the inhibitor.
     let mut sleep_release: Option<Instant> = None;
+    // Deadline for the deferred post-lock blank (see BLANK_DELAY).
+    let mut pending_blank: Option<Instant> = None;
+    // Mirrors the logind session Active property.
+    let mut session_active = true;
 
     let release_inhibitor = |sleep_release: &mut Option<Instant>| {
         if sleep_release.take().is_some() {
@@ -86,15 +107,28 @@ pub fn run() -> ! {
 
     log::info!("idle: manager started");
     loop {
-        let ev = match rx.recv_timeout(Duration::from_millis(250)) {
-            Ok(ev) => ev,
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                if sleep_release.is_some_and(|d| Instant::now() >= d) {
-                    log::warn!("before-sleep: locker not up after {SLEEP_RELEASE_MAX:?} — releasing inhibitor anyway");
-                    release_inhibitor(&mut sleep_release);
-                }
-                continue;
+        let ev = rx.recv_timeout(Duration::from_millis(250));
+
+        // Deadlines fire on every pass, event traffic or not.
+        if sleep_release.is_some_and(|d| Instant::now() >= d) {
+            log::warn!("before-sleep: locker not up after {SLEEP_RELEASE_MAX:?} — releasing inhibitor anyway");
+            release_inhibitor(&mut sleep_release);
+        }
+        if pending_blank.is_some_and(|d| Instant::now() >= d) {
+            pending_blank = None;
+            // Gates checked at fire time: the locker must still be up
+            // (security invariant) and the session still on the seat — a
+            // switch-away lock skips the blank entirely.
+            if locker_active && session_active {
+                run_cmd("lock.blank", "swaymsg", &["output", "*", "power", "off"]);
+            } else {
+                log::info!("lock.blank: skipped (session inactive or locker gone)");
             }
+        }
+
+        let ev = match ev {
+            Ok(ev) => ev,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 log::error!("idle: all event sources gone");
                 std::process::exit(1);
@@ -164,9 +198,32 @@ pub fn run() -> ! {
             }
 
             Ev::LockerUp => {
-                log::info!("lock: locker up — blanking outputs");
-                run_cmd("lock.blank", "swaymsg", &["output", "*", "power", "off"]);
+                if sleep_release.is_some() {
+                    // Suspend path: blank now — the machine is about to
+                    // sleep and the inhibitor must not wait on a timer.
+                    log::info!("lock: locker up — blanking outputs (sleep)");
+                    run_cmd("lock.blank", "swaymsg", &["output", "*", "power", "off"]);
+                } else {
+                    log::info!("lock: locker up — blank in {BLANK_DELAY:?}");
+                    pending_blank = Some(Instant::now() + BLANK_DELAY);
+                }
                 release_inhibitor(&mut sleep_release);
+            }
+            Ev::SessionActive(false) => {
+                session_active = false;
+                // Leaving the seat (fast user switch, bare VT change):
+                // lock the abandoned session behind us. Idempotent when the
+                // switcher script already sent Lock.
+                ensure_locked(&tx, &mut locker_active, "switch");
+            }
+            Ev::SessionActive(true) => {
+                session_active = true;
+                if locker_active {
+                    // Returning to a locked session: light the outputs so
+                    // the lock screen shows instead of a dead panel.
+                    run_cmd("switch.return", "swaymsg", &["output", "*", "power", "on"]);
+                    run_cmd("switch.return", "brightnessctl", &["set", "100%", "-n"]);
+                }
             }
             Ev::LockerGone { rc } => {
                 locker_active = false;

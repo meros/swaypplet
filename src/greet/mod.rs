@@ -2,25 +2,26 @@
 //!
 //! Runs as the greeter user inside a minimal cage/sway session; the wrapper
 //! config execs `swaypplet greet` and tears the compositor down when it
-//! returns. Unlike the lock (own PAM handle + direct fprintd), all auth here
-//! flows through greetd's PAM conversation — only greetd can start the
-//! session, and only its own PAM success lets it. pam_fprintd provides
-//! fingerprint, pam_unix the password.
+//! returns. All password auth flows through greetd's PAM conversation —
+//! only greetd can start the session, and only its own PAM success lets it.
 //!
-//! The greetd protocol is strictly synchronous, which makes concurrent
-//! password-and-fingerprint awkward: once pam_fprintd's "place your finger"
-//! info message is acked, the reader arms and greetd blocks — nothing, not
-//! even a cancel, gets through until the fingerprint resolves. So:
+//! Fingerprint is out-of-band (see `crate::fp_agent`): greetd's PAM stack is
+//! password-only, because the greetd protocol is strictly synchronous and an
+//! armed pam_fprintd parks the whole conversation — cancels and user
+//! switches would hang for the length of a fingerprint wait. Instead the
+//! root `swaypplet fp-agent` claims the reader as the selected user and
+//! verifies directly against fprintd; on a match it hands us a single-use
+//! token which we submit as the password answer, and a pam_exec rule
+//! (`swaypplet fp-check`) in greetd's stack accepts it. The conversation
+//! therefore always rests at an answerable password prompt: typing works in
+//! parallel with the armed reader, and switching users retargets the reader
+//! and cancels/recreates the conversation instantly.
 //!
-//! * The finger info message is deliberately left unacked for a grace
-//!   period. While unacked, the conversation is still cancelable.
-//! * The password field left empty past the grace period means the user
-//!   wants fingerprint → ack, arm the reader.
-//! * A password submitted while cancelable triggers the dance: cancel the
-//!   session, claim the fprintd device ourselves (pam_fprintd then bails
-//!   instantly on recreate), recreate, and auto-answer the password prompt.
-//! * A password submitted while armed can only wait — it auto-submits the
-//!   moment pam_fprintd times out and pam_unix asks.
+//! Selecting a user who already has a live session skips greetd entirely
+//! and jumps to that session via the host switcher — going through greetd
+//! would start a second session, and the session command's "activate the
+//! existing session and exit" fallback makes greetd respawn the greeter,
+//! which used to bounce the VT straight back here.
 //!
 //! Env: SWAYPPLET_GREET_USER (prefilled username), SWAYPPLET_GREET_USERS
 //! (comma-separated users shown as clickable chips; first one is the
@@ -30,9 +31,11 @@
 //! (whitespace-separated KEY=VALUE pairs put into the session's PAM
 //! environment via greetd — e.g. XDG_SESSION_TYPE=wayland so logind
 //! registers a graphical session, which GNOME requires; values cannot
-//! contain whitespace), SWAYPPLET_LOCK_WALLPAPER (shared with the lock UI).
+//! contain whitespace), SWAYPPLET_LOCK_WALLPAPER (shared with the lock UI),
+//! SWAYPPLET_FP_SOCK (fp-agent socket override),
+//! SWAYPPLET_SWITCH_USER_CMD (host switcher, also feeds the chip list).
 
-mod fpblock;
+mod agent;
 mod ipc;
 
 use std::cell::RefCell;
@@ -45,24 +48,12 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use greetd_ipc::AuthMessageType;
 
+use crate::fp_agent::{Cmd as FpCmd, Ev as FpEv};
 use crate::lock::ui::{StatusKind, SurfaceSet, UserChip};
 use crate::switch_user;
 
 const EXIT_STARTED: i32 = 0;
 const EXIT_ERROR: i32 = 1;
-
-/// How long the password field must stay empty before the unacked finger
-/// prompt is acked (arming the reader, giving up cancelability).
-const FP_ARM_TICK: Duration = Duration::from_millis(500);
-const FP_ARM_TICKS: u32 = 3;
-
-#[derive(PartialEq)]
-enum Prompt {
-    /// Secret/Visible question outstanding — Enter answers it directly.
-    Input,
-    /// pam_fprintd's finger message outstanding, deliberately unacked.
-    FpInfo,
-}
 
 struct Pending {
     user: String,
@@ -78,9 +69,11 @@ struct State {
     session_env: Vec<String>,
     /// User the live greetd session was created for.
     session_user: Option<String>,
-    prompt: Option<Prompt>,
-    /// A request is in flight; greetd hears nothing new until it replies
-    /// (possibly the whole fingerprint wait).
+    /// Secret/Visible question outstanding — Enter answers it directly.
+    prompt_open: bool,
+    /// A request is in flight; greetd hears nothing new until it replies.
+    /// With the stack password-only these windows are milliseconds, never a
+    /// fingerprint wait.
     blocked: bool,
     /// cancel_session sent — drop conversation events until Canceled.
     canceling: bool,
@@ -89,15 +82,15 @@ struct State {
     /// Chip click that landed while a request was in flight — the
     /// conversation restarts for this user once greetd replies.
     switch_pending: Option<String>,
-    fp_block: Option<fpblock::Handle>,
-    /// The unack-and-wait treatment is given to the first finger message
-    /// only; retry messages mid-verify are acked instantly.
-    fp_held_once: bool,
-    /// Per-user fprintd enrollment from `--list`. Governs whether the selected
-    /// user gets the fingerprint hint / pam_fprintd, or whether we claim the
-    /// reader to skip it. Empty (no `--list`) → assume enrolled (today's
-    /// behaviour: let pam_fprintd run, show the hint).
+    /// Per-user fprintd enrollment from `--list`. Governs whether the
+    /// selected user gets the reader armed for them. Empty (no `--list`) →
+    /// assume enrolled and let the fp-agent's own enrollment check decide.
     enrolled: HashMap<String, bool>,
+    /// Users with a live graphical session from `--list` — their chips jump
+    /// to the session instead of starting a greetd conversation.
+    logged_in: HashMap<String, bool>,
+    switch_cmd: Option<String>,
+    fp_tx: tokio::sync::mpsc::UnboundedSender<FpCmd>,
 }
 
 impl State {
@@ -113,16 +106,25 @@ impl State {
     }
 
     /// Whether `user` has an enrolled fingerprint. Unknown (no `--list`) →
-    /// `true`, preserving the pre-enrollment-awareness behaviour.
+    /// `true`; the fp-agent double-checks enrollment anyway.
     fn fp_enrolled(&self, user: &str) -> bool {
         self.enrolled.get(user).copied().unwrap_or(true)
     }
 
-    /// Whether the currently selected user is fingerprint-enrolled.
-    fn selected_fp_enrolled(&self) -> bool {
-        self.username()
-            .map(|u| self.fp_enrolled(&u))
-            .unwrap_or(true)
+    /// Point the fp-agent at the currently selected user (or stand it down
+    /// for an unenrolled one). The pill hides until the agent reports Ready
+    /// for the new target.
+    fn retarget_fp(&mut self) {
+        match self.username() {
+            Some(user) if self.fp_enrolled(&user) => {
+                self.surfaces.show_fp(false, "");
+                let _ = self.fp_tx.send(FpCmd::Verify { user });
+            }
+            _ => {
+                let _ = self.fp_tx.send(FpCmd::Stop);
+                self.surfaces.show_fp(false, "");
+            }
+        }
     }
 }
 
@@ -136,7 +138,7 @@ pub fn run() -> ! {
     // Prefer the host `--list` (avatars, presence, fingerprint enrollment) and
     // fall back to the bare SWAYPPLET_GREET_USERS name list. Chip order follows
     // whichever source is used.
-    let (users, chips, enrolled) = match switch_user::list() {
+    let (users, chips, enrolled, logged_in) = match switch_user::list() {
         Some(list) if !list.is_empty() => {
             let users = list.iter().map(|u| u.user.clone()).collect::<Vec<_>>();
             let chips = list
@@ -151,7 +153,11 @@ pub fn run() -> ! {
                 .iter()
                 .map(|u| (u.user.clone(), u.fingerprint))
                 .collect::<HashMap<_, _>>();
-            (users, chips, enrolled)
+            let logged_in = list
+                .iter()
+                .map(|u| (u.user.clone(), u.logged_in))
+                .collect::<HashMap<_, _>>();
+            (users, chips, enrolled, logged_in)
         }
         _ => {
             let users: Vec<String> = std::env::var("SWAYPPLET_GREET_USERS")
@@ -162,7 +168,7 @@ pub fn run() -> ! {
                 .map(str::to_string)
                 .collect();
             let chips = users.iter().map(|u| UserChip::plain(u)).collect::<Vec<_>>();
-            (users, chips, HashMap::new())
+            (users, chips, HashMap::new(), HashMap::new())
         }
     };
     let default_user = std::env::var("SWAYPPLET_GREET_USER")
@@ -179,6 +185,7 @@ pub fn run() -> ! {
         .collect();
 
     let (tx, rx) = ipc::start();
+    let (fp_tx, fp_rx) = agent::start();
     let main_loop = glib::MainLoop::new(None, false);
     let exit_code = Rc::new(RefCell::new(EXIT_ERROR));
 
@@ -192,15 +199,16 @@ pub fn run() -> ! {
         session_cmd,
         session_env,
         session_user: None,
-        prompt: None,
+        prompt_open: false,
         blocked: false,
         canceling: false,
         pending: None,
         recreate_user: None,
         switch_pending: None,
-        fp_block: None,
-        fp_held_once: false,
         enrolled,
+        logged_in,
+        switch_cmd: switch_user::cmd(),
+        fp_tx,
     }));
 
     if chips.len() > 1 {
@@ -225,15 +233,16 @@ pub fn run() -> ! {
     });
     surfaces.tick();
 
-    // Kick off the conversation for the prefilled user right away — the
-    // common case fingerprints straight in without touching the keyboard.
+    // Kick off the conversation for the prefilled user right away and arm
+    // the reader for them — the common case fingerprints straight in
+    // without touching the keyboard.
     {
         let mut s = st.borrow_mut();
         if let Some(user) = s.username() {
             s.session_user = Some(user.clone());
             s.send(ipc::Req::Create { username: user });
         }
-        apply_fp_policy(&mut s);
+        s.retarget_fp();
     }
 
     {
@@ -243,6 +252,9 @@ pub fn run() -> ! {
         glib::timeout_add_local(Duration::from_millis(40), move || {
             while let Ok(ev) = rx.try_recv() {
                 handle_event(&st, ev, &ml, &code);
+            }
+            while let Ok(ev) = fp_rx.try_recv() {
+                handle_fp_event(&st, ev);
             }
             glib::ControlFlow::Continue
         });
@@ -257,7 +269,7 @@ pub fn run() -> ! {
 
 fn submit(st: &Rc<RefCell<State>>, password: String) {
     let mut s = st.borrow_mut();
-    if password.is_empty() && s.prompt != Some(Prompt::Input) {
+    if password.is_empty() && !s.prompt_open {
         return;
     }
     let Some(user) = s.username() else {
@@ -266,47 +278,47 @@ fn submit(st: &Rc<RefCell<State>>, password: String) {
     };
 
     if s.canceling {
-        // Dance already in flight — this password rides along.
+        // Restart already in flight — this secret rides along.
         s.pending = Some(Pending { user: user.clone(), password });
         s.recreate_user = Some(user);
         return;
     }
 
     let same_user = s.session_user.as_deref() == Some(user.as_str());
-    if s.prompt == Some(Prompt::Input) && same_user {
-        s.prompt = None;
+    if s.prompt_open && same_user {
+        s.prompt_open = false;
         s.surfaces.set_status("", StatusKind::Info);
         s.surfaces.set_verifying(true);
         s.send(ipc::Req::Respond(Some(password)));
         return;
     }
 
+    // No prompt open (conversation still being created) or the conversation
+    // belongs to another user: park the secret; it auto-submits at the next
+    // matching prompt.
     s.pending = Some(Pending {
         user: user.clone(),
         password,
     });
+    s.surfaces.set_status("", StatusKind::Info);
     s.surfaces.set_verifying(true);
-    if s.blocked {
-        // Reader already armed; greetd can't hear a cancel until PAM
-        // resolves. The pending password auto-submits at the next prompt.
-        s.surfaces.set_status(
-            "Fingerprint reader active — touch it, or your password submits when it times out",
-            StatusKind::Info,
-        );
-    } else {
-        s.surfaces.set_status("", StatusKind::Info);
-        start_dance(&mut s, user);
+    if !s.blocked {
+        restart_conversation(&mut s, user);
     }
 }
 
-/// A user chip was clicked: mirror the name everywhere and restart the
-/// greetd conversation for that user so the right PAM stack (fingerprint
-/// included) is armed. If greetd can't hear us right now (request in
-/// flight, e.g. the reader is armed for the old user), the old user's
-/// fingerprint hint hides immediately and the restart is queued — it runs
-/// the moment greetd replies (`switch_pending` in `handle_event`).
+/// A user chip was clicked. A user with a live session gets jumped to
+/// directly (their lock screen still guards it); anyone else gets the
+/// greetd conversation restarted for them and the reader retargeted.
 fn switch_user(st: &Rc<RefCell<State>>, user: String) {
     let mut s = st.borrow_mut();
+    if s.logged_in.get(&user).copied().unwrap_or(false) {
+        if let Some(cmd) = s.switch_cmd.clone() {
+            s.surfaces.set_status("Switching…", StatusKind::Info);
+            switch_user::switch_to(&cmd, &user);
+            return;
+        }
+    }
     let already_current = s.session_user.as_deref() == Some(user.as_str())
         && s.username().as_deref() == Some(user.as_str());
     if already_current {
@@ -317,61 +329,59 @@ fn switch_user(st: &Rc<RefCell<State>>, user: String) {
     s.pending = None;
     s.surfaces.set_status("", StatusKind::Info);
     s.surfaces.set_verifying(false);
-    // Re-evaluate fingerprint policy for the newly selected user.
-    apply_fp_policy(&mut s);
+    s.retarget_fp();
     if s.canceling {
-        // A dance is mid-flight; just retarget the recreate.
+        // A restart is mid-flight; just retarget the recreate.
         s.recreate_user = Some(user);
         return;
     }
     if s.blocked {
         // greetd can't hear a cancel until the in-flight request resolves
-        // (possibly a whole fingerprint wait for the old user). The hint on
-        // screen belongs to that old conversation — drop it now so the new
-        // user isn't invited to touch a reader armed for someone else.
-        s.surfaces.show_fp(false, "");
+        // (milliseconds). The restart runs the moment greetd replies
+        // (`switch_pending` in `handle_event`).
         s.switch_pending = Some(user);
         return;
     }
-    s.prompt = None;
+    restart_conversation(&mut s, user);
+}
+
+/// Cancel the current greetd session and recreate it for `user`. With the
+/// PAM stack password-only the conversation always rests at an answerable
+/// prompt, so the cancel is acknowledged immediately.
+fn restart_conversation(s: &mut State, user: String) {
+    s.prompt_open = false;
     s.canceling = true;
     s.recreate_user = Some(user);
-    s.fp_held_once = false;
-    s.surfaces.show_fp(false, "");
     s.send(ipc::Req::Cancel);
 }
 
-/// Align the fprintd block with the selected user's enrollment. Enrolled →
-/// release the reader so pam_fprintd can verify it and the hint shows; not
-/// enrolled → claim it so pam_fprintd bails instantly and no hint is offered.
-/// Skipped mid-dance so it doesn't fight the cancel/recreate flow.
-fn apply_fp_policy(s: &mut State) {
-    if s.canceling {
-        return;
-    }
-    if s.selected_fp_enrolled() {
-        // Dropping the handle releases our claim; pam_fprintd reclaims it.
-        s.fp_block = None;
-    } else {
-        if s.fp_block.is_none() {
-            s.fp_block = Some(fpblock::claim());
+fn handle_fp_event(st: &Rc<RefCell<State>>, ev: FpEv) {
+    match ev {
+        FpEv::Ready => {
+            st.borrow()
+                .surfaces
+                .show_fp(true, "Touch the fingerprint reader");
         }
-        s.surfaces.show_fp(false, "");
+        FpEv::Hint { msg } => {
+            st.borrow().surfaces.show_fp(true, &msg);
+        }
+        FpEv::Unavailable { msg } => {
+            log::info!("fingerprint unavailable: {msg}");
+            st.borrow().surfaces.show_fp(false, "");
+        }
+        FpEv::Match { user, token } => {
+            // The agent verified `user`'s finger on the reader. Guard
+            // against a stale match racing a chip switch: only submit if
+            // that user is still the one selected on screen.
+            let selected = st.borrow().username();
+            if selected.as_deref() != Some(user.as_str()) {
+                log::info!("discarding fingerprint match for deselected {user}");
+                return;
+            }
+            st.borrow().surfaces.show_fp(true, "Fingerprint OK");
+            submit(st, token);
+        }
     }
-}
-
-/// Cancel the current session and recreate it with the fprintd device
-/// claimed by us, so pam_fprintd steps aside and the password prompt
-/// arrives immediately.
-fn start_dance(s: &mut State, user: String) {
-    s.prompt = None;
-    s.canceling = true;
-    s.recreate_user = Some(user);
-    if s.fp_block.is_none() {
-        s.fp_block = Some(fpblock::claim());
-    }
-    s.surfaces.show_fp(false, "");
-    s.send(ipc::Req::Cancel);
 }
 
 fn handle_event(
@@ -386,16 +396,15 @@ fn handle_event(
     // can hear a cancel again only now. Restart the conversation for the new
     // user instead of serving the old one's message. Error needs no special
     // case (it already recreates for the selected name). SessionReady here
-    // means the OLD user's fingerprint verified after someone else was
-    // selected — the UI already shows the new user, so starting the old
-    // session would open A's desktop under B's name. The person at the
-    // keyboard wins; the verified auth is discarded.
+    // means the OLD user's auth completed after someone else was selected —
+    // the UI already shows the new user, so starting the old session would
+    // open A's desktop under B's name. The person at the keyboard wins; the
+    // completed auth is discarded.
     if let Some(user) = s.switch_pending.take() {
         if matches!(ev, ipc::Ev::AuthMessage { .. } | ipc::Ev::SessionReady) {
-            s.prompt = None;
+            s.prompt_open = false;
             s.canceling = true;
             s.recreate_user = Some(user);
-            s.fp_held_once = false;
             s.send(ipc::Req::Cancel);
             return;
         }
@@ -407,7 +416,6 @@ fn handle_event(
             }
             match kind {
                 AuthMessageType::Secret | AuthMessageType::Visible => {
-                    s.surfaces.show_fp(false, "");
                     if matches!(kind, AuthMessageType::Visible) {
                         s.surfaces.set_status(&text, StatusKind::Info);
                     }
@@ -419,40 +427,31 @@ fn handle_event(
                             // Username changed while waiting — start over.
                             let user = p.user.clone();
                             s.pending = Some(p);
-                            start_dance(&mut s, user);
+                            restart_conversation(&mut s, user);
                         }
                         None => {
-                            s.prompt = Some(Prompt::Input);
+                            s.prompt_open = true;
                             s.surfaces.set_verifying(false);
                         }
                     }
                 }
                 AuthMessageType::Info | AuthMessageType::Error => {
-                    let lower = text.to_lowercase();
-                    let fingery = lower.contains("finger") || lower.contains("swipe");
-                    // The selected user's enrollment decides whether we court
-                    // the reader at all: an unenrolled user gets no hint and
-                    // no wait — ack the finger prompt so pam_unix takes over.
-                    let fp_ok = s.selected_fp_enrolled();
-                    if fingery {
-                        s.surfaces.show_fp(fp_ok, text.trim());
-                    } else if matches!(kind, AuthMessageType::Info) {
+                    // Rare with a password-only stack (expired account and
+                    // the like) — show and ack immediately so the
+                    // conversation keeps moving.
+                    if matches!(kind, AuthMessageType::Info) {
                         s.surfaces.set_status(&text, StatusKind::Info);
                     } else {
                         s.surfaces.set_status(&text, StatusKind::Error);
                     }
-                    if fingery && fp_ok && !s.fp_held_once && s.pending.is_none() {
-                        s.fp_held_once = true;
-                        s.prompt = Some(Prompt::FpInfo);
-                        arm_fp_when_idle(st);
-                    } else {
-                        s.send(ipc::Req::Respond(None));
-                    }
+                    s.send(ipc::Req::Respond(None));
                 }
             }
         }
         ipc::Ev::SessionReady => {
-            s.fp_block = None;
+            // Stand the reader down before handover so the session's own
+            // locker (or the next greeter) can claim it cleanly.
+            let _ = s.fp_tx.send(FpCmd::Stop);
             s.surfaces.flash_success();
             let cmd = s.session_cmd.clone();
             let env = s.session_env.clone();
@@ -474,10 +473,8 @@ fn handle_event(
                 return; // error from the dying session; Canceled follows
             }
             // The session is gone either way; reset and start a fresh one.
-            // fp_block is kept: after a failed password the user is typing,
-            // and the instant re-prompt matters more than the reader.
             s.session_user = None;
-            s.prompt = None;
+            s.prompt_open = false;
             s.pending = None;
             s.surfaces.set_verifying(false);
             if auth {
@@ -499,24 +496,4 @@ fn handle_event(
             ml.quit();
         }
     }
-}
-
-/// Ack the held finger prompt once the password field has stayed empty for
-/// the grace period — the user is reaching for the reader, not the keys.
-fn arm_fp_when_idle(st: &Rc<RefCell<State>>) {
-    let st = st.clone();
-    let mut ticks = 0u32;
-    glib::timeout_add_local(FP_ARM_TICK, move || {
-        let mut s = st.borrow_mut();
-        if s.prompt != Some(Prompt::FpInfo) || s.canceling {
-            return glib::ControlFlow::Break;
-        }
-        ticks += 1;
-        if ticks >= FP_ARM_TICKS && s.surfaces.password_empty() {
-            s.prompt = None;
-            s.send(ipc::Req::Respond(None));
-            return glib::ControlFlow::Break;
-        }
-        glib::ControlFlow::Continue
-    });
 }
