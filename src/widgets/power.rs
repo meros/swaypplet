@@ -651,6 +651,21 @@ pub fn build_session_rail() -> gtk4::Box {
     });
     col.append(&lock);
 
+    // Switch user — only when the session exposes the host switcher command,
+    // which locks and jumps to a greeter on another VT. Non-destructive, so
+    // no confirm.
+    if let Some(cmd) = std::env::var("SWAYPPLET_SWITCH_USER_CMD")
+        .ok()
+        .filter(|c| !c.is_empty())
+    {
+        let switch = rail_btn("󰓤", "Switch user", false);
+        switch.connect_clicked(move |b| {
+            hide_panel_for_widget(b.upcast_ref());
+            spawn_session_cmd(&cmd, &[]);
+        });
+        col.append(&switch);
+    }
+
     // Suspend — hide the panel first, then suspend.
     let suspend = rail_btn("󰤄", "Suspend", false);
     suspend.connect_clicked(|b| {

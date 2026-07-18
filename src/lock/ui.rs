@@ -240,6 +240,31 @@ impl SurfaceSet {
             .build();
         status.add_css_class("lock-status");
 
+        // Switch user (lock mode only) — the host command VT-switches to a
+        // greeter for another user; this lock keeps running behind it. Greeter
+        // mode switches users via the chip row instead, so it is skipped there.
+        let switch_user = self
+            .user_field
+            .borrow()
+            .is_none()
+            .then(|| {
+                std::env::var("SWAYPPLET_SWITCH_USER_CMD")
+                    .ok()
+                    .filter(|c| !c.is_empty())
+            })
+            .flatten()
+            .map(|cmd| {
+                let btn = gtk4::Button::with_label("󰓤  Switch user");
+                btn.add_css_class("lock-switch-user");
+                btn.set_halign(gtk4::Align::Center);
+                btn.connect_clicked(move |_| {
+                    if let Err(e) = std::process::Command::new(&cmd).spawn() {
+                        log::error!("failed to spawn switch-user command {cmd}: {e}");
+                    }
+                });
+                btn
+            });
+
         if let Some(row) = &chip_row {
             card.append(row);
         }
@@ -254,6 +279,9 @@ impl SurfaceSet {
         card.append(&fp_pill);
         card.append(&caps);
         card.append(&status);
+        if let Some(btn) = &switch_user {
+            card.append(btn);
+        }
 
         column.append(&clock);
         column.append(&date);

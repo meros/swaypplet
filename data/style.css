@@ -1315,6 +1315,23 @@ revealer {
     color: @fg;
 }
 
+/* ── Switch user (lock, unobtrusive secondary action) ── */
+.lock-switch-user {
+    background: none;
+    color: @fg_dim;
+    border: none;
+    outline: none;
+    box-shadow: none;
+    padding: 4px 10px;
+    font-size: 13px;
+    font-weight: 500;
+    transition: color 150ms ease;
+}
+
+.lock-switch-user:hover {
+    color: @fg;
+}
+
 /* ── Password entry ── */
 .polkit-entry,
 .lock-entry {
