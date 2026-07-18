@@ -1665,6 +1665,8 @@ dependencies = [
  "pam",
  "protobuf",
  "protobuf-codegen",
+ "serde",
+ "serde_json",
  "tokio",
  "wayland-client",
  "wayland-protocols",

@@ -1,5 +1,6 @@
 mod anim;
 mod app;
+mod avatar;
 mod dmenu;
 mod elephant;
 mod greet;
@@ -14,6 +15,7 @@ mod panel;
 mod polkit;
 mod preview;
 mod spawn;
+mod switch_user;
 mod theme;
 mod widgets;
 

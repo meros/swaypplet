@@ -610,7 +610,7 @@ impl PowerSection {
 
 /// Walk up the widget hierarchy to find the containing `gtk4::Window` and
 /// hide it. Used by Lock and Suspend to close the panel before acting.
-fn hide_panel_for_widget(widget: &gtk4::Widget) {
+pub(crate) fn hide_panel_for_widget(widget: &gtk4::Widget) {
     if let Some(root) = widget.root() {
         if let Ok(window) = root.downcast::<gtk4::Window>() {
             window.set_visible(false);
@@ -651,20 +651,8 @@ pub fn build_session_rail() -> gtk4::Box {
     });
     col.append(&lock);
 
-    // Switch user — only when the session exposes the host switcher command,
-    // which locks and jumps to a greeter on another VT. Non-destructive, so
-    // no confirm.
-    if let Some(cmd) = std::env::var("SWAYPPLET_SWITCH_USER_CMD")
-        .ok()
-        .filter(|c| !c.is_empty())
-    {
-        let switch = rail_btn("󰓤", "Switch user", false);
-        switch.connect_clicked(move |b| {
-            hide_panel_for_widget(b.upcast_ref());
-            spawn_session_cmd(&cmd, &[]);
-        });
-        col.append(&switch);
-    }
+    // Switch user now lives in the session-aware user list (UserSection) in
+    // the right column, where rows have room for avatars — see widgets::users.
 
     // Suspend — hide the panel first, then suspend.
     let suspend = rail_btn("󰤄", "Suspend", false);

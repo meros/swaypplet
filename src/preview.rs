@@ -74,8 +74,22 @@ pub fn run(component: &str) {
                 .collect();
             if let Some(first) = users.first() {
                 set.enable_user_field(first);
+                // Mock avatar data so the preview exercises the new chips:
+                // the first user shows a logged-in presence dot, and
+                // SWAYPPLET_PREVIEW_AVATAR=<image> gives it a real picture
+                // (the others keep the monogram fallback).
+                let icon = std::env::var("SWAYPPLET_PREVIEW_AVATAR").ok();
+                let chips: Vec<crate::lock::ui::UserChip> = users
+                    .iter()
+                    .enumerate()
+                    .map(|(i, u)| crate::lock::ui::UserChip {
+                        user: u.clone(),
+                        logged_in: i == 0,
+                        icon: if i == 0 { icon.clone() } else { None },
+                    })
+                    .collect();
                 let sel = set.clone();
-                set.enable_user_chips(&users, Rc::new(move |u| sel.set_username(&u)));
+                set.enable_user_chips(&chips, Rc::new(move |u| sel.set_username(&u)));
             }
             let feedback = set.clone();
             let content = set.build_content(
