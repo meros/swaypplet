@@ -27,10 +27,12 @@
 //! an UNLOCKED desktop. LockerUp is only emitted after the child survived its
 //! settle window.
 //!
-//! Fast user switching adds a second rule: the post-lock blank is deferred
-//! (BLANK_DELAY) and skipped when the session has gone inactive by then — a
-//! switch-away lock races the VT change, and blanking mid-handover leaves
-//! the returning user staring at powered-off outputs. Correspondingly,
+//! Fast user switching adds a second rule: only an idle-triggered lock arms
+//! the post-lock blank, deferred (BLANK_DELAY) and skipped when the session
+//! has gone inactive by then — a switch-away lock races the VT change, and
+//! blanking mid-handover leaves the returning user staring at powered-off
+//! outputs. Manual and switch locks keep the lock UI lit; the Reblank tier
+//! powers the outputs off after 30 s of no input. Correspondingly,
 //! SessionActive(true) on a locked session re-powers the outputs, and
 //! SessionActive(false) locks the session behind any departure (including a
 //! bare Ctrl+Alt+Fn that skipped the switcher script). The sleep path keeps
@@ -79,9 +81,10 @@ pub enum Ev {
 /// anyway. Suspend must not hang on a locker that fails to start.
 const SLEEP_RELEASE_MAX: Duration = Duration::from_secs(3);
 
-/// Post-lock blank delay: long enough for a user-switch VT change to land
-/// (the blank is then skipped), short enough to be invisible on a plain
-/// idle/manual lock.
+/// Post-lock blank delay for idle-triggered locks: long enough for a
+/// user-switch VT change to land (the blank is then skipped). Manual and
+/// switch locks never arm this — the lock UI stays visible until the
+/// Reblank idle tier powers the outputs off.
 const BLANK_DELAY: Duration = Duration::from_millis(600);
 
 pub fn run() -> ! {
@@ -96,6 +99,9 @@ pub fn run() -> ! {
     let mut sleep_release: Option<Instant> = None;
     // Deadline for the deferred post-lock blank (see BLANK_DELAY).
     let mut pending_blank: Option<Instant> = None;
+    // Why the current locker was started ("idle" | "manual" | "sleep" |
+    // "switch"); decides whether LockerUp blanks the outputs.
+    let mut lock_reason: &'static str = "manual";
     // Mirrors the logind session Active property.
     let mut session_active = true;
 
@@ -145,7 +151,7 @@ pub fn run() -> ! {
 
             Ev::Idled(Timeout::Lock) => {
                 log::info!("idle.lock-300s: fire");
-                ensure_locked(&tx, &mut locker_active, "idle");
+                ensure_locked(&tx, &mut locker_active, &mut lock_reason, "idle");
             }
             Ev::Resumed(Timeout::Lock) => {}
 
@@ -177,7 +183,7 @@ pub fn run() -> ! {
                     sleep_release = Some(Instant::now());
                     release_inhibitor(&mut sleep_release);
                 } else {
-                    ensure_locked(&tx, &mut locker_active, "sleep");
+                    ensure_locked(&tx, &mut locker_active, &mut lock_reason, "sleep");
                     sleep_release = Some(Instant::now() + SLEEP_RELEASE_MAX);
                 }
             }
@@ -189,7 +195,7 @@ pub fn run() -> ! {
 
             Ev::LockSignal => {
                 log::info!("lock: signal");
-                ensure_locked(&tx, &mut locker_active, "manual");
+                ensure_locked(&tx, &mut locker_active, &mut lock_reason, "manual");
             }
             Ev::UnlockSignal => {
                 log::info!("unlock: signal");
@@ -203,9 +209,13 @@ pub fn run() -> ! {
                     // sleep and the inhibitor must not wait on a timer.
                     log::info!("lock: locker up — blanking outputs (sleep)");
                     run_cmd("lock.blank", "swaymsg", &["output", "*", "power", "off"]);
-                } else {
+                } else if lock_reason == "idle" {
                     log::info!("lock: locker up — blank in {BLANK_DELAY:?}");
                     pending_blank = Some(Instant::now() + BLANK_DELAY);
+                } else {
+                    // Manual/switch lock: leave the lock UI visible; the
+                    // Reblank idle tier powers the outputs off later.
+                    log::info!("lock: locker up — no auto-blank ({lock_reason})");
                 }
                 release_inhibitor(&mut sleep_release);
             }
@@ -214,7 +224,7 @@ pub fn run() -> ! {
                 // Leaving the seat (fast user switch, bare VT change):
                 // lock the abandoned session behind us. Idempotent when the
                 // switcher script already sent Lock.
-                ensure_locked(&tx, &mut locker_active, "switch");
+                ensure_locked(&tx, &mut locker_active, &mut lock_reason, "switch");
             }
             Ev::SessionActive(true) => {
                 session_active = true;
@@ -248,12 +258,18 @@ pub fn run() -> ! {
     }
 }
 
-fn ensure_locked(tx: &mpsc::Sender<Ev>, locker_active: &mut bool, reason: &'static str) {
+fn ensure_locked(
+    tx: &mpsc::Sender<Ev>,
+    locker_active: &mut bool,
+    lock_reason: &mut &'static str,
+    reason: &'static str,
+) {
     if *locker_active {
         log::info!("lock: locker already running — skip ({reason})");
         return;
     }
     *locker_active = true;
+    *lock_reason = reason;
     locker::start(tx.clone(), reason);
 }
 
