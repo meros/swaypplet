@@ -58,7 +58,8 @@ rustPlatform.buildRustPackage {
     cat > $out/bin/swaypplet-toggle <<'SCRIPT'
     #!/bin/sh
     PID=$(cat "''${XDG_RUNTIME_DIR:-/tmp}/swaypplet.pid" 2>/dev/null)
-    if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+    # comm check: a recycled pid must not get a (default-fatal) USR1
+    if [ -n "$PID" ] && [ "$(cat /proc/$PID/comm 2>/dev/null)" = "swaypplet" ]; then
       kill -USR1 "$PID"
     else
       swaypplet &
@@ -70,7 +71,8 @@ rustPlatform.buildRustPackage {
     cat > $out/bin/swaypplet-launcher <<'SCRIPT'
     #!/bin/sh
     PID=$(cat "''${XDG_RUNTIME_DIR:-/tmp}/swaypplet.pid" 2>/dev/null)
-    if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+    # comm check: a recycled pid must not get a (default-fatal) USR2
+    if [ -n "$PID" ] && [ "$(cat /proc/$PID/comm 2>/dev/null)" = "swaypplet" ]; then
       kill -USR2 "$PID"
     else
       swaypplet launcher &
