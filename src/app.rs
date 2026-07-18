@@ -64,11 +64,15 @@ pub fn run() {
 
     let state_clone = state.clone();
     let store_startup = store.clone();
-    app.connect_startup(move |_app| {
+    app.connect_startup(move |app| {
         theme::load_css();
 
         // Start D-Bus notification server
         dbus::start_server(store_startup.clone());
+
+        // Picker server: `swaypplet dmenu` clients hand their request to
+        // this warm process instead of cold-starting GTK.
+        crate::dmenu::start_server(app);
 
         // SIGUSR1 toggles panel visibility
         let s = state_clone.clone();

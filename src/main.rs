@@ -35,7 +35,8 @@ fn main() {
         Some("greet") => greet::run(),
         // idle manager (swayidle replacement) — standalone process, no GTK.
         Some("idle") => idle::run(),
-        // dmenu-style picker — standalone process; it owns stdin/stdout.
+        // dmenu-style picker — thin client to the panel's picker server,
+        // with a standalone GTK fallback when no panel is listening.
         Some("dmenu") => dmenu::run(args),
         // Dev-only: render one component (or the whole panel) in a plain window
         // for visual validation. See src/preview.rs and dev/render.sh.
