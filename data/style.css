@@ -1215,7 +1215,11 @@ revealer {
 }
 
 .polkit-backdrop {
-    background-color: alpha(black, 0.5);
+    /* Transparent like the launcher/osd aprons: swayfx blurs the
+       swaypplet-polkit layer with blur_ignore_transparent, so an alpha-0
+       backdrop clips the frost to the card instead of frosting the whole
+       screen (a 0.5 black scrim reads as opaque and blurs everything). */
+    background-color: transparent;
 }
 
 .polkit-container,
