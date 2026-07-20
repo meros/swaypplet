@@ -156,9 +156,15 @@ pub fn run() -> ! {
             Ev::Resumed(Timeout::Lock) => {}
 
             Ev::Idled(Timeout::Reblank) => {
-                // Only blank when locked: the gate is the security invariant.
-                if locker_active {
+                // Only blank a locked session that is still on the seat. On an
+                // inactive VT (fast user switch) our idle timers keep firing;
+                // blanking then would fight the SessionActive(true) re-power.
+                if locker_active && session_active {
                     run_cmd("idle.reblank-30s", "swaymsg", &["output", "*", "power", "off"]);
+                } else {
+                    log::info!(
+                        "idle.reblank-30s: skip (locker_active={locker_active} session_active={session_active})"
+                    );
                 }
             }
             // Unconditional (matches old config): if the locker died, a gated
@@ -168,7 +174,13 @@ pub fn run() -> ! {
             }
 
             Ev::Idled(Timeout::Suspend) => {
-                if on_ac() {
+                // Never suspend from an inactive session: our idle timers keep
+                // advancing after a VT switch, so an unguarded suspend would
+                // sleep the whole machine out from under the user who is
+                // actively on another VT.
+                if !session_active {
+                    log::info!("idle.suspend-1200s: session inactive — skip");
+                } else if on_ac() {
                     log::info!("idle.suspend-1200s: on AC — skip");
                 } else {
                     run_cmd("idle.suspend-1200s", "systemctl", &["suspend"]);
