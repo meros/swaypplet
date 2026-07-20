@@ -45,6 +45,13 @@ trait Session {
     /// VT changes flip it).
     #[zbus(property)]
     fn active(&self) -> zbus::Result<bool>;
+    /// logind's record of whether this session is locked. We set it true once
+    /// the locker is up and false on a clean unlock; a fresh idle instance
+    /// reads it at startup to detect a lock that outlived a service restart
+    /// (KillMode took the old locker down with the cgroup).
+    #[zbus(property)]
+    fn locked_hint(&self) -> zbus::Result<bool>;
+    fn set_locked_hint(&self, locked: bool) -> zbus::Result<()>;
 }
 
 /// Handle for the main loop to command the logind thread.
@@ -54,11 +61,18 @@ pub struct Logind {
 
 enum Cmd {
     ReleaseSleepInhibitor,
+    SetLockedHint(bool),
 }
 
 impl Logind {
     pub fn release_sleep_inhibitor(&self) {
         let _ = self.tx.send(Cmd::ReleaseSleepInhibitor);
+    }
+
+    /// Update logind's LockedHint for our session. Fire-and-forget; the
+    /// logind thread logs any D-Bus error.
+    pub fn set_locked_hint(&self, locked: bool) {
+        let _ = self.tx.send(Cmd::SetLockedHint(locked));
     }
 }
 
@@ -110,6 +124,14 @@ async fn run(
     if let Ok(a) = session.active().await {
         let _ = ev.send(Ev::SessionActive(a));
     }
+    // Recover a lock that outlived a service restart: if logind still records
+    // us as locked but this instance just started (no locker), the previous
+    // locker died with the cgroup and the compositor may be holding an empty
+    // ext-session-lock (wedged) or, worse, have dropped it. Relaunch one.
+    if let Ok(true) = session.locked_hint().await {
+        log::warn!("logind: LockedHint set at startup — recovering lock");
+        let _ = ev.send(Ev::RecoverLock);
+    }
 
     loop {
         tokio::select! {
@@ -134,6 +156,11 @@ async fn run(
                 Some(Cmd::ReleaseSleepInhibitor) => {
                     if inhibitor.take().is_some() {
                         log::info!("logind: sleep inhibitor released");
+                    }
+                }
+                Some(Cmd::SetLockedHint(locked)) => {
+                    if let Err(e) = session.set_locked_hint(locked).await {
+                        log::warn!("logind: SetLockedHint({locked}) failed: {e}");
                     }
                 }
                 None => return Ok(()), // main loop gone

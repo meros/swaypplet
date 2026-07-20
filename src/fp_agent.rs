@@ -28,12 +28,14 @@
 //! socket and token paths (tests / dev boxes).
 
 use std::io::{Read, Write};
+use std::os::unix::io::AsRawFd;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, watch, Semaphore};
 use zbus::export::futures_util::StreamExt;
 use zbus::proxy;
 
@@ -42,6 +44,13 @@ use crate::lock::fprint::{is_no_enrolled_prints, parse_verify_status, DeviceProx
 const DEFAULT_SOCK: &str = "/run/swaypplet-fp/agent.sock";
 const DEFAULT_TOKEN: &str = "/run/swaypplet-fp/token.json";
 const TOKEN_TTL_SECS: u64 = 20;
+/// Cap on concurrent client connections. The only legitimate client is the
+/// single on-screen greeter; this bounds a misbehaving/hostile peer on the
+/// greeter-group socket from spawning unbounded verify loops.
+const MAX_CLIENTS: usize = 8;
+/// Cap on bytes read from one connection. Commands are tiny JSON lines; this
+/// stops an unterminated line from growing this root process's memory.
+const MAX_CLIENT_BYTES: u64 = 64 * 1024;
 
 pub(crate) fn sock_path() -> String {
     std::env::var("SWAYPPLET_FP_SOCK")
@@ -227,11 +236,19 @@ async fn serve() -> i32 {
         }
     };
     log::info!("fp-agent listening on {path}");
+    let slots = Arc::new(Semaphore::new(MAX_CLIENTS));
     loop {
         match listener.accept().await {
-            Ok((stream, _)) => {
-                tokio::spawn(client(stream, conn.clone()));
-            }
+            Ok((stream, _)) => match Arc::clone(&slots).try_acquire_owned() {
+                Ok(permit) => {
+                    let conn = conn.clone();
+                    tokio::spawn(async move {
+                        client(stream, conn).await;
+                        drop(permit);
+                    });
+                }
+                Err(_) => log::warn!("fp-agent: client limit ({MAX_CLIENTS}) reached, dropping"),
+            },
             Err(e) => {
                 log::warn!("accept: {e}");
                 tokio::time::sleep(Duration::from_millis(500)).await;
@@ -268,7 +285,9 @@ async fn client(stream: UnixStream, conn: zbus::Connection) {
     let (target_tx, target_rx) = watch::channel::<Option<String>>(None);
     let verifier = tokio::spawn(verify_loop(conn, target_rx, active_rx, out_tx));
 
-    let mut lines = BufReader::new(r).lines();
+    // Bound total input so an unterminated line can't grow this root
+    // process's memory; legitimate commands are a handful of bytes each.
+    let mut lines = BufReader::new(r.take(MAX_CLIENT_BYTES)).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         let line = line.trim();
         if line.is_empty() {
@@ -515,6 +534,30 @@ struct StoredToken {
     expires: u64,
 }
 
+/// Advisory lock over the token file, held for the whole mint/consume
+/// critical section so a mint and a `fp-check` consume can't interleave. The
+/// lock lives on a sibling `.lock` file (never removed) rather than the token
+/// itself, since consume unlinks the token while checking it. Released on
+/// drop (the fd close drops the flock).
+struct TokenLock(#[allow(dead_code)] std::fs::File);
+
+impl TokenLock {
+    fn acquire(token_path: &str) -> Option<Self> {
+        use std::os::unix::fs::OpenOptionsExt;
+        let f = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .mode(0o600)
+            .open(format!("{token_path}.lock"))
+            .ok()?;
+        // Blocking LOCK_EX: the critical section is a few file ops.
+        if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } != 0 {
+            return None;
+        }
+        Some(TokenLock(f))
+    }
+}
+
 fn mint_token(user: &str) -> Result<String, String> {
     let mut buf = [0u8; 32];
     std::fs::File::open("/dev/urandom")
@@ -532,15 +575,25 @@ fn mint_token(user: &str) -> Result<String, String> {
         expires,
     };
     let path = token_path();
+    let _lock = TokenLock::acquire(&path);
+    let payload = serde_json::to_vec(&stored).map_err(|e| e.to_string())?;
+    // Write to a temp sibling then rename, so a concurrent `fp-check` read
+    // never sees a torn file — it observes either the old token or the new
+    // one, never a partial write.
+    let tmp = format!("{path}.tmp.{}", std::process::id());
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create(true).truncate(true);
     {
         use std::os::unix::fs::OpenOptionsExt;
         opts.mode(0o600);
     }
-    let mut f = opts.open(&path).map_err(|e| format!("{path}: {e}"))?;
-    let payload = serde_json::to_vec(&stored).map_err(|e| e.to_string())?;
+    let mut f = opts.open(&tmp).map_err(|e| format!("{tmp}: {e}"))?;
     f.write_all(&payload).map_err(|e| e.to_string())?;
+    f.sync_all().map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("rename {tmp}: {e}")
+    })?;
     Ok(token)
 }
 
@@ -569,6 +622,11 @@ fn check() -> i32 {
         authtok.pop();
     }
     let path = token_path();
+    // Hold the token lock across read+validate+consume so a second concurrent
+    // check can't validate the same single-use token before we remove it. A
+    // wrong guess (non-token authtok) leaves the token in place; only a match
+    // or an expired token consumes it.
+    let _lock = TokenLock::acquire(&path);
     let Ok(raw) = std::fs::read(&path) else {
         return 1;
     };
