@@ -1227,8 +1227,16 @@ revealer {
     background-color: @surface;
     border-radius: 18px;
     border: 1px solid @border_strong;
-    box-shadow: 0 12px 40px alpha(black, 0.5);
     padding: 24px 26px;
+}
+
+/* The lock layer has no layer_effects entry, so it isn't compositor-blurred
+   and its card keeps a real CSS drop shadow. The polkit layer IS blurred
+   with blur_ignore_transparent, where a box-shadow's translucent pixels
+   frost into a halo around the card — so it takes its depth from the blur
+   and border alone, matching launcher/osd. */
+.lock-card {
+    box-shadow: 0 12px 40px alpha(black, 0.5);
 }
 
 /* ── Icon ── */
