@@ -135,42 +135,21 @@ pub fn run() -> ! {
     }
     crate::theme::load_css();
 
-    // Prefer the host `--list` (avatars, presence, fingerprint enrollment) and
-    // fall back to the bare SWAYPPLET_GREET_USERS name list. Chip order follows
-    // whichever source is used.
-    let (users, chips, enrolled, logged_in) = match switch_user::list() {
-        Some(list) if !list.is_empty() => {
-            let users = list.iter().map(|u| u.user.clone()).collect::<Vec<_>>();
-            let chips = list
-                .iter()
-                .map(|u| UserChip {
-                    user: u.user.clone(),
-                    logged_in: u.logged_in,
-                    icon: u.icon.clone(),
-                })
-                .collect::<Vec<_>>();
-            let enrolled = list
-                .iter()
-                .map(|u| (u.user.clone(), u.fingerprint))
-                .collect::<HashMap<_, _>>();
-            let logged_in = list
-                .iter()
-                .map(|u| (u.user.clone(), u.logged_in))
-                .collect::<HashMap<_, _>>();
-            (users, chips, enrolled, logged_in)
-        }
-        _ => {
-            let users: Vec<String> = std::env::var("SWAYPPLET_GREET_USERS")
-                .unwrap_or_default()
-                .split(',')
-                .map(str::trim)
-                .filter(|u| !u.is_empty())
-                .map(str::to_string)
-                .collect();
-            let chips = users.iter().map(|u| UserChip::plain(u)).collect::<Vec<_>>();
-            (users, chips, HashMap::new(), HashMap::new())
-        }
-    };
+    // Start from the cheap SWAYPPLET_GREET_USERS name list so the window can
+    // present without blocking on the host `--list` (two busctl calls per
+    // user; fprintd may be cold at boot). The richer `--list` data — avatars,
+    // presence, fingerprint enrollment — is fetched off-thread below and
+    // upgrades the chips once it lands.
+    let users: Vec<String> = std::env::var("SWAYPPLET_GREET_USERS")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .map(str::to_string)
+        .collect();
+    let chips = users.iter().map(|u| UserChip::plain(u)).collect::<Vec<_>>();
+    let (enrolled, logged_in): (HashMap<String, bool>, HashMap<String, bool>) =
+        (HashMap::new(), HashMap::new());
     let default_user = std::env::var("SWAYPPLET_GREET_USER")
         .ok()
         .filter(|u| !u.is_empty())
@@ -243,6 +222,36 @@ pub fn run() -> ! {
             s.send(ipc::Req::Create { username: user });
         }
         s.retarget_fp();
+    }
+
+    // Upgrade the env-name chips to the host `--list` data (avatars, presence,
+    // fingerprint enrollment) off the main thread — the window is already up.
+    // Until this lands, unknown enrollment is treated as enrolled (the reader
+    // arms) and unknown presence as logged-out (a chip click starts a greetd
+    // conversation rather than jumping); both self-correct once it resolves.
+    {
+        let st = st.clone();
+        let surfaces = surfaces.clone();
+        crate::spawn::spawn_work(switch_user::list, move |list| {
+            let Some(list) = list.filter(|l| !l.is_empty()) else {
+                return;
+            };
+            let chips: Vec<UserChip> = list
+                .iter()
+                .map(|u| UserChip {
+                    user: u.user.clone(),
+                    logged_in: u.logged_in,
+                    icon: u.icon.clone(),
+                })
+                .collect();
+            {
+                let mut s = st.borrow_mut();
+                s.enrolled = list.iter().map(|u| (u.user.clone(), u.fingerprint)).collect();
+                s.logged_in = list.iter().map(|u| (u.user.clone(), u.logged_in)).collect();
+            }
+            surfaces.set_greet_chips(&chips);
+            st.borrow_mut().retarget_fp();
+        });
     }
 
     {

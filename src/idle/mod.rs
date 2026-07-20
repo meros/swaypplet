@@ -67,6 +67,9 @@ pub enum Ev {
     UnlockSignal,
     /// The supervised locker child is up (survived its settle window).
     LockerUp,
+    /// logind's LockedHint was set at our startup: a lock outlived a service
+    /// restart and must be relaunched (the old locker died with the cgroup).
+    RecoverLock,
     /// logind session Active property changed (VT switch / fast user
     /// switch). Also sent once at startup with the initial value.
     SessionActive(bool),
@@ -215,6 +218,14 @@ pub fn run() -> ! {
                 run_cmd("unlock", "brightnessctl", &["set", "100%", "-n"]);
             }
 
+            Ev::RecoverLock => {
+                // Re-power outputs first: the dead locker may have left them
+                // blanked, and the new lock surface needs a lit output to be
+                // seen. Then lock with a reason that keeps the UI visible.
+                run_cmd("recover", "swaymsg", &["output", "*", "power", "on"]);
+                run_cmd("recover", "brightnessctl", &["set", "100%", "-n"]);
+                ensure_locked(&tx, &mut locker_active, &mut lock_reason, "recover");
+            }
             Ev::LockerUp => {
                 if sleep_release.is_some() {
                     // Suspend path: blank now — the machine is about to
@@ -225,10 +236,13 @@ pub fn run() -> ! {
                     log::info!("lock: locker up — blank in {BLANK_DELAY:?}");
                     pending_blank = Some(Instant::now() + BLANK_DELAY);
                 } else {
-                    // Manual/switch lock: leave the lock UI visible; the
-                    // Reblank idle tier powers the outputs off later.
+                    // Manual/switch/recover lock: leave the lock UI visible;
+                    // the Reblank idle tier powers the outputs off later.
                     log::info!("lock: locker up — no auto-blank ({lock_reason})");
                 }
+                // Record the lock in logind so a service restart can recover
+                // it (see Ev::RecoverLock).
+                logind.set_locked_hint(true);
                 release_inhibitor(&mut sleep_release);
             }
             Ev::SessionActive(false) => {
@@ -254,6 +268,7 @@ pub fn run() -> ! {
                 match rc {
                     0 => {
                         log::info!("lock: clean unlock");
+                        logind.set_locked_hint(false);
                         run_cmd("unlock", "swaymsg", &["output", "*", "power", "on"]);
                         run_cmd("unlock", "brightnessctl", &["set", "100%", "-n"]);
                     }

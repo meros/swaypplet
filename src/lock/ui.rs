@@ -91,6 +91,9 @@ struct Surface {
     window: gtk4::Window,
     card: gtk4::Box,
     user_entry: Option<gtk4::Entry>,
+    /// Greeter chip row container, kept so `set_greet_chips` can refill it
+    /// once the async `--list` (avatars, presence, enrollment) resolves.
+    chip_row: Option<gtk4::Box>,
     user_chips: Vec<(String, gtk4::Button)>,
     entry: gtk4::PasswordEntry,
     status: gtk4::Label,
@@ -190,8 +193,12 @@ impl SurfaceSet {
         // an avatar instead of typing a name. Data (avatar, presence) comes
         // from the host `--list` when the greeter has it, else bare names.
         let users = self.users.borrow().clone();
+        // Present with however many users we have now; the greeter refills
+        // this row via `set_greet_chips` when the async `--list` resolves.
+        // The row exists whenever greeter mode has any known users, so a
+        // late `--list` upgrade never has to create a row that isn't there.
         let mut user_chips: Vec<(String, gtk4::Button)> = Vec::new();
-        let chip_row = (greet_mode && users.len() > 1).then(|| {
+        let chip_row = (greet_mode && !users.is_empty()).then(|| {
             let row = gtk4::Box::builder()
                 .orientation(gtk4::Orientation::Horizontal)
                 .spacing(10)
@@ -199,19 +206,7 @@ impl SurfaceSet {
                 .build();
             row.add_css_class("lock-user-row");
             let active = self.user_field.borrow().clone().unwrap_or_default();
-            for u in &users {
-                let chip = avatar_chip(&u.user, u.icon.as_deref(), u.logged_in, u.user == active);
-                let cb = self.on_user_select.clone();
-                let name = u.user.clone();
-                chip.connect_clicked(move |_| {
-                    let cb = cb.borrow().clone();
-                    if let Some(cb) = cb {
-                        cb(name.clone());
-                    }
-                });
-                row.append(&chip);
-                user_chips.push((u.user.clone(), chip));
-            }
+            user_chips = fill_chip_row(&row, &users, &active, &self.on_user_select);
             row
         });
 
@@ -332,6 +327,7 @@ impl SurfaceSet {
             window: window.clone(),
             card,
             user_entry,
+            chip_row,
             user_chips,
             entry,
             status,
@@ -386,6 +382,21 @@ impl SurfaceSet {
     pub fn enable_user_chips(&self, users: &[UserChip], on_select: Rc<dyn Fn(String)>) {
         *self.users.borrow_mut() = users.to_vec();
         *self.on_user_select.borrow_mut() = Some(on_select);
+    }
+
+    /// Refill the greeter chip rows after the async `--list` resolves —
+    /// upgrading the initial env-name chips to avatars + presence without
+    /// having blocked window presentation on the subprocess. No-op for
+    /// surfaces built without a chip row.
+    pub fn set_greet_chips(&self, users: &[UserChip]) {
+        *self.users.borrow_mut() = users.to_vec();
+        let active = self.user_field.borrow().clone().unwrap_or_default();
+        for s in self.inner.borrow_mut().iter_mut() {
+            let Some(row) = s.chip_row.clone() else {
+                continue;
+            };
+            s.user_chips = fill_chip_row(&row, users, &active, &self.on_user_select);
+        }
     }
 
     /// Greeter mode: switch every surface to `user` — entry text, chip
@@ -499,6 +510,35 @@ impl SurfaceSet {
 /// One pill-shaped user chip: round avatar (with presence dot) + name. The
 /// caller wires the click; `active` marks the current user (accent ring via
 /// the `.lock-user-chip.active` CSS descendant selector).
+/// Clear `row` and (re)build one greeter chip per user, wiring each to the
+/// shared select callback. Returns the (name, button) handles so the surface
+/// can toggle the active class on username changes. Shared by the initial
+/// `build_content` and the async `set_greet_chips` refill.
+fn fill_chip_row(
+    row: &gtk4::Box,
+    users: &[UserChip],
+    active: &str,
+    on_select: &Rc<RefCell<Option<Rc<dyn Fn(String)>>>>,
+) -> Vec<(String, gtk4::Button)> {
+    while let Some(child) = row.first_child() {
+        row.remove(&child);
+    }
+    let mut chips = Vec::with_capacity(users.len());
+    for u in users {
+        let chip = avatar_chip(&u.user, u.icon.as_deref(), u.logged_in, u.user == active);
+        let cb = on_select.clone();
+        let name = u.user.clone();
+        chip.connect_clicked(move |_| {
+            if let Some(cb) = cb.borrow().clone() {
+                cb(name.clone());
+            }
+        });
+        row.append(&chip);
+        chips.push((u.user.clone(), chip));
+    }
+    chips
+}
+
 fn avatar_chip(user: &str, icon: Option<&str>, logged_in: bool, active: bool) -> gtk4::Button {
     let content = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
