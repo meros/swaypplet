@@ -90,6 +90,10 @@ pub(crate) enum Ev {
 )]
 pub(crate) trait LogindManager {
     fn get_session_by_pid(&self, pid: u32) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
+    /// `"auto"` resolves the caller's own session; a real id resolves that
+    /// one. Works for user@.service children, where GetSessionByPID fails
+    /// because the PID isn't in any session cgroup.
+    fn get_session(&self, id: &str) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
 }
 
 #[proxy(
@@ -110,25 +114,34 @@ pub(crate) async fn watch_session_active(
     pid: Option<u32>,
     tx: watch::Sender<bool>,
 ) {
-    let session = async {
-        let pid = pid.ok_or_else(|| "no pid".to_string())?;
-        let manager = LogindManagerProxy::new(&conn)
-            .await
-            .map_err(|e| e.to_string())?;
-        let path = manager
-            .get_session_by_pid(pid)
-            .await
-            .map_err(|e| e.to_string())?;
-        LogindSessionProxy::builder(&conn)
-            .path(path)
-            .map_err(|e| e.to_string())?
-            .build()
-            .await
-            .map_err(|e| e.to_string())
+    // Resolve once, with bounded retry: session registration can race the
+    // locker/agent starting (fast VT handoff, cold boot). GetSession("auto")
+    // resolves our own session even for user@.service children, where
+    // GetSessionByPID fails because the PID isn't in a session cgroup — try
+    // it first, then fall back to PID. Giving up too early is what left an
+    // inactive locker holding the fingerprint reader.
+    let mut session = None;
+    for attempt in 0..RESOLVE_ATTEMPTS {
+        match resolve_session(&conn, pid).await {
+            Ok(s) => {
+                session = Some(s);
+                break;
+            }
+            Err(e) => {
+                let last = attempt + 1 == RESOLVE_ATTEMPTS;
+                log::log!(
+                    if last { log::Level::Warn } else { log::Level::Debug },
+                    "session resolve attempt {}/{RESOLVE_ATTEMPTS} failed ({e})",
+                    attempt + 1
+                );
+                if !last {
+                    tokio::time::sleep(RESOLVE_BACKOFF).await;
+                }
+            }
+        }
     }
-    .await;
     match session {
-        Ok(session) => {
+        Some(session) => {
             let mut stream = session.receive_active_changed().await;
             let _ = tx.send(session.active().await.unwrap_or(true));
             while let Some(change) = stream.next().await {
@@ -138,12 +151,42 @@ pub(crate) async fn watch_session_active(
             }
             // Session object vanished (logged out) — hold the last value.
         }
-        Err(e) => {
-            log::info!("no logind session to gate on ({e}); treating as active");
+        None => {
+            log::warn!("no logind session to gate on after retries; treating as active");
             let _ = tx.send(true);
         }
     }
     std::future::pending::<()>().await;
+}
+
+const RESOLVE_ATTEMPTS: u32 = 5;
+const RESOLVE_BACKOFF: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Resolve this process's logind session proxy: GetSession("auto") first
+/// (works for user@.service children), then GetSessionByPID as a fallback.
+async fn resolve_session(
+    conn: &zbus::Connection,
+    pid: Option<u32>,
+) -> Result<LogindSessionProxy<'static>, String> {
+    let manager = LogindManagerProxy::new(conn)
+        .await
+        .map_err(|e| e.to_string())?;
+    let path = match manager.get_session("auto").await {
+        Ok(p) => p,
+        Err(auto_err) => {
+            let pid = pid.ok_or_else(|| format!("GetSession(auto): {auto_err}; no pid fallback"))?;
+            manager
+                .get_session_by_pid(pid)
+                .await
+                .map_err(|e| format!("GetSession(auto): {auto_err}; GetSessionByPID: {e}"))?
+        }
+    };
+    LogindSessionProxy::builder(conn)
+        .path(path)
+        .map_err(|e| e.to_string())?
+        .build()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // --- agent daemon ---------------------------------------------------------
