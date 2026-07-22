@@ -148,6 +148,13 @@ async fn run(tx: mpsc::Sender<FpEvent>) {
         Some(std::process::id()),
         active_tx,
     ));
+    // Gate the claim on the system being awake too: a claim held across
+    // suspend wedges the synaptics device open inside fprintd (it can't
+    // suspend a busy device; every later Claim fails "already open" until
+    // fprintd restarts). Release before sleep, reclaim on resume. A delay
+    // inhibitor held while claimed guarantees our release lands first.
+    let (sleep_tx, mut sleeping) = tokio::sync::watch::channel(false);
+    tokio::spawn(crate::fp_agent::watch_sleep(conn.clone(), sleep_tx));
 
     let manager = match ManagerProxy::new(&conn).await {
         Ok(m) => m,
@@ -207,19 +214,37 @@ async fn run(tx: mpsc::Sender<FpEvent>) {
     }
 
     let mut claimed = false;
+    // Sleep delay-inhibitor, held exactly while `claimed` (see the sleep
+    // gate above). Dropping the fd releases it.
+    let mut inhibitor: Option<zbus::zvariant::OwnedFd> = None;
     let mut reported_down = false;
     loop {
         if !claimed {
             // Park while our session is in the background (user switched
-            // away) — whoever is on the active VT owns the reader.
-            if !*active.borrow_and_update() {
-                send!(FpEvent::Unavailable("session inactive".into()));
+            // away — whoever is on the active VT owns the reader) or the
+            // system is heading into sleep.
+            loop {
+                let why = if !*active.borrow_and_update() {
+                    "session inactive"
+                } else if *sleeping.borrow_and_update() {
+                    "suspending"
+                } else {
+                    break;
+                };
+                inhibitor = None; // unclaimed and parked — don't delay sleep
+                send!(FpEvent::Unavailable(why.into()));
                 reported_down = true;
-                while !*active.borrow_and_update() {
-                    if active.changed().await.is_err() {
-                        break; // watcher gone; fall back to ungated
-                    }
+                tokio::select! {
+                    r = active.changed() => if r.is_err() { break },
+                    r = sleeping.changed() => if r.is_err() { break },
                 }
+                // Watcher gone on either channel (parks forever, so this
+                // can't happen) — fall back to ungated.
+            }
+            // Inhibitor before Claim so sleep can't slip between them; kept
+            // across quick claim retries (it only delays sleep, never blocks).
+            if inhibitor.is_none() {
+                inhibitor = crate::fp_agent::take_sleep_inhibitor(&conn, "swaypplet-lock").await;
             }
             match device.claim("").await {
                 Ok(()) => {
@@ -235,7 +260,13 @@ async fn run(tx: mpsc::Sender<FpEvent>) {
                         send!(FpEvent::Unavailable(format!("claim: {e}")));
                         reported_down = true;
                     }
-                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    // Wake early on a gate flip so the park loop can drop
+                    // the inhibitor instead of stalling a pending suspend.
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_secs(3)) => {}
+                        _ = active.changed() => {}
+                        _ = sleeping.changed() => {}
+                    }
                     continue;
                 }
             }
@@ -245,6 +276,7 @@ async fn run(tx: mpsc::Sender<FpEvent>) {
             log::warn!("VerifyStart failed, reclaiming: {e}");
             claimed = false;
             let _ = device.release().await;
+            inhibitor = None;
             tokio::time::sleep(Duration::from_secs(1)).await;
             continue;
         }
@@ -268,8 +300,31 @@ async fn run(tx: mpsc::Sender<FpEvent>) {
                     if !*active.borrow() {
                         let _ = device.verify_stop().await;
                         let _ = device.release().await;
+                        inhibitor = None;
                         claimed = false;
                         send!(FpEvent::Unavailable("session inactive".into()));
+                        reported_down = true;
+                        break;
+                    }
+                    continue;
+                }
+                r = sleeping.changed() => {
+                    if r.is_err() {
+                        // Same pin-open fallback as `active`, settled awake.
+                        let (tx, rx) = tokio::sync::watch::channel(false);
+                        std::mem::forget(tx);
+                        sleeping = rx;
+                        continue;
+                    }
+                    if *sleeping.borrow() {
+                        // Release before sleep, then drop the inhibitor so
+                        // suspend proceeds with the reader idle. The outer
+                        // loop parks until resume and reclaims.
+                        let _ = device.verify_stop().await;
+                        let _ = device.release().await;
+                        inhibitor = None;
+                        claimed = false;
+                        send!(FpEvent::Unavailable("suspending".into()));
                         reported_down = true;
                         break;
                     }
@@ -279,6 +334,7 @@ async fn run(tx: mpsc::Sender<FpEvent>) {
             let Some(signal) = next else {
                 // Stream ended — device object vanished; reclaim from scratch.
                 claimed = false;
+                inhibitor = None;
                 break;
             };
             let Ok(args) = signal.args() else { continue };
@@ -298,6 +354,7 @@ async fn run(tx: mpsc::Sender<FpEvent>) {
                     send!(FpEvent::Unavailable("reader disconnected".into()));
                     reported_down = true;
                     claimed = false;
+                    inhibitor = None;
                     break; // reclaim loop; reader may come back
                 }
                 Verify::Error => {
