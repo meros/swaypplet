@@ -75,6 +75,15 @@ pub fn switch_to(cmd: &str, user: &str) {
     }
 }
 
+/// Jump to a greeter (fire-and-forget). The helper locks the current session
+/// and activates an idle greeter, or starts one on a spare VT — picking the
+/// target user is the greeter's job.
+pub fn to_greeter(cmd: &str) {
+    if let Err(e) = std::process::Command::new(cmd).arg("--greeter").spawn() {
+        log::error!("failed to spawn switch-user --greeter: {e}");
+    }
+}
+
 /// Legacy cycle (no argument) — the fallback when `--list` is unavailable.
 pub fn cycle(cmd: &str) {
     if let Err(e) = std::process::Command::new(cmd).spawn() {
