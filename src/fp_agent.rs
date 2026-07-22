@@ -103,6 +103,12 @@ pub(crate) trait LogindManager {
     /// one. Works for user@.service children, where GetSessionByPID fails
     /// because the PID isn't in any session cgroup.
     fn get_session(&self, id: &str) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
+    /// Delay inhibitor: sleep waits (bounded by logind's InhibitDelayMaxSec)
+    /// until every holder closes the returned fd.
+    fn inhibit(&self, what: &str, who: &str, why: &str, mode: &str)
+        -> zbus::Result<zbus::zvariant::OwnedFd>;
+    #[zbus(signal)]
+    fn prepare_for_sleep(&self, start: bool) -> zbus::Result<()>;
 }
 
 #[proxy(
@@ -171,6 +177,59 @@ pub(crate) async fn watch_session_active(
 const RESOLVE_ATTEMPTS: u32 = 5;
 const RESOLVE_BACKOFF: std::time::Duration = std::time::Duration::from_millis(500);
 
+/// Push logind's PrepareForSleep state into `tx`, forever: `true` from
+/// PrepareForSleep(start) until the matching resume. Claim holders gate on it
+/// and release the reader before sleep — a claim held across suspend leaves
+/// the synaptics device wedged open inside fprintd (every later Claim fails
+/// with "Device ... is already open" until fprintd restarts). Like
+/// `watch_session_active`, never returns: on setup failure it settles on
+/// `false` (awake) and parks, so receivers can select on `changed()` freely.
+pub(crate) async fn watch_sleep(conn: zbus::Connection, tx: watch::Sender<bool>) {
+    let stream = async {
+        let manager = LogindManagerProxy::new(&conn).await?;
+        manager.receive_prepare_for_sleep().await
+    }
+    .await;
+    match stream {
+        Ok(mut stream) => {
+            while let Some(sig) = stream.next().await {
+                if let Ok(args) = sig.args() {
+                    let _ = tx.send(*args.start());
+                }
+            }
+            // Stream ended (system bus gone) — hold the last value.
+        }
+        Err(e) => {
+            log::warn!("sleep watch unavailable, claims will span suspend: {e}");
+            let _ = tx.send(false);
+        }
+    }
+    std::future::pending::<()>().await;
+}
+
+/// Take a sleep delay-inhibitor; dropping the fd releases it. Held exactly
+/// while a fingerprint claim is held, so the PrepareForSleep handler gets to
+/// VerifyStop+Release before logind lets the machine suspend. `None` (logind
+/// too old, dev container) just means sleep won't wait for us.
+pub(crate) async fn take_sleep_inhibitor(
+    conn: &zbus::Connection,
+    who: &str,
+) -> Option<zbus::zvariant::OwnedFd> {
+    let take = async {
+        LogindManagerProxy::new(conn)
+            .await?
+            .inhibit("sleep", who, "release fingerprint reader before sleep", "delay")
+            .await
+    };
+    match take.await {
+        Ok(fd) => Some(fd),
+        Err(e) => {
+            log::warn!("sleep delay-inhibitor unavailable: {e}");
+            None
+        }
+    }
+}
+
 /// Resolve this process's logind session proxy: GetSession("auto") first
 /// (works for user@.service children), then GetSessionByPID as a fallback.
 async fn resolve_session(
@@ -236,14 +295,19 @@ async fn serve() -> i32 {
         }
     };
     log::info!("fp-agent listening on {path}");
+    // One PrepareForSleep watcher for the daemon; each client's verify loop
+    // gates on a clone of the receiver.
+    let (sleep_tx, sleep_rx) = watch::channel(false);
+    tokio::spawn(watch_sleep(conn.clone(), sleep_tx));
     let slots = Arc::new(Semaphore::new(MAX_CLIENTS));
     loop {
         match listener.accept().await {
             Ok((stream, _)) => match Arc::clone(&slots).try_acquire_owned() {
                 Ok(permit) => {
                     let conn = conn.clone();
+                    let sleeping = sleep_rx.clone();
                     tokio::spawn(async move {
-                        client(stream, conn).await;
+                        client(stream, conn, sleeping).await;
                         drop(permit);
                     });
                 }
@@ -257,7 +321,7 @@ async fn serve() -> i32 {
     }
 }
 
-async fn client(stream: UnixStream, conn: zbus::Connection) {
+async fn client(stream: UnixStream, conn: zbus::Connection, sleeping: watch::Receiver<bool>) {
     let peer_pid = stream
         .peer_cred()
         .ok()
@@ -283,7 +347,7 @@ async fn client(stream: UnixStream, conn: zbus::Connection) {
     let watcher = tokio::spawn(watch_session_active(conn.clone(), peer_pid, active_tx));
 
     let (target_tx, target_rx) = watch::channel::<Option<String>>(None);
-    let verifier = tokio::spawn(verify_loop(conn, target_rx, active_rx, out_tx));
+    let verifier = tokio::spawn(verify_loop(conn, target_rx, active_rx, sleeping, out_tx));
 
     // Bound total input so an unterminated line can't grow this root
     // process's memory; legitimate commands are a handful of bytes each.
@@ -318,6 +382,7 @@ async fn verify_loop(
     conn: zbus::Connection,
     mut target: watch::Receiver<Option<String>>,
     mut active: watch::Receiver<bool>,
+    mut sleeping: watch::Receiver<bool>,
     out: mpsc::UnboundedSender<Ev>,
 ) {
     macro_rules! send {
@@ -351,15 +416,20 @@ async fn verify_loop(
     };
 
     'outer: loop {
-        // Park until there is a target and the client's session is active.
+        // Park until there is a target, the client's session is active, and
+        // the system isn't heading into sleep (a claim held across suspend
+        // wedges the reader open inside fprintd — see `watch_sleep`).
         loop {
-            let armed = target.borrow_and_update().is_some() && *active.borrow_and_update();
+            let armed = target.borrow_and_update().is_some()
+                && *active.borrow_and_update()
+                && !*sleeping.borrow_and_update();
             if armed {
                 break;
             }
             tokio::select! {
                 r = target.changed() => if r.is_err() { return },
                 _ = active.changed() => {}
+                _ = sleeping.changed() => {}
             }
         }
         let Some(user) = target.borrow().clone() else {
@@ -389,10 +459,20 @@ async fn verify_loop(
         }
 
         // Claim as the target user; retry while the reader is busy (e.g. a
-        // backgrounded locker still releasing it).
+        // backgrounded locker still releasing it). The sleep delay-inhibitor
+        // is held while claimed (taken just before Claim so suspend can't
+        // slip between them); `continue 'outer` drops it after the release
+        // calls below, so suspend proceeds with the reader idle.
+        let mut inhibitor: Option<zbus::zvariant::OwnedFd> = None;
         loop {
-            if target.borrow().as_deref() != Some(user.as_str()) || !*active.borrow() {
+            if target.borrow().as_deref() != Some(user.as_str())
+                || !*active.borrow()
+                || *sleeping.borrow()
+            {
                 continue 'outer;
+            }
+            if inhibitor.is_none() {
+                inhibitor = take_sleep_inhibitor(&conn, "swaypplet-fp-agent").await;
             }
             match device.claim(&user).await {
                 Ok(()) => break,
@@ -402,6 +482,7 @@ async fn verify_loop(
                         _ = tokio::time::sleep(Duration::from_millis(500)) => {}
                         r = target.changed() => if r.is_err() { return },
                         _ = active.changed() => {}
+                        _ = sleeping.changed() => {}
                     }
                 }
             }
@@ -410,13 +491,17 @@ async fn verify_loop(
 
         // Verify sessions until a match, a retarget, or deactivation.
         'verify: loop {
-            if target.borrow().as_deref() != Some(user.as_str()) || !*active.borrow() {
+            if target.borrow().as_deref() != Some(user.as_str())
+                || !*active.borrow()
+                || *sleeping.borrow()
+            {
                 let _ = device.release().await;
                 continue 'outer;
             }
             if let Err(e) = device.verify_start("any").await {
                 log::warn!("VerifyStart({user}) failed, reclaiming: {e}");
                 let _ = device.release().await;
+                drop(inhibitor.take());
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 continue 'outer;
             }
@@ -426,6 +511,7 @@ async fn verify_loop(
                         let Some(signal) = sig else {
                             // Stream ended — fprintd restarted; start over.
                             let _ = device.release().await;
+                            drop(inhibitor.take());
                             send!(Ev::Unavailable { msg: "fprintd restarted".into() });
                             tokio::time::sleep(Duration::from_secs(1)).await;
                             continue 'outer;
@@ -435,6 +521,7 @@ async fn verify_loop(
                             Verify::Match => {
                                 let _ = device.verify_stop().await;
                                 let _ = device.release().await;
+                                drop(inhibitor.take());
                                 match mint_token(&user) {
                                     Ok(token) => {
                                         log::info!("fingerprint match for {user}, token minted");
@@ -459,6 +546,7 @@ async fn verify_loop(
                             }
                             Verify::Disconnected => {
                                 let _ = device.release().await;
+                                drop(inhibitor.take());
                                 send!(Ev::Unavailable { msg: "reader disconnected".into() });
                                 tokio::time::sleep(Duration::from_secs(1)).await;
                                 continue 'outer;
@@ -485,6 +573,18 @@ async fn verify_loop(
                             let _ = device.verify_stop().await;
                             let _ = device.release().await;
                             send!(Ev::Unavailable { msg: "session inactive".into() });
+                            continue 'outer;
+                        }
+                    }
+                    _ = sleeping.changed() => {
+                        if *sleeping.borrow() {
+                            // Release before sleep, then drop the inhibitor
+                            // (via `continue 'outer`) so suspend proceeds
+                            // with the reader idle; the park loop reclaims
+                            // on resume.
+                            let _ = device.verify_stop().await;
+                            let _ = device.release().await;
+                            send!(Ev::Unavailable { msg: "suspending".into() });
                             continue 'outer;
                         }
                     }
