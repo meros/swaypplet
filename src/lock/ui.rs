@@ -51,6 +51,14 @@ const CHIP_AVATAR_SIZE: i32 = 36;
 /// 100–500ms and M3's emphasized-exit durations sit right about here.
 pub const HANDOFF: Duration = Duration::from_millis(180);
 
+/// How long after the switch fires before [`SurfaceSet::end_handoff`] puts the
+/// card back. Both surfaces that play the handoff outlive it: the greeter is
+/// the machine's one idle greeter, handed back to whoever returns to that VT,
+/// and the locker keeps running behind the session it just locked. Neither can
+/// be left as a blurred pane with no card in it. Generous enough that a slow
+/// `loginctl activate` still cuts away first.
+const HANDOFF_RECOVER: Duration = Duration::from_secs(2);
+
 /// Runs `SWAYPPLET_LOCK_WAKE_CMD` (throttled) on any key or pointer activity.
 /// The lock script blanks outputs after locking, and swayidle resume events
 /// only fire for timeouts that already expired — right after a manual lock
@@ -519,7 +527,32 @@ impl SurfaceSet {
                 ue.set_sensitive(false);
             }
         }
+        // The switch is fire-and-forget: it can fail, and even when it works
+        // this surface is still here afterwards. Arm the way back now, while
+        // we know we faded something out.
+        let restore = self.clone();
+        glib::timeout_add_local_once(HANDOFF + HANDOFF_RECOVER, move || restore.end_handoff());
         HANDOFF
+    }
+
+    /// Undo [`begin_handoff`]: card back, chips back, typing allowed again.
+    /// Fires on a timer rather than on the switch failing, because the common
+    /// case isn't failure — it's the surface being returned to later.
+    pub fn end_handoff(&self) {
+        for s in self.inner.borrow().iter() {
+            s.card.remove_css_class("lock-handoff");
+            for (_, chip) in &s.user_chips {
+                chip.remove_css_class("picked");
+                chip.remove_css_class("dropped");
+            }
+            s.entry.set_sensitive(true);
+            if let Some(ue) = &s.user_entry {
+                ue.set_sensitive(true);
+            }
+        }
+        self.set_status("", StatusKind::Info);
+        // Desensitizing dropped the caret; nothing would take typing otherwise.
+        self.focus_entry();
     }
 
     /// Wrong password: shake every card (CSS keyframe re-trigger).
