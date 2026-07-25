@@ -65,7 +65,8 @@ fn read_state() -> Option<MediaState> {
     let art_url = playerctl(&["metadata", "mpris:artUrl"]).filter(|s| !s.is_empty());
 
     // Player identity (e.g. "Spotify", "firefox")
-    let player_name = playerctl(&["metadata", "--format", "{{playerName}}"]).filter(|s| !s.is_empty());
+    let player_name =
+        playerctl(&["metadata", "--format", "{{playerName}}"]).filter(|s| !s.is_empty());
 
     // Track length (mpris:length is in microseconds)
     let length_secs = playerctl(&["metadata", "mpris:length"])
@@ -232,9 +233,7 @@ impl MediaSection {
             .spacing(2)
             .build();
 
-        let progress_bar = gtk4::ProgressBar::builder()
-            .hexpand(true)
-            .build();
+        let progress_bar = gtk4::ProgressBar::builder().hexpand(true).build();
         progress_bar.add_css_class("media-progress");
 
         let time_label = gtk4::Label::builder()
@@ -463,10 +462,7 @@ impl MediaSection {
                                 let w_inner = w_c.clone();
                                 let cancelled_inner = cancelled_c.clone();
                                 spawn_work(
-                                    || {
-                                        playerctl(&["position"])
-                                            .and_then(|s| s.parse::<f64>().ok())
-                                    },
+                                    || playerctl(&["position"]).and_then(|s| s.parse::<f64>().ok()),
                                     move |pos| {
                                         // A track change since this was dispatched marks
                                         // `cancelled`; drop the stale result rather than

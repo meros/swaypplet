@@ -154,10 +154,7 @@ fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) 
         .hexpand(true)
         .build();
 
-    let name_lbl = Label::builder()
-        .label(&output.name)
-        .xalign(0.0)
-        .build();
+    let name_lbl = Label::builder().label(&output.name).xalign(0.0).build();
     name_lbl.add_css_class("device-name");
 
     let mode_text = if output.width > 0 && output.height > 0 {
@@ -170,10 +167,7 @@ fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) 
     } else {
         "—".to_string()
     };
-    let mode_lbl = Label::builder()
-        .label(&mode_text)
-        .xalign(0.0)
-        .build();
+    let mode_lbl = Label::builder().label(&mode_text).xalign(0.0).build();
     mode_lbl.add_css_class("device-status");
 
     info_box.append(&name_lbl);

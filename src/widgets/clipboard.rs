@@ -28,12 +28,9 @@ enum FetchedState {
 // ── cliphist helpers (blocking — run on background threads) ──────────────────
 
 fn cliphist_list_blocking() -> FetchedState {
-    let out = Command::new("cliphist")
-        .arg("list")
-        .output()
-        .map_err(|e| {
-            debug!("cliphist spawn error: {e}");
-        });
+    let out = Command::new("cliphist").arg("list").output().map_err(|e| {
+        debug!("cliphist spawn error: {e}");
+    });
 
     let out = match out {
         Ok(o) => o,
@@ -132,9 +129,7 @@ fn restore_entry_blocking(raw_line: &str) {
     }
 
     // Pipe decoded output to wl-copy.
-    let wlcopy = Command::new("wl-copy")
-        .stdin(Stdio::piped())
-        .spawn();
+    let wlcopy = Command::new("wl-copy").stdin(Stdio::piped()).spawn();
 
     let mut wlcopy = match wlcopy {
         Ok(child) => child,
@@ -352,8 +347,11 @@ impl ClipboardSection {
                     w.summary_text.set_label("Clipboard");
                 } else {
                     let count = entries.len();
-                    w.summary_text
-                        .set_label(&format!("Clipboard · {} item{}", count, if count == 1 { "" } else { "s" }));
+                    w.summary_text.set_label(&format!(
+                        "Clipboard · {} item{}",
+                        count,
+                        if count == 1 { "" } else { "s" }
+                    ));
                 }
 
                 // Rebuild entry rows.

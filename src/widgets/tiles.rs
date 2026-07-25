@@ -119,13 +119,10 @@ pub fn build_tile(spec: &TileSpec) -> gtk4::ToggleButton {
                 btn_done.remove_css_class("loading");
                 if !success {
                     let b = btn_done.clone();
-                    glib::timeout_add_local_once(
-                        std::time::Duration::from_secs(2),
-                        move || {
-                            b.set_active(!target);
-                            set_tooltip(&b, !target, tooltip_on, tooltip_off);
-                        },
-                    );
+                    glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
+                        b.set_active(!target);
+                        set_tooltip(&b, !target, tooltip_on, tooltip_off);
+                    });
                 }
             },
         );
@@ -184,7 +181,12 @@ pub fn build_dnd_tile(store: Rc<RefCell<NotificationStore>>) -> gtk4::ToggleButt
 
     let active = store.borrow().is_dnd();
     btn.set_active(active);
-    set_tooltip(&btn, active, "Do Not Disturb: active", "Do Not Disturb: off");
+    set_tooltip(
+        &btn,
+        active,
+        "Do Not Disturb: active",
+        "Do Not Disturb: off",
+    );
 
     let store_c = store.clone();
     let btn_h = btn.clone();
@@ -300,7 +302,10 @@ fn read_wifi_state() -> TileState {
             TileState::Unavailable
         }
         Ok(out) => {
-            if String::from_utf8_lossy(&out.stdout).trim().eq_ignore_ascii_case("enabled") {
+            if String::from_utf8_lossy(&out.stdout)
+                .trim()
+                .eq_ignore_ascii_case("enabled")
+            {
                 TileState::Active
             } else {
                 TileState::Inactive
@@ -360,7 +365,15 @@ fn read_night_state() -> TileState {
 /// and wrongly light the tile up.
 fn read_caffeine_state() -> TileState {
     match Command::new("systemctl")
-        .args(["--user", "show", "-p", "LoadState", "-p", "ActiveState", "swaypplet-idle.service"])
+        .args([
+            "--user",
+            "show",
+            "-p",
+            "LoadState",
+            "-p",
+            "ActiveState",
+            "swaypplet-idle.service",
+        ])
         .output()
     {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {

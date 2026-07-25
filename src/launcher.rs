@@ -157,37 +157,35 @@ impl LauncherView {
         let entry = self.entry.clone();
         let on_activate = self.on_activate.clone();
 
-        key_controller.connect_key_pressed(move |_, key, _, _| {
-            match key {
-                gtk4::gdk::Key::Escape => {
-                    on_escape();
-                    glib::Propagation::Stop
-                }
-                gtk4::gdk::Key::Down => {
-                    move_selection_state(&view_state, &results_box, 1);
-                    glib::Propagation::Stop
-                }
-                gtk4::gdk::Key::Up => {
-                    move_selection_state(&view_state, &results_box, -1);
-                    glib::Propagation::Stop
-                }
-                gtk4::gdk::Key::Return | gtk4::gdk::Key::KP_Enter => {
-                    let s = view_state.borrow();
-                    if let Some(item) = s.results.get(s.selected) {
-                        let provider = item.provider.clone();
-                        let identifier = item.identifier.clone();
-                        let action = default_action(item);
-                        let query = entry.text().to_string();
-                        drop(s);
-                        activate_async(provider, identifier, action, query);
-                        if let Some(cb) = on_activate.borrow().as_ref() {
-                            cb();
-                        }
-                    }
-                    glib::Propagation::Stop
-                }
-                _ => glib::Propagation::Proceed,
+        key_controller.connect_key_pressed(move |_, key, _, _| match key {
+            gtk4::gdk::Key::Escape => {
+                on_escape();
+                glib::Propagation::Stop
             }
+            gtk4::gdk::Key::Down => {
+                move_selection_state(&view_state, &results_box, 1);
+                glib::Propagation::Stop
+            }
+            gtk4::gdk::Key::Up => {
+                move_selection_state(&view_state, &results_box, -1);
+                glib::Propagation::Stop
+            }
+            gtk4::gdk::Key::Return | gtk4::gdk::Key::KP_Enter => {
+                let s = view_state.borrow();
+                if let Some(item) = s.results.get(s.selected) {
+                    let provider = item.provider.clone();
+                    let identifier = item.identifier.clone();
+                    let action = default_action(item);
+                    let query = entry.text().to_string();
+                    drop(s);
+                    activate_async(provider, identifier, action, query);
+                    if let Some(cb) = on_activate.borrow().as_ref() {
+                        cb();
+                    }
+                }
+                glib::Propagation::Stop
+            }
+            _ => glib::Propagation::Proceed,
         });
         widget.add_controller(key_controller);
     }
@@ -317,11 +315,7 @@ fn bump_generation(state: &Rc<RefCell<LauncherState>>) -> u64 {
     s.query_generation
 }
 
-fn move_selection_state(
-    state: &Rc<RefCell<LauncherState>>,
-    results_box: &gtk4::Box,
-    delta: i32,
-) {
+fn move_selection_state(state: &Rc<RefCell<LauncherState>>, results_box: &gtk4::Box, delta: i32) {
     let mut s = state.borrow_mut();
     if s.results.is_empty() {
         return;
@@ -375,17 +369,24 @@ fn run_search(
     std::thread::spawn(move || {
         match elephant::query(&query_c, &providers, MAX_VISIBLE_RESULTS as i32) {
             Ok(results) => {
-                *result_writer.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(results);
+                *result_writer
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(results);
             }
             Err(e) => {
                 log::warn!("Elephant query failed: {}", e);
-                *result_writer.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Vec::new());
+                *result_writer
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Vec::new());
             }
         }
     });
 
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-        let done = result_holder.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some();
+        let done = result_holder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some();
         if !done {
             return glib::ControlFlow::Continue;
         }
@@ -395,7 +396,11 @@ fn run_search(
             return glib::ControlFlow::Break;
         }
 
-        let results = result_holder.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take().unwrap();
+        let results = result_holder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+            .unwrap();
         {
             let mut s = state.borrow_mut();
             s.results = results;

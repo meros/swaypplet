@@ -1,15 +1,12 @@
 //! Session-aware user list for the start-menu's quick-settings column.
 //!
 //! Replaces the old single "Switch user" rail button: on every panel open we
-//! ask the host `SWAYPPLET_SWITCH_USER_CMD --list` who is configured, then
-//! render one row per user (avatar + name + fingerprint badge). Clicking
-//! another user locks this session and jumps to theirs; the current user is
-//! marked and inert.
+//! ask [`switch_user::list`] who is configured, then render one row per user
+//! (avatar + name + fingerprint badge). Clicking another user locks this
+//! session and jumps to theirs; the current user is marked and inert.
 //!
-//! Degradation: no switch command → the section stays hidden (as before);
-//! `--list` fails → a single "Switch user" row falls back to the legacy cycle.
-
-use std::rc::Rc;
+//! Degradation: host not configured for switching → the section stays hidden;
+//! the query fails → a single "Switch user" row falls back to the legacy cycle.
 
 use gtk4::prelude::*;
 
@@ -27,7 +24,6 @@ const AVATAR_SIZE: i32 = 30;
 pub struct UserSection {
     root: gtk4::Box,
     list: gtk4::Box,
-    cmd: Option<String>,
 }
 
 impl UserSection {
@@ -52,11 +48,11 @@ impl UserSection {
             .build();
         root.append(&list);
 
-        let cmd = switch_user::cmd();
-        // No host switcher → no section at all (matches pre-switcher behaviour).
-        root.set_visible(cmd.is_some());
+        // Host not configured for switching → no section at all (matches
+        // pre-switcher behaviour).
+        root.set_visible(switch_user::available());
 
-        Self { root, list, cmd }
+        Self { root, list }
     }
 
     pub fn widget(&self) -> &gtk4::Box {
@@ -66,18 +62,18 @@ impl UserSection {
     /// Re-query the configured users on a background thread and rebuild the
     /// rows. Called on panel open (via `Sections::refresh`).
     pub fn refresh(&self) {
-        let Some(cmd) = self.cmd.clone() else {
+        if !switch_user::available() {
             self.root.set_visible(false);
             return;
-        };
+        }
         let list = self.list.clone();
         let root = self.root.clone();
         spawn_work(switch_user::list, move |users| {
             root.set_visible(true);
             match users {
-                Some(users) if !users.is_empty() => rebuild_rows(&list, &users, &cmd),
-                // `--list` failed: fall back to the legacy no-arg cycle.
-                _ => rebuild_fallback(&list, &cmd),
+                Some(users) if !users.is_empty() => rebuild_rows(&list, &users),
+                // The query failed: fall back to the legacy no-arg cycle.
+                _ => rebuild_fallback(&list),
             }
         });
     }
@@ -89,27 +85,26 @@ fn clear(list: &gtk4::Box) {
     }
 }
 
-fn rebuild_rows(list: &gtk4::Box, users: &[SwitchUser], cmd: &str) {
+fn rebuild_rows(list: &gtk4::Box, users: &[SwitchUser]) {
     clear(list);
     for u in users {
-        list.append(&user_row(u, cmd));
+        list.append(&user_row(u));
     }
 }
 
-fn rebuild_fallback(list: &gtk4::Box, cmd: &str) {
+fn rebuild_fallback(list: &gtk4::Box) {
     clear(list);
     let btn = gtk4::Button::with_label("󰓤  Switch user");
     btn.add_css_class("user-row");
     btn.add_css_class("user-row-fallback");
-    let cmd = cmd.to_owned();
-    btn.connect_clicked(move |b| {
+    btn.connect_clicked(|b| {
         hide_panel_for_widget(b.upcast_ref());
-        switch_user::cycle(&cmd);
+        switch_user::cycle();
     });
     list.append(&btn);
 }
 
-fn user_row(u: &SwitchUser, cmd: &str) -> gtk4::Button {
+fn user_row(u: &SwitchUser) -> gtk4::Button {
     let content = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(10)
@@ -131,7 +126,7 @@ fn user_row(u: &SwitchUser, cmd: &str) -> gtk4::Button {
     name.add_css_class("user-name");
     content.append(&name);
 
-    if u.fingerprint {
+    if u.fingerprint == Some(true) {
         let fp = gtk4::Label::new(Some(FP_GLYPH));
         fp.add_css_class("user-fp");
         fp.set_tooltip_text(Some("Fingerprint enrolled"));
@@ -147,11 +142,10 @@ fn user_row(u: &SwitchUser, cmd: &str) -> gtk4::Button {
         btn.add_css_class("active");
         btn.connect_clicked(|b| hide_panel_for_widget(b.upcast_ref()));
     } else {
-        let cmd = cmd.to_owned();
         let user = u.user.clone();
         btn.connect_clicked(move |b| {
             hide_panel_for_widget(b.upcast_ref());
-            switch_user::switch_to(&cmd, &user);
+            switch_user::switch_to(&user);
         });
     }
 

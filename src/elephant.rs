@@ -171,7 +171,12 @@ pub fn query(
 }
 
 /// Activate a search result item. This is a blocking call.
-pub fn activate(provider: &str, identifier: &str, action: &str, query_text: &str) -> io::Result<()> {
+pub fn activate(
+    provider: &str,
+    identifier: &str,
+    action: &str,
+    query_text: &str,
+) -> io::Result<()> {
     let mut stream = connect()?;
 
     let mut req = ActivateRequest::new();

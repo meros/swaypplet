@@ -76,7 +76,9 @@ pub enum Ev {
     /// The supervisor gave up: clean unlock (rc=0), lock unavailable (rc=2),
     /// or spawn failure (rc=-1). Crash-while-locked relaunches internally and
     /// never reaches here.
-    LockerGone { rc: i32 },
+    LockerGone {
+        rc: i32,
+    },
     Fatal(String),
 }
 
@@ -120,7 +122,9 @@ pub fn run() -> ! {
 
         // Deadlines fire on every pass, event traffic or not.
         if sleep_release.is_some_and(|d| Instant::now() >= d) {
-            log::warn!("before-sleep: locker not up after {SLEEP_RELEASE_MAX:?} — releasing inhibitor anyway");
+            log::warn!(
+                "before-sleep: locker not up after {SLEEP_RELEASE_MAX:?} — releasing inhibitor anyway"
+            );
             release_inhibitor(&mut sleep_release);
         }
         if pending_blank.is_some_and(|d| Instant::now() >= d) {
@@ -149,7 +153,11 @@ pub fn run() -> ! {
                 run_cmd("idle.dim-240s", "brightnessctl", &["set", "10%", "-n"]);
             }
             Ev::Resumed(Timeout::Dim) => {
-                run_cmd("idle.dim-240s.resume", "brightnessctl", &["set", "100%", "-n"]);
+                run_cmd(
+                    "idle.dim-240s.resume",
+                    "brightnessctl",
+                    &["set", "100%", "-n"],
+                );
             }
 
             Ev::Idled(Timeout::Lock) => {
@@ -163,7 +171,11 @@ pub fn run() -> ! {
                 // inactive VT (fast user switch) our idle timers keep firing;
                 // blanking then would fight the SessionActive(true) re-power.
                 if locker_active && session_active {
-                    run_cmd("idle.reblank-30s", "swaymsg", &["output", "*", "power", "off"]);
+                    run_cmd(
+                        "idle.reblank-30s",
+                        "swaymsg",
+                        &["output", "*", "power", "off"],
+                    );
                 } else {
                     log::info!(
                         "idle.reblank-30s: skip (locker_active={locker_active} session_active={session_active})"
@@ -173,7 +185,11 @@ pub fn run() -> ! {
             // Unconditional (matches old config): if the locker died, a gated
             // resume would leave the panel stuck off on next input.
             Ev::Resumed(Timeout::Reblank) => {
-                run_cmd("idle.reblank-30s.resume", "swaymsg", &["output", "*", "power", "on"]);
+                run_cmd(
+                    "idle.reblank-30s.resume",
+                    "swaymsg",
+                    &["output", "*", "power", "on"],
+                );
             }
 
             Ev::Idled(Timeout::Suspend) => {
@@ -272,7 +288,9 @@ pub fn run() -> ! {
                         run_cmd("unlock", "swaymsg", &["output", "*", "power", "on"]);
                         run_cmd("unlock", "brightnessctl", &["set", "100%", "-n"]);
                     }
-                    2 => log::warn!("lock: lock unavailable (rc=2) — another locker or no protocol"),
+                    2 => {
+                        log::warn!("lock: lock unavailable (rc=2) — another locker or no protocol")
+                    }
                     _ => log::error!("lock: locker never started (rc={rc}) — NOT blanking"),
                 }
             }
@@ -322,8 +340,7 @@ fn on_ac() -> bool {
     let Ok(entries) = std::fs::read_dir("/sys/class/power_supply") else {
         return false;
     };
-    entries.flatten().any(|e| {
-        std::fs::read_to_string(e.path().join("online"))
-            .is_ok_and(|s| s.trim() == "1")
-    })
+    entries
+        .flatten()
+        .any(|e| std::fs::read_to_string(e.path().join("online")).is_ok_and(|s| s.trim() == "1"))
 }

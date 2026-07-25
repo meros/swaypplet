@@ -187,7 +187,9 @@ impl PopupManager {
 
         {
             let st = state.clone();
-            store.borrow_mut().connect_notify(move |notif| show(&st, notif));
+            store
+                .borrow_mut()
+                .connect_notify(move |notif| show(&st, notif));
         }
         {
             let st = state.clone();
@@ -551,7 +553,11 @@ fn timeout_for(notif: &Notification) -> Option<u64> {
     }
 }
 
-fn make_timer(store: &Rc<RefCell<NotificationStore>>, notif: &Notification, hovered: bool) -> Timer {
+fn make_timer(
+    store: &Rc<RefCell<NotificationStore>>,
+    notif: &Notification,
+    hovered: bool,
+) -> Timer {
     let Some(ms) = timeout_for(notif) else {
         return Timer::None;
     };
@@ -579,7 +585,8 @@ fn pause_timers(st: &Rc<RefCell<State>>) {
     let now = Instant::now();
     for card in &mut s.cards {
         if matches!(card.timer, Timer::Running { .. }) {
-            if let Timer::Running { source, deadline } = std::mem::replace(&mut card.timer, Timer::None)
+            if let Timer::Running { source, deadline } =
+                std::mem::replace(&mut card.timer, Timer::None)
             {
                 source.remove();
                 card.timer = Timer::Paused {

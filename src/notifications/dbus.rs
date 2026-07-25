@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use zbus::zvariant::Value;
-use zbus::{interface, Connection, SignalContext};
+use zbus::{Connection, SignalContext, interface};
 
 use super::store::{self, NotificationStore};
 use super::{CloseReason, Notification, Urgency};
@@ -225,9 +225,7 @@ pub fn start_server(store: Rc<RefCell<NotificationStore>>) {
                         }
                         Err(e) => {
                             log::error!("Failed to acquire org.freedesktop.Notifications: {e}");
-                            log::error!(
-                                "Is another notification daemon running? (pkill mako)"
-                            );
+                            log::error!("Is another notification daemon running? (pkill mako)");
                         }
                     }
                 }

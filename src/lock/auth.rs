@@ -44,8 +44,8 @@ impl AttemptGate {
 /// Blocking PAM authenticate + account check. Run on a worker thread only —
 /// pam_unix deliberately delays ~2s on failure, which would freeze the UI.
 pub fn pam_verify(user: &str, password: &str) -> Result<(), String> {
-    let mut client = pam::Client::with_password(PAM_SERVICE)
-        .map_err(|e| format!("PAM init failed: {e}"))?;
+    let mut client =
+        pam::Client::with_password(PAM_SERVICE).map_err(|e| format!("PAM init failed: {e}"))?;
     // Authenticate only — no session is opened, so nothing to close on drop.
     client.close_on_drop = false;
     client.conversation_mut().set_credentials(user, password);

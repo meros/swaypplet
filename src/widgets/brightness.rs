@@ -86,9 +86,7 @@ impl BrightnessSection {
         summary_content.append(&summary_text);
         summary_content.append(&summary_arrow);
 
-        let summary_btn = gtk4::Button::builder()
-            .child(&summary_content)
-            .build();
+        let summary_btn = gtk4::Button::builder().child(&summary_content).build();
         summary_btn.add_css_class("section-summary");
 
         // ── Detail revealer ───────────────────────────────────────────────────

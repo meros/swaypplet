@@ -152,7 +152,10 @@ fn handle_agent_event(state: &Rc<RefCell<PolkitState>>, event: AgentEvent) {
         AgentEvent::Begin { request, reply } => {
             let has_active = state.borrow().active.is_some();
             if has_active {
-                state.borrow_mut().queue.push_back(PendingRequest { request, reply });
+                state
+                    .borrow_mut()
+                    .queue
+                    .push_back(PendingRequest { request, reply });
             } else {
                 start_session(state, request, reply);
             }
@@ -432,8 +435,12 @@ fn apply_helper_event(state: &Rc<RefCell<PolkitState>>, event: HelperEvent) -> b
 
 fn handle_user_password(state: &Rc<RefCell<PolkitState>>, password: String) {
     let mut s = state.borrow_mut();
-    let Some(active) = s.active.as_mut() else { return };
-    let Some(helper) = active.helper.as_mut() else { return };
+    let Some(active) = s.active.as_mut() else {
+        return;
+    };
+    let Some(helper) = active.helper.as_mut() else {
+        return;
+    };
     if !active.waiting_password {
         // Helper isn't ready for input yet — ignore stray submits.
         return;

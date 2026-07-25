@@ -327,7 +327,11 @@ impl Panel {
             let slide_c = slide.clone();
             let window_c = window.clone();
             menu_revealer.connect_reveal_child_notify(move |r| {
-                let target = if r.reveals_child() { 0.0 } else { anim::SLIDE_PX };
+                let target = if r.reveals_child() {
+                    0.0
+                } else {
+                    anim::SLIDE_PX
+                };
                 if window_c.is_visible() {
                     slide_c.slide_to(target, r.transition_duration() as f64);
                 } else {
@@ -408,8 +412,7 @@ impl Panel {
 
     pub fn toggle(&self) {
         if self.revealer.reveals_child() && self.window.is_visible() {
-            self.revealer
-                .set_transition_duration(anim::EXIT_MS as u32);
+            self.revealer.set_transition_duration(anim::EXIT_MS as u32);
             self.revealer.set_reveal_child(false);
         } else {
             // Instant-hide paths (rail actions, power session actions) unmap
@@ -419,8 +422,7 @@ impl Panel {
             // instead of skipping.
             self.revealer.set_reveal_child(false);
             self.launcher.reset();
-            self.revealer
-                .set_transition_duration(anim::ENTER_MS as u32);
+            self.revealer.set_transition_duration(anim::ENTER_MS as u32);
             self.window.set_visible(true);
             self.revealer.set_reveal_child(true);
             let sections = self.sections.clone();

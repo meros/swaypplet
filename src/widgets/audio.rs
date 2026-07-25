@@ -125,7 +125,12 @@ fn wpctl_blocking(args: &[&str]) -> Option<String> {
 
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
-        warn!("wpctl {:?} failed ({}): {}", args, out.status, stderr.trim());
+        warn!(
+            "wpctl {:?} failed ({}): {}",
+            args,
+            out.status,
+            stderr.trim()
+        );
         return None;
     }
 
@@ -567,9 +572,7 @@ impl AudioSection {
         summary_content.append(&summary_text);
         summary_content.append(&summary_arrow);
 
-        let summary_btn = gtk4::Button::builder()
-            .child(&summary_content)
-            .build();
+        let summary_btn = gtk4::Button::builder().child(&summary_content).build();
         summary_btn.add_css_class("section-summary");
 
         // ── Detail revealer (collapsed by default) ───────────────────────────
@@ -1179,12 +1182,16 @@ Settings
 
         // Only the playback stream survives; the capture stream (`<` ports)
         // and the Video/Settings blocks are ignored.
-        assert_eq!(streams, vec![("186".to_string(), "SDL Application".to_string())]);
+        assert_eq!(
+            streams,
+            vec![("186".to_string(), "SDL Application".to_string())]
+        );
     }
 
     #[test]
     fn empty_streams_section() {
-        let (_, _, streams) = parse_status("Audio\n ├─ Sinks:\n │  *  1. X [vol: 1.0]\n └─ Streams:\n\nVideo\n");
+        let (_, _, streams) =
+            parse_status("Audio\n ├─ Sinks:\n │  *  1. X [vol: 1.0]\n └─ Streams:\n\nVideo\n");
         assert!(streams.is_empty());
     }
 }

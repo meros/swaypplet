@@ -94,8 +94,7 @@ impl Agent {
                 }
                 let uid_value = ident_details.get("uid")?;
                 let uid = u32::try_from(&**uid_value).ok()?;
-                let username = lookup_username(uid)
-                    .unwrap_or_else(|| format!("uid {uid}"));
+                let username = lookup_username(uid).unwrap_or_else(|| format!("uid {uid}"));
                 Some(ResolvedIdentity { username, uid })
             })
             .collect();
@@ -252,4 +251,3 @@ fn lookup_username(uid: u32) -> Option<String> {
         Some(CStr::from_ptr(pwd.pw_name).to_string_lossy().into_owned())
     }
 }
-

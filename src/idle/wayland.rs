@@ -59,7 +59,10 @@ impl Dispatch<wl_registry::WlRegistry, ()> for App {
         _: &Connection,
         qh: &QueueHandle<Self>,
     ) {
-        if let wl_registry::Event::Global { name, interface, .. } = event {
+        if let wl_registry::Event::Global {
+            name, interface, ..
+        } = event
+        {
             match interface.as_str() {
                 "wl_seat" if state.seat.is_none() => {
                     state.seat = Some(registry.bind::<WlSeat, _, _>(name, 1, qh, ()));
@@ -127,7 +130,10 @@ fn watch(tx: Sender<Ev>) -> Result<(), Box<dyn std::error::Error>> {
     for tier in Timeout::ALL {
         notifier.get_idle_notification(tier.ms(), &seat, &qh, tier);
     }
-    log::info!("idle: watching {} timeouts via ext-idle-notify-v1", Timeout::ALL.len());
+    log::info!(
+        "idle: watching {} timeouts via ext-idle-notify-v1",
+        Timeout::ALL.len()
+    );
 
     loop {
         queue.blocking_dispatch(&mut app)?;

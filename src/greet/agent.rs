@@ -15,10 +15,10 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::unix::OwnedWriteHalf;
 use tokio::net::UnixStream;
+use tokio::net::unix::OwnedWriteHalf;
 
-use crate::fp_agent::{sock_path, Cmd, Ev};
+use crate::fp::agent::{Cmd, Ev, sock_path};
 
 pub fn start() -> (tokio::sync::mpsc::UnboundedSender<Cmd>, mpsc::Receiver<Ev>) {
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -66,7 +66,12 @@ async fn run(mut cmds: tokio::sync::mpsc::UnboundedReceiver<Cmd>, evs: mpsc::Sen
                 if !reported_down {
                     reported_down = true;
                     log::warn!("fp-agent unreachable at {path}: {e}");
-                    if evs.send(Ev::Unavailable { msg: format!("fp-agent: {e}") }).is_err() {
+                    if evs
+                        .send(Ev::Unavailable {
+                            msg: format!("fp-agent: {e}"),
+                        })
+                        .is_err()
+                    {
                         return;
                     }
                 }

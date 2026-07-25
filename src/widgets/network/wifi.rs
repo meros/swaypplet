@@ -3,10 +3,13 @@ use std::rc::Rc;
 use std::sync::mpsc;
 
 use gtk4::prelude::*;
-use gtk4::{Box, Button, Entry, Label, ListBox, ListBoxRow, Orientation, PasswordEntry, Revealer, RevealerTransitionType, Spinner};
+use gtk4::{
+    Box, Button, Entry, Label, ListBox, ListBoxRow, Orientation, PasswordEntry, Revealer,
+    RevealerTransitionType, Spinner,
+};
 
-use super::backend::*;
 use super::NetworkState;
+use super::backend::*;
 
 // ── WiFi list builder ─────────────────────────────────────────────────────────
 
@@ -21,7 +24,11 @@ pub fn rebuild_wifi_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
     };
 
     let total = networks.len();
-    let visible_count = if show_all { total } else { total.min(MAX_VISIBLE_NETWORKS) };
+    let visible_count = if show_all {
+        total
+    } else {
+        total.min(MAX_VISIBLE_NETWORKS)
+    };
 
     for network in networks.iter().take(visible_count) {
         let list_row = build_wifi_row(network);
@@ -95,16 +102,18 @@ fn build_wifi_row(network: &WifiNetwork) -> ListBoxRow {
     }
 
     let lock_lbl = Label::builder()
-        .label(if network.security.is_empty() || network.security == "--" { "" } else { ICON_LOCK })
+        .label(if network.security.is_empty() || network.security == "--" {
+            ""
+        } else {
+            ICON_LOCK
+        })
         .build();
     lock_lbl.add_css_class("network-security");
 
     row_box.append(&signal_lbl);
     row_box.append(&ssid_lbl);
     if let Some(freq) = network.freq_mhz {
-        let band_lbl = Label::builder()
-            .label(freq_band_short(freq))
-            .build();
+        let band_lbl = Label::builder().label(freq_band_short(freq)).build();
         band_lbl.add_css_class("network-band");
         row_box.append(&band_lbl);
     }
@@ -154,14 +163,17 @@ fn build_wifi_row(network: &WifiNetwork) -> ListBoxRow {
                         // Auto-revert after 3 seconds
                         let btn_revert = btn_c.clone();
                         let confirmed_revert = confirmed_c.clone();
-                        glib::timeout_add_local_once(std::time::Duration::from_secs(3), move || {
-                            if confirmed_revert.get() {
-                                confirmed_revert.set(false);
-                                btn_revert.set_label("Forget");
-                                btn_revert.remove_css_class("network-forget-confirm-btn");
-                                btn_revert.add_css_class("network-forget-btn");
-                            }
-                        });
+                        glib::timeout_add_local_once(
+                            std::time::Duration::from_secs(3),
+                            move || {
+                                if confirmed_revert.get() {
+                                    confirmed_revert.set(false);
+                                    btn_revert.set_label("Forget");
+                                    btn_revert.remove_css_class("network-forget-confirm-btn");
+                                    btn_revert.add_css_class("network-forget-btn");
+                                }
+                            },
+                        );
                     } else {
                         confirmed.set(false);
                         btn.set_sensitive(false);
@@ -182,7 +194,9 @@ fn build_wifi_row(network: &WifiNetwork) -> ListBoxRow {
                                     spinner_poll.set_visible(false);
                                     match &result {
                                         NmResult::Success => {
-                                            if let Some(row) = btn_poll.ancestor(ListBoxRow::static_type()) {
+                                            if let Some(row) =
+                                                btn_poll.ancestor(ListBoxRow::static_type())
+                                            {
                                                 row.set_sensitive(false);
                                             }
                                         }
@@ -192,7 +206,9 @@ fn build_wifi_row(network: &WifiNetwork) -> ListBoxRow {
                                     auto_hide_status(&status_poll);
                                     glib::ControlFlow::Break
                                 }
-                                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                                    glib::ControlFlow::Continue
+                                }
                                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                                     spinner_poll.stop();
                                     spinner_poll.set_visible(false);
@@ -266,7 +282,14 @@ fn build_wifi_row(network: &WifiNetwork) -> ListBoxRow {
             pw_revealer.set_child(Some(&pw_area));
             connect_area.append(&pw_revealer);
 
-            wire_connect_new(&connect_btn, &pw_entry, &spinner, &status_lbl, network.ssid.clone(), false);
+            wire_connect_new(
+                &connect_btn,
+                &pw_entry,
+                &spinner,
+                &status_lbl,
+                network.ssid.clone(),
+                false,
+            );
 
             let click = gtk4::GestureClick::new();
             {
@@ -427,7 +450,11 @@ fn build_hidden_network_row(list: &ListBox, _state: &Rc<RefCell<NetworkState>>) 
                         spinner_poll.stop();
                         spinner_poll.set_visible(false);
                         btn_poll.set_sensitive(true);
-                        let display = if msg.is_empty() { "Failed".to_string() } else { msg };
+                        let display = if msg.is_empty() {
+                            "Failed".to_string()
+                        } else {
+                            msg
+                        };
                         status_poll.set_label(&display);
                         status_poll.add_css_class("network-status-err");
                         status_poll.remove_css_class("network-status-ok");
@@ -621,7 +648,11 @@ fn apply_nm_result(status_lbl: &Label, result: &NmResult) {
             status_lbl.remove_css_class("network-status-err");
         }
         NmResult::Failure(msg) => {
-            let display = if msg.is_empty() { "Failed" } else { msg.as_str() };
+            let display = if msg.is_empty() {
+                "Failed"
+            } else {
+                msg.as_str()
+            };
             status_lbl.set_label(display);
             status_lbl.add_css_class("network-status-err");
             status_lbl.remove_css_class("network-status-ok");

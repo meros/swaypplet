@@ -566,7 +566,8 @@ impl BluetoothSection {
                 self.summary_text.set_label(&text);
             }
             n => {
-                self.summary_text.set_label(&format!("{n} devices connected"));
+                self.summary_text
+                    .set_label(&format!("{n} devices connected"));
             }
         }
     }

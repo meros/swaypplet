@@ -15,8 +15,14 @@ use gtk4::prelude::*;
 use crate::avatar::avatar;
 use crate::switch_user;
 
-/// Data for one greeter user chip. Sourced from `SWAYPPLET_SWITCH_USER_CMD
-/// --list` when available (avatar + presence), otherwise just a name.
+/// Data for one user chip. Sourced from [`crate::switch_user::list`] when
+/// available (avatar + presence), otherwise just a name.
+///
+/// The same chip appears in both modes, which is the whole point: whether
+/// you are looking at a greeter or at someone's lock screen, picking a face
+/// takes you to that person's session. Only the plumbing behind the click
+/// differs (greetd start vs. `loginctl activate`), and the person tapping
+/// the screen should never have to know which one they are on.
 #[derive(Clone)]
 pub struct UserChip {
     pub user: String,
@@ -38,6 +44,12 @@ impl UserChip {
 
 /// Avatar diameter for lock/greeter chips.
 const CHIP_AVATAR_SIZE: i32 = 36;
+
+/// How long [`SurfaceSet::begin_handoff`] runs before the caller actually
+/// switches. Long enough to read as a deliberate handoff, short enough that
+/// the machine still feels instant — Apple's HIG puts that band at
+/// 100–500ms and M3's emphasized-exit durations sit right about here.
+pub const HANDOFF: Duration = Duration::from_millis(180);
 
 /// Runs `SWAYPPLET_LOCK_WAKE_CMD` (throttled) on any key or pointer activity.
 /// The lock script blanks outputs after locking, and swayidle resume events
@@ -91,10 +103,13 @@ struct Surface {
     window: gtk4::Window,
     card: gtk4::Box,
     user_entry: Option<gtk4::Entry>,
-    /// Greeter chip row container, kept so `set_greet_chips` can refill it
-    /// once the async `--list` (avatars, presence, enrollment) resolves.
+    /// Chip row container, kept so `set_user_chips` can refill it once the
+    /// async session/enrollment query resolves. In lock mode it starts
+    /// empty and hidden.
     chip_row: Option<gtk4::Box>,
     user_chips: Vec<(String, gtk4::Button)>,
+    /// Lock mode: the "Switch user" fallback, retired once real chips land.
+    switch_btn: Option<gtk4::Button>,
     entry: gtk4::PasswordEntry,
     status: gtk4::Label,
     fp_pill: gtk4::Box,
@@ -111,8 +126,11 @@ pub struct SurfaceSet {
     /// `Some(prefill)` adds an editable username row above the password
     /// entry (greeter mode); `None` is the lock's implicit current user.
     user_field: Rc<RefCell<Option<String>>>,
-    /// Greeter mode: known users rendered as clickable chips above the
-    /// username row (only when more than one).
+    /// Whose chip reads as selected. The greeter moves it with the username
+    /// field; the lock pins it to the session owner and never moves it.
+    active_user: Rc<RefCell<String>>,
+    /// Known users rendered as clickable chips above the username row (only
+    /// when more than one).
     users: Rc<RefCell<Vec<UserChip>>>,
     on_user_select: Rc<RefCell<Option<Rc<dyn Fn(String)>>>>,
 }
@@ -189,33 +207,32 @@ impl SurfaceSet {
 
         let greet_mode = self.user_field.borrow().is_some();
 
-        // User chips (greeter mode with several known users) — the kid clicks
-        // an avatar instead of typing a name. Data (avatar, presence) comes
-        // from the host `--list` when the greeter has it, else bare names.
+        // The user picker — same row, same chips, both modes. Click a face
+        // and you land in that person's session; the greeter starts one, the
+        // lock screen jumps to a running one. Nobody has to work out which
+        // screen they are standing in front of.
+        //
+        // The row is created whenever it *could* be filled, so the async
+        // refill (`set_user_chips`) never has to invent one that isn't
+        // there. It stays hidden until there is more than one face to pick.
         let users = self.users.borrow().clone();
-        // Present with however many users we have now; the greeter refills
-        // this row via `set_greet_chips` when the async `--list` resolves.
-        // The row exists whenever greeter mode has any known users, so a
-        // late `--list` upgrade never has to create a row that isn't there.
         let mut user_chips: Vec<(String, gtk4::Button)> = Vec::new();
-        let chip_row = (greet_mode && !users.is_empty()).then(|| {
+        let chip_row = (greet_mode || switch_user::available()).then(|| {
             let row = gtk4::Box::builder()
                 .orientation(gtk4::Orientation::Horizontal)
                 .spacing(10)
                 .halign(gtk4::Align::Center)
                 .build();
             row.add_css_class("lock-user-row");
-            let active = self.user_field.borrow().clone().unwrap_or_default();
+            let active = self.active_user.borrow().clone();
             user_chips = fill_chip_row(&row, &users, &active, &self.on_user_select);
             row
         });
 
-        // Lock mode: a single "Switch user" button that jumps to a greeter —
-        // picking the target user (and their chips) is the greeter's job.
-        let lock_switch = (!greet_mode)
-            .then(switch_user::cmd)
-            .flatten()
-            .map(build_switch_button);
+        // Lock mode fallback for when the chip query comes back empty or
+        // fails: one button to a greeter, which can pick for itself.
+        // `set_user_chips` hides it as soon as real chips arrive.
+        let lock_switch = (!greet_mode && switch_user::available()).then(build_switch_button);
 
         // Username row (greeter mode only) — the lock authenticates the
         // session user implicitly and never shows it.
@@ -327,6 +344,7 @@ impl SurfaceSet {
             user_entry,
             chip_row,
             user_chips,
+            switch_btn: lock_switch,
             entry,
             status,
             fp_pill,
@@ -373,27 +391,41 @@ impl SurfaceSet {
     /// password entry. Call before any `build_surface`.
     pub fn enable_user_field(&self, prefill: &str) {
         *self.user_field.borrow_mut() = Some(prefill.to_string());
+        *self.active_user.borrow_mut() = prefill.to_string();
     }
 
-    /// Greeter mode: show clickable user chips above the username row.
-    /// Call before any `build_surface`, alongside `enable_user_field`.
+    /// Lock mode: mark whose session this is, so their chip reads as
+    /// selected the way the greeter's target user does. There is no username
+    /// field to move it — the lock only ever authenticates this one person.
+    pub fn set_current_user(&self, user: &str) {
+        *self.active_user.borrow_mut() = user.to_string();
+    }
+
+    /// Show clickable user chips above the username row. Call before any
+    /// `build_surface`; `set_user_chips` handles later arrivals.
     pub fn enable_user_chips(&self, users: &[UserChip], on_select: Rc<dyn Fn(String)>) {
         *self.users.borrow_mut() = users.to_vec();
         *self.on_user_select.borrow_mut() = Some(on_select);
     }
 
-    /// Refill the greeter chip rows after the async `--list` resolves —
-    /// upgrading the initial env-name chips to avatars + presence without
-    /// having blocked window presentation on the subprocess. No-op for
+    /// Refill the chip rows once the session/enrollment query resolves —
+    /// in the greeter, upgrading env-name chips to avatars + presence; on
+    /// the lock screen, populating the row for the first time. Either way
+    /// the surface was on screen long before this landed. No-op for
     /// surfaces built without a chip row.
-    pub fn set_greet_chips(&self, users: &[UserChip]) {
+    pub fn set_user_chips(&self, users: &[UserChip]) {
         *self.users.borrow_mut() = users.to_vec();
-        let active = self.user_field.borrow().clone().unwrap_or_default();
+        let active = self.active_user.borrow().clone();
         for s in self.inner.borrow_mut().iter_mut() {
             let Some(row) = s.chip_row.clone() else {
                 continue;
             };
             s.user_chips = fill_chip_row(&row, users, &active, &self.on_user_select);
+            // Real faces beat a generic button; the greeter the button
+            // would have opened is one chip click away anyway.
+            if let Some(btn) = &s.switch_btn {
+                btn.set_visible(users.len() < 2);
+            }
         }
     }
 
@@ -402,6 +434,7 @@ impl SurfaceSet {
     /// the password entry.
     pub fn set_username(&self, user: &str) {
         *self.user_field.borrow_mut() = Some(user.to_string());
+        *self.active_user.borrow_mut() = user.to_string();
         for s in self.inner.borrow().iter() {
             if let Some(ue) = &s.user_entry {
                 if ue.text() != user {
@@ -458,8 +491,35 @@ impl SurfaceSet {
             }
         }
         if !verifying {
-            self.focus_active_entry();
+            self.focus_entry();
         }
+    }
+
+    /// The beat between picking a face and landing in that session: the
+    /// picked chip blooms, everything else dissolves back to bare wallpaper.
+    /// The surface on the far side of the VT fades its card up from that
+    /// same frame, so the cut happens inside one continuous move instead of
+    /// between two unrelated screens.
+    ///
+    /// Returns the delay the caller should wait before switching. Zero when
+    /// the user has animations off — then nothing is drawn and nothing is
+    /// worth waiting for.
+    pub fn begin_handoff(&self, user: &str) -> Duration {
+        if !animations_enabled() {
+            return Duration::ZERO;
+        }
+        for s in self.inner.borrow().iter() {
+            s.card.add_css_class("lock-handoff");
+            for (name, chip) in &s.user_chips {
+                chip.add_css_class(if name == user { "picked" } else { "dropped" });
+            }
+            // Nothing typed from here on lands anywhere useful.
+            s.entry.set_sensitive(false);
+            if let Some(ue) = &s.user_entry {
+                ue.set_sensitive(false);
+            }
+        }
+        HANDOFF
     }
 
     /// Wrong password: shake every card (CSS keyframe re-trigger).
@@ -490,7 +550,9 @@ impl SurfaceSet {
         }
     }
 
-    fn focus_active_entry(&self) {
+    /// Put the caret back in the password entry — on the surface the
+    /// compositor considers focused, if any.
+    pub fn focus_entry(&self) {
         let surfaces = self.inner.borrow();
         // Prefer the window that actually has compositor focus.
         for s in surfaces.iter() {
@@ -521,6 +583,9 @@ fn fill_chip_row(
     while let Some(child) = row.first_child() {
         row.remove(&child);
     }
+    // One face is no choice at all — the password entry already says who
+    // you are. Only a real picker earns the vertical space.
+    row.set_visible(users.len() > 1);
     let mut chips = Vec::with_capacity(users.len());
     for u in users {
         let chip = avatar_chip(&u.user, u.icon.as_deref(), u.logged_in, u.user == active);
@@ -559,12 +624,20 @@ fn avatar_chip(user: &str, icon: Option<&str>, logged_in: bool, active: bool) ->
 
 /// Lock-mode "Switch user" button — jumps to a greeter instead of offering
 /// direct user targets.
-fn build_switch_button(cmd: String) -> gtk4::Button {
+fn build_switch_button() -> gtk4::Button {
     let btn = gtk4::Button::with_label("󰓤  Switch user");
     btn.add_css_class("lock-switch-user");
     btn.set_halign(gtk4::Align::Center);
-    btn.connect_clicked(move |_| switch_user::to_greeter(&cmd));
+    btn.connect_clicked(|_| switch_user::to_greeter());
     btn
+}
+
+/// GTK's own reduced-motion switch (gtk-enable-animations, which the a11y
+/// settings and `GTK_DEBUG=no-animations` both drive). GTK CSS has no
+/// `prefers-reduced-motion` media query, so the decision is made here and
+/// the animated classes simply never get applied.
+fn animations_enabled() -> bool {
+    gtk4::Settings::default().is_none_or(|s| s.is_gtk_enable_animations())
 }
 
 fn wallpaper_path() -> Option<String> {

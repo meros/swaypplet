@@ -275,10 +275,7 @@ mod tests {
 
     #[test]
     fn mixed_valid_invalid() {
-        assert_eq!(
-            sanitize("<b>ok</b><span>nope</span>"),
-            "<b>ok</b>nope"
-        );
+        assert_eq!(sanitize("<b>ok</b><span>nope</span>"), "<b>ok</b>nope");
     }
 
     #[test]

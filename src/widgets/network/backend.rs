@@ -71,8 +71,15 @@ pub struct WifiNetwork {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ActiveConnection {
-    Wifi { ssid: String, signal: u8, device: String, freq_mhz: Option<u32> },
-    Ethernet { device: String },
+    Wifi {
+        ssid: String,
+        signal: u8,
+        device: String,
+        freq_mhz: Option<u32>,
+    },
+    Ethernet {
+        device: String,
+    },
     Disconnected,
 }
 
@@ -193,7 +200,14 @@ pub fn parse_wifi_list(output: &str, known_ssids: &[String]) -> Vec<WifiNetwork>
             continue;
         }
 
-        networks.push(WifiNetwork { ssid, signal, security, in_use, is_known, freq_mhz });
+        networks.push(WifiNetwork {
+            ssid,
+            signal,
+            security,
+            in_use,
+            is_known,
+            freq_mhz,
+        });
     }
 
     networks.sort_by(|a, b| {
@@ -233,7 +247,16 @@ pub fn get_known_ssids() -> Vec<String> {
 /// A hung nmcli process (e.g. a stuck driver) must not wedge scanning forever.
 pub fn scan_wifi_raw() -> Result<String, String> {
     let mut child = Command::new("nmcli")
-        .args(["-t", "-f", "SSID,SIGNAL,SECURITY,IN-USE,FREQ", "device", "wifi", "list", "--rescan", "yes"])
+        .args([
+            "-t",
+            "-f",
+            "SSID,SIGNAL,SECURITY,IN-USE,FREQ",
+            "device",
+            "wifi",
+            "list",
+            "--rescan",
+            "yes",
+        ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -261,7 +284,14 @@ pub fn scan_wifi_raw() -> Result<String, String> {
 
 pub fn get_active_connection() -> ActiveConnection {
     let Ok(out) = Command::new("nmcli")
-        .args(["-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"])
+        .args([
+            "-t",
+            "-f",
+            "NAME,TYPE,DEVICE",
+            "connection",
+            "show",
+            "--active",
+        ])
         .output()
     else {
         return ActiveConnection::Disconnected;
@@ -279,7 +309,12 @@ pub fn get_active_connection() -> ActiveConnection {
             NM_TYPE_WIFI => {
                 let ssid = parts[0].replace("\\:", ":").trim().to_string();
                 let (signal, freq_mhz) = get_active_wifi_info(&ssid);
-                return ActiveConnection::Wifi { ssid, signal, device, freq_mhz };
+                return ActiveConnection::Wifi {
+                    ssid,
+                    signal,
+                    device,
+                    freq_mhz,
+                };
             }
             NM_TYPE_ETHERNET => {
                 return ActiveConnection::Ethernet { device };
@@ -292,7 +327,14 @@ pub fn get_active_connection() -> ActiveConnection {
 
 fn get_active_wifi_info(ssid: &str) -> (u8, Option<u32>) {
     let Ok(out) = Command::new("nmcli")
-        .args(["-t", "-f", "SSID,SIGNAL,IN-USE,FREQ", "device", "wifi", "list"])
+        .args([
+            "-t",
+            "-f",
+            "SSID,SIGNAL,IN-USE,FREQ",
+            "device",
+            "wifi",
+            "list",
+        ])
         .output()
     else {
         return (0, None);
@@ -494,7 +536,11 @@ pub fn get_network_interfaces() -> Vec<NetworkInterface> {
             let enabled = raw_state != "disconnected"
                 && raw_state != "unavailable"
                 && raw_state != "unmanaged";
-            Some(NetworkInterface { device, iface_type, enabled })
+            Some(NetworkInterface {
+                device,
+                iface_type,
+                enabled,
+            })
         })
         .collect()
 }
@@ -584,7 +630,11 @@ pub fn get_dns_servers(device: &str) -> Vec<String> {
             // Format: IP4.DNS[1]:1.1.1.1
             let (_, addr) = line.split_once(':')?;
             let addr = addr.trim();
-            if addr.is_empty() { None } else { Some(addr.to_string()) }
+            if addr.is_empty() {
+                None
+            } else {
+                Some(addr.to_string())
+            }
         })
         .collect()
 }
@@ -612,7 +662,14 @@ pub fn check_connectivity() -> ConnectivityState {
 
 pub fn get_wifi_power_saving(conn_name: &str) -> bool {
     let Ok(out) = Command::new("nmcli")
-        .args(["-t", "-f", "802-11-wireless.powersave", "connection", "show", conn_name])
+        .args([
+            "-t",
+            "-f",
+            "802-11-wireless.powersave",
+            "connection",
+            "show",
+            conn_name,
+        ])
         .output()
     else {
         return false;
@@ -627,7 +684,13 @@ pub fn set_wifi_power_saving_async(conn_name: String, enable: bool, tx: mpsc::Se
     let value = value.to_string();
     thread::spawn(move || {
         let out = Command::new("nmcli")
-            .args(["connection", "modify", &conn_name, "802-11-wireless.powersave", &value])
+            .args([
+                "connection",
+                "modify",
+                &conn_name,
+                "802-11-wireless.powersave",
+                &value,
+            ])
             .output();
         let result = match out {
             Ok(o) if o.status.success() => NmResult::Success,
@@ -668,7 +731,11 @@ pub fn apply_nm_result(status_lbl: &gtk4::Label, result: &NmResult) {
             status_lbl.remove_css_class("network-status-err");
         }
         NmResult::Failure(msg) => {
-            let display = if msg.is_empty() { "Failed" } else { msg.as_str() };
+            let display = if msg.is_empty() {
+                "Failed"
+            } else {
+                msg.as_str()
+            };
             status_lbl.set_label(display);
             status_lbl.add_css_class("network-status-err");
             status_lbl.remove_css_class("network-status-ok");
