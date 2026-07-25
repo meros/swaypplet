@@ -5,8 +5,8 @@ use std::sync::mpsc;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, ListBox, ListBoxRow, Orientation, Spinner};
 
-use super::backend::*;
 use super::NetworkState;
+use super::backend::*;
 
 pub fn rebuild_vpn_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
     while let Some(child) = list.first_child() {

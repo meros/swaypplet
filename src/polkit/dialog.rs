@@ -115,10 +115,7 @@ impl PolkitDialog {
             .orientation(gtk4::Orientation::Vertical)
             .halign(gtk4::Align::Center)
             .build();
-        let icon_image = gtk4::Image::builder()
-            .pixel_size(44)
-            .visible(false)
-            .build();
+        let icon_image = gtk4::Image::builder().pixel_size(44).visible(false).build();
         icon_image.add_css_class("polkit-icon");
         let icon_label = gtk4::Label::builder().label("\u{f0483}").build();
         icon_label.add_css_class("polkit-icon-glyph");
@@ -150,7 +147,9 @@ impl PolkitDialog {
         fp_pill.add_css_class("polkit-fp-pill");
         let fp_glyph = gtk4::Label::builder().label("\u{f0237}").build();
         fp_glyph.add_css_class("polkit-fp-glyph");
-        let fp_label = gtk4::Label::builder().label("Touch fingerprint reader").build();
+        let fp_label = gtk4::Label::builder()
+            .label("Touch fingerprint reader")
+            .build();
         fp_label.add_css_class("polkit-fp-label");
         fp_pill.append(&fp_glyph);
         fp_pill.append(&fp_label);
@@ -400,9 +399,8 @@ impl PolkitDialog {
         self.card.remove_css_class("polkit-shake");
         self.card.remove_css_class("polkit-success");
         self.card.remove_css_class("polkit-verifying");
-        self.caps_label.set_visible(
-            keyboard_device().is_some_and(|kb| kb.is_caps_locked()),
-        );
+        self.caps_label
+            .set_visible(keyboard_device().is_some_and(|kb| kb.is_caps_locked()));
 
         // Title + message
         self.title_label.set_label("Authentication Required");
@@ -416,8 +414,7 @@ impl PolkitDialog {
         self.set_icon(&request.icon_name, &request.action_id);
 
         // Identities
-        *self.identities.borrow_mut() =
-            request.identities.iter().map(|i| i.uid).collect();
+        *self.identities.borrow_mut() = request.identities.iter().map(|i| i.uid).collect();
         if request.identities.len() <= 1 {
             self.identity_row.set_visible(false);
         } else {
@@ -489,9 +486,7 @@ impl PolkitDialog {
     pub fn set_password_prompt(&self, prompt: &str) {
         // PAM gives prompts like "Password: " — strip trailing colon/space
         // for the placeholder.
-        let cleaned = prompt
-            .trim_end_matches([' ', ':'])
-            .to_string();
+        let cleaned = prompt.trim_end_matches([' ', ':']).to_string();
         let placeholder = if cleaned.is_empty() {
             "Password".to_string()
         } else {

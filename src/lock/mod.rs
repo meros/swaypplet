@@ -16,7 +16,7 @@
 //! with fprintd fingerprint (see `fprint.rs`). Unlock only ever follows a
 //! PAM success or a fingerprint match.
 
-mod auth;
+pub(crate) mod auth;
 pub(crate) mod fprint;
 pub mod glass;
 pub mod ui;
@@ -28,6 +28,7 @@ use std::time::Duration;
 use gtk4::glib;
 use gtk4::prelude::*;
 
+use crate::fp::EngineEvent;
 use crate::spawn::spawn_work;
 use ui::{StatusKind, SurfaceSet};
 
@@ -65,7 +66,51 @@ pub fn run() -> ! {
     let main_loop = glib::MainLoop::new(None, false);
     let exit_code = Rc::new(RefCell::new(EXIT_ERROR));
     let surfaces = SurfaceSet::new();
+    surfaces.set_current_user(&user);
     let gate = Rc::new(RefCell::new(auth::AttemptGate::default()));
+
+    // The same user picker the greeter shows. Your own chip is inert (the
+    // password field below it is already aimed at you); anyone else's hands
+    // off to the host switcher, which locks this session and either jumps to
+    // theirs or opens a greeter. So a lock screen and a greeter answer the
+    // same gesture the same way, which is the whole point of the pair.
+    if crate::switch_user::available() {
+        let surfaces_cb = surfaces.clone();
+        surfaces.enable_user_chips(
+            &[],
+            Rc::new(move |target: String| {
+                if Some(&target) == auth::current_username().as_ref() {
+                    surfaces_cb.focus_entry();
+                    return;
+                }
+                surfaces_cb.set_status("Switching…", StatusKind::Info);
+                // Let the handoff play, then switch. The D-Bus round trips
+                // and the VT change add their own latency on top, so the
+                // beat is never cut short by being early.
+                let delay = surfaces_cb.begin_handoff(&target);
+                glib::timeout_add_local_once(delay, move || {
+                    crate::switch_user::switch_to(&target);
+                });
+            }),
+        );
+        // Off-thread: logind + fprintd round trips must never delay the
+        // lock surface. The row is hidden until this lands.
+        let surfaces = surfaces.clone();
+        spawn_work(crate::switch_user::list, move |list| {
+            let Some(list) = list.filter(|l| l.len() > 1) else {
+                return;
+            };
+            let chips: Vec<ui::UserChip> = list
+                .iter()
+                .map(|u| ui::UserChip {
+                    user: u.user.clone(),
+                    logged_in: u.logged_in,
+                    icon: u.icon.clone(),
+                })
+                .collect();
+            surfaces.set_user_chips(&chips);
+        });
+    }
 
     // ── Password submission ───────────────────────────────────────────
     let on_submit: Rc<dyn Fn(String)> = {
@@ -174,16 +219,16 @@ pub fn run() -> ! {
             glib::timeout_add_local(Duration::from_millis(40), move || {
                 while let Ok(ev) = rx.try_recv() {
                     match ev {
-                        fprint::FpEvent::Ready => {
+                        EngineEvent::Ready => {
                             surfaces.show_fp(true, "Touch fingerprint reader");
                         }
-                        fprint::FpEvent::Hint(h) => surfaces.show_fp(true, h),
-                        fprint::FpEvent::Match => {
+                        EngineEvent::Hint(h) => surfaces.show_fp(true, &h),
+                        EngineEvent::Match(_) => {
                             surfaces.flash_success();
                             instance.unlock();
                             return glib::ControlFlow::Break;
                         }
-                        fprint::FpEvent::Unavailable(why) => {
+                        EngineEvent::Unavailable(why) => {
                             log::info!("fingerprint unavailable: {why}");
                             surfaces.show_fp(false, "");
                         }

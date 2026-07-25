@@ -5,8 +5,8 @@ use std::sync::mpsc;
 use gtk4::prelude::*;
 use gtk4::{Box, Label, ListBox, ListBoxRow, Orientation, Spinner, Switch};
 
-use super::backend::*;
 use super::NetworkState;
+use super::backend::*;
 
 /// Rebuild the interface list from current state. Single implementation used
 /// both from `NetworkSection` methods and async polling callbacks.
@@ -59,9 +59,7 @@ pub fn rebuild_iface_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
             "bridge" => "Bridge",
             _ => &iface.iface_type,
         };
-        let type_lbl = Label::builder()
-            .label(friendly_type)
-            .build();
+        let type_lbl = Label::builder().label(friendly_type).build();
         type_lbl.add_css_class("network-signal");
 
         let spinner = Spinner::new();

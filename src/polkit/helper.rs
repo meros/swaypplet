@@ -109,9 +109,7 @@ impl Helper {
         let stdout_fd = child
             .stdout
             .as_ref()
-            .ok_or_else(|| {
-                std::io::Error::other("polkit helper stdout not piped")
-            })?
+            .ok_or_else(|| std::io::Error::other("polkit helper stdout not piped"))?
             .as_raw_fd();
         unsafe {
             let flags = libc::fcntl(stdout_fd, libc::F_GETFL);
@@ -140,13 +138,8 @@ impl Helper {
         let mut eof = false;
 
         loop {
-            let n = unsafe {
-                libc::read(
-                    self.stdout_fd,
-                    chunk.as_mut_ptr() as *mut _,
-                    chunk.len(),
-                )
-            };
+            let n =
+                unsafe { libc::read(self.stdout_fd, chunk.as_mut_ptr() as *mut _, chunk.len()) };
             if n == 0 {
                 eof = true;
                 break;

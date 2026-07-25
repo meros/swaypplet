@@ -4,8 +4,8 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{Label, ListBox};
 
-use super::backend::*;
 use super::NetworkState;
+use super::backend::*;
 
 /// Widget handles needed by the display update helpers.
 pub struct DisplayWidgets {
@@ -100,8 +100,7 @@ fn schedule_next(
         glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
             match rx.try_recv() {
                 Ok(polled) => {
-                    let changed =
-                        apply_polled_state(&polled, &state_poll, &cached_poll, &w_poll);
+                    let changed = apply_polled_state(&polled, &state_poll, &cached_poll, &w_poll);
                     cached_poll.borrow_mut().accelerated = changed;
 
                     schedule_next(
@@ -208,7 +207,12 @@ pub fn update_active_display_with_ip(
 /// Set connection labels (icon, SSID, signal, summary). Returns the device name if connected.
 fn update_active_labels<'a>(active: &'a ActiveConnection, w: &DisplayWidgets) -> Option<&'a str> {
     match active {
-        ActiveConnection::Wifi { ssid, signal, device, freq_mhz } => {
+        ActiveConnection::Wifi {
+            ssid,
+            signal,
+            device,
+            freq_mhz,
+        } => {
             w.current_icon.set_label(signal_icon(*signal));
             w.current_ssid.set_label(ssid);
             let signal_text = match freq_mhz {
@@ -244,7 +248,12 @@ fn update_active_labels<'a>(active: &'a ActiveConnection, w: &DisplayWidgets) ->
 }
 
 /// Apply pre-fetched IP / gateway / DNS info to the display widgets.
-fn apply_ip_info(w: &DisplayWidgets, ip: &Option<String>, gateway: &Option<String>, dns: &[String]) {
+fn apply_ip_info(
+    w: &DisplayWidgets,
+    ip: &Option<String>,
+    gateway: &Option<String>,
+    dns: &[String],
+) {
     match ip {
         Some(ip) => {
             w.ip_label.set_label(&format!("IP: {}", ip));

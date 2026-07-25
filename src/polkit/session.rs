@@ -24,8 +24,7 @@ pub async fn current_session_id(system_bus: &zbus::Connection) -> zbus::Result<S
     .await?;
 
     let pid: u32 = std::process::id();
-    let path: zbus::zvariant::OwnedObjectPath =
-        manager.call("GetSessionByPID", &(pid,)).await?;
+    let path: zbus::zvariant::OwnedObjectPath = manager.call("GetSessionByPID", &(pid,)).await?;
 
     let session = zbus::Proxy::new(
         system_bus,

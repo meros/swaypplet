@@ -9,10 +9,12 @@ use std::rc::Rc;
 use std::sync::mpsc;
 
 use gtk4::prelude::*;
-use gtk4::{Box, Button, Label, ListBox, Orientation, Revealer, RevealerTransitionType, Spinner, Switch};
+use gtk4::{
+    Box, Button, Label, ListBox, Orientation, Revealer, RevealerTransitionType, Spinner, Switch,
+};
 
-use backend::*;
 use crate::spawn::spawn_work;
+use backend::*;
 
 // ── Async result types ───────────────────────────────────────────────────────
 
@@ -184,9 +186,7 @@ impl NetworkSection {
             .build();
         current_row.add_css_class("network-current");
 
-        let current_icon_label = Label::builder()
-            .label(ICON_DISCONNECTED)
-            .build();
+        let current_icon_label = Label::builder().label(ICON_DISCONNECTED).build();
         current_icon_label.add_css_class("network-icon");
 
         let current_ssid_label = Label::builder()
@@ -220,9 +220,7 @@ impl NetworkSection {
         connectivity_label.add_css_class("network-connectivity");
         connectivity_label.set_visible(false);
 
-        let portal_btn = Button::builder()
-            .label("Open portal")
-            .build();
+        let portal_btn = Button::builder().label("Open portal").build();
         portal_btn.add_css_class("network-connect-btn");
         portal_btn.set_visible(false);
         portal_btn.connect_clicked(|_| {
@@ -283,9 +281,7 @@ impl NetworkSection {
             .build();
         ps_label.add_css_class("network-ssid");
 
-        let ps_switch = Switch::builder()
-            .valign(gtk4::Align::Center)
-            .build();
+        let ps_switch = Switch::builder().valign(gtk4::Align::Center).build();
 
         {
             let ps_switch_c = ps_switch.clone();
@@ -295,8 +291,9 @@ impl NetworkSection {
                     set_wifi_power_saving_async(conn_name, active, tx);
 
                     let sw_poll = ps_switch_c.clone();
-                    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                        match rx.try_recv() {
+                    glib::timeout_add_local(
+                        std::time::Duration::from_millis(100),
+                        move || match rx.try_recv() {
                             Ok(NmResult::Success) => {
                                 sw_poll.set_state(active);
                                 glib::ControlFlow::Break
@@ -305,10 +302,14 @@ impl NetworkSection {
                                 sw_poll.set_state(!active);
                                 glib::ControlFlow::Break
                             }
-                            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
-                        }
-                    });
+                            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                                glib::ControlFlow::Continue
+                            }
+                            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                                glib::ControlFlow::Break
+                            }
+                        },
+                    );
                 }
                 glib::Propagation::Proceed
             });
@@ -342,9 +343,7 @@ impl NetworkSection {
         let scan_spinner = Spinner::new();
         scan_spinner.set_visible(false);
 
-        let scan_status_label = Label::builder()
-            .label("")
-            .build();
+        let scan_status_label = Label::builder().label("").build();
         scan_status_label.add_css_class("network-scan-status");
         scan_status_label.set_visible(false);
 
@@ -549,12 +548,15 @@ impl NetworkSection {
                             let si_poll = summary_icon_radio.clone();
                             let st_poll = summary_text_radio.clone();
                             let sw_poll = wifi_switch_revert.clone();
-                            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                                match rx.try_recv() {
+                            glib::timeout_add_local(
+                                std::time::Duration::from_millis(100),
+                                move || match rx.try_recv() {
                                     Ok(NmResult::Success) => {
                                         state_poll.borrow_mut().wifi_radio_enabled = active;
                                         controls_poll.set_visible(active);
-                                        ps_poll.set_visible(active && get_active_wifi_conn_name().is_some());
+                                        ps_poll.set_visible(
+                                            active && get_active_wifi_conn_name().is_some(),
+                                        );
                                         if !active {
                                             si_poll.set_label(ICON_DISCONNECTED);
                                             st_poll.set_label("WiFi Off");
@@ -565,13 +567,15 @@ impl NetworkSection {
                                         sw_poll.set_state(!active);
                                         glib::ControlFlow::Break
                                     }
-                                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                                        glib::ControlFlow::Continue
+                                    }
                                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                                         sw_poll.set_state(!active);
                                         glib::ControlFlow::Break
                                     }
-                                }
-                            });
+                                },
+                            );
 
                             glib::Propagation::Proceed
                         });
@@ -650,7 +654,8 @@ impl NetworkSection {
 
                 // Fetch IP info for the active device while still on the background thread.
                 let ip_info = match &active {
-                    ActiveConnection::Wifi { device, .. } | ActiveConnection::Ethernet { device } => {
+                    ActiveConnection::Wifi { device, .. }
+                    | ActiveConnection::Ethernet { device } => {
                         let ip = get_device_ip(device);
                         let gateway = get_default_gateway();
                         let dns = get_dns_servers(device);
@@ -663,7 +668,13 @@ impl NetworkSection {
                     },
                 };
 
-                RefreshResult { active, connectivity, interfaces, vpns, ip_info }
+                RefreshResult {
+                    active,
+                    connectivity,
+                    interfaces,
+                    vpns,
+                    ip_info,
+                }
             },
             move |result| {
                 // Apply active connection display (without re-fetching IP info).

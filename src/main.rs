@@ -3,7 +3,8 @@ mod app;
 mod avatar;
 mod dmenu;
 mod elephant;
-mod fp_agent;
+mod fp;
+mod gdm_shim;
 mod greet;
 mod icons;
 mod idle;
@@ -36,10 +37,16 @@ fn main() {
         Some("greet") => greet::run(),
         // idle manager (swayidle replacement) — standalone process, no GTK.
         Some("idle") => idle::run(),
-        // Root fingerprint agent for the greeter (see src/fp_agent.rs) and
+        // Root fingerprint agent for the greeter (see src/fp/agent.rs) and
         // its pam_exec token-check counterpart in greetd's PAM stack.
-        Some("fp-agent") => fp_agent::run_agent(),
-        Some("fp-check") => fp_agent::run_check(),
+        Some("fp-agent") => fp::agent::run_agent(),
+        Some("fp-check") => fp::agent::run_check(),
+        // Fast user switching: the host command behind every picker chip, and
+        // a usable CLI from a getty when the graphical side is unhappy.
+        Some("switch-user") => switch_user::run(args),
+        // Root D-Bus shim standing in for GDM, so GNOME's "Switch User…"
+        // reaches the same greeter as everything else.
+        Some("gdm-shim") => gdm_shim::run(),
         // dmenu-style picker — thin client to the panel's picker server,
         // with a standalone GTK fallback when no panel is listening.
         Some("dmenu") => dmenu::run(args),

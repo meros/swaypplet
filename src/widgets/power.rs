@@ -14,7 +14,11 @@ fn read_sysfs(path: &str) -> Option<String> {
     match fs::read_to_string(path) {
         Ok(s) => {
             let trimmed = s.trim().to_owned();
-            if trimmed.is_empty() { None } else { Some(trimmed) }
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
         }
         Err(e) => {
             log::warn!("Failed to read {}: {}", path, e);
@@ -90,7 +94,6 @@ impl GovernorProfile {
             other => GovernorProfile::Other(other.to_owned()),
         }
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -101,7 +104,10 @@ fn read_battery(bat_path: &str) -> Option<BatteryState> {
     let capacity: u8 = read_sysfs(&format!("{}/capacity", bat_path))
         .and_then(|s| s.parse().ok())
         .or_else(|| {
-            log::error!("Battery info unavailable: cannot read {}/capacity", bat_path);
+            log::error!(
+                "Battery info unavailable: cannot read {}/capacity",
+                bat_path
+            );
             None
         })?;
 
@@ -110,8 +116,7 @@ fn read_battery(bat_path: &str) -> Option<BatteryState> {
         "Discharging".to_owned()
     });
 
-    let charging =
-        status.eq_ignore_ascii_case("Charging") || status.eq_ignore_ascii_case("Full");
+    let charging = status.eq_ignore_ascii_case("Charging") || status.eq_ignore_ascii_case("Full");
 
     let power_w = read_sysfs(&format!("{}/power_now", bat_path))
         .and_then(|s| s.parse::<u64>().ok())
@@ -239,7 +244,6 @@ fn read_governor() -> GovernorProfile {
         .map(|s| GovernorProfile::from_sysfs(&s))
         .unwrap_or(GovernorProfile::Balanced)
 }
-
 
 // ---------------------------------------------------------------------------
 // Widget state
@@ -378,10 +382,7 @@ impl PowerSection {
                 battery_summary_text(bat),
             )
         } else {
-            (
-                "󰻠".to_owned(),
-                format_governor_info(&state.governor),
-            )
+            ("󰻠".to_owned(), format_governor_info(&state.governor))
         };
 
         let summary_icon = gtk4::Label::builder()
@@ -409,9 +410,7 @@ impl PowerSection {
         summary_content.append(&summary_text);
         summary_content.append(&summary_arrow);
 
-        let summary_btn = gtk4::Button::builder()
-            .child(&summary_content)
-            .build();
+        let summary_btn = gtk4::Button::builder().child(&summary_content).build();
         summary_btn.add_css_class("section-summary");
         root.append(&summary_btn);
 
@@ -601,7 +600,6 @@ impl PowerSection {
     pub fn widget(&self) -> &gtk4::Box {
         &self.root
     }
-
 }
 
 // ---------------------------------------------------------------------------

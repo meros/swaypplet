@@ -75,8 +75,16 @@ impl OsdCommand {
 // ── OSD result after performing action ───────────────────────────────────────
 
 enum OsdDisplay {
-    Bar { icon: String, fraction: f64, text: String },
-    Indicator { icon: String, label: String, active: bool },
+    Bar {
+        icon: String,
+        fraction: f64,
+        text: String,
+    },
+    Indicator {
+        icon: String,
+        label: String,
+        active: bool,
+    },
 }
 
 // ── Action execution + state reading ─────────────────────────────────────────
@@ -85,7 +93,13 @@ fn execute_command(cmd: &OsdCommand) -> OsdDisplay {
     match cmd {
         OsdCommand::OutputVolumeRaise => {
             let _ = Command::new("wpctl")
-                .args(["set-volume", "-l", "1.5", "@DEFAULT_AUDIO_SINK@", VOLUME_STEP_PLUS])
+                .args([
+                    "set-volume",
+                    "-l",
+                    "1.5",
+                    "@DEFAULT_AUDIO_SINK@",
+                    VOLUME_STEP_PLUS,
+                ])
                 .output();
             read_volume_display("@DEFAULT_AUDIO_SINK@", false)
         }
@@ -119,7 +133,9 @@ fn execute_command(cmd: &OsdCommand) -> OsdDisplay {
                 .output();
             read_brightness_display()
         }
-        OsdCommand::CapsLock => read_lock_display("capslock", icons::CAPS_ON, icons::CAPS_OFF, "CAPS"),
+        OsdCommand::CapsLock => {
+            read_lock_display("capslock", icons::CAPS_ON, icons::CAPS_OFF, "CAPS")
+        }
         OsdCommand::NumLock => read_lock_display("numlock", icons::NUM_ON, icons::NUM_OFF, "NUM"),
         OsdCommand::ScrollLock => read_lock_display("scrolllock", "S", "s", "SCROLL"),
     }
@@ -165,7 +181,12 @@ fn read_brightness_display() -> OsdDisplay {
         .and_then(|o| {
             let text = String::from_utf8_lossy(&o.stdout).to_string();
             let line = text.lines().next()?.to_string();
-            let field = line.split(',').nth(3)?.trim().trim_end_matches('%').to_string();
+            let field = line
+                .split(',')
+                .nth(3)?
+                .trim()
+                .trim_end_matches('%')
+                .to_string();
             field.parse::<u32>().ok()
         })
         .unwrap_or(0);
@@ -264,9 +285,7 @@ impl Osd {
             .spacing(8)
             .build();
 
-        let bar = gtk4::ProgressBar::builder()
-            .hexpand(true)
-            .build();
+        let bar = gtk4::ProgressBar::builder().hexpand(true).build();
         bar.add_css_class("osd-bar");
 
         let text_label = gtk4::Label::builder()
@@ -340,19 +359,30 @@ impl Osd {
         // stuck command doesn't freeze the panel.
         let cmd = *cmd;
         let osd = self.clone();
-        spawn_work(move || execute_command(&cmd), move |display| osd.show_display(&display));
+        spawn_work(
+            move || execute_command(&cmd),
+            move |display| osd.show_display(&display),
+        );
     }
 
     fn show_display(&self, display: &OsdDisplay) {
         match display {
-            OsdDisplay::Bar { icon, fraction, text } => {
+            OsdDisplay::Bar {
+                icon,
+                fraction,
+                text,
+            } => {
                 self.icon_label.set_label(icon);
                 self.bar.set_fraction(*fraction);
                 self.text_label.set_label(text);
                 self.bar_box.set_visible(true);
                 self.indicator_label.set_visible(false);
             }
-            OsdDisplay::Indicator { icon, label, active } => {
+            OsdDisplay::Indicator {
+                icon,
+                label,
+                active,
+            } => {
                 self.icon_label.set_label(icon);
                 self.indicator_label.set_label(label);
                 self.bar_box.set_visible(false);
@@ -360,7 +390,8 @@ impl Osd {
                 if *active {
                     self.indicator_label.add_css_class("osd-indicator-active");
                 } else {
-                    self.indicator_label.remove_css_class("osd-indicator-active");
+                    self.indicator_label
+                        .remove_css_class("osd-indicator-active");
                 }
             }
         }

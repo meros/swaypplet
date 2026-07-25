@@ -5,7 +5,7 @@
 //! returns. All password auth flows through greetd's PAM conversation —
 //! only greetd can start the session, and only its own PAM success lets it.
 //!
-//! Fingerprint is out-of-band (see `crate::fp_agent`): greetd's PAM stack is
+//! Fingerprint is out-of-band (see `crate::fp::agent`): greetd's PAM stack is
 //! password-only, because the greetd protocol is strictly synchronous and an
 //! armed pam_fprintd parks the whole conversation — cancels and user
 //! switches would hang for the length of a fingerprint wait. Instead the
@@ -32,8 +32,12 @@
 //! environment via greetd — e.g. XDG_SESSION_TYPE=wayland so logind
 //! registers a graphical session, which GNOME requires; values cannot
 //! contain whitespace), SWAYPPLET_LOCK_WALLPAPER (shared with the lock UI),
-//! SWAYPPLET_FP_SOCK (fp-agent socket override),
-//! SWAYPPLET_SWITCH_USER_CMD (host switcher, also feeds the chip list).
+//! SWAYPPLET_FP_SOCK (fp-agent socket override).
+//!
+//! The richer chip data (avatars, presence, fingerprint enrollment) and the
+//! jump-to-a-running-session path both come from [`crate::switch_user`],
+//! which is configured by /etc/swaypplet/switch-user.json rather than the
+//! environment.
 
 mod agent;
 mod ipc;
@@ -44,11 +48,11 @@ use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use greetd_ipc::AuthMessageType;
 use gtk4::glib;
 use gtk4::prelude::*;
-use greetd_ipc::AuthMessageType;
 
-use crate::fp_agent::{Cmd as FpCmd, Ev as FpEv};
+use crate::fp::agent::{Cmd as FpCmd, Ev as FpEv};
 use crate::lock::ui::{StatusKind, SurfaceSet, UserChip};
 use crate::switch_user;
 
@@ -89,7 +93,8 @@ struct State {
     /// Users with a live graphical session from `--list` — their chips jump
     /// to the session instead of starting a greetd conversation.
     logged_in: HashMap<String, bool>,
-    switch_cmd: Option<String>,
+    /// Whether this host does user switching at all (dev boxes don't).
+    can_switch: bool,
     fp_tx: tokio::sync::mpsc::UnboundedSender<FpCmd>,
 }
 
@@ -111,12 +116,46 @@ impl State {
         self.enrolled.get(user).copied().unwrap_or(true)
     }
 
+    /// Whether `user` already has a live graphical session. Unknown (no
+    /// `--list` yet) → `false`, so the greeter behaves as it always did and
+    /// self-corrects once the list lands.
+    fn has_session(&self, user: &str) -> bool {
+        self.logged_in.get(user).copied().unwrap_or(false)
+    }
+
+    /// Hand `user` off to their existing session via the host switcher.
+    /// `false` when there is nothing to hand off to (no session, or no
+    /// switcher on this host) and the caller should fall back to greetd.
+    ///
+    /// Authenticating here would be wasted work *and* a second password
+    /// prompt: greetd would create a session, `sessionDispatch` would notice
+    /// the other one and `loginctl activate` it, and the user would land on
+    /// that session's own lock screen and have to authenticate again. The
+    /// session that owns the screen does the auth; we only get you there.
+    fn jump_to_session(&mut self, user: &str) -> bool {
+        if !self.has_session(user) || !self.can_switch {
+            return false;
+        }
+        self.surfaces.set_status("Switching…", StatusKind::Info);
+        // Same handoff beat as the lock screen's picker — this is a jump
+        // between sessions either way, so it should look like one.
+        let delay = self.surfaces.begin_handoff(user);
+        let user = user.to_string();
+        glib::timeout_add_local_once(delay, move || switch_user::switch_to(&user));
+        true
+    }
+
     /// Point the fp-agent at the currently selected user (or stand it down
     /// for an unenrolled one). The pill hides until the agent reports Ready
     /// for the new target.
+    ///
+    /// A user with a live session gets the reader stood down too: a match
+    /// there could only mint a token for a greetd conversation we are never
+    /// going to run (see `jump_to_session`), and arming it would promise an
+    /// unlock this surface cannot deliver.
     fn retarget_fp(&mut self) {
         match self.username() {
-            Some(user) if self.fp_enrolled(&user) => {
+            Some(user) if self.fp_enrolled(&user) && !self.has_session(&user) => {
                 self.surfaces.show_fp(false, "");
                 let _ = self.fp_tx.send(FpCmd::Verify { user });
             }
@@ -136,10 +175,10 @@ pub fn run() -> ! {
     crate::theme::load_css();
 
     // Start from the cheap SWAYPPLET_GREET_USERS name list so the window can
-    // present without blocking on the host `--list` (two busctl calls per
-    // user; fprintd may be cold at boot). The richer `--list` data — avatars,
-    // presence, fingerprint enrollment — is fetched off-thread below and
-    // upgrades the chips once it lands.
+    // present without blocking on the session query (a logind round trip per
+    // user, plus fprintd, which may be cold at boot). The richer data —
+    // avatars, presence, fingerprint enrollment — is fetched off-thread below
+    // and upgrades the chips once it lands.
     let users: Vec<String> = std::env::var("SWAYPPLET_GREET_USERS")
         .unwrap_or_default()
         .split(',')
@@ -186,7 +225,7 @@ pub fn run() -> ! {
         switch_pending: None,
         enrolled,
         logged_in,
-        switch_cmd: switch_user::cmd(),
+        can_switch: switch_user::available(),
         fp_tx,
     }));
 
@@ -224,7 +263,7 @@ pub fn run() -> ! {
         s.retarget_fp();
     }
 
-    // Upgrade the env-name chips to the host `--list` data (avatars, presence,
+    // Upgrade the env-name chips to the full picker data (avatars, presence,
     // fingerprint enrollment) off the main thread — the window is already up.
     // Until this lands, unknown enrollment is treated as enrolled (the reader
     // arms) and unknown presence as logged-out (a chip click starts a greetd
@@ -246,10 +285,17 @@ pub fn run() -> ! {
                 .collect();
             {
                 let mut s = st.borrow_mut();
-                s.enrolled = list.iter().map(|u| (u.user.clone(), u.fingerprint)).collect();
+                // Only record a definite enrollment verdict; `None` (host
+                // couldn't tell — cold fprintd) is left absent so `fp_enrolled`
+                // falls back to armed rather than tearing the reader down on a
+                // false negative.
+                s.enrolled = list
+                    .iter()
+                    .filter_map(|u| u.fingerprint.map(|fp| (u.user.clone(), fp)))
+                    .collect();
                 s.logged_in = list.iter().map(|u| (u.user.clone(), u.logged_in)).collect();
             }
-            surfaces.set_greet_chips(&chips);
+            surfaces.set_user_chips(&chips);
             st.borrow_mut().retarget_fp();
         });
     }
@@ -286,9 +332,19 @@ fn submit(st: &Rc<RefCell<State>>, password: String) {
         return;
     };
 
+    // The selected user is already logged in somewhere — hand off instead of
+    // authenticating. Reachable when `--list` lands after the prefilled user
+    // has been targeted, so the chip-click guard never ran.
+    if s.jump_to_session(&user) {
+        return;
+    }
+
     if s.canceling {
         // Restart already in flight — this secret rides along.
-        s.pending = Some(Pending { user: user.clone(), password });
+        s.pending = Some(Pending {
+            user: user.clone(),
+            password,
+        });
         s.recreate_user = Some(user);
         return;
     }
@@ -321,12 +377,8 @@ fn submit(st: &Rc<RefCell<State>>, password: String) {
 /// greetd conversation restarted for them and the reader retargeted.
 fn switch_user(st: &Rc<RefCell<State>>, user: String) {
     let mut s = st.borrow_mut();
-    if s.logged_in.get(&user).copied().unwrap_or(false) {
-        if let Some(cmd) = s.switch_cmd.clone() {
-            s.surfaces.set_status("Switching…", StatusKind::Info);
-            switch_user::switch_to(&cmd, &user);
-            return;
-        }
+    if s.jump_to_session(&user) {
+        return;
     }
     let already_current = s.session_user.as_deref() == Some(user.as_str())
         && s.username().as_deref() == Some(user.as_str());
@@ -488,7 +540,11 @@ fn handle_event(
             s.surfaces.set_verifying(false);
             if auth {
                 log::info!("auth failed: {text}");
-                s.surfaces.set_status("Login failed", StatusKind::Error);
+                // Same words the lock screen uses. Neither surface names
+                // its own mode — "Login failed" here and "Wrong password"
+                // there told the same person two different stories about
+                // the same mistyped key.
+                s.surfaces.set_status("Wrong password", StatusKind::Error);
                 s.surfaces.shake();
             } else {
                 log::warn!("greetd error: {text}");
