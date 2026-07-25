@@ -334,6 +334,15 @@ pub enum Flow {
 /// reporting. A healthy idle reader just re-arms; a match still lands.
 const VERIFY_SILENCE_TIMEOUT: Duration = Duration::from_secs(40);
 
+/// Claim retry cadence. The fast one covers the normal handover, where the
+/// previous holder is a few hundred milliseconds from releasing. After
+/// `CLAIM_QUIET_ATTEMPTS` it steps back: every attempt is a full polkit
+/// round trip, and hammering one twice a second for the length of a lock
+/// screen buys nothing a two-second poll doesn't.
+const CLAIM_RETRY: Duration = Duration::from_millis(500);
+const CLAIM_RETRY_SLOW: Duration = Duration::from_secs(2);
+const CLAIM_QUIET_ATTEMPTS: u32 = 6;
+
 /// Whether `user` has usable enrolled prints, distinguishing an authoritative
 /// "none" from a transient read failure.
 enum Enrollment {
@@ -446,6 +455,7 @@ pub async fn verify_engine(
         // after the release calls below, so suspend proceeds with the reader
         // idle.
         let mut inhibitor: Option<zbus::zvariant::OwnedFd> = None;
+        let mut attempts: u32 = 0;
         loop {
             if !targeted(&target, &user) || !*active.borrow() || *sleeping.borrow() {
                 continue 'outer;
@@ -456,9 +466,24 @@ pub async fn verify_engine(
             match device.claim(&user).await {
                 Ok(()) => break,
                 Err(e) => {
-                    log::debug!("claim({user}) failed, retrying: {e}");
+                    attempts += 1;
+                    // A couple of misses is the normal handover shape (the
+                    // other side is still releasing). Past that the reader is
+                    // held by something that isn't going to let go on its own,
+                    // and the only way anyone finds out is this line — so say
+                    // it at warn, once, with fprintd's own words.
+                    if attempts == CLAIM_QUIET_ATTEMPTS {
+                        log::warn!("claim({user}) still failing after {attempts}: {e}");
+                    } else {
+                        log::debug!("claim({user}) attempt {attempts} failed: {e}");
+                    }
+                    let backoff = if attempts < CLAIM_QUIET_ATTEMPTS {
+                        CLAIM_RETRY
+                    } else {
+                        CLAIM_RETRY_SLOW
+                    };
                     tokio::select! {
-                        _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+                        _ = tokio::time::sleep(backoff) => {}
                         r = target.changed() => if r.is_err() { return },
                         _ = active.changed() => {}
                         _ = sleeping.changed() => {}
@@ -466,9 +491,12 @@ pub async fn verify_engine(
                 }
             }
         }
-        emit!(EngineEvent::Ready);
 
         // Verify sessions until a match, a retarget, or a gate flip.
+        // `armed` holds back Ready until a verify is actually running: a claim
+        // alone is not a reader you can touch, and promising one that isn't
+        // scanning is worse than promising nothing.
+        let mut armed = false;
         'verify: loop {
             if !targeted(&target, &user) || !*active.borrow() || *sleeping.borrow() {
                 let _ = device.release().await;
@@ -479,6 +507,10 @@ pub async fn verify_engine(
                 let _ = device.release().await;
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 continue 'outer;
+            }
+            if !armed {
+                armed = true;
+                emit!(EngineEvent::Ready);
             }
             let watchdog = tokio::time::sleep(VERIFY_SILENCE_TIMEOUT);
             tokio::pin!(watchdog);
