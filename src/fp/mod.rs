@@ -334,6 +334,16 @@ pub enum Flow {
 /// reporting. A healthy idle reader just re-arms; a match still lands.
 const VERIFY_SILENCE_TIMEOUT: Duration = Duration::from_secs(40);
 
+/// Floor between VerifyStart calls within one claim. A human retry is seconds
+/// apart, so this is invisible in normal use, and it caps any restart feedback
+/// loop at a trickle instead of a spin. Backstop for the cancel echo below.
+const VERIFY_RESTART_FLOOR: Duration = Duration::from_millis(400);
+
+/// Warn once when one claim has re-armed this many times — a healthy lock
+/// screen re-arms once per [`VERIFY_SILENCE_TIMEOUT`], so anything near this
+/// is a loop that wants looking at.
+const RESTART_WARN_AT: u32 = 20;
+
 /// Claim retry cadence. The fast one covers the normal handover, where the
 /// previous holder is a few hundred milliseconds from releasing. After
 /// `CLAIM_QUIET_ATTEMPTS` it steps back: every attempt is a full polkit
@@ -342,6 +352,32 @@ const VERIFY_SILENCE_TIMEOUT: Duration = Duration::from_secs(40);
 const CLAIM_RETRY: Duration = Duration::from_millis(500);
 const CLAIM_RETRY_SLOW: Duration = Duration::from_secs(2);
 const CLAIM_QUIET_ATTEMPTS: u32 = 6;
+
+/// Whether a terminal status is the echo of a verify session we cancelled
+/// ourselves, and consume the debt if so.
+///
+/// fprintd completes a *running* verify that we stop (VerifyStop on an
+/// in-flight session) with a terminal `verify-no-match`: the synaptics SSM
+/// fails with "Device reported cancellation of operation" and
+/// `report_verify_status` fires anyway. Reading that echo as a failed finger
+/// restarts the verify, and the restart's own cancellation emits the next
+/// echo — a feedback loop that ran ~100 stop/start pairs a second, desynced
+/// the sensor's sequence numbers and left fprintd wedged (2026-07-25 18:23:
+/// 22 s of CPU in two minutes, then "Device 06cb:019d is already open" on
+/// every later claim).
+///
+/// So the engine counts the terminal statuses it is owed by sessions it
+/// killed and absorbs exactly that many. A `Match` is never an echo — a
+/// cancellation can only complete as no-match or error — so a finger that
+/// landed just before the stop still unlocks.
+fn absorb_echo(owed: &mut u32, verdict: &Verify) -> bool {
+    if *owed > 0 && matches!(verdict, Verify::NoMatch | Verify::Error) {
+        *owed -= 1;
+        true
+    } else {
+        false
+    }
+}
 
 /// Whether `user` has usable enrolled prints, distinguishing an authoritative
 /// "none" from a transient read failure.
@@ -496,17 +532,36 @@ pub async fn verify_engine(
         // `armed` holds back Ready until a verify is actually running: a claim
         // alone is not a reader you can touch, and promising one that isn't
         // scanning is worse than promising nothing.
+        //
+        // `echoes` counts terminal statuses fprintd owes us for verify
+        // sessions we cancelled ourselves (see `absorb_echo`); it resets with
+        // the claim, since a fresh claim inherits nothing from the old one.
         let mut armed = false;
+        let mut echoes: u32 = 0;
+        let mut restarts: u32 = 0;
+        let mut last_start: Option<std::time::Instant> = None;
         'verify: loop {
             if !targeted(&target, &user) || !*active.borrow() || *sleeping.borrow() {
                 let _ = device.release().await;
                 continue 'outer;
+            }
+            // Never re-arm faster than the floor, whatever drove us here.
+            if let Some(prev) = last_start {
+                let since = prev.elapsed();
+                if since < VERIFY_RESTART_FLOOR {
+                    tokio::time::sleep(VERIFY_RESTART_FLOOR - since).await;
+                }
             }
             if let Err(e) = device.verify_start("any").await {
                 log::warn!("VerifyStart({user}) failed, reclaiming: {e}");
                 let _ = device.release().await;
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 continue 'outer;
+            }
+            last_start = Some(std::time::Instant::now());
+            restarts += 1;
+            if restarts == RESTART_WARN_AT {
+                log::warn!("verify re-armed {restarts}× on one claim — cancel-echo loop?");
             }
             if !armed {
                 armed = true;
@@ -525,7 +580,14 @@ pub async fn verify_engine(
                             continue 'outer;
                         };
                         let Ok(args) = signal.args() else { continue };
-                        match parse_verify_status(args.result(), *args.done()) {
+                        let verdict = parse_verify_status(args.result(), *args.done());
+                        // A session we killed reporting in — not a finger.
+                        // Absorb it and stay on the session now running.
+                        if absorb_echo(&mut echoes, &verdict) {
+                            log::debug!("absorbed cancel echo: {}", args.result());
+                            continue;
+                        }
+                        match verdict {
                             Verify::Match => {
                                 let _ = device.verify_stop().await;
                                 let _ = device.release().await;
@@ -570,8 +632,16 @@ pub async fn verify_engine(
                         // No status for the whole window — the verify may be
                         // wedged. Re-arm it without dropping the claim (no UI
                         // flicker); the reader keeps scanning.
-                        log::warn!("verify silent for {VERIFY_SILENCE_TIMEOUT:?}, restarting");
+                        //
+                        // Getting here means a session is still running (every
+                        // terminal status leaves this loop), so the stop below
+                        // cancels a live verify and fprintd owes us one more
+                        // terminal status for it. Count it, or the restart
+                        // reads it as a failed finger and the loop feeds
+                        // itself.
+                        log::info!("verify silent for {VERIFY_SILENCE_TIMEOUT:?}, restarting");
                         let _ = device.verify_stop().await;
+                        echoes += 1;
                         continue 'verify;
                     }
                     r = target.changed() => {
@@ -694,6 +764,34 @@ mod tests {
         // Empty string (the old null-deref bug class) → safe fallthrough.
         assert_eq!(parse_verify_status("", true), Verify::Error);
         assert_eq!(parse_verify_status("", false), Verify::Hint(None));
+    }
+
+    #[test]
+    fn cancel_echo_absorbs_one_terminal_status_per_stop() {
+        let mut owed = 1;
+        // The cancelled session's no-match is ours, not the user's.
+        assert!(absorb_echo(&mut owed, &Verify::NoMatch));
+        assert_eq!(owed, 0);
+        // The next one is a real finger.
+        assert!(!absorb_echo(&mut owed, &Verify::NoMatch));
+    }
+
+    #[test]
+    fn cancel_echo_never_swallows_a_match() {
+        // A cancellation completes as no-match or error, never as a match —
+        // a finger that landed just before the stop still unlocks.
+        let mut owed = 1;
+        assert!(!absorb_echo(&mut owed, &Verify::Match));
+        assert_eq!(owed, 1);
+    }
+
+    #[test]
+    fn cancel_echo_covers_error_and_leaves_disconnect_alone() {
+        let mut owed = 1;
+        assert!(absorb_echo(&mut owed, &Verify::Error));
+        let mut owed = 1;
+        // A reader that vanished needs the reclaim path, echo or not.
+        assert!(!absorb_echo(&mut owed, &Verify::Disconnected));
     }
 
     #[test]
