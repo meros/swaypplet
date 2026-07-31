@@ -226,7 +226,7 @@ async fn client(stream: UnixStream, conn: zbus::Connection, sleeping: watch::Rec
         }
         Flow::Continue
     };
-    let verifier = tokio::spawn(verify_engine(conn, target_rx, active_rx, sleeping, sink));
+    let mut verifier = tokio::spawn(verify_engine(conn, target_rx, active_rx, sleeping, sink));
 
     // Bound total input so an unterminated line can't grow this root
     // process's memory; legitimate commands are a handful of bytes each.
@@ -247,9 +247,18 @@ async fn client(stream: UnixStream, conn: zbus::Connection, sleeping: watch::Rec
         }
     }
     // Client gone: dropping the target sender tells the verify loop to stop
-    // any running verify, release the claim, and exit.
+    // any running verify, release the claim, and exit. Engine teardown runs
+    // on timed D-Bus calls, so this resolves in seconds even against a
+    // stalled fprintd; the abort is the backstop that keeps a hung teardown
+    // from stranding this client slot (one of MAX_CLIENTS) and its claim.
     drop(target_tx);
-    let _ = verifier.await;
+    if tokio::time::timeout(Duration::from_secs(10), &mut verifier)
+        .await
+        .is_err()
+    {
+        log::warn!("fp-agent: verify teardown overran 10s, aborting it");
+        verifier.abort();
+    }
     watcher.abort();
     writer.abort();
 }

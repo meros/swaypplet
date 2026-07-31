@@ -68,7 +68,14 @@ async fn run(tx: mpsc::Sender<EngineEvent>) {
     // suspend wedges the synaptics device open inside fprintd. Release before
     // sleep, reclaim on resume (the engine holds a delay-inhibitor while
     // claimed so our release lands first).
-    let (sleep_tx, sleep_rx) = tokio::sync::watch::channel(false);
+    //
+    // Seed from the lock reason: a sleep-triggered locker is born *inside*
+    // the PrepareForSleep window, before `watch_sleep`'s first report can
+    // land, and must not claim the reader on the way into suspend. The
+    // watcher's own read of logind's current state overwrites this within
+    // a round trip either way.
+    let born_sleeping = std::env::var("SWAYPPLET_LOCK_REASON").as_deref() == Ok("sleep");
+    let (sleep_tx, sleep_rx) = tokio::sync::watch::channel(born_sleeping);
     tokio::spawn(watch_sleep(conn.clone(), sleep_tx));
 
     // Constant target: the lock always verifies its own user (empty = the
