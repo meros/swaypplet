@@ -554,6 +554,12 @@ fn handle_event(
                 s.session_user = Some(user.clone());
                 s.send(ipc::Req::Create { username: user });
             }
+            // Re-send the fp target: a fingerprint match parks the engine
+            // until the next command, so a matched-but-rejected token (TTL
+            // expired, Respond raced a chip switch) would otherwise leave
+            // the pill frozen on "Fingerprint OK" with a dead reader. The
+            // engine answers every re-send with its current state.
+            s.retarget_fp();
         }
         ipc::Ev::Fatal(text) => {
             eprintln!("swaypplet greet: {text}");

@@ -27,7 +27,7 @@ pub mod agent;
 
 use std::time::Duration;
 
-use zbus::export::futures_util::StreamExt;
+use zbus::export::futures_util::{FutureExt, StreamExt};
 use zbus::proxy;
 
 // --- fprintd proxies -------------------------------------------------------
@@ -121,6 +121,21 @@ pub(crate) trait LogindManager {
     ) -> zbus::Result<zbus::zvariant::OwnedFd>;
     #[zbus(signal)]
     fn prepare_for_sleep(&self, start: bool) -> zbus::Result<()>;
+    /// Current sleep-transition state — `true` between PrepareForSleep(true)
+    /// and the matching resume. Read once after subscribing, because the
+    /// signal alone only covers *future* transitions.
+    #[zbus(property)]
+    fn preparing_for_sleep(&self) -> zbus::Result<bool>;
+}
+
+#[proxy(
+    interface = "org.freedesktop.systemd1.Manager",
+    default_service = "org.freedesktop.systemd1",
+    default_path = "/org/freedesktop/systemd1"
+)]
+pub(crate) trait Systemd {
+    fn restart_unit(&self, name: &str, mode: &str)
+    -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
 }
 
 #[proxy(
@@ -210,13 +225,23 @@ pub async fn watch_session_active(
 /// `watch_session_active`, never returns: on setup failure it settles on
 /// `false` (awake) and parks, so receivers can select on `changed()` freely.
 pub async fn watch_sleep(conn: zbus::Connection, tx: tokio::sync::watch::Sender<bool>) {
-    let stream = async {
+    let setup = async {
         let manager = LogindManagerProxy::new(&conn).await?;
-        manager.receive_prepare_for_sleep().await
+        let stream = manager.receive_prepare_for_sleep().await?;
+        Ok::<_, zbus::Error>((manager, stream))
     }
     .await;
-    match stream {
-        Ok(mut stream) => {
+    match setup {
+        Ok((manager, mut stream)) => {
+            // Seed with the transition already in flight: a locker spawned
+            // *by* the sleep transition (the idle daemon locks on
+            // PrepareForSleep) starts after the signal fired and would
+            // otherwise claim the reader on the way into suspend.
+            // Subscribe-then-read is race-free — a transition between the
+            // two lands in the stream and overwrites the seed.
+            if let Ok(now) = manager.preparing_for_sleep().await {
+                let _ = tx.send(now);
+            }
             while let Some(sig) = stream.next().await {
                 if let Ok(args) = sig.args() {
                     let _ = tx.send(*args.start());
@@ -289,6 +314,56 @@ async fn resolve_session(
         .map_err(|e| e.to_string())
 }
 
+/// Deadline for any single fprintd D-Bus call. fprintd has documented
+/// multi-second stalls (22 s synaptics SSM spins) — an unbounded await in the
+/// teardown path holds the sleep delay-inhibitor past logind's
+/// InhibitDelayMaxSec, which is exactly the "claim survives into suspend"
+/// wedge the inhibitor exists to prevent. A timed-out call may still complete
+/// inside fprintd later; the orphaned reply is dropped harmlessly.
+const CALL_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// One fprintd call with a deadline. Errors are strings because callers only
+/// log or pattern-match them.
+async fn timed<T>(
+    what: &str,
+    call: impl std::future::Future<Output = zbus::Result<T>>,
+) -> Result<T, String> {
+    match tokio::time::timeout(CALL_TIMEOUT, call).await {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err(format!("{what}: no reply in {CALL_TIMEOUT:?}")),
+    }
+}
+
+/// fprintd's Claim error when libfprint's device object is still open from a
+/// claim that was never released — the holder crashed, or the claim survived
+/// a suspend (ours or an external pam_fprintd prompt's). Distinct from
+/// ordinary contention ("already claimed", a release is coming): here no
+/// release is coming and only an fprintd restart clears the device.
+fn is_wedged_claim(err: &str) -> bool {
+    err.contains("already open")
+}
+
+/// Restart fprintd to clear a wedged device. Needs a polkit rule allowing
+/// active local sessions to restart exactly this unit (the fp-agent is root
+/// and passes implicitly); without one this logs and the claim loop keeps
+/// retrying — no worse than before.
+async fn restart_fprintd(conn: &zbus::Connection) {
+    let restart = async {
+        SystemdProxy::new(conn)
+            .await?
+            .restart_unit("fprintd.service", "replace")
+            .await
+    };
+    match tokio::time::timeout(CALL_TIMEOUT, restart).await {
+        Ok(Ok(_)) => {
+            log::warn!("fprintd device wedged (claim failing \"already open\") — restarted fprintd")
+        }
+        Ok(Err(e)) => log::warn!("fprintd wedged but restart refused (polkit rule missing?): {e}"),
+        Err(_) => log::warn!("fprintd wedged and the restart request timed out"),
+    }
+}
+
 async fn device_proxy(conn: &zbus::Connection) -> Result<DeviceProxy<'static>, String> {
     let manager = ManagerProxy::new(conn).await.map_err(|e| e.to_string())?;
     let path = manager
@@ -329,19 +404,23 @@ pub enum Flow {
     Stop,
 }
 
-/// Restart a silent verify session after this long with no status signal —
-/// covers a driver that accepted VerifyStart but wedged without ever
-/// reporting. A healthy idle reader just re-arms; a match still lands.
-const VERIFY_SILENCE_TIMEOUT: Duration = Duration::from_secs(40);
+/// Ping fprintd after this long with no status signal. Silence is what an
+/// untouched reader sounds like — every unattended lock screen sits here for
+/// its whole life — so silence alone must never restart the verify: the
+/// stop/start churn that "recovery" produced is what desynced the synaptics
+/// sensor and fed the cancel-echo storms (boots -1/-2, 2026-07-25..30). The
+/// ping (a Manager round trip) only detects a daemon that stopped answering;
+/// that, and only that, warrants restarting the session.
+const VERIFY_SILENCE_PING: Duration = Duration::from_secs(40);
 
 /// Floor between VerifyStart calls within one claim. A human retry is seconds
 /// apart, so this is invisible in normal use, and it caps any restart feedback
 /// loop at a trickle instead of a spin. Backstop for the cancel echo below.
 const VERIFY_RESTART_FLOOR: Duration = Duration::from_millis(400);
 
-/// Warn once when one claim has re-armed this many times — a healthy lock
-/// screen re-arms once per [`VERIFY_SILENCE_TIMEOUT`], so anything near this
-/// is a loop that wants looking at.
+/// Warn once when one claim has re-armed this many times — a healthy claim
+/// re-arms only on a failed finger or a dead-daemon ping, so anything near
+/// this is a loop that wants looking at.
 const RESTART_WARN_AT: u32 = 20;
 
 /// Claim retry cadence. The fast one covers the normal handover, where the
@@ -352,6 +431,12 @@ const RESTART_WARN_AT: u32 = 20;
 const CLAIM_RETRY: Duration = Duration::from_millis(500);
 const CLAIM_RETRY_SLOW: Duration = Duration::from_secs(2);
 const CLAIM_QUIET_ATTEMPTS: u32 = 6;
+
+/// Claim attempt at which a wedged-open device (see [`is_wedged_claim`])
+/// triggers an fprintd restart: 6 fast + 2 slow retries ≈ 7 s of failing
+/// claims, past any legitimate handover (a releasing holder takes < 1 s, the
+/// post-resume synaptics re-init 2–4 s). Fires at most once per claim cycle.
+const UNWEDGE_AT: u32 = 8;
 
 /// Whether a terminal status is the echo of a verify session we cancelled
 /// ourselves, and consume the debt if so.
@@ -390,12 +475,16 @@ enum Enrollment {
 }
 
 async fn enrollment(device: &DeviceProxy<'_>, user: &str) -> Enrollment {
-    match device.list_enrolled_fingers(user).await {
-        Ok(fingers) if fingers.is_empty() => Enrollment::None,
-        Ok(_) => Enrollment::Enrolled,
-        Err(e) if is_no_enrolled_prints(&e) => Enrollment::None,
-        Err(e) => {
+    match tokio::time::timeout(CALL_TIMEOUT, device.list_enrolled_fingers(user)).await {
+        Ok(Ok(fingers)) if fingers.is_empty() => Enrollment::None,
+        Ok(Ok(_)) => Enrollment::Enrolled,
+        Ok(Err(e)) if is_no_enrolled_prints(&e) => Enrollment::None,
+        Ok(Err(e)) => {
             log::warn!("list_enrolled_fingers({user}): {e}");
+            Enrollment::Unknown
+        }
+        Err(_) => {
+            log::warn!("list_enrolled_fingers({user}): no reply in {CALL_TIMEOUT:?}");
             Enrollment::Unknown
         }
     }
@@ -426,249 +515,348 @@ pub async fn verify_engine(
         };
     }
 
-    // Resolve the device lazily and retry per target change, so a machine
-    // where fprintd isn't up yet doesn't wedge the connection.
-    let device = loop {
-        if target.borrow_and_update().is_some() {
-            match device_proxy(&conn).await {
-                Ok(d) => break d,
-                Err(e) => emit!(EngineEvent::Unavailable(format!(
-                    "no fingerprint device: {e}"
-                ))),
-            }
-        }
-        if target.changed().await.is_err() {
-            return;
-        }
-    };
-    // Subscribe before the first VerifyStart so no status can slip past.
-    let mut status = match device.receive_verify_status().await {
-        Ok(s) => s,
-        Err(e) => {
-            emit!(EngineEvent::Unavailable(format!("signal subscribe: {e}")));
-            return;
-        }
-    };
+    // Terminal statuses fprintd owes us for verify sessions we cancelled
+    // ourselves (see `absorb_echo`). Engine-lifetime, like the status stream
+    // the echoes arrive on: debt from a cancel just before a release must
+    // survive into the next claim, or the stale echo reads as a failed finger
+    // there and the restart loop feeds itself.
+    let mut echoes: u32 = 0;
 
-    'outer: loop {
-        // Park until there is a target, the session is active, and the system
-        // isn't heading into sleep.
+    // The device proxy and its status stream live and die together: an
+    // fprintd restart (or a reader re-enumeration) invalidates both, so every
+    // path that loses one re-resolves both — parking a session on a dead
+    // object was one of the ways a lock screen lost fingerprint for good.
+    let mut resolve_fails: u32 = 0;
+    'link: loop {
+        // Don't touch fprintd until someone wants a verify — the agent sits
+        // with no target most of its life.
         loop {
-            let armed = target.borrow_and_update().is_some()
-                && *active.borrow_and_update()
-                && !*sleeping.borrow_and_update();
-            if armed {
+            if target.borrow_and_update().is_some() {
                 break;
             }
-            tokio::select! {
-                r = target.changed() => if r.is_err() { return },
-                _ = active.changed() => {}
-                _ = sleeping.changed() => {}
+            if target.changed().await.is_err() {
+                return;
             }
         }
-        let Some(user) = target.borrow().clone() else {
-            continue 'outer;
+        let (device, mut status) = {
+            // Resolve + subscribe under one deadline (two quick round trips);
+            // subscribe before the first VerifyStart so no status slips past.
+            let resolve = async {
+                let device = device_proxy(&conn).await?;
+                let status = device
+                    .receive_verify_status()
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok::<_, String>((device, status))
+            };
+            match tokio::time::timeout(CALL_TIMEOUT, resolve).await {
+                Ok(Ok(pair)) => {
+                    resolve_fails = 0;
+                    pair
+                }
+                other => {
+                    let err = match other {
+                        Ok(Err(e)) => e,
+                        _ => format!("no reply in {CALL_TIMEOUT:?}"),
+                    };
+                    // Keep retrying on a timer — fprintd may be cold at boot
+                    // or mid-restart, and a lock session must outlive that.
+                    // Announce only the first failure of an outage; the pill
+                    // is already hidden and the rest is log noise.
+                    resolve_fails += 1;
+                    if resolve_fails == 1 {
+                        emit!(EngineEvent::Unavailable(format!(
+                            "no fingerprint device: {err}"
+                        )));
+                    } else {
+                        log::debug!("fprintd resolve retry {resolve_fails}: {err}");
+                    }
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue 'link;
+                }
+            }
         };
 
-        // Enrollment gate: skip the claim/verify spin for a user with no
-        // prints, but only on an *authoritative* answer — a failed read falls
-        // through and lets the claim loop retry.
-        match enrollment(&device, &user).await {
-            Enrollment::Enrolled | Enrollment::Unknown => {}
-            Enrollment::None => {
-                emit!(EngineEvent::Unavailable(unenrolled_msg(&user)));
-                if wait_for_retarget(&mut target, &user).await.is_err() {
-                    return;
-                }
-                continue 'outer;
-            }
-        }
-
-        // Claim as the target user; retry while the reader is busy (e.g. a
-        // backgrounded locker still releasing it). The sleep delay-inhibitor
-        // lives for this `'outer` iteration — held from just before Claim so
-        // suspend can't slip in, and dropped by `continue 'outer` (scope exit)
-        // after the release calls below, so suspend proceeds with the reader
-        // idle.
-        let mut inhibitor: Option<zbus::zvariant::OwnedFd> = None;
-        let mut attempts: u32 = 0;
-        loop {
-            if !targeted(&target, &user) || !*active.borrow() || *sleeping.borrow() {
-                continue 'outer;
-            }
-            if inhibitor.is_none() {
-                inhibitor = take_sleep_inhibitor(&conn, "swaypplet-fp").await;
-            }
-            match device.claim(&user).await {
-                Ok(()) => break,
-                Err(e) => {
-                    attempts += 1;
-                    // A couple of misses is the normal handover shape (the
-                    // other side is still releasing). Past that the reader is
-                    // held by something that isn't going to let go on its own,
-                    // and the only way anyone finds out is this line — so say
-                    // it at warn, once, with fprintd's own words.
-                    if attempts == CLAIM_QUIET_ATTEMPTS {
-                        log::warn!("claim({user}) still failing after {attempts}: {e}");
-                    } else {
-                        log::debug!("claim({user}) attempt {attempts} failed: {e}");
-                    }
-                    let backoff = if attempts < CLAIM_QUIET_ATTEMPTS {
-                        CLAIM_RETRY
-                    } else {
-                        CLAIM_RETRY_SLOW
-                    };
-                    tokio::select! {
-                        _ = tokio::time::sleep(backoff) => {}
-                        r = target.changed() => if r.is_err() { return },
-                        _ = active.changed() => {}
-                        _ = sleeping.changed() => {}
-                    }
-                }
-            }
-        }
-
-        // Verify sessions until a match, a retarget, or a gate flip.
-        // `armed` holds back Ready until a verify is actually running: a claim
-        // alone is not a reader you can touch, and promising one that isn't
-        // scanning is worse than promising nothing.
-        //
-        // `echoes` counts terminal statuses fprintd owes us for verify
-        // sessions we cancelled ourselves (see `absorb_echo`); it resets with
-        // the claim, since a fresh claim inherits nothing from the old one.
-        let mut armed = false;
-        let mut echoes: u32 = 0;
-        let mut restarts: u32 = 0;
-        let mut last_start: Option<std::time::Instant> = None;
-        'verify: loop {
-            if !targeted(&target, &user) || !*active.borrow() || *sleeping.borrow() {
-                let _ = device.release().await;
-                continue 'outer;
-            }
-            // Never re-arm faster than the floor, whatever drove us here.
-            if let Some(prev) = last_start {
-                let since = prev.elapsed();
-                if since < VERIFY_RESTART_FLOOR {
-                    tokio::time::sleep(VERIFY_RESTART_FLOOR - since).await;
-                }
-            }
-            if let Err(e) = device.verify_start("any").await {
-                log::warn!("VerifyStart({user}) failed, reclaiming: {e}");
-                let _ = device.release().await;
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                continue 'outer;
-            }
-            last_start = Some(std::time::Instant::now());
-            restarts += 1;
-            if restarts == RESTART_WARN_AT {
-                log::warn!("verify re-armed {restarts}× on one claim — cancel-echo loop?");
-            }
-            if !armed {
-                armed = true;
-                emit!(EngineEvent::Ready);
-            }
-            let watchdog = tokio::time::sleep(VERIFY_SILENCE_TIMEOUT);
-            tokio::pin!(watchdog);
+        'outer: loop {
+            // Park until there is a target, the session is active, and the
+            // system isn't heading into sleep.
             loop {
+                let armed = target.borrow_and_update().is_some()
+                    && *active.borrow_and_update()
+                    && !*sleeping.borrow_and_update();
+                if armed {
+                    break;
+                }
                 tokio::select! {
-                    sig = status.next() => {
-                        let Some(signal) = sig else {
-                            // Stream ended — fprintd restarted; start over.
-                            let _ = device.release().await;
-                            emit!(EngineEvent::Unavailable("fprintd restarted".into()));
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                            continue 'outer;
-                        };
-                        let Ok(args) = signal.args() else { continue };
-                        let verdict = parse_verify_status(args.result(), *args.done());
-                        // A session we killed reporting in — not a finger.
-                        // Absorb it and stay on the session now running.
-                        if absorb_echo(&mut echoes, &verdict) {
-                            log::debug!("absorbed cancel echo: {}", args.result());
-                            continue;
+                    r = target.changed() => if r.is_err() { return },
+                    _ = active.changed() => {}
+                    _ = sleeping.changed() => {}
+                }
+            }
+            let Some(user) = target.borrow().clone() else {
+                continue 'outer;
+            };
+
+            // Cancel-of-a-live-session teardown, shared by every gate-flip
+            // path out of the verify loop: the killed session earns fprintd
+            // an echo (`absorb_echo`), the claim goes back, and the sink
+            // hears about it so no pill outlives its reader.
+            macro_rules! stand_down {
+                ($reason:expr) => {{
+                    let _ = timed("VerifyStop", device.verify_stop()).await;
+                    echoes += 1;
+                    let _ = timed("Release", device.release()).await;
+                    emit!(EngineEvent::Unavailable($reason.into()));
+                    continue 'outer;
+                }};
+            }
+
+            // Enrollment gate: skip the claim/verify spin for a user with no
+            // prints, but only on an *authoritative* answer — a failed read
+            // falls through and lets the claim loop retry.
+            match enrollment(&device, &user).await {
+                Enrollment::Enrolled | Enrollment::Unknown => {}
+                Enrollment::None => {
+                    emit!(EngineEvent::Unavailable(unenrolled_msg(&user)));
+                    // Park until the next target command of any kind — the
+                    // same user re-sent counts (enrollment may have just
+                    // happened), so this is `changed()`, not a value wait.
+                    if target.changed().await.is_err() {
+                        return;
+                    }
+                    continue 'outer;
+                }
+            }
+
+            // Claim as the target user; retry while the reader is busy (e.g.
+            // a backgrounded locker still releasing it). The sleep
+            // delay-inhibitor lives for this `'outer` iteration — held from
+            // just before Claim so suspend can't slip in, and dropped by
+            // `continue 'outer`/`'link` (scope exit) after the release calls
+            // below, so suspend proceeds with the reader idle.
+            let mut inhibitor: Option<zbus::zvariant::OwnedFd> = None;
+            let mut attempts: u32 = 0;
+            loop {
+                if !targeted(&target, &user) || !*active.borrow() || *sleeping.borrow() {
+                    continue 'outer;
+                }
+                if inhibitor.is_none() {
+                    inhibitor = take_sleep_inhibitor(&conn, "swaypplet-fp").await;
+                }
+                match timed("Claim", device.claim(&user)).await {
+                    Ok(()) => break,
+                    Err(e) => {
+                        attempts += 1;
+                        // A couple of misses is the normal handover shape (the
+                        // other side is still releasing). Past that the reader
+                        // is held by something that isn't letting go on its
+                        // own — say so once, with fprintd's own words, and
+                        // stop promising a pill nobody can touch.
+                        if attempts == CLAIM_QUIET_ATTEMPTS {
+                            log::warn!("claim({user}) still failing after {attempts}: {e}");
+                            emit!(EngineEvent::Unavailable("reader busy".into()));
+                        } else {
+                            log::debug!("claim({user}) attempt {attempts} failed: {e}");
                         }
-                        match verdict {
-                            Verify::Match => {
-                                let _ = device.verify_stop().await;
-                                let _ = device.release().await;
-                                // Released — drop the inhibitor now so a
-                                // post-match `wait_for_retarget` (agent) can't
-                                // needlessly delay a suspend while unclaimed.
-                                drop(inhibitor.take());
-                                match sink(EngineEvent::Match(user.clone())) {
-                                    Flow::Stop => return,
-                                    Flow::Continue => {
-                                        // Done for this target; wait for a
-                                        // retarget (the greeter normally
-                                        // disconnects instead).
-                                        if wait_for_retarget(&mut target, &user).await.is_err() {
-                                            return;
+                        // A device wedged open (a claim survived suspend, or
+                        // its holder crashed) never releases on its own; a
+                        // fresh fprintd is the only cure. The polkit rule
+                        // scoping the restart to this one unit keeps the
+                        // hammer small, and `== UNWEDGE_AT` fires it at most
+                        // once per claim cycle.
+                        if attempts == UNWEDGE_AT && is_wedged_claim(&e) {
+                            restart_fprintd(&conn).await;
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                            continue 'link; // fresh daemon, fresh device + stream
+                        }
+                        let backoff = if attempts < CLAIM_QUIET_ATTEMPTS {
+                            CLAIM_RETRY
+                        } else {
+                            CLAIM_RETRY_SLOW
+                        };
+                        tokio::select! {
+                            _ = tokio::time::sleep(backoff) => {}
+                            r = target.changed() => if r.is_err() { return },
+                            _ = active.changed() => {}
+                            _ = sleeping.changed() => {}
+                        }
+                    }
+                }
+            }
+
+            // The status stream outlives claims, so anything buffered while
+            // we were parked — the echo of a cancel, a match that raced a
+            // gate flip — belongs to a dead claim. Settle the echo ledger
+            // and start this claim with a clean stream, so a stale verdict
+            // can never be read as this claim's finger.
+            while let Some(Some(sig)) = status.next().now_or_never() {
+                if let Ok(args) = sig.args() {
+                    let verdict = parse_verify_status(args.result(), *args.done());
+                    absorb_echo(&mut echoes, &verdict);
+                    log::debug!("discarding pre-claim status: {}", args.result());
+                }
+            }
+
+            // Verify sessions until a match, a retarget, or a gate flip.
+            // `armed` holds back Ready until a verify is actually running: a
+            // claim alone is not a reader you can touch, and promising one
+            // that isn't scanning is worse than promising nothing.
+            let mut armed = false;
+            let mut restarts: u32 = 0;
+            let mut last_start: Option<std::time::Instant> = None;
+            'verify: loop {
+                if !targeted(&target, &user) || !*active.borrow() || *sleeping.borrow() {
+                    let _ = timed("Release", device.release()).await;
+                    emit!(EngineEvent::Unavailable("standing down".into()));
+                    continue 'outer;
+                }
+                // Never re-arm faster than the floor, whatever drove us here.
+                if let Some(prev) = last_start {
+                    let since = prev.elapsed();
+                    if since < VERIFY_RESTART_FLOOR {
+                        tokio::time::sleep(VERIFY_RESTART_FLOOR - since).await;
+                    }
+                }
+                if let Err(e) = timed("VerifyStart", device.verify_start("any")).await {
+                    log::warn!("VerifyStart({user}) failed, reclaiming: {e}");
+                    let _ = timed("Release", device.release()).await;
+                    emit!(EngineEvent::Unavailable("reader error, reclaiming".into()));
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue 'outer;
+                }
+                last_start = Some(std::time::Instant::now());
+                restarts += 1;
+                if restarts == RESTART_WARN_AT {
+                    log::warn!("verify re-armed {restarts}× on one claim — cancel-echo loop?");
+                }
+                if !armed {
+                    armed = true;
+                    emit!(EngineEvent::Ready);
+                }
+                let watchdog = tokio::time::sleep(VERIFY_SILENCE_PING);
+                tokio::pin!(watchdog);
+                loop {
+                    tokio::select! {
+                        sig = status.next() => {
+                            let Some(signal) = sig else {
+                                // Stream over — fprintd went away and took the
+                                // claim and the device object with it.
+                                emit!(EngineEvent::Unavailable("fprintd restarted".into()));
+                                tokio::time::sleep(Duration::from_secs(1)).await;
+                                continue 'link;
+                            };
+                            watchdog.as_mut().reset(
+                                tokio::time::Instant::now() + VERIFY_SILENCE_PING,
+                            );
+                            let Ok(args) = signal.args() else { continue };
+                            let verdict = parse_verify_status(args.result(), *args.done());
+                            // A session we killed reporting in — not a finger.
+                            // Absorb it and stay on the session now running.
+                            if absorb_echo(&mut echoes, &verdict) {
+                                log::debug!("absorbed cancel echo: {}", args.result());
+                                continue;
+                            }
+                            match verdict {
+                                Verify::Match => {
+                                    let _ = timed("VerifyStop", device.verify_stop()).await;
+                                    let _ = timed("Release", device.release()).await;
+                                    // Released — drop the inhibitor now so a
+                                    // post-match park (agent) can't needlessly
+                                    // delay a suspend while unclaimed.
+                                    drop(inhibitor.take());
+                                    match sink(EngineEvent::Match(user.clone())) {
+                                        Flow::Stop => return,
+                                        Flow::Continue => {
+                                            // Done for this target; park until
+                                            // the next command — a retarget, a
+                                            // stand-down, or the same user
+                                            // re-sent (a greeter re-arming
+                                            // after its auth path failed
+                                            // downstream of the match).
+                                            if target.changed().await.is_err() {
+                                                return;
+                                            }
+                                            continue 'outer;
                                         }
-                                        continue 'outer;
                                     }
                                 }
+                                Verify::NoMatch => {
+                                    let _ = timed("VerifyStop", device.verify_stop()).await;
+                                    emit!(EngineEvent::Hint("Not recognized — try again".into()));
+                                    continue 'verify;
+                                }
+                                Verify::Disconnected => {
+                                    let _ = timed("Release", device.release()).await;
+                                    emit!(EngineEvent::Unavailable("reader disconnected".into()));
+                                    // Re-enumeration hands out a fresh object
+                                    // path — resolve from scratch.
+                                    tokio::time::sleep(Duration::from_secs(1)).await;
+                                    continue 'link;
+                                }
+                                Verify::Error => {
+                                    let _ = timed("VerifyStop", device.verify_stop()).await;
+                                    tokio::time::sleep(Duration::from_secs(1)).await;
+                                    continue 'verify;
+                                }
+                                Verify::Hint(Some(h)) => emit!(EngineEvent::Hint(h.into())),
+                                Verify::Hint(None) => {}
                             }
-                            Verify::NoMatch => {
-                                let _ = device.verify_stop().await;
-                                emit!(EngineEvent::Hint("Not recognized — try again".into()));
-                                continue 'verify;
-                            }
-                            Verify::Disconnected => {
-                                let _ = device.release().await;
-                                emit!(EngineEvent::Unavailable("reader disconnected".into()));
-                                tokio::time::sleep(Duration::from_secs(1)).await;
-                                continue 'outer;
-                            }
-                            Verify::Error => {
-                                let _ = device.verify_stop().await;
-                                tokio::time::sleep(Duration::from_secs(1)).await;
-                                continue 'verify;
-                            }
-                            Verify::Hint(Some(h)) => emit!(EngineEvent::Hint(h.into())),
-                            Verify::Hint(None) => {}
                         }
-                    }
-                    _ = &mut watchdog => {
-                        // No status for the whole window — the verify may be
-                        // wedged. Re-arm it without dropping the claim (no UI
-                        // flicker); the reader keeps scanning.
-                        //
-                        // Getting here means a session is still running (every
-                        // terminal status leaves this loop), so the stop below
-                        // cancels a live verify and fprintd owes us one more
-                        // terminal status for it. Count it, or the restart
-                        // reads it as a failed finger and the loop feeds
-                        // itself.
-                        log::info!("verify silent for {VERIFY_SILENCE_TIMEOUT:?}, restarting");
-                        let _ = device.verify_stop().await;
-                        echoes += 1;
-                        continue 'verify;
-                    }
-                    r = target.changed() => {
-                        if r.is_err() || target.borrow().as_deref() != Some(user.as_str()) {
-                            let _ = device.verify_stop().await;
-                            let _ = device.release().await;
-                            if r.is_err() { return; }
-                            continue 'outer;
+                        _ = &mut watchdog => {
+                            // Quiet for the whole window. An untouched reader
+                            // is silent by nature — every unattended lock
+                            // screen lives here — so silence is not failure.
+                            // Ping the daemon and only restart the verify if
+                            // fprintd itself stopped answering; churning a
+                            // healthy claim is what used to desync the sensor.
+                            let ping = async {
+                                ManagerProxy::new(&conn).await?.get_default_device().await
+                            };
+                            match tokio::time::timeout(CALL_TIMEOUT, ping).await {
+                                Ok(Ok(_)) => watchdog.as_mut().reset(
+                                    tokio::time::Instant::now() + VERIFY_SILENCE_PING,
+                                ),
+                                _ => {
+                                    log::info!(
+                                        "fprintd quiet for {VERIFY_SILENCE_PING:?} and not \
+                                         answering — restarting verify"
+                                    );
+                                    let _ = timed("VerifyStop", device.verify_stop()).await;
+                                    echoes += 1;
+                                    continue 'verify;
+                                }
+                            }
                         }
-                    }
-                    _ = active.changed() => {
-                        if !*active.borrow() {
-                            let _ = device.verify_stop().await;
-                            let _ = device.release().await;
-                            emit!(EngineEvent::Unavailable("session inactive".into()));
-                            continue 'outer;
+                        r = target.changed() => {
+                            if r.is_err() {
+                                let _ = timed("VerifyStop", device.verify_stop()).await;
+                                let _ = timed("Release", device.release()).await;
+                                return;
+                            }
+                            if targeted(&target, &user) {
+                                // Same target re-sent: a client asking "make
+                                // sure you're armed, and say so". The verify
+                                // is live — answer with the state, so a client
+                                // that hid its pill on its own (greeter list
+                                // upgrade) can resync.
+                                emit!(EngineEvent::Ready);
+                            } else {
+                                stand_down!("standing down");
+                            }
                         }
-                    }
-                    _ = sleeping.changed() => {
-                        if *sleeping.borrow() {
-                            // Release before sleep, then drop the inhibitor
-                            // (via `continue 'outer`) so suspend proceeds with
-                            // the reader idle; the park loop reclaims on resume.
-                            let _ = device.verify_stop().await;
-                            let _ = device.release().await;
-                            emit!(EngineEvent::Unavailable("suspending".into()));
-                            continue 'outer;
+                        _ = active.changed() => {
+                            if !*active.borrow() {
+                                stand_down!("session inactive");
+                            }
+                        }
+                        _ = sleeping.changed() => {
+                            if *sleeping.borrow() {
+                                // Release before sleep; `continue 'outer`
+                                // (inside stand_down) drops the inhibitor so
+                                // suspend proceeds with the reader idle, and
+                                // the park loop reclaims on resume.
+                                stand_down!("suspending");
+                            }
                         }
                     }
                 }
@@ -689,22 +877,6 @@ fn unenrolled_msg(user: &str) -> String {
 
 fn targeted(target: &tokio::sync::watch::Receiver<Option<String>>, user: &str) -> bool {
     target.borrow().as_deref() == Some(user)
-}
-
-/// Wait until the verify target is anything other than `user` (including
-/// `None`). `Err` when the target sender was dropped (client disconnected).
-async fn wait_for_retarget(
-    target: &mut tokio::sync::watch::Receiver<Option<String>>,
-    user: &str,
-) -> Result<(), ()> {
-    loop {
-        if target.borrow_and_update().as_deref() != Some(user) {
-            return Ok(());
-        }
-        if target.changed().await.is_err() {
-            return Err(());
-        }
-    }
 }
 
 #[cfg(test)]
@@ -792,6 +964,18 @@ mod tests {
         let mut owed = 1;
         // A reader that vanished needs the reclaim path, echo or not.
         assert!(!absorb_echo(&mut owed, &Verify::Disconnected));
+    }
+
+    #[test]
+    fn wedged_claim_is_distinct_from_ordinary_contention() {
+        // libfprint device left open by a claim that never released —
+        // restart-worthy.
+        assert!(is_wedged_claim(
+            "org.freedesktop.DBus.Error.Failed: Device 06cb:019d is already open"
+        ));
+        // Ordinary contention: a release is coming; never restart for this.
+        assert!(!is_wedged_claim("the device is already claimed"));
+        assert!(!is_wedged_claim("Claim: no reply in 3s"));
     }
 
     #[test]
