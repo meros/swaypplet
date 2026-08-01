@@ -344,6 +344,16 @@ fn is_wedged_claim(err: &str) -> bool {
     err.contains("already open")
 }
 
+/// fprintd's Claim error while the reader's USB endpoint is mid-reset — the
+/// post-resume re-init window (the s0ix path resets the sensor on wake,
+/// see s0ix-suspend.nix). Claims are doomed until it settles, and an Open
+/// raced against the reset can leave the device wedged open inside libfprint
+/// (observed 2026-07-31 21:28: six stalled Opens on resume, then "already
+/// open" for the rest of the boot).
+fn is_device_resetting(err: &str) -> bool {
+    err.contains("endpoint stalled")
+}
+
 /// Restart fprintd to clear a wedged device. Needs a polkit rule allowing
 /// active local sessions to restart exactly this unit (the fp-agent is root
 /// and passes implicitly); without one this logs and the claim loop keeps
@@ -432,11 +442,16 @@ const CLAIM_RETRY: Duration = Duration::from_millis(500);
 const CLAIM_RETRY_SLOW: Duration = Duration::from_secs(2);
 const CLAIM_QUIET_ATTEMPTS: u32 = 6;
 
-/// Claim attempt at which a wedged-open device (see [`is_wedged_claim`])
-/// triggers an fprintd restart: 6 fast + 2 slow retries ≈ 7 s of failing
-/// claims, past any legitimate handover (a releasing holder takes < 1 s, the
-/// post-resume synaptics re-init 2–4 s). Fires at most once per claim cycle.
-const UNWEDGE_AT: u32 = 8;
+/// Cooldown between fprintd restarts for a wedged device (see
+/// [`is_wedged_claim`]). "Already open" cannot self-resolve — fprintd
+/// accepted the claim, so no other holder exists and no release is coming —
+/// which is why the restart fires after a single retry rather than a long
+/// patience window: the 8-attempts-per-cycle accounting this replaces never
+/// fired once in practice (measured 2026-07-31 — every lock session was
+/// retargeted or password-unlocked first). The cooldown is engine-lifetime,
+/// so claim-cycle resets can't defer the cure, and a restart that doesn't
+/// cure (the cause is below fprintd: USB, driver) can't loop.
+const UNWEDGE_COOLDOWN: Duration = Duration::from_secs(30);
 
 /// Whether a terminal status is the echo of a verify session we cancelled
 /// ourselves, and consume the debt if so.
@@ -527,6 +542,10 @@ pub async fn verify_engine(
     // path that loses one re-resolves both — parking a session on a dead
     // object was one of the ways a lock screen lost fingerprint for good.
     let mut resolve_fails: u32 = 0;
+
+    // Engine-lifetime, deliberately not per claim cycle: retargets and gate
+    // flips reset the cycle but must not reset the wedge cure's clock.
+    let mut last_unwedge: Option<std::time::Instant> = None;
     'link: loop {
         // Don't touch fprintd until someone wants a verify — the agent sits
         // with no target most of its life.
@@ -658,18 +677,28 @@ pub async fn verify_engine(
                         } else {
                             log::debug!("claim({user}) attempt {attempts} failed: {e}");
                         }
-                        // A device wedged open (a claim survived suspend, or
-                        // its holder crashed) never releases on its own; a
-                        // fresh fprintd is the only cure. The polkit rule
-                        // scoping the restart to this one unit keeps the
-                        // hammer small, and `== UNWEDGE_AT` fires it at most
-                        // once per claim cycle.
-                        if attempts == UNWEDGE_AT && is_wedged_claim(&e) {
+                        // A device wedged open never releases on its own; a
+                        // fresh fprintd is the only cure. One retry absorbs
+                        // the edge where our own timed-out release lands a
+                        // moment late; then restart, gated by the
+                        // engine-lifetime cooldown (see UNWEDGE_COOLDOWN).
+                        // The polkit rule scoping the restart to this one
+                        // unit keeps the hammer small.
+                        if attempts >= 2
+                            && is_wedged_claim(&e)
+                            && last_unwedge.is_none_or(|t| t.elapsed() >= UNWEDGE_COOLDOWN)
+                        {
+                            last_unwedge = Some(std::time::Instant::now());
                             restart_fprintd(&conn).await;
                             tokio::time::sleep(Duration::from_secs(1)).await;
                             continue 'link; // fresh daemon, fresh device + stream
                         }
-                        let backoff = if attempts < CLAIM_QUIET_ATTEMPTS {
+                        // A resetting endpoint outlasts the fast cadence by
+                        // design (2–4 s re-init), and every Open against it
+                        // is another chance to wedge the device — go
+                        // straight to the gentle poll.
+                        let backoff = if attempts < CLAIM_QUIET_ATTEMPTS && !is_device_resetting(&e)
+                        {
                             CLAIM_RETRY
                         } else {
                             CLAIM_RETRY_SLOW
@@ -976,6 +1005,18 @@ mod tests {
         // Ordinary contention: a release is coming; never restart for this.
         assert!(!is_wedged_claim("the device is already claimed"));
         assert!(!is_wedged_claim("Claim: no reply in 3s"));
+    }
+
+    #[test]
+    fn resetting_endpoint_is_neither_wedged_nor_contention() {
+        let e = "net.reactivated.Fprint.Error.Internal: Open failed with \
+                 error: endpoint stalled or request not supported";
+        assert!(is_device_resetting(e));
+        assert!(!is_wedged_claim(e));
+        // The wedge signature is not a reset — restart cures it, waiting won't.
+        assert!(!is_device_resetting(
+            "org.freedesktop.DBus.Error.Failed: Device 06cb:019d is already open"
+        ));
     }
 
     #[test]
