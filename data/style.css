@@ -168,6 +168,80 @@ button.bar-ws.urgent {
     animation: workspace-urgent-glow 0.75s steps(30) infinite alternate;
 }
 
+/* ── Bar center: media pill (mirrors waybar custom/media) ──
+   Neutral pill; playing state earns accent text + the breathing glow. */
+button.bar-media {
+    margin: 5px 4px;
+    padding: 4px 12px;
+    min-width: 0;
+    min-height: 0;
+    background-color: alpha(@bg1, 0.85);
+    border-radius: 8px;
+    color: @fg_dim;
+    transition: background-color 150ms ease, color 150ms ease;
+}
+
+button.bar-media:hover {
+    background-color: alpha(@bg2, 0.90);
+}
+
+button.bar-media.playing {
+    color: @accent;
+    animation: media-breathing 2s steps(30) infinite alternate;
+}
+
+/* ── Bar right: battery + clock fused into one instrument track ──
+   Same segmented geometry as .bar-workspaces; the 5px right margin keeps
+   the concentric 6px gap at the card corner (waybar's #right-track). */
+.bar-track {
+    margin: 5px 5px 5px 4px;
+    border-radius: 8px;
+}
+
+.bar-track > .bar-seg {
+    margin: 0;
+    padding: 4px 12px;
+    min-width: 0;
+    min-height: 0;
+    background-color: alpha(@bg1, 0.85);
+    border-radius: 0;
+    color: @fg;
+    transition: background-color 150ms ease, box-shadow 150ms ease, color 150ms ease;
+}
+
+.bar-track > .bar-seg:not(:first-child) {
+    border-left: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.bar-track > .bar-seg:first-child {
+    border-top-left-radius: 8px;
+    border-bottom-left-radius: 8px;
+}
+
+.bar-track > .bar-seg:last-child {
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
+button.bar-clock:hover {
+    background-color: alpha(@bg2, 0.90);
+}
+
+/* Battery: state as text color; critical earns the loud pulse. */
+.bar-battery.charging {
+    color: @accent;
+}
+
+.bar-battery.warning:not(.charging) {
+    color: @accent_secondary;
+}
+
+.bar-battery.critical:not(.charging) {
+    background-color: @accent_quinary;
+    color: @bg0;
+    animation: battery-critical-pulse 0.7s steps(24) infinite alternate;
+}
+
 /* ── State-driven motion (matches waybar) ──
    Pure outer glow, no bevel layers. Box-shadow animations replace the
    element's whole box-shadow each frame, so use them only on shadowless

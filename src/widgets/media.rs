@@ -15,16 +15,16 @@ const ICON_NEXT: &str = "󰒭";
 // ── Backend ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
-enum PlaybackStatus {
+pub(crate) enum PlaybackStatus {
     Playing,
     Paused,
 }
 
 #[derive(Debug, Clone)]
-struct MediaState {
-    status: PlaybackStatus,
-    artist: String,
-    title: String,
+pub(crate) struct MediaState {
+    pub(crate) status: PlaybackStatus,
+    pub(crate) artist: String,
+    pub(crate) title: String,
     art_url: Option<String>,
     player_name: Option<String>,
     /// Track length in seconds (from mpris:length, which is in microseconds).
@@ -33,7 +33,7 @@ struct MediaState {
     position_secs: Option<f64>,
 }
 
-fn playerctl(args: &[&str]) -> Option<String> {
+pub(crate) fn playerctl(args: &[&str]) -> Option<String> {
     let out = Command::new("playerctl").args(args).output().ok()?;
     if out.status.success() {
         Some(String::from_utf8_lossy(&out.stdout).trim().to_owned())
@@ -42,7 +42,7 @@ fn playerctl(args: &[&str]) -> Option<String> {
     }
 }
 
-fn read_state() -> Option<MediaState> {
+pub(crate) fn read_state() -> Option<MediaState> {
     let status_str = playerctl(&["status"])?;
 
     let status = match status_str.as_str() {

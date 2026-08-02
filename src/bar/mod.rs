@@ -9,6 +9,9 @@
 //! During development the bar runs standalone (`swaypplet bar`, own
 //! GApplication id) next to the live panel + waybar.
 
+mod battery;
+mod clock;
+mod media;
 mod start;
 mod workspaces;
 
@@ -150,10 +153,23 @@ fn build_bar_window(
         .orientation(gtk4::Orientation::Horizontal)
         .css_classes(["bar-center"])
         .build();
+    center.append(&media::build(sway));
     let right = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .css_classes(["bar-right"])
         .build();
+    // Battery + clock fuse into one segmented track (waybar's
+    // group/right-track); a batteryless machine skips the segment so the
+    // clock keeps the rounded left end.
+    let track = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .css_classes(["bar-track"])
+        .build();
+    if let Some(bat) = battery::build() {
+        track.append(&bat);
+    }
+    track.append(&clock::build());
+    right.append(&track);
 
     root.set_start_widget(Some(&left));
     root.set_center_widget(Some(&center));
