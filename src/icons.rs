@@ -16,6 +16,24 @@ pub const NOTIFICATION: &str = "󰂚";
 pub const NOTIFICATION_CLEAR: &str = "󰂛";
 pub const CLOSE: &str = "󰅖";
 
+// Display / monitor
+pub const DISPLAY: &str = "󰍹";
+
+// Media controls
+pub const MEDIA_PREV: &str = "󰒮";
+pub const MEDIA_PLAY: &str = "󰐊";
+pub const MEDIA_PAUSE: &str = "󰏤";
+pub const MEDIA_NEXT: &str = "󰒭";
+
+// Clipboard
+pub const CLIPBOARD: &str = "󰅍";
+
+// Fingerprint (lock, greeter, polkit, user rows — keep in sync everywhere)
+pub const FINGERPRINT: &str = "\u{f0237}";
+
+// User switching
+pub const SWITCH_USER: &str = "󰓤";
+
 // Keyboard indicators
 pub const CAPS_ON: &str = "A";
 pub const CAPS_OFF: &str = "a";

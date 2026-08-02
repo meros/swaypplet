@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, Orientation, Revealer, RevealerTransitionType, Spinner};
 
+use crate::icons;
 use crate::spawn::spawn_work;
 
 // ── Nerd Font icons ───────────────────────────────────────────────────────────
@@ -13,7 +14,6 @@ const ICON_HEADPHONES: &str = "󰋋";
 const ICON_KEYBOARD: &str = "󰌌";
 const ICON_MOUSE: &str = "󰍽";
 const ICON_PHONE: &str = "󰏲";
-const ICON_COMPUTER: &str = "󰍹";
 const ICON_BLUETOOTH: &str = "󰂯";
 const ICON_BLUETOOTH_OFF: &str = "󰂲";
 
@@ -196,7 +196,7 @@ fn device_icon(hint: Option<&str>) -> &'static str {
         Some(h) if h.contains("keyboard") => ICON_KEYBOARD,
         Some(h) if h.contains("mouse") => ICON_MOUSE,
         Some(h) if h.contains("phone") => ICON_PHONE,
-        Some(h) if h.contains("computer") || h.contains("laptop") => ICON_COMPUTER,
+        Some(h) if h.contains("computer") || h.contains("laptop") => icons::DISPLAY,
         _ => ICON_BLUETOOTH,
     }
 }
