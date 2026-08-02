@@ -99,6 +99,75 @@ window.panel {
     border-radius: 8px;
 }
 
+/* ── Bar left cluster: start button + workspaces (mirrors waybar) ──
+   Pill geometry: bar 38 − 2×5px margin = 28px-tall pills. Unfocused
+   labels sit muted so the focused (accent) segment is the only loud
+   element on the left. */
+.bar-start {
+    margin: 5px 4px 5px 5px;
+    padding: 4px 0;
+    min-width: 28px;
+    min-height: 0;
+    background-color: alpha(@bg1, 0.85);
+    border-radius: 8px;
+    color: @accent;
+    font-weight: bold;
+    transition: background-color 150ms ease, color 150ms ease;
+}
+
+.bar-start:hover {
+    background-color: alpha(@bg2, 0.90);
+}
+
+/* Segmented track: flat buttons fused into one pill, only the ends round. */
+.bar-workspaces {
+    margin: 5px 4px;
+    border-radius: 8px;
+}
+
+button.bar-ws {
+    margin: 0;
+    padding: 4px 12px;
+    min-width: 0;
+    min-height: 0;
+    background-color: alpha(@bg1, 0.85);
+    color: @fg_dim;
+    border-radius: 0;
+    transition: background-color 150ms ease, box-shadow 150ms ease, color 150ms ease;
+}
+
+button.bar-ws:not(:first-child) {
+    border-left: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+button.bar-ws:first-child {
+    border-top-left-radius: 8px;
+    border-bottom-left-radius: 8px;
+}
+
+button.bar-ws:last-child {
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
+button.bar-ws:hover {
+    background-color: alpha(@bg2, 0.90);
+    color: @fg;
+}
+
+button.bar-ws.focused {
+    background-color: @accent;
+    color: @bg0;
+    font-weight: bold;
+    box-shadow: 0 0 8px alpha(@accent, 0.3);
+}
+
+button.bar-ws.urgent {
+    background-color: @accent_quinary;
+    color: @bg0;
+    animation: workspace-urgent-glow 0.75s steps(30) infinite alternate;
+}
+
 /* ── State-driven motion (matches waybar) ──
    Pure outer glow, no bevel layers. Box-shadow animations replace the
    element's whole box-shadow each frame, so use them only on shadowless
@@ -117,6 +186,11 @@ window.panel {
 @keyframes media-breathing {
     from { box-shadow: 0 0 0 alpha(@accent, 0.0); }
     to   { box-shadow: 0 0 10px alpha(@accent, 0.40); }
+}
+
+@keyframes workspace-urgent-glow {
+    from { box-shadow: 0 0 2px alpha(@accent_quinary, 0.2); }
+    to   { box-shadow: 0 0 14px alpha(@accent_quinary, 0.65); }
 }
 
 /* For bordered cards with a drop shadow (e.g. critical notifications). */

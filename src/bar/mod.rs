@@ -9,6 +9,9 @@
 //! During development the bar runs standalone (`swaypplet bar`, own
 //! GApplication id) next to the live panel + waybar.
 
+mod start;
+mod workspaces;
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -18,6 +21,7 @@ use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, Layer};
 
 use crate::layer_shell::{self, LayerShellConfig};
+use crate::sway_ipc::SwayService;
 use crate::theme;
 
 const APP_ID: &str = "dev.swaypplet.bar";
@@ -50,15 +54,26 @@ pub struct BarManager {
     app: gtk4::Application,
     monitors: gio::ListModel,
     windows: RefCell<Vec<BarWindow>>,
+    sway: Rc<SwayService>,
+    /// What the start button does. In-process hosting passes a direct
+    /// `panel.toggle()`; the standalone bar passes the cross-process
+    /// SIGUSR1 fallback (see `start::toggle_panel_fallback`).
+    toggle_panel: Rc<dyn Fn()>,
 }
 
 impl BarManager {
-    pub fn new(app: &gtk4::Application) -> Rc<Self> {
+    pub fn new(
+        app: &gtk4::Application,
+        sway: Rc<SwayService>,
+        toggle_panel: Rc<dyn Fn()>,
+    ) -> Rc<Self> {
         let display = gdk::Display::default().expect("no gdk display");
         let manager = Rc::new(Self {
             app: app.clone(),
             monitors: display.monitors(),
             windows: RefCell::new(Vec::new()),
+            sway,
+            toggle_panel,
         });
 
         // Intentional Rc cycle (monitors → handler → manager → monitors):
@@ -97,7 +112,8 @@ impl BarManager {
                 .iter()
                 .any(|bar| bar.monitor == monitor);
             if !known {
-                let window = build_bar_window(&self.app, &monitor);
+                let window =
+                    build_bar_window(&self.app, &monitor, &self.sway, self.toggle_panel.clone());
                 window.present();
                 self.windows
                     .borrow_mut()
@@ -107,7 +123,12 @@ impl BarManager {
     }
 }
 
-fn build_bar_window(app: &gtk4::Application, monitor: &gdk::Monitor) -> gtk4::Window {
+fn build_bar_window(
+    app: &gtk4::Application,
+    monitor: &gdk::Monitor,
+    sway: &Rc<SwayService>,
+    toggle_panel: Rc<dyn Fn()>,
+) -> gtk4::Window {
     let window = layer_shell::create_layer_window_on(app, &BAR_CONFIG, Some(monitor));
     window.set_resizable(false);
     window.set_decorated(false);
@@ -123,6 +144,8 @@ fn build_bar_window(app: &gtk4::Application, monitor: &gdk::Monitor) -> gtk4::Wi
         .orientation(gtk4::Orientation::Horizontal)
         .css_classes(["bar-left"])
         .build();
+    left.append(&start::build(toggle_panel));
+    left.append(&workspaces::build(sway));
     let center = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .css_classes(["bar-center"])
@@ -156,23 +179,13 @@ pub fn run() {
             return;
         }
         theme::load_css();
-        // Keeps itself alive through its main-context event loop; the bar
-        // widgets that consume it arrive in a later step, so for now the
-        // model is only surfaced at debug level.
-        let sway = crate::sway_ipc::SwayService::start();
-        sway.connect_change({
-            let sway = sway.clone();
-            move || {
-                let s = sway.snapshot();
-                log::debug!(
-                    "sway: {} workspaces, focused {:?}, mode {}",
-                    s.workspaces.len(),
-                    s.focused_title,
-                    s.mode
-                );
-            }
-        });
-        *slot = Some(BarManager::new(app));
+        // Keeps itself alive through its main-context event loop.
+        let sway = SwayService::start();
+        *slot = Some(BarManager::new(
+            app,
+            sway,
+            Rc::new(start::toggle_panel_fallback),
+        ));
     });
 
     // Empty argv: run() would parse std::env::args and treat the `bar`
