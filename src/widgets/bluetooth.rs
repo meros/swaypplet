@@ -588,7 +588,7 @@ fn make_connected_row(dev: &BtDevice, parent_list: &Box) -> Box {
         .hexpand(true)
         .build();
     row.add_css_class("device-row");
-    row.add_css_class("device-row--connected");
+    row.add_css_class("connected");
 
     let icon_lbl = Label::builder()
         .label(device_icon(dev.icon_hint.as_deref()))
@@ -667,7 +667,7 @@ fn make_connected_row(dev: &BtDevice, parent_list: &Box) -> Box {
                         btn_poll.set_sensitive(true);
                         forget_poll.set_sensitive(true);
                         status_poll.set_label(&format!("Error: {reason}"));
-                        status_poll.add_css_class("device-status--error");
+                        status_poll.add_css_class("error");
                         glib::ControlFlow::Break
                     }
                     Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
@@ -712,7 +712,7 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
         .hexpand(true)
         .build();
     row.add_css_class("device-row");
-    row.add_css_class("device-row--available");
+    row.add_css_class("available");
 
     let icon_lbl = Label::builder()
         .label(device_icon(dev.icon_hint.as_deref()))
@@ -756,8 +756,8 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
             spinner_c.set_visible(true);
             spinner_c.start();
             status_c.set_label("");
-            status_c.remove_css_class("device-status--error");
-            status_c.remove_css_class("device-status--success");
+            status_c.remove_css_class("error");
+            status_c.remove_css_class("success");
 
             let mac_bg = mac.clone();
             let (tx, rx) = mpsc::channel::<ConnectResult>();
@@ -781,7 +781,7 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
                         spinner_poll.stop();
                         spinner_poll.set_visible(false);
                         status_poll.set_label("✓");
-                        status_poll.add_css_class("device-status--success");
+                        status_poll.add_css_class("success");
 
                         // Brief flash of the checkmark, then remove the row
                         // (caller's refresh() will add it to connected list).
@@ -801,7 +801,7 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
                         btn_poll.set_sensitive(true);
                         forget_poll.set_sensitive(true);
                         status_poll.set_label(&format!("Connection failed: {reason}"));
-                        status_poll.add_css_class("device-status--error");
+                        status_poll.add_css_class("error");
                         glib::ControlFlow::Break
                     }
                     Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
