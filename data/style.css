@@ -135,13 +135,19 @@ window.panel {
 
 button.bar-ws {
     margin: 0;
-    padding: 4px 12px;
+    /* 2px shaved off the bottom padding for the reserved ribbon lane
+       below — total height unchanged, ribbons never move geometry. */
+    padding: 4px 12px 2px;
     min-width: 0;
     min-height: 0;
     background-color: alpha(@bg1, 0.85);
     color: @fg_dim;
     border-radius: 0;
-    transition: background-color 150ms ease, box-shadow 150ms ease, color 150ms ease;
+    /* Ribbon lane (src/bar/workspaces.rs, vision increment 10) —
+       transparent until a task ribbon lands. */
+    border-bottom: 2px solid transparent;
+    transition: background-color 150ms ease, box-shadow 150ms ease, color 150ms ease,
+        border-bottom-color 150ms ease;
 }
 
 button.bar-ws:not(:first-child) {
@@ -175,6 +181,15 @@ button.bar-ws.urgent {
     color: @bg0;
     animation: workspace-urgent-glow 0.75s steps(30) infinite alternate;
 }
+
+/* Task ribbons: 2px lane under each task group — off = no session, dim
+   solid = working, task hue = waiting. Fused segments make per-button
+   borders read as one ribbon spanning the group. */
+button.bar-ws.ribbon-working { border-bottom-color: alpha(@fg, 0.30); }
+button.bar-ws.ribbon-waiting.task1 { border-bottom-color: @accent; }
+button.bar-ws.ribbon-waiting.task2 { border-bottom-color: @accent_secondary; }
+button.bar-ws.ribbon-waiting.task3 { border-bottom-color: @accent_tertiary; }
+button.bar-ws.ribbon-waiting.task4 { border-bottom-color: @accent_quaternary; }
 
 /* ── Bar center: the decision slot (src/bar/decision.rs) ──
    Empty at nominal. One occupant behind a Revealer: battery critical
