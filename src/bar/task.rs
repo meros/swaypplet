@@ -38,16 +38,19 @@ enum Activity {
     Working,
     Waiting,
     Stopped,
+    /// Data invalid — unknown status value or missing status file. Rendered
+    /// as the amber OFF-flag, never as Waiting: a channel that can't say
+    /// "I don't know" can't be trusted when it says "act" (vision P9).
+    Stale,
 }
 
 impl Activity {
-    /// Missing file and unknown values both land on Waiting, the hook
-    /// scripts' default state.
     fn parse(s: &str) -> Self {
         match s {
             "working" => Self::Working,
+            "waiting" => Self::Waiting,
             "stopped" => Self::Stopped,
-            _ => Self::Waiting,
+            _ => Self::Stale,
         }
     }
 
@@ -56,6 +59,16 @@ impl Activity {
             Self::Working => "working",
             Self::Waiting => "waiting",
             Self::Stopped => "stopped",
+            Self::Stale => "stale",
+        }
+    }
+
+    /// Stale draws hollow so "data invalid" survives grayscale and never
+    /// reads as a live filled state.
+    fn glyph(self) -> &'static str {
+        match self {
+            Self::Stale => "○",
+            _ => "●",
         }
     }
 }
@@ -219,7 +232,7 @@ fn read_view(dir: &Path, output: Option<&str>, sway: &SwayService) -> PillView {
         sessions.push(Session {
             desc,
             activity: first_line(&dir.join(format!("status-{pid}")))
-                .map_or(Activity::Waiting, |s| Activity::parse(&s)),
+                .map_or(Activity::Stale, |s| Activity::parse(&s)),
             progress: first_line(&dir.join(format!("progress-{pid}"))),
         });
     }
@@ -297,7 +310,7 @@ fn render(btn: &gtk4::Button, content: &gtk4::Box, view: &PillView) {
         if i > 0 {
             content.append(&dim_label("|"));
         }
-        let dot = gtk4::Label::new(Some("●"));
+        let dot = gtk4::Label::new(Some(session.activity.glyph()));
         dot.add_css_class("bar-task-dot");
         dot.add_css_class(session.activity.css_class());
         content.append(&dot);
@@ -406,11 +419,20 @@ mod tests {
     }
 
     #[test]
-    fn activity_defaults_to_waiting() {
+    fn unknown_activity_is_stale_not_waiting() {
         assert_eq!(Activity::parse("working"), Activity::Working);
         assert_eq!(Activity::parse("stopped"), Activity::Stopped);
         assert_eq!(Activity::parse("waiting"), Activity::Waiting);
-        assert_eq!(Activity::parse("banana"), Activity::Waiting);
+        // Unknown must never impersonate Waiting (the cry-wolf trainer).
+        assert_eq!(Activity::parse("banana"), Activity::Stale);
+        assert_eq!(Activity::parse(""), Activity::Stale);
+    }
+
+    #[test]
+    fn stale_renders_hollow() {
+        assert_eq!(Activity::Stale.glyph(), "○");
+        assert_eq!(Activity::Waiting.glyph(), "●");
+        assert_eq!(Activity::Stale.css_class(), "stale");
     }
 
     #[test]

@@ -190,9 +190,10 @@ button.bar-media:hover {
     background-color: alpha(@bg2, 0.90);
 }
 
+/* Playing is a static accent — on the bar, a loop would burn frames for
+   hours (vision P2); the breathing glow stays on panel surfaces only. */
 button.bar-media.playing {
     color: @accent;
-    animation: media-breathing 2s steps(30) infinite alternate;
 }
 
 /* ── Bar right: battery + clock fused into one instrument track ──
@@ -298,11 +299,12 @@ button.bar-task:hover {
     color: @fg_dim;
 }
 
-/* Activity dot: working breathes in accent, waiting sits amber, a stopped
-   session dims out instead of shouting red. */
+/* Activity dot: static states only (vision P2 — motion is onset-only, no
+   loop may ride the frame clock). Working = accent fill, waiting = amber
+   fill, stopped = dim, stale = amber hollow ring (○ glyph from task.rs)
+   marking "data invalid", distinct from waiting by shape (P9). */
 .bar-task-dot.working {
     color: @accent;
-    animation: task-dot-pulse 1.5s steps(30) infinite alternate;
 }
 
 .bar-task-dot.waiting {
@@ -311,6 +313,10 @@ button.bar-task:hover {
 
 .bar-task-dot.stopped {
     color: @fg_dim;
+}
+
+.bar-task-dot.stale {
+    color: @accent_secondary;
 }
 
 /* ── Active-task accent ripple ──
@@ -376,12 +382,6 @@ button.bar-task:hover {
 @keyframes workspace-urgent-glow {
     from { box-shadow: 0 0 2px alpha(@accent_quinary, 0.2); }
     to   { box-shadow: 0 0 14px alpha(@accent_quinary, 0.65); }
-}
-
-/* Text glyph, so opacity breathes instead of box-shadow. */
-@keyframes task-dot-pulse {
-    from { opacity: 1; }
-    to   { opacity: 0.35; }
 }
 
 /* For bordered cards with a drop shadow (e.g. critical notifications). */
