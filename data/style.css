@@ -55,6 +55,17 @@
 @define-color danger         #cc241d;
 @define-color danger_tint    alpha(#fb4934, 0.16);  /* destructive hover     */
 
+/* ── Glass card: shared base for floating surfaces (OSD, notification
+   popups, launcher, polkit/lock cards, start menu). box-shadow stays
+   per-surface: compositor-blurred layers need `none` (a shadow's
+   translucent pixels would frost into a halo), while the unblurred lock
+   layer keeps a real drop shadow. ── */
+.glass-card {
+    background-color: @surface;
+    border-radius: 18px;
+    border: 1px solid @border_strong;
+}
+
 /* ── Window: transparent so compositor alpha-blends ──
    No outer drop shadows on floating cards: swayfx blur_ignore_transparent
    only skips pixels with alpha exactly 0, so a shadow overhanging the
@@ -961,9 +972,6 @@ revealer {
 }
 
 .osd-container {
-    background-color: @surface;
-    border-radius: 18px;
-    border: 1px solid @border_strong;
     box-shadow: none;
     padding: 20px 28px 16px;
     min-width: 160px;
@@ -1023,9 +1031,6 @@ revealer {
    fully alpha-0 so compositor blur clips to the cards
    (see the window comment). */
 .notification-popup-content {
-    background-color: @surface;
-    border-radius: 18px;
-    border: 1px solid @border_strong;
     box-shadow: none;
     padding: 12px 14px;
 }
@@ -1139,9 +1144,6 @@ revealer {
 }
 
 .launcher-container {
-    background-color: @surface;
-    border-radius: 18px;
-    border: 1px solid @border_strong;
     box-shadow: none;
     padding: 16px;
 }
@@ -1231,9 +1233,6 @@ revealer {
 
 .polkit-container,
 .lock-card {
-    background-color: @surface;
-    border-radius: 18px;
-    border: 1px solid @border_strong;
     padding: 24px 26px;
 }
 
@@ -1634,9 +1633,6 @@ revealer {
 
 /* The menu surface itself. */
 .startmenu-root {
-    background-color: @surface;
-    border-radius: 18px;
-    border: 1px solid @border_strong;
     box-shadow: none;
     padding: 16px;
 }

@@ -252,6 +252,7 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     let card = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
         .build();
+    card.add_css_class("glass-card");
     card.add_css_class("notification-popup-content");
     card.set_size_request(CARD_WIDTH, -1);
     set_critical_class(&card, notif);

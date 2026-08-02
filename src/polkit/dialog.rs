@@ -109,6 +109,7 @@ impl PolkitDialog {
             .spacing(14)
             .width_request(400)
             .build();
+        card.add_css_class("glass-card");
         card.add_css_class("polkit-container");
 
         // Icon (image first, fallback nerd-font label)
