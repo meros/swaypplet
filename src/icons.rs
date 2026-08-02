@@ -17,6 +17,10 @@ pub const NOTIFICATION: &str = "󰂚";
 pub const NOTIFICATION_CLEAR: &str = "󰂛";
 pub const CLOSE: &str = "󰅖";
 
+// Bar
+/// Start button logo — the same glyph waybar's custom/swaypplet used.
+pub const START: &str = "\u{f313}";
+
 // Keyboard indicators
 pub const CAPS_ON: &str = "A";
 pub const CAPS_OFF: &str = "a";

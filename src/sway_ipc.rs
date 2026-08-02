@@ -107,13 +107,13 @@ impl SwayService {
     }
 
     /// Full state snapshot (cloned — the model is a handful of small rows).
+    #[allow(dead_code)] // consumed by the bar widgets as they land
     pub fn snapshot(&self) -> SwayState {
         self.state.borrow().clone()
     }
 
-    // Getters below are consumed by the bar widgets in the next step.
+    // Getters below are consumed by the bar widgets as they land.
 
-    #[allow(dead_code)]
     pub fn workspaces(&self) -> Vec<WorkspaceInfo> {
         self.state.borrow().workspaces.clone()
     }
@@ -139,7 +139,6 @@ impl SwayService {
 /// blocking the GTK thread. Each call opens a throwaway connection —
 /// commands arrive at click rate, and a fresh socket can't be left wedged
 /// by a sway restart the way a cached one could.
-#[allow(dead_code)] // consumed by the bar widgets in the next step
 pub fn run_command(cmd: &str) {
     let cmd = cmd.to_string();
     crate::spawn::spawn_work(
