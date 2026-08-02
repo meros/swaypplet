@@ -146,7 +146,10 @@ fn build_bar_window(
     toggle_panel: Rc<dyn Fn()>,
 ) -> gtk4::Window {
     let window = layer_shell::create_layer_window_on(app, &BAR_CONFIG, Some(monitor));
-    window.set_resizable(false);
+    // Resizable stays ON: the left+right anchors mean the compositor's
+    // configure sets the width, and a non-resizable GTK window pins to its
+    // natural (content) size instead — the card then ends after the clock
+    // rather than spanning the output.
     window.set_decorated(false);
 
     // Pane/content split for the enter transition (motion on glass,
@@ -206,6 +209,25 @@ fn build_bar_window(
     let slide = anim::SlideBin::new();
     slide.set_child(&root);
     window.set_child(Some(&slide));
+
+    // Height forensics at map time: the surface only honours the requested
+    // 38px if no cluster's minimum exceeds it, and a single padded widget
+    // silently grows the whole bar. Log the offenders instead of guessing.
+    {
+        let (left, center, right, root) =
+            (left.clone(), center.clone(), right.clone(), root.clone());
+        window.connect_map(move |_| {
+            for (name, w) in [
+                ("root", root.upcast_ref::<gtk4::Widget>()),
+                ("left", left.upcast_ref()),
+                ("center", center.upcast_ref()),
+                ("right", right.upcast_ref()),
+            ] {
+                let (min, nat, _, _) = w.measure(gtk4::Orientation::Vertical, -1);
+                log::debug!("bar height: {name} min={min} nat={nat}");
+            }
+        });
+    }
 
     // Enter: fade + short settle up from below the surface edge, per bar
     // window (so hotplugged outputs get it too). The exclusive zone is a
