@@ -36,6 +36,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk4::{glib, graphene, prelude::*, subclass::prelude::*};
+use gtk4_layer_shell::LayerShell;
 
 pub const ENTER_MS: f64 = 300.0;
 pub const MOVE_MS: f64 = 300.0;
@@ -88,6 +89,10 @@ struct RevealInner {
     slide: RefCell<Option<(SlideBin, f64)>>,
     shown: Cell<bool>,
     tick: RefCell<Option<gtk4::TickCallbackId>>,
+    /// The window's real keyboard interactivity, captured at construction.
+    /// Parking (see [`Reveal::finish_hide`]) drops it to None so an
+    /// invisible-but-mapped surface never eats keys; show() restores this.
+    kb_mode: Cell<gtk4_layer_shell::KeyboardMode>,
 }
 
 /// One show/hide transition for every glass surface (motion on glass, see
@@ -105,6 +110,11 @@ impl Reveal {
     /// its alpha is what swayfx stencils blur against, so [`Reveal`] owns
     /// its opacity outright and lands it on exactly 0.0 when hidden.
     pub fn new(window: &gtk4::Window, pane: &impl IsA<gtk4::Widget>) -> Self {
+        let kb_mode = if window.is_layer_window() {
+            window.keyboard_mode()
+        } else {
+            gtk4_layer_shell::KeyboardMode::None
+        };
         Reveal {
             inner: Rc::new(RevealInner {
                 window: window.clone(),
@@ -113,8 +123,30 @@ impl Reveal {
                 slide: RefCell::new(None),
                 shown: Cell::new(false),
                 tick: RefCell::new(None),
+                kb_mode: Cell::new(kb_mode),
             }),
         }
+    }
+
+    /// Map the window in its parked-hidden state, once, at construction.
+    /// swayfx rebuilds its blur pipeline when a blurred layer surface maps,
+    /// and that transition frame renders black — pre-mapping pays the cost
+    /// at startup instead of on the first user-visible fade, and
+    /// finish_hide keeps the surface mapped ever after for the same reason.
+    pub fn premap(&self) {
+        let inner = &self.inner;
+        inner.pane.set_opacity(0.0);
+        if let Some(c) = &*inner.content.borrow() {
+            c.set_opacity(0.0);
+        }
+        if let Some((bin, px)) = &*inner.slide.borrow() {
+            bin.jump_to(*px);
+        }
+        inner.window.set_visible(true);
+        // The gdk surface only exists after realize; park from idle so the
+        // empty input region lands on it.
+        let this = self.clone();
+        glib::idle_add_local_once(move || this.park_input());
     }
 
     /// Everything drawn on the glass; fades over the full enter/exit
@@ -141,6 +173,7 @@ impl Reveal {
         inner.shown.set(true);
         let was_visible = inner.window.is_visible();
         inner.window.set_visible(true);
+        self.unpark_input();
         if !animations_enabled() {
             self.cancel_tick();
             inner.pane.set_opacity(1.0);
@@ -152,10 +185,10 @@ impl Reveal {
             }
             return;
         }
-        // A fresh map starts from the fully hidden pose — instant-hide
-        // paths (window unmapped without hide()) would otherwise skip the
-        // enter transition entirely.
-        if !was_visible {
+        // Start from the fully hidden pose on a fresh map OR a parked
+        // surface (pane at exactly 0) — instant-hide paths (window unmapped
+        // without hide()) would otherwise skip the enter transition.
+        if !was_visible || inner.pane.opacity() == 0.0 {
             inner.pane.set_opacity(0.0);
             if let Some(c) = &*inner.content.borrow() {
                 c.set_opacity(0.0);
@@ -190,6 +223,13 @@ impl Reveal {
         }
     }
 
+    /// Hide by PARKING, not unmapping: opacities to exactly 0.0 (the swayfx
+    /// stencil discards alpha-0 pixels, so nothing renders and no frost
+    /// shows), empty input region so clicks pass through, keyboard mode
+    /// None so no keys are eaten. The surface stays mapped because swayfx
+    /// re-initializes its blur pipeline on map/unmap and that transition
+    /// frame renders black — the flash this whole arrangement exists to
+    /// avoid.
     fn finish_hide(&self) {
         let inner = &self.inner;
         inner.pane.set_opacity(0.0);
@@ -199,7 +239,32 @@ impl Reveal {
         if let Some((bin, px)) = &*inner.slide.borrow() {
             bin.jump_to(*px);
         }
-        inner.window.set_visible(false);
+        if inner.window.is_visible() {
+            self.park_input();
+        }
+    }
+
+    fn park_input(&self) {
+        let inner = &self.inner;
+        if inner.window.is_layer_window() {
+            inner
+                .window
+                .set_keyboard_mode(gtk4_layer_shell::KeyboardMode::None);
+        }
+        if let Some(surface) = inner.window.surface() {
+            surface.set_input_region(Some(&cairo::Region::create()));
+        }
+    }
+
+    fn unpark_input(&self) {
+        let inner = &self.inner;
+        if inner.window.is_layer_window() {
+            inner.window.set_keyboard_mode(inner.kb_mode.get());
+        }
+        if let Some(surface) = inner.window.surface() {
+            // None restores the default full-surface input region.
+            surface.set_input_region(None);
+        }
     }
 
     /// Drive pane + content from their *current* opacities toward the

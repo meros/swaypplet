@@ -276,8 +276,10 @@ impl Launcher {
         window.set_child(Some(&backdrop));
 
         // Enter/exit transition (motion on glass, anim.rs): the container is
-        // the pane, the launcher view the content. Pure crossfade.
+        // the pane, the launcher view the content. Pure crossfade. Premap
+        // warms the compositor blur pipeline (see Reveal::premap).
         let reveal = anim::Reveal::new(&window, &container).content(view.widget());
+        reveal.premap();
 
         // Hide the window after a result is activated.
         {
