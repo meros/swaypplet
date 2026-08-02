@@ -137,8 +137,9 @@ fn generic_label(num: i32, name: &str) -> &str {
 
 /// Numbered workspaces switch by number, so "5:t2a" and a bare "5" resolve
 /// to the same target (matches waybar and the sway keybindings);
-/// named-only ones by quoted name.
-fn switch_command(num: i32, name: &str) -> String {
+/// named-only ones by quoted name. Also the popover session rows' focus
+/// path (bar/popover.rs).
+pub(crate) fn switch_command(num: i32, name: &str) -> String {
     if num >= 0 {
         format!("workspace number {num}")
     } else {

@@ -13,6 +13,10 @@
 //! Accent ripple: the local bay's task stamps bar-task1..4 on this bar's
 //! root (moved verbatim from the deleted task pill); style.css colors the
 //! track band + focused workspace from there.
+//!
+//! Bay click opens the read-layer task popover (bar/popover.rs, vision
+//! increment 8); the old direct task-find/task-rename click bindings live
+//! there as footer actions.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -20,8 +24,8 @@ use std::time::{Duration, SystemTime};
 
 use gtk4::prelude::*;
 
+use super::popover::TaskPopover;
 use crate::anim::{self, SlideBin};
-use crate::spawn::spawn_work;
 use crate::sway_ipc::SwayService;
 use crate::task_state::{Activity, SessionState, TaskState, TaskStateService, task_of_name};
 
@@ -198,8 +202,14 @@ pub fn build(
         .css_classes(["bar-board", "bar-seg"])
         .build();
     let bays: Vec<Bay> = (1..=4).map(Bay::new).collect();
-    for bay in &bays {
+    for (i, bay) in bays.iter().enumerate() {
         board.append(&bay.button);
+        let n = i as u8 + 1;
+        let tasks = tasks.clone();
+        let popover = bay.popover.clone();
+        bay.button.connect_clicked(move |_| {
+            popover.open(tasks.snapshot().task(n), tasks.skew_boundary());
+        });
     }
 
     let refresh: Rc<dyn Fn()> = {
@@ -218,10 +228,12 @@ pub fn build(
                 apply_accent(&root, local);
             }
             let snapshot = tasks.snapshot();
+            let skew = tasks.skew_boundary();
             let now = SystemTime::now();
             for (i, bay) in bays.iter().enumerate() {
                 let n = i as u8 + 1;
                 bay.apply(bay_view(n, snapshot.task(n), local == Some(n), now));
+                bay.popover.refresh_if_open(snapshot.task(n), skew);
             }
         })
     };
@@ -261,26 +273,9 @@ fn apply_accent(root: &gtk4::Widget, task: Option<u8>) {
     }
 }
 
-/// task-find / task-rename come from the nixos config's PATH; a machine
-/// without them just logs. `status()` runs on a worker so the picker the
-/// script opens can't block the bar, and the child gets reaped.
-fn run_task_command(cmd: &'static str) {
-    spawn_work(
-        move || {
-            std::process::Command::new(cmd)
-                .status()
-                .map_err(|e| e.to_string())
-        },
-        move |result| {
-            if let Err(e) = result {
-                log::warn!("bar board: `{cmd}`: {e}");
-            }
-        },
-    );
-}
-
 struct Bay {
     button: gtk4::Button,
+    popover: TaskPopover,
     slide: SlideBin,
     marker: gtk4::Label,
     chip_reveal: gtk4::Revealer,
@@ -350,14 +345,11 @@ impl Bay {
             .child(&slide)
             .css_classes(["bar-bay", BAY_TASK_CLASSES[n as usize - 1]])
             .build();
-        button.connect_clicked(|_| run_task_command("task-find"));
-        let right = gtk4::GestureClick::new();
-        right.set_button(gtk4::gdk::BUTTON_SECONDARY);
-        right.connect_pressed(|_, _, _, _| run_task_command("task-rename"));
-        button.add_controller(right);
+        let popover = TaskPopover::new(&button, n);
 
         Self {
             button,
+            popover,
             slide,
             marker,
             chip_reveal,

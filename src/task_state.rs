@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use gio::prelude::*;
 
@@ -117,6 +117,16 @@ pub struct TaskStateService {
     acked: RefCell<HashMap<i32, Option<SystemTime>>>,
     /// A dropped GFileMonitor stops watching.
     _monitor: RefCell<Option<gio::FileMonitor>>,
+    /// Suspend detection for honest ages (the popover's ~ prefix): the
+    /// wall and monotonic clocks last sampled together, plus the wall
+    /// time of the most recent detected jump.
+    skew: RefCell<SkewTracker>,
+}
+
+struct SkewTracker {
+    wall: SystemTime,
+    mono: Instant,
+    boundary: Option<SystemTime>,
 }
 
 impl TaskStateService {
@@ -128,6 +138,11 @@ impl TaskStateService {
             age_timer: RefCell::new(None),
             acked: RefCell::new(HashMap::new()),
             _monitor: RefCell::new(None),
+            skew: RefCell::new(SkewTracker {
+                wall: SystemTime::now(),
+                mono: Instant::now(),
+                boundary: None,
+            }),
         });
 
         // The watcher needs the directory before the first session writes it.
@@ -165,10 +180,31 @@ impl TaskStateService {
         self.state.with(Clone::clone)
     }
 
+    /// Wall time of the most recent detected suspend; ages of status
+    /// writes older than this straddle slept hours and are only
+    /// approximate. CLOCK_MONOTONIC stops during suspend, so a wall delta
+    /// that outruns the monotonic delta between two samples marks "a
+    /// suspend ended in this window". Sampled on every refresh and on
+    /// popover open — no timer of its own (cadence budget).
+    pub fn skew_boundary(&self) -> Option<SystemTime> {
+        let mut t = self.skew.borrow_mut();
+        let (now_wall, now_mono) = (SystemTime::now(), Instant::now());
+        let wall_delta = now_wall.duration_since(t.wall).unwrap_or(Duration::ZERO);
+        if clock_jumped(wall_delta, now_mono - t.mono) {
+            t.boundary = Some(now_wall);
+        }
+        t.wall = now_wall;
+        t.mono = now_mono;
+        t.boundary
+    }
+
     /// Rescan into a snapshot. `notify_unchanged` forces the observer fire
     /// for age-dependent renders: the snapshot carries no clock, so an age
     /// tick compares equal.
     fn refresh(self: &Rc<Self>, notify_unchanged: bool) {
+        // Sample the clocks while we're here: the denser the sampling,
+        // the tighter the suspend boundary the popover flags against.
+        self.skew_boundary();
         let sway = self.sway.snapshot();
         let mut snapshot = scan(&self.dir, &sway);
         let focused: Vec<&str> = sway
@@ -210,7 +246,8 @@ impl TaskStateService {
 
 // ── State assembly ──────────────────────────────────────────────────────
 
-fn state_dir() -> PathBuf {
+/// Also the popover's root for last-<pid> rows (bar/popover.rs).
+pub(crate) fn state_dir() -> PathBuf {
     glib::home_dir().join(".local/state/claude-tasks")
 }
 
@@ -313,7 +350,7 @@ fn claude_pids(dir: &Path) -> Vec<i32> {
 }
 
 /// First line of `path`; `None` when the file is missing or blank.
-fn first_line(path: &Path) -> Option<String> {
+pub(crate) fn first_line(path: &Path) -> Option<String> {
     let text = fs::read_to_string(path).ok()?;
     let line = text.lines().next()?.trim();
     (!line.is_empty()).then(|| line.to_string())
@@ -371,6 +408,12 @@ fn parent_pid_from_stat(stat: &str) -> Option<i32> {
         .nth(1)?
         .parse()
         .ok()
+}
+
+/// A minute of tolerance: timer latency and scheduling never add up to
+/// that between two samples; a real suspend does.
+fn clock_jumped(wall_delta: Duration, mono_delta: Duration) -> bool {
+    wall_delta > mono_delta + Duration::from_secs(60)
 }
 
 /// Leading `N/M` token of a progress line ("1/5 ETA ~15m"); a zero total
@@ -463,6 +506,18 @@ mod tests {
         // Chain ends without a window.
         assert_eq!(window_workspace(400, &map, |_| Some(1)), None);
         assert_eq!(window_workspace(400, &map, |_| None), None);
+    }
+
+    #[test]
+    fn clock_jump_needs_a_minute_of_drift() {
+        let s = Duration::from_secs;
+        assert!(!clock_jumped(s(30), s(30)));
+        // Half a minute of drift is scheduling noise, not a suspend.
+        assert!(!clock_jumped(s(90), s(60)));
+        // An hour asleep between samples.
+        assert!(clock_jumped(s(3700), s(30)));
+        // Wall behind monotonic (NTP step back) is not a suspend.
+        assert!(!clock_jumped(s(10), s(60)));
     }
 
     #[test]

@@ -249,6 +249,14 @@ pub(crate) fn battery_summary_text(bat: &BatteryState) -> String {
     format!("{}% · {}", bat.capacity, battery_sub_text(bat))
 }
 
+/// Present draw ("7.2 W") for the bar battery popover; `None` when sysfs
+/// gives no settled power_now reading.
+pub(crate) fn watts_text(bat: &BatteryState) -> Option<String> {
+    bat.power_w
+        .filter(|w| *w >= 0.001)
+        .map(|w| format!("{w:.1} W"))
+}
+
 // ---------------------------------------------------------------------------
 // Governor helpers
 // ---------------------------------------------------------------------------
@@ -732,5 +740,29 @@ fn wire_confirm<F: Fn() + 'static>(btn: &gtk4::Button, verb: &'static str, exec:
 fn spawn_session_cmd(cmd: &str, args: &[&str]) {
     if let Err(e) = std::process::Command::new(cmd).args(args).spawn() {
         log::error!("Failed to spawn {} {:?}: {}", cmd, args, e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bat(power_w: Option<f64>) -> BatteryState {
+        BatteryState {
+            capacity: 50,
+            charging: false,
+            power_w,
+            energy_now_wh: None,
+            energy_full_wh: None,
+            health_pct: None,
+        }
+    }
+
+    #[test]
+    fn watts_text_skips_unsettled_meters() {
+        assert_eq!(watts_text(&bat(Some(7.24))), Some("7.2 W".into()));
+        // power_now == 0 — meter hasn't settled yet.
+        assert_eq!(watts_text(&bat(Some(0.0))), None);
+        assert_eq!(watts_text(&bat(None)), None);
     }
 }
