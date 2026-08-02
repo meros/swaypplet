@@ -144,9 +144,11 @@ Each increment ships independently and leaves the bar better than it found it.
 - **Unknown status as Waiting** (current task.rs:46-51): the cry-wolf trainer; replaced by the OFF-flag, increment 1.
 - **Tray dwell-dot** (A, B): NeedsAttention filtering gives the same silence with no hidden hover surface.
 
-## Open questions for the owner
+## Owner decisions (2026-08-02)
 
-1. **Escalation at 10 min unacked**: pure static luminance step (current spec), or additionally a slow blink via boundary-aimed class toggle (≥1 s cadence, never frame-clock)? Taste call between maximal stillness and a harder-to-miss overdue tier.
-2. **Stopped sessions**: near-off dot in the bay (current spec), or nothing at all? Showing it says "slot occupied, session done"; hiding it makes stopped and no-session identical.
-3. **Media mark**: keep the persistent dim ♪ while a player exists, or drop even that and leave media entirely to popover/panel? The mark is the last ambient trace of a zero-action state.
-4. **Budget-pacing hazard glyph (O6)**: want it in the hazard lane at all? The plumbing is trivial and severable; the question is purely whether "Claude feels slow" deserves a mark or a shrug.
+The four open questions were put to the owner; all resolved:
+
+1. **Escalation at 10 min unacked**: static luminance step only — nothing on the bar ever loops.
+2. **Stopped sessions**: near-off dot in the bay ("slot occupied, session done").
+3. **Media mark**: keep the persistent dim ♪ (dims further paused, hidden when no player).
+4. **Budget-pacing hazard glyph (O6)**: rejected — "Claude feels slow" gets a shrug, not a mark.
