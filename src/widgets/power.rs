@@ -333,20 +333,15 @@ pub struct PowerSection {
     bat_handles: Option<Rc<BatteryHandles>>,
 
     // Summary row button + labels (always visible).
-    #[allow(dead_code)]
     summary_btn: gtk4::Button,
     summary_icon: gtk4::Label,
     summary_text: gtk4::Label,
-    // Stored to allow toggling arrow glyph; mutated only via cloned handle in closure.
-    #[allow(dead_code)]
     summary_arrow: gtk4::Label,
 
     // Governor info label (inside revealer).
     governor_label: gtk4::Label,
 
     // Revealer for detail content.
-    // Stored for ownership; toggled via cloned handle in gesture closure.
-    #[allow(dead_code)]
     detail_revealer: gtk4::Revealer,
 }
 

@@ -60,16 +60,12 @@ pub(crate) struct NetworkState {
 
 // ── NetworkSection ────────────────────────────────────────────────────────────
 
-#[allow(dead_code)]
 pub struct NetworkSection {
     root: Box,
     state: Rc<RefCell<NetworkState>>,
     // Summary row
-    summary_btn: Button,
     summary_icon: Label,
     summary_text: Label,
-    summary_arrow: Label,
-    detail_revealer: Revealer,
     // Detail widgets
     current_icon_label: Label,
     current_ssid_label: Label,
@@ -86,8 +82,6 @@ pub struct NetworkSection {
     scan_spinner: Spinner,
     scan_status_label: Label,
     // Toggle / lists
-    toggle_button: Button,
-    revealer: Revealer,
     network_list_box: ListBox,
     vpn_list_box: ListBox,
     iface_list_box: ListBox,
@@ -439,7 +433,6 @@ impl NetworkSection {
 
             let state_toggle = state_ref.clone();
             let toggle_btn_c = toggle_button.clone();
-            let toggle_btn_field = toggle_button.clone();
             toggle_button.connect_clicked(move |_| {
                 let mut s = state_toggle.borrow_mut();
                 s.list_visible = !s.list_visible;
@@ -455,11 +448,8 @@ impl NetworkSection {
             let section = Self {
                 root,
                 state: state_ref,
-                summary_btn,
                 summary_icon,
                 summary_text,
-                summary_arrow,
-                detail_revealer,
                 current_icon_label,
                 current_ssid_label,
                 current_signal_label,
@@ -473,8 +463,6 @@ impl NetworkSection {
                 power_save_row,
                 scan_spinner,
                 scan_status_label,
-                toggle_button: toggle_btn_field,
-                revealer,
                 network_list_box,
                 vpn_list_box,
                 iface_list_box,

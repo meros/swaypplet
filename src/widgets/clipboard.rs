@@ -167,7 +167,6 @@ fn cliphist_wipe_blocking() {
 
 struct Widgets {
     summary_btn: gtk4::Button,
-    summary_icon: gtk4::Label,
     summary_text: gtk4::Label,
     summary_arrow: gtk4::Label,
     detail_revealer: gtk4::Revealer,
@@ -256,7 +255,6 @@ impl ClipboardSection {
 
         let widgets = Rc::new(Widgets {
             summary_btn,
-            summary_icon,
             summary_text,
             summary_arrow,
             detail_revealer,

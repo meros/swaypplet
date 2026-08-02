@@ -400,11 +400,6 @@ impl Panel {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn refresh(&self) {
-        self.sections.refresh();
-    }
-
     pub fn refresh_audio(&self) {
         self.sections.audio.refresh();
     }

@@ -192,9 +192,3 @@ pub fn activate(
 
     Ok(())
 }
-
-/// Check if the elephant socket exists (daemon is likely running).
-#[allow(dead_code)]
-pub fn is_available() -> bool {
-    socket_path().exists()
-}
