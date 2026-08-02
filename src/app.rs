@@ -3,7 +3,6 @@ use std::fs;
 use std::rc::Rc;
 
 use gio::prelude::*;
-use glib::unix_signal_add_local;
 use gtk4::Application;
 use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
@@ -76,7 +75,7 @@ pub fn run() {
 
         // SIGUSR1 toggles panel visibility
         let s = state_clone.clone();
-        unix_signal_add_local(10 /* SIGUSR1 */, move || {
+        crate::glib_unix::signal_add_local(10 /* SIGUSR1 */, move || {
             if let Some(ref panel) = s.borrow().panel {
                 panel.toggle();
             }
@@ -85,7 +84,7 @@ pub fn run() {
 
         // SIGUSR2 toggles launcher
         let s = state_clone.clone();
-        unix_signal_add_local(12 /* SIGUSR2 */, move || {
+        crate::glib_unix::signal_add_local(12 /* SIGUSR2 */, move || {
             if let Some(ref launcher) = s.borrow().launcher {
                 launcher.toggle();
             }
@@ -199,7 +198,7 @@ pub fn run() {
             app.activate();
         }
 
-        0
+        glib::ExitCode::SUCCESS
     });
 
     app.connect_shutdown(|_| {

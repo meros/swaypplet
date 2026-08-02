@@ -440,11 +440,7 @@ fn reflow(st: &Rc<RefCell<State>>) {
 /// Reduced motion: collapse any animation to a single frame so state flow
 /// (exit removal, unmap) still runs through the tick path.
 fn anim_ms(ms: f64) -> f64 {
-    if anim::animations_enabled() {
-        ms
-    } else {
-        1.0
-    }
+    if anim::animations_enabled() { ms } else { 1.0 }
 }
 
 /// Apply a card's current pose as a Fixed child transform. The card widget
@@ -556,7 +552,7 @@ fn update_input_region(s: &State) {
             let _ = region.union_rectangle(&rect);
         }
     }
-    surface.set_input_region(&region);
+    surface.set_input_region(Some(&region));
 }
 
 // ── Auto-dismiss timers ──

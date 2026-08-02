@@ -28,7 +28,7 @@ pub fn create_layer_window(app: &gtk4::Application, config: &LayerShellConfig) -
 
     window.init_layer_shell();
     window.set_layer(Layer::Overlay);
-    window.set_namespace(config.namespace);
+    window.set_namespace(Some(config.namespace));
     window.set_keyboard_mode(config.keyboard_mode);
 
     for &(edge, anchored) in config.anchors {
