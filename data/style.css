@@ -368,6 +368,40 @@ button.flat:hover {
     font-size: 8px;
 }
 
+/* ── User rows (user switcher section) — buttons, so reset chrome first ── */
+.user-row {
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    border: none;
+    padding: 10px 10px;
+    border-radius: 8px;
+    min-height: 36px;
+    transition: background-color 150ms ease;
+}
+
+.user-row:hover {
+    background-color: alpha(white, 0.04);
+}
+
+.user-row.active {
+    background-color: alpha(@accent, 0.08);
+}
+
+.user-row.active:hover {
+    background-color: alpha(@accent, 0.12);
+}
+
+.user-name {
+    font-size: 13px;
+    color: @fg;
+}
+
+.user-fp {
+    font-size: 11px;
+    color: @fg_dim;
+}
+
 /* ── Media controls ── */
 /* ── Media: album art ── */
 .media-art-frame {

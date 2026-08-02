@@ -242,7 +242,6 @@ impl SurfaceSet {
                 .spacing(10)
                 .halign(gtk4::Align::Center)
                 .build();
-            row.add_css_class("lock-user-row");
             let active = self.active_user.borrow().clone();
             user_chips = fill_chip_row(&row, &users, &active, &self.on_user_select);
             row
@@ -662,7 +661,6 @@ fn avatar_chip(user: &str, icon: Option<&str>, logged_in: bool, active: bool) ->
     content.append(&avatar(user, icon, CHIP_AVATAR_SIZE, logged_in));
 
     let name = gtk4::Label::new(Some(user));
-    name.add_css_class("lock-user-name");
     content.append(&name);
 
     let chip = gtk4::Button::builder().child(&content).build();
