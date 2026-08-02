@@ -12,6 +12,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
+use crate::icons;
 use crate::layer_shell::{self, LayerShellConfig};
 
 use super::agent::AuthRequest;
@@ -145,7 +146,7 @@ impl PolkitDialog {
             .visible(false)
             .build();
         fp_pill.add_css_class("polkit-fp-pill");
-        let fp_glyph = gtk4::Label::builder().label("\u{f0237}").build();
+        let fp_glyph = gtk4::Label::builder().label(icons::FINGERPRINT).build();
         fp_glyph.add_css_class("polkit-fp-glyph");
         let fp_label = gtk4::Label::builder()
             .label("Touch fingerprint reader")

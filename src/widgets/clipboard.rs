@@ -5,7 +5,8 @@ use std::thread;
 use gtk4::prelude::*;
 use log::{debug, error, warn};
 
-const ICON_CLIPBOARD: &str = "󰅍";
+use crate::icons;
+
 const MAX_ENTRIES: usize = 10;
 const PREVIEW_LEN: usize = 60;
 
@@ -193,7 +194,7 @@ impl ClipboardSection {
             .spacing(6)
             .build();
 
-        let summary_icon = gtk4::Label::new(Some(ICON_CLIPBOARD));
+        let summary_icon = gtk4::Label::new(Some(icons::CLIPBOARD));
         summary_icon.add_css_class("section-summary-icon");
 
         let summary_text = gtk4::Label::new(Some("Clipboard"));

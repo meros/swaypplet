@@ -4,10 +4,8 @@ use std::sync::mpsc;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, Orientation, Revealer, RevealerTransitionType};
 
+use crate::icons;
 use crate::spawn::spawn_work;
-
-// ── Nerd Font icons ───────────────────────────────────────────────────────────
-const ICON_DISPLAY: &str = "󰍹";
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
@@ -146,7 +144,7 @@ fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) 
         .build();
     row.add_css_class("device-row");
 
-    let icon_lbl = Label::builder().label(ICON_DISPLAY).build();
+    let icon_lbl = Label::builder().label(icons::DISPLAY).build();
     icon_lbl.add_css_class("device-icon");
 
     let info_box = Box::builder()
@@ -279,7 +277,7 @@ impl DisplaySection {
             .hexpand(true)
             .build();
 
-        let summary_icon = Label::builder().label(ICON_DISPLAY).build();
+        let summary_icon = Label::builder().label(icons::DISPLAY).build();
         summary_icon.add_css_class("section-summary-icon");
 
         let summary_text = Label::builder()

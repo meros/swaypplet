@@ -14,6 +14,7 @@ use gtk4::prelude::*;
 
 use crate::anim::animations_enabled;
 use crate::avatar::avatar;
+use crate::icons;
 use crate::switch_user;
 
 /// Data for one user chip. Sourced from [`crate::switch_user::list`] when
@@ -279,7 +280,7 @@ impl SurfaceSet {
             .visible(false)
             .build();
         fp_pill.add_css_class("lock-fp-pill");
-        let fp_glyph = gtk4::Label::builder().label("\u{f0237}").build();
+        let fp_glyph = gtk4::Label::builder().label(icons::FINGERPRINT).build();
         fp_glyph.add_css_class("lock-fp-glyph");
         let fp_label = gtk4::Label::builder()
             .label("Touch fingerprint reader")
@@ -675,7 +676,7 @@ fn avatar_chip(user: &str, icon: Option<&str>, logged_in: bool, active: bool) ->
 /// Lock-mode "Switch user" button — jumps to a greeter instead of offering
 /// direct user targets.
 fn build_switch_button() -> gtk4::Button {
-    let btn = gtk4::Button::with_label("󰓤  Switch user");
+    let btn = gtk4::Button::with_label(&format!("{}  Switch user", icons::SWITCH_USER));
     btn.add_css_class("lock-switch-user");
     btn.set_halign(gtk4::Align::Center);
     btn.connect_clicked(|_| switch_user::to_greeter());

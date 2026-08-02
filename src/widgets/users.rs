@@ -11,13 +11,11 @@
 use gtk4::prelude::*;
 
 use crate::avatar::avatar;
+use crate::icons;
 use crate::spawn::spawn_work;
 use crate::switch_user::{self, SwitchUser};
 use crate::widgets::power::hide_panel_for_widget;
 
-/// Fingerprint-enrolled glyph, dim, shown on the right of an enrolled user's
-/// row (matches the lock/greeter fingerprint iconography, U+F0237).
-const FP_GLYPH: &str = "\u{f0237}";
 /// Avatar diameter for panel rows.
 const AVATAR_SIZE: i32 = 30;
 
@@ -94,7 +92,7 @@ fn rebuild_rows(list: &gtk4::Box, users: &[SwitchUser]) {
 
 fn rebuild_fallback(list: &gtk4::Box) {
     clear(list);
-    let btn = gtk4::Button::with_label("󰓤  Switch user");
+    let btn = gtk4::Button::with_label(&format!("{}  Switch user", icons::SWITCH_USER));
     btn.add_css_class("user-row");
     btn.add_css_class("user-row-fallback");
     btn.connect_clicked(|b| {
@@ -127,7 +125,7 @@ fn user_row(u: &SwitchUser) -> gtk4::Button {
     content.append(&name);
 
     if u.fingerprint == Some(true) {
-        let fp = gtk4::Label::new(Some(FP_GLYPH));
+        let fp = gtk4::Label::new(Some(icons::FINGERPRINT));
         fp.add_css_class("user-fp");
         fp.set_tooltip_text(Some("Fingerprint enrolled"));
         content.append(&fp);
