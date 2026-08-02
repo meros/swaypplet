@@ -16,6 +16,7 @@ mod clock;
 mod media;
 mod start;
 mod task;
+mod tray;
 mod workspaces;
 
 use std::cell::RefCell;
@@ -62,6 +63,7 @@ pub struct BarManager {
     monitors: gio::ListModel,
     windows: RefCell<Vec<BarWindow>>,
     sway: Rc<SwayService>,
+    tray: Rc<tray::TrayService>,
     /// What the start button does. In-process hosting passes a direct
     /// `panel.toggle()`; the standalone bar passes the cross-process
     /// SIGUSR1 fallback (see `start::toggle_panel_fallback`).
@@ -80,6 +82,7 @@ impl BarManager {
             monitors: display.monitors(),
             windows: RefCell::new(Vec::new()),
             sway,
+            tray: tray::TrayService::start(),
             toggle_panel,
         });
 
@@ -120,8 +123,13 @@ impl BarManager {
                 .any(|bar| bar.monitor == monitor);
             if !known {
                 // build_bar_window maps the window itself (Reveal enter).
-                let window =
-                    build_bar_window(&self.app, &monitor, &self.sway, self.toggle_panel.clone());
+                let window = build_bar_window(
+                    &self.app,
+                    &monitor,
+                    &self.sway,
+                    &self.tray,
+                    self.toggle_panel.clone(),
+                );
                 self.windows
                     .borrow_mut()
                     .push(BarWindow { monitor, window });
@@ -134,6 +142,7 @@ fn build_bar_window(
     app: &gtk4::Application,
     monitor: &gdk::Monitor,
     sway: &Rc<SwayService>,
+    tray: &Rc<tray::TrayService>,
     toggle_panel: Rc<dyn Fn()>,
 ) -> gtk4::Window {
     let window = layer_shell::create_layer_window_on(app, &BAR_CONFIG, Some(monitor));
@@ -168,6 +177,8 @@ fn build_bar_window(
     let right = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .build();
+    // Tray sits left of the track, matching waybar's modules-right order.
+    right.append(&tray::build(tray));
     // Battery + task pill + clock fuse into one segmented track (waybar's
     // group/right-track); a batteryless machine skips the segment so the
     // task pill keeps the rounded left end.
