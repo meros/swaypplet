@@ -7,7 +7,6 @@
 //! zbus 4; Cargo carries both majors and nothing crosses this module's
 //! boundary except the crate's own plain-data model types.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -15,6 +14,8 @@ use system_tray::client::{ActivateRequest, Client};
 use system_tray::item::StatusNotifierItem;
 use system_tray::menu::TrayMenu;
 use tokio::sync::broadcast::error::RecvError;
+
+use crate::service::{Backoff, Observed};
 
 /// One SNI item as the bar renders it.
 #[derive(Debug, Clone)]
@@ -31,12 +32,9 @@ enum Cmd {
     AboutToShow { address: String, menu_path: String },
 }
 
-/// Lives on the GTK main thread behind `Rc`; the event loop spawned by
-/// [`TrayService::start`] holds a strong ref, so the service persists for
-/// the process (same lifetime story as `SwayService`).
+/// SNI item service; [`Observed`] documents the `Rc` lifetime story.
 pub struct TrayService {
-    items: RefCell<Vec<TrayItem>>,
-    on_change: RefCell<Vec<Rc<dyn Fn()>>>,
+    items: Observed<Vec<TrayItem>>,
     cmd: tokio::sync::mpsc::UnboundedSender<Cmd>,
 }
 
@@ -44,8 +42,7 @@ impl TrayService {
     pub fn start() -> Rc<Self> {
         let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
         let service = Rc::new(Self {
-            items: RefCell::new(Vec::new()),
-            on_change: RefCell::new(Vec::new()),
+            items: Observed::new(Vec::new()),
             cmd: cmd_tx,
         });
 
@@ -55,13 +52,7 @@ impl TrayService {
         let for_events = service.clone();
         glib::MainContext::default().spawn_local(async move {
             while let Ok(items) = rx.recv().await {
-                *for_events.items.borrow_mut() = items;
-                // Clone the list and fire outside the borrow — a callback
-                // may re-enter a getter or connect another observer.
-                let callbacks: Vec<_> = for_events.on_change.borrow().clone();
-                for cb in &callbacks {
-                    cb();
-                }
+                for_events.items.set(items);
             }
         });
 
@@ -69,20 +60,17 @@ impl TrayService {
     }
 
     pub fn connect_change(&self, cb: impl Fn() + 'static) {
-        self.on_change.borrow_mut().push(Rc::new(cb));
+        self.items.connect_change(cb);
     }
 
     /// Current items, sorted for a stable bar order.
     pub fn items(&self) -> Vec<TrayItem> {
-        self.items.borrow().clone()
+        self.items.with(Clone::clone)
     }
 
     pub fn item(&self, address: &str) -> Option<TrayItem> {
         self.items
-            .borrow()
-            .iter()
-            .find(|i| i.address == address)
-            .cloned()
+            .with(|items| items.iter().find(|i| i.address == address).cloned())
     }
 
     /// Left-click activation. Coordinates are a hint the spec allows us to
@@ -130,23 +118,17 @@ async fn run(
     tx: async_channel::Sender<Vec<TrayItem>>,
     mut cmd: tokio::sync::mpsc::UnboundedReceiver<Cmd>,
 ) {
-    const INITIAL: Duration = Duration::from_millis(250);
-    const MAX: Duration = Duration::from_secs(8);
-    let mut backoff = INITIAL;
+    let mut backoff = Backoff::new();
     loop {
         let started = Instant::now();
         match session(&tx, &mut cmd).await {
             Ok(()) => return, // receiver gone — process is shutting down
-            Err(e) => log::warn!("tray: {e}; reconnecting in {backoff:?}"),
+            Err(e) => {
+                let delay = backoff.next_delay(started.elapsed());
+                log::warn!("tray: {e}; reconnecting in {delay:?}");
+                tokio::time::sleep(delay).await;
+            }
         }
-        tokio::time::sleep(backoff).await;
-        // Same ladder-reset heuristic as sway_ipc: a long-lived session was
-        // a real connection that died, not a refused bus.
-        backoff = if started.elapsed() > Duration::from_secs(10) {
-            INITIAL
-        } else {
-            (backoff * 2).min(MAX)
-        };
     }
 }
 

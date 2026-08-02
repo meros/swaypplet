@@ -328,6 +328,14 @@ button.bar-task.none {
 .bar-root.bar-task3 .bar-track > .bar-seg { border-top-color: @accent_tertiary; }
 .bar-root.bar-task4 .bar-track > .bar-seg { border-top-color: @accent_quaternary; }
 
+/* Workspace-strip dots (src/bar/workspaces.rs): every numbered workspace
+   1–16 carries its task's accent — same order, defined only here so a
+   palette retune reaches the dots too. */
+.bar-ws-dot.task1 { color: @accent; }
+.bar-ws-dot.task2 { color: @accent_secondary; }
+.bar-ws-dot.task3 { color: @accent_tertiary; }
+.bar-ws-dot.task4 { color: @accent_quaternary; }
+
 .bar-root.bar-task1 button.bar-ws.focused {
     background-color: @accent;
     box-shadow: 0 0 10px alpha(@accent, 0.45);
