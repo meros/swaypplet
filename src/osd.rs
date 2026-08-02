@@ -225,6 +225,10 @@ fn read_lock_display(lock_name: &str, icon_on: &str, icon_off: &str, label: &str
 
 // ── OSD Widget ───────────────────────────────────────────────────────────────
 
+/// Volume/brightness route into the bar's decision slot (icon, fraction,
+/// text) → handled? Installed by app.rs once the bar exists.
+type BarRoute = Box<dyn Fn(&str, f64, &str) -> bool>;
+
 #[derive(Clone)]
 pub struct Osd {
     icon_label: gtk4::Label,
@@ -235,6 +239,7 @@ pub struct Osd {
     bar_box: gtk4::Box,
     reveal: anim::Reveal,
     timeout_id: Rc<RefCell<Option<glib::SourceId>>>,
+    bar_route: Rc<RefCell<Option<BarRoute>>>,
 }
 
 impl Osd {
@@ -330,7 +335,16 @@ impl Osd {
             bar_box,
             reveal,
             timeout_id: Rc::new(RefCell::new(None)),
+            bar_route: Rc::new(RefCell::new(None)),
         }
+    }
+
+    /// Install the bar route (docs/BAR_VISION.md, increment 5): while the
+    /// focused window is not fullscreen, volume/brightness displays render
+    /// as the decision-slot interjection instead of the center card. Lock
+    /// indicators (caps/num/scroll) always keep the card.
+    pub fn set_bar_route(&self, route: impl Fn(&str, f64, &str) -> bool + 'static) {
+        *self.bar_route.borrow_mut() = Some(Box::new(route));
     }
 
     pub fn trigger(&self, cmd: &OsdCommand) {
@@ -345,6 +359,16 @@ impl Osd {
     }
 
     fn show_display(&self, display: &OsdDisplay) {
+        if let OsdDisplay::Bar {
+            icon,
+            fraction,
+            text,
+        } = display
+            && let Some(route) = &*self.bar_route.borrow()
+            && route(icon, *fraction, text)
+        {
+            return;
+        }
         match display {
             OsdDisplay::Bar {
                 icon,

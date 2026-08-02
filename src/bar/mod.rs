@@ -57,6 +57,8 @@ static BAR_CONFIG: LayerShellConfig = LayerShellConfig {
 struct BarWindow {
     monitor: gdk::Monitor,
     window: gtk4::Window,
+    /// OSD interjections route here (BAR_VISION increment 5).
+    decision: decision::DecisionSlot,
 }
 
 /// Keeps one bar window per connected output, following monitor hotplug.
@@ -128,7 +130,7 @@ impl BarManager {
                 .any(|bar| bar.monitor == monitor);
             if !known {
                 // build_bar_window maps the window itself (Reveal enter).
-                let window = build_bar_window(
+                let (window, decision) = build_bar_window(
                     &self.app,
                     &monitor,
                     &self.sway,
@@ -136,11 +138,41 @@ impl BarManager {
                     &self.tray,
                     self.toggle_panel.clone(),
                 );
-                self.windows
-                    .borrow_mut()
-                    .push(BarWindow { monitor, window });
+                self.windows.borrow_mut().push(BarWindow {
+                    monitor,
+                    window,
+                    decision,
+                });
             }
         }
+    }
+
+    /// Route a volume/brightness OSD into the decision slot on the
+    /// focused output's bar (any bar as fallback). `false` when no bar
+    /// exists, so the caller falls back to the center-screen card.
+    pub fn interject(&self, icon: &str, fraction: f64, text: &str) -> bool {
+        let windows = self.windows.borrow();
+        let Some(first) = windows.first() else {
+            return false;
+        };
+        // gdk connector names match sway output names under wlroots.
+        let focused_output = self
+            .sway
+            .snapshot()
+            .workspaces
+            .iter()
+            .find(|w| w.focused)
+            .map(|w| w.output.clone());
+        let target = windows
+            .iter()
+            .find(|bar| {
+                focused_output
+                    .as_deref()
+                    .is_some_and(|out| bar.monitor.connector().is_some_and(|c| c == out))
+            })
+            .unwrap_or(first);
+        target.decision.interject(icon, fraction, text);
+        true
     }
 }
 
@@ -151,7 +183,7 @@ fn build_bar_window(
     tasks: &Rc<TaskStateService>,
     tray: &Rc<tray::TrayService>,
     toggle_panel: Rc<dyn Fn()>,
-) -> gtk4::Window {
+) -> (gtk4::Window, decision::DecisionSlot) {
     let window = layer_shell::create_layer_window_on(app, &BAR_CONFIG, Some(monitor));
     // Resizable stays ON: the left+right anchors mean the compositor's
     // configure sets the width, and a non-resizable GTK window pins to its
@@ -257,7 +289,7 @@ fn build_bar_window(
         .slide(&slide, anim::SLIDE_PX)
         .show();
 
-    window
+    (window, decision)
 }
 
 pub fn run() {

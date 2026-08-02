@@ -15,6 +15,13 @@
 //! segment's existing 30 s poll, which feeds this slot through
 //! `set_battery` — no poll of its own. Charger connect therefore clears
 //! within one battery poll; sysfs has no edge to subscribe to here.
+//!
+//! The one transient tenant (increment 5): volume/brightness OSD
+//! interjections. `interject` overlays the standing occupant on a
+//! crossfaded Stack page — never destroying it — with icon + eased
+//! center-anchored hairline + value; repeated keypresses retarget the
+//! ease so they read as one continuous sweep, and 1.5 s after the last
+//! press the slot yields back to whatever the mux holds.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -33,6 +40,12 @@ const SWAP_MS: u64 = 200;
 /// settask caps descriptions at 40 chars; the slot shows all of them
 /// (vision P5's one sanctioned exception) but never more.
 const DESC_MAX_CHARS: i32 = 40;
+
+/// OSD interjection: decay after the last keypress (matches the center
+/// card's `OSD_TIMEOUT_MS`) and the per-press hairline ease.
+const OSD_DECAY_MS: u64 = 1500;
+const OSD_EASE_MS: f64 = 150.0;
+const HAIRLINE_WIDTH: i32 = 64;
 
 const DOT_CLASSES: [&str; 4] = ["t1", "t2", "t3", "t4"];
 
@@ -131,6 +144,8 @@ fn occupant(battery: Option<&BatteryView>, snap: &TaskSnapshot, now: SystemTime)
 
 struct Inner {
     revealer: gtk4::Revealer,
+    /// Occupant page under the interjection page; crossfade between them.
+    stack: gtk4::Stack,
     root: gtk4::Box,
     dot: gtk4::Label,
     text: gtk4::Label,
@@ -143,6 +158,16 @@ struct Inner {
     desired: RefCell<Option<Occ>>,
     /// A collapse is in flight; its timeout applies `desired` when done.
     swapping: Cell<bool>,
+    // ── OSD interjection (transient tenant) ─────────────────────────────
+    osd_page: gtk4::Box,
+    osd_icon: gtk4::Label,
+    osd_text: gtk4::Label,
+    hairline: gtk4::DrawingArea,
+    /// Fraction the draw func paints; eased toward the latest keypress.
+    hair_shown: Rc<Cell<f64>>,
+    hair_tick: Rc<RefCell<Option<gtk4::TickCallbackId>>>,
+    interjecting: Cell<bool>,
+    decay: RefCell<Option<glib::SourceId>>,
 }
 
 /// Cheap handle; the TaskStateService observer keeps the widgets updated
@@ -176,18 +201,84 @@ impl DecisionSlot {
         root.append(&text);
         root.append(&meta);
 
+        // OSD interjection page: icon + center-anchored hairline + value.
+        // Shares the .bar-decision pill so the crossfade only swaps
+        // content, not the card.
+        let osd_icon = gtk4::Label::builder()
+            .css_classes(["bar-decision-osd-icon"])
+            .build();
+        let osd_text = gtk4::Label::builder()
+            .css_classes(["bar-decision-osd-text"])
+            .build();
+        let hair_shown: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+        let hairline = gtk4::DrawingArea::builder()
+            .content_width(HAIRLINE_WIDTH)
+            .content_height(2)
+            .valign(gtk4::Align::Center)
+            .css_classes(["bar-decision-hairline"])
+            .build();
+        {
+            let shown = hair_shown.clone();
+            hairline.set_draw_func(move |area, cr, w, h| {
+                let c = area.color();
+                let (w, h) = (f64::from(w), f64::from(h));
+                // Dim full-width track under the fill.
+                cr.set_source_rgba(
+                    c.red().into(),
+                    c.green().into(),
+                    c.blue().into(),
+                    f64::from(c.alpha()) * 0.25,
+                );
+                cr.rectangle(0.0, 0.0, w, h);
+                let _ = cr.fill();
+                let f = shown.get().clamp(0.0, 1.0);
+                if f <= 0.0 {
+                    return;
+                }
+                // Center-anchored: the fill grows outward from the middle.
+                cr.set_source_rgba(
+                    c.red().into(),
+                    c.green().into(),
+                    c.blue().into(),
+                    c.alpha().into(),
+                );
+                cr.rectangle((w - w * f) / 2.0, 0.0, w * f, h);
+                let _ = cr.fill();
+            });
+        }
+        let osd_page = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(8)
+            .css_classes(["bar-decision", "bar-decision-osd"])
+            .build();
+        osd_page.append(&osd_icon);
+        osd_page.append(&hairline);
+        osd_page.append(&osd_text);
+
+        // The interjection overlays the occupant without destroying it: a
+        // Stack keeps both pages alive and crossfades at the 150 ms
+        // sub-threshold scale.
+        let stack = gtk4::Stack::builder()
+            .transition_type(gtk4::StackTransitionType::Crossfade)
+            .transition_duration(150)
+            .hhomogeneous(false)
+            .build();
+        stack.add_child(&root);
+        stack.add_child(&osd_page);
+
         // Horizontal slide so the collapse frees width smoothly — the
         // CenterBox recenters instead of snapping neighbors.
         let revealer = gtk4::Revealer::builder()
             .transition_type(gtk4::RevealerTransitionType::SlideRight)
             .transition_duration(SWAP_MS as u32)
             .reveal_child(false)
-            .child(&root)
+            .child(&stack)
             .build();
 
         let slot = Self {
             inner: Rc::new(Inner {
                 revealer,
+                stack,
                 root,
                 dot,
                 text,
@@ -197,6 +288,14 @@ impl DecisionSlot {
                 shown: RefCell::new(None),
                 desired: RefCell::new(None),
                 swapping: Cell::new(false),
+                osd_page,
+                osd_icon,
+                osd_text,
+                hairline,
+                hair_shown,
+                hair_tick: Rc::new(RefCell::new(None)),
+                interjecting: Cell::new(false),
+                decay: RefCell::new(None),
             }),
         };
 
@@ -242,7 +341,86 @@ impl DecisionSlot {
             return;
         }
         *inner.desired.borrow_mut() = occ;
+        if inner.interjecting.get() {
+            // The transient tenant holds the slot; the handover runs at
+            // yield time instead.
+            return;
+        }
         self.begin_swap();
+    }
+
+    /// OSD interjection (occupant 3, the only transient tenant): show
+    /// icon + hairline + value over the standing occupant, retargeting
+    /// the eased fraction on every keypress, and arm the 1.5 s decay.
+    pub fn interject(&self, icon: &str, fraction: f64, text: &str) {
+        let inner = &self.inner;
+        inner.osd_icon.set_text(icon);
+        inner.osd_text.set_text(text);
+        self.animate_hairline(fraction);
+        if !inner.interjecting.get() {
+            inner.interjecting.set(true);
+            inner.stack.set_visible_child(&inner.osd_page);
+        }
+        inner.revealer.set_reveal_child(true);
+        if let Some(id) = inner.decay.borrow_mut().take() {
+            id.remove();
+        }
+        let slot = self.clone();
+        let id = glib::timeout_add_local_once(Duration::from_millis(OSD_DECAY_MS), move || {
+            slot.inner.decay.borrow_mut().take();
+            slot.yield_back();
+        });
+        *inner.decay.borrow_mut() = Some(id);
+    }
+
+    /// Decay: hand the slot back to whatever the mux holds. The standing
+    /// occupant was never destroyed, so yielding is a crossfade back (or
+    /// a collapse when nobody needs the owner).
+    fn yield_back(&self) {
+        let inner = &self.inner;
+        inner.interjecting.set(false);
+        inner.stack.set_visible_child(&inner.root);
+        let desired_key = inner.desired.borrow().as_ref().map(Occ::key);
+        if desired_key == *inner.shown.borrow() {
+            if desired_key.is_none() && !inner.swapping.get() {
+                inner.revealer.set_reveal_child(false);
+            }
+        } else {
+            // An occupant change arrived mid-interjection; run the
+            // deferred handover now.
+            self.begin_swap();
+        }
+    }
+
+    /// Ease the hairline toward `target` over 150 ms so repeated
+    /// keypresses read as one continuous sweep; reduced motion jumps.
+    fn animate_hairline(&self, target: f64) {
+        let inner = &self.inner;
+        if let Some(id) = inner.hair_tick.borrow_mut().take() {
+            id.remove();
+        }
+        let from = inner.hair_shown.get();
+        if !anim::animations_enabled() || from == target {
+            inner.hair_shown.set(target);
+            inner.hairline.queue_draw();
+            return;
+        }
+        let start = glib::monotonic_time();
+        let shown = inner.hair_shown.clone();
+        let tick = inner.hair_tick.clone();
+        let id = inner.hairline.add_tick_callback(move |area, _| {
+            let t =
+                (((glib::monotonic_time() - start) as f64 / 1000.0) / OSD_EASE_MS).clamp(0.0, 1.0);
+            shown.set(from + (target - from) * anim::ease_out_cubic(t));
+            area.queue_draw();
+            if t >= 1.0 {
+                tick.borrow_mut().take();
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
+        *inner.hair_tick.borrow_mut() = Some(id);
     }
 
     /// Handover: collapse the outgoing occupant over the structural
