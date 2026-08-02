@@ -288,15 +288,10 @@ button.bar-tray-item.needs-attention {
 }
 
 /* ── Task pill: middle track segment (src/bar/task.rs) ──
-   The slot keeps width even with nothing to show (waybar's .none rule) so
-   the track shape never collapses between sessions. */
+   Hidden entirely when there's no session and no manual name — an empty
+   reserved slot read as a hole in the track. */
 button.bar-task:hover {
     background-color: alpha(@bg2, 0.90);
-}
-
-button.bar-task.none {
-    min-width: 90px;
-    color: @fg_dim;
 }
 
 .bar-task-dim {

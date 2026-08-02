@@ -314,15 +314,16 @@ fn render(btn: &gtk4::Button, content: &gtk4::Box, view: &PillView) {
         content.append(&desc_label(manual));
     }
 
+    // No session and no manual name → no pill. An empty reserved slot read
+    // as a hole in the track; battery|clock close ranks instead (the CSS
+    // first/last-child radii still see the hidden widget, so the track's
+    // rounded ends stay put).
     let empty = view.is_empty();
+    btn.set_visible(!empty);
     if empty {
-        btn.add_css_class("none");
         btn.set_tooltip_text(None);
-    } else {
-        btn.remove_css_class("none");
-        if let Some(task) = view.task {
-            btn.set_tooltip_text(Some(&format!("Task {task}")));
-        }
+    } else if let Some(task) = view.task {
+        btn.set_tooltip_text(Some(&format!("Task {task}")));
     }
 }
 
