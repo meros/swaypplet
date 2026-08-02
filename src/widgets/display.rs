@@ -1,45 +1,32 @@
 use std::process::Command;
-use std::sync::mpsc;
 
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, Orientation, Revealer, RevealerTransitionType};
+use serde::Deserialize;
 
+use crate::icons;
 use crate::spawn::spawn_work;
-
-// ── Nerd Font icons ───────────────────────────────────────────────────────────
-const ICON_DISPLAY: &str = "󰍹";
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Default)]
+/// One entry from `swaymsg -t get_outputs`; unknown fields are ignored.
+#[derive(Debug, Clone, Deserialize)]
 struct OutputInfo {
     name: String,
     active: bool,
+    /// Absent for disabled outputs.
+    current_mode: Option<Mode>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct Mode {
     width: u32,
     height: u32,
     /// Refresh rate in millihertz (e.g. 60000 = 60 Hz).
-    refresh_mhz: u32,
-    #[allow(dead_code)]
-    make: String,
-    #[allow(dead_code)]
-    model: String,
+    refresh: u32,
 }
 
 // ── Backend helpers ───────────────────────────────────────────────────────────
-
-/// Extract the string value from a JSON line like `"key": "value",`.
-fn extract_string_value(line: &str) -> String {
-    // Split on `"` — the value is the 4th token (index 3).
-    line.split('"').nth(3).unwrap_or("").to_string()
-}
-
-/// Extract the numeric value from a JSON line like `"key": 1234,`.
-fn extract_number(line: &str) -> u32 {
-    line.split(':')
-        .nth(1)
-        .and_then(|s| s.trim().trim_end_matches(',').parse().ok())
-        .unwrap_or(0)
-}
 
 /// Run `swaymsg -t get_outputs --raw` and parse the JSON response.
 fn get_outputs() -> Vec<OutputInfo> {
@@ -50,65 +37,10 @@ fn get_outputs() -> Vec<OutputInfo> {
         return Vec::new();
     };
 
-    let json = String::from_utf8_lossy(&out.stdout);
-    parse_outputs(&json)
-}
-
-fn parse_outputs(json: &str) -> Vec<OutputInfo> {
-    let mut outputs: Vec<OutputInfo> = Vec::new();
-    let mut current: Option<OutputInfo> = None;
-    let mut in_current_mode = false;
-
-    for line in json.lines() {
-        let trimmed = line.trim();
-
-        // A new output object begins whenever we see a top-level "name" key.
-        // swaymsg outputs the name field first in each object, so this acts as
-        // a reliable object boundary.
-        if trimmed.starts_with("\"name\":") {
-            // Push the previous output before starting a new one.
-            if let Some(o) = current.take() {
-                outputs.push(o);
-            }
-            let name = extract_string_value(trimmed);
-            current = Some(OutputInfo {
-                name,
-                ..Default::default()
-            });
-            in_current_mode = false;
-        }
-
-        let Some(ref mut o) = current else { continue };
-
-        if trimmed.starts_with("\"active\":") {
-            o.active = trimmed.contains("true");
-        } else if trimmed.contains("\"current_mode\"") {
-            in_current_mode = true;
-        } else if trimmed.starts_with("\"make\":") {
-            o.make = extract_string_value(trimmed);
-        } else if trimmed.starts_with("\"model\":") {
-            o.model = extract_string_value(trimmed);
-        }
-
-        if in_current_mode {
-            if trimmed.starts_with("\"width\":") {
-                o.width = extract_number(trimmed);
-            } else if trimmed.starts_with("\"height\":") {
-                o.height = extract_number(trimmed);
-            } else if trimmed.starts_with("\"refresh\":") {
-                o.refresh_mhz = extract_number(trimmed);
-                // current_mode block is complete after refresh.
-                in_current_mode = false;
-            }
-        }
-    }
-
-    // Push the final output.
-    if let Some(o) = current {
-        outputs.push(o);
-    }
-
-    outputs
+    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+        log::warn!("failed to parse swaymsg get_outputs JSON: {}", e);
+        Vec::new()
+    })
 }
 
 /// Format refresh rate: millihertz → integer Hz string.
@@ -118,20 +50,15 @@ fn format_refresh(mhz: u32) -> String {
 
 // ── Toggle action ─────────────────────────────────────────────────────────────
 
-/// Send `swaymsg output <name> enable|disable` on a background thread.
-/// Returns a channel receiver that yields `true` on success, `false` on failure.
-fn toggle_output_async(name: String, enable: bool) -> mpsc::Receiver<bool> {
-    let (tx, rx) = mpsc::channel::<bool>();
-    std::thread::spawn(move || {
-        let cmd = if enable { "enable" } else { "disable" };
-        let ok = Command::new("swaymsg")
-            .args(["output", &name, cmd])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        let _ = tx.send(ok);
-    });
-    rx
+/// Run `swaymsg output <name> enable|disable` (blocking — call from a
+/// background thread, e.g. via `spawn_work`).
+fn toggle_output_blocking(name: &str, enable: bool) -> bool {
+    let cmd = if enable { "enable" } else { "disable" };
+    Command::new("swaymsg")
+        .args(["output", name, cmd])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 // ── Row builder ───────────────────────────────────────────────────────────────
@@ -146,7 +73,7 @@ fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) 
         .build();
     row.add_css_class("device-row");
 
-    let icon_lbl = Label::builder().label(ICON_DISPLAY).build();
+    let icon_lbl = Label::builder().label(icons::DISPLAY).build();
     icon_lbl.add_css_class("device-icon");
 
     let info_box = Box::builder()
@@ -157,15 +84,11 @@ fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) 
     let name_lbl = Label::builder().label(&output.name).xalign(0.0).build();
     name_lbl.add_css_class("device-name");
 
-    let mode_text = if output.width > 0 && output.height > 0 {
-        format!(
-            "{}x{} @ {}",
-            output.width,
-            output.height,
-            format_refresh(output.refresh_mhz)
-        )
-    } else {
-        "—".to_string()
+    let mode_text = match &output.current_mode {
+        Some(m) if m.width > 0 && m.height > 0 => {
+            format!("{}x{} @ {}", m.width, m.height, format_refresh(m.refresh))
+        }
+        _ => "—".to_string(),
     };
     let mode_lbl = Label::builder().label(&mode_text).xalign(0.0).build();
     mode_lbl.add_css_class("device-status");
@@ -189,7 +112,6 @@ fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) 
         let name = output.name.clone();
         let active = output.active;
         let output_list_c = output_list.clone();
-        let toggle_btn_c = toggle_btn.clone();
 
         toggle_btn.connect_clicked(move |btn| {
             // Re-validate against the freshest state before disabling: the
@@ -203,26 +125,16 @@ fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) 
 
             btn.set_sensitive(false);
 
-            let rx = toggle_output_async(name.clone(), !active);
-
             // Refresh the list after the command completes.
+            let name_bg = name.clone();
             let output_list_refresh = output_list_c.clone();
-            let btn_refresh = toggle_btn_c.clone();
-            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                match rx.try_recv() {
-                    Ok(_) => {
-                        // Re-populate the list to reflect the new state.
-                        populate_output_list(&output_list_refresh);
-                        glib::ControlFlow::Break
-                    }
-                    Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        // Command thread dropped without sending — restore button.
-                        btn_refresh.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                }
-            });
+            spawn_work(
+                move || toggle_output_blocking(&name_bg, !active),
+                move |_ok| {
+                    // Re-populate the list to reflect the new state.
+                    populate_output_list(&output_list_refresh);
+                },
+            );
         });
     }
 
@@ -254,7 +166,6 @@ fn populate_output_list_with_data(list: &Box, outputs: &[OutputInfo]) {
 
 // ── DisplaySection ────────────────────────────────────────────────────────────
 
-#[allow(dead_code)]
 pub struct DisplaySection {
     root: Box,
     summary_btn: Button,
@@ -280,7 +191,7 @@ impl DisplaySection {
             .hexpand(true)
             .build();
 
-        let summary_icon = Label::builder().label(ICON_DISPLAY).build();
+        let summary_icon = Label::builder().label(icons::DISPLAY).build();
         summary_icon.add_css_class("section-summary-icon");
 
         let summary_text = Label::builder()

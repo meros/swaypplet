@@ -4,13 +4,8 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use crate::icons;
 use crate::spawn::spawn_work;
-
-// ── Nerd Font icons ───────────────────────────────────────────────────────────
-const ICON_PREV: &str = "󰒮";
-const ICON_PLAY: &str = "󰐊";
-const ICON_PAUSE: &str = "󰏤";
-const ICON_NEXT: &str = "󰒭";
 
 // ── Backend ───────────────────────────────────────────────────────────────────
 
@@ -255,14 +250,14 @@ impl MediaSection {
             .build();
         controls.add_css_class("media-controls");
 
-        let prev_btn = gtk4::Button::with_label(ICON_PREV);
+        let prev_btn = gtk4::Button::with_label(icons::MEDIA_PREV);
         prev_btn.add_css_class("media-btn");
 
-        let play_pause_btn = gtk4::Button::with_label(ICON_PLAY);
+        let play_pause_btn = gtk4::Button::with_label(icons::MEDIA_PLAY);
         play_pause_btn.add_css_class("media-btn");
         play_pause_btn.add_css_class("media-play-pause");
 
-        let next_btn = gtk4::Button::with_label(ICON_NEXT);
+        let next_btn = gtk4::Button::with_label(icons::MEDIA_NEXT);
         next_btn.add_css_class("media-btn");
 
         controls.append(&prev_btn);
@@ -497,11 +492,11 @@ impl MediaSection {
                 // Also toggles `.playing` on the section root so descendants
                 // (e.g. `.media-art-frame`) can drive the breathing animation.
                 if ms.status == PlaybackStatus::Playing {
-                    w.play_pause_btn.set_label(ICON_PAUSE);
+                    w.play_pause_btn.set_label(icons::MEDIA_PAUSE);
                     w.play_pause_btn.add_css_class("suggested");
                     root.add_css_class("playing");
                 } else {
-                    w.play_pause_btn.set_label(ICON_PLAY);
+                    w.play_pause_btn.set_label(icons::MEDIA_PLAY);
                     w.play_pause_btn.remove_css_class("suggested");
                     root.remove_css_class("playing");
                 }

@@ -268,6 +268,7 @@ impl Osd {
             .spacing(0)
             .halign(gtk4::Align::Center)
             .build();
+        outer.add_css_class("glass-card");
         outer.add_css_class("osd-container");
 
         let icon_label = gtk4::Label::builder()

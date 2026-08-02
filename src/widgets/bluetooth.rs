@@ -1,11 +1,11 @@
 use std::cell::RefCell;
 use std::process::Command;
 use std::rc::Rc;
-use std::sync::mpsc;
 
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, Orientation, Revealer, RevealerTransitionType, Spinner};
 
+use crate::icons;
 use crate::spawn::spawn_work;
 
 // ── Nerd Font icons ───────────────────────────────────────────────────────────
@@ -13,7 +13,6 @@ const ICON_HEADPHONES: &str = "󰋋";
 const ICON_KEYBOARD: &str = "󰌌";
 const ICON_MOUSE: &str = "󰍽";
 const ICON_PHONE: &str = "󰏲";
-const ICON_COMPUTER: &str = "󰍹";
 const ICON_BLUETOOTH: &str = "󰂯";
 const ICON_BLUETOOTH_OFF: &str = "󰂲";
 
@@ -196,7 +195,7 @@ fn device_icon(hint: Option<&str>) -> &'static str {
         Some(h) if h.contains("keyboard") => ICON_KEYBOARD,
         Some(h) if h.contains("mouse") => ICON_MOUSE,
         Some(h) if h.contains("phone") => ICON_PHONE,
-        Some(h) if h.contains("computer") || h.contains("laptop") => ICON_COMPUTER,
+        Some(h) if h.contains("computer") || h.contains("laptop") => icons::DISPLAY,
         _ => ICON_BLUETOOTH,
     }
 }
@@ -491,13 +490,13 @@ impl BluetoothSection {
             state,
         });
 
-        section.schedule_refresh();
+        section.refresh();
         section
     }
 
     /// Schedule an async refresh: fetch Bluetooth state on a background thread,
     /// then apply the result on the GTK main thread.
-    pub fn schedule_refresh(self: &Rc<Self>) {
+    pub fn refresh(self: &Rc<Self>) {
         let section = Rc::clone(self);
         spawn_work(read_bt_state_blocking, move |state| {
             section.apply_state(state);
@@ -588,7 +587,7 @@ fn make_connected_row(dev: &BtDevice, parent_list: &Box) -> Box {
         .hexpand(true)
         .build();
     row.add_css_class("device-row");
-    row.add_css_class("device-row--connected");
+    row.add_css_class("connected");
 
     let icon_lbl = Label::builder()
         .label(device_icon(dev.icon_hint.as_deref()))
@@ -639,14 +638,6 @@ fn make_connected_row(dev: &BtDevice, parent_list: &Box) -> Box {
             status_c.set_label("");
 
             let mac_bg = mac.clone();
-            let (tx, rx) = mpsc::channel::<ConnectResult>();
-
-            std::thread::spawn(move || {
-                let result = bt_disconnect_blocking(&mac_bg);
-                let _ = tx.send(result);
-            });
-
-            // Poll the channel from the main loop.
             let row_poll = row_c.clone();
             let parent_poll = parent_c.clone();
             let spinner_poll = spinner_c.clone();
@@ -654,32 +645,23 @@ fn make_connected_row(dev: &BtDevice, parent_list: &Box) -> Box {
             let forget_poll = forget_btn_c.clone();
             let status_poll = status_c.clone();
 
-            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                match rx.try_recv() {
-                    Ok(ConnectResult::Success) => {
+            spawn_work(
+                move || bt_disconnect_blocking(&mac_bg),
+                move |result| match result {
+                    ConnectResult::Success => {
                         // Remove the row from the connected list.
                         parent_poll.remove(&row_poll);
-                        glib::ControlFlow::Break
                     }
-                    Ok(ConnectResult::Failure(reason)) => {
+                    ConnectResult::Failure(reason) => {
                         spinner_poll.stop();
                         spinner_poll.set_visible(false);
                         btn_poll.set_sensitive(true);
                         forget_poll.set_sensitive(true);
                         status_poll.set_label(&format!("Error: {reason}"));
-                        status_poll.add_css_class("device-status--error");
-                        glib::ControlFlow::Break
+                        status_poll.add_css_class("error");
                     }
-                    Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        spinner_poll.stop();
-                        spinner_poll.set_visible(false);
-                        btn_poll.set_sensitive(true);
-                        forget_poll.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                }
-            });
+                },
+            );
         });
     }
 
@@ -712,7 +694,7 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
         .hexpand(true)
         .build();
     row.add_css_class("device-row");
-    row.add_css_class("device-row--available");
+    row.add_css_class("available");
 
     let icon_lbl = Label::builder()
         .label(device_icon(dev.icon_hint.as_deref()))
@@ -756,18 +738,10 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
             spinner_c.set_visible(true);
             spinner_c.start();
             status_c.set_label("");
-            status_c.remove_css_class("device-status--error");
-            status_c.remove_css_class("device-status--success");
+            status_c.remove_css_class("error");
+            status_c.remove_css_class("success");
 
             let mac_bg = mac.clone();
-            let (tx, rx) = mpsc::channel::<ConnectResult>();
-
-            std::thread::spawn(move || {
-                let result = bt_connect_blocking(&mac_bg);
-                let _ = tx.send(result);
-            });
-
-            // Poll the channel from the main loop.
             let row_poll = row_c.clone();
             let parent_poll = parent_c.clone();
             let spinner_poll = spinner_c.clone();
@@ -775,13 +749,14 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
             let forget_poll = forget_btn_c.clone();
             let status_poll = status_c.clone();
 
-            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                match rx.try_recv() {
-                    Ok(ConnectResult::Success) => {
+            spawn_work(
+                move || bt_connect_blocking(&mac_bg),
+                move |result| match result {
+                    ConnectResult::Success => {
                         spinner_poll.stop();
                         spinner_poll.set_visible(false);
                         status_poll.set_label("✓");
-                        status_poll.add_css_class("device-status--success");
+                        status_poll.add_css_class("success");
 
                         // Brief flash of the checkmark, then remove the row
                         // (caller's refresh() will add it to connected list).
@@ -793,27 +768,17 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
                                 parent_rm.remove(&row_rm);
                             },
                         );
-                        glib::ControlFlow::Break
                     }
-                    Ok(ConnectResult::Failure(reason)) => {
+                    ConnectResult::Failure(reason) => {
                         spinner_poll.stop();
                         spinner_poll.set_visible(false);
                         btn_poll.set_sensitive(true);
                         forget_poll.set_sensitive(true);
                         status_poll.set_label(&format!("Connection failed: {reason}"));
-                        status_poll.add_css_class("device-status--error");
-                        glib::ControlFlow::Break
+                        status_poll.add_css_class("error");
                     }
-                    Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        spinner_poll.stop();
-                        spinner_poll.set_visible(false);
-                        btn_poll.set_sensitive(true);
-                        forget_poll.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                }
-            });
+                },
+            );
         });
     }
 

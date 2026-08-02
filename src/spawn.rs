@@ -20,6 +20,28 @@ where
     glib::idle_add_local_once(move || poll_channel(rx, on_done));
 }
 
+/// Spawn a dedicated named thread hosting a current-thread tokio runtime that
+/// blocks on `fut`. Thread-spawn or runtime-build failure is logged once; the
+/// future is then dropped, so any channels it captured disconnect and their
+/// receivers see the worker as gone.
+pub fn spawn_tokio_thread(name: &str, fut: impl std::future::Future<Output = ()> + Send + 'static) {
+    let log_name = name.to_string();
+    let spawned = std::thread::Builder::new()
+        .name(name.to_string())
+        .spawn(move || {
+            match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt.block_on(fut),
+                Err(e) => log::error!("{log_name}: failed to build tokio runtime: {e}"),
+            }
+        });
+    if let Err(e) = spawned {
+        log::warn!("{name}: failed to spawn thread: {e}");
+    }
+}
+
 /// Poll a channel on the GTK main thread until a value arrives, then call `on_done`.
 pub fn poll_channel<T: 'static>(rx: Receiver<T>, on_done: impl FnOnce(T) + 'static) {
     match rx.try_recv() {

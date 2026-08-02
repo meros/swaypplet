@@ -24,24 +24,7 @@ use crate::fp::{EngineEvent, Flow, SessionGate, verify_engine, watch_session_act
 /// drops).
 pub fn start() -> mpsc::Receiver<EngineEvent> {
     let (tx, rx) = mpsc::channel();
-    let spawned = std::thread::Builder::new()
-        .name("fprint".into())
-        .spawn(move || {
-            let rt = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(rt) => rt,
-                Err(e) => {
-                    let _ = tx.send(EngineEvent::Unavailable(format!("tokio runtime: {e}")));
-                    return;
-                }
-            };
-            rt.block_on(run(tx));
-        });
-    if let Err(e) = spawned {
-        log::warn!("fprint worker thread failed to spawn: {e}");
-    }
+    crate::spawn::spawn_tokio_thread("fprint", run(tx));
     rx
 }
 

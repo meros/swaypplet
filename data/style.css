@@ -55,6 +55,17 @@
 @define-color danger         #cc241d;
 @define-color danger_tint    alpha(#fb4934, 0.16);  /* destructive hover     */
 
+/* ── Glass card: shared base for floating surfaces (OSD, notification
+   popups, launcher, polkit/lock cards, start menu). box-shadow stays
+   per-surface: compositor-blurred layers need `none` (a shadow's
+   translucent pixels would frost into a halo), while the unblurred lock
+   layer keeps a real drop shadow. ── */
+.glass-card {
+    background-color: @surface;
+    border-radius: 18px;
+    border: 1px solid @border_strong;
+}
+
 /* ── Window: transparent so compositor alpha-blends ──
    No outer drop shadows on floating cards: swayfx blur_ignore_transparent
    only skips pixels with alpha exactly 0, so a shadow overhanging the
@@ -307,6 +318,13 @@ button.bar-task.none {
    Pure outer glow, no bevel layers. Box-shadow animations replace the
    element's whole box-shadow each frame, so use them only on shadowless
    elements; bordered cards animate border-color instead. */
+@keyframes media-breathing {
+    from { box-shadow: 0 0 0 alpha(@accent, 0.0); }
+    to   { box-shadow: 0 0 10px alpha(@accent, 0.40); }
+}
+
+/* Restored in the cleanup merge: the cleanup branch pruned this as orphaned
+   (true pre-bar), but .bar-battery.critical animates it. */
 @keyframes battery-critical-pulse {
     from {
         background-color: @accent_quinary;
@@ -316,11 +334,6 @@ button.bar-task.none {
         background-color: @accent_quinary;
         box-shadow: 0 0 12px alpha(@accent_quinary, 0.6);
     }
-}
-
-@keyframes media-breathing {
-    from { box-shadow: 0 0 0 alpha(@accent, 0.0); }
-    to   { box-shadow: 0 0 10px alpha(@accent, 0.40); }
 }
 
 @keyframes workspace-urgent-glow {
@@ -601,14 +614,51 @@ button.flat:hover {
     color: @fg_dim;
 }
 
+.device-status.error {
+    color: @red;
+}
+
+.device-status.success {
+    color: @green;
+}
+
 .device-active-dot {
     color: @accent;
     font-size: 8px;
 }
 
-/* ── Connecting / loading state ── */
-.connecting {
-    opacity: 0.6;
+/* ── User rows (user switcher section) — buttons, so reset chrome first ── */
+.user-row {
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    border: none;
+    padding: 10px 10px;
+    border-radius: 8px;
+    min-height: 36px;
+    transition: background-color 150ms ease;
+}
+
+.user-row:hover {
+    background-color: alpha(white, 0.04);
+}
+
+.user-row.active {
+    background-color: alpha(@accent, 0.08);
+}
+
+.user-row.active:hover {
+    background-color: alpha(@accent, 0.12);
+}
+
+.user-name {
+    font-size: 13px;
+    color: @fg;
+}
+
+.user-fp {
+    font-size: 11px;
+    color: @fg_dim;
 }
 
 /* ── Media controls ── */
@@ -766,25 +816,6 @@ levelbar.battery-low block.filled {
     color: @fg_dim;
 }
 
-/* ── Power actions row ── */
-.power-actions-row {
-    margin-top: 4px;
-}
-
-.power-actions-row .toggle-btn {
-    min-width: 48px;
-    min-height: 44px;
-    font-size: 16px;
-    padding: 8px;
-}
-
-.power-actions-row .toggle-btn.confirm {
-    background-color: @red;
-    color: @fg;
-    font-size: 11px;
-    animation: battery-critical-pulse 0.7s steps(24) infinite alternate;
-}
-
 /* ── Spinner / loading states ── */
 spinner {
     color: @accent;
@@ -878,7 +909,7 @@ revealer {
     padding: 16px;
 }
 
-.unavailable {
+.audio-unavailable {
     color: @fg_dim;
     font-size: 11px;
     font-style: italic;
@@ -1189,9 +1220,6 @@ revealer {
 }
 
 .osd-container {
-    background-color: @surface;
-    border-radius: 18px;
-    border: 1px solid @border_strong;
     box-shadow: none;
     padding: 20px 28px 16px;
     min-width: 160px;
@@ -1251,9 +1279,6 @@ revealer {
    fully alpha-0 so compositor blur clips to the cards
    (see the window comment). */
 .notification-popup-content {
-    background-color: @surface;
-    border-radius: 18px;
-    border: 1px solid @border_strong;
     box-shadow: none;
     padding: 12px 14px;
 }
@@ -1367,9 +1392,6 @@ revealer {
 }
 
 .launcher-container {
-    background-color: @surface;
-    border-radius: 18px;
-    border: 1px solid @border_strong;
     box-shadow: none;
     padding: 16px;
 }
@@ -1459,9 +1481,6 @@ revealer {
 
 .polkit-container,
 .lock-card {
-    background-color: @surface;
-    border-radius: 18px;
-    border: 1px solid @border_strong;
     padding: 24px 26px;
 }
 
@@ -1862,9 +1881,6 @@ revealer {
 
 /* The menu surface itself. */
 .startmenu-root {
-    background-color: @surface;
-    border-radius: 18px;
-    border: 1px solid @border_strong;
     box-shadow: none;
     padding: 16px;
 }

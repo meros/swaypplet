@@ -32,15 +32,11 @@ fn set_brightness(value: u32) {
 
 // ── BrightnessSection ─────────────────────────────────────────────────────────
 
-#[allow(dead_code)]
 pub struct BrightnessSection {
     root: gtk4::Box,
     scale: gtk4::Scale,
     pct_label: gtk4::Label,
     summary_text: gtk4::Label,
-    summary_btn: gtk4::Button,
-    summary_arrow: gtk4::Label,
-    detail_revealer: gtk4::Revealer,
     /// Guard flag: true while `refresh()` is programmatically updating the scale
     /// so the value-changed handler does not call `brightnessctl set` in response.
     updating: Rc<RefCell<bool>>,
@@ -160,9 +156,6 @@ impl BrightnessSection {
             scale,
             pct_label,
             summary_text,
-            summary_btn,
-            summary_arrow,
-            detail_revealer,
             updating,
         };
         section.refresh();
@@ -191,7 +184,6 @@ impl BrightnessSection {
         );
     }
 
-    #[allow(dead_code)]
     pub fn widget(&self) -> &gtk4::Box {
         &self.root
     }
