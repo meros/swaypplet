@@ -12,10 +12,10 @@
 //! an external bar owns the strip (see app.rs).
 
 mod battery;
+mod board;
 mod clock;
 mod media;
 mod start;
-mod task;
 mod tray;
 mod workspaces;
 
@@ -188,9 +188,9 @@ fn build_bar_window(
         .build();
     // Tray sits left of the track, matching waybar's modules-right order.
     right.append(&tray::build(tray));
-    // Battery + task pill + clock fuse into one segmented track (waybar's
+    // Battery + board + clock fuse into one segmented track (waybar's
     // group/right-track); a batteryless machine skips the segment so the
-    // task pill keeps the rounded left end.
+    // board keeps the rounded left end.
     let track = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .css_classes(["bar-track"])
@@ -199,7 +199,7 @@ fn build_bar_window(
         track.append(&bat);
     }
     // gdk connector names match sway output names under wlroots.
-    track.append(&task::build(
+    track.append(&board::build(
         sway,
         tasks,
         monitor.connector().map(|c| c.to_string()),
