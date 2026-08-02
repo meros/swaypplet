@@ -1,10 +1,6 @@
 //! logind integration: sleep delay-inhibitor + PrepareForSleep, and the
 //! session's Lock/Unlock signals (`loginctl lock-session` → Lock).
 //!
-//! Same thread pattern as lock::fprint — a dedicated thread hosting a
-//! current-thread tokio runtime for zbus, events out via std mpsc, commands
-//! in via a tokio channel.
-//!
 //! The inhibitor is held whenever the system is awake, so suspend always
 //! waits for the locker (released by the main loop once the locker is up,
 //! re-taken here on PrepareForSleep(false)).
@@ -78,18 +74,11 @@ impl Logind {
 
 pub fn start(ev: Sender<Ev>) -> Logind {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    std::thread::Builder::new()
-        .name("idle-logind".into())
-        .spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("tokio runtime");
-            if let Err(e) = rt.block_on(run(ev.clone(), rx)) {
-                let _ = ev.send(Ev::Fatal(format!("logind: {e}")));
-            }
-        })
-        .expect("spawn idle-logind thread");
+    crate::spawn::spawn_tokio_thread("idle-logind", async move {
+        if let Err(e) = run(ev.clone(), rx).await {
+            let _ = ev.send(Ev::Fatal(format!("logind: {e}")));
+        }
+    });
     Logind { tx }
 }
 

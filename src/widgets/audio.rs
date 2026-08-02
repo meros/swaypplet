@@ -509,10 +509,8 @@ impl UnavailableBanner {
 
 // ── AudioSection ──────────────────────────────────────────────────────────────
 
-#[allow(dead_code)]
 struct Widgets {
     // Summary row (always visible)
-    summary_btn: gtk4::Button,
     summary_icon: gtk4::Label,
     summary_text: gtk4::Label,
     summary_arrow: gtk4::Label,
@@ -533,7 +531,6 @@ struct Widgets {
     unavailable: UnavailableBanner, // shown when wpctl is unavailable
 }
 
-#[allow(dead_code)]
 pub struct AudioSection {
     root: gtk4::Box,
     widgets: Rc<Widgets>,
@@ -726,7 +723,6 @@ impl AudioSection {
         detail_box.append(&content);
 
         let widgets = Rc::new(Widgets {
-            summary_btn,
             summary_icon,
             summary_text,
             summary_arrow,
@@ -771,37 +767,11 @@ impl AudioSection {
             let upd2 = updating.clone();
             let last = last_ids.clone();
 
-            let (tx, rx) = std::sync::mpsc::channel::<DefaultIds>();
-            thread::spawn(move || {
-                let _ = tx.send(read_default_ids_blocking());
-            });
-
-            // Poll the one-shot channel from the GLib main loop (non-blocking).
-            glib::idle_add_local_once(move || match rx.try_recv() {
-                Ok(new_ids) => Self::apply_default_ids(&w2, &upd2, &last, new_ids),
-                Err(_) => Self::poll_default_ids(w2, upd2, last, rx),
+            crate::spawn::spawn_work(read_default_ids_blocking, move |new_ids| {
+                Self::apply_default_ids(&w2, &upd2, &last, new_ids)
             });
 
             glib::ControlFlow::Continue
-        });
-    }
-
-    /// Re-queue itself (non-blocking) until the background thread delivers
-    /// the new default-device IDs.
-    fn poll_default_ids(
-        w: Rc<Widgets>,
-        updating: Rc<RefCell<bool>>,
-        last: Rc<RefCell<DefaultIds>>,
-        rx: std::sync::mpsc::Receiver<DefaultIds>,
-    ) {
-        glib::idle_add_local_once(move || match rx.try_recv() {
-            Ok(new_ids) => Self::apply_default_ids(&w, &updating, &last, new_ids),
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                Self::poll_default_ids(w, updating, last, rx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                error!("default-device monitor background thread disconnected unexpectedly");
-            }
         });
     }
 
@@ -902,42 +872,10 @@ impl AudioSection {
     }
 
     /// Schedule a full state refresh on a background thread. Results are
-    /// delivered back to the main thread via `glib::idle_add_local_once`.
+    /// delivered back to the main thread by `spawn_work`.
     fn schedule_refresh(w: Rc<Widgets>, updating: Rc<RefCell<bool>>) {
-        let (tx, rx) = std::sync::mpsc::channel::<FetchedState>();
-
-        thread::spawn(move || {
-            let state = read_state_blocking();
-            // Ignore send errors — the UI may have been destroyed.
-            let _ = tx.send(state);
-        });
-
-        // Poll the one-shot channel from the GLib main loop.
-        glib::idle_add_local_once(move || {
-            match rx.try_recv() {
-                Ok(fetched) => Self::apply_fetched(&w, &updating, fetched),
-                Err(_) => {
-                    // Background thread not done yet; re-queue.
-                    Self::poll_until_ready(w, updating, rx);
-                }
-            }
-        });
-    }
-
-    /// Re-queue itself until the background thread has delivered its result.
-    fn poll_until_ready(
-        w: Rc<Widgets>,
-        updating: Rc<RefCell<bool>>,
-        rx: std::sync::mpsc::Receiver<FetchedState>,
-    ) {
-        glib::idle_add_local_once(move || match rx.try_recv() {
-            Ok(fetched) => Self::apply_fetched(&w, &updating, fetched),
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                Self::poll_until_ready(w, updating, rx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                error!("audio state background thread disconnected unexpectedly");
-            }
+        crate::spawn::spawn_work(read_state_blocking, move |fetched| {
+            Self::apply_fetched(&w, &updating, fetched)
         });
     }
 
@@ -1106,7 +1044,6 @@ impl AudioSection {
         Self::schedule_refresh(self.widgets.clone(), self.updating.clone());
     }
 
-    #[allow(dead_code)]
     pub fn widget(&self) -> &gtk4::Box {
         &self.root
     }

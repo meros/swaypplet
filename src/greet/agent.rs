@@ -23,26 +23,7 @@ use crate::fp::agent::{Cmd, Ev, sock_path};
 pub fn start() -> (tokio::sync::mpsc::UnboundedSender<Cmd>, mpsc::Receiver<Ev>) {
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
     let (ev_tx, ev_rx) = mpsc::channel();
-    let spawned = std::thread::Builder::new()
-        .name("fp-agent-client".into())
-        .spawn(move || {
-            let rt = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(rt) => rt,
-                Err(e) => {
-                    let _ = ev_tx.send(Ev::Unavailable {
-                        msg: format!("tokio runtime: {e}"),
-                    });
-                    return;
-                }
-            };
-            rt.block_on(run(cmd_rx, ev_tx));
-        });
-    if let Err(e) = spawned {
-        log::warn!("fp-agent client thread failed to spawn: {e}");
-    }
+    crate::spawn::spawn_tokio_thread("fp-agent-client", run(cmd_rx, ev_tx));
     (cmd_tx, ev_rx)
 }
 

@@ -7,6 +7,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use crate::anim;
+use crate::icons;
 use crate::launcher::LauncherView;
 use crate::notifications::store::NotificationStore;
 use crate::widgets::{
@@ -22,11 +23,6 @@ use crate::widgets::{
     tiles,
     users::UserSection,
 };
-
-// Quick-strip glyphs.
-const ICON_SPEAKER: &str = "󰕾";
-const ICON_BRIGHTNESS: &str = "󰃞";
-const ICON_DISPLAY: &str = "󰍹";
 
 // ── Sections bundle ───────────────────────────────────────────────────────────
 
@@ -52,7 +48,7 @@ impl Sections {
         self.audio.refresh();
         self.brightness.refresh();
         self.network.refresh();
-        self.bluetooth.schedule_refresh();
+        self.bluetooth.refresh();
         self.display.refresh();
         self.media.refresh();
         self.notifications.refresh();
@@ -98,6 +94,7 @@ impl Panel {
             .halign(gtk4::Align::Start)
             .valign(gtk4::Align::End)
             .build();
+        root.add_css_class("glass-card");
         root.add_css_class("startmenu-root");
 
         // The menu fades in while settling up SLIDE_PX from below the
@@ -159,9 +156,15 @@ impl Panel {
         let users = UserSection::new();
 
         // 1. Volume slider (hoisted from AudioSection).
-        right.append(&slider_row(ICON_SPEAKER, audio.output_volume_scale()));
+        right.append(&slider_row(
+            icons::SPEAKER_HIGH,
+            audio.output_volume_scale(),
+        ));
         // 2. Brightness slider (hoisted from BrightnessSection).
-        right.append(&slider_row(ICON_BRIGHTNESS, brightness.brightness_scale()));
+        right.append(&slider_row(
+            icons::BRIGHTNESS,
+            brightness.brightness_scale(),
+        ));
 
         // 3. Toggle tiles — declarative spec → one factory.
         let specs = tiles::tile_specs(); // [wifi, bluetooth, night, caffeine]
@@ -204,7 +207,7 @@ impl Panel {
         // output/monitor controls inline, matching the Wi-Fi/Bluetooth pattern.
         // Expand the section so its output list shows as soon as we reveal it.
         display.expand_for_page();
-        let display_tile = reveal_only_tile(ICON_DISPLAY, "Display", display.widget(), &right);
+        let display_tile = reveal_only_tile(icons::DISPLAY, "Display", display.widget(), &right);
         grid_place(&grid, &display_tile, &mut col, &mut row_i);
 
         right.append(&grid);
@@ -398,11 +401,6 @@ impl Panel {
                 launcher.focus_entry();
             });
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn refresh(&self) {
-        self.sections.refresh();
     }
 
     pub fn refresh_audio(&self) {

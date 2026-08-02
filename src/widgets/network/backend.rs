@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -33,6 +32,16 @@ const NM_TYPE_WIREGUARD: &str = "wireguard";
 pub enum NmResult {
     Success,
     Failure(String),
+}
+
+/// Run `nmcli` with the given arguments (blocking — call from a background
+/// thread, e.g. via `spawn_work`).
+fn run_nmcli(args: &[&str]) -> NmResult {
+    match Command::new("nmcli").args(args).output() {
+        Ok(o) if o.status.success() => NmResult::Success,
+        Ok(o) => NmResult::Failure(String::from_utf8_lossy(&o.stderr).trim().to_string()),
+        Err(e) => NmResult::Failure(e.to_string()),
+    }
 }
 
 // ── Signal strength helpers ───────────────────────────────────────────────────
@@ -155,20 +164,8 @@ pub fn wifi_radio_enabled() -> bool {
     String::from_utf8_lossy(&out.stdout).trim() == "enabled"
 }
 
-pub fn set_wifi_radio_async(enable: bool, tx: mpsc::Sender<NmResult>) {
-    let state: &str = if enable { "on" } else { "off" };
-    let state = state.to_owned();
-    thread::spawn(move || {
-        let out = Command::new("nmcli")
-            .args(["radio", "wifi", &state])
-            .output();
-        let result = match out {
-            Ok(o) if o.status.success() => NmResult::Success,
-            Ok(o) => NmResult::Failure(String::from_utf8_lossy(&o.stderr).trim().to_string()),
-            Err(e) => NmResult::Failure(e.to_string()),
-        };
-        let _ = tx.send(result);
-    });
+pub fn set_wifi_radio(enable: bool) -> NmResult {
+    run_nmcli(&["radio", "wifi", if enable { "on" } else { "off" }])
 }
 
 // ── Backend helpers ───────────────────────────────────────────────────────────
@@ -433,82 +430,33 @@ pub fn get_vpn_connections() -> Vec<VpnConnection> {
         .collect()
 }
 
-pub fn vpn_up_async(name: String, tx: mpsc::Sender<NmResult>) {
-    thread::spawn(move || {
-        let out = Command::new("nmcli")
-            .args(["connection", "up", &name])
-            .output();
-        let result = match out {
-            Ok(o) if o.status.success() => NmResult::Success,
-            Ok(o) => NmResult::Failure(String::from_utf8_lossy(&o.stderr).trim().to_string()),
-            Err(e) => NmResult::Failure(e.to_string()),
-        };
-        let _ = tx.send(result);
-    });
+pub fn vpn_up(name: &str) -> NmResult {
+    run_nmcli(&["connection", "up", name])
 }
 
-pub fn vpn_down_async(name: String, tx: mpsc::Sender<NmResult>) {
-    thread::spawn(move || {
-        let out = Command::new("nmcli")
-            .args(["connection", "down", &name])
-            .output();
-        let result = match out {
-            Ok(o) if o.status.success() => NmResult::Success,
-            Ok(o) => NmResult::Failure(String::from_utf8_lossy(&o.stderr).trim().to_string()),
-            Err(e) => NmResult::Failure(e.to_string()),
-        };
-        let _ = tx.send(result);
-    });
+pub fn vpn_down(name: &str) -> NmResult {
+    run_nmcli(&["connection", "down", name])
 }
 
 // ── WiFi connect/forget ───────────────────────────────────────────────────────
 
-pub fn connect_known_async(ssid: String, tx: mpsc::Sender<NmResult>) {
-    thread::spawn(move || {
-        let out = Command::new("nmcli")
-            .args(["connection", "up", &ssid])
-            .output();
-        let result = match out {
-            Ok(o) if o.status.success() => NmResult::Success,
-            Ok(o) => NmResult::Failure(String::from_utf8_lossy(&o.stderr).trim().to_string()),
-            Err(e) => NmResult::Failure(e.to_string()),
-        };
-        let _ = tx.send(result);
-    });
+pub fn connect_known(ssid: &str) -> NmResult {
+    run_nmcli(&["connection", "up", ssid])
 }
 
-pub fn connect_new_async(ssid: String, password: String, hidden: bool, tx: mpsc::Sender<NmResult>) {
-    thread::spawn(move || {
-        let mut cmd = Command::new("nmcli");
-        cmd.args(["device", "wifi", "connect", &ssid]);
-        if !password.is_empty() {
-            cmd.args(["password", &password]);
-        }
-        if hidden {
-            cmd.args(["hidden", "yes"]);
-        }
-        let out = cmd.output();
-        let result = match out {
-            Ok(o) if o.status.success() => NmResult::Success,
-            Ok(o) => NmResult::Failure(String::from_utf8_lossy(&o.stderr).trim().to_string()),
-            Err(e) => NmResult::Failure(e.to_string()),
-        };
-        let _ = tx.send(result);
-    });
+pub fn connect_new(ssid: &str, password: &str, hidden: bool) -> NmResult {
+    let mut args = vec!["device", "wifi", "connect", ssid];
+    if !password.is_empty() {
+        args.extend(["password", password]);
+    }
+    if hidden {
+        args.extend(["hidden", "yes"]);
+    }
+    run_nmcli(&args)
 }
 
-pub fn forget_network_async(ssid: String, tx: mpsc::Sender<NmResult>) {
-    thread::spawn(move || {
-        let out = Command::new("nmcli")
-            .args(["connection", "delete", &ssid])
-            .output();
-        let result = match out {
-            Ok(o) if o.status.success() => NmResult::Success,
-            Ok(o) => NmResult::Failure(String::from_utf8_lossy(&o.stderr).trim().to_string()),
-            Err(e) => NmResult::Failure(e.to_string()),
-        };
-        let _ = tx.send(result);
-    });
+pub fn forget_network(ssid: &str) -> NmResult {
+    run_nmcli(&["connection", "delete", ssid])
 }
 
 // ── Interface management ──────────────────────────────────────────────────────
@@ -545,32 +493,12 @@ pub fn get_network_interfaces() -> Vec<NetworkInterface> {
         .collect()
 }
 
-pub fn device_connect_async(device: String, tx: mpsc::Sender<NmResult>) {
-    thread::spawn(move || {
-        let out = Command::new("nmcli")
-            .args(["device", "connect", &device])
-            .output();
-        let result = match out {
-            Ok(o) if o.status.success() => NmResult::Success,
-            Ok(o) => NmResult::Failure(String::from_utf8_lossy(&o.stderr).trim().to_string()),
-            Err(e) => NmResult::Failure(e.to_string()),
-        };
-        let _ = tx.send(result);
-    });
+pub fn device_connect(device: &str) -> NmResult {
+    run_nmcli(&["device", "connect", device])
 }
 
-pub fn device_disconnect_async(device: String, tx: mpsc::Sender<NmResult>) {
-    thread::spawn(move || {
-        let out = Command::new("nmcli")
-            .args(["device", "disconnect", &device])
-            .output();
-        let result = match out {
-            Ok(o) if o.status.success() => NmResult::Success,
-            Ok(o) => NmResult::Failure(String::from_utf8_lossy(&o.stderr).trim().to_string()),
-            Err(e) => NmResult::Failure(e.to_string()),
-        };
-        let _ = tx.send(result);
-    });
+pub fn device_disconnect(device: &str) -> NmResult {
+    run_nmcli(&["device", "disconnect", device])
 }
 
 pub fn iface_type_icon(iface_type: &str) -> &'static str {
@@ -679,26 +607,16 @@ pub fn get_wifi_power_saving(conn_name: &str) -> bool {
     text.trim().ends_with(":3")
 }
 
-pub fn set_wifi_power_saving_async(conn_name: String, enable: bool, tx: mpsc::Sender<NmResult>) {
+pub fn set_wifi_power_saving(conn_name: &str, enable: bool) -> NmResult {
+    // powersave: 3 = enabled, 2 = disabled
     let value = if enable { "3" } else { "2" };
-    let value = value.to_string();
-    thread::spawn(move || {
-        let out = Command::new("nmcli")
-            .args([
-                "connection",
-                "modify",
-                &conn_name,
-                "802-11-wireless.powersave",
-                &value,
-            ])
-            .output();
-        let result = match out {
-            Ok(o) if o.status.success() => NmResult::Success,
-            Ok(o) => NmResult::Failure(String::from_utf8_lossy(&o.stderr).trim().to_string()),
-            Err(e) => NmResult::Failure(e.to_string()),
-        };
-        let _ = tx.send(result);
-    });
+    run_nmcli(&[
+        "connection",
+        "modify",
+        conn_name,
+        "802-11-wireless.powersave",
+        value,
+    ])
 }
 
 /// Get the NM connection name for the active WiFi connection.

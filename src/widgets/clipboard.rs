@@ -5,7 +5,8 @@ use std::thread;
 use gtk4::prelude::*;
 use log::{debug, error, warn};
 
-const ICON_CLIPBOARD: &str = "󰅍";
+use crate::icons;
+
 const MAX_ENTRIES: usize = 10;
 const PREVIEW_LEN: usize = 60;
 
@@ -167,7 +168,6 @@ fn cliphist_wipe_blocking() {
 
 struct Widgets {
     summary_btn: gtk4::Button,
-    summary_icon: gtk4::Label,
     summary_text: gtk4::Label,
     summary_arrow: gtk4::Label,
     detail_revealer: gtk4::Revealer,
@@ -194,7 +194,7 @@ impl ClipboardSection {
             .spacing(6)
             .build();
 
-        let summary_icon = gtk4::Label::new(Some(ICON_CLIPBOARD));
+        let summary_icon = gtk4::Label::new(Some(icons::CLIPBOARD));
         summary_icon.add_css_class("section-summary-icon");
 
         let summary_text = gtk4::Label::new(Some("Clipboard"));
@@ -256,7 +256,6 @@ impl ClipboardSection {
 
         let widgets = Rc::new(Widgets {
             summary_btn,
-            summary_icon,
             summary_text,
             summary_arrow,
             detail_revealer,
@@ -293,27 +292,7 @@ impl ClipboardSection {
     }
 
     fn spawn_state_fetch(w: Rc<Widgets>, fetch: impl FnOnce() -> FetchedState + Send + 'static) {
-        let (tx, rx) = std::sync::mpsc::channel::<FetchedState>();
-
-        thread::spawn(move || {
-            let state = fetch();
-            let _ = tx.send(state);
-        });
-
-        glib::idle_add_local_once(move || match rx.try_recv() {
-            Ok(fetched) => Self::apply_fetched(&w, fetched),
-            Err(_) => Self::poll_until_ready(w, rx),
-        });
-    }
-
-    fn poll_until_ready(w: Rc<Widgets>, rx: std::sync::mpsc::Receiver<FetchedState>) {
-        glib::idle_add_local_once(move || match rx.try_recv() {
-            Ok(fetched) => Self::apply_fetched(&w, fetched),
-            Err(std::sync::mpsc::TryRecvError::Empty) => Self::poll_until_ready(w, rx),
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                error!("clipboard state background thread disconnected unexpectedly");
-            }
-        });
+        crate::spawn::spawn_work(fetch, move |fetched| Self::apply_fetched(&w, fetched));
     }
 
     fn apply_fetched(w: &Rc<Widgets>, fetched: FetchedState) {

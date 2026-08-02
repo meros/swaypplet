@@ -12,7 +12,6 @@ pub const MIC_MUTED: &str = "󰍭";
 pub const BRIGHTNESS: &str = "󰃟";
 
 // Notifications
-#[allow(dead_code)]
 pub const NOTIFICATION: &str = "󰂚";
 pub const NOTIFICATION_CLEAR: &str = "󰂛";
 pub const CLOSE: &str = "󰅖";
@@ -20,6 +19,24 @@ pub const CLOSE: &str = "󰅖";
 // Bar
 /// Start button logo — the same glyph waybar's custom/swaypplet used.
 pub const START: &str = "\u{f313}";
+
+// Display / monitor
+pub const DISPLAY: &str = "󰍹";
+
+// Media controls
+pub const MEDIA_PREV: &str = "󰒮";
+pub const MEDIA_PLAY: &str = "󰐊";
+pub const MEDIA_PAUSE: &str = "󰏤";
+pub const MEDIA_NEXT: &str = "󰒭";
+
+// Clipboard
+pub const CLIPBOARD: &str = "󰅍";
+
+// Fingerprint (lock, greeter, polkit, user rows — keep in sync everywhere)
+pub const FINGERPRINT: &str = "\u{f0237}";
+
+// User switching
+pub const SWITCH_USER: &str = "󰓤";
 
 // Keyboard indicators
 pub const CAPS_ON: &str = "A";
