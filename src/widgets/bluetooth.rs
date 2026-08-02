@@ -490,13 +490,13 @@ impl BluetoothSection {
             state,
         });
 
-        section.schedule_refresh();
+        section.refresh();
         section
     }
 
     /// Schedule an async refresh: fetch Bluetooth state on a background thread,
     /// then apply the result on the GTK main thread.
-    pub fn schedule_refresh(self: &Rc<Self>) {
+    pub fn refresh(self: &Rc<Self>) {
         let section = Rc::clone(self);
         spawn_work(read_bt_state_blocking, move |state| {
             section.apply_state(state);
