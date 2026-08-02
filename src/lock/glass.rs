@@ -14,8 +14,12 @@
 
 use gtk4::{gdk, glib, graphene, gsk, prelude::*, subclass::prelude::*};
 
-/// GSK gaussian blur radius, tuned to read like the swayfx layer blur.
-const BLUR_RADIUS: f64 = 28.0;
+/// GSK gaussian blur radius at rest, tuned to read like the swayfx layer
+/// blur. Unlike the layer-shell surfaces (whose compositor frost is binary,
+/// see anim.rs), this client-side blur has a real sigma to animate: the
+/// enter transition ramps it 0 → this while the card fades in — the one
+/// surface in swaypplet that can do the full iOS-style materialize.
+pub const BLUR_RADIUS: f64 = 28.0;
 /// Matches `.lock-card` border-radius in style.css.
 const CORNER_RADIUS: f32 = 18.0;
 /// Matches `.lock-scrim` (alpha(black, 0.45)) so glass shows the dimmed
@@ -24,11 +28,22 @@ const SCRIM: gdk::RGBA = gdk::RGBA::new(0.0, 0.0, 0.0, 0.45);
 
 mod imp {
     use super::*;
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
 
-    #[derive(Default)]
     pub struct GlassPane {
         pub texture: RefCell<Option<gdk::Texture>>,
+        pub radius: Cell<f64>,
+        pub ramp: RefCell<Option<gtk4::TickCallbackId>>,
+    }
+
+    impl Default for GlassPane {
+        fn default() -> Self {
+            GlassPane {
+                texture: RefCell::new(None),
+                radius: Cell::new(super::BLUR_RADIUS),
+                ramp: RefCell::new(None),
+            }
+        }
     }
 
     #[glib::object_subclass]
@@ -62,10 +77,17 @@ mod imp {
                         graphene::Rect::new(0.0, 0.0, w, h),
                         CORNER_RADIUS,
                     );
+                    let radius = self.radius.get();
                     snapshot.push_rounded_clip(&clip);
-                    snapshot.push_blur(BLUR_RADIUS);
+                    // Below ~0.5 the blur is invisible; skipping the node
+                    // keeps the ramp's first frames free.
+                    if radius >= 0.5 {
+                        snapshot.push_blur(radius);
+                    }
                     snapshot.append_texture(texture, &graphene::Rect::new(ox, oy, dw, dh));
-                    snapshot.pop();
+                    if radius >= 0.5 {
+                        snapshot.pop();
+                    }
                     snapshot.append_color(&SCRIM, &graphene::Rect::new(0.0, 0.0, w, h));
                     snapshot.pop();
                 }
@@ -99,6 +121,42 @@ impl GlassPane {
     pub fn set_texture(&self, texture: Option<gdk::Texture>) {
         *self.imp().texture.borrow_mut() = texture;
         self.queue_draw();
+    }
+
+    /// Animatable blur sigma (0 = crisp). The enter transition ramps this
+    /// 0 → [`BLUR_RADIUS`] so the glass materializes with the card.
+    pub fn set_blur_radius(&self, radius: f64) {
+        self.imp().radius.set(radius);
+        self.queue_draw();
+    }
+
+    /// Ramp the blur sigma from its current value to `target` over `ms`,
+    /// eased like every other surface motion (anim.rs). Retargeting cancels
+    /// a running ramp; respects reduced motion by jumping.
+    pub fn ramp_blur_to(&self, target: f64, ms: f64) {
+        if let Some(id) = self.imp().ramp.take() {
+            id.remove();
+        }
+        if !crate::anim::animations_enabled() {
+            self.set_blur_radius(target);
+            return;
+        }
+        let from = self.imp().radius.get();
+        if from == target {
+            return;
+        }
+        let start = glib::monotonic_time();
+        let id = self.add_tick_callback(move |pane, _| {
+            let t = (((glib::monotonic_time() - start) as f64 / 1000.0) / ms).clamp(0.0, 1.0);
+            pane.set_blur_radius(from + (target - from) * crate::anim::ease_out_cubic(t));
+            if t >= 1.0 {
+                pane.imp().ramp.take();
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
+        *self.imp().ramp.borrow_mut() = Some(id);
     }
 }
 

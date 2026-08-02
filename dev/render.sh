@@ -40,6 +40,14 @@ SOCK="$RUNTIME/sway-render-$$.sock"
   # Preview windows are normal toplevels; float them so they render at their
   # natural requested size instead of being tiled to fill the output.
   printf 'for_window [app_id="dev.swaypplet..*"] floating enable\n'
+  # Mirror the live session's swayfx frost (users/modules/sway.nix in the
+  # nixos repo) so screenshots show the glass the way users see it. On a
+  # plain sway binary these lines log config errors and are ignored — the
+  # harness still boots, just unfrosted.
+  printf 'blur enable\nblur_passes 1\nblur_radius 5\n'
+  for ns in swaypplet swaypplet-launcher swaypplet-osd swaypplet-notification swaypplet-polkit; do
+    printf 'layer_effects "%s" { blur enable; blur_ignore_transparent enable; }\n' "$ns"
+  done
 } > "$CFG"
 
 cleanup() { [ -n "${SWAY_PID:-}" ] && kill "$SWAY_PID" 2>/dev/null || true; rm -f "$CFG" "$LOG"; }
