@@ -18,14 +18,18 @@
 //!  1200 s  suspend, only on battery
 //!
 //! before-sleep: lock + blank while holding the logind sleep delay-inhibitor,
-//! release only once the locker is up (bounded by SLEEP_RELEASE_MAX — logind
-//! force-continues at its own inhibitor timeout anyway). after-resume/unlock:
-//! re-power outputs + restore brightness.
+//! release only once the compositor has CONFIRMED the lock (bounded by
+//! SLEEP_RELEASE_MAX — logind force-continues at its own inhibitor timeout
+//! anyway). after-resume/unlock: re-power outputs + restore brightness.
 //!
 //! Security invariant (from the old lockScript): never blank outputs unless
-//! the locker is confirmed running — blanking without a lock would power off
-//! an UNLOCKED desktop. LockerUp is only emitted after the child survived its
-//! settle window.
+//! the session is confirmed locked — blanking without a lock would power off
+//! an UNLOCKED desktop. LockerUp is only emitted after the compositor
+//! acknowledged the lock (ext-session-lock `locked`, relayed by the child
+//! over its stdout — see locker.rs). A merely-running child counts for
+//! nothing: the 2026-08-02 incident had suspend freeze the cgroup mid-GTK-
+//! startup, so the machine slept unlocked and the desktop was visible for
+//! ~5 s after lid-open until the lock request finally landed.
 //!
 //! Fast user switching adds a second rule: only an idle-triggered lock arms
 //! the post-lock blank, deferred (BLANK_DELAY) and skipped when the session
@@ -65,7 +69,9 @@ pub enum Ev {
     LockSignal,
     /// logind session Unlock signal.
     UnlockSignal,
-    /// The supervised locker child is up (survived its settle window).
+    /// The compositor confirmed the session lock (the locker child relayed
+    /// the ext-session-lock `locked` event). May repeat after a
+    /// crash-while-locked relaunch; handlers are idempotent.
     LockerUp,
     /// logind's LockedHint was set at our startup: a lock outlived a service
     /// restart and must be relaunched (the old locker died with the cgroup).
@@ -98,6 +104,9 @@ pub fn run() -> ! {
     let logind = logind::start(tx.clone());
 
     let mut locker_active = false;
+    // True only between the compositor's lock confirmation (LockerUp) and
+    // LockerGone. locker_active alone means "a launch is in flight".
+    let mut locker_confirmed = false;
     // Deadline for releasing the sleep inhibitor while a locker launch is in
     // flight. Some(_) means PrepareForSleep(true) arrived and we still hold
     // the inhibitor.
@@ -129,10 +138,12 @@ pub fn run() -> ! {
         }
         if pending_blank.is_some_and(|d| Instant::now() >= d) {
             pending_blank = None;
-            // Gates checked at fire time: the locker must still be up
-            // (security invariant) and the session still on the seat — a
-            // switch-away lock skips the blank entirely.
-            if locker_active && session_active {
+            // Gates checked at fire time: the lock must still be confirmed
+            // (security invariant; a crash relaunch keeps the compositor
+            // lock held, so confirmed stays true through the gap) and the
+            // session still on the seat — a switch-away lock skips the
+            // blank entirely.
+            if locker_confirmed && session_active {
                 run_cmd("lock.blank", "swaymsg", &["output", "*", "power", "off"]);
             } else {
                 log::info!("lock.blank: skipped (session inactive or locker gone)");
@@ -162,7 +173,13 @@ pub fn run() -> ! {
 
             Ev::Idled(Timeout::Lock) => {
                 log::info!("idle.lock-300s: fire");
-                ensure_locked(&tx, &mut locker_active, &mut lock_reason, "idle");
+                ensure_locked(
+                    &tx,
+                    &mut locker_active,
+                    &mut locker_confirmed,
+                    &mut lock_reason,
+                    "idle",
+                );
             }
             Ev::Resumed(Timeout::Lock) => {}
 
@@ -170,7 +187,7 @@ pub fn run() -> ! {
                 // Only blank a locked session that is still on the seat. On an
                 // inactive VT (fast user switch) our idle timers keep firing;
                 // blanking then would fight the SessionActive(true) re-power.
-                if locker_active && session_active {
+                if locker_confirmed && session_active {
                     run_cmd(
                         "idle.reblank-30s",
                         "swaymsg",
@@ -178,7 +195,7 @@ pub fn run() -> ! {
                     );
                 } else {
                     log::info!(
-                        "idle.reblank-30s: skip (locker_active={locker_active} session_active={session_active})"
+                        "idle.reblank-30s: skip (locker_confirmed={locker_confirmed} session_active={session_active})"
                     );
                 }
             }
@@ -209,12 +226,23 @@ pub fn run() -> ! {
 
             Ev::Sleep(true) => {
                 log::info!("before-sleep: fire");
-                if locker_active {
+                if locker_confirmed {
                     // Already locked — nothing to wait for.
                     sleep_release = Some(Instant::now());
                     release_inhibitor(&mut sleep_release);
                 } else {
-                    ensure_locked(&tx, &mut locker_active, &mut lock_reason, "sleep");
+                    // No lock, or a launch is in flight but the compositor
+                    // hasn't confirmed it yet: hold the inhibitor until
+                    // LockerUp. Releasing on a mere spawn is how a suspend
+                    // freeze once caught the locker mid-startup and slept
+                    // the machine unlocked.
+                    ensure_locked(
+                        &tx,
+                        &mut locker_active,
+                        &mut locker_confirmed,
+                        &mut lock_reason,
+                        "sleep",
+                    );
                     sleep_release = Some(Instant::now() + SLEEP_RELEASE_MAX);
                 }
             }
@@ -226,7 +254,13 @@ pub fn run() -> ! {
 
             Ev::LockSignal => {
                 log::info!("lock: signal");
-                ensure_locked(&tx, &mut locker_active, &mut lock_reason, "manual");
+                ensure_locked(
+                    &tx,
+                    &mut locker_active,
+                    &mut locker_confirmed,
+                    &mut lock_reason,
+                    "manual",
+                );
             }
             Ev::UnlockSignal => {
                 log::info!("unlock: signal");
@@ -240,9 +274,16 @@ pub fn run() -> ! {
                 // seen. Then lock with a reason that keeps the UI visible.
                 run_cmd("recover", "swaymsg", &["output", "*", "power", "on"]);
                 run_cmd("recover", "brightnessctl", &["set", "100%", "-n"]);
-                ensure_locked(&tx, &mut locker_active, &mut lock_reason, "recover");
+                ensure_locked(
+                    &tx,
+                    &mut locker_active,
+                    &mut locker_confirmed,
+                    &mut lock_reason,
+                    "recover",
+                );
             }
             Ev::LockerUp => {
+                locker_confirmed = true;
                 if sleep_release.is_some() {
                     // Suspend path: blank now — the machine is about to
                     // sleep and the inhibitor must not wait on a timer.
@@ -266,7 +307,13 @@ pub fn run() -> ! {
                 // Leaving the seat (fast user switch, bare VT change):
                 // lock the abandoned session behind us. Idempotent when the
                 // switcher script already sent Lock.
-                ensure_locked(&tx, &mut locker_active, &mut lock_reason, "switch");
+                ensure_locked(
+                    &tx,
+                    &mut locker_active,
+                    &mut locker_confirmed,
+                    &mut lock_reason,
+                    "switch",
+                );
             }
             Ev::SessionActive(true) => {
                 session_active = true;
@@ -279,6 +326,7 @@ pub fn run() -> ! {
             }
             Ev::LockerGone { rc } => {
                 locker_active = false;
+                locker_confirmed = false;
                 // Locked-or-bailed either way: don't hold suspend for this.
                 release_inhibitor(&mut sleep_release);
                 match rc {
@@ -306,6 +354,7 @@ pub fn run() -> ! {
 fn ensure_locked(
     tx: &mpsc::Sender<Ev>,
     locker_active: &mut bool,
+    locker_confirmed: &mut bool,
     lock_reason: &mut &'static str,
     reason: &'static str,
 ) {
@@ -314,6 +363,7 @@ fn ensure_locked(
         return;
     }
     *locker_active = true;
+    *locker_confirmed = false;
     *lock_reason = reason;
     locker::start(tx.clone(), reason);
 }
