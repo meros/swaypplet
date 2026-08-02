@@ -292,27 +292,7 @@ impl ClipboardSection {
     }
 
     fn spawn_state_fetch(w: Rc<Widgets>, fetch: impl FnOnce() -> FetchedState + Send + 'static) {
-        let (tx, rx) = std::sync::mpsc::channel::<FetchedState>();
-
-        thread::spawn(move || {
-            let state = fetch();
-            let _ = tx.send(state);
-        });
-
-        glib::idle_add_local_once(move || match rx.try_recv() {
-            Ok(fetched) => Self::apply_fetched(&w, fetched),
-            Err(_) => Self::poll_until_ready(w, rx),
-        });
-    }
-
-    fn poll_until_ready(w: Rc<Widgets>, rx: std::sync::mpsc::Receiver<FetchedState>) {
-        glib::idle_add_local_once(move || match rx.try_recv() {
-            Ok(fetched) => Self::apply_fetched(&w, fetched),
-            Err(std::sync::mpsc::TryRecvError::Empty) => Self::poll_until_ready(w, rx),
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                error!("clipboard state background thread disconnected unexpectedly");
-            }
-        });
+        crate::spawn::spawn_work(fetch, move |fetched| Self::apply_fetched(&w, fetched));
     }
 
     fn apply_fetched(w: &Rc<Widgets>, fetched: FetchedState) {
