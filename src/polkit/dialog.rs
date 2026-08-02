@@ -57,7 +57,6 @@ impl Default for Callbacks {
 }
 
 pub struct PolkitDialog {
-    window: gtk4::Window,
     icon_image: gtk4::Image,
     icon_label: gtk4::Label,
     title_label: gtk4::Label,
@@ -73,6 +72,7 @@ pub struct PolkitDialog {
     details_label: gtk4::Label,
     auth_btn: gtk4::Button,
     card: gtk4::Box,
+    reveal: crate::anim::Reveal,
     identities: Rc<RefCell<Vec<u32>>>,
     callbacks: Rc<RefCell<Callbacks>>,
 }
@@ -243,27 +243,35 @@ impl PolkitDialog {
         actions.append(&auth_btn);
 
         // ── Assemble the card ────────────────────────────────────────
-        card.append(&icon_box);
-        card.append(&title_label);
-        card.append(&message_label);
-        card.append(&fp_pill);
-        card.append(&password_entry);
-        card.append(&caps_label);
-        card.append(&identity_row);
-        card.append(&status_label);
-        card.append(&details_toggle);
-        card.append(&details_revealer);
-        card.append(&actions);
+        // Content box on the glass: fades over the full enter/exit while
+        // the card (pane) tint arrives fast (motion on glass, anim.rs).
+        let content = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(14)
+            .build();
+        content.append(&icon_box);
+        content.append(&title_label);
+        content.append(&message_label);
+        content.append(&fp_pill);
+        content.append(&password_entry);
+        content.append(&caps_label);
+        content.append(&identity_row);
+        content.append(&status_label);
+        content.append(&details_toggle);
+        content.append(&details_revealer);
+        content.append(&actions);
+        card.append(&content);
 
         center.append(&card);
         backdrop.append(&center);
         window.set_child(Some(&backdrop));
 
+        let reveal = crate::anim::Reveal::new(&window, &card).content(&content);
+
         let identities: Rc<RefCell<Vec<u32>>> = Rc::new(RefCell::new(Vec::new()));
         let callbacks: Rc<RefCell<Callbacks>> = Rc::new(RefCell::new(Callbacks::default()));
 
         let dialog = Rc::new(PolkitDialog {
-            window: window.clone(),
             icon_image,
             icon_label,
             title_label,
@@ -279,6 +287,7 @@ impl PolkitDialog {
             details_label,
             auth_btn: auth_btn.clone(),
             card: card.clone(),
+            reveal,
             identities: identities.clone(),
             callbacks: callbacks.clone(),
         });
@@ -438,11 +447,11 @@ impl PolkitDialog {
             on_identity,
         };
 
-        self.window.set_visible(true);
+        self.reveal.show();
     }
 
     pub fn hide(&self) {
-        self.window.set_visible(false);
+        self.reveal.hide();
         self.password_entry.set_text("");
         *self.callbacks.borrow_mut() = Callbacks::default();
     }

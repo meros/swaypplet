@@ -336,6 +336,13 @@ fn present_picker(
     window.add_controller(key);
 
     picker.refilter("");
+    // Enter transition (motion on glass, anim.rs); show() before present()
+    // so the fade starts from the hidden pose. The exit stays instant by
+    // design: finish() destroys the window so the exclusive keyboard grab
+    // releases immediately.
+    crate::anim::Reveal::new(&window, &container)
+        .content(&view)
+        .show();
     window.present();
     entry.grab_focus();
     picker

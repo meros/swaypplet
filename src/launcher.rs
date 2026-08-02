@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
+use crate::anim;
 use crate::elephant::{self, SearchResult};
 use crate::layer_shell::{self, LayerShellConfig};
 
@@ -235,6 +236,7 @@ impl Default for LauncherView {
 pub struct Launcher {
     window: gtk4::Window,
     view: LauncherView,
+    reveal: anim::Reveal,
 }
 
 impl Launcher {
@@ -271,37 +273,45 @@ impl Launcher {
         backdrop.append(&container);
         window.set_child(Some(&backdrop));
 
+        // Enter/exit transition (motion on glass, anim.rs): the container is
+        // the pane, the launcher view the content. Pure crossfade.
+        let reveal = anim::Reveal::new(&window, &container).content(view.widget());
+
         // Hide the window after a result is activated.
         {
-            let window_c = window.clone();
-            view.set_on_activate(move || window_c.set_visible(false));
+            let reveal_c = reveal.clone();
+            view.set_on_activate(move || reveal_c.hide());
         }
 
         // Esc / arrows / Enter handled on the window in capture phase.
         {
-            let window_c = window.clone();
-            view.install_key_controller(&window, move || window_c.set_visible(false));
+            let reveal_c = reveal.clone();
+            view.install_key_controller(&window, move || reveal_c.hide());
         }
 
         // Backdrop click → dismiss.
         let gesture = gtk4::GestureClick::new();
         {
-            let window_c = window.clone();
+            let reveal_c = reveal.clone();
             gesture.connect_released(move |_, _, _, _| {
-                window_c.set_visible(false);
+                reveal_c.hide();
             });
         }
         window.add_controller(gesture);
 
-        Launcher { window, view }
+        Launcher {
+            window,
+            view,
+            reveal,
+        }
     }
 
     pub fn toggle(&self) {
-        if self.window.is_visible() {
-            self.window.set_visible(false);
+        if self.reveal.is_shown() && self.window.is_visible() {
+            self.reveal.hide();
         } else {
             self.view.reset();
-            self.window.set_visible(true);
+            self.reveal.show();
             self.view.focus_entry();
         }
     }

@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use gtk4::prelude::*;
 
+use crate::anim::animations_enabled;
 use crate::avatar::avatar;
 use crate::switch_user;
 
@@ -110,6 +111,9 @@ pub enum StatusKind {
 struct Surface {
     window: gtk4::Window,
     card: gtk4::Box,
+    /// The client-side glass behind the card; its sigma is animatable
+    /// (materialize on enter, dissolve on handoff — see glass.rs).
+    pane: super::glass::GlassPane,
     user_entry: Option<gtk4::Entry>,
     /// Chip row container, kept so `set_user_chips` can refill it once the
     /// async session/enrollment query resolves. In lock mode it starts
@@ -212,6 +216,12 @@ impl SurfaceSet {
         pane.set_margin_top(48);
         pane.set_child(&card);
         pane.set_texture(wallpaper.clone());
+        // Materialize: sigma ramps 0 → full with the card's enter fade
+        // (auth-card-enter, 300 ms = anim::ENTER_MS). This is client-side
+        // GSK blur, the one glass in swaypplet with a real radius to
+        // animate; ramp_blur_to jumps under reduced motion.
+        pane.set_blur_radius(0.0);
+        pane.ramp_blur_to(super::glass::BLUR_RADIUS, crate::anim::ENTER_MS);
 
         let greet_mode = self.user_field.borrow().is_some();
 
@@ -349,6 +359,7 @@ impl SurfaceSet {
         let surface = Surface {
             window: window.clone(),
             card,
+            pane,
             user_entry,
             chip_row,
             user_chips,
@@ -518,6 +529,10 @@ impl SurfaceSet {
         }
         for s in self.inner.borrow().iter() {
             s.card.add_css_class("lock-handoff");
+            // The glass dissolves with the card (matches the 240ms+120ms
+            // card fade in style.css), so the wallpaper is bare when the
+            // VT cut lands.
+            s.pane.ramp_blur_to(0.0, 360.0);
             for (name, chip) in &s.user_chips {
                 chip.add_css_class(if name == user { "picked" } else { "dropped" });
             }
@@ -541,6 +556,8 @@ impl SurfaceSet {
     pub fn end_handoff(&self) {
         for s in self.inner.borrow().iter() {
             s.card.remove_css_class("lock-handoff");
+            s.pane
+                .ramp_blur_to(super::glass::BLUR_RADIUS, crate::anim::ENTER_MS);
             for (_, chip) in &s.user_chips {
                 chip.remove_css_class("picked");
                 chip.remove_css_class("dropped");
@@ -663,14 +680,6 @@ fn build_switch_button() -> gtk4::Button {
     btn.set_halign(gtk4::Align::Center);
     btn.connect_clicked(|_| switch_user::to_greeter());
     btn
-}
-
-/// GTK's own reduced-motion switch (gtk-enable-animations, which the a11y
-/// settings and `GTK_DEBUG=no-animations` both drive). GTK CSS has no
-/// `prefers-reduced-motion` media query, so the decision is made here and
-/// the animated classes simply never get applied.
-fn animations_enabled() -> bool {
-    gtk4::Settings::default().is_none_or(|s| s.is_gtk_enable_animations())
 }
 
 fn wallpaper_path() -> Option<String> {

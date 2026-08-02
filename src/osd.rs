@@ -227,16 +227,13 @@ fn read_lock_display(lock_name: &str, icon_on: &str, icon_off: &str, label: &str
 
 #[derive(Clone)]
 pub struct Osd {
-    window: gtk4::Window,
     icon_label: gtk4::Label,
     bar: gtk4::ProgressBar,
     text_label: gtk4::Label,
     // For indicator mode (caps lock etc.)
     indicator_label: gtk4::Label,
     bar_box: gtk4::Box,
-    wrapper: gtk4::Box,
-    spacer: gtk4::Box,
-    revealer: gtk4::Revealer,
+    reveal: anim::Reveal,
     timeout_id: Rc<RefCell<Option<glib::SourceId>>>,
 }
 
@@ -305,51 +302,30 @@ impl Osd {
         indicator_label.add_css_class("osd-indicator");
         indicator_label.set_visible(false);
 
-        outer.append(&icon_label);
-        outer.append(&bar_box);
-        outer.append(&indicator_label);
+        // Content sits on the glass and fades over the full duration; the
+        // card (`outer`) is the pane whose tint arrives fast (motion on
+        // glass, anim.rs). Pure crossfade — no settle on the OSD.
+        let content = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(0)
+            .build();
+        content.append(&icon_label);
+        content.append(&bar_box);
+        content.append(&indicator_label);
+        outer.append(&content);
 
         wrapper.append(&outer);
+        window.set_child(Some(&wrapper));
 
-        // Enter/exit is a pure crossfade (motion on glass, anim.rs) — the
-        // frost pops in first, then the content resolves. The invisible
-        // spacer is kept at the card's measured size so the auto-sized layer
-        // surface stays constant while the revealer hides its child.
-        let spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-
-        let revealer = gtk4::Revealer::builder()
-            .transition_type(gtk4::RevealerTransitionType::Crossfade)
-            .transition_duration(anim::ENTER_MS as u32)
-            .reveal_child(false)
-            .valign(gtk4::Align::End)
-            .build();
-        revealer.set_child(Some(&wrapper));
-
-        let overlay = gtk4::Overlay::new();
-        overlay.set_child(Some(&spacer));
-        overlay.add_overlay(&revealer);
-        window.set_child(Some(&overlay));
-
-        // Unmap only once the exit fade has fully finished.
-        {
-            let window_c = window.clone();
-            revealer.connect_child_revealed_notify(move |r| {
-                if !r.is_child_revealed() && !r.reveals_child() {
-                    window_c.set_visible(false);
-                }
-            });
-        }
+        let reveal = anim::Reveal::new(&window, &outer).content(&content);
 
         Osd {
-            window,
             icon_label,
             bar,
             text_label,
             indicator_label,
             bar_box,
-            wrapper,
-            spacer,
-            revealer,
+            reveal,
             timeout_id: Rc::new(RefCell::new(None)),
         }
     }
@@ -396,34 +372,27 @@ impl Osd {
             }
         }
 
-        // Pin the surface to the card's size before the wipe so the layer
-        // surface doesn't resize per animation frame (content just changed,
-        // so re-measure every show).
-        let (_, nat_w, _, _) = self.wrapper.measure(gtk4::Orientation::Horizontal, -1);
-        let (_, nat_h, _, _) = self.wrapper.measure(gtk4::Orientation::Vertical, nat_w);
-        self.spacer.set_size_request(nat_w, nat_h);
-
         // Fade in (motion on glass, anim.rs). Retriggering mid-exit
-        // reverses the fade from its current opacity.
-        self.revealer.set_transition_duration(anim::ENTER_MS as u32);
-        self.window.set_visible(true);
-        self.revealer.set_reveal_child(true);
+        // reverses the fade from its current opacities; opacity never
+        // unmaps the content, so the auto-sized surface stays put during
+        // the transition (the old spacer overlay is gone with the
+        // revealer).
+        self.reveal.show();
 
         // Cancel previous timeout
         if let Some(id) = self.timeout_id.borrow_mut().take() {
             id.remove();
         }
 
-        // Auto-hide after timeout: fade out, then unmap (the child-revealed
-        // handler hides the window when the fade ends)
-        let revealer_c = self.revealer.clone();
+        // Auto-hide after timeout: fade out, then unmap (Reveal hides the
+        // window when the exit finishes)
+        let reveal_c = self.reveal.clone();
         let timeout_ref = self.timeout_id.clone();
         let id = glib::timeout_add_local_once(
             std::time::Duration::from_millis(OSD_TIMEOUT_MS as u64),
             move || {
                 *timeout_ref.borrow_mut() = None;
-                revealer_c.set_transition_duration(anim::EXIT_MS as u32);
-                revealer_c.set_reveal_child(false);
+                reveal_c.hide();
             },
         );
         *self.timeout_id.borrow_mut() = Some(id);

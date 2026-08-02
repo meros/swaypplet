@@ -71,11 +71,11 @@ pub struct Panel {
     pub window: gtk4::Window,
     sections: Rc<Sections>,
     launcher: Rc<LauncherView>,
-    /// Enter/exit crossfade for the glass menu, paired with a short
-    /// [`anim::SlideBin`] settle (motion on glass, anim.rs).
-    /// `reveals_child()` is the shown/hidden intent flag; the window unmaps
-    /// when the fade finishes.
-    revealer: gtk4::Revealer,
+    /// Enter/exit transition for the glass menu: fast pane tint, full-length
+    /// content fade, short [`anim::SlideBin`] settle (motion on glass,
+    /// anim.rs). `is_shown()` is the intent flag; the window unmaps when the
+    /// exit finishes.
+    reveal: anim::Reveal,
 }
 
 impl Panel {
@@ -102,17 +102,11 @@ impl Panel {
 
         // The menu fades in while settling up SLIDE_PX from below the
         // window's bottom edge (4px above the bar), and fades out sinking
-        // back — a crossfade plus a short slide (motion on glass, anim.rs).
-        // The window is a fixed 780x700 layer surface, so only internal
-        // layout animates; the surface itself never resizes, and the settle
-        // overshoot is clipped at its bottom edge. Created here so rail
-        // buttons can reference it; `root` is attached (wrapped in the
-        // SlideBin) further down.
-        let menu_revealer = gtk4::Revealer::builder()
-            .transition_type(gtk4::RevealerTransitionType::Crossfade)
-            .transition_duration(anim::ENTER_MS as u32)
-            .reveal_child(false)
-            .build();
+        // back — pane tint fast, content over the full fade, plus the slide
+        // (motion on glass, anim.rs). The window is a fixed 780x700 layer
+        // surface, so only internal layout animates; the surface itself
+        // never resizes, and the settle overshoot is clipped at its bottom
+        // edge.
 
         // ── Body: two columns ─────────────────────────────────────────────────
         let body = gtk4::Box::builder()
@@ -307,56 +301,33 @@ impl Panel {
         body.append(&left);
         body.append(&right_scroller);
 
-        root.append(&body);
-        root.append(&clipboard_revealer);
+        // Content sits on the glass (`root` carries the frosted background)
+        // and fades over the full duration while the pane tint arrives fast.
+        let content = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(0)
+            .build();
+        content.append(&body);
+        content.append(&clipboard_revealer);
+        root.append(&content);
 
-        // The settle half of the enter/exit motion: the revealer crossfades
-        // while the SlideBin translates the menu between SLIDE_PX below its
-        // resting spot and 0. Driven off `reveal-child` so every open/close
-        // path (bar toggle, backdrop click, Esc, rail actions) animates the
-        // same way; the intent flip happens before the window unmaps, so
-        // snapping the reveal shut on an unmapped window jumps instead.
         let slide = anim::SlideBin::new();
         slide.set_child(&root);
         slide.jump_to(anim::SLIDE_PX);
-        menu_revealer.set_child(Some(&slide));
-        backdrop.append(&menu_revealer);
+        backdrop.append(&slide);
         window.set_child(Some(&backdrop));
 
-        {
-            let slide_c = slide.clone();
-            let window_c = window.clone();
-            menu_revealer.connect_reveal_child_notify(move |r| {
-                let target = if r.reveals_child() {
-                    0.0
-                } else {
-                    anim::SLIDE_PX
-                };
-                if window_c.is_visible() {
-                    slide_c.slide_to(target, r.transition_duration() as f64);
-                } else {
-                    slide_c.jump_to(target);
-                }
-            });
-        }
+        // Every open/close path (bar toggle, backdrop click, Esc, rail
+        // actions) goes through this one Reveal, which also drives the
+        // SlideBin settle and unmaps the window once the exit finishes.
+        let reveal = anim::Reveal::new(&window, &root)
+            .content(&content)
+            .slide(&slide, anim::SLIDE_PX);
 
-        // Unmap only once the exit fade has fully finished.
-        {
-            let window_c = window.clone();
-            menu_revealer.connect_child_revealed_notify(move |r| {
-                if !r.is_child_revealed() && !r.reveals_child() {
-                    window_c.set_visible(false);
-                }
-            });
-        }
-
-        // Shared dismiss path: fade the menu out, then unmap (handler above).
+        // Shared dismiss path: fade the menu out, then unmap.
         let hide_menu = {
-            let revealer_c = menu_revealer.clone();
-            Rc::new(move || {
-                revealer_c.set_transition_duration(anim::EXIT_MS as u32);
-                revealer_c.set_reveal_child(false);
-            })
+            let reveal_c = reveal.clone();
+            Rc::new(move || reveal_c.hide())
         };
 
         // ── Sections bundle ──────────────────────────────────────────────────
@@ -406,25 +377,20 @@ impl Panel {
             window,
             sections,
             launcher,
-            revealer: menu_revealer,
+            reveal,
         }
     }
 
     pub fn toggle(&self) {
-        if self.revealer.reveals_child() && self.window.is_visible() {
-            self.revealer.set_transition_duration(anim::EXIT_MS as u32);
-            self.revealer.set_reveal_child(false);
+        if self.reveal.is_shown() && self.window.is_visible() {
+            self.reveal.hide();
         } else {
             // Instant-hide paths (rail actions, power session actions) unmap
-            // the window without closing the reveal; snap it shut (state
-            // changes on an unmapped revealer are instantaneous, and the
-            // SlideBin jumps back down) so the enter fade+settle plays
-            // instead of skipping.
-            self.revealer.set_reveal_child(false);
+            // the window without going through hide(); show() on an unmapped
+            // window restarts from the fully hidden pose, so the enter
+            // fade+settle plays instead of skipping.
             self.launcher.reset();
-            self.revealer.set_transition_duration(anim::ENTER_MS as u32);
-            self.window.set_visible(true);
-            self.revealer.set_reveal_child(true);
+            self.reveal.show();
             let sections = self.sections.clone();
             let launcher = self.launcher.clone();
             glib::idle_add_local_once(move || {

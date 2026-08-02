@@ -34,9 +34,10 @@ const MAX_POPUPS: usize = 5;
 
 // ── Animation (durations and easing come from crate::anim) ──
 // Entry and exit fade the card while it settles a short SLIDE_PX from/toward
-// the right edge (motion on glass, anim.rs) — the frost pops in first, then
-// the content resolves. The overshoot past the canvas's right margin is
-// clipped by the overlay clipper.
+// the right edge (motion on glass, anim.rs): the card itself is the glass
+// pane and rides the fast `glass_channel` tint ramp, while its content
+// (the inner hbox) fades over the full duration. The overshoot past the
+// canvas's right margin is clipped by the overlay clipper.
 
 const BASE_TIMEOUT_MS: u64 = 5000;
 const PER_CHAR_MS: u64 = 40;
@@ -52,12 +53,15 @@ static POPUP_CONFIG: LayerShellConfig = LayerShellConfig {
 
 /// Animated properties of a card. `y` is the visual top edge, `x_off` a
 /// horizontal slide offset (entry/exit), `scale` shrinks collapsed cards.
+/// `opacity` is the card (glass pane) alpha — it also carries the collapsed
+/// stack dimming — and `content` is the inner hbox alpha on top of it.
 #[derive(Clone, Copy, PartialEq)]
 struct Pose {
     y: f64,
     x_off: f64,
     scale: f64,
     opacity: f64,
+    content: f64,
 }
 
 fn lerp_pose(a: Pose, b: Pose, t: f64) -> Pose {
@@ -67,6 +71,7 @@ fn lerp_pose(a: Pose, b: Pose, t: f64) -> Pose {
         x_off: l(a.x_off, b.x_off),
         scale: l(a.scale, b.scale),
         opacity: l(a.opacity, b.opacity),
+        content: l(a.content, b.content),
     }
 }
 
@@ -286,18 +291,21 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
                 x_off: anim::SLIDE_PX,
                 scale: 1.0,
                 opacity: 0.0,
+                content: 0.0,
             },
             from: Pose {
                 y: 0.0,
                 x_off: anim::SLIDE_PX,
                 scale: 1.0,
                 opacity: 0.0,
+                content: 0.0,
             },
             to: Pose {
                 y: 0.0,
                 x_off: 0.0,
                 scale: 1.0,
                 opacity: 1.0,
+                content: 1.0,
             },
             anim_start: 0,
             anim_ms: anim::ENTER_MS,
@@ -330,9 +338,10 @@ fn start_exit(st: &Rc<RefCell<State>>, id: u32) -> bool {
                 let to = Pose {
                     x_off: anim::SLIDE_PX,
                     opacity: 0.0,
+                    content: 0.0,
                     ..card.cur
                 };
-                card.retarget(to, anim::EXIT_MS, now);
+                card.retarget(to, anim_ms(anim::EXIT_MS), now);
                 true
             }
             None => false,
@@ -379,6 +388,7 @@ fn reflow(st: &Rc<RefCell<State>>) {
                     x_off: 0.0,
                     scale: 1.0,
                     opacity: 1.0,
+                    content: 1.0,
                 };
                 full_top = y;
                 full_bottom = y + card.height;
@@ -396,6 +406,7 @@ fn reflow(st: &Rc<RefCell<State>>) {
                     x_off: 0.0,
                     scale,
                     opacity: 1.0 - PEEK_OPACITY_STEP * k,
+                    content: 1.0,
                 }
             };
 
@@ -408,15 +419,16 @@ fn reflow(st: &Rc<RefCell<State>>) {
                     x_off: anim::SLIDE_PX,
                     scale: to.scale,
                     opacity: 0.0,
+                    content: 0.0,
                 };
                 card.from = card.cur;
                 card.to = to;
                 card.anim_start = now;
-                card.anim_ms = anim::ENTER_MS;
+                card.anim_ms = anim_ms(anim::ENTER_MS);
                 card.animating = true;
                 apply_pose(&canvas, card);
             } else {
-                card.retarget(to, anim::MOVE_MS, now);
+                card.retarget(to, anim_ms(anim::MOVE_MS), now);
             }
         }
 
@@ -425,7 +437,19 @@ fn reflow(st: &Rc<RefCell<State>>) {
     ensure_tick(st);
 }
 
-/// Apply a card's current pose as a Fixed child transform.
+/// Reduced motion: collapse any animation to a single frame so state flow
+/// (exit removal, unmap) still runs through the tick path.
+fn anim_ms(ms: f64) -> f64 {
+    if anim::animations_enabled() {
+        ms
+    } else {
+        1.0
+    }
+}
+
+/// Apply a card's current pose as a Fixed child transform. The card widget
+/// is the glass pane; its first child (the hbox) is the content fading on
+/// top of it.
 fn apply_pose(canvas: &gtk4::Fixed, card: &Card) {
     let right_x = (WINDOW_WIDTH - EDGE_MARGIN) as f64;
     // Right-align the visual box; collapsed cards shrink toward the
@@ -436,6 +460,9 @@ fn apply_pose(canvas: &gtk4::Fixed, card: &Card) {
         .scale(card.cur.scale as f32, card.cur.scale as f32);
     canvas.set_child_transform(&card.widget, Some(&transform));
     card.widget.set_opacity(card.cur.opacity);
+    if let Some(content) = card.widget.first_child() {
+        content.set_opacity(card.cur.content);
+    }
 }
 
 fn ensure_tick(st: &Rc<RefCell<State>>) {
@@ -463,6 +490,11 @@ fn ensure_tick(st: &Rc<RefCell<State>>) {
             }
             let t = (((now - card.anim_start) as f64 / 1000.0) / card.anim_ms).clamp(0.0, 1.0);
             card.cur = lerp_pose(card.from, card.to, ease_out_cubic(t));
+            // The pane channel overrides the eased lerp: tint arrives (and
+            // leaves) inside GLASS_MS so it lands with the compositor frost
+            // (motion on glass, anim.rs). Driven off linear t.
+            card.cur.opacity =
+                anim::glass_channel(card.from.opacity, card.to.opacity, t, card.anim_ms);
             apply_pose(&canvas, card);
             if t >= 1.0 {
                 card.animating = false;
