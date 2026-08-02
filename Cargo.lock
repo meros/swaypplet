@@ -251,6 +251,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bumpalo"
+version = "3.20.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
+
+[[package]]
 name = "bytes"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1085,6 +1091,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "js-sys"
+version = "0.3.103"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53b44bfcdb3f8d5837a46dae1ca9660a837176eee74a28b229bc626816589102"
+dependencies = [
+ "cfg-if",
+ "futures-util",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "khronos_api"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1521,6 +1538,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustversion"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
+
+[[package]]
 name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1694,10 +1717,11 @@ dependencies = [
  "serde",
  "serde_json",
  "swayipc",
+ "system-tray",
  "tokio",
  "wayland-client",
  "wayland-protocols",
- "zbus",
+ "zbus 4.4.0",
 ]
 
 [[package]]
@@ -1744,6 +1768,21 @@ dependencies = [
  "pkg-config",
  "toml",
  "version-compare",
+]
+
+[[package]]
+name = "system-tray"
+version = "0.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "138dae477eb80d0ca1b5c64cf942685ea1a7faa84fe7cec7b06aa1a3cc9026d9"
+dependencies = [
+ "cfg-if",
+ "futures-lite",
+ "serde",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "zbus 5.18.0",
 ]
 
 [[package]]
@@ -1955,6 +1994,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
+name = "uuid"
+version = "1.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
+dependencies = [
+ "js-sys",
+ "serde_core",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "version-compare"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1971,6 +2021,51 @@ name = "wasi"
 version = "0.11.1+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
+
+[[package]]
+name = "wasm-bindgen"
+version = "0.2.126"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b067c0c11094aef6b7a801c1e34a26affafdf3d051dba08456b868789aaf9a4"
+dependencies = [
+ "cfg-if",
+ "once_cell",
+ "rustversion",
+ "wasm-bindgen-macro",
+ "wasm-bindgen-shared",
+]
+
+[[package]]
+name = "wasm-bindgen-macro"
+version = "0.2.126"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "167ce5e579f6bcf889c4f7175a8a5a585de84e8ff93976ce393efa5f2837aab1"
+dependencies = [
+ "quote",
+ "wasm-bindgen-macro-support",
+]
+
+[[package]]
+name = "wasm-bindgen-macro-support"
+version = "0.2.126"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3997c7839262f4ef12cf90b818d6340c18e80f263f1a94bf157d0ec4420380e"
+dependencies = [
+ "bumpalo",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "wasm-bindgen-shared",
+]
+
+[[package]]
+name = "wasm-bindgen-shared"
+version = "0.2.126"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc1b4cb0cc549fcf58d7dfc081778139b3d283a081644e833e84682ad71cea24"
+dependencies = [
+ "unicode-ident",
+]
 
 [[package]]
 name = "wayland-backend"
@@ -2191,9 +2286,39 @@ dependencies = [
  "uds_windows",
  "windows-sys 0.52.0",
  "xdg-home",
- "zbus_macros",
- "zbus_names",
- "zvariant",
+ "zbus_macros 4.4.0",
+ "zbus_names 3.0.0",
+ "zvariant 4.2.0",
+]
+
+[[package]]
+name = "zbus"
+version = "5.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe18fb60dc696039e738717b76eaea21e7a4489bbb1885020b43c94236d7e98a"
+dependencies = [
+ "async-broadcast",
+ "async-recursion",
+ "async-trait",
+ "enumflags2",
+ "event-listener",
+ "futures-core",
+ "futures-lite",
+ "hex",
+ "libc",
+ "ordered-stream",
+ "rustix 1.1.4",
+ "serde",
+ "serde_repr",
+ "tokio",
+ "tracing",
+ "uds_windows",
+ "uuid",
+ "windows-sys 0.61.2",
+ "winnow",
+ "zbus_macros 5.18.0",
+ "zbus_names 4.3.4",
+ "zvariant 5.13.1",
 ]
 
 [[package]]
@@ -2206,7 +2331,22 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
- "zvariant_utils",
+ "zvariant_utils 2.1.0",
+]
+
+[[package]]
+name = "zbus_macros"
+version = "5.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe96480bed92df2b442a1a30df364e12d08eed03aeb061f2b8dc6afb2be91119"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "zbus_names 4.3.4",
+ "zvariant 5.13.1",
+ "zvariant_utils 3.5.0",
 ]
 
 [[package]]
@@ -2217,7 +2357,18 @@ checksum = "4b9b1fef7d021261cc16cba64c351d291b715febe0fa10dc3a443ac5a5022e6c"
 dependencies = [
  "serde",
  "static_assertions",
- "zvariant",
+ "zvariant 4.2.0",
+]
+
+[[package]]
+name = "zbus_names"
+version = "4.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8bf88b4a3ff53e883001e0e0115b297a9d53c31b9c1edd2bfdd853e3428624e"
+dependencies = [
+ "serde",
+ "winnow",
+ "zvariant 5.13.1",
 ]
 
 [[package]]
@@ -2256,7 +2407,21 @@ dependencies = [
  "enumflags2",
  "serde",
  "static_assertions",
- "zvariant_derive",
+ "zvariant_derive 4.2.0",
+]
+
+[[package]]
+name = "zvariant"
+version = "5.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bee2a0bcd2a907786a456fff45aaaaf54c9ba5f50b71ae9ec1a4edd200c94911"
+dependencies = [
+ "endi",
+ "enumflags2",
+ "serde",
+ "winnow",
+ "zvariant_derive 5.13.1",
+ "zvariant_utils 3.5.0",
 ]
 
 [[package]]
@@ -2269,7 +2434,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
- "zvariant_utils",
+ "zvariant_utils 2.1.0",
+]
+
+[[package]]
+name = "zvariant_derive"
+version = "5.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38a708216a18780796770bfe3f4739c7c83a3e8f789b755534bbbc06e4e23e12"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "zvariant_utils 3.5.0",
 ]
 
 [[package]]
@@ -2281,4 +2459,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "zvariant_utils"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90cb9383f9b45290407a1258b202d3f8f01db719eb60b4e4055c6375af4fc7c7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn 2.0.119",
+ "winnow",
 ]

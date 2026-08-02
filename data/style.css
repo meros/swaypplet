@@ -253,6 +253,40 @@ button.bar-clock:hover {
     animation: battery-critical-pulse 0.7s steps(24) infinite alternate;
 }
 
+/* ── Tray: SNI icon pill left of the instrument track (src/bar/tray/) ──
+   Ports waybar's #tray module. GTK4 dropped -gtk-icon-effect, so .passive
+   maps waybar's dim to opacity; .needs-attention keeps the red fill. */
+.bar-tray {
+    margin: 5px 4px;
+    padding: 2px 4px;
+    background-color: alpha(@bg1, 0.85);
+    border-radius: 8px;
+}
+
+button.bar-tray-item {
+    margin: 0;
+    padding: 2px 4px;
+    min-width: 0;
+    min-height: 0;
+    background: none;
+    border-radius: 6px;
+    color: @fg;
+    transition: background-color 150ms ease, opacity 150ms ease;
+}
+
+button.bar-tray-item:hover {
+    background-color: alpha(@bg2, 0.90);
+}
+
+button.bar-tray-item.passive {
+    opacity: 0.55;
+}
+
+button.bar-tray-item.needs-attention {
+    background-color: @accent_quinary;
+    color: @bg0;
+}
+
 /* ── Task pill: middle track segment (src/bar/task.rs) ──
    The slot keeps width even with nothing to show (waybar's .none rule) so
    the track shape never collapses between sessions. */
