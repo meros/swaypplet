@@ -28,6 +28,14 @@ pub(crate) struct MediaState {
     position_secs: Option<f64>,
 }
 
+impl MediaState {
+    /// Local album-art path for the bar media popover; remote URLs are
+    /// skipped (would need fetch + cache), same rule as the panel section.
+    pub(crate) fn art_path(&self) -> Option<String> {
+        self.art_url.as_deref().and_then(resolve_art_path)
+    }
+}
+
 pub(crate) fn playerctl(args: &[&str]) -> Option<String> {
     let out = Command::new("playerctl").args(args).output().ok()?;
     if out.status.success() {

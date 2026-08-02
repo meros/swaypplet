@@ -457,6 +457,82 @@ button.bar-bay.t4.local { box-shadow: 0 0 0 1px alpha(@accent_quaternary, 0.85);
     color: alpha(@fg, 0.55);
 }
 
+/* ── Read-layer popovers: one chassis for bays + marks (src/bar/popover.rs) ──
+   The glass card is the popover child, not the popover node: popup
+   surfaces sit outside swayfx's layer_effects list, so there is no frost
+   behind them and the body swaps the translucent card fill for the raised
+   opaque one (keeping the glass-card radius + border). */
+popover.bar-popover,
+popover.bar-popover > contents {
+    background: none;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+}
+
+.bar-popover-body {
+    background-color: @surface_raised;
+    padding: 12px;
+    min-width: 200px;
+}
+
+.bar-popover-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: @fg_dim;
+}
+
+.bar-popover-list,
+.bar-popover-list row {
+    background: transparent;
+    padding: 0;
+    border: none;
+    box-shadow: none;
+}
+
+/* Session rows: click or Enter focuses the session's workspace. */
+.bar-popover-row {
+    padding: 6px 8px;
+    border-radius: 8px;
+    transition: background-color 150ms ease;
+}
+
+.bar-popover-list row:hover .bar-popover-row,
+.bar-popover-list row:focus .bar-popover-row {
+    background-color: alpha(white, 0.05);
+}
+
+.bar-popover-desc {
+    font-size: 13px;
+    color: @fg;
+}
+
+.bar-popover-meta {
+    font-size: 11px;
+    color: @fg_dim;
+}
+
+/* Last assistant message — present once the nixos-side Stop hook writes
+   last-<pid>; absent (and unmissed) until then. */
+.bar-popover-last {
+    font-size: 11px;
+    color: @text_faint;
+    font-style: italic;
+}
+
+.bar-popover-empty {
+    font-size: 12px;
+    color: @fg_dim;
+    font-style: italic;
+}
+
+button.bar-popover-action {
+    font-size: 12px;
+    padding: 4px 10px;
+    min-height: 28px;
+}
+
 /* ── Active-task accent ripple ──
    board.rs stamps bar-task1..4 on this output's .bar-root; descendant
    selectors push the task color across the right track's band lane and

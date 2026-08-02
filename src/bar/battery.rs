@@ -11,13 +11,16 @@
 //!
 //! Sysfs readers come from `widgets::power`; the icon table here is
 //! waybar's 11-step ladder (power.rs keeps its own coarser 5-step icon
-//! for the panel summary row).
+//! for the panel summary row). Click opens the read-layer chassis
+//! (bar/popover.rs) with the battery section: time-to-empty prose + the
+//! present draw in watts, one fresh sysfs read per open.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use super::popover;
 use crate::anim::{self, SlideBin};
 use crate::widgets::power::{self, BatteryState};
 
@@ -88,6 +91,31 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
         .css_classes(["bar-battery", "bar-seg"])
         .build();
     root.append(&slide);
+
+    // Read layer (vision increment 8): click opens the battery section.
+    // One sysfs read per open — no timer while closed.
+    {
+        let (pop, body) = popover::chassis(&root);
+        let path = path.clone();
+        let click = gtk4::GestureClick::new();
+        click.connect_released(move |_, _, _, _| {
+            let Some(bat) = power::read_battery(&path) else {
+                return;
+            };
+            while let Some(child) = body.first_child() {
+                body.remove(&child);
+            }
+            body.append(&popover::line(
+                &power::battery_summary_text(&bat),
+                "bar-popover-desc",
+            ));
+            if let Some(watts) = power::watts_text(&bat) {
+                body.append(&popover::line(&format!("Draw {watts}"), "bar-popover-meta"));
+            }
+            pop.popup();
+        });
+        root.add_controller(click);
+    }
 
     let ui = Rc::new(Ui {
         icon,
