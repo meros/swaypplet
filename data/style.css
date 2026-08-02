@@ -200,13 +200,19 @@ button.bar-media.playing {
 
 .bar-track > .bar-seg {
     margin: 0;
-    padding: 4px 12px;
+    /* 2px top padding + the 2px band lane below = the 4px bottom, so text
+       stays vertically centered (waybar's 2px 12px 4px + border-top). */
+    padding: 2px 12px 4px;
     min-width: 0;
     min-height: 0;
     background-color: alpha(@bg1, 0.85);
     border-radius: 0;
+    /* Reserved lane for the active-task band — transparent until task.rs
+       stamps bar-taskN on the root, so segments never jump. */
+    border-top: 2px solid transparent;
     color: @fg;
-    transition: background-color 150ms ease, box-shadow 150ms ease, color 150ms ease;
+    transition: background-color 150ms ease, box-shadow 150ms ease, color 150ms ease,
+        border-top-color 150ms ease;
 }
 
 .bar-track > .bar-seg:not(:first-child) {
@@ -242,6 +248,67 @@ button.bar-clock:hover {
     animation: battery-critical-pulse 0.7s steps(24) infinite alternate;
 }
 
+/* ── Task pill: middle track segment (src/bar/task.rs) ──
+   The slot keeps width even with nothing to show (waybar's .none rule) so
+   the track shape never collapses between sessions. */
+button.bar-task:hover {
+    background-color: alpha(@bg2, 0.90);
+}
+
+button.bar-task.none {
+    min-width: 90px;
+    color: @fg_dim;
+}
+
+.bar-task-dim {
+    color: @fg_dim;
+}
+
+/* Activity dot: working breathes in accent, waiting sits amber, a stopped
+   session dims out instead of shouting red. */
+.bar-task-dot.working {
+    color: @accent;
+    animation: task-dot-pulse 1.5s steps(30) infinite alternate;
+}
+
+.bar-task-dot.waiting {
+    color: @accent_secondary;
+}
+
+.bar-task-dot.stopped {
+    color: @fg_dim;
+}
+
+/* ── Active-task accent ripple ──
+   task.rs stamps bar-task1..4 on this output's .bar-root; descendant
+   selectors push the task color across the right track's band lane and
+   onto the focused workspace segment. Colors follow waybar's taskColors
+   (accent order 1→4). */
+.bar-root.bar-task1 .bar-track > .bar-seg { border-top-color: @accent; }
+.bar-root.bar-task2 .bar-track > .bar-seg { border-top-color: @accent_secondary; }
+.bar-root.bar-task3 .bar-track > .bar-seg { border-top-color: @accent_tertiary; }
+.bar-root.bar-task4 .bar-track > .bar-seg { border-top-color: @accent_quaternary; }
+
+.bar-root.bar-task1 button.bar-ws.focused {
+    background-color: @accent;
+    box-shadow: 0 0 10px alpha(@accent, 0.45);
+}
+
+.bar-root.bar-task2 button.bar-ws.focused {
+    background-color: @accent_secondary;
+    box-shadow: 0 0 10px alpha(@accent_secondary, 0.45);
+}
+
+.bar-root.bar-task3 button.bar-ws.focused {
+    background-color: @accent_tertiary;
+    box-shadow: 0 0 10px alpha(@accent_tertiary, 0.45);
+}
+
+.bar-root.bar-task4 button.bar-ws.focused {
+    background-color: @accent_quaternary;
+    box-shadow: 0 0 10px alpha(@accent_quaternary, 0.45);
+}
+
 /* ── State-driven motion (matches waybar) ──
    Pure outer glow, no bevel layers. Box-shadow animations replace the
    element's whole box-shadow each frame, so use them only on shadowless
@@ -265,6 +332,12 @@ button.bar-clock:hover {
 @keyframes workspace-urgent-glow {
     from { box-shadow: 0 0 2px alpha(@accent_quinary, 0.2); }
     to   { box-shadow: 0 0 14px alpha(@accent_quinary, 0.65); }
+}
+
+/* Text glyph, so opacity breathes instead of box-shadow. */
+@keyframes task-dot-pulse {
+    from { opacity: 1; }
+    to   { opacity: 0.35; }
 }
 
 /* For bordered cards with a drop shadow (e.g. critical notifications). */
