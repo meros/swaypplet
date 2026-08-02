@@ -83,17 +83,6 @@ window.panel {
    Pure outer glow, no bevel layers. Box-shadow animations replace the
    element's whole box-shadow each frame, so use them only on shadowless
    elements; bordered cards animate border-color instead. */
-@keyframes battery-critical-pulse {
-    from {
-        background-color: @accent_quinary;
-        box-shadow: 0 0 2px alpha(@accent_quinary, 0.0);
-    }
-    to {
-        background-color: @accent_quinary;
-        box-shadow: 0 0 12px alpha(@accent_quinary, 0.6);
-    }
-}
-
 @keyframes media-breathing {
     from { box-shadow: 0 0 0 alpha(@accent, 0.0); }
     to   { box-shadow: 0 0 10px alpha(@accent, 0.40); }
@@ -366,14 +355,17 @@ button.flat:hover {
     color: @fg_dim;
 }
 
+.device-status.error {
+    color: @red;
+}
+
+.device-status.success {
+    color: @green;
+}
+
 .device-active-dot {
     color: @accent;
     font-size: 8px;
-}
-
-/* ── Connecting / loading state ── */
-.connecting {
-    opacity: 0.6;
 }
 
 /* ── Media controls ── */
@@ -531,25 +523,6 @@ levelbar.battery-low block.filled {
     color: @fg_dim;
 }
 
-/* ── Power actions row ── */
-.power-actions-row {
-    margin-top: 4px;
-}
-
-.power-actions-row .toggle-btn {
-    min-width: 48px;
-    min-height: 44px;
-    font-size: 16px;
-    padding: 8px;
-}
-
-.power-actions-row .toggle-btn.confirm {
-    background-color: @red;
-    color: @fg;
-    font-size: 11px;
-    animation: battery-critical-pulse 0.7s steps(24) infinite alternate;
-}
-
 /* ── Spinner / loading states ── */
 spinner {
     color: @accent;
@@ -643,7 +616,7 @@ revealer {
     padding: 16px;
 }
 
-.unavailable {
+.audio-unavailable {
     color: @fg_dim;
     font-size: 11px;
     font-style: italic;
