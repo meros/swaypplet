@@ -263,6 +263,7 @@ impl Launcher {
             .width_request(560)
             .height_request(520)
             .build();
+        container.add_css_class("glass-card");
         container.add_css_class("launcher-container");
 
         let view = LauncherView::new();

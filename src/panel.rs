@@ -94,6 +94,7 @@ impl Panel {
             .halign(gtk4::Align::Start)
             .valign(gtk4::Align::End)
             .build();
+        root.add_css_class("glass-card");
         root.add_css_class("startmenu-root");
 
         // The menu fades in while settling up SLIDE_PX from below the

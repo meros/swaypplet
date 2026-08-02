@@ -209,6 +209,7 @@ impl SurfaceSet {
             .spacing(14)
             .width_request(360)
             .build();
+        card.add_css_class("glass-card");
         card.add_css_class("lock-card");
 
         // Frosted pane hugging the card exactly (margin lives on the pane so
