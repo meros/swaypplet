@@ -1,5 +1,4 @@
 use std::process::Command;
-use std::sync::mpsc;
 
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, Orientation, Revealer, RevealerTransitionType};
@@ -116,20 +115,15 @@ fn format_refresh(mhz: u32) -> String {
 
 // ── Toggle action ─────────────────────────────────────────────────────────────
 
-/// Send `swaymsg output <name> enable|disable` on a background thread.
-/// Returns a channel receiver that yields `true` on success, `false` on failure.
-fn toggle_output_async(name: String, enable: bool) -> mpsc::Receiver<bool> {
-    let (tx, rx) = mpsc::channel::<bool>();
-    std::thread::spawn(move || {
-        let cmd = if enable { "enable" } else { "disable" };
-        let ok = Command::new("swaymsg")
-            .args(["output", &name, cmd])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        let _ = tx.send(ok);
-    });
-    rx
+/// Run `swaymsg output <name> enable|disable` (blocking — call from a
+/// background thread, e.g. via `spawn_work`).
+fn toggle_output_blocking(name: &str, enable: bool) -> bool {
+    let cmd = if enable { "enable" } else { "disable" };
+    Command::new("swaymsg")
+        .args(["output", name, cmd])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 // ── Row builder ───────────────────────────────────────────────────────────────
@@ -187,7 +181,6 @@ fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) 
         let name = output.name.clone();
         let active = output.active;
         let output_list_c = output_list.clone();
-        let toggle_btn_c = toggle_btn.clone();
 
         toggle_btn.connect_clicked(move |btn| {
             // Re-validate against the freshest state before disabling: the
@@ -201,26 +194,16 @@ fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) 
 
             btn.set_sensitive(false);
 
-            let rx = toggle_output_async(name.clone(), !active);
-
             // Refresh the list after the command completes.
+            let name_bg = name.clone();
             let output_list_refresh = output_list_c.clone();
-            let btn_refresh = toggle_btn_c.clone();
-            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                match rx.try_recv() {
-                    Ok(_) => {
-                        // Re-populate the list to reflect the new state.
-                        populate_output_list(&output_list_refresh);
-                        glib::ControlFlow::Break
-                    }
-                    Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        // Command thread dropped without sending — restore button.
-                        btn_refresh.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                }
-            });
+            spawn_work(
+                move || toggle_output_blocking(&name_bg, !active),
+                move |_ok| {
+                    // Re-populate the list to reflect the new state.
+                    populate_output_list(&output_list_refresh);
+                },
+            );
         });
     }
 

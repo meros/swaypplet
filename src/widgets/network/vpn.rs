@@ -1,12 +1,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::mpsc;
 
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, ListBox, ListBoxRow, Orientation, Spinner};
 
 use super::NetworkState;
 use super::backend::*;
+use crate::spawn::spawn_work;
 
 pub fn rebuild_vpn_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
     while let Some(child) = list.first_child() {
@@ -69,43 +69,30 @@ pub fn rebuild_vpn_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
                 spinner_c.start();
                 status_c.set_visible(false);
 
-                let (tx, rx) = mpsc::channel::<NmResult>();
-                if is_active {
-                    vpn_down_async(name_clone.clone(), tx);
-                } else {
-                    vpn_up_async(name_clone.clone(), tx);
-                }
-
+                let name_bg = name_clone.clone();
                 let btn_poll = btn_c.clone();
                 let spinner_poll = spinner_c.clone();
                 let status_poll = status_c.clone();
                 let was_active = is_active;
-                glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                    match rx.try_recv() {
-                        Ok(result) => {
-                            spinner_poll.stop();
-                            spinner_poll.set_visible(false);
-                            btn_poll.set_sensitive(true);
-                            apply_nm_result(&status_poll, &result);
-                            if matches!(result, NmResult::Success) {
-                                btn_poll.set_label(if was_active {
-                                    "Connect"
-                                } else {
-                                    "Disconnect"
-                                });
-                            }
-                            auto_hide_status(&status_poll);
-                            glib::ControlFlow::Break
+                spawn_work(
+                    move || {
+                        if was_active {
+                            vpn_down(&name_bg)
+                        } else {
+                            vpn_up(&name_bg)
                         }
-                        Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                            spinner_poll.stop();
-                            spinner_poll.set_visible(false);
-                            btn_poll.set_sensitive(true);
-                            glib::ControlFlow::Break
+                    },
+                    move |result| {
+                        spinner_poll.stop();
+                        spinner_poll.set_visible(false);
+                        btn_poll.set_sensitive(true);
+                        apply_nm_result(&status_poll, &result);
+                        if matches!(result, NmResult::Success) {
+                            btn_poll.set_label(if was_active { "Connect" } else { "Disconnect" });
                         }
-                    }
-                });
+                        auto_hide_status(&status_poll);
+                    },
+                );
             });
         }
 

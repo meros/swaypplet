@@ -1,12 +1,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::mpsc;
 
 use gtk4::prelude::*;
 use gtk4::{Box, Label, ListBox, ListBoxRow, Orientation, Spinner, Switch};
 
 use super::NetworkState;
 use super::backend::*;
+use crate::spawn::spawn_work;
 
 /// Rebuild the interface list from current state. Single implementation used
 /// both from `NetworkSection` methods and async polling callbacks.
@@ -83,46 +83,37 @@ pub fn rebuild_iface_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
                 spinner_c.start();
                 row_c.add_css_class("network-connecting");
 
-                let (tx, rx) = mpsc::channel::<NmResult>();
-                if active {
-                    device_connect_async(device.clone(), tx);
-                } else {
-                    device_disconnect_async(device.clone(), tx);
-                }
-
+                let device_bg = device.clone();
                 let state_poll = state_c.clone();
                 let list_poll = list_c.clone();
                 let spinner_poll = spinner_c.clone();
                 let switch_poll = switch_c.clone();
                 let row_poll = row_c.clone();
-                glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                    let stop_spinner = || {
+                spawn_work(
+                    move || {
+                        if active {
+                            device_connect(&device_bg)
+                        } else {
+                            device_disconnect(&device_bg)
+                        }
+                    },
+                    move |result| {
                         spinner_poll.stop();
                         spinner_poll.set_visible(false);
                         row_poll.remove_css_class("network-connecting");
-                    };
-                    match rx.try_recv() {
-                        Ok(NmResult::Success) => {
-                            stop_spinner();
-                            let interfaces = get_network_interfaces();
-                            state_poll.borrow_mut().interfaces = interfaces;
-                            rebuild_iface_list(&list_poll, &state_poll);
-                            glib::ControlFlow::Break
+                        match result {
+                            NmResult::Success => {
+                                let interfaces = get_network_interfaces();
+                                state_poll.borrow_mut().interfaces = interfaces;
+                                rebuild_iface_list(&list_poll, &state_poll);
+                            }
+                            NmResult::Failure(_) => {
+                                switch_poll.set_sensitive(true);
+                                switch_poll.set_active(!active);
+                            }
                         }
-                        Ok(NmResult::Failure(_)) => {
-                            stop_spinner();
-                            switch_poll.set_sensitive(true);
-                            switch_poll.set_active(!active);
-                            glib::ControlFlow::Break
-                        }
-                        Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                            stop_spinner();
-                            switch_poll.set_sensitive(true);
-                            glib::ControlFlow::Break
-                        }
-                    }
-                });
+                    },
+                );
 
                 glib::Propagation::Proceed
             });

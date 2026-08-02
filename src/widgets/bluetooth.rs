@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::process::Command;
 use std::rc::Rc;
-use std::sync::mpsc;
 
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, Orientation, Revealer, RevealerTransitionType, Spinner};
@@ -639,14 +638,6 @@ fn make_connected_row(dev: &BtDevice, parent_list: &Box) -> Box {
             status_c.set_label("");
 
             let mac_bg = mac.clone();
-            let (tx, rx) = mpsc::channel::<ConnectResult>();
-
-            std::thread::spawn(move || {
-                let result = bt_disconnect_blocking(&mac_bg);
-                let _ = tx.send(result);
-            });
-
-            // Poll the channel from the main loop.
             let row_poll = row_c.clone();
             let parent_poll = parent_c.clone();
             let spinner_poll = spinner_c.clone();
@@ -654,32 +645,23 @@ fn make_connected_row(dev: &BtDevice, parent_list: &Box) -> Box {
             let forget_poll = forget_btn_c.clone();
             let status_poll = status_c.clone();
 
-            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                match rx.try_recv() {
-                    Ok(ConnectResult::Success) => {
+            spawn_work(
+                move || bt_disconnect_blocking(&mac_bg),
+                move |result| match result {
+                    ConnectResult::Success => {
                         // Remove the row from the connected list.
                         parent_poll.remove(&row_poll);
-                        glib::ControlFlow::Break
                     }
-                    Ok(ConnectResult::Failure(reason)) => {
+                    ConnectResult::Failure(reason) => {
                         spinner_poll.stop();
                         spinner_poll.set_visible(false);
                         btn_poll.set_sensitive(true);
                         forget_poll.set_sensitive(true);
                         status_poll.set_label(&format!("Error: {reason}"));
                         status_poll.add_css_class("error");
-                        glib::ControlFlow::Break
                     }
-                    Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        spinner_poll.stop();
-                        spinner_poll.set_visible(false);
-                        btn_poll.set_sensitive(true);
-                        forget_poll.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                }
-            });
+                },
+            );
         });
     }
 
@@ -760,14 +742,6 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
             status_c.remove_css_class("success");
 
             let mac_bg = mac.clone();
-            let (tx, rx) = mpsc::channel::<ConnectResult>();
-
-            std::thread::spawn(move || {
-                let result = bt_connect_blocking(&mac_bg);
-                let _ = tx.send(result);
-            });
-
-            // Poll the channel from the main loop.
             let row_poll = row_c.clone();
             let parent_poll = parent_c.clone();
             let spinner_poll = spinner_c.clone();
@@ -775,9 +749,10 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
             let forget_poll = forget_btn_c.clone();
             let status_poll = status_c.clone();
 
-            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                match rx.try_recv() {
-                    Ok(ConnectResult::Success) => {
+            spawn_work(
+                move || bt_connect_blocking(&mac_bg),
+                move |result| match result {
+                    ConnectResult::Success => {
                         spinner_poll.stop();
                         spinner_poll.set_visible(false);
                         status_poll.set_label("✓");
@@ -793,27 +768,17 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
                                 parent_rm.remove(&row_rm);
                             },
                         );
-                        glib::ControlFlow::Break
                     }
-                    Ok(ConnectResult::Failure(reason)) => {
+                    ConnectResult::Failure(reason) => {
                         spinner_poll.stop();
                         spinner_poll.set_visible(false);
                         btn_poll.set_sensitive(true);
                         forget_poll.set_sensitive(true);
                         status_poll.set_label(&format!("Connection failed: {reason}"));
                         status_poll.add_css_class("error");
-                        glib::ControlFlow::Break
                     }
-                    Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        spinner_poll.stop();
-                        spinner_poll.set_visible(false);
-                        btn_poll.set_sensitive(true);
-                        forget_poll.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                }
-            });
+                },
+            );
         });
     }
 

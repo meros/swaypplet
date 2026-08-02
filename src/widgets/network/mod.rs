@@ -6,7 +6,6 @@ mod wifi;
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::mpsc;
 
 use gtk4::prelude::*;
 use gtk4::{
@@ -281,27 +280,12 @@ impl NetworkSection {
             let ps_switch_c = ps_switch.clone();
             ps_switch.connect_state_set(move |_sw, active| {
                 if let Some(conn_name) = get_active_wifi_conn_name() {
-                    let (tx, rx) = mpsc::channel::<NmResult>();
-                    set_wifi_power_saving_async(conn_name, active, tx);
-
                     let sw_poll = ps_switch_c.clone();
-                    glib::timeout_add_local(
-                        std::time::Duration::from_millis(100),
-                        move || match rx.try_recv() {
-                            Ok(NmResult::Success) => {
-                                sw_poll.set_state(active);
-                                glib::ControlFlow::Break
-                            }
-                            Ok(NmResult::Failure(_)) => {
-                                sw_poll.set_state(!active);
-                                glib::ControlFlow::Break
-                            }
-                            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                                glib::ControlFlow::Continue
-                            }
-                            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                                glib::ControlFlow::Break
-                            }
+                    spawn_work(
+                        move || set_wifi_power_saving(&conn_name, active),
+                        move |result| match result {
+                            NmResult::Success => sw_poll.set_state(active),
+                            NmResult::Failure(_) => sw_poll.set_state(!active),
                         },
                     );
                 }
@@ -527,19 +511,16 @@ impl NetworkSection {
                         // Wire WiFi radio toggle now that we know adapter is present.
                         let wifi_switch_revert = wifi_switch_radio.clone();
                         wifi_switch_radio.connect_state_set(move |_sw, active| {
-                            let (tx, rx) = mpsc::channel::<NmResult>();
-                            set_wifi_radio_async(active, tx);
-
                             let state_poll = state_radio_init.clone();
                             let controls_poll = wifi_controls_radio.clone();
                             let ps_poll = power_save_radio.clone();
                             let si_poll = summary_icon_radio.clone();
                             let st_poll = summary_text_radio.clone();
                             let sw_poll = wifi_switch_revert.clone();
-                            glib::timeout_add_local(
-                                std::time::Duration::from_millis(100),
-                                move || match rx.try_recv() {
-                                    Ok(NmResult::Success) => {
+                            spawn_work(
+                                move || set_wifi_radio(active),
+                                move |result| match result {
+                                    NmResult::Success => {
                                         state_poll.borrow_mut().wifi_radio_enabled = active;
                                         controls_poll.set_visible(active);
                                         ps_poll.set_visible(
@@ -549,18 +530,9 @@ impl NetworkSection {
                                             si_poll.set_label(ICON_DISCONNECTED);
                                             st_poll.set_label("WiFi Off");
                                         }
-                                        glib::ControlFlow::Break
                                     }
-                                    Ok(NmResult::Failure(_)) => {
+                                    NmResult::Failure(_) => {
                                         sw_poll.set_state(!active);
-                                        glib::ControlFlow::Break
-                                    }
-                                    Err(std::sync::mpsc::TryRecvError::Empty) => {
-                                        glib::ControlFlow::Continue
-                                    }
-                                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                                        sw_poll.set_state(!active);
-                                        glib::ControlFlow::Break
                                     }
                                 },
                             );
