@@ -162,17 +162,10 @@ pub fn start() -> std::sync::mpsc::Receiver<AgentEvent> {
     let (tx, rx) = std::sync::mpsc::channel::<AgentEvent>();
     let sender = Arc::new(Mutex::new(tx));
 
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("polkit agent: failed to create tokio runtime");
-
-        rt.block_on(async move {
-            if let Err(e) = run(sender).await {
-                log::error!("polkit agent thread exited: {e}");
-            }
-        });
+    crate::spawn::spawn_tokio_thread("polkit-agent", async move {
+        if let Err(e) = run(sender).await {
+            log::error!("polkit agent thread exited: {e}");
+        }
     });
 
     rx
