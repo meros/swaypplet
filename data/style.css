@@ -213,7 +213,7 @@ button.bar-media.playing {
     min-height: 0;
     background-color: alpha(@bg1, 0.85);
     border-radius: 0;
-    /* Reserved lane for the active-task band — transparent until task.rs
+    /* Reserved lane for the active-task band — transparent until board.rs
        stamps bar-taskN on the root, so segments never jump. */
     border-top: 2px solid transparent;
     color: @fg;
@@ -288,39 +288,103 @@ button.bar-tray-item.needs-attention {
     color: @bg0;
 }
 
-/* ── Task pill: middle track segment (src/bar/task.rs) ──
-   Hidden entirely when there's no session and no manual name — an empty
-   reserved slot read as a hole in the track. */
-button.bar-task:hover {
-    background-color: alpha(@bg2, 0.90);
+/* ── The board: four-bay cross-task instrument (src/bar/board.rs) ──
+   Replaces the per-output task pill. Position + numeral carry identity,
+   hue reinforces (vision P3): every state stays distinct in grayscale —
+   socket = hollow ring, working = mid fill, waiting = bright fill,
+   stopped = near-off dot glyph, stale = amber hollow OFF-flag glyph.
+   All states static (P2); escalation is a luminance tier step (owner
+   decision 1), the ack drop is the one 150ms sub-threshold crossfade. */
+.bar-track > .bar-seg.bar-board {
+    padding: 2px 5px 4px;
 }
 
-.bar-task-dim {
+button.bar-bay {
+    margin: 2px 0;
+    padding: 0 4px;
+    /* a11y floor: >=24px hit target per bay; drawn content >=16px. */
+    min-width: 24px;
+    min-height: 0;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    color: @fg_dim;
+    transition: background-color 150ms ease, color 150ms ease,
+        border-color 150ms ease, box-shadow 150ms ease;
+}
+
+/* No session: hollow socket. */
+button.bar-bay.socket {
+    border-color: alpha(@fg, 0.15);
+    color: alpha(@fg, 0.20);
+}
+
+/* Working: filled block, achromatic — busy needs nothing from the owner. */
+button.bar-bay.working {
+    background-color: alpha(@bg3, 0.90);
     color: @fg_dim;
 }
 
-/* Activity dot: static states only (vision P2 — motion is onset-only, no
-   loop may ride the frame clock). Working = accent fill, waiting = amber
-   fill, stopped = dim, stale = amber hollow ring (○ glyph from task.rs)
-   marking "data invalid", distinct from waiting by shape (P9). */
-.bar-task-dot.working {
-    color: @accent;
+/* Stopped: near-off dot — slot occupied, session done (owner decision 2). */
+button.bar-bay.stopped {
+    color: alpha(@fg, 0.12);
 }
 
-.bar-task-dot.waiting {
+/* Stale: data invalid, amber hollow OFF-flag — hollow so it never reads
+   as a live filled state, and never as Waiting (P9). */
+button.bar-bay.stale {
+    border-color: @accent_secondary;
     color: @accent_secondary;
 }
 
-.bar-task-dot.stopped {
-    color: @fg_dim;
+/* Waiting, acked: task hue held at a tint — seen, not yet served. */
+button.bar-bay.t1.waiting { background-color: alpha(@accent, 0.30); color: @fg; }
+button.bar-bay.t2.waiting { background-color: alpha(@accent_secondary, 0.30); color: @fg; }
+button.bar-bay.t3.waiting { background-color: alpha(@accent_tertiary, 0.30); color: @fg; }
+button.bar-bay.t4.waiting { background-color: alpha(@accent_quaternary, 0.30); color: @fg; }
+
+/* Waiting, unacked: full-luminance hue after the onset nudge, then static. */
+button.bar-bay.t1.waiting.unacked { background-color: @accent; color: @bg0; }
+button.bar-bay.t2.waiting.unacked { background-color: @accent_secondary; color: @bg0; }
+button.bar-bay.t3.waiting.unacked { background-color: @accent_tertiary; color: @bg0; }
+button.bar-bay.t4.waiting.unacked { background-color: @accent_quaternary; color: @bg0; }
+
+/* Unacked >=10 min: one static luminance tier step — nothing on the bar
+   ever loops (owner decision 1). */
+button.bar-bay.t1.waiting.unacked.overdue { background-color: shade(@accent, 1.25); box-shadow: 0 0 8px alpha(@accent, 0.45); }
+button.bar-bay.t2.waiting.unacked.overdue { background-color: shade(@accent_secondary, 1.25); box-shadow: 0 0 8px alpha(@accent_secondary, 0.45); }
+button.bar-bay.t3.waiting.unacked.overdue { background-color: shade(@accent_tertiary, 1.25); box-shadow: 0 0 8px alpha(@accent_tertiary, 0.45); }
+button.bar-bay.t4.waiting.unacked.overdue { background-color: shade(@accent_quaternary, 1.25); box-shadow: 0 0 8px alpha(@accent_quaternary, 0.45); }
+
+/* Local bay (this output's visible task): hue ring + static width step —
+   workspace hopping is the highest-frequency event, so no animation. */
+button.bar-bay.local {
+    min-width: 30px;
 }
 
-.bar-task-dot.stale {
-    color: @accent_secondary;
+button.bar-bay.t1.local { box-shadow: 0 0 0 1px alpha(@accent, 0.85); }
+button.bar-bay.t2.local { box-shadow: 0 0 0 1px alpha(@accent_secondary, 0.85); }
+button.bar-bay.t3.local { box-shadow: 0 0 0 1px alpha(@accent_tertiary, 0.85); }
+button.bar-bay.t4.local { box-shadow: 0 0 0 1px alpha(@accent_quaternary, 0.85); }
+
+.bar-bay-marker {
+    margin-right: 2px;
+}
+
+/* Waiting-age chip: revealed at the 2 min threshold, ticks 1/min while a
+   session waits (boundary-aimed timer in task_state.rs). */
+.bar-bay-chip {
+    margin-left: 3px;
+    font-size: 8pt;
+}
+
+/* Bottom 2px N/M fill (DrawingArea paints with the CSS color). */
+.bar-bay-fill {
+    color: alpha(@fg, 0.55);
 }
 
 /* ── Active-task accent ripple ──
-   task.rs stamps bar-task1..4 on this output's .bar-root; descendant
+   board.rs stamps bar-task1..4 on this output's .bar-root; descendant
    selectors push the task color across the right track's band lane and
    onto the focused workspace segment. Colors follow waybar's taskColors
    (accent order 1→4). */

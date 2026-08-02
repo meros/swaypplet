@@ -45,24 +45,6 @@ impl Activity {
             _ => Self::Stale,
         }
     }
-
-    pub fn css_class(self) -> &'static str {
-        match self {
-            Self::Working => "working",
-            Self::Waiting => "waiting",
-            Self::Stopped => "stopped",
-            Self::Stale => "stale",
-        }
-    }
-
-    /// Stale draws hollow so "data invalid" survives grayscale and never
-    /// reads as a live filled state.
-    pub fn glyph(self) -> &'static str {
-        match self {
-            Self::Stale => "○",
-            _ => "●",
-        }
-    }
 }
 
 /// One progress-<PID> line: raw text for prose surfaces, the leading
@@ -90,6 +72,11 @@ pub struct SessionState {
     pub workspace: String,
     /// mtime of status-<PID> — waiting age; may be suspend-skewed.
     pub status_mtime: Option<SystemTime>,
+    /// Focus-as-acknowledgment (vision P10): true once this waiting
+    /// episode's workspace (or task) has been focused. Meaningful only
+    /// while `activity` is Waiting; ack drops luminance, the state stays
+    /// "waiting" until the hook writes working/stopped.
+    pub acked: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -124,6 +111,10 @@ pub struct TaskStateService {
     /// Armed only while some session is Waiting (vision P7); one-shot,
     /// aimed at the next whole-minute age boundary (clock.rs pattern).
     age_timer: RefCell<Option<glib::SourceId>>,
+    /// Acked waiting episodes, pid → status mtime at ack. Sticky for the
+    /// episode: focus leaving does not un-acknowledge; a status rewrite
+    /// (new mtime) starts a fresh, unacked episode.
+    acked: RefCell<HashMap<i32, Option<SystemTime>>>,
     /// A dropped GFileMonitor stops watching.
     _monitor: RefCell<Option<gio::FileMonitor>>,
 }
@@ -135,6 +126,7 @@ impl TaskStateService {
             sway: sway.clone(),
             dir: state_dir(),
             age_timer: RefCell::new(None),
+            acked: RefCell::new(HashMap::new()),
             _monitor: RefCell::new(None),
         });
 
@@ -177,7 +169,15 @@ impl TaskStateService {
     /// for age-dependent renders: the snapshot carries no clock, so an age
     /// tick compares equal.
     fn refresh(self: &Rc<Self>, notify_unchanged: bool) {
-        let snapshot = scan(&self.dir, &self.sway.snapshot());
+        let sway = self.sway.snapshot();
+        let mut snapshot = scan(&self.dir, &sway);
+        let focused: Vec<&str> = sway
+            .workspaces
+            .iter()
+            .filter(|w| w.focused)
+            .map(|w| w.name.as_str())
+            .collect();
+        reconcile_acks(&mut snapshot, &mut self.acked.borrow_mut(), &focused);
         if notify_unchanged {
             self.state.set(snapshot);
         } else {
@@ -251,12 +251,52 @@ fn scan_with(
                 progress: first_line(&dir.join(format!("progress-{pid}"))).map(Progress::parse),
                 workspace,
                 status_mtime: fs::metadata(&status).and_then(|m| m.modified()).ok(),
+                acked: false,
             });
     }
     for (i, task) in snapshot.tasks.iter_mut().enumerate() {
         task.manual = first_line(&dir.join(format!("manual-t{}", i + 1)));
     }
     snapshot
+}
+
+/// Focus is acknowledgment (vision P10, the input the owner already
+/// produces hundreds of times a day): a waiting session whose workspace —
+/// or any workspace of its task, the stated fallback — is focused becomes
+/// acked, and stays acked for that waiting episode (keyed by status
+/// mtime) after focus moves on. Any output's focus acks everywhere: the
+/// episode map is service-global, so every board renders the same drop.
+fn reconcile_acks(
+    snapshot: &mut TaskSnapshot,
+    acked: &mut HashMap<i32, Option<SystemTime>>,
+    focused: &[&str],
+) {
+    let focused_tasks: Vec<u8> = focused.iter().filter_map(|f| task_of_name(f)).collect();
+    for (i, task) in snapshot.tasks.iter_mut().enumerate() {
+        let n = i as u8 + 1;
+        for s in &mut task.sessions {
+            if s.activity != Activity::Waiting {
+                acked.remove(&s.pid);
+                continue;
+            }
+            let same_episode = acked.get(&s.pid) == Some(&s.status_mtime);
+            let focused_now = focused.contains(&s.workspace.as_str()) || focused_tasks.contains(&n);
+            s.acked = same_episode || focused_now;
+            if s.acked {
+                acked.insert(s.pid, s.status_mtime);
+            } else {
+                // A rewritten status (new mtime) is a fresh episode.
+                acked.remove(&s.pid);
+            }
+        }
+    }
+    let live: std::collections::HashSet<i32> = snapshot
+        .tasks
+        .iter()
+        .flat_map(|t| &t.sessions)
+        .map(|s| s.pid)
+        .collect();
+    acked.retain(|pid, _| live.contains(pid));
 }
 
 /// PIDs with a pid-<N> description file, sorted for stable render order.
@@ -409,13 +449,6 @@ mod tests {
     }
 
     #[test]
-    fn stale_renders_hollow() {
-        assert_eq!(Activity::Stale.glyph(), "○");
-        assert_eq!(Activity::Waiting.glyph(), "●");
-        assert_eq!(Activity::Stale.css_class(), "stale");
-    }
-
-    #[test]
     fn workspace_walk_climbs_the_parent_chain() {
         let map = HashMap::from([(100, "5:t2a".to_string())]);
         let parent = |p: i32| match p {
@@ -450,6 +483,7 @@ mod tests {
             progress: None,
             workspace: "5:t2a".into(),
             status_mtime: mtime,
+            acked: false,
         }
     }
 
@@ -517,6 +551,7 @@ mod tests {
         };
         let snap = scan_with(&dir, &sway, comm, parent);
         fs::remove_dir_all(&dir).unwrap();
+        assert!(!snap.task(2).sessions[0].acked);
 
         let session = &snap.task(2).sessions[0];
         assert_eq!(session.pid, 300);
@@ -535,5 +570,71 @@ mod tests {
         assert_eq!(snap.task(3).manual.as_deref(), Some("manual name"));
         assert!(snap.task(1).sessions.is_empty());
         assert!(snap.task(3).sessions.is_empty());
+    }
+
+    #[test]
+    fn focusing_the_workspace_acks_and_the_ack_sticks() {
+        let mtime = Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1000));
+        let mut acked = HashMap::new();
+
+        let mut snap = snapshot_of(vec![waiting_at(mtime)]);
+        reconcile_acks(&mut snap, &mut acked, &["17:wb"]);
+        assert!(!snap.task(1).sessions[0].acked);
+
+        // Session lives on 5:t2a (task 2, but stored under task 1 by the
+        // fixture — reconcile keys focus on the session's own fields).
+        reconcile_acks(&mut snap, &mut acked, &["5:t2a"]);
+        assert!(snap.task(1).sessions[0].acked);
+
+        // Focus moves away: the episode stays acked.
+        reconcile_acks(&mut snap, &mut acked, &["17:wb"]);
+        assert!(snap.task(1).sessions[0].acked);
+
+        // Status rewritten (new mtime) → fresh episode, unacked again.
+        let mut snap = snapshot_of(vec![waiting_at(Some(
+            SystemTime::UNIX_EPOCH + Duration::from_secs(2000),
+        ))]);
+        reconcile_acks(&mut snap, &mut acked, &["17:wb"]);
+        assert!(!snap.task(1).sessions[0].acked);
+    }
+
+    #[test]
+    fn focusing_any_workspace_of_the_task_acks_as_fallback() {
+        // waiting_at sits on 5:t2a; snapshot_of stores it under task 1, so
+        // build a task-2 snapshot to exercise the task-level fallback.
+        let mut snap = TaskSnapshot::default();
+        snap.tasks[1].sessions = vec![waiting_at(None)];
+        let mut acked = HashMap::new();
+        // A different task-2 workspace than the session's own.
+        reconcile_acks(&mut snap, &mut acked, &["6:t2b"]);
+        assert!(snap.task(2).sessions[0].acked);
+    }
+
+    #[test]
+    fn leaving_waiting_forgets_the_episode() {
+        let mtime = Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1000));
+        let mut acked = HashMap::new();
+        let mut snap = snapshot_of(vec![waiting_at(mtime)]);
+        reconcile_acks(&mut snap, &mut acked, &["5:t2a"]);
+        assert!(snap.task(1).sessions[0].acked);
+
+        // Back to working: the map entry dies with the wait...
+        let mut working = waiting_at(mtime);
+        working.activity = Activity::Working;
+        let mut snap = snapshot_of(vec![working]);
+        reconcile_acks(&mut snap, &mut acked, &[]);
+        assert!(acked.is_empty());
+
+        // ...so waiting again (even with the same mtime) starts unacked.
+        let mut snap = snapshot_of(vec![waiting_at(mtime)]);
+        reconcile_acks(&mut snap, &mut acked, &[]);
+        assert!(!snap.task(1).sessions[0].acked);
+
+        // A vanished session is pruned from the map entirely.
+        let mut snap = snapshot_of(vec![waiting_at(mtime)]);
+        reconcile_acks(&mut snap, &mut acked, &["5:t2a"]);
+        assert!(!acked.is_empty());
+        reconcile_acks(&mut TaskSnapshot::default(), &mut acked, &[]);
+        assert!(acked.is_empty());
     }
 }
