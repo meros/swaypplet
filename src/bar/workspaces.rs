@@ -11,10 +11,9 @@ use crate::sway_ipc::{self, SwayService, WorkspaceInfo};
 
 // Label tables — mirror users/modules/workspace-config.nix (nixos repo):
 // nums 1–16 are 4 tasks × 4 screens rendered "1¹".."4⁴" behind a
-// task-colored dot (waybar's taskColors, i.e. the style.css accents in
-// task order), nums 17–29 the generic keyed workspaces. Keep in lockstep
-// with that file.
-const TASK_DOT_COLORS: [&str; 4] = ["#689d6a", "#d79921", "#458588", "#b16286"];
+// task-colored dot (`.bar-ws-dot.taskN`; colors live in data/style.css
+// beside the accent-ripple rules), nums 17–29 the generic keyed
+// workspaces. Keep in lockstep with that file.
 const TASK_SUPERSCRIPTS: [&str; 4] = ["¹", "²", "³", "⁴"];
 const GENERIC_LABELS: &[(i32, &str)] = &[
     (17, "󰖟 b"),
@@ -39,8 +38,8 @@ pub fn build(sway: &Rc<SwayService>) -> gtk4::Box {
         .build();
 
     // Buttons are rebuilt only when the workspace rows change: the service
-    // also fires for title-only snapshots (per keystroke in some
-    // terminals), which must not churn widgets mid-hover.
+    // also fires for pid-map-only snapshots (window churn), which must not
+    // rebuild widgets mid-hover.
     let cache: Rc<RefCell<Vec<WorkspaceInfo>>> = Rc::new(RefCell::new(Vec::new()));
     let weak = container.downgrade();
     let sway_cb = sway.clone();
@@ -71,11 +70,9 @@ fn rebuild(container: &gtk4::Box, workspaces: &[WorkspaceInfo]) {
         container.remove(&child);
     }
     for ws in workspaces {
-        let label = gtk4::Label::new(None);
-        label.set_markup(&label_markup(ws.num, &ws.name));
         let btn = gtk4::Button::builder()
             .css_classes(["bar-ws"])
-            .child(&label)
+            .child(&label_widget(ws.num, &ws.name))
             .build();
         if ws.focused {
             btn.add_css_class("focused");
@@ -100,23 +97,41 @@ fn sort_workspaces(list: &mut [WorkspaceInfo]) {
     list.sort_by(|a, b| (a.num < 0, a.num, &a.name).cmp(&(b.num < 0, b.num, &b.name)));
 }
 
-/// Pango markup for a workspace button label.
-fn label_markup(num: i32, name: &str) -> String {
-    if (1..=16).contains(&num) {
-        let task = ((num - 1) / 4) as usize;
-        let screen = ((num - 1) % 4) as usize;
-        return format!(
-            "<span foreground='{}'>●</span> {}{}",
-            TASK_DOT_COLORS[task],
-            task + 1,
-            TASK_SUPERSCRIPTS[screen]
-        );
+/// Button content: task workspaces get a task-colored dot beside the
+/// label, everything else a plain label.
+fn label_widget(num: i32, name: &str) -> gtk4::Widget {
+    let Some((task, text)) = task_label(num) else {
+        return gtk4::Label::new(Some(generic_label(num, name))).upcast();
+    };
+    let row = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(4)
+        .build();
+    let dot = gtk4::Label::new(Some("●"));
+    dot.add_css_class("bar-ws-dot");
+    dot.add_css_class(&format!("task{task}"));
+    row.append(&dot);
+    row.append(&gtk4::Label::new(Some(&text)));
+    row.upcast()
+}
+
+/// Task strip membership: `Some((task 1–4, "1¹".."4⁴"))` for nums 1–16.
+fn task_label(num: i32) -> Option<(usize, String)> {
+    if !(1..=16).contains(&num) {
+        return None;
     }
+    let task = ((num - 1) / 4) as usize + 1;
+    let screen = ((num - 1) % 4) as usize;
+    Some((task, format!("{task}{}", TASK_SUPERSCRIPTS[screen])))
+}
+
+/// Label for non-task workspaces.
+fn generic_label(num: i32, name: &str) -> &str {
     match GENERIC_LABELS.iter().find(|(n, _)| *n == num) {
-        Some((_, label)) => (*label).to_string(),
+        Some((_, label)) => label,
         // Waybar's default icon was blank; the name keeps ad-hoc
         // workspaces visible instead of rendering an empty button.
-        None => glib::markup_escape_text(name).to_string(),
+        None => name,
     }
 }
 
@@ -148,32 +163,25 @@ mod tests {
     }
 
     #[test]
-    fn task_labels_carry_dot_and_superscript() {
-        assert_eq!(
-            label_markup(1, "1:t1a"),
-            "<span foreground='#689d6a'>●</span> 1¹"
-        );
-        assert_eq!(
-            label_markup(16, "16:t4d"),
-            "<span foreground='#b16286'>●</span> 4⁴"
-        );
+    fn task_workspaces_carry_task_index_and_superscript() {
+        assert_eq!(task_label(1), Some((1, "1¹".into())));
+        assert_eq!(task_label(16), Some((4, "4⁴".into())));
         // Task boundary: num 5 is task 2, screen 1.
-        assert_eq!(
-            label_markup(5, "5:t2a"),
-            "<span foreground='#d79921'>●</span> 2¹"
-        );
+        assert_eq!(task_label(5), Some((2, "2¹".into())));
+        assert_eq!(task_label(17), None);
+        assert_eq!(task_label(-1), None);
     }
 
     #[test]
     fn generic_labels_come_from_the_table() {
-        assert_eq!(label_markup(17, "17:wb"), "󰖟 b");
-        assert_eq!(label_markup(29, "29:wy"), "󰗃 y");
+        assert_eq!(generic_label(17, "17:wb"), "󰖟 b");
+        assert_eq!(generic_label(29, "29:wy"), "󰗃 y");
     }
 
     #[test]
-    fn unknown_workspaces_fall_back_to_the_escaped_name() {
-        assert_eq!(label_markup(-1, "a<b&c"), "a&lt;b&amp;c");
-        assert_eq!(label_markup(42, "42"), "42");
+    fn unknown_workspaces_fall_back_to_the_name() {
+        assert_eq!(generic_label(-1, "mail"), "mail");
+        assert_eq!(generic_label(42, "42"), "42");
     }
 
     #[test]

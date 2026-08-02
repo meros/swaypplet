@@ -18,6 +18,7 @@ mod osd;
 mod panel;
 mod polkit;
 mod preview;
+mod service;
 mod spawn;
 mod sway_ipc;
 mod switch_user;
