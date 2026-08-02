@@ -46,4 +46,13 @@ pub struct Notification {
     pub progress: Option<u32>,
     /// replaces_id from the Notify call.
     pub replaces_id: u32,
+    /// Claude session pid from the nixos hook's `claude-pid` hint
+    /// (stop-notification policy, vision O2). Absent → normal rules.
+    pub claude_pid: Option<i32>,
+    /// Task 1–4 the session belongs to, resolved once at add time; the
+    /// popup renders it as hue dot + "T<N>" attribution.
+    pub task: Option<u8>,
+    /// The session's workspace was visible when the notification arrived —
+    /// the popup is suppressed (history keeps it; Critical overrides).
+    pub suppressed: bool,
 }

@@ -150,6 +150,23 @@ pub fn run() {
                 }
             });
             let sway = SwayService::start();
+            // Stop-notification policy (vision O2): the store resolves a
+            // notification's claude-pid hint to task + visibility here,
+            // where the sway model lives — same /proc parent-chain hop and
+            // ":tN" parse the task scan uses. Bar disabled → no resolver →
+            // hinted notifications follow normal rules.
+            {
+                let sway = sway.clone();
+                store_activate
+                    .borrow_mut()
+                    .set_task_resolver(Box::new(move |pid| {
+                        let snap = sway.snapshot();
+                        let ws = crate::task_state::workspace_of_pid(pid, &snap.pid_workspaces)?;
+                        let task = crate::task_state::task_of_name(&ws)?;
+                        let visible = snap.workspaces.iter().any(|w| w.name == ws && w.visible);
+                        Some(crate::notifications::store::TaskRef { task, visible })
+                    }));
+            }
             let bar = BarManager::new(app, sway.clone(), toggle);
             // OSD interjection (BAR_VISION increment 5): volume/brightness
             // render in the bar's decision slot unless the focused window

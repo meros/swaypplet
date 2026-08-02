@@ -365,6 +365,13 @@ fn parent_pid(pid: i32) -> Option<i32> {
     parent_pid_from_stat(&fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
 }
 
+/// pid → owning workspace through the live /proc parent chain — the
+/// entry point for callers outside the scan (stop-notification
+/// attribution, vision O2).
+pub fn workspace_of_pid(pid: i32, pid_workspaces: &HashMap<i32, String>) -> Option<String> {
+    window_workspace(pid, pid_workspaces, parent_pid)
+}
+
 /// Walk `pid` and its ancestors until one owns a sway view. Claude sits a
 /// few levels below the terminal that owns the window (shell, wrappers).
 fn window_workspace(
