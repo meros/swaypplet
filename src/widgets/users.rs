@@ -31,7 +31,6 @@ impl UserSection {
             .spacing(6)
             .build();
         root.add_css_class("section");
-        root.add_css_class("user-section");
 
         let title = gtk4::Label::builder()
             .label("Users")
@@ -94,7 +93,6 @@ fn rebuild_fallback(list: &gtk4::Box) {
     clear(list);
     let btn = gtk4::Button::with_label(&format!("{}  Switch user", icons::SWITCH_USER));
     btn.add_css_class("user-row");
-    btn.add_css_class("user-row-fallback");
     btn.connect_clicked(|b| {
         hide_panel_for_widget(b.upcast_ref());
         switch_user::cycle();
