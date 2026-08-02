@@ -22,6 +22,7 @@ mod service;
 mod spawn;
 mod sway_ipc;
 mod switch_user;
+mod task_state;
 mod theme;
 mod widgets;
 

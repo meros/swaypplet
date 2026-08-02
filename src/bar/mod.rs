@@ -30,6 +30,7 @@ use gtk4_layer_shell::{Edge, Layer};
 use crate::anim;
 use crate::layer_shell::{self, LayerShellConfig};
 use crate::sway_ipc::SwayService;
+use crate::task_state::TaskStateService;
 use crate::theme;
 
 const APP_ID: &str = "dev.swaypplet.bar";
@@ -63,6 +64,7 @@ pub struct BarManager {
     monitors: gio::ListModel,
     windows: RefCell<Vec<BarWindow>>,
     sway: Rc<SwayService>,
+    tasks: Rc<TaskStateService>,
     tray: Rc<tray::TrayService>,
     /// What the start button does. In-process hosting passes a direct
     /// `panel.toggle()`; the standalone bar passes the cross-process
@@ -77,11 +79,13 @@ impl BarManager {
         toggle_panel: Rc<dyn Fn()>,
     ) -> Rc<Self> {
         let display = gdk::Display::default().expect("no gdk display");
+        let tasks = TaskStateService::start(&sway);
         let manager = Rc::new(Self {
             app: app.clone(),
             monitors: display.monitors(),
             windows: RefCell::new(Vec::new()),
             sway,
+            tasks,
             tray: tray::TrayService::start(),
             toggle_panel,
         });
@@ -127,6 +131,7 @@ impl BarManager {
                     &self.app,
                     &monitor,
                     &self.sway,
+                    &self.tasks,
                     &self.tray,
                     self.toggle_panel.clone(),
                 );
@@ -142,6 +147,7 @@ fn build_bar_window(
     app: &gtk4::Application,
     monitor: &gdk::Monitor,
     sway: &Rc<SwayService>,
+    tasks: &Rc<TaskStateService>,
     tray: &Rc<tray::TrayService>,
     toggle_panel: Rc<dyn Fn()>,
 ) -> gtk4::Window {
@@ -195,6 +201,7 @@ fn build_bar_window(
     // gdk connector names match sway output names under wlroots.
     track.append(&task::build(
         sway,
+        tasks,
         monitor.connector().map(|c| c.to_string()),
         &root,
     ));
