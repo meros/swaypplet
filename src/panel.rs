@@ -48,7 +48,7 @@ impl Sections {
         self.audio.refresh();
         self.brightness.refresh();
         self.network.refresh();
-        self.bluetooth.schedule_refresh();
+        self.bluetooth.refresh();
         self.display.refresh();
         self.media.refresh();
         self.notifications.refresh();
