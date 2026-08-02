@@ -12,7 +12,6 @@ pub const MIC_MUTED: &str = "󰍭";
 pub const BRIGHTNESS: &str = "󰃟";
 
 // Notifications
-#[allow(dead_code)]
 pub const NOTIFICATION: &str = "󰂚";
 pub const NOTIFICATION_CLEAR: &str = "󰂛";
 pub const CLOSE: &str = "󰅖";

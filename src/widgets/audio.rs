@@ -509,10 +509,8 @@ impl UnavailableBanner {
 
 // ── AudioSection ──────────────────────────────────────────────────────────────
 
-#[allow(dead_code)]
 struct Widgets {
     // Summary row (always visible)
-    summary_btn: gtk4::Button,
     summary_icon: gtk4::Label,
     summary_text: gtk4::Label,
     summary_arrow: gtk4::Label,
@@ -533,7 +531,6 @@ struct Widgets {
     unavailable: UnavailableBanner, // shown when wpctl is unavailable
 }
 
-#[allow(dead_code)]
 pub struct AudioSection {
     root: gtk4::Box,
     widgets: Rc<Widgets>,
@@ -726,7 +723,6 @@ impl AudioSection {
         detail_box.append(&content);
 
         let widgets = Rc::new(Widgets {
-            summary_btn,
             summary_icon,
             summary_text,
             summary_arrow,
@@ -1106,7 +1102,6 @@ impl AudioSection {
         Self::schedule_refresh(self.widgets.clone(), self.updating.clone());
     }
 
-    #[allow(dead_code)]
     pub fn widget(&self) -> &gtk4::Box {
         &self.root
     }

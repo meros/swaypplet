@@ -254,7 +254,6 @@ fn populate_output_list_with_data(list: &Box, outputs: &[OutputInfo]) {
 
 // ── DisplaySection ────────────────────────────────────────────────────────────
 
-#[allow(dead_code)]
 pub struct DisplaySection {
     root: Box,
     summary_btn: Button,
