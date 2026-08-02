@@ -31,7 +31,7 @@ fn read_sysfs(path: &str) -> Option<String> {
 /// contains "Battery" and return its path (e.g.
 /// `/sys/class/power_supply/BAT0`). Returns `None` on desktops without a
 /// battery.
-fn find_battery_path() -> Option<String> {
+pub(crate) fn find_battery_path() -> Option<String> {
     let dir = match fs::read_dir("/sys/class/power_supply") {
         Ok(d) => d,
         Err(e) => {
@@ -63,10 +63,10 @@ fn find_battery_path() -> Option<String> {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
-struct BatteryState {
+pub(crate) struct BatteryState {
     /// 0–100
-    capacity: u8,
-    charging: bool,
+    pub(crate) capacity: u8,
+    pub(crate) charging: bool,
     /// Watts (power_now / 1_000_000)
     power_w: Option<f64>,
     /// Wh remaining
@@ -100,7 +100,7 @@ impl GovernorProfile {
 // Battery reading
 // ---------------------------------------------------------------------------
 
-fn read_battery(bat_path: &str) -> Option<BatteryState> {
+pub(crate) fn read_battery(bat_path: &str) -> Option<BatteryState> {
     let capacity: u8 = read_sysfs(&format!("{}/capacity", bat_path))
         .and_then(|s| s.parse().ok())
         .or_else(|| {
@@ -231,7 +231,8 @@ fn battery_sub_text(bat: &BatteryState) -> String {
 
 /// Build the summary text for the summary row from battery state.
 /// Format: "85% · Charging — 30m to full" or "85% · 3h 20m remaining"
-fn battery_summary_text(bat: &BatteryState) -> String {
+/// Also the bar battery pill's tooltip (src/bar/battery.rs).
+pub(crate) fn battery_summary_text(bat: &BatteryState) -> String {
     format!("{}% · {}", bat.capacity, battery_sub_text(bat))
 }
 
