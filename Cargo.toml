@@ -27,6 +27,7 @@ libc = "0.2"
 greetd_ipc = { version = "0.10.3", features = ["sync-codec"] }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+swayipc = "4"
 
 [build-dependencies]
 protobuf-codegen = "3.7"
