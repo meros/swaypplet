@@ -42,6 +42,9 @@ pub struct SwayState {
     pub workspaces: Vec<WorkspaceInfo>,
     /// pid → workspace name for every view in the tree (task-pill lookup).
     pub pid_workspaces: HashMap<i32, String>,
+    /// The focused view is fullscreen — OSD interjections route to the
+    /// center card instead of the bar (docs/BAR_VISION.md, increment 5).
+    pub focused_fullscreen: bool,
 }
 
 // ── GTK-side service ────────────────────────────────────────────────────
@@ -152,9 +155,11 @@ fn session(tx: &async_channel::Sender<SwayState>) -> Result<(), swayipc::Error> 
 }
 
 fn snapshot(query: &mut Connection) -> Result<SwayState, swayipc::Error> {
+    let tree = query.get_tree()?;
     Ok(SwayState {
         workspaces: workspace_infos(query.get_workspaces()?),
-        pid_workspaces: index_tree(&query.get_tree()?),
+        pid_workspaces: index_tree(&tree),
+        focused_fullscreen: focused_fullscreen(&tree),
     })
 }
 
@@ -198,6 +203,18 @@ fn walk(node: &Node, workspace: Option<&str>, pids: &mut HashMap<i32, String>) {
     for child in node.nodes.iter().chain(&node.floating_nodes) {
         walk(child, workspace, pids);
     }
+}
+
+/// True when the focused node is fullscreen (`fullscreen_mode` 1 =
+/// workspace, 2 = global; sway reports 0/absent otherwise).
+fn focused_fullscreen(node: &Node) -> bool {
+    if node.focused && node.fullscreen_mode.unwrap_or(0) != 0 {
+        return true;
+    }
+    node.nodes
+        .iter()
+        .chain(&node.floating_nodes)
+        .any(focused_fullscreen)
 }
 
 #[cfg(test)]
@@ -300,6 +317,32 @@ mod tests {
             }))],
         })));
         assert!(index_tree(&root).is_empty());
+    }
+
+    #[test]
+    fn fullscreen_flag_follows_the_focused_node_only() {
+        // The contract tree's focused kitty is not fullscreen.
+        assert!(!focused_fullscreen(&contract()));
+
+        let fs = |focused: bool, mode: u8| {
+            tree(node(json!({
+                "type": "root",
+                "nodes": [node(json!({
+                    "type": "workspace",
+                    "name": "1",
+                    "nodes": [node(json!({
+                        "id": 10, "pid": 100, "name": "mpv",
+                        "focused": focused, "fullscreen_mode": mode,
+                    }))],
+                }))],
+            })))
+        };
+        assert!(focused_fullscreen(&fs(true, 1)));
+        // Global fullscreen counts too.
+        assert!(focused_fullscreen(&fs(true, 2)));
+        // Fullscreen but not focused: the OSD may still use the bar.
+        assert!(!focused_fullscreen(&fs(false, 1)));
+        assert!(!focused_fullscreen(&fs(true, 0)));
     }
 
     #[test]

@@ -540,8 +540,8 @@ mod tests {
         fs::write(dir.join("manual-t3"), "manual name\n").unwrap();
 
         let sway = SwayState {
-            workspaces: Vec::new(),
             pid_workspaces: HashMap::from([(100, "5:t2a".to_string())]),
+            ..SwayState::default()
         };
         let comm = |pid: i32| (pid == 300).then(|| "claude".to_string());
         let parent = |p: i32| match p {

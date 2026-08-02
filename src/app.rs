@@ -149,7 +149,21 @@ pub fn run() {
                     panel.toggle();
                 }
             });
-            st._bar = Some(BarManager::new(app, SwayService::start(), toggle));
+            let sway = SwayService::start();
+            let bar = BarManager::new(app, sway.clone(), toggle);
+            // OSD interjection (BAR_VISION increment 5): volume/brightness
+            // render in the bar's decision slot unless the focused window
+            // is fullscreen — then the center-screen card stays.
+            {
+                let bar = bar.clone();
+                osd.set_bar_route(move |icon, fraction, text| {
+                    if sway.snapshot().focused_fullscreen {
+                        return false;
+                    }
+                    bar.interject(icon, fraction, text)
+                });
+            }
+            st._bar = Some(bar);
         }
 
         st.panel = Some(panel);

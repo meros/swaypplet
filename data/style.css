@@ -209,6 +209,23 @@ button.bar-ws.urgent {
     color: @bg0;
 }
 
+/* OSD interjection (the slot's one transient tenant): icon + eased
+   center-anchored hairline + value, 1.5 s decay back to the occupant. */
+.bar-decision-osd-icon {
+    min-width: 20px;
+}
+
+/* DrawingArea paints track (25% alpha) and fill from this color. */
+.bar-decision-hairline {
+    color: @accent;
+}
+
+.bar-decision-osd-text {
+    font-size: 9pt;
+    color: @fg_dim;
+    min-width: 34px;
+}
+
 /* ── Media mark: single dim achromatic ♪ (src/bar/media.rs) ──
    Hidden with no player; .paused dims further. No pill, no title — the
    mark is ambient, detail arrives with its popover. */
