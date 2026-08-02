@@ -48,14 +48,6 @@ pub fn run() -> ! {
 
     let instance = gtk4_session_lock::Instance::new();
 
-    // The per-monitor `monitor` signal shipped in gtk4-layer-shell 1.1; the
-    // 0.1.2 crate predates the binding so we connect by name. Verify the
-    // runtime library has it before locking, or we'd lock with no surfaces.
-    if glib::subclass::SignalId::lookup("monitor", instance.type_()).is_none() {
-        eprintln!("swaypplet lock: gtk4-layer-shell too old (need >=1.1 for ::monitor)");
-        std::process::exit(EXIT_UNAVAILABLE);
-    }
-
     let Some(user) = auth::current_username() else {
         eprintln!("swaypplet lock: cannot determine current user");
         std::process::exit(EXIT_ERROR);
@@ -186,17 +178,10 @@ pub fn run() -> ! {
     {
         let surfaces = surfaces.clone();
         let on_submit = on_submit.clone();
-        instance.connect_local("monitor", false, move |values| {
-            let instance = values[0]
-                .get::<gtk4_session_lock::Instance>()
-                .expect("monitor signal: sender is the Instance");
-            let monitor = values[1]
-                .get::<gdk4::Monitor>()
-                .expect("monitor signal: argument is a GdkMonitor");
+        instance.connect_monitor(move |instance, monitor| {
             let window = surfaces.build_surface(on_submit.clone());
-            instance.assign_window_to_monitor(&window, &monitor);
+            instance.assign_window_to_monitor(&window, monitor);
             window.present();
-            None
         });
     }
 

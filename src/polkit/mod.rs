@@ -262,7 +262,7 @@ fn install_fd_watch(state: &Rc<RefCell<PolkitState>>, fd: RawFd) {
     // both hold a clone; whichever calls `.take()` first owns the remove.
     let handle: SourceHandle = Rc::new(Cell::new(None));
     let handle_cb = handle.clone();
-    let source = glib::unix_fd_add_local(
+    let source = crate::glib_unix::fd_add_local(
         fd,
         glib::IOCondition::IN | glib::IOCondition::HUP | glib::IOCondition::ERR,
         move |_fd, _cond| {

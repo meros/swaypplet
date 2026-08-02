@@ -285,7 +285,8 @@ glib::wrapper! {
     /// child can start below its resting position (positive `dy`) and
     /// settle up into place.
     pub struct SlideBin(ObjectSubclass<imp::SlideBin>)
-        @extends gtk4::Widget;
+        @extends gtk4::Widget,
+        @implements gtk4::Accessible, gtk4::Buildable, gtk4::ConstraintTarget;
 }
 
 impl SlideBin {

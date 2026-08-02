@@ -5,6 +5,7 @@ mod dmenu;
 mod elephant;
 mod fp;
 mod gdm_shim;
+mod glib_unix;
 mod greet;
 mod icons;
 mod idle;
