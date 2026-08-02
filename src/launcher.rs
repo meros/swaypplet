@@ -6,7 +6,6 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 
 use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
@@ -365,9 +364,6 @@ fn run_search(
     results_box: gtk4::Box,
     on_activate: Rc<RefCell<Option<Box<dyn Fn()>>>>,
 ) {
-    let result_holder: Arc<Mutex<Option<Vec<SearchResult>>>> = Arc::new(Mutex::new(None));
-    let result_writer = result_holder.clone();
-
     // Empty query → default desktop-application list only.
     let providers: Vec<&str> = if query.is_empty() {
         vec!["desktopapplications"]
@@ -376,50 +372,27 @@ fn run_search(
     };
 
     let query_c = query.clone();
-    std::thread::spawn(move || {
-        match elephant::query(&query_c, &providers, MAX_VISIBLE_RESULTS as i32) {
-            Ok(results) => {
-                *result_writer
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(results);
-            }
+    crate::spawn::spawn_work(
+        move || match elephant::query(&query_c, &providers, MAX_VISIBLE_RESULTS as i32) {
+            Ok(results) => results,
             Err(e) => {
                 log::warn!("Elephant query failed: {}", e);
-                *result_writer
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Vec::new());
+                Vec::new()
             }
-        }
-    });
-
-    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-        let done = result_holder
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .is_some();
-        if !done {
-            return glib::ControlFlow::Continue;
-        }
-
-        let current_gen = state.borrow().query_generation;
-        if generation != current_gen {
-            return glib::ControlFlow::Break;
-        }
-
-        let results = result_holder
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-            .unwrap();
-        {
-            let mut s = state.borrow_mut();
-            s.results = results;
-            s.selected = 0;
-        }
-
-        rebuild_results_ui(&results_box, &state, &query, &on_activate);
-        glib::ControlFlow::Break
-    });
+        },
+        move |results| {
+            // A newer query superseded this one while it ran — drop the results.
+            if generation != state.borrow().query_generation {
+                return;
+            }
+            {
+                let mut s = state.borrow_mut();
+                s.results = results;
+                s.selected = 0;
+            }
+            rebuild_results_ui(&results_box, &state, &query, &on_activate);
+        },
+    );
 }
 
 fn rebuild_results_ui(
