@@ -251,6 +251,16 @@ button.bar-media-mark.paused {
     color: alpha(@fg, 0.22);
 }
 
+/* ── Hazard lane: standing amber conditions (src/bar/hazards.rs) ──
+   The lane itself owns no margins or padding — zero width when healthy;
+   each glyph carries its own spacing inside its Revealer. Amber static:
+   armed, not act-now (red stays "act now", vision P3). */
+.bar-hazard {
+    margin: 5px 2px;
+    padding: 4px 6px;
+    color: @accent_secondary;
+}
+
 /* ── Bar right: battery + clock fused into one instrument track ──
    Same segmented geometry as .bar-workspaces; the 5px right margin keeps
    the concentric 6px gap at the card corner (waybar's #right-track). */
