@@ -7,6 +7,20 @@ type CloseCb = Rc<dyn Fn(u32, CloseReason)>;
 type ChangeCb = Rc<dyn Fn()>;
 type ActionCb = Rc<dyn Fn(u32, &str)>;
 
+/// A Claude session located for stop-notification policy (vision O2):
+/// which task owns it, and whether its workspace is showing on any output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TaskRef {
+    /// Task number 1–4 (the workspace ":tN" infix).
+    pub task: u8,
+    /// The session's workspace is visible on some output right now.
+    pub visible: bool,
+}
+
+/// pid → session location, injected from app.rs where the sway and task
+/// services live — the store itself stays UI-agnostic.
+type TaskResolver = Box<dyn Fn(i32) -> Option<TaskRef>>;
+
 /// Single source of truth for all notification state.
 ///
 /// Lives on the GTK main thread behind `Rc<RefCell<…>>`.
@@ -29,6 +43,7 @@ pub struct NotificationStore {
     on_close: Vec<CloseCb>,
     on_change: Vec<ChangeCb>,
     on_action: Vec<ActionCb>,
+    task_resolver: Option<TaskResolver>,
 }
 
 /// Deferred callbacks that must be fired after releasing the store's `RefCell`.
@@ -77,7 +92,15 @@ impl NotificationStore {
             on_close: Vec::new(),
             on_change: Vec::new(),
             on_action: Vec::new(),
+            task_resolver: None,
         }
+    }
+
+    /// Inject the pid → session resolver (vision O2). Runs inside `add`
+    /// while the store's `RefCell` borrow is held, so it must not call
+    /// back into the store.
+    pub fn set_task_resolver(&mut self, resolver: TaskResolver) {
+        self.task_resolver = Some(resolver);
     }
 
     // ── Observer registration ────────────────────────────────────────────
@@ -113,6 +136,18 @@ impl NotificationStore {
     /// Add or replace a notification. Returns `(assigned_id, pending_callbacks)`.
     /// Caller **must** call `pending.fire()` after releasing the borrow.
     pub fn add(&mut self, mut notif: Notification) -> (u32, PendingCallbacks) {
+        // Stop-notification policy (vision O2): resolve the claude-pid
+        // hint ONCE, now — attribution and suppression must reflect where
+        // the session was when the notification arrived, not when it
+        // renders. An unresolvable pid stays unattributed (normal rules).
+        if let Some(pid) = notif.claude_pid
+            && let Some(resolver) = &self.task_resolver
+            && let Some(task_ref) = resolver(pid)
+        {
+            notif.task = Some(task_ref.task);
+            notif.suppressed = task_ref.visible;
+        }
+
         // Assign ID
         if notif.replaces_id > 0 {
             if let Some(pos) = self
@@ -217,6 +252,12 @@ impl NotificationStore {
         if self.dnd_enabled && notif.urgency != Urgency::Critical {
             return false;
         }
+        // A Claude session on a visible workspace already shows its state
+        // on screen — the stop toast is noise there (vision O2). The
+        // notification still enters history; Critical always pops.
+        if notif.suppressed && notif.urgency != Urgency::Critical {
+            return false;
+        }
         true
     }
 
@@ -257,4 +298,113 @@ pub fn store_action_invoked(store: &StoreRef, id: u32, key: &str) {
 pub fn store_clear_all(store: &StoreRef) {
     let pending = store.borrow_mut().clear_all();
     pending.fire();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn notif(claude_pid: Option<i32>, urgency: Urgency) -> Notification {
+        Notification {
+            id: 0,
+            app_name: "Claude".into(),
+            summary: "stopped".into(),
+            body: String::new(),
+            urgency,
+            actions: Vec::new(),
+            expire_timeout: -1,
+            timestamp: std::time::SystemTime::now(),
+            transient: false,
+            progress: None,
+            replaces_id: 0,
+            claude_pid,
+            task: None,
+            suppressed: false,
+        }
+    }
+
+    /// Add through the policy and return the stored row.
+    fn add_one(store: &mut NotificationStore, n: Notification) -> Notification {
+        let (id, _pending) = store.add(n);
+        store.all().iter().find(|n| n.id == id).unwrap().clone()
+    }
+
+    #[test]
+    fn visible_session_is_suppressed_but_kept_in_history() {
+        let mut store = NotificationStore::new();
+        store.set_task_resolver(Box::new(|_| {
+            Some(TaskRef {
+                task: 2,
+                visible: true,
+            })
+        }));
+        let stored = add_one(&mut store, notif(Some(300), Urgency::Normal));
+        assert_eq!(stored.task, Some(2));
+        assert!(!store.should_popup(&stored));
+        assert_eq!(store.all().len(), 1);
+    }
+
+    #[test]
+    fn background_session_is_attributed_and_delivered() {
+        let mut store = NotificationStore::new();
+        store.set_task_resolver(Box::new(|_| {
+            Some(TaskRef {
+                task: 3,
+                visible: false,
+            })
+        }));
+        let stored = add_one(&mut store, notif(Some(300), Urgency::Normal));
+        assert_eq!(stored.task, Some(3));
+        assert!(store.should_popup(&stored));
+    }
+
+    #[test]
+    fn no_hint_never_consults_the_resolver() {
+        let calls = Rc::new(std::cell::Cell::new(0u32));
+        let mut store = NotificationStore::new();
+        let counter = calls.clone();
+        store.set_task_resolver(Box::new(move |_| {
+            counter.set(counter.get() + 1);
+            Some(TaskRef {
+                task: 1,
+                visible: true,
+            })
+        }));
+        let stored = add_one(&mut store, notif(None, Urgency::Normal));
+        assert_eq!(calls.get(), 0);
+        assert_eq!(stored.task, None);
+        assert!(store.should_popup(&stored));
+    }
+
+    #[test]
+    fn critical_is_attributed_but_never_suppressed() {
+        let mut store = NotificationStore::new();
+        store.set_task_resolver(Box::new(|_| {
+            Some(TaskRef {
+                task: 4,
+                visible: true,
+            })
+        }));
+        let stored = add_one(&mut store, notif(Some(300), Urgency::Critical));
+        assert_eq!(stored.task, Some(4));
+        assert!(store.should_popup(&stored));
+    }
+
+    #[test]
+    fn unresolvable_pid_follows_normal_rules() {
+        let mut store = NotificationStore::new();
+        store.set_task_resolver(Box::new(|_| None));
+        let stored = add_one(&mut store, notif(Some(300), Urgency::Normal));
+        assert_eq!(stored.task, None);
+        assert!(!stored.suppressed);
+        assert!(store.should_popup(&stored));
+    }
+
+    #[test]
+    fn without_a_resolver_the_hint_is_inert() {
+        let mut store = NotificationStore::new();
+        let stored = add_one(&mut store, notif(Some(300), Urgency::Normal));
+        assert_eq!(stored.task, None);
+        assert!(store.should_popup(&stored));
+    }
 }

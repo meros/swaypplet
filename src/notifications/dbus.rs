@@ -94,6 +94,13 @@ impl NotificationServer {
             _ => None,
         });
 
+        // Claude stop-notification attribution (vision O2): the nixos-side
+        // hook sends `--hint=int:claude-pid:<PID>`; notify-send ints are I32.
+        let claude_pid = hints.get("claude-pid").and_then(|v| match v {
+            Value::I32(i) => Some(*i),
+            _ => None,
+        });
+
         // Parse paired action strings: [id, label, id, label, ...]
         let action_pairs: Vec<(String, String)> = actions
             .chunks(2)
@@ -118,6 +125,10 @@ impl NotificationServer {
             transient,
             progress,
             replaces_id,
+            claude_pid,
+            // Resolved by the store at add time (set_task_resolver).
+            task: None,
+            suppressed: false,
         };
 
         // Send to main thread and wait for the assigned ID

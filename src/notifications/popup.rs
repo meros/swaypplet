@@ -692,16 +692,35 @@ fn populate_card(card: &gtk4::Box, notif: &Notification, store: &Rc<RefCell<Noti
     // becomes the natural width and can push the card past the window (see
     // reflow). Fill + xalign(0) makes the label span that allocation and
     // ellipsize/wrap there instead of shrinking to the collapsed natural.
+    // Header row: task attribution (vision O2 — hue dot + "T<N>" says
+    // whose background session this is) ahead of the app name.
+    let header = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(4)
+        .build();
+    if let Some(task) = notif.task {
+        let dot = gtk4::Label::new(Some("●"));
+        dot.add_css_class("notification-task-dot");
+        dot.add_css_class(&format!("t{task}"));
+        header.append(&dot);
+        let num = gtk4::Label::new(Some(&format!("T{task}")));
+        num.add_css_class("notification-task-num");
+        header.append(&num);
+    }
     if !notif.app_name.is_empty() {
         let app_label = gtk4::Label::builder()
             .label(notif.app_name.to_uppercase())
             .halign(gtk4::Align::Fill)
             .xalign(0.0)
+            .hexpand(true)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
             .max_width_chars(1)
             .build();
         app_label.add_css_class("notification-app-name");
-        vbox.append(&app_label);
+        header.append(&app_label);
+    }
+    if header.first_child().is_some() {
+        vbox.append(&header);
     }
 
     let summary = gtk4::Label::builder()

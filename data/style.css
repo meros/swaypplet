@@ -1550,6 +1550,22 @@ revealer {
     color: @fg_dim;
 }
 
+/* Task attribution on background-session stop notifications (vision O2):
+   hue dot + "T<N>" ahead of the app name, same four accents as the
+   bar-decision dot. */
+.notification-task-dot { font-size: 9px; }
+.notification-task-dot.t1 { color: @accent; }
+.notification-task-dot.t2 { color: @accent_secondary; }
+.notification-task-dot.t3 { color: @accent_tertiary; }
+.notification-task-dot.t4 { color: @accent_quaternary; }
+
+.notification-task-num {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: @fg;
+}
+
 .notification-summary {
     font-size: 15px;
     font-weight: 700;
