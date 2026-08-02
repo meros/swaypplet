@@ -13,6 +13,7 @@ mod battery;
 mod clock;
 mod media;
 mod start;
+mod task;
 mod workspaces;
 
 use std::cell::RefCell;
@@ -158,9 +159,9 @@ fn build_bar_window(
         .orientation(gtk4::Orientation::Horizontal)
         .css_classes(["bar-right"])
         .build();
-    // Battery + clock fuse into one segmented track (waybar's
+    // Battery + task pill + clock fuse into one segmented track (waybar's
     // group/right-track); a batteryless machine skips the segment so the
-    // clock keeps the rounded left end.
+    // task pill keeps the rounded left end.
     let track = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .css_classes(["bar-track"])
@@ -168,6 +169,12 @@ fn build_bar_window(
     if let Some(bat) = battery::build() {
         track.append(&bat);
     }
+    // gdk connector names match sway output names under wlroots.
+    track.append(&task::build(
+        sway,
+        monitor.connector().map(|c| c.to_string()),
+        &root,
+    ));
     track.append(&clock::build());
     right.append(&track);
 

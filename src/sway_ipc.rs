@@ -107,7 +107,6 @@ impl SwayService {
     }
 
     /// Full state snapshot (cloned — the model is a handful of small rows).
-    #[allow(dead_code)] // consumed by the bar widgets as they land
     pub fn snapshot(&self) -> SwayState {
         self.state.borrow().clone()
     }
@@ -126,12 +125,6 @@ impl SwayService {
     #[allow(dead_code)]
     pub fn binding_mode(&self) -> String {
         self.state.borrow().mode.clone()
-    }
-
-    /// The workspace hosting `pid`'s window, if it has one on screen.
-    #[allow(dead_code)]
-    pub fn workspace_for_pid(&self, pid: i32) -> Option<String> {
-        self.state.borrow().pid_workspaces.get(&pid).cloned()
     }
 }
 
