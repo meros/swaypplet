@@ -115,13 +115,16 @@ window.panel {
     min-height: 0;
     background-color: alpha(@bg1, 0.85);
     border-radius: 8px;
-    color: @accent;
+    /* Dim luminance family (vision increment 6): the resting bar carries
+       no hue — color anywhere is itself the message. */
+    color: alpha(@fg, 0.45);
     font-weight: bold;
     transition: background-color 150ms ease, color 150ms ease;
 }
 
 .bar-start:hover {
     background-color: alpha(@bg2, 0.90);
+    color: @fg;
 }
 
 /* Segmented track: flat buttons fused into one pill, only the ends round. */
@@ -287,28 +290,41 @@ button.bar-media-mark.paused {
     border-bottom-right-radius: 8px;
 }
 
+/* Clock: dim luminance family — the readout is reference, not signal. */
+button.bar-clock {
+    color: alpha(@fg, 0.45);
+}
+
 button.bar-clock:hover {
     background-color: alpha(@bg2, 0.90);
+    color: @fg;
 }
 
-/* Battery: state as text color; critical earns the loud pulse. */
-.bar-battery.charging {
-    color: @accent;
+/* Battery (vision increment 6): dim gray glyph at rest, bolt included —
+   no %, no hue. Amber + revealed % at the 30 % edge, static red at 15 %
+   (the onset nudge is Rust-side; nothing on the bar loops). battery.rs
+   only applies .warning/.critical off the charger, so no :not(.charging)
+   guards here. */
+.bar-battery {
+    color: alpha(@fg, 0.45);
 }
 
-.bar-battery.warning:not(.charging) {
+.bar-battery.warning {
     color: @accent_secondary;
 }
 
-.bar-battery.critical:not(.charging) {
+.bar-battery.critical {
     background-color: @accent_quinary;
     color: @bg0;
-    animation: battery-critical-pulse 0.7s steps(24) infinite alternate;
+}
+
+.bar-battery-pct {
+    margin-left: 4px;
 }
 
 /* ── Tray: SNI icon pill left of the instrument track (src/bar/tray/) ──
-   Ports waybar's #tray module. GTK4 dropped -gtk-icon-effect, so .passive
-   maps waybar's dim to opacity; .needs-attention keeps the red fill. */
+   NeedsAttention items only (service-side predicate); the pill is zero
+   width at rest and every visible item carries the attention fill. */
 .bar-tray {
     margin: 5px 4px;
     padding: 2px 4px;
@@ -329,10 +345,6 @@ button.bar-tray-item {
 
 button.bar-tray-item:hover {
     background-color: alpha(@bg2, 0.90);
-}
-
-button.bar-tray-item.passive {
-    opacity: 0.55;
 }
 
 button.bar-tray-item.needs-attention {
@@ -480,19 +492,6 @@ button.bar-bay.t4.local { box-shadow: 0 0 0 1px alpha(@accent_quaternary, 0.85);
 @keyframes media-breathing {
     from { box-shadow: 0 0 0 alpha(@accent, 0.0); }
     to   { box-shadow: 0 0 10px alpha(@accent, 0.40); }
-}
-
-/* Restored in the cleanup merge: the cleanup branch pruned this as orphaned
-   (true pre-bar), but .bar-battery.critical animates it. */
-@keyframes battery-critical-pulse {
-    from {
-        background-color: @accent_quinary;
-        box-shadow: 0 0 2px alpha(@accent_quinary, 0.0);
-    }
-    to {
-        background-color: @accent_quinary;
-        box-shadow: 0 0 12px alpha(@accent_quinary, 0.6);
-    }
 }
 
 @keyframes workspace-urgent-glow {

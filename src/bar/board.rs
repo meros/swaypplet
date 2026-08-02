@@ -37,11 +37,6 @@ const CHIP_AFTER: Duration = Duration::from_secs(2 * 60);
 /// decision 1: never a loop).
 const OVERDUE_AFTER: Duration = Duration::from_secs(10 * 60);
 
-/// Onset nudge: `slide_to` has no completion callback (anim.rs), so the
-/// return leg is scheduled by timeout rather than chained.
-const NUDGE_PX: f64 = -3.0;
-const NUDGE_MS: f64 = 100.0;
-
 // ── View model ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -410,7 +405,7 @@ impl Bay {
 
         self.button.set_tooltip_text(Some(&view.tooltip));
         if onset {
-            nudge(&self.slide);
+            anim::nudge(&self.slide);
         }
         *cache = Some(view);
     }
@@ -444,19 +439,6 @@ impl Bay {
         });
         *self.fill_tick.borrow_mut() = Some(id);
     }
-}
-
-/// One onset transient, then static rest (P2). `slide_to` has no
-/// completion callback, so the return leg rides a timeout.
-fn nudge(slide: &SlideBin) {
-    if !anim::animations_enabled() {
-        return;
-    }
-    slide.slide_to(NUDGE_PX, NUDGE_MS);
-    let slide = slide.clone();
-    glib::timeout_add_local_once(Duration::from_millis(NUDGE_MS as u64), move || {
-        slide.slide_to(0.0, anim::EXIT_MS);
-    });
 }
 
 #[cfg(test)]

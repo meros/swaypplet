@@ -1,6 +1,10 @@
 //! System tray — SNI items as icon buttons with native GTK4 DBusMenu
 //! popovers (replaces waybar's tray module).
 //!
+//! The service snapshot ships NeedsAttention items only (vision "Right
+//! cluster"), so the segment is zero width at rest — the empty container
+//! hides — and every button here is an attention state by construction.
+//!
 //! Left click activates the app (menu-only items open the menu instead),
 //! right click opens the menu, middle click sends the secondary activate.
 
@@ -124,8 +128,10 @@ struct ItemUi {
 impl ItemUi {
     fn new(container: &gtk4::Box, tray: &Rc<TrayService>, item: &TrayItem) -> Self {
         let image = gtk4::Image::new();
+        // needs-attention is unconditional: the service predicate already
+        // filtered everything else out.
         let button = gtk4::Button::builder()
-            .css_classes(["bar-tray-item"])
+            .css_classes(["bar-tray-item", "needs-attention"])
             .has_frame(false)
             .child(&image)
             .build();
@@ -182,14 +188,6 @@ impl ItemUi {
             self.icon_key.replace(Some(key));
         }
 
-        let status = item.sni.status;
-        set_class(&self.button, "passive", status == Status::Passive);
-        set_class(
-            &self.button,
-            "needs-attention",
-            status == Status::NeedsAttention,
-        );
-
         let tooltip = item
             .sni
             .tool_tip
@@ -243,12 +241,4 @@ fn open_menu(
         .get_or_insert_with(|| menu::MenuUi::new(button, tray.clone(), item.address.clone(), path));
     ui.set_layout(layout);
     ui.popup();
-}
-
-fn set_class(widget: &impl IsA<gtk4::Widget>, class: &str, on: bool) {
-    if on {
-        widget.add_css_class(class);
-    } else {
-        widget.remove_css_class(class);
-    }
 }

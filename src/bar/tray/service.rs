@@ -11,7 +11,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use system_tray::client::{ActivateRequest, Client};
-use system_tray::item::StatusNotifierItem;
+use system_tray::item::{Status, StatusNotifierItem};
 use system_tray::menu::TrayMenu;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -189,8 +189,14 @@ async fn session(
 fn snapshot(client: &Client) -> Vec<TrayItem> {
     let map = client.items();
     let map = map.lock().expect("tray item mutex");
+    // NeedsAttention only (vision "Right cluster"): Active/Passive items
+    // are ambient app presence, not a call on the owner — they simply
+    // don't exist to the bar, which then hides the empty container. The
+    // predicate lives in the snapshot so a status change flows through
+    // the normal event path as an item appearing or vanishing.
     let mut items: Vec<TrayItem> = map
         .iter()
+        .filter(|(_, (sni, _))| sni.status == Status::NeedsAttention)
         .map(|(address, (sni, menu))| TrayItem {
             address: address.clone(),
             sni: sni.clone(),
