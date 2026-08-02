@@ -340,3 +340,24 @@ impl Default for SlideBin {
         Self::new()
     }
 }
+
+/// Onset nudge travel/duration (board bays, battery critical).
+const NUDGE_PX: f64 = -3.0;
+const NUDGE_MS: f64 = 100.0;
+
+/// One onset transient, then static rest (vision P2). `slide_to` has no
+/// completion callback, so the return leg rides a timeout. Reduced motion
+/// skips it entirely — the state classes carry the change.
+pub fn nudge(slide: &SlideBin) {
+    if !animations_enabled() {
+        return;
+    }
+    slide.slide_to(NUDGE_PX, NUDGE_MS);
+    let slide = slide.clone();
+    glib::timeout_add_local_once(
+        std::time::Duration::from_millis(NUDGE_MS as u64),
+        move || {
+            slide.slide_to(0.0, EXIT_MS);
+        },
+    );
+}

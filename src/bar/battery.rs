@@ -1,12 +1,24 @@
 //! Battery module — left segment of the bar's right instrument track.
 //!
+//! Instrument quieting (docs/BAR_VISION.md, increment 6): a dim gray
+//! glyph at rest — no %, no hue — and the charging bolt stays gray too.
+//! At ≤30 % the segment turns amber and the % text Reveals in; at ≤15 %
+//! it turns static red with one onset nudge (P2: onset-only, nothing
+//! loops). CSS classes change on threshold edges only, so the 30 s poll
+//! never restyles a resting instrument. The decision slot's
+//! battery-critical occupant shares [`CRITICAL_PCT`] (bar/decision.rs),
+//! so slot escalation and the red tier fire on the same edge.
+//!
 //! Sysfs readers come from `widgets::power`; the icon table here is
-//! waybar's 11-step ladder (power.rs keeps its own coarser 5-step icon for
-//! the panel summary row). States mirror waybar.nix: warning ≤30,
-//! critical ≤15 (the CSS scopes the loud styling to `:not(.charging)`).
+//! waybar's 11-step ladder (power.rs keeps its own coarser 5-step icon
+//! for the panel summary row).
+
+use std::cell::Cell;
+use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use crate::anim::{self, SlideBin};
 use crate::widgets::power::{self, BatteryState};
 
 const WARNING_PCT: u8 = 30;
@@ -16,31 +28,89 @@ const ICON_CHARGING: &str = "󰂄";
 // Waybar's format-icons: one glyph per 10 % bucket, 0–100.
 const ICONS: [&str; 11] = ["󰂎", "󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰁿", "󰂁", "󰂂", "󰁹"];
 
+/// Loudness tier; classes and the % reveal change only on tier edges.
+/// Charging is always `Rest` — the stand-down table clears both warn and
+/// critical on charger connect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tier {
+    Rest,
+    Warning,
+    Critical,
+}
+
+fn tier(capacity: u8, charging: bool) -> Tier {
+    if charging {
+        Tier::Rest
+    } else if capacity <= CRITICAL_PCT {
+        Tier::Critical
+    } else if capacity <= WARNING_PCT {
+        Tier::Warning
+    } else {
+        Tier::Rest
+    }
+}
+
+struct Ui {
+    icon: gtk4::Label,
+    pct: gtk4::Label,
+    pct_reveal: gtk4::Revealer,
+    slide: SlideBin,
+    /// Last applied tier; `None` before the first read so startup styling
+    /// is an edge (a bar born at 12 % must still go red) but never a
+    /// nudge-worthy onset.
+    tier: Cell<Option<Tier>>,
+}
+
 /// `None` on machines without a battery — the caller skips the segment so
-/// the clock keeps the track's rounded left end. `on_state` rides the same
-/// 30 s poll (it feeds the decision slot's battery occupant, which adds no
-/// poll of its own).
-pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Label> {
+/// the board keeps the track's rounded left end. `on_state` rides the
+/// same 30 s poll (it feeds the decision slot's battery occupant, which
+/// adds no poll of its own).
+pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
     let path = power::find_battery_path()?;
 
-    let label = gtk4::Label::builder()
+    let icon = gtk4::Label::new(None);
+    let pct = gtk4::Label::builder()
+        .css_classes(["bar-battery-pct"])
+        .build();
+    let pct_reveal = gtk4::Revealer::builder()
+        .transition_type(gtk4::RevealerTransitionType::SlideRight)
+        .transition_duration(200)
+        .child(&pct)
+        .build();
+    let content = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .build();
+    content.append(&icon);
+    content.append(&pct_reveal);
+    let slide = SlideBin::new();
+    slide.set_child(&content);
+    let root = gtk4::Box::builder()
         .css_classes(["bar-battery", "bar-seg"])
         .build();
+    root.append(&slide);
+
+    let ui = Rc::new(Ui {
+        icon,
+        pct,
+        pct_reveal,
+        slide,
+        tier: Cell::new(None),
+    });
     if let Some(bat) = power::read_battery(&path) {
-        apply(&label, &bat);
+        apply(&root, &ui, &bat);
         on_state(&bat);
     }
 
     // Own 30 s timer, deliberately not is_mapped-gated like the panel's
     // (widgets/power.rs): the bar is always on screen, and the critical
-    // pulse must not wait for a map event to start.
-    let weak = label.downgrade();
+    // escalation must not wait for a map event to start.
+    let weak = root.downgrade();
     glib::timeout_add_seconds_local(30, move || {
-        let Some(label) = weak.upgrade() else {
+        let Some(root) = weak.upgrade() else {
             return glib::ControlFlow::Break;
         };
         if let Some(bat) = power::read_battery(&path) {
-            apply(&label, &bat);
+            apply(&root, &ui, &bat);
             on_state(&bat);
         }
         // A failed read keeps the last-known display (transient sysfs
@@ -48,19 +118,29 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Label> 
         glib::ControlFlow::Continue
     });
 
-    Some(label)
+    Some(root)
 }
 
-fn apply(label: &gtk4::Label, bat: &BatteryState) {
-    label.set_label(&format!(
-        "{} {}%",
-        icon(bat.capacity, bat.charging),
-        bat.capacity
-    ));
-    label.set_tooltip_text(Some(&power::battery_summary_text(bat)));
-    set_class(label, "charging", bat.charging);
-    set_class(label, "warning", bat.capacity <= WARNING_PCT);
-    set_class(label, "critical", bat.capacity <= CRITICAL_PCT);
+fn apply(root: &gtk4::Box, ui: &Ui, bat: &BatteryState) {
+    ui.icon.set_label(icon(bat.capacity, bat.charging));
+    root.set_tooltip_text(Some(&power::battery_summary_text(bat)));
+
+    let t = tier(bat.capacity, bat.charging);
+    if t != Tier::Rest {
+        ui.pct.set_label(&format!("{}%", bat.capacity));
+    }
+    let prev = ui.tier.replace(Some(t));
+    if prev == Some(t) {
+        return;
+    }
+    // Threshold edge: the only place classes (and the % reveal) change.
+    set_class(root, "warning", t == Tier::Warning);
+    set_class(root, "critical", t == Tier::Critical);
+    ui.pct_reveal.set_reveal_child(t != Tier::Rest);
+    // One onset nudge on entering critical — never on a startup read.
+    if t == Tier::Critical && prev.is_some() {
+        anim::nudge(&ui.slide);
+    }
 }
 
 fn set_class(widget: &impl IsA<gtk4::Widget>, class: &str, on: bool) {
@@ -97,5 +177,23 @@ mod tests {
     fn charging_overrides_the_bucket() {
         assert_eq!(icon(3, true), ICON_CHARGING);
         assert_eq!(icon(100, true), ICON_CHARGING);
+    }
+
+    #[test]
+    fn tiers_step_on_the_spec_thresholds() {
+        assert_eq!(tier(100, false), Tier::Rest);
+        assert_eq!(tier(31, false), Tier::Rest);
+        assert_eq!(tier(30, false), Tier::Warning);
+        assert_eq!(tier(16, false), Tier::Warning);
+        assert_eq!(tier(15, false), Tier::Critical);
+        assert_eq!(tier(0, false), Tier::Critical);
+    }
+
+    #[test]
+    fn charging_stands_every_tier_down() {
+        // Stand-down table: warn and critical both clear on charger
+        // connect — the bolt at 5 % is a resting gray glyph.
+        assert_eq!(tier(30, true), Tier::Rest);
+        assert_eq!(tier(5, true), Tier::Rest);
     }
 }
