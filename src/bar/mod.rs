@@ -156,6 +156,22 @@ pub fn run() {
             return;
         }
         theme::load_css();
+        // Keeps itself alive through its main-context event loop; the bar
+        // widgets that consume it arrive in a later step, so for now the
+        // model is only surfaced at debug level.
+        let sway = crate::sway_ipc::SwayService::start();
+        sway.connect_change({
+            let sway = sway.clone();
+            move || {
+                let s = sway.snapshot();
+                log::debug!(
+                    "sway: {} workspaces, focused {:?}, mode {}",
+                    s.workspaces.len(),
+                    s.focused_title,
+                    s.mode
+                );
+            }
+        });
         *slot = Some(BarManager::new(app));
     });
 

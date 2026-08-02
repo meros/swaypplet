@@ -19,6 +19,7 @@ mod panel;
 mod polkit;
 mod preview;
 mod spawn;
+mod sway_ipc;
 mod switch_user;
 mod theme;
 mod widgets;
