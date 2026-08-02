@@ -204,6 +204,13 @@ impl PopupManager {
                 .borrow_mut()
                 .connect_close(move |id, _reason| dismiss(&st, id));
         }
+
+        // Premap: the empty canvas renders nothing and the map handler
+        // installs the empty input region, so the surface is inert — but
+        // the compositor's blur pipeline initializes now instead of
+        // flashing a black frame on the first notification (same parking
+        // rationale as anim::Reveal).
+        window.present();
     }
 }
 
@@ -479,7 +486,6 @@ fn ensure_tick(st: &Rc<RefCell<State>>) {
         let mut s = st.borrow_mut();
         let now = glib::monotonic_time();
         let canvas = s.canvas.clone();
-        let window = s.window.clone();
         let mut any_running = false;
         let mut finished_exits = Vec::new();
 
@@ -510,19 +516,26 @@ fn ensure_tick(st: &Rc<RefCell<State>>) {
             .rev()
             .map(|&i| s.cards.remove(i).widget)
             .collect();
-        let hide = !any_running && s.cards.is_empty();
+        let emptied = !any_running && s.cards.is_empty();
         if !any_running {
             s.ticking = false;
         }
-        // Unparenting and unmapping synthesize pointer crossing events whose
-        // handlers (pause/resume_timers) borrow the state — release it first,
-        // or a hover during the last exit aborts on a nested borrow.
+        // Unparenting synthesizes pointer crossing events whose handlers
+        // (pause/resume_timers) borrow the state — release it first, or a
+        // hover during the last exit aborts on a nested borrow.
         drop(s);
         for widget in &removed {
             canvas.remove(widget);
         }
-        if hide {
-            window.set_visible(false);
+        if emptied {
+            // Stay MAPPED with an empty input region instead of unmapping:
+            // all cards are gone so nothing renders (transparent canvas,
+            // alpha-0 everywhere — the swayfx stencil skips it), and swayfx
+            // rebuilds its blur pipeline on map/unmap, which flashes a
+            // black frame. Same parking rationale as anim::Reveal.
+            if let Ok(s) = st.try_borrow() {
+                update_input_region(&s);
+            }
         }
 
         if any_running {
