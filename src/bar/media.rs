@@ -1,10 +1,14 @@
-//! Media module — center pill mirroring waybar's custom/media.
+//! Media mark — single dim achromatic ♪ in the right cluster
+//! (docs/BAR_VISION.md, increment 4; replaces the center media pill).
 //!
-//! State comes from `widgets::media::read_state` (playerctl batch on a
-//! worker thread), refreshed every 3 s plus on every sway event — the
-//! event hook covers keyboard media bindings (they emit window/tick
-//! traffic) without waiting out the poll. A `playerctl -F` follower child
-//! would push updates instantly; deferred for now — it needs child
+//! Hidden while no player exists, `.paused` dims further when playback is
+//! stopped/paused. No title text and no ambient progress — detail arrives
+//! with the popover increment; click keeps the pill's play-pause action
+//! meanwhile. State comes from `widgets::media::read_state` (playerctl
+//! batch on a worker thread), refreshed every 3 s plus on every sway
+//! event — the pill's pre-existing cadence, kept as-is: the event hook
+//! covers keyboard media bindings (they emit window/tick traffic) without
+//! waiting out the poll, and a `playerctl -F` follower child would need
 //! lifecycle management the poll gets for free.
 
 use std::cell::Cell;
@@ -16,19 +20,11 @@ use crate::spawn::spawn_work;
 use crate::sway_ipc::SwayService;
 use crate::widgets::media::{self, MediaState, PlaybackStatus};
 
-// Waybar parity: format "󰐊 {}", max-length 40.
-const ICON: &str = "󰐊";
-const MAX_CHARS: i32 = 40;
-
 pub fn build(sway: &Rc<SwayService>) -> gtk4::Button {
-    let label = gtk4::Label::builder()
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .max_width_chars(MAX_CHARS)
-        .build();
-    // Hidden until a player shows up, like waybar's empty custom module.
+    // Hidden until a player shows up.
     let btn = gtk4::Button::builder()
-        .child(&label)
-        .css_classes(["bar-media"])
+        .child(&gtk4::Label::new(Some("♪")))
+        .css_classes(["bar-media-mark"])
         .visible(false)
         .build();
 
@@ -37,7 +33,6 @@ pub fn build(sway: &Rc<SwayService>) -> gtk4::Button {
     // (output unplugged) so the poll timer can end itself.
     let refresh: Rc<dyn Fn() -> bool> = {
         let weak = btn.downgrade();
-        let label = label.clone();
         let busy = Rc::new(Cell::new(false));
         Rc::new(move || {
             let Some(btn) = weak.upgrade() else {
@@ -48,10 +43,9 @@ pub fn build(sway: &Rc<SwayService>) -> gtk4::Button {
             }
             busy.set(true);
             let busy = busy.clone();
-            let label = label.clone();
             spawn_work(media::read_state, move |state| {
                 busy.set(false);
-                apply(&btn, &label, &state);
+                apply(&btn, &state);
             });
             true
         })
@@ -90,41 +84,15 @@ pub fn build(sway: &Rc<SwayService>) -> gtk4::Button {
     btn
 }
 
-fn apply(btn: &gtk4::Button, label: &gtk4::Label, state: &Option<MediaState>) {
+fn apply(btn: &gtk4::Button, state: &Option<MediaState>) {
     let Some(ms) = state else {
         btn.set_visible(false);
         return;
     };
     btn.set_visible(true);
-    label.set_label(&format!("{ICON} {}", track_text(&ms.artist, &ms.title)));
     if ms.status == PlaybackStatus::Playing {
-        btn.add_css_class("playing");
+        btn.remove_css_class("paused");
     } else {
-        btn.remove_css_class("playing");
-    }
-}
-
-/// "artist - title", dropping whichever side is missing (unit-tested).
-/// Waybar rendered a bare " - title" for artistless streams; joining only
-/// non-empty parts reads better.
-fn track_text(artist: &str, title: &str) -> String {
-    match (artist.is_empty(), title.is_empty()) {
-        (false, false) => format!("{artist} - {title}"),
-        (true, false) => title.to_string(),
-        (false, true) => artist.to_string(),
-        (true, true) => "Unknown track".to_string(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn track_text_joins_only_present_parts() {
-        assert_eq!(track_text("Kraftwerk", "Autobahn"), "Kraftwerk - Autobahn");
-        assert_eq!(track_text("", "Autobahn"), "Autobahn");
-        assert_eq!(track_text("Kraftwerk", ""), "Kraftwerk");
-        assert_eq!(track_text("", ""), "Unknown track");
+        btn.add_css_class("paused");
     }
 }

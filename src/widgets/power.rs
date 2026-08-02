@@ -229,6 +229,19 @@ fn battery_sub_text(bat: &BatteryState) -> String {
     }
 }
 
+/// Time-to-empty ("1h 5m") while discharging; `None` when charging or
+/// when the estimate is unreliable (missing sysfs fields, unsettled
+/// meter). Feeds the bar decision slot's battery-critical occupant.
+pub(crate) fn time_to_empty_text(bat: &BatteryState) -> Option<String> {
+    if bat.charging {
+        return None;
+    }
+    match (bat.power_w, bat.energy_now_wh) {
+        (Some(power), Some(energy)) if power >= 0.001 => format_hours(energy / power),
+        _ => None,
+    }
+}
+
 /// Build the summary text for the summary row from battery state.
 /// Format: "85% · Charging — 30m to full" or "85% · 3h 20m remaining"
 /// Also the bar battery pill's tooltip (src/bar/battery.rs).

@@ -14,6 +14,7 @@
 mod battery;
 mod board;
 mod clock;
+mod decision;
 mod media;
 mod start;
 mod tray;
@@ -179,14 +180,19 @@ fn build_bar_window(
         .build();
     left.append(&start::build(toggle_panel));
     left.append(&workspaces::build(sway));
+    // Center: the decision slot — priority-muxed single occupant, empty
+    // at nominal (bar/decision.rs).
     let center = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .build();
-    center.append(&media::build(sway));
+    let decision = decision::DecisionSlot::build(tasks);
+    center.append(decision.widget());
     let right = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .build();
-    // Tray sits left of the track, matching waybar's modules-right order.
+    // Right cluster order per the vision: media mark, tray, then the
+    // instrument track.
+    right.append(&media::build(sway));
     right.append(&tray::build(tray));
     // Battery + board + clock fuse into one segmented track (waybar's
     // group/right-track); a batteryless machine skips the segment so the
@@ -195,7 +201,12 @@ fn build_bar_window(
         .orientation(gtk4::Orientation::Horizontal)
         .css_classes(["bar-track"])
         .build();
-    if let Some(bat) = battery::build() {
+    if let Some(bat) = battery::build({
+        // The decision slot's battery occupant rides this segment's 30 s
+        // poll instead of polling on its own.
+        let slot = decision.clone();
+        move |bat| slot.set_battery(bat)
+    }) {
         track.append(&bat);
     }
     // gdk connector names match sway output names under wlroots.

@@ -10,14 +10,17 @@ use gtk4::prelude::*;
 use crate::widgets::power::{self, BatteryState};
 
 const WARNING_PCT: u8 = 30;
-const CRITICAL_PCT: u8 = 15;
+/// Shared with the decision slot's battery occupant (bar/decision.rs).
+pub(crate) const CRITICAL_PCT: u8 = 15;
 const ICON_CHARGING: &str = "󰂄";
 // Waybar's format-icons: one glyph per 10 % bucket, 0–100.
 const ICONS: [&str; 11] = ["󰂎", "󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰁿", "󰂁", "󰂂", "󰁹"];
 
 /// `None` on machines without a battery — the caller skips the segment so
-/// the clock keeps the track's rounded left end.
-pub fn build() -> Option<gtk4::Label> {
+/// the clock keeps the track's rounded left end. `on_state` rides the same
+/// 30 s poll (it feeds the decision slot's battery occupant, which adds no
+/// poll of its own).
+pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Label> {
     let path = power::find_battery_path()?;
 
     let label = gtk4::Label::builder()
@@ -25,6 +28,7 @@ pub fn build() -> Option<gtk4::Label> {
         .build();
     if let Some(bat) = power::read_battery(&path) {
         apply(&label, &bat);
+        on_state(&bat);
     }
 
     // Own 30 s timer, deliberately not is_mapped-gated like the panel's
@@ -37,6 +41,7 @@ pub fn build() -> Option<gtk4::Label> {
         };
         if let Some(bat) = power::read_battery(&path) {
             apply(&label, &bat);
+            on_state(&bat);
         }
         // A failed read keeps the last-known display (transient sysfs
         // hiccups around suspend); no reason to stop polling.
