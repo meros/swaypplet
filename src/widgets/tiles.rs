@@ -35,6 +35,10 @@ pub struct TileSpec {
     pub action: fn(bool) -> bool,
     /// Read current state. Runs on a background thread.
     pub read_state: fn() -> TileState,
+    /// Main-thread observer fired with each *established* state: every
+    /// successful read and every successful toggle. Feeds in-process
+    /// consumers (the bar's hazard lane) without them polling the tool.
+    pub on_state: Option<fn(bool)>,
 }
 
 /// The declarative tile set for the quick strip: Wi-Fi, Bluetooth, DND,
@@ -51,6 +55,7 @@ pub fn tile_specs() -> Vec<TileSpec> {
                 run_ok(Command::new("nmcli").args(["radio", "wifi", if on { "on" } else { "off" }]))
             },
             read_state: read_wifi_state,
+            on_state: None,
         },
         TileSpec {
             icon: "󰂯",
@@ -61,6 +66,7 @@ pub fn tile_specs() -> Vec<TileSpec> {
                 run_ok(Command::new("bluetoothctl").args(["power", if on { "on" } else { "off" }]))
             },
             read_state: read_bluetooth_state,
+            on_state: None,
         },
         TileSpec {
             icon: "󰖔",
@@ -75,6 +81,7 @@ pub fn tile_specs() -> Vec<TileSpec> {
                 ]))
             },
             read_state: read_night_state,
+            on_state: None,
         },
         // Caffeine stops the idle manager itself: idle timeouts (lock, screen
         // blank) come from `swaypplet idle`, which only honors wayland
@@ -93,6 +100,9 @@ pub fn tile_specs() -> Vec<TileSpec> {
                 ]))
             },
             read_state: read_caffeine_state,
+            // The bar's hazard lane rides this path instead of polling
+            // systemctl (docs/BAR_VISION.md, increment 7).
+            on_state: Some(crate::bar::hazards::set_caffeine),
         },
     ]
 }
@@ -105,6 +115,7 @@ pub fn build_tile(spec: &TileSpec) -> gtk4::ToggleButton {
     let action = spec.action;
     let tooltip_on = spec.tooltip_on;
     let tooltip_off = spec.tooltip_off;
+    let on_state = spec.on_state;
 
     let btn_h = btn.clone();
     btn.connect_clicked(move |_| {
@@ -117,7 +128,13 @@ pub fn build_tile(spec: &TileSpec) -> gtk4::ToggleButton {
             move || action(target),
             move |success| {
                 btn_done.remove_css_class("loading");
-                if !success {
+                if success {
+                    // Established, not optimistic: a failed toggle never
+                    // reaches in-process consumers.
+                    if let Some(observe) = on_state {
+                        observe(target);
+                    }
+                } else {
                     let b = btn_done.clone();
                     glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
                         b.set_active(!target);
@@ -163,12 +180,16 @@ pub fn init_tile_state(btn: &gtk4::ToggleButton, spec: &TileSpec) {
     let read_state = spec.read_state;
     let tooltip_on = spec.tooltip_on;
     let tooltip_off = spec.tooltip_off;
+    let on_state = spec.on_state;
     spawn::spawn_work(
         move || read_state(),
         move |state| {
             apply_tile_state(&btn, state);
             if state != TileState::Unavailable {
                 set_tooltip(&btn, state == TileState::Active, tooltip_on, tooltip_off);
+                if let Some(observe) = on_state {
+                    observe(state == TileState::Active);
+                }
             }
         },
     );

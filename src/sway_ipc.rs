@@ -45,6 +45,9 @@ pub struct SwayState {
     /// The focused view is fullscreen — OSD interjections route to the
     /// center card instead of the bar (docs/BAR_VISION.md, increment 5).
     pub focused_fullscreen: bool,
+    /// Current binding mode ("default" at rest; "" only before the first
+    /// snapshot). The hazard lane shows non-default modes (increment 7).
+    pub binding_mode: String,
 }
 
 // ── GTK-side service ────────────────────────────────────────────────────
@@ -139,11 +142,14 @@ fn session(tx: &async_channel::Sender<SwayState>) -> Result<(), swayipc::Error> 
         return Ok(());
     }
 
+    // Mode rides the existing subscription — a few events per day, no
+    // poll (vision cadence budget).
     let events = Connection::new()?.subscribe([
         EventType::Workspace,
         EventType::Window,
         EventType::Output,
         EventType::Tick,
+        EventType::Mode,
     ])?;
     for event in events {
         event?;
@@ -160,6 +166,7 @@ fn snapshot(query: &mut Connection) -> Result<SwayState, swayipc::Error> {
         workspaces: workspace_infos(query.get_workspaces()?),
         pid_workspaces: index_tree(&tree),
         focused_fullscreen: focused_fullscreen(&tree),
+        binding_mode: query.get_binding_state()?,
     })
 }
 

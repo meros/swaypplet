@@ -15,6 +15,8 @@ mod battery;
 mod board;
 mod clock;
 mod decision;
+// pub(crate): widgets/tiles.rs feeds the caffeine hazard through it.
+pub(crate) mod hazards;
 mod media;
 mod start;
 mod tray;
@@ -222,10 +224,11 @@ fn build_bar_window(
     let right = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .build();
-    // Right cluster order per the vision: media mark, tray, then the
-    // instrument track.
+    // Right cluster order per the vision: media mark, tray, hazard lane,
+    // then the instrument track.
     right.append(&media::build(sway));
     right.append(&tray::build(tray));
+    right.append(&hazards::build(sway));
     // Battery + board + clock fuse into one segmented track (waybar's
     // group/right-track); a batteryless machine skips the segment so the
     // board keeps the rounded left end.

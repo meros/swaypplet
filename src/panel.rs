@@ -548,6 +548,7 @@ fn copy_spec(spec: &tiles::TileSpec) -> tiles::TileSpec {
         tooltip_off: spec.tooltip_off,
         action: spec.action,
         read_state: spec.read_state,
+        on_state: spec.on_state,
     }
 }
 
