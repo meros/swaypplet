@@ -79,6 +79,26 @@ window.panel {
     font-size: 10pt;
 }
 
+/* ── Bar: bottom frosted card, one per output (src/bar/) ──
+   Mirrors the waybar card it replaces: @surface fill (swayfx blurs the
+   wallpaper behind the "swaypplet-bar" namespace), hairline border,
+   radius 14. Modules inside the slots use radius 8 (concentric with the
+   card at its ~6px inset). */
+.bar-root {
+    font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
+    font-size: 10pt;
+    background-color: @surface;
+    border: 1px solid @border_subtle;
+    border-radius: 14px;
+    color: @fg;
+}
+
+.bar-left,
+.bar-center,
+.bar-right {
+    border-radius: 8px;
+}
+
 /* ── State-driven motion (matches waybar) ──
    Pure outer glow, no bevel layers. Box-shadow animations replace the
    element's whole box-shadow each frame, so use them only on shadowless

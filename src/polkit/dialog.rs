@@ -18,6 +18,8 @@ use super::agent::AuthRequest;
 
 static POLKIT_CONFIG: LayerShellConfig = LayerShellConfig {
     namespace: "swaypplet-polkit",
+    layer: gtk4_layer_shell::Layer::Overlay,
+    exclusive: false,
     default_width: None,
     default_height: None,
     anchors: &[

@@ -241,6 +241,8 @@ impl Osd {
     pub fn new(app: &gtk4::Application) -> Self {
         static OSD_CONFIG: LayerShellConfig = LayerShellConfig {
             namespace: "swaypplet-osd",
+            layer: gtk4_layer_shell::Layer::Overlay,
+            exclusive: false,
             default_width: None,
             default_height: None,
             anchors: &[(Edge::Bottom, true)],

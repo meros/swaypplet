@@ -20,6 +20,8 @@ const DEBOUNCE_MS: u64 = 100;
 
 static LAUNCHER_CONFIG: LayerShellConfig = LayerShellConfig {
     namespace: "swaypplet-launcher",
+    layer: gtk4_layer_shell::Layer::Overlay,
+    exclusive: false,
     default_width: None,
     default_height: None,
     anchors: &[

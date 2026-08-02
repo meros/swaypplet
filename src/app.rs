@@ -28,6 +28,8 @@ fn pid_file_path() -> std::path::PathBuf {
 // Start-menu popup: bottom-left anchored, ~780x700, clearing the waybar.
 static PANEL_CONFIG: LayerShellConfig = LayerShellConfig {
     namespace: "swaypplet",
+    layer: gtk4_layer_shell::Layer::Overlay,
+    exclusive: false,
     default_width: Some(780),
     default_height: Some(700),
     anchors: &[(Edge::Bottom, true), (Edge::Left, true)],
