@@ -1,6 +1,12 @@
 //! Workspaces module — one button per sway workspace, driven by the
 //! [`SwayService`] observer. Every bar shows all workspaces regardless of
 //! output (waybar's `all-outputs = true`).
+//!
+//! Task ribbons (docs/BAR_VISION.md, increment 10): a 2 px bottom lane
+//! under each task's workspace group from [`TaskStateService`] — off = no
+//! session, dim solid = working, task hue = waiting. The buttons are
+//! fused segments, so per-button borders read as one ribbon across the
+//! group.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -8,6 +14,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use crate::sway_ipc::{self, SwayService, WorkspaceInfo};
+use crate::task_state::{Activity, TaskSnapshot, TaskStateService};
 
 // Label tables — mirror users/modules/workspace-config.nix (nixos repo):
 // nums 1–16 are 4 tasks × 4 screens rendered "1¹".."4⁴" behind a
@@ -31,18 +38,23 @@ const GENERIC_LABELS: &[(i32, &str)] = &[
     (29, "󰗃 y"),
 ];
 
-pub fn build(sway: &Rc<SwayService>) -> gtk4::Box {
+pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box {
     let container = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .css_classes(["bar-workspaces"])
         .build();
 
-    // Buttons are rebuilt only when the workspace rows change: the service
-    // also fires for pid-map-only snapshots (window churn), which must not
-    // rebuild widgets mid-hover.
-    let cache: Rc<RefCell<Vec<WorkspaceInfo>>> = Rc::new(RefCell::new(Vec::new()));
+    // Buttons are rebuilt only when the workspace rows or the task
+    // ribbons change: the service also fires for pid-map-only snapshots
+    // (window churn), which must not rebuild widgets mid-hover. Ribbon
+    // state joins the key safely — task transitions are a few per hour
+    // (vision). Occupancy ticks stay backlog: window-event data in this
+    // key would defeat the anti-shimmer gate it exists for.
+    let cache: Rc<RefCell<(Vec<WorkspaceInfo>, [Ribbon; 4])>> =
+        Rc::new(RefCell::new(<_>::default()));
     let weak = container.downgrade();
     let sway_cb = sway.clone();
+    let tasks_cb = tasks.clone();
     let sync = Rc::new(move || {
         // The observer outlives the widget when its output is unplugged
         // (the service has no disconnect); a dead weak ref makes the
@@ -52,20 +64,26 @@ pub fn build(sway: &Rc<SwayService>) -> gtk4::Box {
         };
         let mut workspaces = sway_cb.workspaces();
         sort_workspaces(&mut workspaces);
-        if *cache.borrow() == workspaces {
-            return;
+        let ribbons = ribbon_states(&tasks_cb.snapshot());
+        {
+            let cache = cache.borrow();
+            if cache.0 == workspaces && cache.1 == ribbons {
+                return;
+            }
         }
-        rebuild(&container, &workspaces);
-        *cache.borrow_mut() = workspaces;
+        rebuild(&container, &workspaces, &ribbons);
+        *cache.borrow_mut() = (workspaces, ribbons);
     });
     sync();
     let sync_cb = sync.clone();
     sway.connect_change(move || sync_cb());
+    let sync_cb = sync.clone();
+    tasks.connect_change(move || sync_cb());
 
     container
 }
 
-fn rebuild(container: &gtk4::Box, workspaces: &[WorkspaceInfo]) {
+fn rebuild(container: &gtk4::Box, workspaces: &[WorkspaceInfo], ribbons: &[Ribbon; 4]) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
@@ -83,13 +101,54 @@ fn rebuild(container: &gtk4::Box, workspaces: &[WorkspaceInfo]) {
         if ws.urgent {
             btn.add_css_class("urgent");
         }
+        if let Some((task, _)) = task_label(ws.num) {
+            apply_ribbon(&btn, task, ribbons[task - 1]);
+        }
         let cmd = switch_command(ws.num, &ws.name);
         btn.connect_clicked(move |_| sway_ipc::run_command(&cmd));
         container.append(&btn);
     }
 }
 
+fn apply_ribbon(btn: &gtk4::Button, task: usize, ribbon: Ribbon) {
+    match ribbon {
+        Ribbon::Off => {}
+        Ribbon::Working => btn.add_css_class("ribbon-working"),
+        Ribbon::Waiting => {
+            btn.add_css_class("ribbon-waiting");
+            btn.add_css_class(&format!("task{task}"));
+        }
+    }
+}
+
 // ── Pure helpers (unit-tested below) ────────────────────────────────────
+
+/// One task's ribbon — the coarse cross-room glance; the board carries
+/// the detail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Ribbon {
+    #[default]
+    Off,
+    Working,
+    Waiting,
+}
+
+/// Waiting outranks working. Stopped and stale sessions read Off: three
+/// encodings is the whole ribbon vocabulary, and stale must not
+/// impersonate a live state (P9) — the board's OFF-flag carries it.
+fn ribbon_states(snap: &TaskSnapshot) -> [Ribbon; 4] {
+    std::array::from_fn(|i| {
+        let sessions = &snap.tasks[i].sessions;
+        let any = |a: Activity| sessions.iter().any(|s| s.activity == a);
+        if any(Activity::Waiting) {
+            Ribbon::Waiting
+        } else if any(Activity::Working) {
+            Ribbon::Working
+        } else {
+            Ribbon::Off
+        }
+    })
+}
 
 /// Numbered workspaces in numeric order, named-only ones (num -1) last,
 /// alphabetically — matches waybar's default sort.
@@ -192,6 +251,29 @@ mod tests {
         assert_eq!(
             switch_command(-1, "we\"ird\\ws"),
             "workspace \"we\\\"ird\\\\ws\""
+        );
+    }
+
+    #[test]
+    fn ribbons_rank_waiting_over_working_and_quiet_the_rest() {
+        use crate::task_state::SessionState;
+        let session = |activity| SessionState {
+            pid: 1,
+            desc: "d".into(),
+            activity,
+            progress: None,
+            workspace: "5:t2a".into(),
+            status_mtime: None,
+            acked: false,
+        };
+        let mut snap = TaskSnapshot::default();
+        snap.tasks[0].sessions = vec![session(Activity::Working), session(Activity::Waiting)];
+        snap.tasks[1].sessions = vec![session(Activity::Working)];
+        // Stopped/stale-only tasks stay Off — the board carries those.
+        snap.tasks[2].sessions = vec![session(Activity::Stopped), session(Activity::Stale)];
+        assert_eq!(
+            ribbon_states(&snap),
+            [Ribbon::Waiting, Ribbon::Working, Ribbon::Off, Ribbon::Off]
         );
     }
 
