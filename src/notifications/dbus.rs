@@ -169,71 +169,60 @@ pub fn start_server(store: Rc<RefCell<NotificationStore>>) {
     let sender = Arc::new(Mutex::new(EventSender { tx }));
     let server = NotificationServer { sender };
 
-    // Spawn the D-Bus connection on a background thread
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create tokio runtime for D-Bus");
+    crate::spawn::spawn_tokio_thread("notify-dbus", async move {
+        match Connection::session().await {
+            Ok(conn) => {
+                if let Err(e) = conn
+                    .object_server()
+                    .at("/org/freedesktop/Notifications", server)
+                    .await
+                {
+                    log::error!("Failed to register notification interface: {e}");
+                    return;
+                }
 
-        rt.block_on(async move {
-            match Connection::session().await {
-                Ok(conn) => {
-                    if let Err(e) = conn
-                        .object_server()
-                        .at("/org/freedesktop/Notifications", server)
-                        .await
-                    {
-                        log::error!("Failed to register notification interface: {e}");
-                        return;
-                    }
+                match conn.request_name("org.freedesktop.Notifications").await {
+                    Ok(_) => {
+                        log::info!("Notification D-Bus server started");
 
-                    match conn.request_name("org.freedesktop.Notifications").await {
-                        Ok(_) => {
-                            log::info!("Notification D-Bus server started");
+                        let iface_ref = match conn
+                            .object_server()
+                            .interface::<_, NotificationServer>("/org/freedesktop/Notifications")
+                            .await
+                        {
+                            Ok(r) => r,
+                            Err(e) => {
+                                log::error!("Failed to look up notification interface: {e}");
+                                return;
+                            }
+                        };
 
-                            let iface_ref = match conn
-                                .object_server()
-                                .interface::<_, NotificationServer>(
-                                    "/org/freedesktop/Notifications",
-                                )
-                                .await
-                            {
-                                Ok(r) => r,
-                                Err(e) => {
-                                    log::error!("Failed to look up notification interface: {e}");
-                                    return;
+                        // Emit signals the GTK thread asks for, for as long as it's alive.
+                        while let Some(event) = signal_rx.recv().await {
+                            let ctxt = iface_ref.signal_context();
+                            let result = match event {
+                                SignalEvent::Closed(id, reason) => {
+                                    NotificationServer::notification_closed(ctxt, id, reason).await
+                                }
+                                SignalEvent::ActionInvoked(id, key) => {
+                                    NotificationServer::action_invoked(ctxt, id, &key).await
                                 }
                             };
-
-                            // Emit signals the GTK thread asks for, for as long as it's alive.
-                            while let Some(event) = signal_rx.recv().await {
-                                let ctxt = iface_ref.signal_context();
-                                let result = match event {
-                                    SignalEvent::Closed(id, reason) => {
-                                        NotificationServer::notification_closed(ctxt, id, reason)
-                                            .await
-                                    }
-                                    SignalEvent::ActionInvoked(id, key) => {
-                                        NotificationServer::action_invoked(ctxt, id, &key).await
-                                    }
-                                };
-                                if let Err(e) = result {
-                                    log::warn!("Failed to emit notification signal: {e}");
-                                }
+                            if let Err(e) = result {
+                                log::warn!("Failed to emit notification signal: {e}");
                             }
                         }
-                        Err(e) => {
-                            log::error!("Failed to acquire org.freedesktop.Notifications: {e}");
-                            log::error!("Is another notification daemon running? (pkill mako)");
-                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to acquire org.freedesktop.Notifications: {e}");
+                        log::error!("Is another notification daemon running? (pkill mako)");
                     }
                 }
-                Err(e) => {
-                    log::error!("Failed to connect to session bus: {e}");
-                }
             }
-        });
+            Err(e) => {
+                log::error!("Failed to connect to session bus: {e}");
+            }
+        }
     });
 
     // Forward store close/action events to the D-Bus thread as outgoing signals.
