@@ -207,6 +207,19 @@ pub fn run() -> ! {
         instance.connect_locked(move |_| {
             log::info!("session locked");
 
+            // Readiness handshake with the idle supervisor: one line on
+            // stdout once the compositor has confirmed the lock. The
+            // supervisor gates DPMS-off and the logind sleep inhibitor on
+            // this — process-alive is not session-locked (a suspend freeze
+            // can land mid-startup, before the lock request is even sent).
+            // Errors ignored: stdout may be a closed pipe on relaunch.
+            {
+                use std::io::Write;
+                let mut out = std::io::stdout();
+                let _ = writeln!(out, "LOCKED");
+                let _ = out.flush();
+            }
+
             let clock_surfaces = surfaces.clone();
             glib::timeout_add_seconds_local(1, move || {
                 clock_surfaces.tick();

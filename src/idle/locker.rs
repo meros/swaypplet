@@ -9,20 +9,20 @@
 //! else is a crash while locked (relaunch after re-powering outputs so the
 //! new lock surface can commit; the 30 s reblank tier re-blanks if idle).
 //!
+//! Readiness: the child prints "LOCKED" on stdout once the compositor
+//! confirms the lock; only that emits LockerUp. Time-based settle windows
+//! are not a lock — suspend can freeze the cgroup mid-startup.
+//!
 //! No flock: idempotency is the main loop's `locker_active` flag — all lock
 //! triggers (idle tier, logind Lock signal, before-sleep) land on the same
 //! thread.
 
-use std::process::Command;
+use std::io::BufRead;
+use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use super::Ev;
-
-/// How long the child must survive before we call it "up" (and blank
-/// outputs). With ext-session-lock the session is blanked from the instant
-/// the locker requests the lock, so this only orders the DPMS-off.
-const SETTLE: Duration = Duration::from_millis(150);
 
 pub fn start(ev: Sender<Ev>, reason: &'static str) {
     std::thread::Builder::new()
@@ -43,11 +43,11 @@ fn supervise(ev: Sender<Ev>, reason: &'static str) {
         }
     };
 
-    let mut first = true;
     loop {
         let mut child = match Command::new(&exe)
             .arg("lock")
             .env("SWAYPPLET_LOCK_REASON", reason)
+            .stdout(Stdio::piped())
             .spawn()
         {
             Ok(c) => c,
@@ -58,15 +58,27 @@ fn supervise(ev: Sender<Ev>, reason: &'static str) {
             }
         };
 
-        if first {
-            std::thread::sleep(SETTLE);
-            // If the child died inside the settle window, fall through to
-            // wait() and let the exit-code branches decide. LockerUp is never
-            // sent, so outputs are never blanked over a lockless session.
-            if let Ok(None) = child.try_wait() {
-                first = false;
-                let _ = ev.send(Ev::LockerUp);
-            }
+        // Readiness handshake: the child prints "LOCKED" on stdout once the
+        // compositor confirms the lock (ext-session-lock `locked` event).
+        // Only that emits LockerUp — a merely-alive child proves nothing (a
+        // suspend freeze can land before its lock request is even sent).
+        // Reading to EOF keeps the pipe from ever blocking the child.
+        if let Some(out) = child.stdout.take() {
+            let ev = ev.clone();
+            std::thread::Builder::new()
+                .name("idle-locker-ready".into())
+                .spawn(move || {
+                    for line in std::io::BufReader::new(out).lines() {
+                        match line {
+                            Ok(l) if l.trim() == "LOCKED" => {
+                                let _ = ev.send(Ev::LockerUp);
+                            }
+                            Ok(_) => {}
+                            Err(_) => break,
+                        }
+                    }
+                })
+                .expect("spawn idle-locker-ready thread");
         }
 
         let rc = match child.wait() {
