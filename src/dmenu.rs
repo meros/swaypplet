@@ -28,6 +28,8 @@ use crate::theme;
 // Reuses the launcher's namespace so swayfx layer_effects (blur) apply.
 static DMENU_CONFIG: LayerShellConfig = LayerShellConfig {
     namespace: "swaypplet-launcher",
+    layer: gtk4_layer_shell::Layer::Overlay,
+    exclusive: false,
     default_width: None,
     default_height: None,
     anchors: &[

@@ -1,6 +1,7 @@
 mod anim;
 mod app;
 mod avatar;
+mod bar;
 mod dmenu;
 mod elephant;
 mod fp;
@@ -48,6 +49,9 @@ fn main() {
         // Root D-Bus shim standing in for GDM, so GNOME's "Switch User…"
         // reaches the same greeter as everything else.
         Some("gdm-shim") => gdm_shim::run(),
+        // Native status bar (waybar replacement) — own GApplication so it
+        // can run standalone next to the panel during the migration.
+        Some("bar") => bar::run(),
         // dmenu-style picker — thin client to the panel's picker server,
         // with a standalone GTK fallback when no panel is listening.
         Some("dmenu") => dmenu::run(args),

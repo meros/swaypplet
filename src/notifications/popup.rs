@@ -44,6 +44,8 @@ const PER_CHAR_MS: u64 = 40;
 
 static POPUP_CONFIG: LayerShellConfig = LayerShellConfig {
     namespace: "swaypplet-notification",
+    layer: gtk4_layer_shell::Layer::Overlay,
+    exclusive: false,
     default_width: Some(WINDOW_WIDTH),
     default_height: Some(WINDOW_HEIGHT),
     anchors: &[(Edge::Top, true), (Edge::Right, true)],
