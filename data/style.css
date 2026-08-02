@@ -93,12 +93,6 @@ window.panel {
     color: @fg;
 }
 
-.bar-left,
-.bar-center,
-.bar-right {
-    border-radius: 8px;
-}
-
 /* ── Bar left cluster: start button + workspaces (mirrors waybar) ──
    Pill geometry: bar 38 − 2×5px margin = 28px-tall pills. Unfocused
    labels sit muted so the focused (accent) segment is the only loud

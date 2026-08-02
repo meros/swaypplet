@@ -6,8 +6,10 @@
 //! auto exclusive zone so tiled windows sit above the bar + margins, while
 //! the Overlay panel/OSD/launcher surfaces still stack over it.
 //!
-//! During development the bar runs standalone (`swaypplet bar`, own
-//! GApplication id) next to the live panel + waybar.
+//! The default swaypplet process hosts the bar (app.rs); `swaypplet bar`
+//! (own GApplication id) still runs it standalone for development next to
+//! a live panel, and `SWAYPPLET_NO_BAR=1` keeps the hosted bar off while
+//! an external bar owns the strip (see app.rs).
 
 mod battery;
 mod clock;
@@ -24,6 +26,7 @@ use gtk4::gdk;
 use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, Layer};
 
+use crate::anim;
 use crate::layer_shell::{self, LayerShellConfig};
 use crate::sway_ipc::SwayService;
 use crate::theme;
@@ -116,9 +119,9 @@ impl BarManager {
                 .iter()
                 .any(|bar| bar.monitor == monitor);
             if !known {
+                // build_bar_window maps the window itself (Reveal enter).
                 let window =
                     build_bar_window(&self.app, &monitor, &self.sway, self.toggle_panel.clone());
-                window.present();
                 self.windows
                     .borrow_mut()
                     .push(BarWindow { monitor, window });
@@ -137,27 +140,33 @@ fn build_bar_window(
     window.set_resizable(false);
     window.set_decorated(false);
 
-    // CenterBox, not Box: the center slot must stay screen-centered
-    // regardless of how the left/right clusters grow.
-    let root = gtk4::CenterBox::builder()
+    // Pane/content split for the enter transition (motion on glass,
+    // anim.rs): `root` carries the frosted .bar-root card so its tint can
+    // land within GLASS_MS, while the clusters on it fade over the full
+    // enter.
+    let root = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .css_classes(["bar-root"])
         .build();
 
+    // CenterBox, not Box: the center slot must stay screen-centered
+    // regardless of how the left/right clusters grow.
+    let content = gtk4::CenterBox::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .hexpand(true)
+        .build();
+
     let left = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
-        .css_classes(["bar-left"])
         .build();
     left.append(&start::build(toggle_panel));
     left.append(&workspaces::build(sway));
     let center = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
-        .css_classes(["bar-center"])
         .build();
     center.append(&media::build(sway));
     let right = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
-        .css_classes(["bar-right"])
         .build();
     // Battery + task pill + clock fuse into one segmented track (waybar's
     // group/right-track); a batteryless machine skips the segment so the
@@ -178,11 +187,25 @@ fn build_bar_window(
     track.append(&clock::build());
     right.append(&track);
 
-    root.set_start_widget(Some(&left));
-    root.set_center_widget(Some(&center));
-    root.set_end_widget(Some(&right));
+    content.set_start_widget(Some(&left));
+    content.set_center_widget(Some(&center));
+    content.set_end_widget(Some(&right));
+    root.append(&content);
 
-    window.set_child(Some(&root));
+    let slide = anim::SlideBin::new();
+    slide.set_child(&root);
+    window.set_child(Some(&slide));
+
+    // Enter: fade + short settle up from below the surface edge, per bar
+    // window (so hotplugged outputs get it too). The exclusive zone is a
+    // property of the mapped surface, so tiled windows take their final
+    // size on frame one — only render nodes move. Bars never hide; the
+    // Reveal drops once the enter finishes.
+    anim::Reveal::new(&window, &root)
+        .content(&content)
+        .slide(&slide, anim::SLIDE_PX)
+        .show();
+
     window
 }
 
