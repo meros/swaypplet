@@ -1,6 +1,5 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::mpsc;
 
 use gtk4::prelude::*;
 use gtk4::{
@@ -10,6 +9,7 @@ use gtk4::{
 
 use super::NetworkState;
 use super::backend::*;
+use crate::spawn::spawn_work;
 
 // ── WiFi list builder ─────────────────────────────────────────────────────────
 
@@ -181,42 +181,29 @@ fn build_wifi_row(network: &WifiNetwork) -> ListBoxRow {
                         spinner_c.start();
                         status_c.set_visible(false);
 
-                        let (tx, rx) = mpsc::channel::<NmResult>();
-                        forget_network_async(ssid.clone(), tx);
-
+                        let ssid_bg = ssid.clone();
                         let btn_poll = btn.clone();
                         let spinner_poll = spinner_c.clone();
                         let status_poll = status_c.clone();
-                        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                            match rx.try_recv() {
-                                Ok(result) => {
-                                    spinner_poll.stop();
-                                    spinner_poll.set_visible(false);
-                                    match &result {
-                                        NmResult::Success => {
-                                            if let Some(row) =
-                                                btn_poll.ancestor(ListBoxRow::static_type())
-                                            {
-                                                row.set_sensitive(false);
-                                            }
+                        spawn_work(
+                            move || forget_network(&ssid_bg),
+                            move |result| {
+                                spinner_poll.stop();
+                                spinner_poll.set_visible(false);
+                                match &result {
+                                    NmResult::Success => {
+                                        if let Some(row) =
+                                            btn_poll.ancestor(ListBoxRow::static_type())
+                                        {
+                                            row.set_sensitive(false);
                                         }
-                                        NmResult::Failure(_) => btn_poll.set_sensitive(true),
                                     }
-                                    apply_nm_result(&status_poll, &result);
-                                    auto_hide_status(&status_poll);
-                                    glib::ControlFlow::Break
+                                    NmResult::Failure(_) => btn_poll.set_sensitive(true),
                                 }
-                                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                                    glib::ControlFlow::Continue
-                                }
-                                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                                    spinner_poll.stop();
-                                    spinner_poll.set_visible(false);
-                                    btn_poll.set_sensitive(true);
-                                    glib::ControlFlow::Break
-                                }
-                            }
-                        });
+                                apply_nm_result(&status_poll, &result);
+                                auto_hide_status(&status_poll);
+                            },
+                        );
                     }
                 });
             }
@@ -426,51 +413,20 @@ fn build_hidden_network_row(list: &ListBox, _state: &Rc<RefCell<NetworkState>>) 
             spinner_c.start();
             status_c.set_visible(false);
 
-            let (tx, rx) = mpsc::channel::<NmResult>();
-            connect_new_async(ssid, password, true, tx);
-
             let btn_poll = btn_c.clone();
             let spinner_poll = spinner_c.clone();
             let status_poll = status_c.clone();
 
-            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                match rx.try_recv() {
-                    Ok(NmResult::Success) => {
-                        spinner_poll.stop();
-                        spinner_poll.set_visible(false);
-                        btn_poll.set_sensitive(true);
-                        status_poll.set_label("✓");
-                        status_poll.add_css_class("network-status-ok");
-                        status_poll.remove_css_class("network-status-err");
-                        status_poll.set_visible(true);
-                        auto_hide_status(&status_poll);
-                        glib::ControlFlow::Break
-                    }
-                    Ok(NmResult::Failure(msg)) => {
-                        spinner_poll.stop();
-                        spinner_poll.set_visible(false);
-                        btn_poll.set_sensitive(true);
-                        let display = if msg.is_empty() {
-                            "Failed".to_string()
-                        } else {
-                            msg
-                        };
-                        status_poll.set_label(&display);
-                        status_poll.add_css_class("network-status-err");
-                        status_poll.remove_css_class("network-status-ok");
-                        status_poll.set_visible(true);
-                        auto_hide_status(&status_poll);
-                        glib::ControlFlow::Break
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        spinner_poll.stop();
-                        spinner_poll.set_visible(false);
-                        btn_poll.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                }
-            });
+            spawn_work(
+                move || connect_new(&ssid, &password, true),
+                move |result| {
+                    spinner_poll.stop();
+                    spinner_poll.set_visible(false);
+                    btn_poll.set_sensitive(true);
+                    apply_nm_result(&status_poll, &result);
+                    auto_hide_status(&status_poll);
+                },
+            );
         });
     }
 
@@ -513,32 +469,21 @@ fn wire_connect_known(btn: &Button, spinner: &Spinner, status_lbl: &Label, ssid:
         spinner_c.start();
         status_c.set_visible(false);
 
-        let (tx, rx) = mpsc::channel::<NmResult>();
-        connect_known_async(ssid.clone(), tx);
-
+        let ssid_bg = ssid.clone();
         let btn_poll = btn_c.clone();
         let spinner_poll = spinner_c.clone();
         let status_poll = status_c.clone();
 
-        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-            match rx.try_recv() {
-                Ok(result) => {
-                    spinner_poll.stop();
-                    spinner_poll.set_visible(false);
-                    btn_poll.set_sensitive(true);
-                    apply_nm_result(&status_poll, &result);
-                    auto_hide_status(&status_poll);
-                    glib::ControlFlow::Break
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    spinner_poll.stop();
-                    spinner_poll.set_visible(false);
-                    btn_poll.set_sensitive(true);
-                    glib::ControlFlow::Break
-                }
-            }
-        });
+        spawn_work(
+            move || connect_known(&ssid_bg),
+            move |result| {
+                spinner_poll.stop();
+                spinner_poll.set_visible(false);
+                btn_poll.set_sensitive(true);
+                apply_nm_result(&status_poll, &result);
+                auto_hide_status(&status_poll);
+            },
+        );
     });
 }
 
@@ -569,32 +514,21 @@ fn wire_connect_new(
         spinner_c.start();
         status_c.set_visible(false);
 
-        let (tx, rx) = mpsc::channel::<NmResult>();
-        connect_new_async(ssid.clone(), password, hidden, tx);
-
+        let ssid_bg = ssid.clone();
         let btn_poll = btn_c.clone();
         let spinner_poll = spinner_c.clone();
         let status_poll = status_c.clone();
 
-        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-            match rx.try_recv() {
-                Ok(result) => {
-                    spinner_poll.stop();
-                    spinner_poll.set_visible(false);
-                    btn_poll.set_sensitive(true);
-                    apply_nm_result(&status_poll, &result);
-                    auto_hide_status(&status_poll);
-                    glib::ControlFlow::Break
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    spinner_poll.stop();
-                    spinner_poll.set_visible(false);
-                    btn_poll.set_sensitive(true);
-                    glib::ControlFlow::Break
-                }
-            }
-        });
+        spawn_work(
+            move || connect_new(&ssid_bg, &password, hidden),
+            move |result| {
+                spinner_poll.stop();
+                spinner_poll.set_visible(false);
+                btn_poll.set_sensitive(true);
+                apply_nm_result(&status_poll, &result);
+                auto_hide_status(&status_poll);
+            },
+        );
     });
 }
 
@@ -609,61 +543,20 @@ fn wire_connect_open(btn: &Button, spinner: &Spinner, status_lbl: &Label, ssid: 
         spinner_c.start();
         status_c.set_visible(false);
 
-        let (tx, rx) = mpsc::channel::<NmResult>();
-        connect_new_async(ssid.clone(), String::new(), false, tx);
-
+        let ssid_bg = ssid.clone();
         let btn_poll = btn_c.clone();
         let spinner_poll = spinner_c.clone();
         let status_poll = status_c.clone();
 
-        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-            match rx.try_recv() {
-                Ok(result) => {
-                    spinner_poll.stop();
-                    spinner_poll.set_visible(false);
-                    btn_poll.set_sensitive(true);
-                    apply_nm_result(&status_poll, &result);
-                    auto_hide_status(&status_poll);
-                    glib::ControlFlow::Break
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    spinner_poll.stop();
-                    spinner_poll.set_visible(false);
-                    btn_poll.set_sensitive(true);
-                    glib::ControlFlow::Break
-                }
-            }
-        });
-    });
-}
-
-// ── Shared status helpers ─────────────────────────────────────────────────────
-
-fn apply_nm_result(status_lbl: &Label, result: &NmResult) {
-    match result {
-        NmResult::Success => {
-            status_lbl.set_label("✓");
-            status_lbl.add_css_class("network-status-ok");
-            status_lbl.remove_css_class("network-status-err");
-        }
-        NmResult::Failure(msg) => {
-            let display = if msg.is_empty() {
-                "Failed"
-            } else {
-                msg.as_str()
-            };
-            status_lbl.set_label(display);
-            status_lbl.add_css_class("network-status-err");
-            status_lbl.remove_css_class("network-status-ok");
-        }
-    }
-    status_lbl.set_visible(true);
-}
-
-pub fn auto_hide_status(status_lbl: &Label) {
-    let status_hide = status_lbl.clone();
-    glib::timeout_add_local_once(std::time::Duration::from_secs(4), move || {
-        status_hide.set_visible(false);
+        spawn_work(
+            move || connect_new(&ssid_bg, "", false),
+            move |result| {
+                spinner_poll.stop();
+                spinner_poll.set_visible(false);
+                btn_poll.set_sensitive(true);
+                apply_nm_result(&status_poll, &result);
+                auto_hide_status(&status_poll);
+            },
+        );
     });
 }
