@@ -173,27 +173,62 @@ button.bar-ws.urgent {
     animation: workspace-urgent-glow 0.75s steps(30) infinite alternate;
 }
 
-/* ── Bar center: media pill (mirrors waybar custom/media) ──
-   Neutral pill; playing state earns accent text + the breathing glow. */
-button.bar-media {
+/* ── Bar center: the decision slot (src/bar/decision.rs) ──
+   Empty at nominal. One occupant behind a Revealer: battery critical
+   (red, act now) or the oldest unacked waiting session (task-hue dot +
+   full description + age chip). Static once revealed (vision P2). */
+.bar-decision {
     margin: 5px 4px;
     padding: 4px 12px;
-    min-width: 0;
     min-height: 0;
     background-color: alpha(@bg1, 0.85);
     border-radius: 8px;
-    color: @fg_dim;
+    color: @fg;
     transition: background-color 150ms ease, color 150ms ease;
 }
 
-button.bar-media:hover {
+/* Battery critical owns the slot in red — the one "act now" color. */
+.bar-decision.critical {
+    background-color: @accent_quinary;
+    color: @bg0;
+}
+
+/* Task-hue dot: hue reinforces identity, the description carries it. */
+.bar-decision-dot.t1 { color: @accent; }
+.bar-decision-dot.t2 { color: @accent_secondary; }
+.bar-decision-dot.t3 { color: @accent_tertiary; }
+.bar-decision-dot.t4 { color: @accent_quaternary; }
+
+/* Waiting age + "+N more wait" suffix. */
+.bar-decision-meta {
+    font-size: 8pt;
+    color: @fg_dim;
+}
+
+.bar-decision.critical .bar-decision-meta {
+    color: @bg0;
+}
+
+/* ── Media mark: single dim achromatic ♪ (src/bar/media.rs) ──
+   Hidden with no player; .paused dims further. No pill, no title — the
+   mark is ambient, detail arrives with its popover. */
+button.bar-media-mark {
+    margin: 5px 2px;
+    padding: 4px 6px;
+    min-width: 0;
+    min-height: 0;
+    background: none;
+    border-radius: 8px;
+    color: alpha(@fg, 0.45);
+    transition: background-color 150ms ease, color 150ms ease, opacity 150ms ease;
+}
+
+button.bar-media-mark:hover {
     background-color: alpha(@bg2, 0.90);
 }
 
-/* Playing is a static accent — on the bar, a loop would burn frames for
-   hours (vision P2); the breathing glow stays on panel surfaces only. */
-button.bar-media.playing {
-    color: @accent;
+button.bar-media-mark.paused {
+    color: alpha(@fg, 0.22);
 }
 
 /* ── Bar right: battery + clock fused into one instrument track ──

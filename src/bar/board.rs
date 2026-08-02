@@ -154,14 +154,15 @@ fn bay_view(n: u8, task: &TaskState, local: bool, now: SystemTime) -> BayView {
 }
 
 /// A missing or future mtime (suspend skew) counts as age zero, matching
-/// the service's age-timer rule.
-fn session_age(s: &SessionState, now: SystemTime) -> Duration {
+/// the service's age-timer rule. Shared with the decision slot.
+pub(crate) fn session_age(s: &SessionState, now: SystemTime) -> Duration {
     s.status_mtime
         .and_then(|m| now.duration_since(m).ok())
         .unwrap_or(Duration::ZERO)
 }
 
-fn chip_label(age: Duration) -> Option<String> {
+/// `None` below the 2 min threshold. Shared with the decision slot.
+pub(crate) fn chip_label(age: Duration) -> Option<String> {
     let mins = age.as_secs() / 60;
     (age >= CHIP_AFTER).then(|| {
         if mins < 60 {
