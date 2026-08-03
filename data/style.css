@@ -135,19 +135,22 @@ window.panel {
 
 button.bar-ws {
     margin: 0;
-    /* 2px shaved off the bottom padding for the reserved ribbon lane
-       below — total height unchanged, ribbons never move geometry. */
-    padding: 4px 12px 2px;
+    /* 2px shaved off each vertical padding for the two reserved lanes —
+       total height unchanged, neither lane moves geometry. */
+    padding: 2px 12px 2px;
     min-width: 0;
     min-height: 0;
     background-color: alpha(@bg1, 0.85);
     color: @fg_dim;
     border-radius: 0;
-    /* Ribbon lane (src/bar/workspaces.rs, vision increment 10) —
-       transparent until a task ribbon lands. */
+    /* Two lanes, two vocabularies, never sharing an edge or a hue: the
+       TOP lane is the selection cap (where am I — src/bar/workspaces.rs
+       WsState), the BOTTOM lane the task ribbon (which task — vision
+       increment 10). Both transparent until their state lands. */
+    border-top: 2px solid transparent;
     border-bottom: 2px solid transparent;
-    transition: background-color 150ms ease, box-shadow 150ms ease, color 150ms ease,
-        border-bottom-color 150ms ease;
+    transition: background-color 150ms ease, color 150ms ease,
+        border-top-color 150ms ease, border-bottom-color 150ms ease;
 }
 
 button.bar-ws:not(:first-child) {
@@ -169,17 +172,38 @@ button.bar-ws:hover {
     color: @fg;
 }
 
-button.bar-ws.focused {
-    background-color: @accent;
-    color: @bg0;
-    font-weight: bold;
-    box-shadow: 0 0 8px alpha(@accent, 0.3);
+/* Selection tiers — one mark, three intensities, all achromatic. Hue is
+   spoken for: the dot and the ribbon carry task identity, so the cursor
+   cannot also be a hue without the two colliding (and the vision puts
+   position and numeral first, hue as reinforcement only). Each bar states
+   its OWN output: the workspace on this screen is the anchor, focus is a
+   step on that same mark. Focus on the other monitor therefore never
+   lights a pill here, it only drops this bar's anchor one tier. */
+button.bar-ws.visible-elsewhere {
+    border-top-color: alpha(@fg, 0.25);
 }
 
+button.bar-ws.visible-here {
+    background-color: alpha(@fg, 0.14);
+    color: @fg;
+    border-top-color: alpha(@fg, 0.55);
+}
+
+button.bar-ws.visible-here.focused {
+    background-color: alpha(@fg, 0.28);
+    color: @fg;
+    font-weight: bold;
+    border-top-color: @fg;
+}
+
+/* Static red tier, no keyframe loop: a looping "calm" animation is
+   per-frame wakeups for hours (vision P2 bans it outright). The onset
+   nudge that belongs here waits on an incremental rebuild(), same
+   blocker as occupancy ticks. */
 button.bar-ws.urgent {
     background-color: @accent_quinary;
     color: @bg0;
-    animation: workspace-urgent-glow 0.75s steps(30) infinite alternate;
+    border-top-color: @accent_quinary;
 }
 
 /* Task ribbons: 2px lane under each task group — off = no session, dim
@@ -566,25 +590,11 @@ button.bar-popover-action {
 .bar-ws-dot.task3 { color: @accent_tertiary; }
 .bar-ws-dot.task4 { color: @accent_quaternary; }
 
-.bar-root.bar-task1 button.bar-ws.focused {
-    background-color: @accent;
-    box-shadow: 0 0 10px alpha(@accent, 0.45);
-}
-
-.bar-root.bar-task2 button.bar-ws.focused {
-    background-color: @accent_secondary;
-    box-shadow: 0 0 10px alpha(@accent_secondary, 0.45);
-}
-
-.bar-root.bar-task3 button.bar-ws.focused {
-    background-color: @accent_tertiary;
-    box-shadow: 0 0 10px alpha(@accent_tertiary, 0.45);
-}
-
-.bar-root.bar-task4 button.bar-ws.focused {
-    background-color: @accent_quaternary;
-    box-shadow: 0 0 10px alpha(@accent_quaternary, 0.45);
-}
+/* The accent ripple deliberately stops at the track band above: it is
+   keyed to this output's LOCAL task, so stamping it on the selected
+   workspace fused two different facts (which task is on this screen, and
+   which workspace holds focus, possibly on the other screen) into one
+   mark. The selection tiers are achromatic for that reason. */
 
 /* ── State-driven motion (matches waybar) ──
    Pure outer glow, no bevel layers. Box-shadow animations replace the
@@ -593,11 +603,6 @@ button.bar-popover-action {
 @keyframes media-breathing {
     from { box-shadow: 0 0 0 alpha(@accent, 0.0); }
     to   { box-shadow: 0 0 10px alpha(@accent, 0.40); }
-}
-
-@keyframes workspace-urgent-glow {
-    from { box-shadow: 0 0 2px alpha(@accent_quinary, 0.2); }
-    to   { box-shadow: 0 0 14px alpha(@accent_quinary, 0.65); }
 }
 
 /* For bordered cards with a drop shadow (e.g. critical notifications). */
