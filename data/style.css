@@ -127,10 +127,29 @@ window.panel {
     color: @fg;
 }
 
-/* Segmented track: flat buttons fused into one pill, only the ends round. */
-.bar-workspaces {
+/* One fused pill per screen (src/bar/workspaces.rs group_by_output),
+   ordered left-to-right as the monitors stand; the holder carries the
+   strip's margin so the gap between pills is the only thing separating
+   them. One screen = one pill = the pre-grouping look. */
+.bar-ws-groups {
     margin: 5px 4px;
+}
+
+/* Segmented track: flat buttons fused into one pill, only the ends round.
+   Each pill is a segmented control over one screen's workspaces, so
+   exactly one segment in it is .current. The screen WITHOUT input focus
+   dims as a whole — container-level, the way iTerm2 dims unfocused split
+   panes and VS Code unfocused editors. Dimming costs no new shape, keeps
+   the pill readable as a keymap, and scales to any number of screens;
+   the .focused step inside it is the second, redundant channel. */
+.bar-workspaces {
     border-radius: 8px;
+    opacity: 0.62;
+    transition: opacity 150ms ease;
+}
+
+.bar-workspaces.active-screen {
+    opacity: 1;
 }
 
 button.bar-ws {
@@ -172,24 +191,19 @@ button.bar-ws:hover {
     color: @fg;
 }
 
-/* Selection tiers — one mark, three intensities, all achromatic. Hue is
+/* Selection tiers — one mark, two intensities, all achromatic. Hue is
    spoken for: the dot and the ribbon carry task identity, so the cursor
    cannot also be a hue without the two colliding (and the vision puts
-   position and numeral first, hue as reinforcement only). Each bar states
-   its OWN output: the workspace on this screen is the anchor, focus is a
-   step on that same mark. Focus on the other monitor therefore never
-   lights a pill here, it only drops this bar's anchor one tier. */
-button.bar-ws.visible-elsewhere {
-    border-top-color: alpha(@fg, 0.25);
-}
-
-button.bar-ws.visible-here {
+   position and numeral first, hue as reinforcement only). .current is
+   what its screen shows; .focused is that same mark stepped up on the
+   screen holding input, which only ever happens inside .active-screen. */
+button.bar-ws.current {
     background-color: alpha(@fg, 0.14);
     color: @fg;
     border-top-color: alpha(@fg, 0.55);
 }
 
-button.bar-ws.visible-here.focused {
+button.bar-ws.current.focused {
     background-color: alpha(@fg, 0.28);
     color: @fg;
     font-weight: bold;

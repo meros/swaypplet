@@ -36,10 +36,21 @@ pub struct WorkspaceInfo {
     pub visible: bool,
 }
 
+/// One connected output and where it sits in the layout, so consumers can
+/// order per-output UI the way the screens actually stand on the desk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputInfo {
+    pub name: String,
+    pub x: i32,
+    pub y: i32,
+}
+
 /// Full cached model, replaced wholesale on every sway event.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SwayState {
     pub workspaces: Vec<WorkspaceInfo>,
+    /// Connected outputs in tree order; [`OutputInfo`] carries placement.
+    pub outputs: Vec<OutputInfo>,
     /// pid → workspace name for every view in the tree (task-pill lookup).
     pub pid_workspaces: HashMap<i32, String>,
     /// The focused view is fullscreen — OSD interjections route to the
@@ -89,10 +100,6 @@ impl SwayService {
     /// Full state snapshot (cloned — the model is a handful of small rows).
     pub fn snapshot(&self) -> SwayState {
         self.state.with(Clone::clone)
-    }
-
-    pub fn workspaces(&self) -> Vec<WorkspaceInfo> {
-        self.state.with(|s| s.workspaces.clone())
     }
 }
 
@@ -173,6 +180,9 @@ fn snapshot(query: &mut Connection) -> Result<SwayState, swayipc::Error> {
     let tree = query.get_tree()?;
     Ok(SwayState {
         workspaces: workspace_infos(query.get_workspaces()?),
+        // From the tree we already fetched — get_outputs would be a third
+        // round-trip per event for the same two numbers.
+        outputs: output_infos(&tree),
         pid_workspaces: index_tree(&tree),
         focused_fullscreen: focused_fullscreen(&tree),
         binding_mode: query.get_binding_state()?,
@@ -191,6 +201,23 @@ fn workspace_infos(reply: Vec<swayipc::Workspace>) -> Vec<WorkspaceInfo> {
             focused: w.focused,
             urgent: w.urgent,
             visible: w.visible,
+        })
+        .collect()
+}
+
+/// The tree's output children, minus sway's `__i3` pseudo-output (which
+/// hosts the scratchpad and has no place on any desk).
+fn output_infos(root: &Node) -> Vec<OutputInfo> {
+    root.nodes
+        .iter()
+        .filter(|n| n.node_type == NodeType::Output)
+        .filter_map(|n| {
+            let name = n.name.clone().filter(|s| !s.starts_with("__"))?;
+            Some(OutputInfo {
+                name,
+                x: n.rect.x,
+                y: n.rect.y,
+            })
         })
         .collect()
 }
