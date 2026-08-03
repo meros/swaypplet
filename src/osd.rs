@@ -326,8 +326,6 @@ impl Osd {
         window.set_child(Some(&wrapper));
 
         let reveal = anim::Reveal::new(&window, &outer).content(&content);
-        // Premap warms the compositor blur pipeline (see Reveal::premap).
-        reveal.premap();
 
         Osd {
             icon_label,

@@ -277,6 +277,13 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
         window.present();
     }
 
+    // First card into an empty (parked) stack: re-arm the compositor frost
+    // the emptied branch dropped (see anim::set_layer_blur).
+    let was_empty = st.borrow().cards.iter().all(|c| c.exiting);
+    if was_empty {
+        anim::set_layer_blur(Some(POPUP_CONFIG.namespace.into()), true, || {});
+    }
+
     // Parenting the card can synthesize a pointer enter whose handler
     // borrows the state — put it on the canvas before taking the borrow.
     let (canvas, hovered) = {
@@ -529,10 +536,18 @@ fn ensure_tick(st: &Rc<RefCell<State>>) {
         }
         if emptied {
             // Stay MAPPED with an empty input region instead of unmapping:
-            // all cards are gone so nothing renders (transparent canvas,
-            // alpha-0 everywhere — the swayfx stencil skips it), and swayfx
-            // rebuilds its blur pipeline on map/unmap, which flashes a
-            // black frame. Same parking rationale as anim::Reveal.
+            // swayfx rebuilds its blur pipeline on map/unmap, which flashes
+            // a black frame. The frost must be dropped explicitly — a
+            // parked surface's stale blur lingers otherwise (see
+            // anim::set_layer_blur); show() re-arms it with the next card.
+            let st_blur = st.clone();
+            anim::set_layer_blur(Some(POPUP_CONFIG.namespace.into()), false, move || {
+                // A card that arrived while sway was replying already sent its
+                // own `blur enable`, which this disable may have overtaken.
+                if st_blur.borrow().cards.iter().any(|c| !c.exiting) {
+                    anim::set_layer_blur(Some(POPUP_CONFIG.namespace.into()), true, || {});
+                }
+            });
             if let Ok(s) = st.try_borrow() {
                 update_input_region(&s);
             }

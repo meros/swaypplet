@@ -65,6 +65,37 @@ pub fn animations_enabled() -> bool {
     gtk4::Settings::default().is_none_or(|s| s.is_gtk_enable_animations())
 }
 
+/// Toggle a namespace's compositor frost at runtime, because neither of the
+/// two client-side ways of hiding a frosted layer surface gets rid of it:
+/// mapping or unmapping a BLURRED surface makes swayfx re-initialize blur
+/// state and that transition frame renders black, and a surface that stays
+/// mapped with an all-alpha-0 buffer keeps a stale frost despite
+/// blur_ignore_transparent. Disabling the blur node is unconditional —
+/// swayfx skips the node entirely, no stencil, nothing drawn. So blur is
+/// show/hide state: enabled right after map (the frost lands a frame or two
+/// into the fade, inside the GLASS_MS tint lead), disabled before unmap.
+///
+/// Only ever `blur enable|disable`, NEVER `reset`. sway merges a runtime
+/// `layer_effects` into the namespace's existing criteria (layer_criteria.c
+/// `layer_criteria_add` clones the old effects first), so this keeps the
+/// blur_ignore_transparent and corner_radius the sway config set — and, more
+/// importantly, `reset` clears blur_ignore_transparent, which sends sway
+/// into `wlr_scene_blur_set_transparency_mask_source(node, NULL)`; that
+/// dereferences the NULL source at scenefx wlr_scene.c:1153 and takes the
+/// whole compositor down (scenefx 0.4.1-git/37ccd72, swayfx 0.5.3-git).
+///
+/// `then` runs on the GTK thread once sway has acknowledged the change,
+/// which hide uses to sequence the unmap after the frost is gone — and on
+/// failure too, so a wedged socket can't strand a surface mapped forever.
+pub fn set_layer_blur(namespace: Option<glib::GString>, on: bool, then: impl FnOnce() + 'static) {
+    let Some(ns) = namespace else {
+        then();
+        return;
+    };
+    let effect = if on { "blur enable" } else { "blur disable" };
+    crate::sway_ipc::run_command_then(&format!("layer_effects \"{ns}\" \"{effect}\""), then);
+}
+
 /// The glass-pane opacity channel for a fade between `from` and `to` at
 /// linear progress `t` of a `total_ms` animation. Rising fades arrive
 /// within [`GLASS_MS`]; falling fades hold until the last [`GLASS_MS`] and
@@ -89,10 +120,6 @@ struct RevealInner {
     slide: RefCell<Option<(SlideBin, f64)>>,
     shown: Cell<bool>,
     tick: RefCell<Option<gtk4::TickCallbackId>>,
-    /// The window's real keyboard interactivity, captured at construction.
-    /// Parking (see [`Reveal::finish_hide`]) drops it to None so an
-    /// invisible-but-mapped surface never eats keys; show() restores this.
-    kb_mode: Cell<gtk4_layer_shell::KeyboardMode>,
 }
 
 /// One show/hide transition for every glass surface (motion on glass, see
@@ -110,11 +137,6 @@ impl Reveal {
     /// its alpha is what swayfx stencils blur against, so [`Reveal`] owns
     /// its opacity outright and lands it on exactly 0.0 when hidden.
     pub fn new(window: &gtk4::Window, pane: &impl IsA<gtk4::Widget>) -> Self {
-        let kb_mode = if window.is_layer_window() {
-            window.keyboard_mode()
-        } else {
-            gtk4_layer_shell::KeyboardMode::None
-        };
         Reveal {
             inner: Rc::new(RevealInner {
                 window: window.clone(),
@@ -123,30 +145,8 @@ impl Reveal {
                 slide: RefCell::new(None),
                 shown: Cell::new(false),
                 tick: RefCell::new(None),
-                kb_mode: Cell::new(kb_mode),
             }),
         }
-    }
-
-    /// Map the window in its parked-hidden state, once, at construction.
-    /// swayfx rebuilds its blur pipeline when a blurred layer surface maps,
-    /// and that transition frame renders black — pre-mapping pays the cost
-    /// at startup instead of on the first user-visible fade, and
-    /// finish_hide keeps the surface mapped ever after for the same reason.
-    pub fn premap(&self) {
-        let inner = &self.inner;
-        inner.pane.set_opacity(0.0);
-        if let Some(c) = &*inner.content.borrow() {
-            c.set_opacity(0.0);
-        }
-        if let Some((bin, px)) = &*inner.slide.borrow() {
-            bin.jump_to(*px);
-        }
-        inner.window.set_visible(true);
-        // The gdk surface only exists after realize; park from idle so the
-        // empty input region lands on it.
-        let this = self.clone();
-        glib::idle_add_local_once(move || this.park_input());
     }
 
     /// Everything drawn on the glass; fades over the full enter/exit
@@ -172,8 +172,14 @@ impl Reveal {
         let inner = &self.inner;
         inner.shown.set(true);
         let was_visible = inner.window.is_visible();
+        // Map first, frost second: the surface maps effect-less (nothing
+        // for swayfx to initialize, so no black frame), and the enable
+        // lands a frame or two into the fade — inside the GLASS_MS tint
+        // lead (see set_layer_blur).
         inner.window.set_visible(true);
-        self.unpark_input();
+        if inner.window.is_layer_window() {
+            set_layer_blur(inner.window.namespace(), true, || {});
+        }
         if !animations_enabled() {
             self.cancel_tick();
             inner.pane.set_opacity(1.0);
@@ -223,13 +229,13 @@ impl Reveal {
         }
     }
 
-    /// Hide by PARKING, not unmapping: opacities to exactly 0.0 (the swayfx
-    /// stencil discards alpha-0 pixels, so nothing renders and no frost
-    /// shows), empty input region so clicks pass through, keyboard mode
-    /// None so no keys are eaten. The surface stays mapped because swayfx
-    /// re-initializes its blur pipeline on map/unmap and that transition
-    /// frame renders black — the flash this whole arrangement exists to
-    /// avoid.
+    /// Hide fully: opacities land on exactly 0.0 and the surface UNMAPS, so
+    /// interaction with whatever is behind resumes unconditionally. The
+    /// frost is dropped first and the unmap waits for sway's acknowledgment
+    /// — unmapping a blurred surface flashes a black frame, and a mapped
+    /// alpha-0 one keeps a stale frost, so blur-off-then-unmap is the only
+    /// clean exit (see [`set_layer_blur`]). A show() racing the
+    /// acknowledgment wins: the unmap is skipped.
     fn finish_hide(&self) {
         let inner = &self.inner;
         inner.pane.set_opacity(0.0);
@@ -239,31 +245,22 @@ impl Reveal {
         if let Some((bin, px)) = &*inner.slide.borrow() {
             bin.jump_to(*px);
         }
-        if inner.window.is_visible() {
-            self.park_input();
+        if !inner.window.is_visible() {
+            return;
         }
-    }
-
-    fn park_input(&self) {
-        let inner = &self.inner;
         if inner.window.is_layer_window() {
-            inner
-                .window
-                .set_keyboard_mode(gtk4_layer_shell::KeyboardMode::None);
-        }
-        if let Some(surface) = inner.window.surface() {
-            surface.set_input_region(Some(&cairo::Region::create()));
-        }
-    }
-
-    fn unpark_input(&self) {
-        let inner = &self.inner;
-        if inner.window.is_layer_window() {
-            inner.window.set_keyboard_mode(inner.kb_mode.get());
-        }
-        if let Some(surface) = inner.window.surface() {
-            // None restores the default full-surface input region.
-            surface.set_input_region(None);
+            let this = self.clone();
+            set_layer_blur(inner.window.namespace(), false, move || {
+                if this.inner.shown.get() {
+                    // A show() beat the reply here; its own `blur enable` may
+                    // have reached sway before this disable, so restate it.
+                    set_layer_blur(this.inner.window.namespace(), true, || {});
+                } else {
+                    this.inner.window.set_visible(false);
+                }
+            });
+        } else {
+            inner.window.set_visible(false);
         }
     }
 
