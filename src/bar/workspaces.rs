@@ -30,19 +30,21 @@
 //! meanings on one channel (vision: position and numeral first, hue as
 //! reinforcement only).
 //!
-//! Task ribbons (docs/BAR_VISION.md, increment 10): a 2 px bottom lane
-//! under each task's workspace group from [`TaskStateService`] — off = no
-//! session, dim solid = working, task hue = waiting. The buttons are
-//! fused segments, so per-button borders read as one ribbon across the
-//! group. Selection uses the top lane, so the two never collide.
+//! Task ribbons (docs/BAR_VISION.md, increment 10) live in the bottom
+//! 2 px lane, so selection (top lane) and task state never collide. The
+//! buttons are fused segments, so per-button borders read as one ribbon
+//! across a task's four workspaces: off = no session, dim solid = the
+//! task is live, task hue = *this* workspace holds a waiting session
+//! ([`TaskRibbon`]). The lane tells you which task wants you, the bright
+//! segment tells you which key to press.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk4::prelude::*;
 
 use crate::sway_ipc::{self, OutputInfo, SwayService, WorkspaceInfo};
-use crate::task_state::{Activity, TaskSnapshot, TaskStateService};
+use crate::task_state::{Activity, TaskSnapshot, TaskStateService, task_of_name};
 
 /// Gap between per-screen group pills. Wide enough to read as separate
 /// pills, narrow enough that the strip stays one cluster.
@@ -79,18 +81,11 @@ pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box 
         .css_classes(["bar-ws-groups"])
         .build();
 
-    // Buttons are rebuilt only when the workspace rows, the output
-    // placement or the task ribbons change: the service also fires for
-    // pid-map-only snapshots (window churn), which must not rebuild
-    // widgets mid-hover. Ribbon state joins the key safely — task
-    // transitions are a few per hour (vision). Occupancy ticks stay
-    // backlog: window-event data in this key would defeat the
-    // anti-shimmer gate it exists for.
-    type CacheKey = (Vec<WorkspaceInfo>, Vec<OutputInfo>, [Ribbon; 4]);
-    let cache: Rc<RefCell<CacheKey>> = Rc::new(RefCell::new(<_>::default()));
+    let pills: Rc<RefCell<Vec<Pill>>> = Rc::new(RefCell::new(Vec::new()));
     let weak = container.downgrade();
     let sway_cb = sway.clone();
     let tasks_cb = tasks.clone();
+    let pills_cb = pills.clone();
     let sync = Rc::new(move || {
         // The observer outlives the widget when its output is unplugged
         // (the service has no disconnect); a dead weak ref makes the
@@ -101,17 +96,19 @@ pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box 
         let snap = sway_cb.snapshot();
         let mut workspaces = snap.workspaces;
         sort_workspaces(&mut workspaces);
-        let outputs = snap.outputs;
-        let ribbons = ribbon_states(&tasks_cb.snapshot());
-        {
-            let cache = cache.borrow();
-            if cache.0 == workspaces && cache.1 == outputs && cache.2 == ribbons {
-                return;
-            }
+        let groups = group_by_output(&workspaces, &snap.outputs);
+        let plans = ribbon_plans(&tasks_cb.snapshot());
+
+        let mut pills = pills_cb.borrow_mut();
+        // Widgets are recreated only when the *shape* changes: workspaces
+        // appearing, vanishing or moving screen. Everything else — focus,
+        // current, urgent, ribbons — is a class diff on live widgets, so
+        // a workspace switch no longer destroys the button under the
+        // pointer and the 150 ms tier transitions actually get to play.
+        if !matches_layout(&pills, &groups) {
+            *pills = raise(&container, &groups);
         }
-        let groups = group_by_output(&workspaces, &outputs);
-        rebuild(&container, &groups, &ribbons);
-        *cache.borrow_mut() = (workspaces, outputs, ribbons);
+        apply(&pills, &groups, &plans);
     });
     sync();
     let sync_cb = sync.clone();
@@ -122,47 +119,149 @@ pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box 
     container
 }
 
-fn rebuild(container: &gtk4::Box, groups: &[Group], ribbons: &[Ribbon; 4]) {
+/// One screen's pill and its live segment widgets.
+struct Pill {
+    widget: gtk4::Box,
+    active: Cell<bool>,
+    segments: Vec<Segment>,
+}
+
+/// One workspace button plus the last state written to it, so a snapshot
+/// that changes nothing touches no CSS (the PillView cache pattern).
+struct Segment {
+    workspace: String,
+    /// Task strip membership, fixed for the workspace's lifetime.
+    task: Option<usize>,
+    button: gtk4::Button,
+    view: Cell<SegView>,
+}
+
+/// Everything CSS-visible about a segment, in one comparable value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SegView {
+    state: WsState,
+    urgent: bool,
+    ribbon: Ribbon,
+}
+
+impl SegView {
+    /// The state a freshly raised segment claims to be in. No real state
+    /// equals it, so the first [`apply`] after a rebuild always writes.
+    const UNWRITTEN: Self = Self {
+        state: WsState::Unwritten,
+        urgent: false,
+        ribbon: Ribbon::Off,
+    };
+}
+
+/// True when the built widgets already match the groups' shape: same
+/// screens in the same order, each holding the same workspaces.
+fn matches_layout(pills: &[Pill], groups: &[Group]) -> bool {
+    pills.len() == groups.len()
+        && pills.iter().zip(groups).all(|(pill, group)| {
+            pill.segments.len() == group.workspaces.len()
+                && pill
+                    .segments
+                    .iter()
+                    .zip(&group.workspaces)
+                    .all(|(seg, ws)| seg.workspace == ws.name)
+        })
+}
+
+/// Build the widget tree from scratch. State classes are left to
+/// [`apply`]; every fresh segment starts on a view no real state equals,
+/// so the first apply always writes.
+fn raise(container: &gtk4::Box, groups: &[Group]) -> Vec<Pill> {
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
-    for group in groups {
-        let pill = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .css_classes(["bar-workspaces"])
-            .build();
-        if group.active {
-            pill.add_css_class("active-screen");
-        }
-        for ws in &group.workspaces {
-            let btn = gtk4::Button::builder()
-                .css_classes(["bar-ws"])
-                .child(&label_widget(ws.num, &ws.name))
+    groups
+        .iter()
+        .map(|group| {
+            let widget = gtk4::Box::builder()
+                .orientation(gtk4::Orientation::Horizontal)
+                .css_classes(["bar-workspaces"])
                 .build();
-            match ws_state(ws) {
-                WsState::Idle => {}
-                WsState::Current => btn.add_css_class("current"),
-                WsState::Focused => {
-                    btn.add_css_class("current");
-                    btn.add_css_class("focused");
-                }
+            let segments = group
+                .workspaces
+                .iter()
+                .map(|ws| {
+                    let button = gtk4::Button::builder()
+                        .css_classes(["bar-ws"])
+                        .child(&label_widget(ws.num, &ws.name))
+                        .build();
+                    let cmd = switch_command(ws.num, &ws.name);
+                    button.connect_clicked(move |_| sway_ipc::run_command(&cmd));
+                    widget.append(&button);
+                    Segment {
+                        workspace: ws.name.clone(),
+                        task: task_label(ws.num).map(|(task, _)| task),
+                        button,
+                        view: Cell::new(SegView::UNWRITTEN),
+                    }
+                })
+                .collect();
+            container.append(&widget);
+            Pill {
+                widget,
+                active: Cell::new(false),
+                segments,
             }
-            if ws.urgent {
-                btn.add_css_class("urgent");
+        })
+        .collect()
+}
+
+/// Write current state onto the live widgets. Callers guarantee the
+/// shapes match ([`matches_layout`]).
+fn apply(pills: &[Pill], groups: &[Group], plans: &[TaskRibbon; 4]) {
+    for (pill, group) in pills.iter().zip(groups) {
+        if pill.active.replace(group.active) != group.active {
+            match group.active {
+                true => pill.widget.add_css_class("active-screen"),
+                false => pill.widget.remove_css_class("active-screen"),
             }
-            if let Some((task, _)) = task_label(ws.num) {
-                apply_ribbon(&btn, task, ribbons[task - 1]);
-            }
-            let cmd = switch_command(ws.num, &ws.name);
-            btn.connect_clicked(move |_| sway_ipc::run_command(&cmd));
-            pill.append(&btn);
         }
-        container.append(&pill);
+        for (seg, ws) in pill.segments.iter().zip(&group.workspaces) {
+            let view = SegView {
+                state: ws_state(ws),
+                urgent: ws.urgent,
+                ribbon: seg
+                    .task
+                    .map_or(Ribbon::Off, |task| ribbon_for(&plans[task - 1], &ws.name)),
+            };
+            if seg.view.replace(view) != view {
+                write_seg(&seg.button, seg.task, view);
+            }
+        }
     }
 }
 
-fn apply_ribbon(btn: &gtk4::Button, task: usize, ribbon: Ribbon) {
-    match ribbon {
+fn write_seg(btn: &gtk4::Button, task: Option<usize>, view: SegView) {
+    for class in [
+        "current",
+        "focused",
+        "urgent",
+        "ribbon-working",
+        "ribbon-waiting",
+    ] {
+        btn.remove_css_class(class);
+    }
+    if let Some(task) = task {
+        btn.remove_css_class(&format!("task{task}"));
+    }
+    match view.state {
+        WsState::Unwritten | WsState::Idle => {}
+        WsState::Current => btn.add_css_class("current"),
+        WsState::Focused => {
+            btn.add_css_class("current");
+            btn.add_css_class("focused");
+        }
+    }
+    if view.urgent {
+        btn.add_css_class("urgent");
+    }
+    let Some(task) = task else { return };
+    match view.ribbon {
         Ribbon::Off => {}
         Ribbon::Working => btn.add_css_class("ribbon-working"),
         Ribbon::Waiting => {
@@ -247,6 +346,9 @@ fn group_by_output(workspaces: &[WorkspaceInfo], outputs: &[OutputInfo]) -> Vec<
 /// competing with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WsState {
+    /// Sentinel for a segment whose classes have never been written; see
+    /// [`SegView::UNWRITTEN`]. Never produced by [`ws_state`].
+    Unwritten,
     /// Not on screen anywhere.
     Idle,
     /// The selected segment of its screen's pill — what that screen shows.
@@ -274,21 +376,56 @@ enum Ribbon {
     Waiting,
 }
 
-/// Waiting outranks working. Stopped and stale sessions read Off: three
-/// encodings is the whole ribbon vocabulary, and stale must not
-/// impersonate a live state (P9) — the board's OFF-flag carries it.
-fn ribbon_states(snap: &TaskSnapshot) -> [Ribbon; 4] {
+/// One task's ribbon, resolved down to the workspace holding the session
+/// (PINPOINT). The old ribbon painted the task hue under all four of a
+/// task's workspaces, so it said "task 2 wants you" without saying
+/// whether that is `2¹` or `2⁴` — the strip's only verb is "go there",
+/// and it was withholding the where. `SessionState.workspace` already
+/// carries it, so the hue now lands on the one segment you would press.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct TaskRibbon {
+    /// Any session working: the dim lane, unchanged in meaning.
+    working: bool,
+    /// Workspace names holding a waiting session.
+    waiting_on: Vec<String>,
+    /// A waiting session sits on a workspace outside its own task strip
+    /// (moved by hand, or a generic workspace). No segment can point at
+    /// it, so the whole group keeps the old whole-lane hue rather than
+    /// losing the signal.
+    waiting_unplaced: bool,
+}
+
+/// Stopped and stale sessions leave no ribbon: three encodings is the
+/// whole vocabulary, and stale must not impersonate a live state (P9) —
+/// the board's OFF-flag carries it.
+fn ribbon_plans(snap: &TaskSnapshot) -> [TaskRibbon; 4] {
     std::array::from_fn(|i| {
+        let task = i as u8 + 1;
         let sessions = &snap.tasks[i].sessions;
-        let any = |a: Activity| sessions.iter().any(|s| s.activity == a);
-        if any(Activity::Waiting) {
-            Ribbon::Waiting
-        } else if any(Activity::Working) {
-            Ribbon::Working
-        } else {
-            Ribbon::Off
+        let mut plan = TaskRibbon {
+            working: sessions.iter().any(|s| s.activity == Activity::Working),
+            ..Default::default()
+        };
+        for waiting in sessions.iter().filter(|s| s.activity == Activity::Waiting) {
+            match task_of_name(&waiting.workspace) == Some(task) {
+                true => plan.waiting_on.push(waiting.workspace.clone()),
+                false => plan.waiting_unplaced = true,
+            }
         }
+        plan
     })
+}
+
+/// The ribbon one workspace draws: the task's hue only where the waiting
+/// session actually sits, the dim lane across its siblings.
+fn ribbon_for(plan: &TaskRibbon, workspace: &str) -> Ribbon {
+    if plan.waiting_unplaced || plan.waiting_on.iter().any(|w| w == workspace) {
+        Ribbon::Waiting
+    } else if plan.working || !plan.waiting_on.is_empty() {
+        Ribbon::Working
+    } else {
+        Ribbon::Off
+    }
 }
 
 /// Numbered workspaces in numeric order, named-only ones (num -1) last,
@@ -506,27 +643,95 @@ mod tests {
         );
     }
 
-    #[test]
-    fn ribbons_rank_waiting_over_working_and_quiet_the_rest() {
-        use crate::task_state::SessionState;
-        let session = |activity| SessionState {
+    fn session(activity: Activity, workspace: &str) -> crate::task_state::SessionState {
+        crate::task_state::SessionState {
             pid: 1,
             desc: "d".into(),
             activity,
             progress: None,
-            workspace: "5:t2a".into(),
+            workspace: workspace.into(),
             status_mtime: None,
             acked: false,
-        };
+        }
+    }
+
+    /// Task 2's four workspaces, in strip order.
+    const T2: [&str; 4] = ["5:t2a", "6:t2b", "7:t2c", "8:t2d"];
+
+    fn lane(plan: &TaskRibbon) -> Vec<Ribbon> {
+        T2.iter().map(|w| ribbon_for(plan, w)).collect()
+    }
+
+    #[test]
+    fn stopped_and_stale_tasks_draw_no_ribbon() {
         let mut snap = TaskSnapshot::default();
-        snap.tasks[0].sessions = vec![session(Activity::Working), session(Activity::Waiting)];
-        snap.tasks[1].sessions = vec![session(Activity::Working)];
-        // Stopped/stale-only tasks stay Off — the board carries those.
-        snap.tasks[2].sessions = vec![session(Activity::Stopped), session(Activity::Stale)];
+        snap.tasks[1].sessions = vec![
+            session(Activity::Stopped, "5:t2a"),
+            session(Activity::Stale, "6:t2b"),
+        ];
+        assert_eq!(lane(&ribbon_plans(&snap)[1]), [Ribbon::Off; 4]);
+    }
+
+    #[test]
+    fn working_draws_the_dim_lane_across_the_whole_task() {
+        let mut snap = TaskSnapshot::default();
+        snap.tasks[1].sessions = vec![session(Activity::Working, "7:t2c")];
+        assert_eq!(lane(&ribbon_plans(&snap)[1]), [Ribbon::Working; 4]);
+    }
+
+    #[test]
+    fn waiting_lights_only_the_workspace_holding_it() {
+        let mut snap = TaskSnapshot::default();
+        snap.tasks[1].sessions = vec![
+            session(Activity::Working, "5:t2a"),
+            session(Activity::Waiting, "7:t2c"),
+        ];
+        // The lane says task 2 is live; the hue says press 7:t2c.
         assert_eq!(
-            ribbon_states(&snap),
-            [Ribbon::Waiting, Ribbon::Working, Ribbon::Off, Ribbon::Off]
+            lane(&ribbon_plans(&snap)[1]),
+            [
+                Ribbon::Working,
+                Ribbon::Working,
+                Ribbon::Waiting,
+                Ribbon::Working
+            ]
         );
+    }
+
+    #[test]
+    fn two_waits_in_one_task_light_both_segments() {
+        let mut snap = TaskSnapshot::default();
+        snap.tasks[1].sessions = vec![
+            session(Activity::Waiting, "5:t2a"),
+            session(Activity::Waiting, "8:t2d"),
+        ];
+        assert_eq!(
+            lane(&ribbon_plans(&snap)[1]),
+            [
+                Ribbon::Waiting,
+                Ribbon::Working,
+                Ribbon::Working,
+                Ribbon::Waiting
+            ]
+        );
+    }
+
+    #[test]
+    fn a_wait_parked_outside_its_task_keeps_the_whole_lane_hued() {
+        let mut snap = TaskSnapshot::default();
+        // Session moved to the browser workspace: no segment can point at
+        // it, so the signal degrades to the old group-wide hue.
+        snap.tasks[1].sessions = vec![session(Activity::Waiting, "17:wb")];
+        assert_eq!(lane(&ribbon_plans(&snap)[1]), [Ribbon::Waiting; 4]);
+    }
+
+    #[test]
+    fn tasks_do_not_bleed_into_each_other() {
+        let mut snap = TaskSnapshot::default();
+        snap.tasks[1].sessions = vec![session(Activity::Waiting, "5:t2a")];
+        let plans = ribbon_plans(&snap);
+        assert_eq!(lane(&plans[0]), [Ribbon::Off; 4]);
+        assert_eq!(ribbon_for(&plans[0], "1:t1a"), Ribbon::Off);
     }
 
     #[test]
