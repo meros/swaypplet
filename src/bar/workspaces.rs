@@ -1,21 +1,52 @@
 //! Workspaces module — one button per sway workspace, driven by the
-//! [`SwayService`] observer. Every bar lists all workspaces regardless of
-//! output (waybar's `all-outputs = true`), but *states* them per output:
-//! see [`WsState`].
+//! [`SwayService`] observer.
+//!
+//! # The strip's vocabulary
+//!
+//! Two levels, and every bar draws them identically — the strip states
+//! the world, not the bar's own point of view, so both screens agree on
+//! what they show.
+//!
+//! **Groups are screens.** [`group_by_output`] splits the strip into one
+//! fused pill per output, ordered the way the monitors stand on the desk.
+//! Each pill is a segmented control in the classic sense (Apple HIG:
+//! mutually exclusive segments, exactly one selected), and the selected
+//! segment is what that screen is showing. The pill for the screen
+//! *without* input focus dims as a whole — the container-level cue iTerm2
+//! uses for unfocused split panes and VS Code for unfocused editors. It
+//! costs no new shape and scales to any number of screens. One screen
+//! means one pill, always undimmed: exactly the pre-grouping look.
+//!
+//! **Buttons are workspaces** ([`WsState`]): idle, `current` (this
+//! screen's selected segment), or `focused` (`current`, and its screen
+//! holds input). Focus is a step on the `current` mark, never a mark of
+//! its own — the inactive-selection convention (VS Code's
+//! list.activeSelection vs list.inactiveSelection). It is redundant with
+//! the group dimming on purpose: two channels for the single most-read
+//! state in the bar.
+//!
+//! Everything here is achromatic. Hue belongs to task identity — the dot
+//! and the ribbon — and a cursor that also carried hue would put two
+//! meanings on one channel (vision: position and numeral first, hue as
+//! reinforcement only).
 //!
 //! Task ribbons (docs/BAR_VISION.md, increment 10): a 2 px bottom lane
 //! under each task's workspace group from [`TaskStateService`] — off = no
 //! session, dim solid = working, task hue = waiting. The buttons are
 //! fused segments, so per-button borders read as one ribbon across the
-//! group.
+//! group. Selection uses the top lane, so the two never collide.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::sway_ipc::{self, SwayService, WorkspaceInfo};
+use crate::sway_ipc::{self, OutputInfo, SwayService, WorkspaceInfo};
 use crate::task_state::{Activity, TaskSnapshot, TaskStateService};
+
+/// Gap between per-screen group pills. Wide enough to read as separate
+/// pills, narrow enough that the strip stays one cluster.
+const GROUP_GAP_PX: i32 = 8;
 
 // Label tables — mirror users/modules/workspace-config.nix (nixos repo):
 // nums 1–16 are 4 tasks × 4 screens rendered "1¹".."4⁴" behind a
@@ -39,26 +70,24 @@ const GENERIC_LABELS: &[(i32, &str)] = &[
     (29, "󰗃 y"),
 ];
 
-/// `output` is this bar's sway output name (gdk connector), the same
-/// value `board::build` takes.
-pub fn build(
-    sway: &Rc<SwayService>,
-    tasks: &Rc<TaskStateService>,
-    output: Option<String>,
-) -> gtk4::Box {
+pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box {
+    // Holder for the per-screen group pills; the fused-segment styling
+    // lives on the groups inside it.
     let container = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
-        .css_classes(["bar-workspaces"])
+        .spacing(GROUP_GAP_PX)
+        .css_classes(["bar-ws-groups"])
         .build();
 
-    // Buttons are rebuilt only when the workspace rows or the task
-    // ribbons change: the service also fires for pid-map-only snapshots
-    // (window churn), which must not rebuild widgets mid-hover. Ribbon
-    // state joins the key safely — task transitions are a few per hour
-    // (vision). Occupancy ticks stay backlog: window-event data in this
-    // key would defeat the anti-shimmer gate it exists for.
-    let cache: Rc<RefCell<(Vec<WorkspaceInfo>, [Ribbon; 4])>> =
-        Rc::new(RefCell::new(<_>::default()));
+    // Buttons are rebuilt only when the workspace rows, the output
+    // placement or the task ribbons change: the service also fires for
+    // pid-map-only snapshots (window churn), which must not rebuild
+    // widgets mid-hover. Ribbon state joins the key safely — task
+    // transitions are a few per hour (vision). Occupancy ticks stay
+    // backlog: window-event data in this key would defeat the
+    // anti-shimmer gate it exists for.
+    type CacheKey = (Vec<WorkspaceInfo>, Vec<OutputInfo>, [Ribbon; 4]);
+    let cache: Rc<RefCell<CacheKey>> = Rc::new(RefCell::new(<_>::default()));
     let weak = container.downgrade();
     let sway_cb = sway.clone();
     let tasks_cb = tasks.clone();
@@ -69,17 +98,20 @@ pub fn build(
         let Some(container) = weak.upgrade() else {
             return;
         };
-        let mut workspaces = sway_cb.workspaces();
+        let snap = sway_cb.snapshot();
+        let mut workspaces = snap.workspaces;
         sort_workspaces(&mut workspaces);
+        let outputs = snap.outputs;
         let ribbons = ribbon_states(&tasks_cb.snapshot());
         {
             let cache = cache.borrow();
-            if cache.0 == workspaces && cache.1 == ribbons {
+            if cache.0 == workspaces && cache.1 == outputs && cache.2 == ribbons {
                 return;
             }
         }
-        rebuild(&container, &workspaces, &ribbons, output.as_deref());
-        *cache.borrow_mut() = (workspaces, ribbons);
+        let groups = group_by_output(&workspaces, &outputs);
+        rebuild(&container, &groups, &ribbons);
+        *cache.borrow_mut() = (workspaces, outputs, ribbons);
     });
     sync();
     let sync_cb = sync.clone();
@@ -90,38 +122,42 @@ pub fn build(
     container
 }
 
-fn rebuild(
-    container: &gtk4::Box,
-    workspaces: &[WorkspaceInfo],
-    ribbons: &[Ribbon; 4],
-    output: Option<&str>,
-) {
+fn rebuild(container: &gtk4::Box, groups: &[Group], ribbons: &[Ribbon; 4]) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
-    for ws in workspaces {
-        let btn = gtk4::Button::builder()
-            .css_classes(["bar-ws"])
-            .child(&label_widget(ws.num, &ws.name))
+    for group in groups {
+        let pill = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .css_classes(["bar-workspaces"])
             .build();
-        match ws_state(ws, output) {
-            WsState::Idle => {}
-            WsState::Elsewhere => btn.add_css_class("visible-elsewhere"),
-            WsState::Here => btn.add_css_class("visible-here"),
-            WsState::Focused => {
-                btn.add_css_class("visible-here");
-                btn.add_css_class("focused");
+        if group.active {
+            pill.add_css_class("active-screen");
+        }
+        for ws in &group.workspaces {
+            let btn = gtk4::Button::builder()
+                .css_classes(["bar-ws"])
+                .child(&label_widget(ws.num, &ws.name))
+                .build();
+            match ws_state(ws) {
+                WsState::Idle => {}
+                WsState::Current => btn.add_css_class("current"),
+                WsState::Focused => {
+                    btn.add_css_class("current");
+                    btn.add_css_class("focused");
+                }
             }
+            if ws.urgent {
+                btn.add_css_class("urgent");
+            }
+            if let Some((task, _)) = task_label(ws.num) {
+                apply_ribbon(&btn, task, ribbons[task - 1]);
+            }
+            let cmd = switch_command(ws.num, &ws.name);
+            btn.connect_clicked(move |_| sway_ipc::run_command(&cmd));
+            pill.append(&btn);
         }
-        if ws.urgent {
-            btn.add_css_class("urgent");
-        }
-        if let Some((task, _)) = task_label(ws.num) {
-            apply_ribbon(&btn, task, ribbons[task - 1]);
-        }
-        let cmd = switch_command(ws.num, &ws.name);
-        btn.connect_clicked(move |_| sway_ipc::run_command(&cmd));
-        container.append(&btn);
+        container.append(&pill);
     }
 }
 
@@ -138,36 +174,93 @@ fn apply_ribbon(btn: &gtk4::Button, task: usize, ribbon: Ribbon) {
 
 // ── Pure helpers (unit-tested below) ────────────────────────────────────
 
-/// What a workspace is *to this bar*. A bar describes its own output, so
-/// the anchor is "shown on this screen" and focus is a step on that same
-/// mark, never a mark of its own — the inactive-selection convention
-/// (VS Code's list.activeSelection vs list.inactiveSelection; the same
-/// resolution Waybar issue #1403 reached for its `visible` class). The
-/// workspace focused on the *other* output therefore reads Elsewhere
-/// here and Focused on its own bar, instead of lighting up on both.
+/// One screen's workspaces, rendered as one fused pill.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Group {
+    /// sway output name; kept for ordering and for reading tests.
+    output: String,
+    /// This screen holds input focus, so its pill stays undimmed. Exactly
+    /// one group unless sway reports no focused workspace at all (only
+    /// seen mid-restart, before the first real snapshot).
+    active: bool,
+    workspaces: Vec<WorkspaceInfo>,
+}
+
+/// Split the strip into one group per screen, ordered the way the screens
+/// stand on the desk: left to right, then top to bottom, by the output's
+/// layout origin. Workspaces migrate between outputs in sway (nothing is
+/// pinned here), so both the grouping and the order follow whatever the
+/// current layout says.
+///
+/// `workspaces` must already be [`sort_workspaces`]-ordered; grouping is
+/// stable, so each group keeps that order. Outputs sway did not report
+/// (an unplug racing this snapshot) trail the known ones by name rather
+/// than dropping their workspaces off the bar, and no output information
+/// at all collapses to the single pill of the one-screen case.
+fn group_by_output(workspaces: &[WorkspaceInfo], outputs: &[OutputInfo]) -> Vec<Group> {
+    if outputs.is_empty() {
+        return vec![Group {
+            output: String::new(),
+            active: true,
+            workspaces: workspaces.to_vec(),
+        }];
+    }
+    let mut placed: Vec<&OutputInfo> = outputs.iter().collect();
+    placed.sort_by_key(|o| (o.x, o.y, o.name.clone()));
+
+    let mut groups: Vec<Group> = Vec::new();
+    let mut push = |out: &str, ws: &WorkspaceInfo| match groups.iter_mut().find(|g| g.output == out)
+    {
+        Some(g) => g.workspaces.push(ws.clone()),
+        None => groups.push(Group {
+            output: out.to_string(),
+            active: false,
+            workspaces: vec![ws.clone()],
+        }),
+    };
+    for out in &placed {
+        for ws in workspaces.iter().filter(|w| w.output == out.name) {
+            push(&out.name, ws);
+        }
+    }
+    // Unknown outputs last, grouped by name so the order is at least
+    // stable while the layout settles.
+    let mut orphans: Vec<&WorkspaceInfo> = workspaces
+        .iter()
+        .filter(|w| !placed.iter().any(|o| o.name == w.output))
+        .collect();
+    orphans.sort_by(|a, b| a.output.cmp(&b.output));
+    for ws in orphans {
+        push(&ws.output.clone(), ws);
+    }
+    for group in &mut groups {
+        group.active = group.workspaces.iter().any(|w| w.focused);
+    }
+    groups
+}
+
+/// What a workspace is, stated globally — the same on every bar, because
+/// which screen it belongs to is already said by the group it sits in.
+/// Focus is a step on the `Current` mark rather than a mark of its own
+/// (the inactive-selection convention: VS Code's list.activeSelection vs
+/// list.inactiveSelection), so it reinforces the group dimming instead of
+/// competing with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WsState {
     /// Not on screen anywhere.
     Idle,
-    /// On screen, but on another output: pressing its key pulls focus off
-    /// this screen, which is worth knowing before you press it.
-    Elsewhere,
-    /// On this output, input is elsewhere.
-    Here,
-    /// On this output and holding input focus.
+    /// The selected segment of its screen's pill — what that screen shows.
+    /// Exactly one per group.
+    Current,
+    /// `Current`, on the screen holding input. Exactly one overall.
     Focused,
 }
 
-fn ws_state(ws: &WorkspaceInfo, output: Option<&str>) -> WsState {
-    // No connector match (gdk name unknown): degrade to the global view —
-    // the focused workspace is treated as this bar's, which is exactly
-    // the pre-per-output behaviour.
-    let here = output.map_or(ws.focused, |out| ws.output == out);
-    match (ws.visible, here, ws.focused) {
-        (false, _, _) => WsState::Idle,
-        (true, false, _) => WsState::Elsewhere,
-        (true, true, true) => WsState::Focused,
-        (true, true, false) => WsState::Here,
+fn ws_state(ws: &WorkspaceInfo) -> WsState {
+    match (ws.visible, ws.focused) {
+        (_, true) => WsState::Focused,
+        (true, false) => WsState::Current,
+        (false, false) => WsState::Idle,
     }
 }
 
@@ -270,39 +363,115 @@ mod tests {
         }
     }
 
-    #[test]
-    fn state_is_per_output_and_focus_never_lights_a_foreign_bar() {
-        let mut left = ws(1, "1:t1a");
-        left.output = "DP-3".into();
-        left.visible = true;
-        left.focused = true;
-        let mut right = ws(5, "5:t2a");
-        right.output = "eDP-1".into();
-        right.visible = true;
-        let idle = ws(9, "9:t3a");
+    fn on(num: i32, name: &str, output: &str) -> WorkspaceInfo {
+        WorkspaceInfo {
+            output: output.into(),
+            ..ws(num, name)
+        }
+    }
 
-        // The bar on the focused output: its own workspace is the bright
-        // one, the other screen's reads Elsewhere.
-        assert_eq!(ws_state(&left, Some("DP-3")), WsState::Focused);
-        assert_eq!(ws_state(&right, Some("DP-3")), WsState::Elsewhere);
-        // The bar on the unfocused output: its own workspace still marked,
-        // one tier down, and nothing on it is Focused.
-        assert_eq!(ws_state(&right, Some("eDP-1")), WsState::Here);
-        assert_eq!(ws_state(&left, Some("eDP-1")), WsState::Elsewhere);
-        assert_eq!(ws_state(&idle, Some("DP-3")), WsState::Idle);
+    fn out(name: &str, x: i32, y: i32) -> OutputInfo {
+        OutputInfo {
+            name: name.into(),
+            x,
+            y,
+        }
+    }
+
+    fn shown(num: i32, name: &str, output: &str, focused: bool) -> WorkspaceInfo {
+        WorkspaceInfo {
+            visible: true,
+            focused,
+            ..on(num, name, output)
+        }
+    }
+
+    fn shape(groups: &[Group]) -> Vec<(&str, Vec<i32>)> {
+        groups
+            .iter()
+            .map(|g| {
+                (
+                    g.output.as_str(),
+                    g.workspaces.iter().map(|w| w.num).collect(),
+                )
+            })
+            .collect()
     }
 
     #[test]
-    fn unknown_connector_falls_back_to_the_global_view() {
-        let mut focused = ws(1, "1:t1a");
-        focused.visible = true;
-        focused.focused = true;
-        let mut other = ws(5, "5:t2a");
-        other.output = "eDP-1".into();
-        other.visible = true;
-        assert_eq!(ws_state(&focused, None), WsState::Focused);
-        assert_eq!(ws_state(&other, None), WsState::Elsewhere);
-        assert_eq!(ws_state(&ws(9, "9:t3a"), None), WsState::Idle);
+    fn one_screen_is_one_pill() {
+        let list = [on(1, "1:t1a", "eDP-1"), on(17, "17:wb", "eDP-1")];
+        let groups = group_by_output(&list, &[out("eDP-1", 0, 0)]);
+        assert_eq!(shape(&groups), [("eDP-1", vec![1, 17])]);
+    }
+
+    #[test]
+    fn groups_follow_the_screens_left_to_right_then_top_to_bottom() {
+        let list = [
+            on(1, "1:t1a", "right"),
+            on(5, "5:t2a", "left"),
+            on(9, "9:t3a", "below"),
+            on(17, "17:wb", "left"),
+        ];
+        let outputs = [
+            // Declared in a deliberately unhelpful order: placement
+            // decides, not the order sway happened to report them.
+            out("below", 0, 1440),
+            out("right", 2560, 0),
+            out("left", 0, 0),
+        ];
+        assert_eq!(
+            shape(&group_by_output(&list, &outputs)),
+            [
+                ("left", vec![5, 17]),
+                ("below", vec![9]),
+                ("right", vec![1]),
+            ]
+        );
+    }
+
+    #[test]
+    fn no_output_info_collapses_to_a_single_pill() {
+        let list = [on(1, "1:t1a", "DP-3"), on(5, "5:t2a", "eDP-1")];
+        let groups = group_by_output(&list, &[]);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(shape(&groups), [("", vec![1, 5])]);
+    }
+
+    #[test]
+    fn workspaces_on_an_unreported_output_trail_instead_of_vanishing() {
+        let list = [on(1, "1:t1a", "DP-3"), on(5, "5:t2a", "ghost")];
+        assert_eq!(
+            shape(&group_by_output(&list, &[out("DP-3", 0, 0)])),
+            [("DP-3", vec![1]), ("ghost", vec![5])]
+        );
+    }
+
+    #[test]
+    fn exactly_the_screen_holding_input_stays_undimmed() {
+        let list = [
+            shown(1, "1:t1a", "left", false),
+            on(2, "2:t1b", "left"),
+            shown(5, "5:t2a", "right", true),
+        ];
+        let groups = group_by_output(&list, &[out("left", 0, 0), out("right", 2560, 0)]);
+        let active: Vec<(&str, bool)> = groups
+            .iter()
+            .map(|g| (g.output.as_str(), g.active))
+            .collect();
+        assert_eq!(active, [("left", false), ("right", true)]);
+    }
+
+    #[test]
+    fn one_current_segment_per_screen_and_one_focused_overall() {
+        let left = shown(1, "1:t1a", "left", false);
+        let right = shown(5, "5:t2a", "right", true);
+        // Each screen's shown workspace is its selected segment; only the
+        // one on the focused screen steps up. Both read the same on every
+        // bar — the group says which screen they belong to.
+        assert_eq!(ws_state(&left), WsState::Current);
+        assert_eq!(ws_state(&right), WsState::Focused);
+        assert_eq!(ws_state(&ws(9, "9:t3a")), WsState::Idle);
     }
 
     #[test]
