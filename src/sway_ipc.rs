@@ -101,6 +101,14 @@ impl SwayService {
 /// commands arrive at click rate, and a fresh socket can't be left wedged
 /// by a sway restart the way a cached one could.
 pub fn run_command(cmd: &str) {
+    run_command_then(cmd, || {});
+}
+
+/// [`run_command`] plus a completion hook that runs on the GTK thread once
+/// sway has replied — the ordering guarantee callers need when a command has
+/// to land *before* the next thing they do (see `anim::set_layer_blur`).
+/// `then` runs on failure too, so a wedged socket can never strand a caller.
+pub fn run_command_then(cmd: &str, then: impl FnOnce() + 'static) {
     let cmd = cmd.to_string();
     crate::spawn::spawn_work(
         move || {
@@ -113,6 +121,7 @@ pub fn run_command(cmd: &str) {
             if let Err(msg) = result {
                 log::warn!("{msg}");
             }
+            then();
         },
     );
 }

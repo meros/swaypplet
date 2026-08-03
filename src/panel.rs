@@ -322,12 +322,10 @@ impl Panel {
 
         // Every open/close path (bar toggle, backdrop click, Esc, rail
         // actions) goes through this one Reveal, which also drives the
-        // SlideBin settle and parks the surface once the exit finishes.
-        // Premap warms the compositor blur pipeline (see Reveal::premap).
+        // SlideBin settle and unmaps the window once the exit finishes.
         let reveal = anim::Reveal::new(&window, &root)
             .content(&content)
             .slide(&slide, anim::SLIDE_PX);
-        reveal.premap();
 
         // Shared dismiss path: fade the menu out, then unmap.
         let hide_menu = {
