@@ -31,8 +31,8 @@ use crate::task_state::{Activity, SessionState, TaskState, TaskStateService, tas
 
 const TASK_CLASSES: [&str; 4] = ["bar-task1", "bar-task2", "bar-task3", "bar-task4"];
 const BAY_TASK_CLASSES: [&str; 4] = ["t1", "t2", "t3", "t4"];
-const STATE_CLASSES: [&str; 7] = [
-    "socket", "working", "waiting", "unacked", "overdue", "stopped", "stale",
+const STATE_CLASSES: [&str; 8] = [
+    "socket", "working", "waiting", "blocked", "unacked", "overdue", "stopped", "stale",
 ];
 
 /// Age chip appears once a wait is no longer a blip.
@@ -48,6 +48,10 @@ enum BayState {
     #[default]
     Socket,
     Working,
+    /// Halted on a permission prompt: the top of the ladder, because it
+    /// is the only state where the session cannot continue without the
+    /// owner and the answer takes two seconds.
+    Blocked,
     Waiting {
         acked: bool,
         overdue: bool,
@@ -72,8 +76,14 @@ struct BayView {
 }
 
 impl BayView {
+    /// Drives the onset nudge: both states that want the owner qualify,
+    /// and a blocked bay always does (a permission prompt has no acked
+    /// tier — answering it is the acknowledgment).
     fn is_unacked(&self) -> bool {
-        matches!(self.state, BayState::Waiting { acked: false, .. })
+        matches!(
+            self.state,
+            BayState::Blocked | BayState::Waiting { acked: false, .. }
+        )
     }
 }
 
@@ -81,6 +91,9 @@ fn state_classes(state: BayState) -> &'static [&'static str] {
     match state {
         BayState::Socket => &["socket"],
         BayState::Working => &["working"],
+        // Rides the same solid-hue fill as an unacked wait; the marker
+        // glyph is what separates them, per the shape rule below.
+        BayState::Blocked => &["waiting", "unacked", "blocked"],
         BayState::Waiting { acked: true, .. } => &["waiting"],
         BayState::Waiting {
             acked: false,
@@ -100,6 +113,7 @@ fn state_classes(state: BayState) -> &'static [&'static str] {
 /// marks "data invalid", never a live filled state (P9).
 fn state_marker(state: BayState) -> &'static str {
     match state {
+        BayState::Blocked => "!",
         BayState::Stopped => "·",
         BayState::Stale => "○",
         _ => "",
@@ -110,13 +124,18 @@ fn state_marker(state: BayState) -> &'static str {
 /// (that is the state that needs the owner), then stale (a lying bay is
 /// worse than a busy one, P9), then working, then stopped.
 fn bay_view(n: u8, task: &TaskState, local: bool, now: SystemTime) -> BayView {
+    // Blocked and waiting share the chip and the fill: both are "wants
+    // you", and the age of a stuck permission prompt is as worth knowing
+    // as the age of a finished turn.
     let waiting: Vec<&SessionState> = task
         .sessions
         .iter()
-        .filter(|s| s.activity == Activity::Waiting)
+        .filter(|s| s.activity.wants_owner())
         .collect();
     let any = |a: Activity| task.sessions.iter().any(|s| s.activity == a);
-    let state = if !waiting.is_empty() {
+    let state = if any(Activity::Blocked) {
+        BayState::Blocked
+    } else if !waiting.is_empty() {
         BayState::Waiting {
             acked: waiting.iter().all(|s| s.acked),
             overdue: waiting
@@ -468,6 +487,34 @@ mod tests {
         assert_eq!(view.state, BayState::Socket);
         assert_eq!(view.chip, None);
         assert_eq!(view.fill, None);
+    }
+
+    #[test]
+    fn blocked_outranks_every_other_state_and_carries_the_marker() {
+        let now = SystemTime::now();
+        let task = task_of(vec![
+            session(Activity::Working, false, None, now),
+            session(Activity::Waiting, false, Some(Duration::from_secs(60)), now),
+            session(Activity::Blocked, false, Some(Duration::ZERO), now),
+        ]);
+        let view = bay_view(1, &task, false, now);
+        assert_eq!(view.state, BayState::Blocked);
+        // Rides the unacked fill, separated by shape, and nudges on onset.
+        assert_eq!(state_classes(view.state), ["waiting", "unacked", "blocked"]);
+        assert_eq!(state_marker(view.state), "!");
+        assert!(view.is_unacked());
+    }
+
+    #[test]
+    fn a_blocked_session_still_earns_an_age_chip() {
+        let now = SystemTime::now();
+        let task = task_of(vec![session(
+            Activity::Blocked,
+            false,
+            Some(Duration::from_secs(5 * 60)),
+            now,
+        )]);
+        assert_eq!(bay_view(1, &task, false, now).chip, Some("5m".into()));
     }
 
     #[test]

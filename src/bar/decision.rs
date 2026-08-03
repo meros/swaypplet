@@ -86,6 +86,10 @@ enum Occ {
         pid: i32,
         task: u8,
         desc: String,
+        /// Halted on a permission prompt rather than finished. Swaps the
+        /// dot for the board's `!` marker; nothing else differs, because
+        /// the slot's job is the description either way.
+        blocked: bool,
         /// Age chip and/or "+N more wait" suffix.
         meta: Option<String>,
     },
@@ -120,21 +124,27 @@ fn occupant(battery: Option<&BatteryView>, snap: &TaskSnapshot, now: SystemTime)
         .iter()
         .enumerate()
         .flat_map(|(i, t)| t.sessions.iter().map(move |s| (i as u8 + 1, s)))
-        .filter(|(_, s)| s.activity == Activity::Waiting && !s.acked)
+        .filter(|(_, s)| s.activity.wants_owner() && !s.acked)
         .collect();
-    // Oldest = earliest status mtime; a missing or future mtime (suspend
-    // skew) counts as age zero, matching the service's age rule. Pid
-    // tie-breaks for a stable pick.
-    let (task, oldest) = waiting
-        .iter()
-        .copied()
-        .min_by_key(|(_, s)| (s.status_mtime.map_or(now, |m| m.min(now)), s.pid))?;
+    // Blocked first: a permission prompt has the session stopped dead,
+    // while a finished turn is waiting at the owner's pace. Within a
+    // tier, oldest = earliest status mtime; a missing or future mtime
+    // (suspend skew) counts as age zero, matching the service's age
+    // rule. Pid tie-breaks for a stable pick.
+    let (task, oldest) = waiting.iter().copied().min_by_key(|(_, s)| {
+        (
+            s.activity != Activity::Blocked,
+            s.status_mtime.map_or(now, |m| m.min(now)),
+            s.pid,
+        )
+    })?;
     let chip = chip_label(session_age(oldest, now));
     let more = (waiting.len() > 1).then(|| format!("+{}", waiting.len() - 1));
     Some(Occ::Waiting {
         pid: oldest.pid,
         task,
         desc: oldest.desc.clone(),
+        blocked: oldest.activity == Activity::Blocked,
         meta: match (chip, more) {
             (Some(c), Some(m)) => Some(format!("{c} {m}")),
             (c, m) => c.or(m),
@@ -481,10 +491,16 @@ impl DecisionSlot {
                 inner.meta.set_visible(false);
             }
             Occ::Waiting {
-                task, desc, meta, ..
+                task,
+                desc,
+                blocked,
+                meta,
+                ..
             } => {
                 inner.root.remove_css_class("critical");
-                inner.dot.set_text("●");
+                // Same marker vocabulary as the board bay, so the two
+                // surfaces never disagree about what a glyph means.
+                inner.dot.set_text(if *blocked { "!" } else { "●" });
                 inner.dot.add_css_class(DOT_CLASSES[*task as usize - 1]);
                 inner.text.set_text(desc);
                 match meta {
@@ -568,9 +584,36 @@ mod tests {
                 pid: 2,
                 task: 3,
                 desc: "task for 2".into(),
+                blocked: false,
                 meta: Some("12m +2".into()),
             }
         );
+    }
+
+    #[test]
+    fn a_blocked_session_takes_the_slot_from_an_older_wait() {
+        let now = SystemTime::now();
+        let mut snap = TaskSnapshot::default();
+        // An hour-old finished turn loses to a permission prompt that
+        // landed seconds ago: one is stopped dead, the other is not.
+        snap.tasks[0].sessions = vec![waiting(1, false, Some(Duration::from_secs(60 * 60)), now)];
+        let mut prompt = waiting(2, false, Some(Duration::from_secs(5)), now);
+        prompt.activity = Activity::Blocked;
+        snap.tasks[1].sessions = vec![prompt];
+        assert!(matches!(
+            occupant(None, &snap, now),
+            Some(Occ::Waiting {
+                pid: 2,
+                blocked: true,
+                ..
+            })
+        ));
+        // Battery critical still outranks it: nothing beats the machine
+        // dying (priority 1, stand-down table).
+        assert!(matches!(
+            occupant(Some(&battery(true)), &snap, now),
+            Some(Occ::Battery { .. })
+        ));
     }
 
     #[test]

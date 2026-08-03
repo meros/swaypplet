@@ -476,6 +476,20 @@ button.bar-bay.t2.waiting.unacked { background-color: @accent_secondary; color: 
 button.bar-bay.t3.waiting.unacked { background-color: @accent_tertiary; color: @bg0; }
 button.bar-bay.t4.waiting.unacked { background-color: @accent_quaternary; color: @bg0; }
 
+/* Blocked: halted on a permission prompt, the one state where the session
+   cannot continue without the owner. It rides the unacked fill above,
+   because a second hue tier at bay size would fail the grayscale rule;
+   the separation is the `!` marker (shape first, P3) plus the bold
+   numeral. No overdue step and no acked tier: answering the prompt is
+   the acknowledgment, and it takes two seconds. */
+button.bar-bay.blocked {
+    font-weight: 700;
+}
+
+button.bar-bay.blocked .bar-bay-marker {
+    font-weight: 700;
+}
+
 /* Unacked >=10 min: one static luminance tier step — nothing on the bar
    ever loops (owner decision 1). */
 button.bar-bay.t1.waiting.unacked.overdue { background-color: shade(@accent, 1.25); box-shadow: 0 0 8px alpha(@accent, 0.45); }
