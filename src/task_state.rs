@@ -25,9 +25,24 @@ use crate::sway_ipc::{SwayService, SwayState};
 
 // ── Model ───────────────────────────────────────────────────────────────
 
+/// What a session is doing. These mirror the states Claude Code itself
+/// distinguishes rather than inventing a taxonomy beside them:
+/// `UserPromptSubmit`/`PreToolUse`/`PostToolUse` mean working, the
+/// `Notification` hook's `permission_prompt` family means blocked, `Stop`
+/// and `idle_prompt` mean waiting, `SessionEnd` means stopped. Claude
+/// Code's own agent view draws the same line between "needs input" and
+/// "finished its turn", and every CI system separates "waiting for
+/// approval" from "succeeded" for the same reason: one halts progress,
+/// the other is progress.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Activity {
     Working,
+    /// Halted mid-turn on a permission or elicitation prompt. Nothing
+    /// proceeds until the owner answers, so this outranks Waiting in
+    /// every mux. Self-clearing: approving produces the next tool call,
+    /// whose hook writes working.
+    Blocked,
+    /// Turn finished; the owner's move, at their pace.
     Waiting,
     Stopped,
     /// Data invalid — unknown status value or missing status file. Rendered
@@ -40,10 +55,17 @@ impl Activity {
     pub fn parse(s: &str) -> Self {
         match s {
             "working" => Self::Working,
+            "blocked" => Self::Blocked,
             "waiting" => Self::Waiting,
             "stopped" => Self::Stopped,
             _ => Self::Stale,
         }
+    }
+
+    /// Both states that want the owner. They differ in urgency, not in
+    /// kind, so callers that only ask "does this need me" use this.
+    pub fn wants_owner(self) -> bool {
+        matches!(self, Self::Blocked | Self::Waiting)
     }
 }
 

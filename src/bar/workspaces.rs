@@ -406,7 +406,10 @@ fn ribbon_plans(snap: &TaskSnapshot) -> [TaskRibbon; 4] {
             working: sessions.iter().any(|s| s.activity == Activity::Working),
             ..Default::default()
         };
-        for waiting in sessions.iter().filter(|s| s.activity == Activity::Waiting) {
+        // Blocked and waiting both read as the task hue here: a 2 px lane
+        // has one thing to say, which is "this workspace wants you". The
+        // board bay and the decision slot carry the urgency split.
+        for waiting in sessions.iter().filter(|s| s.activity.wants_owner()) {
             match task_of_name(&waiting.workspace) == Some(task) {
                 true => plan.waiting_on.push(waiting.workspace.clone()),
                 false => plan.waiting_unplaced = true,

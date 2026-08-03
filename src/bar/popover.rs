@@ -220,6 +220,9 @@ fn focus_command(name: &str) -> String {
 fn meta_line(s: &SessionState, now: SystemTime, skew: Option<SystemTime>) -> String {
     let state = match s.activity {
         Activity::Working => format!("working {}", age_text(s, now, skew)),
+        // Named for what it wants, since the popover is the one surface
+        // with room to say it.
+        Activity::Blocked => format!("needs permission {}", age_text(s, now, skew)),
         Activity::Waiting => format!("waiting {}", age_text(s, now, skew)),
         Activity::Stopped => format!("stopped {}", age_text(s, now, skew)),
         // No age for an invalid write — dating it would lend it
