@@ -214,7 +214,12 @@ fn build_bar_window(
         .orientation(gtk4::Orientation::Horizontal)
         .build();
     left.append(&start::build(toggle_panel));
-    left.append(&workspaces::build(sway, tasks));
+    // gdk connector names match sway output names under wlroots.
+    left.append(&workspaces::build(
+        sway,
+        tasks,
+        monitor.connector().map(|c| c.to_string()),
+    ));
     // Center: the decision slot — priority-muxed single occupant, empty
     // at nominal (bar/decision.rs).
     let center = gtk4::Box::builder()

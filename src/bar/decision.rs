@@ -19,9 +19,11 @@
 //! The one transient tenant (increment 5): volume/brightness OSD
 //! interjections. `interject` overlays the standing occupant on a
 //! crossfaded Stack page — never destroying it — with icon + eased
-//! center-anchored hairline + value; repeated keypresses retarget the
-//! ease so they read as one continuous sweep, and 1.5 s after the last
-//! press the slot yields back to whatever the mux holds.
+//! hairline + value, the hairline filling left-to-right off a full-width
+//! track exactly like the standalone OSD's ProgressBar (osd.rs);
+//! repeated keypresses retarget the ease so they read as one continuous
+//! sweep, and 1.5 s after the last press the slot yields back to
+//! whatever the mux holds.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -235,14 +237,17 @@ impl DecisionSlot {
                 if f <= 0.0 {
                     return;
                 }
-                // Center-anchored: the fill grows outward from the middle.
+                // Left-anchored, like every other progress readout in the
+                // codebase: the fill is a value on a track, and a value
+                // that grows out of the middle reads as a meter, not a
+                // level (osd.rs uses a plain GtkProgressBar for this).
                 cr.set_source_rgba(
                     c.red().into(),
                     c.green().into(),
                     c.blue().into(),
                     c.alpha().into(),
                 );
-                cr.rectangle((w - w * f) / 2.0, 0.0, w * f, h);
+                cr.rectangle(0.0, 0.0, w * f, h);
                 let _ = cr.fill();
             });
         }
@@ -266,10 +271,12 @@ impl DecisionSlot {
         stack.add_child(&root);
         stack.add_child(&osd_page);
 
-        // Horizontal slide so the collapse frees width smoothly — the
-        // CenterBox recenters instead of snapping neighbors.
+        // Crossfade, not a slide: the slot is the CenterBox's center
+        // child, so its width change moves nothing beside it, and the
+        // horizontal unfurl only drew attention to the OSD pill
+        // assembling itself. Opacity in, opacity out.
         let revealer = gtk4::Revealer::builder()
-            .transition_type(gtk4::RevealerTransitionType::SlideRight)
+            .transition_type(gtk4::RevealerTransitionType::Crossfade)
             .transition_duration(SWAP_MS as u32)
             .reveal_child(false)
             .child(&stack)

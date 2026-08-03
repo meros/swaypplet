@@ -1,6 +1,7 @@
 //! Workspaces module — one button per sway workspace, driven by the
-//! [`SwayService`] observer. Every bar shows all workspaces regardless of
-//! output (waybar's `all-outputs = true`).
+//! [`SwayService`] observer. Every bar lists all workspaces regardless of
+//! output (waybar's `all-outputs = true`), but *states* them per output:
+//! see [`WsState`].
 //!
 //! Task ribbons (docs/BAR_VISION.md, increment 10): a 2 px bottom lane
 //! under each task's workspace group from [`TaskStateService`] — off = no
@@ -38,7 +39,13 @@ const GENERIC_LABELS: &[(i32, &str)] = &[
     (29, "󰗃 y"),
 ];
 
-pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box {
+/// `output` is this bar's sway output name (gdk connector), the same
+/// value `board::build` takes.
+pub fn build(
+    sway: &Rc<SwayService>,
+    tasks: &Rc<TaskStateService>,
+    output: Option<String>,
+) -> gtk4::Box {
     let container = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .css_classes(["bar-workspaces"])
@@ -71,7 +78,7 @@ pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box 
                 return;
             }
         }
-        rebuild(&container, &workspaces, &ribbons);
+        rebuild(&container, &workspaces, &ribbons, output.as_deref());
         *cache.borrow_mut() = (workspaces, ribbons);
     });
     sync();
@@ -83,7 +90,12 @@ pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box 
     container
 }
 
-fn rebuild(container: &gtk4::Box, workspaces: &[WorkspaceInfo], ribbons: &[Ribbon; 4]) {
+fn rebuild(
+    container: &gtk4::Box,
+    workspaces: &[WorkspaceInfo],
+    ribbons: &[Ribbon; 4],
+    output: Option<&str>,
+) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
@@ -92,11 +104,14 @@ fn rebuild(container: &gtk4::Box, workspaces: &[WorkspaceInfo], ribbons: &[Ribbo
             .css_classes(["bar-ws"])
             .child(&label_widget(ws.num, &ws.name))
             .build();
-        if ws.focused {
-            btn.add_css_class("focused");
-        }
-        if ws.visible {
-            btn.add_css_class("visible");
+        match ws_state(ws, output) {
+            WsState::Idle => {}
+            WsState::Elsewhere => btn.add_css_class("visible-elsewhere"),
+            WsState::Here => btn.add_css_class("visible-here"),
+            WsState::Focused => {
+                btn.add_css_class("visible-here");
+                btn.add_css_class("focused");
+            }
         }
         if ws.urgent {
             btn.add_css_class("urgent");
@@ -122,6 +137,39 @@ fn apply_ribbon(btn: &gtk4::Button, task: usize, ribbon: Ribbon) {
 }
 
 // ── Pure helpers (unit-tested below) ────────────────────────────────────
+
+/// What a workspace is *to this bar*. A bar describes its own output, so
+/// the anchor is "shown on this screen" and focus is a step on that same
+/// mark, never a mark of its own — the inactive-selection convention
+/// (VS Code's list.activeSelection vs list.inactiveSelection; the same
+/// resolution Waybar issue #1403 reached for its `visible` class). The
+/// workspace focused on the *other* output therefore reads Elsewhere
+/// here and Focused on its own bar, instead of lighting up on both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WsState {
+    /// Not on screen anywhere.
+    Idle,
+    /// On screen, but on another output: pressing its key pulls focus off
+    /// this screen, which is worth knowing before you press it.
+    Elsewhere,
+    /// On this output, input is elsewhere.
+    Here,
+    /// On this output and holding input focus.
+    Focused,
+}
+
+fn ws_state(ws: &WorkspaceInfo, output: Option<&str>) -> WsState {
+    // No connector match (gdk name unknown): degrade to the global view —
+    // the focused workspace is treated as this bar's, which is exactly
+    // the pre-per-output behaviour.
+    let here = output.map_or(ws.focused, |out| ws.output == out);
+    match (ws.visible, here, ws.focused) {
+        (false, _, _) => WsState::Idle,
+        (true, false, _) => WsState::Elsewhere,
+        (true, true, true) => WsState::Focused,
+        (true, true, false) => WsState::Here,
+    }
+}
 
 /// One task's ribbon — the coarse cross-room glance; the board carries
 /// the detail.
@@ -220,6 +268,41 @@ mod tests {
             urgent: false,
             visible: false,
         }
+    }
+
+    #[test]
+    fn state_is_per_output_and_focus_never_lights_a_foreign_bar() {
+        let mut left = ws(1, "1:t1a");
+        left.output = "DP-3".into();
+        left.visible = true;
+        left.focused = true;
+        let mut right = ws(5, "5:t2a");
+        right.output = "eDP-1".into();
+        right.visible = true;
+        let idle = ws(9, "9:t3a");
+
+        // The bar on the focused output: its own workspace is the bright
+        // one, the other screen's reads Elsewhere.
+        assert_eq!(ws_state(&left, Some("DP-3")), WsState::Focused);
+        assert_eq!(ws_state(&right, Some("DP-3")), WsState::Elsewhere);
+        // The bar on the unfocused output: its own workspace still marked,
+        // one tier down, and nothing on it is Focused.
+        assert_eq!(ws_state(&right, Some("eDP-1")), WsState::Here);
+        assert_eq!(ws_state(&left, Some("eDP-1")), WsState::Elsewhere);
+        assert_eq!(ws_state(&idle, Some("DP-3")), WsState::Idle);
+    }
+
+    #[test]
+    fn unknown_connector_falls_back_to_the_global_view() {
+        let mut focused = ws(1, "1:t1a");
+        focused.visible = true;
+        focused.focused = true;
+        let mut other = ws(5, "5:t2a");
+        other.output = "eDP-1".into();
+        other.visible = true;
+        assert_eq!(ws_state(&focused, None), WsState::Focused);
+        assert_eq!(ws_state(&other, None), WsState::Elsewhere);
+        assert_eq!(ws_state(&ws(9, "9:t3a"), None), WsState::Idle);
     }
 
     #[test]
