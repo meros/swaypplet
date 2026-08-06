@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use zbus::zvariant::Value;
-use zbus::{Connection, SignalContext, interface};
+use zbus::{SignalContext, interface};
 
 use super::store::{self, NotificationStore};
 use super::{CloseReason, Notification, Urgency};
@@ -12,7 +12,10 @@ use super::{CloseReason, Notification, Urgency};
 // ── Events sent from the D-Bus thread to the GTK main thread ─────────────
 
 enum DbusEvent {
-    Notify(Notification, std::sync::mpsc::Sender<u32>),
+    /// The reply channel is a `tokio::sync::oneshot` so the D-Bus side can
+    /// *await* the assigned ID instead of blocking its thread on it. See
+    /// `notify()` for why blocking here wedges the whole session bus.
+    Notify(Notification, tokio::sync::oneshot::Sender<u32>),
     Close(u32),
 }
 
@@ -131,16 +134,29 @@ impl NotificationServer {
             suppressed: false,
         };
 
-        // Send to main thread and wait for the assigned ID
-        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        // Send to main thread and wait for the assigned ID.
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         {
+            // Scoped: a std Mutex guard must not be held across the await
+            // below, and `send` on an unbounded channel never blocks.
             let sender = self.sender.lock().unwrap();
             let _ = sender.tx.send(DbusEvent::Notify(notif, reply_tx));
         }
 
-        // Wait for the main thread to process and return the ID
-        match reply_rx.recv_timeout(std::time::Duration::from_secs(5)) {
-            Ok(id) => Ok(id),
+        // Await — never block. This runs on the object-server dispatch task,
+        // which shares its single-threaded runtime with zbus's socket reader.
+        // A blocking wait here stops that reader, and because zbus applies
+        // backpressure (`broadcast_direct` into a 64-message queue) the
+        // connection then stops draining its socket entirely. dbus-broker
+        // charges the resulting backlog to the *user's* byte quota, so one
+        // stalled reader here starves every peer on the session bus —
+        // xdg-desktop-portal included, which is what made GTK apps (our own
+        // lock screen among them) block 25 s on the settings portal.
+        match tokio::time::timeout(std::time::Duration::from_secs(5), reply_rx).await {
+            Ok(Ok(id)) => Ok(id),
+            Ok(Err(_)) => Err(zbus::fdo::Error::Failed(
+                "Notification store went away".to_string(),
+            )),
             Err(_) => Err(zbus::fdo::Error::Failed(
                 "Timed out waiting for notification store".to_string(),
             )),
@@ -181,7 +197,18 @@ pub fn start_server(store: Rc<RefCell<NotificationStore>>) {
     let server = NotificationServer { sender };
 
     crate::spawn::spawn_tokio_thread("notify-dbus", async move {
-        match Connection::session().await {
+        // Headroom over zbus's 64-message default: this connection is the
+        // session bus's notification daemon, so it sees bursts (a batch of
+        // notify calls, name churn) that a busy GTK main thread can briefly
+        // fail to keep pace with. A full queue does not merely slow us down
+        // — it halts the socket reader, with the session-wide consequences
+        // described in `notify()`. Deep queue + non-blocking `notify()` is
+        // belt and braces; neither alone is worth relying on.
+        let session = match zbus::ConnectionBuilder::session() {
+            Ok(b) => b.max_queued(1024).build().await,
+            Err(e) => Err(e),
+        };
+        match session {
             Ok(conn) => {
                 if let Err(e) = conn
                     .object_server()
