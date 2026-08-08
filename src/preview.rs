@@ -152,6 +152,30 @@ pub fn run(component: &str) {
             return;
         }
 
+        // dmenu picker: the real layer-shell surface (works under the nested
+        // sway harness) pre-filled with sample items, so the card, the prompt
+        // header and the row rhythm can be screenshotted without a pipe.
+        if component == "dmenu" {
+            let items: Vec<String> = std::env::var("SWAYPPLET_PREVIEW_ITEMS")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .map(|v| v.split(',').map(|s| s.trim().to_string()).collect())
+                .unwrap_or_else(|| {
+                    ["Personal", "Work", "Norban", "Consulting", "Testing"]
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect()
+                });
+            let prompt =
+                std::env::var("SWAYPPLET_PREVIEW_PROMPT").unwrap_or_else(|_| "Chrome Profile".into());
+            let picker = crate::dmenu::present_picker(app, &prompt, items, |_| std::process::exit(0));
+            if let Ok(query) = std::env::var("SWAYPPLET_PREVIEW_QUERY") {
+                picker.set_query(&query);
+            }
+            std::mem::forget(picker);
+            return;
+        }
+
         // Single component: wrap its widget in a small window carrying the panel
         // surface classes so it inherits the same styling context.
         let window = ApplicationWindow::builder()

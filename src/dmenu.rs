@@ -1,7 +1,8 @@
-//! `swaypplet dmenu` — dmenu-style picker with the launcher's styling.
+//! `swaypplet dmenu` — dmenu-style picker on the launcher's glass card.
 //!
 //! Reads newline-separated items on stdin, shows a filterable list in a
-//! layer-shell window, prints the chosen item to stdout and exits 0.
+//! layer-shell window, prints the chosen item to stdout and exits 0. The
+//! `--prompt` text is the card's title, so it stays readable while typing.
 //! Esc or a backdrop click exits 1 with no output. When the query matches
 //! no item, Enter prints the query itself — so a single piped line plus
 //! `--prompt` doubles as an editable text prompt (used by `settask`).
@@ -214,7 +215,7 @@ struct State {
     query: String,
 }
 
-struct Picker {
+pub(crate) struct Picker {
     window: gtk4::Window,
     entry: gtk4::SearchEntry,
     results_box: gtk4::Box,
@@ -225,7 +226,7 @@ struct Picker {
 
 /// Build and present a picker window on `app`. `on_done` runs exactly once —
 /// on selection, cancel, or supersession — after the window is destroyed.
-fn present_picker(
+pub(crate) fn present_picker(
     app: &gtk4::Application,
     placeholder: &str,
     items: Vec<String>,
@@ -241,8 +242,11 @@ fn present_picker(
         .orientation(gtk4::Orientation::Vertical)
         .halign(gtk4::Align::Center)
         .valign(gtk4::Align::Center)
-        .width_request(560)
+        .width_request(480)
         .build();
+    // Same chassis as the launcher and the polkit dialog: @surface fill,
+    // radius 18, hairline border (style.css .glass-card).
+    container.add_css_class("glass-card");
     container.add_css_class("launcher-container");
     container.add_css_class("dmenu");
 
@@ -251,8 +255,17 @@ fn present_picker(
         .build();
     view.add_css_class("launcher-view");
 
+    // The prompt is the card's title rather than entry placeholder text: a
+    // placeholder vanishes on the first keystroke, exactly when a caller like
+    // `settask` still needs to say what is being typed.
+    let header = gtk4::Label::builder()
+        .label(placeholder.trim().trim_end_matches(':'))
+        .halign(gtk4::Align::Start)
+        .ellipsize(gtk4::pango::EllipsizeMode::End)
+        .build();
+    header.add_css_class("dmenu-title");
+
     let entry = gtk4::SearchEntry::builder()
-        .placeholder_text(placeholder)
         .hexpand(true)
         // The default ~150 ms search_changed debounce is for expensive
         // searches; filtering a local list should track every keystroke.
@@ -273,6 +286,7 @@ fn present_picker(
         .build();
     scroller.add_css_class("launcher-scroller");
 
+    view.append(&header);
     view.append(&entry);
     view.append(&scroller);
     container.append(&view);
@@ -351,6 +365,13 @@ fn present_picker(
 }
 
 impl Picker {
+    /// Preview-only: type `text` into the entry, driving the same filter path
+    /// a keystroke would, so `dev/render.sh --mode preview:dmenu` can shoot
+    /// the filtered and no-match states.
+    pub(crate) fn set_query(&self, text: &str) {
+        self.entry.set_text(text);
+    }
+
     /// Resolve once: destroy the window (releasing the exclusive keyboard
     /// grab immediately) and deliver the reply.
     fn finish(&self, reply: Option<String>) {
@@ -397,6 +418,21 @@ impl Picker {
 
         while let Some(child) = self.results_box.first_child() {
             self.results_box.remove(&child);
+        }
+        // Nothing matched: say so, and name what Enter will do — the raw
+        // query is the reply in that case, which the empty list alone hides.
+        if s.visible.is_empty() {
+            let note = gtk4::Label::builder()
+                .label(if query.is_empty() {
+                    "No items"
+                } else {
+                    "No matches · Enter keeps what you typed"
+                })
+                .halign(gtk4::Align::Start)
+                .ellipsize(gtk4::pango::EllipsizeMode::End)
+                .build();
+            note.add_css_class("dmenu-empty");
+            self.results_box.append(&note);
         }
         for (pos, &idx) in s.visible.iter().enumerate() {
             let row = build_row(&s.items[idx], pos == s.selected);
