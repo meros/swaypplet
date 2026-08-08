@@ -1709,8 +1709,15 @@ revealer {
     caret-color: @fg;
 }
 
-.launcher-entry:focus {
-    border-color: alpha(@accent, 0.5);
+/* GtkSearchEntry keeps focus on its inner text node, so the entry node only
+   ever matches :focus-within — without it Adwaita's blue focus border wins
+   over ours. Outline and shadow off for the same reason the cards carry no
+   drop shadow: translucent pixels frost under swayfx blur. */
+.launcher-entry:focus,
+.launcher-entry:focus-within {
+    border-color: @accent;
+    outline: none;
+    box-shadow: none;
 }
 
 .launcher-results {
@@ -1758,6 +1765,41 @@ revealer {
     font-size: 9px;
     color: @fg_dim;
     opacity: 0.6;
+}
+
+/* ── dmenu — the piped-list picker (`swaypplet dmenu`) ──
+   Same glass card and row rhythm as the launcher, sized for a short list:
+   a titled card with the caller's prompt, the filter entry, then the items.
+   Used by chrome-profile-launcher, jump-to-task and settask. ── */
+
+/* The card hugs its (usually short) item list instead of the launcher's
+   fixed 520px stage. */
+.dmenu .launcher-scroller {
+    min-height: 0;
+}
+
+/* Prompt title. Indented to the rows' text inset (12px) so title and item
+   labels share one left margin. */
+.dmenu .dmenu-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: @fg;
+    margin: 0 0 10px 12px;
+}
+
+/* The entry is one step down from the launcher's full-screen stage: the card
+   is a short dialog, so the filter field sits closer to row scale. */
+.dmenu .launcher-entry {
+    min-height: 34px;
+    padding: 8px 12px;
+    font-size: 15px;
+}
+
+/* Empty result list — same box as a row, muted, never selectable. */
+.dmenu .dmenu-empty {
+    padding: 10px 12px;
+    font-size: 13px;
+    color: @text_faint;
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -2203,11 +2245,6 @@ revealer {
 
 .launcher-scroller {
     min-height: 360px;
-}
-
-/* dmenu mode: the card hugs its (usually short) item list */
-.dmenu .launcher-scroller {
-    min-height: 0;
 }
 
 /* ── Right column: quick settings ── */
