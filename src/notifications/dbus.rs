@@ -27,6 +27,7 @@ enum DbusEvent {
 enum SignalEvent {
     Closed(u32, u32),
     ActionInvoked(u32, String),
+    Replied(u32, String),
 }
 
 /// Thread-safe sender for D-Bus → main thread communication.
@@ -173,6 +174,10 @@ impl NotificationServer {
             "icon-static".into(),
             "actions".into(),
             "action-icons".into(),
+            // KDE's convention, and the one Element and Telegram speak: the
+            // sender offers an `inline-reply` action whose label is the
+            // placeholder, and gets the text back on `NotificationReplied`.
+            "inline-reply".into(),
             "persistence".into(),
             // Non-standard, but the tag every OSD-style sender already uses
             // to replace its own notification in place.
@@ -342,6 +347,14 @@ impl NotificationServer {
         id: u32,
         action_key: &str,
     ) -> zbus::Result<()>;
+
+    /// Text the user typed into a card offering `inline-reply`.
+    #[zbus(signal)]
+    async fn notification_replied(
+        emitter: &SignalContext<'_>,
+        id: u32,
+        text: &str,
+    ) -> zbus::Result<()>;
 }
 
 /// Start the D-Bus notification server.
@@ -405,6 +418,9 @@ pub fn start_server(store: Rc<RefCell<NotificationStore>>) {
                                 SignalEvent::ActionInvoked(id, key) => {
                                     NotificationServer::action_invoked(ctxt, id, &key).await
                                 }
+                                SignalEvent::Replied(id, text) => {
+                                    NotificationServer::notification_replied(ctxt, id, &text).await
+                                }
                             };
                             if let Err(e) = result {
                                 log::warn!("Failed to emit notification signal: {e}");
@@ -431,8 +447,14 @@ pub fn start_server(store: Rc<RefCell<NotificationStore>>) {
         });
     }
     {
+        let tx = signal_tx.clone();
         store.borrow_mut().connect_action(move |id, key| {
-            let _ = signal_tx.send(SignalEvent::ActionInvoked(id, key.to_string()));
+            let _ = tx.send(SignalEvent::ActionInvoked(id, key.to_string()));
+        });
+    }
+    {
+        store.borrow_mut().connect_reply(move |id, text| {
+            let _ = signal_tx.send(SignalEvent::Replied(id, text.to_string()));
         });
     }
 

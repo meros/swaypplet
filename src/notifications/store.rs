@@ -6,6 +6,9 @@ type NotifyCb = Rc<dyn Fn(&Notification)>;
 type CloseCb = Rc<dyn Fn(u32, CloseReason)>;
 type ChangeCb = Rc<dyn Fn()>;
 type ActionCb = Rc<dyn Fn(u32, &str)>;
+/// A typed reply to a notification, which is a different thing from an
+/// action: it carries text the user wrote rather than naming a button.
+type ReplyCb = Rc<dyn Fn(u32, &str)>;
 
 /// A Claude session located for stop-notification policy (vision O2):
 /// which task owns it, and whether its workspace is showing on any output.
@@ -47,6 +50,7 @@ pub struct NotificationStore {
     on_close: Vec<CloseCb>,
     on_change: Vec<ChangeCb>,
     on_action: Vec<ActionCb>,
+    on_reply: Vec<ReplyCb>,
     task_resolver: Option<TaskResolver>,
 }
 
@@ -56,6 +60,7 @@ pub struct PendingCallbacks {
     close: Vec<(CloseCb, u32, CloseReason)>,
     change: Vec<ChangeCb>,
     action: Vec<(ActionCb, u32, String)>,
+    reply: Vec<(ReplyCb, u32, String)>,
 }
 
 impl PendingCallbacks {
@@ -65,6 +70,7 @@ impl PendingCallbacks {
             close: Vec::new(),
             change: Vec::new(),
             action: Vec::new(),
+            reply: Vec::new(),
         }
     }
 
@@ -82,6 +88,9 @@ impl PendingCallbacks {
         for (cb, id, key) in self.action {
             cb(id, &key);
         }
+        for (cb, id, text) in self.reply {
+            cb(id, &text);
+        }
     }
 }
 
@@ -97,6 +106,7 @@ impl NotificationStore {
             on_close: Vec::new(),
             on_change: Vec::new(),
             on_action: Vec::new(),
+            on_reply: Vec::new(),
             task_resolver: None,
         }
     }
@@ -124,6 +134,21 @@ impl NotificationStore {
 
     pub fn connect_action(&mut self, cb: impl Fn(u32, &str) + 'static) {
         self.on_action.push(Rc::new(cb));
+    }
+
+    pub fn connect_reply(&mut self, cb: impl Fn(u32, &str) + 'static) {
+        self.on_reply.push(Rc::new(cb));
+    }
+
+    /// Hand a typed reply back to the sender. Does not mutate notification
+    /// state: whether replying also closes the notification is the caller's
+    /// decision, the same as for an action.
+    pub fn reply(&self, id: u32, text: &str) -> PendingCallbacks {
+        let mut pending = PendingCallbacks::new();
+        for cb in &self.on_reply {
+            pending.reply.push((cb.clone(), id, text.to_string()));
+        }
+        pending
     }
 
     // ── DND ──────────────────────────────────────────────────────────────
@@ -334,6 +359,11 @@ pub fn store_close(store: &StoreRef, id: u32, reason: CloseReason) {
 
 pub fn store_action_invoked(store: &StoreRef, id: u32, key: &str) {
     let pending = store.borrow().action_invoked(id, key);
+    pending.fire();
+}
+
+pub fn store_reply(store: &StoreRef, id: u32, text: &str) {
+    let pending = store.borrow().reply(id, text);
     pending.fire();
 }
 
