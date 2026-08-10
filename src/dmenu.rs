@@ -61,9 +61,20 @@ struct Response {
 
 /// Socket lives in the per-user runtime dir (mode 0700) like the pid file,
 /// so only the owning user can reach the picker.
+///
+/// Keyed by `WAYLAND_DISPLAY`, because the runtime dir is shared across
+/// compositors: a nested session (dev/render.sh, dev/filmstrip.sh) binding
+/// the same path would unlink the live panel's socket and answer its
+/// clients. One panel per compositor, one socket per panel.
 fn socket_path() -> PathBuf {
     let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    std::path::Path::new(&dir).join("swaypplet-dmenu.sock")
+    let display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "default".into());
+    // WAYLAND_DISPLAY may be an absolute path; only the leaf names the socket.
+    let display = std::path::Path::new(&display)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "default".into());
+    std::path::Path::new(&dir).join(format!("swaypplet-dmenu-{display}.sock"))
 }
 
 pub fn run(mut args: impl Iterator<Item = String>) {
@@ -222,6 +233,10 @@ pub(crate) struct Picker {
     state: RefCell<State>,
     /// Taken on the first `finish`; later calls are no-ops.
     done: RefCell<Option<Box<dyn FnOnce(Option<String>)>>>,
+    /// Owns the surface's alpha for as long as the picker is up. Set right
+    /// after the window is built, so the enter transition is not driving a
+    /// Reveal that has already been dropped.
+    reveal: RefCell<Option<crate::anim::Reveal>>,
 }
 
 /// Build and present a picker window on `app`. `on_done` runs exactly once —
@@ -307,6 +322,7 @@ pub(crate) fn present_picker(
             query: String::new(),
         }),
         done: RefCell::new(Some(Box::new(on_done))),
+        reveal: RefCell::new(None),
     });
 
     // Click on the backdrop (not the card) cancels.
@@ -352,14 +368,19 @@ pub(crate) fn present_picker(
     window.add_controller(key);
 
     picker.refilter("");
-    // Enter transition (motion on glass, anim.rs); show() before present()
-    // so the fade starts from the hidden pose. The exit stays instant by
+    // Enter transition (motion on glass, anim.rs). The exit stays instant by
     // design: finish() destroys the window so the exclusive keyboard grab
     // releases immediately.
-    crate::anim::Reveal::new(&window, &container)
-        .content(&view)
-        .show();
+    //
+    // The Reveal is held on the Picker rather than dropped as a temporary.
+    // It owns the surface's alpha, and `SurfaceAlpha`'s Drop resets the
+    // multiplier to opaque and destroys the object — as a temporary that
+    // landed the moment the transition ended, which is precisely why this
+    // picker used to snap to full opacity instead of fading in.
+    let reveal = crate::anim::Reveal::new(&window, &container).content(&view);
+    reveal.show();
     window.present();
+    *picker.reveal.borrow_mut() = Some(reveal);
     entry.grab_focus();
     picker
 }
