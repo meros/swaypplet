@@ -53,7 +53,7 @@ const GROUP_GAP_PX: i32 = 8;
 // Label tables — mirror users/modules/workspace-config.nix (nixos repo):
 // nums 1–16 are the task grid, rendered "1¹".."4⁴" behind a task-colored
 // dot (`.bar-ws-dot.taskN`; colors live in data/style.css beside the
-// accent-ripple rules), nums 17–30 the generic keyed workspaces. Keep in
+// accent-ripple rules), nums 17–37 the generic keyed workspaces. Keep in
 // lockstep with that file.
 //
 // The grid is 4 tasks × 2 screens as of 2026-08-10; the superscript table
@@ -62,20 +62,27 @@ const GROUP_GAP_PX: i32 = 8;
 // third screen should render rather than fall back to its raw name.
 const TASK_SUPERSCRIPTS: [&str; 4] = ["¹", "²", "³", "⁴"];
 const GENERIC_LABELS: &[(i32, &str)] = &[
-    (17, "󰖟 b"),
-    (18, "󰊤 g"),
-    (19, "h"),
-    (20, "i"),
-    (21, "j"),
-    (22, "k"),
-    (23, "󰍡 m"),
-    (24, "n"),
-    (25, "📧 o"),
-    (26, "󰓇 p"),
-    (27, "󰜎 r"),
-    (28, "󰓓 t"),
-    (29, "󰑴 u"),
-    (30, "󰗃 y"),
+    (17, "3"),
+    (18, "4"),
+    (19, "󰖟 b"),
+    (20, "󰃭 c"),
+    (21, "󰈙 d"),
+    (22, "e"),
+    (23, "󰉋 f"),
+    (24, "󰊤 g"),
+    (25, "h"),
+    (26, "i"),
+    (27, "j"),
+    (28, "k"),
+    (29, "󰍡 m"),
+    (30, "n"),
+    (31, "📧 o"),
+    (32, "󰓇 p"),
+    (33, "󰜎 r"),
+    (34, "󰓓 t"),
+    (35, "󰑴 u"),
+    (36, "󰕧 v"),
+    (37, "󰗃 y"),
 ];
 
 pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box {
@@ -546,9 +553,9 @@ mod tests {
 
     #[test]
     fn one_screen_is_one_pill() {
-        let list = [on(1, "1:t1a", "eDP-1"), on(17, "17:wb", "eDP-1")];
+        let list = [on(1, "1:t1a", "eDP-1"), on(19, "19:wb", "eDP-1")];
         let groups = group_by_output(&list, &[out("eDP-1", 0, 0)]);
-        assert_eq!(shape(&groups), [("eDP-1", vec![1, 17])]);
+        assert_eq!(shape(&groups), [("eDP-1", vec![1, 19])]);
     }
 
     #[test]
@@ -557,7 +564,7 @@ mod tests {
             on(1, "1:t1a", "right"),
             on(5, "5:t2a", "left"),
             on(9, "9:t3a", "below"),
-            on(17, "17:wb", "left"),
+            on(19, "19:wb", "left"),
         ];
         let outputs = [
             // Declared in a deliberately unhelpful order: placement
@@ -569,7 +576,7 @@ mod tests {
         assert_eq!(
             shape(&group_by_output(&list, &outputs)),
             [
-                ("left", vec![5, 17]),
+                ("left", vec![5, 19]),
                 ("below", vec![9]),
                 ("right", vec![1]),
             ]
@@ -632,9 +639,10 @@ mod tests {
 
     #[test]
     fn generic_labels_come_from_the_table() {
-        assert_eq!(generic_label(17, "17:wb"), "󰖟 b");
-        assert_eq!(generic_label(30, "30:wy"), "󰗃 y");
-        assert_eq!(generic_label(27, "27:wr"), "󰜎 r");
+        assert_eq!(generic_label(19, "19:wb"), "󰖟 b");
+        assert_eq!(generic_label(37, "37:wy"), "󰗃 y");
+        assert_eq!(generic_label(33, "33:wr"), "󰜎 r");
+        assert_eq!(generic_label(17, "17:w3"), "3");
     }
 
     #[test]
@@ -731,7 +739,7 @@ mod tests {
         let mut snap = TaskSnapshot::default();
         // Session moved to the browser workspace: no segment can point at
         // it, so the signal degrades to the old group-wide hue.
-        snap.tasks[1].sessions = vec![session(Activity::Waiting, "17:wb")];
+        snap.tasks[1].sessions = vec![session(Activity::Waiting, "19:wb")];
         assert_eq!(lane(&ribbon_plans(&snap)[1]), [Ribbon::Waiting; 4]);
     }
 
