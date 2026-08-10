@@ -74,7 +74,7 @@ done
 export WAYLAND_DISPLAY="$WD"
 [ -n "$CSS" ] && export SWAYPPLET_CSS="$CSS"
 
-rm -f /tmp/swaypplet.pid
+rm -f "$RUNTIME/swaypplet.pid"
 case "$MODE" in
   polkit)    "$BIN" polkit-agent >/tmp/swpp-app.log 2>&1 & ;;
   preview:*) "$BIN" --preview "${MODE#preview:}" >/tmp/swpp-app.log 2>&1 & ;;
@@ -87,7 +87,7 @@ for _ in $(seq 1 60); do
   sleep 0.1
 done
 if [ "$MODE" = "panel" ] || [ "$MODE" = "launcher" ]; then
-  p="$(cat /tmp/swaypplet.pid 2>/dev/null || true)"
+  p="$(cat "$RUNTIME/swaypplet.pid" 2>/dev/null || true)"
   [ -n "$p" ] && kill -USR1 "$p" 2>/dev/null || true
   for _ in $(seq 1 40); do
     swaymsg -t get_tree 2>/dev/null | grep -q '"app_id": *"[^"]*swaypplet' && { mapped=1; break; }

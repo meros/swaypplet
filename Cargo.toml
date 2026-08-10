@@ -29,6 +29,7 @@ wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 swayipc = "4"
 system-tray = { version = "0.8", default-features = false, features = ["data"] }
+gdk4-wayland = { version = "0.11", features = ["wayland_crate"] }
 
 [build-dependencies]
 protobuf-codegen = "3.7"

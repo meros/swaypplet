@@ -89,6 +89,7 @@ cleanup() {
   [ -n "${SWAY_PID:-}" ] && kill "$SWAY_PID" 2>/dev/null
   # Keep the compositor log next to the frames: "why is there no frost" is
   # answered there and nowhere else.
+  restore_pid
   cp "$LOG" "$OUT/sway.log" 2>/dev/null
   cp "$CFG" "$OUT/sway.conf" 2>/dev/null
   rm -f "$CFG" "$LOG" "$BG"
@@ -115,7 +116,12 @@ done
 [ -n "$WD" ] || { echo "could not determine WAYLAND_DISPLAY"; cat "$LOG"; exit 1; }
 export WAYLAND_DISPLAY="$WD"
 
-rm -f /tmp/swaypplet.pid
+# The pid file is a fixed path shared with the live session, and the nested
+# instance would leave a dead pid in it for the session's mod+space to signal.
+PIDFILE="$RUNTIME/swaypplet.pid"
+SAVED_PID="$(cat "$PIDFILE" 2>/dev/null)"
+restore_pid() { [ -n "${SAVED_PID:-}" ] && printf '%s' "$SAVED_PID" > "$PIDFILE"; return 0; }
+rm -f "$PIDFILE"
 # A private bus has no a11y registry, and GTK treats failing to reach it as
 # fatal to GApplication registration, which leaves the app without its
 # notification service. Nothing here needs the bridge.
@@ -157,10 +163,17 @@ case "$SURFACE" in
     sleep $(awk "BEGIN{print (300*$SCALE + 1200*$SCALE/20)/1000}")
     ;;
   panel|launcher)
-    p="$(cat /tmp/swaypplet.pid 2>/dev/null)"
-    [ -n "$p" ] && kill -USR1 "$p" 2>/dev/null
+    # The pid file appears a beat after the bus name does.
+    p=""
+    for _ in $(seq 1 60); do
+      p="$(cat "$PIDFILE" 2>/dev/null)"
+      [ -n "$p" ] && break
+      sleep 0.1
+    done
+    [ -n "$p" ] || { echo "no pid file, cannot toggle the panel"; exit 1; }
+    kill -USR1 "$p" || { echo "USR1 to $p failed"; exit 1; }
     sleep $(awk "BEGIN{print 2 + 400*$SCALE/1000}")
-    [ -n "$p" ] && kill -USR1 "$p" 2>/dev/null
+    kill -USR1 "$p"
     sleep $(awk "BEGIN{print 2 + 400*$SCALE/1000}")
     ;;
   osd)

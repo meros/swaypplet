@@ -1,3 +1,4 @@
+mod alpha;
 mod anim;
 mod app;
 mod avatar;

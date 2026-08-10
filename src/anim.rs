@@ -158,6 +158,9 @@ struct RevealInner {
     slide: RefCell<Option<(SlideBin, f64)>>,
     shown: Cell<bool>,
     tick: RefCell<Option<gtk4::TickCallbackId>>,
+    /// The compositor's own alpha for this surface, when it offers one. Bound
+    /// on the first show, because the surface does not exist before that.
+    alpha: RefCell<Option<crate::alpha::SurfaceAlpha>>,
 }
 
 /// One show/hide transition for every glass surface (motion on glass, see
@@ -183,6 +186,7 @@ impl Reveal {
                 slide: RefCell::new(None),
                 shown: Cell::new(false),
                 tick: RefCell::new(None),
+                alpha: RefCell::new(None),
             }),
         }
     }
@@ -215,11 +219,17 @@ impl Reveal {
         // lands a frame or two into the fade — inside the GLASS_MS tint
         // lead (see set_layer_blur).
         inner.window.set_visible(true);
+        if inner.alpha.borrow().is_none() {
+            *inner.alpha.borrow_mut() = crate::alpha::SurfaceAlpha::attach(&inner.window);
+        }
         if inner.window.is_layer_window() {
             set_layer_blur(inner.window.namespace(), true, || {});
         }
         if !animations_enabled() {
             self.cancel_tick();
+            if let Some(a) = &*inner.alpha.borrow() {
+                a.set(1.0);
+            }
             inner.pane.set_opacity(1.0);
             if let Some(c) = &*inner.content.borrow() {
                 c.set_opacity(1.0);
@@ -232,10 +242,10 @@ impl Reveal {
         // Start from the fully hidden pose on a fresh map OR a parked
         // surface (pane at exactly 0) — instant-hide paths (window unmapped
         // without hide()) would otherwise skip the enter transition.
-        if !was_visible || inner.pane.opacity() == 0.0 {
-            inner.pane.set_opacity(0.0);
+        if !was_visible || self.material_alpha() == 0.0 {
+            self.set_material_alpha(0.0);
             if let Some(c) = &*inner.content.borrow() {
-                c.set_opacity(0.0);
+                c.set_opacity(if inner.alpha.borrow().is_some() { 1.0 } else { 0.0 });
             }
             if let Some((bin, px)) = &*inner.slide.borrow() {
                 bin.jump_to(*px);
@@ -261,6 +271,33 @@ impl Reveal {
         self.animate(false);
     }
 
+    /// The material's current opacity: the compositor's number when it owns
+    /// it, the pane widget's alpha otherwise.
+    fn material_alpha(&self) -> f64 {
+        match &*self.inner.alpha.borrow() {
+            Some(a) => a.get(),
+            None => self.inner.pane.opacity(),
+        }
+    }
+
+    /// Drive the material. With `wp_alpha_modifier_v1` this is one number for
+    /// pane, frost and content together, which is what makes the frost fade
+    /// at all; the pane widget then stays fully opaque and the content stops
+    /// needing a fade of its own. Without it, the old split stands: the pane
+    /// carries the tint and the content fades on top of it.
+    fn set_material_alpha(&self, a: f64) {
+        match &*self.inner.alpha.borrow() {
+            Some(m) => {
+                m.set(a);
+                self.inner.pane.set_opacity(1.0);
+                // The multiplier is surface state, so it lands on the next
+                // commit and only a redraw produces one.
+                self.inner.pane.queue_draw();
+            }
+            None => self.inner.pane.set_opacity(a),
+        }
+    }
+
     fn cancel_tick(&self) {
         if let Some(id) = self.inner.tick.take() {
             id.remove();
@@ -276,7 +313,7 @@ impl Reveal {
     /// acknowledgment wins: the unmap is skipped.
     fn finish_hide(&self) {
         let inner = &self.inner;
-        inner.pane.set_opacity(0.0);
+        self.set_material_alpha(0.0);
         if let Some(c) = &*inner.content.borrow() {
             c.set_opacity(0.0);
         }
@@ -307,7 +344,8 @@ impl Reveal {
     fn animate(&self, entering: bool) {
         self.cancel_tick();
         let inner = &self.inner;
-        let pane_from = inner.pane.opacity();
+        let compositor_owns = inner.alpha.borrow().is_some();
+        let pane_from = self.material_alpha();
         let content_from = inner.content.borrow().as_ref().map(|c| c.opacity());
         let target = if entering { 1.0 } else { 0.0 };
         let total = duration(if entering { ENTER_MS } else { EXIT_MS });
@@ -315,11 +353,14 @@ impl Reveal {
         let this = self.clone();
         let id = inner.pane.add_tick_callback(move |_, _| {
             let t = (((glib::monotonic_time() - start) as f64 / 1000.0) / total).clamp(0.0, 1.0);
-            this.inner
-                .pane
-                .set_opacity(glass_channel(pane_from, target, t));
-            if let (Some(from), Some(c)) = (content_from, this.inner.content.borrow().as_ref()) {
-                c.set_opacity(from + (target - from) * ease_out_cubic(t));
+            if compositor_owns {
+                // Material and content are one object now, eased together.
+                this.set_material_alpha(pane_from + (target - pane_from) * ease_out_cubic(t));
+            } else {
+                this.set_material_alpha(glass_channel(pane_from, target, t));
+                if let (Some(from), Some(c)) = (content_from, this.inner.content.borrow().as_ref()) {
+                    c.set_opacity(from + (target - from) * ease_out_cubic(t));
+                }
             }
             if t >= 1.0 {
                 this.inner.tick.take();
