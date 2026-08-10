@@ -1569,6 +1569,15 @@ revealer {
     padding: 12px 14px;
 }
 
+/* Cards past the fully-visible band sit behind the stack, dimmer as they go.
+   A tint change rather than widget opacity: each card owns its surface now,
+   and that surface's alpha is the material fade, which this must not fight.
+   The frost stays — a collapsed card is still glass, just further back. */
+.notification-popup-content.collapsed {
+    background-color: alpha(@surface, 0.82);
+    border-color: alpha(@border_strong, 0.7);
+}
+
 /* Border pulse, not box-shadow: a glow would overhang into the
    transparent canvas and get frosted (see the window comment). */
 .notification-popup-content.critical {

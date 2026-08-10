@@ -58,7 +58,7 @@ impl SurfaceAlpha {
 
         // The manager object lives on its own queue; the per-surface object
         // never sends events, so it needs no dispatch of its own.
-        let mut queue = conn.new_event_queue::<Finder>();
+        let queue = conn.new_event_queue::<Finder>();
         let qh = queue.handle();
         let alpha = manager.get_surface(&wl_surface, &qh, ());
         let _ = queue.flush();

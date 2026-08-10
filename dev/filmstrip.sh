@@ -55,6 +55,7 @@ BG="$(mktemp /tmp/swpp-film-XXXX.png)"
 if [ -z "$CROP" ]; then
   case "$SURFACE" in
     notification) CROP="384x190+$((W - 384))+0";;
+    stack)        CROP="384x460+$((W - 384))+0";;
     osd)          CROP="${W}x220+0+$((H - 260))";;
     panel)        CROP="800x$((H - 40))+0+0";;
     *)            CROP="${W}x${H}+0+0";;
@@ -160,6 +161,17 @@ case "$SURFACE" in
   notification)
     # Long enough to hold still between the enter and the exit at this scale.
     notify-send -t $((300 * SCALE)) "filmstrip" "glass enter and exit"
+    sleep $(awk "BEGIN{print (300*$SCALE + 1200*$SCALE/20)/1000}")
+    ;;
+  stack)
+    # Several at once, to check the stacking and the collapsed tail rather
+    # than one card's transition.
+    i=0
+    while [ $i -lt 5 ]; do
+      notify-send -a "app$i" -t $((300 * SCALE)) "card $i" "body of card $i"
+      sleep 0.4
+      i=$((i + 1))
+    done
     sleep $(awk "BEGIN{print (300*$SCALE + 1200*$SCALE/20)/1000}")
     ;;
   panel|launcher)
