@@ -321,7 +321,7 @@ mod tests {
     #[test]
     fn focus_command_matches_the_keybinding_path() {
         assert_eq!(focus_command("5:t2a"), "workspace number 5");
-        assert_eq!(focus_command("17:wb"), "workspace number 17");
+        assert_eq!(focus_command("19:wb"), "workspace number 19");
         assert_eq!(focus_command("mail"), "workspace \"mail\"");
     }
 }

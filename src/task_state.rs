@@ -487,7 +487,7 @@ mod tests {
 
     #[test]
     fn non_task_workspaces_have_no_task() {
-        assert_eq!(task_of_name("17:wb"), None);
+        assert_eq!(task_of_name("19:wb"), None);
         assert_eq!(task_of_name("mail"), None);
         // Digit outside the 4-task scheme.
         assert_eq!(task_of_name("40:t9a"), None);
@@ -662,7 +662,7 @@ mod tests {
         let mut acked = HashMap::new();
 
         let mut snap = snapshot_of(vec![waiting_at(mtime)]);
-        reconcile_acks(&mut snap, &mut acked, &["17:wb"]);
+        reconcile_acks(&mut snap, &mut acked, &["19:wb"]);
         assert!(!snap.task(1).sessions[0].acked);
 
         // Session lives on 5:t2a (task 2, but stored under task 1 by the
@@ -671,14 +671,14 @@ mod tests {
         assert!(snap.task(1).sessions[0].acked);
 
         // Focus moves away: the episode stays acked.
-        reconcile_acks(&mut snap, &mut acked, &["17:wb"]);
+        reconcile_acks(&mut snap, &mut acked, &["19:wb"]);
         assert!(snap.task(1).sessions[0].acked);
 
         // Status rewritten (new mtime) → fresh episode, unacked again.
         let mut snap = snapshot_of(vec![waiting_at(Some(
             SystemTime::UNIX_EPOCH + Duration::from_secs(2000),
         ))]);
-        reconcile_acks(&mut snap, &mut acked, &["17:wb"]);
+        reconcile_acks(&mut snap, &mut acked, &["19:wb"]);
         assert!(!snap.task(1).sessions[0].acked);
     }
 
