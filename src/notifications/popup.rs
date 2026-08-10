@@ -36,7 +36,12 @@ const MAX_POPUPS: usize = 5;
 // the stack and evicts everything you had not read yet; past the cap its
 // oldest card gives way to its newest and the overflow is counted on the
 // survivor instead.
-const MAX_PER_APP: usize = 2;
+//
+// Set to the fully-visible band rather than lower: one app may fill the
+// cards shown at full size and no more, which still leaves the collapsed
+// tail for everyone else. Tighter than this and three ordinary notifications
+// in a row from one app drop one immediately, which reads as a bug.
+const MAX_PER_APP: usize = FULL_VISIBLE;
 
 // ── Animation (durations and easing come from crate::anim) ──
 // Entry and exit fade the card while it settles a short SLIDE_PX from/toward
@@ -121,6 +126,9 @@ struct Card {
     newborn: bool,
     /// Which app sent it, for the per-app cap.
     app: String,
+    /// The card carries a field that has to be typed into, which is the only
+    /// reason the surface ever accepts keyboard focus.
+    wants_keyboard: bool,
     /// When the notification arrived, for the age in the header.
     stamp: std::time::SystemTime,
     /// The header's age label, so the minute tick can rewrite it without
@@ -317,8 +325,10 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
             if let Some(card) = s.cards.iter_mut().find(|c| c.id == id && !c.exiting) {
                 card.stamp = notif.timestamp;
                 card.age = age;
+                card.wants_keyboard = wants_keyboard(notif);
             }
         }
+        sync_keyboard_mode(st);
         reflow(st);
         return;
     }
@@ -435,12 +445,14 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
             exiting: false,
             newborn: true,
             app: notif.app_name.clone(),
+            wants_keyboard: wants_keyboard(notif),
             stamp: notif.timestamp,
             age,
         });
     }
 
     ensure_age_timer(st);
+    sync_keyboard_mode(st);
     reflow(st);
 }
 
@@ -682,6 +694,11 @@ fn ensure_tick(st: &Rc<RefCell<State>>) {
         for widget in &removed {
             canvas.remove(widget);
         }
+        if !removed.is_empty() {
+            // A card that carried a field has gone, so the surface may no
+            // longer need to be reachable by keyboard at all.
+            sync_keyboard_mode(&st);
+        }
         if emptied {
             // Stay MAPPED with an empty input region instead of unmapping:
             // swayfx rebuilds its blur pipeline on map/unmap, which flashes
@@ -709,16 +726,29 @@ fn ensure_tick(st: &Rc<RefCell<State>>) {
     });
 }
 
-/// Let the surface take keyboard focus, or give it back.
+/// Match the surface's keyboard mode to whether anything on it can be typed
+/// into.
 ///
-/// The stack is `KeyboardMode::None` at rest. Anything else would make a
-/// surface that appears unbidden, several times an hour, able to hold the
-/// keyboard — so the mode is raised only for as long as a reply field is
-/// deliberately in use.
-fn set_keyboard(st: &Rc<RefCell<State>>, on: bool) {
+/// The stack is `KeyboardMode::None` at rest, and must be: a surface that
+/// appears unbidden several times an hour has no business holding the
+/// keyboard. `OnDemand` is the mode that lets a click move focus here without
+/// ever taking it unasked — the compositor grants focus on the click and on
+/// nothing else, unlike `Exclusive`, which grabs on map.
+///
+/// The mode has to be raised *before* the click, not during it. Setting it
+/// from the click handler is too late: the compositor has already decided
+/// where that button press sends focus, so the entry drew a focus ring and
+/// then received no keys at all.
+fn sync_keyboard_mode(st: &Rc<RefCell<State>>) {
     use gtk4_layer_shell::{KeyboardMode, LayerShell};
-    let window = st.borrow().window.clone();
-    window.set_keyboard_mode(if on {
+    let (window, wanted) = {
+        let s = st.borrow();
+        (
+            s.window.clone(),
+            s.cards.iter().any(|c| !c.exiting && c.wants_keyboard),
+        )
+    };
+    window.set_keyboard_mode(if wanted {
         KeyboardMode::OnDemand
     } else {
         KeyboardMode::None
@@ -971,6 +1001,11 @@ const COMPACT_CATEGORIES: &[&str] = &["device", "x-swaypplet.osd"];
 /// construction — volume, brightness and this machine's own "nothing to jump
 /// to" all land here. A category can also say so outright, which catches the
 /// senders that describe what they are without setting `transient`.
+/// Whether a notification puts a text field on its card.
+fn wants_keyboard(notif: &Notification) -> bool {
+    notif.actions.iter().any(|(key, _)| key == INLINE_REPLY_KEY)
+}
+
 fn is_compact(notif: &Notification) -> bool {
     if !notif.actions.is_empty() || !notif.body.is_empty() {
         return false;
@@ -1210,16 +1245,12 @@ fn populate_card(
                 store::store_close(&store_c, id, CloseReason::Dismissed);
             }
         });
-        // The stack runs with no keyboard mode, so this field cannot be typed
-        // into until the surface is allowed keyboard focus — and it is only
-        // allowed once the field is deliberately clicked. Switching the whole
-        // surface to on-demand when a card merely appears would put a
-        // focus-stealing overlay one notification away.
+        // The surface is already on-demand by the time a card with this field
+        // is on screen (see sync_keyboard_mode); the click only has to move
+        // GTK's own focus onto the entry.
         let click = gtk4::GestureClick::new();
-        let st_c = st.clone();
         let entry_c = entry.clone();
         click.connect_pressed(move |_, _, _, _| {
-            set_keyboard(&st_c, true);
             entry_c.grab_focus();
         });
         entry.add_controller(click);
@@ -1227,10 +1258,16 @@ fn populate_card(
         // Escape hands the keyboard straight back, so the surface can never
         // be left holding focus with no obvious way out.
         let keys = gtk4::EventControllerKey::new();
-        let st_c = st.clone();
+        let entry_c = entry.clone();
         keys.connect_key_pressed(move |_, key, _, _| {
             if key == gtk4::gdk::Key::Escape {
-                set_keyboard(&st_c, false);
+                // Give the keyboard back by dropping the field's focus. The
+                // surface stays on-demand until the card itself goes, which
+                // costs nothing: on-demand never takes focus unasked.
+                entry_c.set_text("");
+                if let Some(root) = entry_c.root() {
+                    root.set_focus(None::<&gtk4::Widget>);
+                }
                 return gtk4::glib::Propagation::Stop;
             }
             gtk4::glib::Propagation::Proceed
@@ -1243,10 +1280,7 @@ fn populate_card(
         let focus = gtk4::EventControllerFocus::new();
         focus.connect_enter(move |_| pause_timers(&st_c));
         let st_c = st.clone();
-        focus.connect_leave(move |_| {
-            set_keyboard(&st_c, false);
-            resume_timers(&st_c);
-        });
+        focus.connect_leave(move |_| resume_timers(&st_c));
         entry.add_controller(focus);
         vbox.append(&entry);
     }
