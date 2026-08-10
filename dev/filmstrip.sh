@@ -14,7 +14,7 @@
 # checked.
 #
 # Usage:
-#   dev/filmstrip.sh [--bin PATH] [--sway PATH] [--scale N] [--surface notification|panel|launcher|osd]
+#   dev/filmstrip.sh [--bin PATH] [--sway PATH] [--scale N] [--surface notification|panel|launcher|osd|dmenu]
 #                    [--out DIR] [--res WxH]
 #
 # --sway lets a patched compositor be checked without restarting the session,
@@ -58,6 +58,7 @@ if [ -z "$CROP" ]; then
     stack)        CROP="384x460+$((W - 384))+0";;
     osd)          CROP="${W}x220+0+$((H - 260))";;
     panel)        CROP="800x$((H - 40))+0+0";;
+    dmenu)        CROP="640x460+$(((W - 640) / 2))+$(((H - 460) / 2))";;
     *)            CROP="${W}x${H}+0+0";;
   esac
 fi
@@ -191,6 +192,25 @@ case "$SURFACE" in
   osd)
     "$BIN" osd --output-volume raise >/dev/null 2>&1
     sleep $(awk "BEGIN{print 4 + 400*$SCALE/1000}")
+    ;;
+  dmenu)
+    # The picker builds a fresh layer surface per request, unlike the panel
+    # and the launcher, so its enter is the one worth watching frame by
+    # frame. The client blocks until something is picked; the seat has no
+    # keyboard under WLR_LIBINPUT_NO_DEVICES, so it gets killed once the
+    # enter has played out.
+    #
+    # The warm-up run matters: a debug build is a few hundred MB and takes
+    # seconds to page in, which lands the whole transition after the grab
+    # loop has been killed. The flag below is not one dmenu knows, so the
+    # run exits 2 on it — after the dynamic linker has done its work.
+    "$BIN" dmenu --filmstrip-warmup </dev/null >/dev/null 2>&1
+    printf 'Alexander (privat)\nAlexander (norban)\nSALJARE\nMAKLARE\nADMIN\n' \
+      | "$BIN" dmenu --prompt "Chrome Profile" >/dev/null 2>&1 &
+    DMENU_PID=$!
+    sleep $(awk "BEGIN{print 8 + 400*$SCALE/1000}")
+    kill "$DMENU_PID" 2>/dev/null
+    sleep 1
     ;;
   *) echo "unknown surface: $SURFACE" >&2; exit 2;;
 esac
