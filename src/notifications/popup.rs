@@ -9,6 +9,7 @@ use gtk4_layer_shell::Edge;
 use crate::anim::{self, ease_out_cubic};
 use crate::icons;
 use crate::layer_shell::{self, LayerShellConfig};
+use crate::notifications::ImageSource;
 
 use super::store::{self, NotificationStore};
 use super::{CloseReason, Notification, Urgency};
@@ -31,6 +32,11 @@ const PEEK: f64 = 12.0;
 const PEEK_SCALE_STEP: f64 = 0.05;
 const PEEK_OPACITY_STEP: f64 = 0.15;
 const MAX_POPUPS: usize = 5;
+// How many cards one app may hold at once. Without this a chatty app fills
+// the stack and evicts everything you had not read yet; past the cap its
+// oldest card gives way to its newest and the overflow is counted on the
+// survivor instead.
+const MAX_PER_APP: usize = 2;
 
 // ── Animation (durations and easing come from crate::anim) ──
 // Entry and exit fade the card while it settles a short SLIDE_PX from/toward
@@ -38,6 +44,11 @@ const MAX_POPUPS: usize = 5;
 // pane and rides the fast `glass_channel` tint ramp, while its content
 // (the inner hbox) fades over the full duration. The overshoot past the
 // canvas's right margin is clipped by the overlay clipper.
+
+// Drag-to-dismiss: how far before the gesture takes the event sequence off
+// the click handler, and how far before releasing means "gone".
+const DRAG_CLAIM_PX: f64 = 8.0;
+const DRAG_DISMISS_PX: f64 = 72.0;
 
 const BASE_TIMEOUT_MS: u64 = 5000;
 const PER_CHAR_MS: u64 = 40;
@@ -104,6 +115,13 @@ struct Card {
     animating: bool,
     exiting: bool,
     newborn: bool,
+    /// Which app sent it, for the per-app cap.
+    app: String,
+    /// When the notification arrived, for the age in the header.
+    stamp: std::time::SystemTime,
+    /// The header's age label, so the minute tick can rewrite it without
+    /// rebuilding the card under the pointer.
+    age: Option<gtk4::Label>,
 }
 
 /// Where an exiting card animates to: fade out while drifting a short settle
@@ -165,6 +183,14 @@ struct State {
     store: Rc<RefCell<NotificationStore>>,
     ticking: bool,
     hovered: bool,
+    /// Cards an app has had pushed off the stack while it still holds one,
+    /// shown as a count on its newest card. Cleared when the app's last card
+    /// goes, so the number always means "since this run of chatter began".
+    overflow: std::collections::HashMap<String, u32>,
+    /// The once-a-minute age refresh. Boundary-aimed and alive only while
+    /// cards are on screen (P7): a timer that outlives its reason is a
+    /// wakeup for nothing.
+    age_timer: Option<glib::SourceId>,
 }
 
 /// Manages the popup notification stack at the top-right: newest on top,
@@ -199,6 +225,8 @@ impl PopupManager {
             store: store.clone(),
             ticking: false,
             hovered: false,
+            overflow: std::collections::HashMap::new(),
+            age_timer: None,
         }));
 
         // Hovering the stack pauses auto-dismiss timers
@@ -272,10 +300,43 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
             })
     };
     if let Some(widget) = existing {
-        populate_card(&widget, notif, &store);
+        let overflow = st
+            .borrow()
+            .overflow
+            .get(&notif.app_name)
+            .copied()
+            .unwrap_or(0);
+        let age = populate_card(&widget, notif, &store, st, overflow);
         set_critical_class(&widget, notif);
+        {
+            let mut s = st.borrow_mut();
+            if let Some(card) = s.cards.iter_mut().find(|c| c.id == id && !c.exiting) {
+                card.stamp = notif.timestamp;
+                card.age = age;
+            }
+        }
         reflow(st);
         return;
+    }
+
+    // The app's own oldest card gives way before anyone else's: a burst from
+    // one sender should cost that sender its slots, not the stack.
+    let crowded = {
+        let s = st.borrow();
+        let mine: Vec<u32> = s
+            .cards
+            .iter()
+            .filter(|c| !c.exiting && c.app == notif.app_name)
+            .map(|c| c.id)
+            .collect();
+        (mine.len() >= MAX_PER_APP).then(|| mine[0])
+    };
+    if let Some(old_id) = crowded {
+        start_exit(st, old_id);
+        *st.borrow_mut()
+            .overflow
+            .entry(notif.app_name.clone())
+            .or_insert(0) += 1;
     }
 
     // Evict the oldest popup when full (popup only — the notification
@@ -299,7 +360,13 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     card.add_css_class("notification-popup-content");
     card.set_size_request(CARD_WIDTH, -1);
     set_critical_class(&card, notif);
-    populate_card(&card, notif, &store);
+    let overflow = st
+        .borrow()
+        .overflow
+        .get(&notif.app_name)
+        .copied()
+        .unwrap_or(0);
+    let age = populate_card(&card, notif, &store, st, overflow);
 
     // present() maps the window and the map signal fires synchronously —
     // its handler borrows the state, so present outside any borrow.
@@ -363,10 +430,41 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
             animating: false,
             exiting: false,
             newborn: true,
+            app: notif.app_name.clone(),
+            stamp: notif.timestamp,
+            age,
         });
     }
 
+    ensure_age_timer(st);
     reflow(st);
+}
+
+/// Keep the header ages honest while cards are on screen.
+///
+/// One timer for the whole stack rather than one per card, aimed at the
+/// minute so every card turns over together, and dropped as soon as the
+/// stack empties.
+fn ensure_age_timer(st: &Rc<RefCell<State>>) {
+    if st.borrow().age_timer.is_some() {
+        return;
+    }
+    let st_c = st.clone();
+    let source = glib::timeout_add_local(Duration::from_secs(60), move || {
+        let mut s = st_c.borrow_mut();
+        if s.cards.is_empty() {
+            s.age_timer = None;
+            return glib::ControlFlow::Break;
+        }
+        let now = std::time::SystemTime::now();
+        for card in &s.cards {
+            if let Some(label) = &card.age {
+                label.set_label(&age_label(card.stamp, now).unwrap_or_default());
+            }
+        }
+        glib::ControlFlow::Continue
+    });
+    st.borrow_mut().age_timer = Some(source);
 }
 
 fn dismiss(st: &Rc<RefCell<State>>, id: u32) {
@@ -559,6 +657,16 @@ fn ensure_tick(st: &Rc<RefCell<State>>) {
             .rev()
             .map(|&i| s.cards.remove(i).widget)
             .collect();
+        // An app with no cards left starts its next burst from zero. The set
+        // is collected first because `retain` holds the map borrowed while it
+        // runs, and the predicate has to read `cards` on the same struct.
+        let live_apps: std::collections::HashSet<String> = s
+            .cards
+            .iter()
+            .filter(|c| !c.exiting)
+            .map(|c| c.app.clone())
+            .collect();
+        s.overflow.retain(|app, _| live_apps.contains(app));
         let emptied = !any_running && s.cards.is_empty();
         if !any_running {
             s.ticking = false;
@@ -595,6 +703,24 @@ fn ensure_tick(st: &Rc<RefCell<State>>) {
             glib::ControlFlow::Break
         }
     });
+}
+
+/// Follow a drag with the card, without letting the animation fight it.
+///
+/// The offset is written straight into the card's current pose, so a release
+/// that dismisses starts its exit from where the finger left it rather than
+/// snapping back first.
+fn drag_card_to(st: &Rc<RefCell<State>>, id: u32, dx: f64) {
+    let mut s = st.borrow_mut();
+    let canvas = s.canvas.clone();
+    let Some(card) = s.cards.iter_mut().find(|c| c.id == id && !c.exiting) else {
+        return;
+    };
+    card.animating = false;
+    card.cur.x_off = dx;
+    // Fade with distance, so the card reads as leaving rather than sliding.
+    card.cur.opacity = (1.0 - dx / (DRAG_DISMISS_PX * 1.6)).clamp(0.0, 1.0);
+    apply_pose(&canvas, card);
 }
 
 /// Restrict pointer input to the area the cards occupy (current and
@@ -707,6 +833,102 @@ fn resume_timers(st: &Rc<RefCell<State>>) {
     }
 }
 
+// ── Pictures ──
+
+/// Icon size in the card's leading slot.
+const ICON_PX: i32 = 24;
+/// Thumbnail size when the notification carries its own picture.
+const THUMB_PX: i32 = 40;
+/// A picture at least this wide, and at least this much wider than it is
+/// tall, is a screenshot or a banner rather than an avatar, so it goes under
+/// the text at full card width instead of into the leading slot.
+const WIDE_MIN_PX: i32 = 192;
+const WIDE_MIN_ASPECT: f64 = 1.6;
+
+/// Build a paintable widget for an image source, or `None` when it cannot be
+/// resolved — a missing file or an icon name no theme has. Callers fall back
+/// rather than showing a broken-image placeholder, because a card with no
+/// picture reads better than a card with a question mark in it.
+fn image_widget(src: &ImageSource, px: i32) -> Option<gtk4::Widget> {
+    use gtk4::prelude::*;
+    let image = match src {
+        ImageSource::Named(name) => {
+            let display = gtk4::gdk::Display::default()?;
+            let theme = gtk4::IconTheme::for_display(&display);
+            if !theme.has_icon(name) {
+                return None;
+            }
+            gtk4::Image::from_icon_name(name)
+        }
+        ImageSource::Path(path) => {
+            if !path.is_file() {
+                return None;
+            }
+            gtk4::Image::from_file(path)
+        }
+        ImageSource::Data(d) => {
+            let bytes = gtk4::glib::Bytes::from(&d.data);
+            let pixbuf = gtk4::gdk_pixbuf::Pixbuf::from_bytes(
+                &bytes,
+                gtk4::gdk_pixbuf::Colorspace::Rgb,
+                d.has_alpha,
+                d.bits_per_sample,
+                d.width,
+                d.height,
+                d.rowstride,
+            );
+            let texture = gtk4::gdk::Texture::for_pixbuf(&pixbuf);
+            gtk4::Image::from_paintable(Some(&texture))
+        }
+    };
+    image.set_pixel_size(px);
+    Some(image.upcast())
+}
+
+/// Whether a picture should be laid out as a wide banner. Only the geometry
+/// decides, and for files it is read from the header rather than by decoding
+/// the whole image.
+fn is_wide_picture(src: &ImageSource) -> bool {
+    let (w, h) = match src {
+        ImageSource::Data(d) => (d.width, d.height),
+        ImageSource::Path(path) => match gtk4::gdk_pixbuf::Pixbuf::file_info(path) {
+            Some((_, w, h)) => (w, h),
+            None => return false,
+        },
+        // A themed name is an icon by definition.
+        ImageSource::Named(_) => return false,
+    };
+    if h <= 0 {
+        return false;
+    }
+    w >= WIDE_MIN_PX && (w as f64 / h as f64) >= WIDE_MIN_ASPECT
+}
+
+// ── Age ──
+
+/// How old a notification reads on the card. Short forms, because this sits
+/// in a header beside the app name and competes with it for width.
+///
+/// Anything under a minute is "now": a card that just arrived does not need
+/// its age, and a per-second countdown would be a loop the bar's cadence
+/// budget (P7) does not pay for.
+fn age_label(ts: std::time::SystemTime, now: std::time::SystemTime) -> Option<String> {
+    let secs = now.duration_since(ts).ok()?.as_secs();
+    Some(match secs {
+        0..=59 => return None,
+        60..=3599 => format!("{}m", secs / 60),
+        3600..=86_399 => format!("{}h", secs / 3600),
+        _ => format!("{}d", secs / 86_400),
+    })
+}
+
+/// A body long enough that the 3-line cap will hide part of it, so the card
+/// earns an expander. Counted on the text rather than measured after layout:
+/// the answer is needed while building the card, before it has an allocation.
+fn body_is_truncated(body: &str) -> bool {
+    body.lines().count() > 3 || body.chars().count() > 140
+}
+
 // ── Card content ──
 
 fn set_critical_class(card: &gtk4::Box, notif: &Notification) {
@@ -717,18 +939,97 @@ fn set_critical_class(card: &gtk4::Box, notif: &Notification) {
     }
 }
 
+/// Categories whose notifications are status reports rather than messages:
+/// nothing to read, nothing to act on, and a full card around three words
+/// reads as an empty box. Prefixes, because the spec's categories are
+/// dotted and senders extend them (`device.added`, `device.removed`).
+const COMPACT_CATEGORIES: &[&str] = &["device", "x-swaypplet.osd"];
+
+/// Whether a notification wants the one-line template.
+///
+/// Two ways in. A transient toast with nothing to read or press is one by
+/// construction — volume, brightness and this machine's own "nothing to jump
+/// to" all land here. A category can also say so outright, which catches the
+/// senders that describe what they are without setting `transient`.
+fn is_compact(notif: &Notification) -> bool {
+    if !notif.actions.is_empty() || !notif.body.is_empty() {
+        return false;
+    }
+    if notif.transient {
+        return true;
+    }
+    notif.category.as_deref().is_some_and(|c| {
+        COMPACT_CATEGORIES
+            .iter()
+            .any(|p| c == *p || c.starts_with(&format!("{p}.")))
+    })
+}
+
 /// (Re)build a card's content. The card box itself persists across
 /// `replaces_id` updates (keeping its z-order and transform); everything
 /// inside — including gesture handlers — is rebuilt with fresh store refs.
-fn populate_card(card: &gtk4::Box, notif: &Notification, store: &Rc<RefCell<NotificationStore>>) {
+///
+/// Returns the age label, if the card has one, so the stack can retitle it on
+/// the minute tick without rebuilding the card underneath the pointer.
+fn populate_card(
+    card: &gtk4::Box,
+    notif: &Notification,
+    store: &Rc<RefCell<NotificationStore>>,
+    st: &Rc<RefCell<State>>,
+    overflow: u32,
+) -> Option<gtk4::Label> {
     while let Some(child) = card.first_child() {
         card.remove(&child);
+    }
+
+    let compact = is_compact(notif);
+    if compact {
+        card.add_css_class("compact");
+    } else {
+        card.remove_css_class("compact");
     }
 
     let hbox = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(10)
         .build();
+
+    // Leading rail. Identity as position and shape, with hue only
+    // reinforcing it (P3), so the card still says whose it is in grayscale.
+    let rail = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .build();
+    rail.add_css_class("notification-rail");
+    if let Some(task) = notif.task {
+        rail.add_css_class(&format!("t{task}"));
+    }
+    if notif.urgency == Urgency::Critical {
+        rail.add_css_class("critical");
+    }
+    hbox.append(&rail);
+
+    // A picture wide enough to be a screenshot or a banner goes under the
+    // text at full width; anything else is a thumbnail in the leading slot,
+    // which is what a chat avatar or an app icon wants to be.
+    let wide = notif.image.as_ref().filter(|i| is_wide_picture(i));
+    let leading = if wide.is_some() {
+        notif.icon.as_ref()
+    } else {
+        notif.image.as_ref().or(notif.icon.as_ref())
+    };
+    let leading_px = if wide.is_none() && notif.image.is_some() {
+        THUMB_PX
+    } else {
+        ICON_PX
+    };
+    if let Some(widget) = leading.and_then(|src| image_widget(src, leading_px)) {
+        widget.add_css_class("notification-icon");
+        widget.set_valign(gtk4::Align::Start);
+        if notif.image.is_some() && wide.is_none() {
+            widget.add_css_class("thumb");
+        }
+        hbox.append(&widget);
+    }
 
     // Text content
     let vbox = gtk4::Box::builder()
@@ -744,7 +1045,8 @@ fn populate_card(card: &gtk4::Box, notif: &Notification, store: &Rc<RefCell<Noti
     // reflow). Fill + xalign(0) makes the label span that allocation and
     // ellipsize/wrap there instead of shrinking to the collapsed natural.
     // Header row: task attribution (vision O2 — hue dot + "T<N>" says
-    // whose background session this is) ahead of the app name.
+    // whose background session this is) ahead of the app name, with the
+    // card's age closing it out on the right.
     let header = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(4)
@@ -770,9 +1072,33 @@ fn populate_card(card: &gtk4::Box, notif: &Notification, store: &Rc<RefCell<Noti
         app_label.add_css_class("notification-app-name");
         header.append(&app_label);
     }
-    if header.first_child().is_some() {
-        vbox.append(&header);
+
+    // How many of this app's cards the stack has had to drop to make room
+    // for this one. Says "there is more of this" without spending a slot.
+    if overflow > 0 {
+        let badge = gtk4::Label::new(Some(&format!("+{overflow}")));
+        badge.add_css_class("notification-overflow");
+        badge.set_tooltip_text(Some(&format!(
+            "{overflow} more from {} — open the centre to read them",
+            notif.app_name
+        )));
+        header.append(&badge);
     }
+
+    // Age. Built for every card that has a header, empty until the card is a
+    // minute old, so the minute tick has something to write into.
+    let age = gtk4::Label::builder()
+        .label(age_label(notif.timestamp, std::time::SystemTime::now()).unwrap_or_default())
+        .halign(gtk4::Align::End)
+        .build();
+    age.add_css_class("notification-age");
+    let age_label_handle = if header.first_child().is_some() {
+        header.append(&age);
+        vbox.append(&header);
+        Some(age)
+    } else {
+        None
+    };
 
     let summary = gtk4::Label::builder()
         .label(&notif.summary)
@@ -799,6 +1125,32 @@ fn populate_card(card: &gtk4::Box, notif: &Notification, store: &Rc<RefCell<Noti
             .build();
         body.add_css_class("notification-body");
         vbox.append(&body);
+
+        // The rest of a long body is one click away rather than only in the
+        // centre. A button, not a hover reveal (P8).
+        if body_is_truncated(&notif.body) {
+            let more = gtk4::Button::builder().label("more").build();
+            more.add_css_class("flat");
+            more.add_css_class("notification-more-btn");
+            more.set_halign(gtk4::Align::Start);
+            let body_c = body.clone();
+            let st_c = st.clone();
+            more.connect_clicked(move |btn| {
+                let expanded = body_c.lines() < 0;
+                body_c.set_lines(if expanded { 3 } else { -1 });
+                btn.set_label(if expanded { "more" } else { "less" });
+                // The card's height changed, so the stack has to re-measure
+                // and re-stack around it.
+                reflow(&st_c);
+            });
+            vbox.append(&more);
+        }
+    }
+
+    if let Some(widget) = wide.and_then(|src| image_widget(src, CARD_WIDTH)) {
+        widget.add_css_class("notification-picture");
+        widget.set_halign(gtk4::Align::Fill);
+        vbox.append(&widget);
     }
 
     // Progress bar
@@ -823,17 +1175,34 @@ fn populate_card(card: &gtk4::Box, notif: &Notification, store: &Rc<RefCell<Noti
             if key == "default" {
                 continue; // default action is handled by clicking the popup body
             }
-            let btn = gtk4::Button::builder().label(label).build();
+            let btn = gtk4::Button::builder().build();
+            // With `action-icons` the key names an icon rather than being an
+            // opaque token, and the label is the tooltip instead.
+            if notif.action_icons
+                && let Some(display) = gtk4::gdk::Display::default()
+                && gtk4::IconTheme::for_display(&display).has_icon(key)
+            {
+                btn.set_child(Some(&gtk4::Image::from_icon_name(key)));
+                btn.set_tooltip_text(Some(label));
+            } else {
+                btn.set_label(label);
+            }
             btn.add_css_class("flat");
             btn.add_css_class("notification-action-btn");
 
             let id = notif.id;
             let store_c = store.clone();
             let key_c = key.clone();
+            // `resident` is the spec's way of saying an action does not
+            // dismiss. Without honouring it every button is terminal, so a
+            // "snooze" or a "mark read" could never be offered by a sender.
+            let resident = notif.resident;
             btn.connect_clicked(move |_| {
                 log::info!("Action invoked: notification {id}, action {key_c}");
                 store::store_action_invoked(&store_c, id, &key_c);
-                store::store_close(&store_c, id, CloseReason::Dismissed);
+                if !resident {
+                    store::store_close(&store_c, id, CloseReason::Dismissed);
+                }
             });
             actions_box.append(&btn);
         }
@@ -843,33 +1212,215 @@ fn populate_card(card: &gtk4::Box, notif: &Notification, store: &Rc<RefCell<Noti
 
     hbox.append(&vbox);
 
-    // Close button
-    let close_btn = gtk4::Button::builder()
-        .label(icons::CLOSE)
+    // Trailing controls, stacked so the card keeps one gutter rather than
+    // sprouting buttons along its edge.
+    let controls = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .spacing(2)
         .valign(gtk4::Align::Start)
         .build();
+
+    let close_btn = gtk4::Button::builder().label(icons::CLOSE).build();
     close_btn.add_css_class("flat");
     close_btn.add_css_class("notification-close-btn");
-
     let id = notif.id;
     let store_c = store.clone();
     close_btn.connect_clicked(move |_| {
         store::store_close(&store_c, id, CloseReason::Dismissed);
     });
-    hbox.append(&close_btn);
+    controls.append(&close_btn);
 
-    // Click on body = focus the app's window, then dismiss
+    // Snooze and mute live behind one visible button rather than only behind
+    // a right-click, so they exist for someone who never dwells (P8).
+    if !compact {
+        let more_btn = gtk4::Button::builder().label("⋯").build();
+        more_btn.add_css_class("flat");
+        more_btn.add_css_class("notification-menu-btn");
+        let menu = card_menu(notif, store, st);
+        menu.set_parent(&more_btn);
+        more_btn.connect_clicked(move |_| menu.popup());
+        controls.append(&more_btn);
+    }
+
+    hbox.append(&controls);
+
+    // Drag the card aside to dismiss it. Once the pointer has clearly
+    // committed, the drag claims the event sequence so the click gesture
+    // below never fires — otherwise flicking a card away would also focus
+    // the app it came from.
+    let drag = gtk4::GestureDrag::new();
+    let base = std::cell::Cell::new(0.0_f64);
+    {
+        let st_c = st.clone();
+        let id = notif.id;
+        drag.connect_drag_begin(move |_, _, _| {
+            base.set(
+                st_c.borrow()
+                    .cards
+                    .iter()
+                    .find(|c| c.id == id && !c.exiting)
+                    .map(|c| c.cur.x_off)
+                    .unwrap_or(0.0),
+            );
+        });
+    }
+    {
+        let st_c = st.clone();
+        let id = notif.id;
+        drag.connect_drag_update(move |g, dx, _| {
+            if dx.abs() > DRAG_CLAIM_PX {
+                g.set_state(gtk4::EventSequenceState::Claimed);
+            }
+            // Only outward: dragging a right-anchored card leftward would
+            // pull it across the screen rather than off it.
+            drag_card_to(&st_c, id, dx.max(0.0));
+        });
+    }
+    {
+        let st_c = st.clone();
+        let store_c = store.clone();
+        let id = notif.id;
+        drag.connect_drag_end(move |_, dx, _| {
+            if dx >= DRAG_DISMISS_PX {
+                store::store_close(&store_c, id, CloseReason::Dismissed);
+            } else {
+                // Short of the threshold the card settles back into its slot,
+                // which reflow already knows how to do.
+                reflow(&st_c);
+            }
+        });
+    }
+    hbox.add_controller(drag);
+
+    // Click on body = focus the app's window, then dismiss. Middle-click
+    // dismisses without firing the default action, which is the difference
+    // between "I dealt with this" and "I read this".
     let gesture = gtk4::GestureClick::new();
+    gesture.set_button(0);
     let id = notif.id;
     let app_name = notif.app_name.clone();
     let store_c = store.clone();
-    gesture.connect_released(move |_, _, _, _| {
-        focus_app_window(&app_name);
-        store::store_close(&store_c, id, CloseReason::Dismissed);
+    gesture.connect_released(move |g, _, _, _| match g.current_button() {
+        gtk4::gdk::BUTTON_MIDDLE => store::store_close(&store_c, id, CloseReason::Dismissed),
+        gtk4::gdk::BUTTON_PRIMARY => {
+            focus_app_window(&app_name);
+            store::store_close(&store_c, id, CloseReason::Dismissed);
+        }
+        _ => {}
     });
     hbox.add_controller(gesture);
 
     card.append(&hbox);
+    age_label_handle
+}
+
+/// The per-card menu: postpone it, silence the app, or go read the rest in
+/// the centre.
+fn card_menu(
+    notif: &Notification,
+    store: &Rc<RefCell<NotificationStore>>,
+    st: &Rc<RefCell<State>>,
+) -> gtk4::Popover {
+    let list = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .spacing(2)
+        .build();
+    let popover = gtk4::Popover::builder().child(&list).build();
+    popover.add_css_class("notification-menu");
+    popover.set_has_arrow(false);
+
+    let item = |label: &str| {
+        let b = gtk4::Button::builder().label(label).build();
+        b.add_css_class("flat");
+        b.set_halign(gtk4::Align::Fill);
+        b
+    };
+
+    for (label, mins) in [("Snooze 5 min", 5u64), ("Snooze 30 min", 30)] {
+        let b = item(label);
+        let notif_c = notif.clone();
+        let store_c = store.clone();
+        let pop = popover.clone();
+        b.connect_clicked(move |_| {
+            pop.popdown();
+            snooze(&store_c, &notif_c, Duration::from_secs(mins * 60));
+        });
+        list.append(&b);
+    }
+
+    if !notif.app_name.is_empty() {
+        // A muted app can still be on screen: Critical overrides the mute, so
+        // the one card you do see from it is the place to lift the silence.
+        let muted = store.borrow().is_muted(&notif.app_name);
+        let b = item(&if muted {
+            format!("Unmute {}", notif.app_name)
+        } else {
+            format!("Mute {} for 1 h", notif.app_name)
+        });
+        let app = notif.app_name.clone();
+        let id = notif.id;
+        let store_c = store.clone();
+        let pop = popover.clone();
+        b.connect_clicked(move |_| {
+            pop.popdown();
+            if muted {
+                store_c.borrow_mut().unmute_app(&app);
+            } else {
+                store_c
+                    .borrow_mut()
+                    .mute_app(&app, Duration::from_secs(3600));
+                store::store_close(&store_c, id, CloseReason::Dismissed);
+            }
+        });
+        list.append(&b);
+    }
+
+    let b = item("Dismiss all");
+    let st_c = st.clone();
+    let pop = popover.clone();
+    b.connect_clicked(move |_| {
+        pop.popdown();
+        dismiss_all(&st_c);
+    });
+    list.append(&b);
+
+    popover
+}
+
+/// Take a notification off screen and bring it back later, unchanged.
+///
+/// The re-presented copy carries no `replaces_id`: the original was closed,
+/// so replacing it would target an id the store no longer holds open.
+fn snooze(store: &Rc<RefCell<NotificationStore>>, notif: &Notification, after: Duration) {
+    store::store_close(store, notif.id, CloseReason::Dismissed);
+    let store_c = store.clone();
+    let mut again = notif.clone();
+    again.id = 0;
+    again.replaces_id = 0;
+    // Transient snoozed notifications would come back and immediately refuse
+    // to be stored; the point of snoozing is that it comes back at all.
+    again.transient = false;
+    glib::timeout_add_local_once(after, move || {
+        store::store_add(&store_c, again.clone());
+    });
+}
+
+/// Close every card currently on screen.
+fn dismiss_all(st: &Rc<RefCell<State>>) {
+    let (ids, store) = {
+        let s = st.borrow();
+        (
+            s.cards
+                .iter()
+                .filter(|c| !c.exiting)
+                .map(|c| c.id)
+                .collect::<Vec<_>>(),
+            s.store.clone(),
+        )
+    };
+    for id in ids {
+        store::store_close(&store, id, CloseReason::Dismissed);
+    }
 }
 
 /// Try to focus a Sway window matching the notification's app name.
@@ -972,6 +1523,7 @@ fn walk_tree<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::notifications::Notification;
 
     /// The pose a card is pushed with in `show`, before `reflow` measures it
     /// and gives it a slot. Duplicated here rather than shared, so that a
@@ -1025,6 +1577,75 @@ mod tests {
             opacity: 1.0 - PEEK_OPACITY_STEP,
             content: 1.0,
         }
+    }
+
+    #[test]
+    fn age_reads_as_metadata_not_a_countdown() {
+        let base = std::time::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let at = |secs| age_label(base, base + Duration::from_secs(secs));
+        // Under a minute has nothing worth saying, and saying it every second
+        // would be a loop the cadence budget does not pay for.
+        assert_eq!(at(0), None);
+        assert_eq!(at(59), None);
+        assert_eq!(at(60).as_deref(), Some("1m"));
+        assert_eq!(at(59 * 60).as_deref(), Some("59m"));
+        assert_eq!(at(3600).as_deref(), Some("1h"));
+        assert_eq!(at(86_400).as_deref(), Some("1d"));
+        // A clock that went backwards is not an age.
+        assert_eq!(age_label(base, base - Duration::from_secs(10)), None);
+    }
+
+    #[test]
+    fn only_a_long_body_earns_an_expander() {
+        assert!(!body_is_truncated("one line"));
+        assert!(!body_is_truncated("a\nb\nc"));
+        assert!(body_is_truncated("a\nb\nc\nd"));
+        assert!(body_is_truncated(&"x".repeat(141)));
+        assert!(!body_is_truncated(&"x".repeat(140)));
+    }
+
+    #[test]
+    fn the_compact_template_is_for_toasts_with_nothing_to_act_on() {
+        let toast = Notification {
+            transient: true,
+            summary: "Volume 40%".into(),
+            ..Default::default()
+        };
+        assert!(is_compact(&toast));
+
+        // A body or an action means there is something to read or press, and
+        // the one-line template has room for neither.
+        assert!(!is_compact(&Notification {
+            body: "something".into(),
+            ..toast.clone()
+        }));
+        assert!(!is_compact(&Notification {
+            actions: vec![("ok".into(), "OK".into())],
+            ..toast.clone()
+        }));
+        // Anything kept in history is not a toast...
+        assert!(!is_compact(&Notification {
+            transient: false,
+            ..toast.clone()
+        }));
+        // ...unless it says what it is.
+        assert!(is_compact(&Notification {
+            transient: false,
+            category: Some("device.added".into()),
+            ..toast.clone()
+        }));
+        assert!(is_compact(&Notification {
+            transient: false,
+            category: Some("device".into()),
+            ..toast.clone()
+        }));
+        // A prefix match must not swallow an unrelated category that merely
+        // starts with the same letters.
+        assert!(!is_compact(&Notification {
+            transient: false,
+            category: Some("devicemanager.thing".into()),
+            ..toast
+        }));
     }
 
     /// A card anywhere in the stack does have somewhere to exit to, so the
