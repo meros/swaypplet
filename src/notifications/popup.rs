@@ -57,7 +57,7 @@ static POPUP_CONFIG: LayerShellConfig = LayerShellConfig {
 /// horizontal slide offset (entry/exit), `scale` shrinks collapsed cards.
 /// `opacity` is the card (glass pane) alpha — it also carries the collapsed
 /// stack dimming — and `content` is the inner hbox alpha on top of it.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 struct Pose {
     y: f64,
     x_off: f64,
@@ -106,7 +106,41 @@ struct Card {
     newborn: bool,
 }
 
+/// Where an exiting card animates to: fade out while drifting a short settle
+/// toward the edge (motion on glass, anim.rs).
+///
+/// Note that for a card still sitting in its entry pose this is *the pose it
+/// is already in* — `x_off` at the slide offset, both alphas at zero. That
+/// equality is what `arm_exit` exists to survive.
+fn exit_pose(cur: Pose) -> Pose {
+    Pose {
+        x_off: anim::SLIDE_PX,
+        opacity: 0.0,
+        content: 0.0,
+        ..cur
+    }
+}
+
 impl Card {
+    /// Arm the exit animation. Unlike `retarget` this never short-circuits,
+    /// and the difference is load-bearing: `exiting` must only ever be set
+    /// together with a live animation, because the tick loop is the one path
+    /// that removes a card and it only visits animating ones.
+    ///
+    /// A card that stopped animating mid-exit is invisible to every consumer.
+    /// `reflow` filters exiting cards out, so it is never re-posed;
+    /// `update_input_region` filters them out, so no input region covers it
+    /// and clicks fall through; the tick skips it, so it is never unparented.
+    /// What is left on screen is an empty glass pane that tints whatever is
+    /// behind it and cannot be dismissed.
+    fn arm_exit(&mut self, ms: f64, now: i64) {
+        self.from = self.cur;
+        self.to = exit_pose(self.cur);
+        self.anim_start = now;
+        self.anim_ms = ms;
+        self.animating = true;
+    }
+
     fn retarget(&mut self, to: Pose, ms: f64, now: i64) {
         if self.animating && self.to == to {
             return;
@@ -350,15 +384,7 @@ fn start_exit(st: &Rc<RefCell<State>>, id: u32) -> bool {
             Some(card) => {
                 cancel_timer(&mut card.timer);
                 card.exiting = true;
-                // Fade out while drifting a short settle toward the edge
-                // (motion on glass, anim.rs).
-                let to = Pose {
-                    x_off: anim::SLIDE_PX,
-                    opacity: 0.0,
-                    content: 0.0,
-                    ..card.cur
-                };
-                card.retarget(to, anim_ms(anim::EXIT_MS), now);
+                card.arm_exit(anim_ms(anim::EXIT_MS), now);
                 true
             }
             None => false,
@@ -481,7 +507,9 @@ fn apply_pose(canvas: &gtk4::Fixed, card: &Card) {
 fn ensure_tick(st: &Rc<RefCell<State>>) {
     let canvas = {
         let mut s = st.borrow_mut();
-        if s.ticking || !s.cards.iter().any(|c| c.animating) {
+        // Exiting cards wake the tick too, even when they have no animation
+        // left: the sweep inside it is what collects them.
+        if s.ticking || !s.cards.iter().any(|c| c.animating || c.exiting) {
             return;
         }
         s.ticking = true;
@@ -498,6 +526,14 @@ fn ensure_tick(st: &Rc<RefCell<State>>) {
 
         for (i, card) in s.cards.iter_mut().enumerate() {
             if !card.animating {
+                // Nothing left to animate, so an exiting card is finished
+                // whether or not it ever ran a frame. Belt and braces behind
+                // `arm_exit`: this loop is the only path that unparents a
+                // card, and one that never reaches it stays on screen as an
+                // undismissable pane.
+                if card.exiting {
+                    finished_exits.push(i);
+                }
                 continue;
             }
             let t = (((now - card.anim_start) as f64 / 1000.0) / card.anim_ms).clamp(0.0, 1.0);
@@ -929,6 +965,78 @@ fn walk_tree<'a>(
             for child in children {
                 walk_tree(child, app_lower, workspace, best);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The pose a card is pushed with in `show`, before `reflow` measures it
+    /// and gives it a slot. Duplicated here rather than shared, so that a
+    /// change to either one breaks this test instead of passing silently.
+    fn entry_pose() -> Pose {
+        Pose {
+            y: 0.0,
+            x_off: anim::SLIDE_PX,
+            scale: 1.0,
+            opacity: 0.0,
+            content: 0.0,
+        }
+    }
+
+    /// `exit_pose` has fixed points, so an exit can legitimately be a
+    /// zero-length animation. That is the hazard `arm_exit` exists for: build
+    /// it on `retarget`, whose "already at the target, nothing to do" guard
+    /// leaves `animating` false, and such a card is stranded — `exiting` and
+    /// invisible to the tick, to reflow and to the input region alike, which
+    /// is an empty pane on screen that no click can reach.
+    ///
+    /// The entry pose is exactly such a fixed point, which is why a
+    /// notification closed before its first reflow was the way to see it.
+    #[test]
+    fn an_exit_can_be_zero_length() {
+        for cur in [entry_pose(), settled_pose(), collapsed_pose()] {
+            assert_eq!(
+                exit_pose(exit_pose(cur)),
+                exit_pose(cur),
+                "exit_pose is idempotent, so its image is all fixed points"
+            );
+        }
+        assert_eq!(exit_pose(entry_pose()), entry_pose());
+    }
+
+    fn settled_pose() -> Pose {
+        Pose {
+            y: 12.0,
+            x_off: 0.0,
+            scale: 1.0,
+            opacity: 1.0,
+            content: 1.0,
+        }
+    }
+
+    fn collapsed_pose() -> Pose {
+        Pose {
+            y: 40.0,
+            x_off: 0.0,
+            scale: 1.0 - PEEK_SCALE_STEP,
+            opacity: 1.0 - PEEK_OPACITY_STEP,
+            content: 1.0,
+        }
+    }
+
+    /// A card anywhere in the stack does have somewhere to exit to, so the
+    /// guard in `retarget` is otherwise doing its job.
+    #[test]
+    fn a_card_in_the_stack_has_somewhere_to_exit_to() {
+        for cur in [settled_pose(), collapsed_pose()] {
+            assert_ne!(exit_pose(cur), cur);
+            // The exit leaves the card's slot and scale alone; only the slide
+            // and the two alphas move.
+            assert_eq!(exit_pose(cur).y, cur.y);
+            assert_eq!(exit_pose(cur).scale, cur.scale);
         }
     }
 }
