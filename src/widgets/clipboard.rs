@@ -1,168 +1,16 @@
-use std::process::Command;
+//! Clipboard history section.
+//!
+//! The rows come from [`crate::clipboard`], which watches the selection over
+//! `ext-data-control-v1` in this process. This used to shell out to
+//! `cliphist list` on every open, against a database no daemon was filling —
+//! see that module's header for what that cost.
+
 use std::rc::Rc;
-use std::thread;
 
 use gtk4::prelude::*;
-use log::{debug, error, warn};
 
+use crate::clipboard::{ClipboardService, EntryView};
 use crate::icons;
-
-const MAX_ENTRIES: usize = 10;
-const PREVIEW_LEN: usize = 60;
-
-// ── Data types ────────────────────────────────────────────────────────────────
-
-#[derive(Clone, Debug)]
-struct ClipEntry {
-    /// The raw line from `cliphist list` (ID\tcontent).
-    raw_line: String,
-    /// Display preview (truncated, single line).
-    preview: String,
-}
-
-#[derive(Clone, Debug)]
-enum FetchedState {
-    Ok(Vec<ClipEntry>),
-    Unavailable(String),
-}
-
-// ── cliphist helpers (blocking — run on background threads) ──────────────────
-
-fn cliphist_list_blocking() -> FetchedState {
-    let out = Command::new("cliphist").arg("list").output().map_err(|e| {
-        debug!("cliphist spawn error: {e}");
-    });
-
-    let out = match out {
-        Ok(o) => o,
-        Err(_) => {
-            return FetchedState::Unavailable("cliphist not available".to_string());
-        }
-    };
-
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        warn!("cliphist list failed ({}): {}", out.status, stderr.trim());
-        return FetchedState::Unavailable("cliphist not available".to_string());
-    }
-
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let entries: Vec<ClipEntry> = stdout
-        .lines()
-        .take(MAX_ENTRIES)
-        .filter_map(|line| {
-            if line.is_empty() {
-                return None;
-            }
-            // Each line: "<id>\t<content_preview>"
-            let preview = if let Some(tab_pos) = line.find('\t') {
-                let content = &line[tab_pos + 1..];
-                make_preview(content)
-            } else {
-                make_preview(line)
-            };
-            Some(ClipEntry {
-                raw_line: line.to_string(),
-                preview,
-            })
-        })
-        .collect();
-
-    FetchedState::Ok(entries)
-}
-
-/// Truncate content to a single-line preview of at most PREVIEW_LEN chars.
-fn make_preview(content: &str) -> String {
-    // Collapse newlines to a space so multi-line content shows on one line.
-    let single_line: String = content
-        .chars()
-        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
-        .collect();
-
-    if single_line.chars().count() <= PREVIEW_LEN {
-        single_line
-    } else {
-        let truncated: String = single_line.chars().take(PREVIEW_LEN).collect();
-        format!("{}…", truncated)
-    }
-}
-
-/// Restore a clipboard entry by piping its raw line through `cliphist decode | wl-copy`.
-fn restore_entry_blocking(raw_line: &str) {
-    // echo "<line>" | cliphist decode | wl-copy
-    use std::io::Write;
-    use std::process::Stdio;
-
-    let decode = Command::new("cliphist")
-        .arg("decode")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn();
-
-    let mut decode = match decode {
-        Ok(child) => child,
-        Err(e) => {
-            error!("cliphist decode spawn error: {e}");
-            return;
-        }
-    };
-
-    if let Some(stdin) = decode.stdin.as_mut() {
-        if let Err(e) = stdin.write_all(raw_line.as_bytes()) {
-            error!("cliphist decode write error: {e}");
-            return;
-        }
-    }
-
-    let decode_out = match decode.wait_with_output() {
-        Ok(o) => o,
-        Err(e) => {
-            error!("cliphist decode wait error: {e}");
-            return;
-        }
-    };
-
-    if !decode_out.status.success() {
-        let stderr = String::from_utf8_lossy(&decode_out.stderr);
-        error!("cliphist decode failed: {}", stderr.trim());
-        return;
-    }
-
-    // Pipe decoded output to wl-copy.
-    let wlcopy = Command::new("wl-copy").stdin(Stdio::piped()).spawn();
-
-    let mut wlcopy = match wlcopy {
-        Ok(child) => child,
-        Err(e) => {
-            error!("wl-copy spawn error: {e}");
-            return;
-        }
-    };
-
-    if let Some(stdin) = wlcopy.stdin.as_mut() {
-        if let Err(e) = stdin.write_all(&decode_out.stdout) {
-            error!("wl-copy write error: {e}");
-            return;
-        }
-    }
-
-    if let Err(e) = wlcopy.wait() {
-        error!("wl-copy wait error: {e}");
-    }
-}
-
-fn cliphist_wipe_blocking() {
-    let out = Command::new("cliphist").arg("wipe").output();
-    match out {
-        Ok(o) if !o.status.success() => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            warn!("cliphist wipe failed ({}): {}", o.status, stderr.trim());
-        }
-        Err(e) => warn!("cliphist wipe spawn error: {e}"),
-        _ => {}
-    }
-}
 
 // ── ClipboardSection ──────────────────────────────────────────────────────────
 
@@ -178,6 +26,9 @@ struct Widgets {
 pub struct ClipboardSection {
     root: gtk4::Box,
     widgets: Rc<Widgets>,
+    /// `None` on a compositor without the protocol; the section says so
+    /// rather than showing an empty list that looks like an empty history.
+    service: Option<Rc<ClipboardService>>,
 }
 
 impl ClipboardSection {
@@ -220,7 +71,6 @@ impl ClipboardSection {
             .reveal_child(false)
             .build();
 
-        // Wire summary button click to toggle the revealer.
         {
             let rev = detail_revealer.clone();
             let arrow = summary_arrow.clone();
@@ -234,14 +84,12 @@ impl ClipboardSection {
         root.append(&summary_btn);
         root.append(&detail_revealer);
 
-        // ── Detail content box ────────────────────────────────────────────────
         let detail_box = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(4)
             .build();
         detail_revealer.set_child(Some(&detail_box));
 
-        // ── Entry list ────────────────────────────────────────────────────────
         let entry_list = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(2)
@@ -249,7 +97,6 @@ impl ClipboardSection {
         entry_list.add_css_class("device-list");
         detail_box.append(&entry_list);
 
-        // ── Clear button ──────────────────────────────────────────────────────
         let clear_btn = gtk4::Button::with_label("Clear History");
         clear_btn.add_css_class("flat");
         detail_box.append(&clear_btn);
@@ -263,97 +110,81 @@ impl ClipboardSection {
             clear_btn,
         });
 
-        // Wire the Clear button.
-        {
-            let w = widgets.clone();
-            widgets.clear_btn.connect_clicked(move |_| {
-                Self::schedule_wipe_and_refresh(w.clone());
-            });
+        let service = crate::clipboard::service();
+
+        if let Some(svc) = &service {
+            {
+                let svc = svc.clone();
+                let w = widgets.clone();
+                widgets.clear_btn.connect_clicked(move |_| {
+                    svc.clear();
+                    // The observer fires from clear(), so the list redraws
+                    // itself; nothing to do here but let it.
+                    let _ = &w;
+                });
+            }
+            // Rows follow the ring: a copy made while the panel is open
+            // lands in the list without an open/close cycle.
+            {
+                let svc = svc.clone();
+                let w = widgets.clone();
+                svc.clone()
+                    .connect_change(move || Self::render(&w, Some(&svc.entries())));
+            }
+        } else {
+            widgets.clear_btn.set_sensitive(false);
         }
 
-        let section = ClipboardSection { root, widgets };
+        let section = ClipboardSection {
+            root,
+            widgets,
+            service,
+        };
         section.refresh();
         section
     }
 
-    // ── Async refresh machinery ───────────────────────────────────────────────
+    /// Draw `entries`, or the unavailable notice when there is no service.
+    fn render(w: &Rc<Widgets>, entries: Option<&[EntryView]>) {
+        while let Some(child) = w.entry_list.first_child() {
+            w.entry_list.remove(&child);
+        }
 
-    fn schedule_refresh(w: Rc<Widgets>) {
-        Self::spawn_state_fetch(w, cliphist_list_blocking);
-    }
+        let Some(entries) = entries else {
+            let notice = gtk4::Label::new(Some("Clipboard history unavailable"));
+            notice.set_xalign(0.0);
+            notice.add_css_class("device-row");
+            w.entry_list.append(&notice);
+            w.summary_text.set_label("Unavailable");
+            w.summary_arrow.set_label("▸");
+            w.detail_revealer.set_reveal_child(false);
+            w.detail_revealer.set_sensitive(false);
+            return;
+        };
 
-    /// Wipe then list on the same background thread, so the refresh can
-    /// never observe a list fetched before the wipe finished.
-    fn schedule_wipe_and_refresh(w: Rc<Widgets>) {
-        Self::spawn_state_fetch(w, || {
-            cliphist_wipe_blocking();
-            cliphist_list_blocking()
-        });
-    }
+        w.detail_revealer.set_sensitive(true);
+        w.clear_btn.set_sensitive(!entries.is_empty());
 
-    fn spawn_state_fetch(w: Rc<Widgets>, fetch: impl FnOnce() -> FetchedState + Send + 'static) {
-        crate::spawn::spawn_work(fetch, move |fetched| Self::apply_fetched(&w, fetched));
-    }
+        if entries.is_empty() {
+            w.summary_text.set_label("Clipboard");
+            let empty = gtk4::Label::new(Some("No clipboard history"));
+            empty.set_xalign(0.0);
+            empty.add_css_class("device-row");
+            w.entry_list.append(&empty);
+            return;
+        }
 
-    fn apply_fetched(w: &Rc<Widgets>, fetched: FetchedState) {
-        match fetched {
-            FetchedState::Unavailable(msg) => {
-                debug!("Clipboard section: {msg}");
-
-                // Replace entry list content with an unavailable notice.
-                while let Some(child) = w.entry_list.first_child() {
-                    w.entry_list.remove(&child);
-                }
-                let notice = gtk4::Label::new(Some("Clipboard manager not available"));
-                notice.set_xalign(0.0);
-                notice.add_css_class("device-row");
-                w.entry_list.append(&notice);
-
-                w.clear_btn.set_sensitive(false);
-                w.summary_text.set_label("Unavailable");
-
-                // Disable the expand gesture by preventing the arrow from changing.
-                w.summary_arrow.set_label("▸");
-                w.detail_revealer.set_reveal_child(false);
-                w.detail_revealer.set_sensitive(false);
-            }
-            FetchedState::Ok(entries) => {
-                w.clear_btn.set_sensitive(true);
-                w.detail_revealer.set_sensitive(true);
-
-                // Update summary text.
-                if entries.is_empty() {
-                    w.summary_text.set_label("Clipboard");
-                } else {
-                    let count = entries.len();
-                    w.summary_text.set_label(&format!(
-                        "Clipboard · {} item{}",
-                        count,
-                        if count == 1 { "" } else { "s" }
-                    ));
-                }
-
-                // Rebuild entry rows.
-                while let Some(child) = w.entry_list.first_child() {
-                    w.entry_list.remove(&child);
-                }
-
-                if entries.is_empty() {
-                    let empty_label = gtk4::Label::new(Some("No clipboard history"));
-                    empty_label.set_xalign(0.0);
-                    empty_label.add_css_class("device-row");
-                    w.entry_list.append(&empty_label);
-                } else {
-                    for entry in entries {
-                        let row = Self::build_entry_row(entry, w.clone());
-                        w.entry_list.append(&row);
-                    }
-                }
-            }
+        let count = entries.len();
+        w.summary_text.set_label(&format!(
+            "Clipboard · {count} item{}",
+            if count == 1 { "" } else { "s" }
+        ));
+        for entry in entries {
+            w.entry_list.append(&Self::build_entry_row(entry, w.clone()));
         }
     }
 
-    fn build_entry_row(entry: ClipEntry, w: Rc<Widgets>) -> gtk4::Box {
+    fn build_entry_row(entry: &EntryView, w: Rc<Widgets>) -> gtk4::Box {
         let row = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .spacing(8)
@@ -368,18 +199,17 @@ impl ClipboardSection {
         preview_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         row.append(&preview_label);
 
-        // Clicking restores this entry and collapses the panel.
-        let raw_line = entry.raw_line.clone();
+        // Clicking puts the entry back on the selection and collapses the
+        // list. The set is a Wayland request, not a subprocess, so there is
+        // nothing to wait for and nothing to spawn.
+        let id = entry.id;
         let gesture = gtk4::GestureClick::new();
         gesture.connect_released(move |_, _, _, _| {
-            let line = raw_line.clone();
-            let w2 = w.clone();
-            thread::spawn(move || {
-                restore_entry_blocking(&line);
-            });
-            // Collapse the revealer after selection.
-            w2.detail_revealer.set_reveal_child(false);
-            w2.summary_arrow.set_label("▸");
+            if let Some(svc) = crate::clipboard::service() {
+                svc.restore(id);
+            }
+            w.detail_revealer.set_reveal_child(false);
+            w.summary_arrow.set_label("▸");
         });
         row.add_controller(gesture);
 
@@ -388,10 +218,11 @@ impl ClipboardSection {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    /// Kick off a non-blocking state refresh. The UI is updated asynchronously
-    /// via the GLib main loop once the background thread completes.
+    /// Redraw from the current ring. Cheap now: the state is in this
+    /// process, so an open costs a clone of at most ten previews.
     pub fn refresh(&self) {
-        Self::schedule_refresh(self.widgets.clone());
+        let entries = self.service.as_ref().map(|s| s.entries());
+        Self::render(&self.widgets, entries.as_deref());
     }
 
     /// Switch into page mode: reveal detail immediately, hide the summary
