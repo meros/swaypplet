@@ -440,7 +440,7 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
                 content: 1.0,
             },
             anim_start: 0,
-            anim_ms: anim::ENTER_MS,
+            anim_ms: anim_ms(anim::ENTER_MS),
             animating: false,
             exiting: false,
             newborn: true,
@@ -594,10 +594,11 @@ fn reflow(st: &Rc<RefCell<State>>) {
     ensure_tick(st);
 }
 
-/// Reduced motion: collapse any animation to a single frame so state flow
-/// (exit removal, unmap) still runs through the tick path.
+/// Every card duration goes through the shared scale, so reduced motion and
+/// `SWAYPPLET_ANIM_SCALE` reach the stack like they reach every other
+/// surface.
 fn anim_ms(ms: f64) -> f64 {
-    if anim::animations_enabled() { ms } else { 1.0 }
+    anim::duration(ms)
 }
 
 /// Apply a card's current pose as a Fixed child transform. The card widget

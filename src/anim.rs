@@ -54,6 +54,35 @@ pub fn ease_out_cubic(t: f64) -> f64 {
     1.0 - (1.0 - t).powi(3)
 }
 
+/// The one place an animation length is decided, so reduced motion and the
+/// debug stretch below apply to every surface without each one remembering
+/// to ask.
+///
+/// Reduced motion collapses to a single frame rather than zero, because the
+/// state flow (exit removal, unmap, frost teardown) rides the same tick as
+/// the motion and still has to run.
+pub fn duration(ms: f64) -> f64 {
+    if !animations_enabled() {
+        return 1.0;
+    }
+    ms * debug_scale()
+}
+
+/// `SWAYPPLET_ANIM_SCALE` stretches every animation by this factor. A fade
+/// that is right at 200 ms is very hard to judge and nearly impossible to
+/// capture; at 20x it is four seconds and every frame can be looked at. Read
+/// once, because it is a debugging switch and not a live setting.
+fn debug_scale() -> f64 {
+    static SCALE: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *SCALE.get_or_init(|| {
+        std::env::var("SWAYPPLET_ANIM_SCALE")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .unwrap_or(1.0)
+    })
+}
+
 /// GTK's own reduced-motion switch (gtk-enable-animations, which the a11y
 /// settings and `GTK_DEBUG=no-animations` both drive). GTK CSS has no
 /// `prefers-reduced-motion` media query, so every animation entry point
@@ -213,7 +242,7 @@ impl Reveal {
             }
         }
         if let Some((bin, _)) = &*inner.slide.borrow() {
-            bin.slide_to(0.0, ENTER_MS);
+            bin.slide_to(0.0, duration(ENTER_MS));
         }
         self.animate(true);
     }
@@ -227,7 +256,7 @@ impl Reveal {
             return;
         }
         if let Some((bin, px)) = &*inner.slide.borrow() {
-            bin.slide_to(*px, EXIT_MS);
+            bin.slide_to(*px, duration(EXIT_MS));
         }
         self.animate(false);
     }
@@ -281,7 +310,7 @@ impl Reveal {
         let pane_from = inner.pane.opacity();
         let content_from = inner.content.borrow().as_ref().map(|c| c.opacity());
         let target = if entering { 1.0 } else { 0.0 };
-        let total = if entering { ENTER_MS } else { EXIT_MS };
+        let total = duration(if entering { ENTER_MS } else { EXIT_MS });
         let start = glib::monotonic_time();
         let this = self.clone();
         let id = inner.pane.add_tick_callback(move |_, _| {
@@ -423,12 +452,13 @@ pub fn nudge(slide: &SlideBin) {
     if !animations_enabled() {
         return;
     }
-    slide.slide_to(NUDGE_PX, NUDGE_MS);
+    let onset = duration(NUDGE_MS);
+    slide.slide_to(NUDGE_PX, onset);
     let slide = slide.clone();
     glib::timeout_add_local_once(
-        std::time::Duration::from_millis(NUDGE_MS as u64),
+        std::time::Duration::from_millis(onset as u64),
         move || {
-            slide.slide_to(0.0, EXIT_MS);
+            slide.slide_to(0.0, duration(EXIT_MS));
         },
     );
 }
