@@ -180,8 +180,21 @@ fn session_row(s: &SessionState, now: SystemTime, skew: Option<SystemTime>) -> g
 
 /// First line of the last assistant message, written by the nixos-side
 /// Stop hook (vision increment 9, other repo). Absent file = absent row.
+///
+/// Nothing sweeps `last-<PID>`, so the directory holds one per session the
+/// machine has ever run, and PIDs come back around. A file written before
+/// its process started belongs to whoever held the number last, and
+/// showing it would attribute a dead session's words to a live one — the
+/// same failure the comm gate closes for descriptions (task_state.rs).
+/// An unreadable start time leaves the file trusted, which is where this
+/// stood before.
 fn last_message(pid: i32) -> Option<String> {
-    first_line(&state_dir().join(format!("last-{pid}")))
+    let path = state_dir().join(format!("last-{pid}"));
+    let written = std::fs::metadata(&path).and_then(|m| m.modified()).ok()?;
+    if crate::task_state::proc_start_time(pid).is_some_and(|start| written < start) {
+        return None;
+    }
+    first_line(&path)
 }
 
 /// task-find / task-rename come from the nixos config's PATH; a machine

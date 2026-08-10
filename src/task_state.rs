@@ -439,6 +439,63 @@ fn parent_pid_from_stat(stat: &str) -> Option<i32> {
         .ok()
 }
 
+/// Wall-clock start of `pid`, or `None` when it cannot be determined.
+///
+/// A PID is a name the kernel hands back out; the start time is what makes
+/// it an identity. The session scan already gates on comm, so a recycled
+/// PID cannot resurrect a dead session — but the per-PID files a session
+/// leaves behind (`last-<PID>`, and nothing sweeps them) outlive it, and a
+/// new session that inherits the number would serve them as its own until
+/// it wrote its first. Comparing a file's mtime against this tells the two
+/// apart.
+pub(crate) fn proc_start_time(pid: i32) -> Option<SystemTime> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    start_time_from(start_ticks_from_stat(&stat)?, boot_time()?, clock_ticks()?)
+}
+
+/// Field 22 of /proc/<pid>/stat: process start, in clock ticks since boot.
+/// Same last-')' rule as ppid above; field 22 is the twentieth after it.
+fn start_ticks_from_stat(stat: &str) -> Option<u64> {
+    stat.rsplit_once(')')?
+        .1
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()
+}
+
+/// Boot time from /proc/stat's `btime` line, in seconds since the epoch.
+/// Read once: the kernel's answer does not change, and a suspend does not
+/// move it (unlike every wall-clock reading derived from uptime).
+fn boot_time() -> Option<SystemTime> {
+    static BOOT: std::sync::OnceLock<Option<SystemTime>> = std::sync::OnceLock::new();
+    *BOOT.get_or_init(|| {
+        let stat = fs::read_to_string("/proc/stat").ok()?;
+        let secs: u64 = stat
+            .lines()
+            .find_map(|l| l.strip_prefix("btime "))?
+            .trim()
+            .parse()
+            .ok()?;
+        Some(SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
+    })
+}
+
+/// `sysconf(_SC_CLK_TCK)` — the unit field 22 is counted in. 100 on every
+/// mainstream kernel, asked for rather than assumed.
+fn clock_ticks() -> Option<u64> {
+    let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    (hz > 0).then(|| hz as u64)
+}
+
+/// Split out from [`proc_start_time`] so the arithmetic is testable
+/// without a process to point it at.
+fn start_time_from(ticks: u64, boot: SystemTime, hz: u64) -> Option<SystemTime> {
+    boot.checked_add(Duration::from_nanos(
+        ticks.checked_mul(1_000_000_000)? / hz,
+    ))
+}
+
 /// A minute of tolerance: timer latency and scheduling never add up to
 /// that between two samples; a real suspend does.
 fn clock_jumped(wall_delta: Duration, mono_delta: Duration) -> bool {
@@ -500,6 +557,47 @@ mod tests {
         // comm containing the delimiter itself.
         assert_eq!(parent_pid_from_stat("999 (a) b) R 7 999 1"), Some(7));
         assert_eq!(parent_pid_from_stat("garbage"), None);
+    }
+
+    #[test]
+    fn start_ticks_reads_field_22() {
+        // 1234 (comm) then fields 3..: S ppid pgrp sid tty tpgid flags
+        // minflt cminflt majflt cmajflt utime stime cutime cstime prio
+        // nice threads itrealvalue starttime
+        let stat = "1234 (claude) S 42 1234 1234 0 -1 4194304 100 0 0 0                     5 6 0 0 20 0 12 0 648773 rest ignored";
+        assert_eq!(start_ticks_from_stat(stat), Some(648_773));
+        // comm containing the delimiter, same rule as ppid.
+        let odd = "9 (a) b) S 7 9 9 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 999 x";
+        assert_eq!(start_ticks_from_stat(odd), Some(999));
+        assert_eq!(start_ticks_from_stat("garbage"), None);
+    }
+
+    /// The field index is the fragile part, and a fake /proc cannot catch
+    /// it drifting. Our own process is the one whose start time is known
+    /// to be recent, so read it back and check it lands in a window no
+    /// wrong field could.
+    #[test]
+    fn start_time_of_this_process_is_recent() {
+        let start = proc_start_time(std::process::id() as i32).expect("own /proc/<pid>/stat");
+        let age = SystemTime::now()
+            .duration_since(start)
+            .expect("this process started in the past");
+        assert!(age < Duration::from_secs(3600), "start time {age:?} old");
+    }
+
+    #[test]
+    fn start_time_is_boot_plus_ticks() {
+        let boot = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        // 250 ticks at 100 Hz is 2.5 s after boot.
+        assert_eq!(
+            start_time_from(250, boot, 100),
+            Some(boot + Duration::from_millis(2_500))
+        );
+        // Sub-tick resolution survives: 1 tick at 100 Hz is 10 ms, not 0 s.
+        assert_eq!(
+            start_time_from(1, boot, 100),
+            Some(boot + Duration::from_millis(10))
+        );
     }
 
     #[test]
