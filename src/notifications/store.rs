@@ -39,6 +39,10 @@ pub struct NotificationStore {
     open_ids: std::collections::HashSet<u32>,
     next_id: u32,
     dnd_enabled: bool,
+    /// Apps silenced from the card itself, each until an instant. Popups
+    /// only: a muted app's notifications still reach history, because muting
+    /// is "stop interrupting me", not "throw this away".
+    muted_apps: std::collections::HashMap<String, std::time::Instant>,
     on_notify: Vec<NotifyCb>,
     on_close: Vec<CloseCb>,
     on_change: Vec<ChangeCb>,
@@ -88,6 +92,7 @@ impl NotificationStore {
             open_ids: std::collections::HashSet::new(),
             next_id: 1,
             dnd_enabled: false,
+            muted_apps: std::collections::HashMap::new(),
             on_notify: Vec::new(),
             on_close: Vec::new(),
             on_change: Vec::new(),
@@ -123,6 +128,25 @@ impl NotificationStore {
 
     // ── DND ──────────────────────────────────────────────────────────────
 
+    /// Silence an app's popups for a while. Returns the instant it lifts.
+    pub fn mute_app(&mut self, app: &str, for_: std::time::Duration) -> std::time::Instant {
+        let until = std::time::Instant::now() + for_;
+        self.muted_apps.insert(app.to_lowercase(), until);
+        until
+    }
+
+    pub fn unmute_app(&mut self, app: &str) {
+        self.muted_apps.remove(&app.to_lowercase());
+    }
+
+    /// Whether an app is muted right now. Expired entries are not swept: the
+    /// map is keyed by app name and bounded by how many apps exist.
+    pub fn is_muted(&self, app: &str) -> bool {
+        self.muted_apps
+            .get(&app.to_lowercase())
+            .is_some_and(|&until| std::time::Instant::now() < until)
+    }
+
     pub fn is_dnd(&self) -> bool {
         self.dnd_enabled
     }
@@ -146,6 +170,19 @@ impl NotificationStore {
         {
             notif.task = Some(task_ref.task);
             notif.suppressed = task_ref.visible;
+        }
+
+        // A synchronous tag means "this supersedes my previous one": volume
+        // and brightness OSDs, and this machine's own scripts, all send one.
+        // Resolved into `replaces_id` so there is a single replacement path
+        // rather than two that can disagree.
+        if notif.replaces_id == 0
+            && let Some(tag) = &notif.sync_tag
+            && let Some(prev) = self.notifications.iter().rev().find(|n| {
+                n.sync_tag.as_deref() == Some(tag.as_str()) && n.app_name == notif.app_name
+            })
+        {
+            notif.replaces_id = prev.id;
         }
 
         // Assign ID
@@ -258,6 +295,11 @@ impl NotificationStore {
         if notif.suppressed && notif.urgency != Urgency::Critical {
             return false;
         }
+        // Muted from a card. Critical overrides, on the same reasoning as
+        // DND: muting an app is about its chatter, not about emergencies.
+        if notif.urgency != Urgency::Critical && self.is_muted(&notif.app_name) {
+            return false;
+        }
         true
     }
 
@@ -306,21 +348,72 @@ mod tests {
 
     fn notif(claude_pid: Option<i32>, urgency: Urgency) -> Notification {
         Notification {
-            id: 0,
             app_name: "Claude".into(),
             summary: "stopped".into(),
-            body: String::new(),
             urgency,
-            actions: Vec::new(),
-            expire_timeout: -1,
             timestamp: std::time::SystemTime::now(),
-            transient: false,
-            progress: None,
-            replaces_id: 0,
             claude_pid,
-            task: None,
-            suppressed: false,
+            ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_muted_app_stops_popping_but_still_reaches_history() {
+        let mut store = NotificationStore::new();
+        let n = Notification {
+            app_name: "Spotify".into(),
+            ..notif(None, Urgency::Normal)
+        };
+        let stored = add_one(&mut store, n.clone());
+        assert!(store.should_popup(&stored));
+
+        store.mute_app("spotify", std::time::Duration::from_secs(3600));
+        let stored = add_one(&mut store, n.clone());
+        assert!(!store.should_popup(&stored), "muted app must not pop");
+        assert!(
+            store.all().iter().any(|s| s.id == stored.id),
+            "muting silences the popup, it does not drop the notification"
+        );
+
+        // Critical overrides, same as DND.
+        let urgent = Notification {
+            app_name: "Spotify".into(),
+            ..notif(None, Urgency::Critical)
+        };
+        let stored = add_one(&mut store, urgent);
+        assert!(store.should_popup(&stored));
+
+        store.unmute_app("Spotify");
+        let stored = add_one(&mut store, n);
+        assert!(store.should_popup(&stored));
+    }
+
+    #[test]
+    fn a_synchronous_tag_replaces_its_predecessor_in_place() {
+        let mut store = NotificationStore::new();
+        let mk = |summary: &str| Notification {
+            app_name: "swaypplet".into(),
+            summary: summary.into(),
+            sync_tag: Some("volume".into()),
+            ..notif(None, Urgency::Normal)
+        };
+        let first = add_one(&mut store, mk("30%"));
+        let second = add_one(&mut store, mk("40%"));
+
+        assert_eq!(second.id, first.id, "the tag replaces rather than stacks");
+        assert_eq!(store.all().len(), 1);
+        assert_eq!(store.all()[0].summary, "40%");
+
+        // A different tag from the same app is a different conversation.
+        let other = add_one(
+            &mut store,
+            Notification {
+                sync_tag: Some("brightness".into()),
+                ..mk("60%")
+            },
+        );
+        assert_ne!(other.id, first.id);
+        assert_eq!(store.all().len(), 2);
     }
 
     /// Add through the policy and return the stored row.

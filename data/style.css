@@ -1576,6 +1576,105 @@ revealer {
     animation: critical-border-pulse 0.7s steps(12) infinite alternate;
 }
 
+/* Critical must not depend on red alone: a squarer corner and a wider rail
+   are the shape channel (P3), and both survive a grayscale filter. */
+.notification-popup-content.critical {
+    border-radius: 6px;
+}
+
+.notification-popup-content.critical .notification-rail {
+    min-width: 5px;
+}
+
+/* One-line template for OSD-style toasts (transient, no body, no actions):
+   the full card around three words read as an empty box. */
+.notification-popup-content.compact {
+    padding: 8px 12px;
+}
+
+/* Leading rail. Identity as position and shape first, hue only reinforcing
+   it (P3): the rail is present and sized the same in grayscale, and only
+   its colour says whose it is. */
+.notification-rail {
+    min-width: 3px;
+    border-radius: 2px;
+    background-color: alpha(@fg_dim, 0.35);
+}
+
+.notification-rail.t1 { background-color: @accent; }
+.notification-rail.t2 { background-color: @accent_secondary; }
+.notification-rail.t3 { background-color: @accent_tertiary; }
+.notification-rail.t4 { background-color: @accent_quaternary; }
+.notification-rail.critical { background-color: @red; }
+
+.notification-icon {
+    margin-top: 1px;
+    opacity: 0.9;
+}
+
+/* A picture the notification supplied is content, so it gets the treatment
+   content gets: square-ish, clipped, full opacity. */
+.notification-icon.thumb {
+    border-radius: 6px;
+    opacity: 1;
+}
+
+.notification-picture {
+    border-radius: 8px;
+    margin-top: 6px;
+}
+
+/* The card's age, closing the header opposite the app name. Reads as
+   metadata, never competing with the summary. */
+.notification-age {
+    font-size: 11px;
+    color: @fg_dim;
+    opacity: 0.7;
+}
+
+/* "+N more from this app" — a count, deliberately not a stack of cards. */
+.notification-overflow {
+    font-size: 10px;
+    font-weight: 700;
+    color: @fg_dim;
+    background-color: alpha(@fg_dim, 0.15);
+    border-radius: 6px;
+    padding: 0 5px;
+}
+
+.notification-more-btn {
+    font-size: 11px;
+    padding: 0 6px;
+    min-height: 20px;
+    color: @fg_dim;
+}
+
+.notification-more-btn:hover {
+    color: @fg;
+}
+
+.notification-menu-btn {
+    font-size: 12px;
+    padding: 2px;
+    min-width: 24px;
+    min-height: 20px;
+    color: @fg_dim;
+}
+
+.notification-menu-btn:hover {
+    color: @fg;
+}
+
+.notification-menu > contents {
+    padding: 4px;
+}
+
+.notification-menu button {
+    font-size: 12px;
+    padding: 4px 10px;
+    min-height: 24px;
+}
+
 .notification-app-name {
     font-size: 11px;
     font-weight: 700;
