@@ -9,6 +9,7 @@
 #
 # Usage:
 #   dev/render.sh [--bin PATH] [--res WxH] [--out FILE] [--mode panel|launcher|polkit|preview:NAME] [--css FILE]
+#   SWPP_SEED_CLIPBOARD=1 dev/render.sh --mode preview:clipboard   # rows to draw
 # No `set -e`: this harness polls with `cond && break` loops, which trip the
 # set -e + &&-list gotcha (a false test exits the script). Errors are checked
 # explicitly with `|| { …; exit 1; }` instead.
@@ -77,7 +78,19 @@ export WAYLAND_DISPLAY="$WD"
 rm -f "$RUNTIME/swaypplet.pid"
 case "$MODE" in
   polkit)    "$BIN" polkit-agent >/tmp/swpp-app.log 2>&1 & ;;
-  preview:*) "$BIN" --preview "${MODE#preview:}" >/tmp/swpp-app.log 2>&1 & ;;
+  preview:*)
+    "$BIN" --preview "${MODE#preview:}" >/tmp/swpp-app.log 2>&1 &
+    # SWPP_SEED_CLIPBOARD=1 puts three selections on the nested session so
+    # the clipboard section has rows to draw. It has to happen *after* the
+    # app starts: the data-control watcher only ever sees selections made
+    # while it is running, so seeding first shoots an empty list.
+    if [ -n "${SWPP_SEED_CLIPBOARD:-}" ]; then
+      sleep 2
+      for t in "first copied line" "andra raden med åäö" "third one"; do
+        printf '%s' "$t" | wl-copy && sleep 0.5
+      done
+    fi
+    ;;
   *)         "$BIN" >/tmp/swpp-app.log 2>&1 & ;;
 esac
 

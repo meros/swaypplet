@@ -3,6 +3,7 @@ mod anim;
 mod app;
 mod avatar;
 mod bar;
+mod clipboard;
 mod dmenu;
 mod elephant;
 mod fp;
