@@ -331,6 +331,41 @@ fn build_entry(
         vbox.append(&bar);
     }
 
+    // The notification's own actions, which used to exist only on the popup
+    // and only under a pointer. The panel opens from a keybinding and GTK
+    // gives its buttons ordinary focus traversal, so putting them here is
+    // what makes an action reachable without a pointer at all (P8) — and it
+    // does that without an input grab on an overlay-layer surface.
+    if !notif.actions.is_empty() {
+        let actions_box = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(4)
+            .build();
+        actions_box.add_css_class("notification-actions");
+
+        for (key, label) in &notif.actions {
+            // "default" is what clicking the notification itself means; in a
+            // list of rows there is no such gesture to hang it on, so it gets
+            // a button like any other.
+            let btn = gtk4::Button::builder().label(label).build();
+            btn.add_css_class("flat");
+            btn.add_css_class("notification-action-btn");
+
+            let id = notif.id;
+            let key_c = key.clone();
+            let store_c = store.clone();
+            let resident = notif.resident;
+            btn.connect_clicked(move |_| {
+                store::store_action_invoked(&store_c, id, &key_c);
+                if !resident {
+                    store::store_close(&store_c, id, CloseReason::Dismissed);
+                }
+            });
+            actions_box.append(&btn);
+        }
+        vbox.append(&actions_box);
+    }
+
     row.append(&vbox);
 
     // Dismiss button

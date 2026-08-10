@@ -47,6 +47,10 @@ const MAX_PER_APP: usize = 2;
 
 // Drag-to-dismiss: how far before the gesture takes the event sequence off
 // the click handler, and how far before releasing means "gone".
+/// The action key a sender uses to ask for a reply field (KDE's convention,
+/// which is what the `inline-reply` capability promises).
+const INLINE_REPLY_KEY: &str = "inline-reply";
+
 const DRAG_CLAIM_PX: f64 = 8.0;
 const DRAG_DISMISS_PX: f64 = 72.0;
 
@@ -705,6 +709,22 @@ fn ensure_tick(st: &Rc<RefCell<State>>) {
     });
 }
 
+/// Let the surface take keyboard focus, or give it back.
+///
+/// The stack is `KeyboardMode::None` at rest. Anything else would make a
+/// surface that appears unbidden, several times an hour, able to hold the
+/// keyboard — so the mode is raised only for as long as a reply field is
+/// deliberately in use.
+fn set_keyboard(st: &Rc<RefCell<State>>, on: bool) {
+    use gtk4_layer_shell::{KeyboardMode, LayerShell};
+    let window = st.borrow().window.clone();
+    window.set_keyboard_mode(if on {
+        KeyboardMode::OnDemand
+    } else {
+        KeyboardMode::None
+    });
+}
+
 /// Follow a drag with the card, without letting the animation fight it.
 ///
 /// The offset is written straight into the card's current pose, so a release
@@ -1163,6 +1183,74 @@ fn populate_card(
         vbox.append(&bar);
     }
 
+    // Inline reply. The sender offers an `inline-reply` action whose label is
+    // the placeholder; the text comes back on `NotificationReplied` rather
+    // than as an action, because it is content, not a button press.
+    if let Some((_, placeholder)) = notif
+        .actions
+        .iter()
+        .find(|(key, _)| key == INLINE_REPLY_KEY)
+    {
+        let entry = gtk4::Entry::builder()
+            .placeholder_text(placeholder)
+            .hexpand(true)
+            .build();
+        entry.add_css_class("notification-reply");
+        let id = notif.id;
+        let store_c = store.clone();
+        let resident = notif.resident;
+        entry.connect_activate(move |e| {
+            let text = e.text();
+            if text.is_empty() {
+                return;
+            }
+            store::store_reply(&store_c, id, &text);
+            e.set_text("");
+            if !resident {
+                store::store_close(&store_c, id, CloseReason::Dismissed);
+            }
+        });
+        // The stack runs with no keyboard mode, so this field cannot be typed
+        // into until the surface is allowed keyboard focus — and it is only
+        // allowed once the field is deliberately clicked. Switching the whole
+        // surface to on-demand when a card merely appears would put a
+        // focus-stealing overlay one notification away.
+        let click = gtk4::GestureClick::new();
+        let st_c = st.clone();
+        let entry_c = entry.clone();
+        click.connect_pressed(move |_, _, _, _| {
+            set_keyboard(&st_c, true);
+            entry_c.grab_focus();
+        });
+        entry.add_controller(click);
+
+        // Escape hands the keyboard straight back, so the surface can never
+        // be left holding focus with no obvious way out.
+        let keys = gtk4::EventControllerKey::new();
+        let st_c = st.clone();
+        keys.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk4::gdk::Key::Escape {
+                set_keyboard(&st_c, false);
+                return gtk4::glib::Propagation::Stop;
+            }
+            gtk4::glib::Propagation::Proceed
+        });
+        entry.add_controller(keys);
+
+        // Typing must not race the auto-dismiss timer out from under the
+        // sentence being written.
+        let st_c = st.clone();
+        let focus = gtk4::EventControllerFocus::new();
+        focus.connect_enter(move |_| pause_timers(&st_c));
+        let st_c = st.clone();
+        focus.connect_leave(move |_| {
+            set_keyboard(&st_c, false);
+            resume_timers(&st_c);
+        });
+        entry.add_controller(focus);
+        vbox.append(&entry);
+    }
+
     // Action buttons
     if !notif.actions.is_empty() {
         let actions_box = gtk4::Box::builder()
@@ -1174,6 +1262,9 @@ fn populate_card(
         for (key, label) in &notif.actions {
             if key == "default" {
                 continue; // default action is handled by clicking the popup body
+            }
+            if key == INLINE_REPLY_KEY {
+                continue; // rendered as the text field above
             }
             let btn = gtk4::Button::builder().build();
             // With `action-icons` the key names an icon rather than being an

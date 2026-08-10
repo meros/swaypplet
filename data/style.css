@@ -1642,6 +1642,14 @@ revealer {
     padding: 0 5px;
 }
 
+/* Inline reply field. Sized to sit under the body without turning the card
+   into a form. */
+.notification-reply {
+    font-size: 13px;
+    min-height: 26px;
+    margin-top: 6px;
+}
+
 .notification-more-btn {
     font-size: 11px;
     padding: 0 6px;
