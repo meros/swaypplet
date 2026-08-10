@@ -1382,6 +1382,12 @@ fn populate_card(
         more_btn.add_css_class("notification-menu-btn");
         let menu = card_menu(notif, store, st);
         menu.set_parent(&more_btn);
+        // GTK4 hands a popover's parent no ownership, so one that outlives
+        // its button is a leak the toolkit complains about by name
+        // ("Finalizing GtkButton, but it still has children left"). Cards are
+        // rebuilt on every replaces_id update, so this is per notification.
+        let menu_c = menu.clone();
+        more_btn.connect_destroy(move |_| menu_c.unparent());
         more_btn.connect_clicked(move |_| menu.popup());
         controls.append(&more_btn);
     }
