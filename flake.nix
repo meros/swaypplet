@@ -64,6 +64,20 @@
               pkg-config
               # pam-sys generates its libpam bindings at build time
               rustPlatform.bindgenHook
+
+              # Visual harnesses (dev/render.sh, dev/filmstrip.sh): something
+              # to grab frames with, and something to turn them into a contact
+              # sheet. The compositor is deliberately NOT here: these harnesses
+              # need the session's swayfx for the frost, and a plain sway on
+              # PATH would shadow it and quietly render everything unblurred.
+              grim
+              imagemagick
+              # montage labels the frames, and ImageMagick has no font to do
+              # it with unless one is on the path.
+              dejavu_fonts
+              ffmpeg
+              libnotify
+              dbus
             ];
 
             buildInputs = runtimeDeps;
