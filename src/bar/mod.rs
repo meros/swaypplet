@@ -195,9 +195,9 @@ fn build_bar_window(
     window.set_decorated(false);
 
     // Pane/content split for the enter transition (motion on glass,
-    // anim.rs): `root` carries the frosted .bar-root card so its tint can
-    // land within GLASS_MS, while the clusters on it fade over the full
-    // enter.
+    // anim.rs): `root` carries the frosted .bar-root card so its tint lands
+    // with the frost in one step, while the clusters on it fade over the
+    // full enter.
     let root = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .css_classes(["bar-root"])

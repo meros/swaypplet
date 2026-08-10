@@ -652,11 +652,10 @@ fn ensure_tick(st: &Rc<RefCell<State>>) {
             }
             let t = (((now - card.anim_start) as f64 / 1000.0) / card.anim_ms).clamp(0.0, 1.0);
             card.cur = lerp_pose(card.from, card.to, ease_out_cubic(t));
-            // The pane channel overrides the eased lerp: tint arrives (and
-            // leaves) inside GLASS_MS so it lands with the compositor frost
-            // (motion on glass, anim.rs). Driven off linear t.
-            card.cur.opacity =
-                anim::glass_channel(card.from.opacity, card.to.opacity, t, card.anim_ms);
+            // The pane channel overrides the eased lerp: tint steps in and
+            // out with the compositor frost rather than crossfading through
+            // it (motion on glass, anim.rs). Driven off linear t.
+            card.cur.opacity = anim::glass_channel(card.from.opacity, card.to.opacity, t);
             apply_pose(&canvas, card);
             if t >= 1.0 {
                 card.animating = false;

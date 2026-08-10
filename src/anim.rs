@@ -23,14 +23,17 @@
 //!
 //! The recipe, per Apple's material rule (never alpha-fade the effect view;
 //! fade what sits on it): the *pane* — the widget whose CSS carries the
-//! frosted card background — snaps to full tint within [`GLASS_MS`] so
-//! tint and frost land in the same beat, while the *content* on it fades
-//! over the full [`ENTER_MS`]/[`EXIT_MS`]. Exits mirror it: content fades
-//! first, the pane drops in the last [`GLASS_MS`] and must land on exactly
-//! 0.0 (the stencil threshold). [`Reveal`] packages this; surfaces with a
-//! directional entrance add a short [`SLIDE_PX`] settle on top. The lock
-//! screen's client-side glass (lock/glass.rs) is the one place a true
-//! sigma ramp is possible, and does that instead.
+//! frosted card background — steps straight to full tint so tint and frost
+//! land in the same frame, while the *content* on it fades over the full
+//! [`ENTER_MS`]/[`EXIT_MS`]. Exits mirror it: content fades first, and the
+//! pane drops from full tint to exactly 0.0 (the stencil threshold) in one
+//! frame at the end. Ramping the pane across that boundary is what produced
+//! a darkened square, because every intermediate alpha is fully frosted and
+//! only partly tinted; [`glass_channel`] carries the argument. [`Reveal`]
+//! packages this; surfaces with a directional entrance add a short
+//! [`SLIDE_PX`] settle on top. The lock screen's client-side glass
+//! (lock/glass.rs) is the one place a true sigma ramp is possible, and does
+//! that instead.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -41,12 +44,6 @@ use gtk4_layer_shell::LayerShell;
 pub const ENTER_MS: f64 = 300.0;
 pub const MOVE_MS: f64 = 300.0;
 pub const EXIT_MS: f64 = 200.0;
-
-/// How fast the pane's own tint arrives (and, on exit, leaves). Short by
-/// design: the compositor frost is behind every alpha > 0 pixel from the
-/// first frame, so the tint has to land with it or the card reads as an
-/// untinted frosted rectangle.
-pub const GLASS_MS: f64 = 90.0;
 
 /// Travel distance of the settle that accompanies a fade on surfaces with a
 /// directional entrance. Short by design — the fade carries the transition,
@@ -65,15 +62,18 @@ pub fn animations_enabled() -> bool {
     gtk4::Settings::default().is_none_or(|s| s.is_gtk_enable_animations())
 }
 
-/// Toggle a namespace's compositor frost at runtime, because neither of the
-/// two client-side ways of hiding a frosted layer surface gets rid of it:
-/// mapping or unmapping a BLURRED surface makes swayfx re-initialize blur
-/// state and that transition frame renders black, and a surface that stays
-/// mapped with an all-alpha-0 buffer keeps a stale frost despite
-/// blur_ignore_transparent. Disabling the blur node is unconditional —
-/// swayfx skips the node entirely, no stencil, nothing drawn. So blur is
-/// show/hide state: enabled right after map (the frost lands a frame or two
-/// into the fade, inside the GLASS_MS tint lead), disabled before unmap.
+/// Toggle a namespace's compositor frost at runtime, so a frosted surface
+/// can be hidden without a black frame: mapping or unmapping a BLURRED
+/// surface makes swayfx re-initialize blur state, and that transition frame
+/// renders black. Disabling the blur node first is unconditional — swayfx
+/// skips the node entirely, no stencil, nothing drawn. So blur is show/hide
+/// state: enabled right after map, disabled before unmap.
+///
+/// Leaving the surface mapped instead is not an alternative, and the reason
+/// is not the frost. A mapped surface with nothing left to draw stops
+/// committing, so the compositor goes on showing the last buffer it was
+/// sent — the content mid-fade. `blur disable` does not touch that, because
+/// it is the client's own pixels. Hiding means unmapping.
 ///
 /// Only ever `blur enable|disable`, NEVER `reset`. sway merges a runtime
 /// `layer_effects` into the namespace's existing criteria (layer_criteria.c
@@ -97,18 +97,27 @@ pub fn set_layer_blur(namespace: Option<glib::GString>, on: bool, then: impl FnO
 }
 
 /// The glass-pane opacity channel for a fade between `from` and `to` at
-/// linear progress `t` of a `total_ms` animation. Rising fades arrive
-/// within [`GLASS_MS`]; falling fades hold until the last [`GLASS_MS`] and
-/// land exactly on `to` (which must be 0.0 when hiding — swayfx stencils
-/// blur at alpha exactly zero).
-pub fn glass_channel(from: f64, to: f64, t: f64, total_ms: f64) -> f64 {
-    if to >= from {
-        let g = (t * total_ms / GLASS_MS).min(1.0);
-        from + (to - from) * g
-    } else {
-        let g = ((1.0 - t) * total_ms / GLASS_MS).min(1.0);
-        to + (from - to) * g
+/// linear progress `t`.
+///
+/// Zero is the only boundary the compositor cannot follow. swayfx frosts
+/// every pixel with alpha above zero at full strength and offers no ramp, so
+/// a pane at 0.3 is not a third-frosted card: it is a *fully* frosted
+/// rectangle wearing a third of its tint, which reads as a darkened square
+/// with nothing in it. Crossing that boundary is therefore a step, taken in
+/// a single frame, so the tint arrives and leaves with the frost.
+///
+/// A 90 ms ramp used to cross it instead, and those ~5 frames at each end
+/// were the darkened square. Between two frosted states there is no such
+/// mismatch — both are fully frosted — so an ordinary eased ramp is right,
+/// which is what the collapsed stack's dimming wants.
+pub fn glass_channel(from: f64, to: f64, t: f64) -> f64 {
+    if from == 0.0 {
+        return if t > 0.0 { to } else { from };
     }
+    if to == 0.0 {
+        return if t >= 1.0 { to } else { from };
+    }
+    from + (to - from) * ease_out_cubic(t)
 }
 
 // ── Reveal: the shared show/hide transition ────────────────────────────
@@ -279,7 +288,7 @@ impl Reveal {
             let t = (((glib::monotonic_time() - start) as f64 / 1000.0) / total).clamp(0.0, 1.0);
             this.inner
                 .pane
-                .set_opacity(glass_channel(pane_from, target, t, total));
+                .set_opacity(glass_channel(pane_from, target, t));
             if let (Some(from), Some(c)) = (content_from, this.inner.content.borrow().as_ref()) {
                 c.set_opacity(from + (target - from) * ease_out_cubic(t));
             }
