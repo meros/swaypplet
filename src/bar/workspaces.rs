@@ -51,10 +51,15 @@ use crate::task_state::{Activity, TaskSnapshot, TaskStateService, task_of_name};
 const GROUP_GAP_PX: i32 = 8;
 
 // Label tables — mirror users/modules/workspace-config.nix (nixos repo):
-// nums 1–16 are 4 tasks × 4 screens rendered "1¹".."4⁴" behind a
-// task-colored dot (`.bar-ws-dot.taskN`; colors live in data/style.css
-// beside the accent-ripple rules), nums 17–29 the generic keyed
-// workspaces. Keep in lockstep with that file.
+// nums 1–16 are the task grid, rendered "1¹".."4⁴" behind a task-colored
+// dot (`.bar-ws-dot.taskN`; colors live in data/style.css beside the
+// accent-ripple rules), nums 17–30 the generic keyed workspaces. Keep in
+// lockstep with that file.
+//
+// The grid is 4 tasks × 2 screens as of 2026-08-10; the superscript table
+// still runs to four because the `num` spacing (1,2 / 5,6 / 9,10 / 13,14)
+// was kept when screens c and d were retired, and a task that grows a
+// third screen should render rather than fall back to its raw name.
 const TASK_SUPERSCRIPTS: [&str; 4] = ["¹", "²", "³", "⁴"];
 const GENERIC_LABELS: &[(i32, &str)] = &[
     (17, "󰖟 b"),
@@ -67,9 +72,10 @@ const GENERIC_LABELS: &[(i32, &str)] = &[
     (24, "n"),
     (25, "📧 o"),
     (26, "󰓇 p"),
-    (27, "󰓓 t"),
-    (28, "󰑴 u"),
-    (29, "󰗃 y"),
+    (27, "󰜎 r"),
+    (28, "󰓓 t"),
+    (29, "󰑴 u"),
+    (30, "󰗃 y"),
 ];
 
 pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box {
@@ -627,7 +633,8 @@ mod tests {
     #[test]
     fn generic_labels_come_from_the_table() {
         assert_eq!(generic_label(17, "17:wb"), "󰖟 b");
-        assert_eq!(generic_label(29, "29:wy"), "󰗃 y");
+        assert_eq!(generic_label(30, "30:wy"), "󰗃 y");
+        assert_eq!(generic_label(27, "27:wr"), "󰜎 r");
     }
 
     #[test]
