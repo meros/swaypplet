@@ -699,17 +699,37 @@ fn ensure_tick(st: &Rc<RefCell<State>>) {
             sync_keyboard_mode(&st);
         }
         if emptied {
-            // Stay MAPPED with an empty input region instead of unmapping:
-            // swayfx rebuilds its blur pipeline on map/unmap, which flashes
-            // a black frame. The frost must be dropped explicitly — a
-            // parked surface's stale blur lingers otherwise (see
-            // anim::set_layer_blur); show() re-arms it with the next card.
+            // Drop the frost, then UNMAP, which is the order and the reason
+            // Reveal::finish_hide already uses.
+            //
+            // Parking the surface mapped was the old answer here, on the
+            // grounds that map/unmap makes swayfx rebuild its blur pipeline
+            // and flash a black frame. It cannot work. A mapped surface
+            // shows whatever buffer it last committed, and once the last
+            // card is unparented this stack has nothing left to draw, so GTK
+            // never commits again: what the compositor keeps compositing is
+            // the frame from just before the removal, the card a hair above
+            // alpha 0. That is the ghost, and it is none of the things it
+            // looks like. Not the frost, since it outlives `blur disable`.
+            // Not a stranded widget, since the canvas is empty by then. Not
+            // stale damage, since a full output re-arrange does not clear
+            // it. The compositor is faithfully showing what the client last
+            // sent, and only an unmap takes that texture out of the scene.
+            //
+            // The black flash is avoided the way Reveal avoids it: the frost
+            // is gone before the unmap, and show() maps before re-arming it.
             let st_blur = st.clone();
             anim::set_layer_blur(Some(POPUP_CONFIG.namespace.into()), false, move || {
                 // A card that arrived while sway was replying already sent its
                 // own `blur enable`, which this disable may have overtaken.
-                if st_blur.borrow().cards.iter().any(|c| !c.exiting) {
+                let s = st_blur.borrow();
+                if s.cards.iter().any(|c| !c.exiting) {
+                    drop(s);
                     anim::set_layer_blur(Some(POPUP_CONFIG.namespace.into()), true, || {});
+                } else {
+                    let window = s.window.clone();
+                    drop(s);
+                    window.set_visible(false);
                 }
             });
             if let Ok(s) = st.try_borrow() {
