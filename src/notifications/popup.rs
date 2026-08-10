@@ -1,15 +1,29 @@
+//! The popup notification stack at the top-right.
+//!
+//! Each card is its own [`GlassSurface`], which is what makes the rest of
+//! this file short. The compositor's frost and its alpha are per surface, so
+//! a card that owns one fades as a material: the blur collapses with the
+//! tint instead of hanging on as a frosted rectangle holding no colour. It
+//! also unmaps when it goes, so it cannot leave anything of itself behind,
+//! and it takes only the clicks that land on it.
+//!
+//! What is left here is the choreography: which card sits where, which one
+//! gives way when the stack is full, and when each one expires. The
+//! transitions themselves belong to `anim::Reveal`, and the surface to
+//! `surface::GlassSurface`.
+
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gtk4::prelude::*;
-use gtk4::{graphene, gsk};
 use gtk4_layer_shell::Edge;
 
-use crate::anim::{self, ease_out_cubic};
+use crate::anim;
 use crate::icons;
-use crate::layer_shell::{self, LayerShellConfig};
+use crate::layer_shell::LayerShellConfig;
 use crate::notifications::ImageSource;
+use crate::surface::GlassSurface;
 
 use super::store::{self, NotificationStore};
 use super::{CloseReason, Notification, Urgency};
@@ -18,9 +32,9 @@ use super::{CloseReason, Notification, Urgency};
 const CARD_WIDTH: i32 = 360;
 // Offset of the card column from the screen's top/right corner
 const EDGE_MARGIN: i32 = 12;
-// The window is a fixed-size transparent canvas; cards animate inside it.
-// Layer-shell margins jump discretely per commit (double-buffered protocol
-// state), so the surface itself never moves — only child transforms do.
+// Every card spans the whole column and is placed inside it, so the surface
+// never has to move: layer-shell margins are protocol state and animating a
+// slot by moving the surface would be a configure round trip per frame.
 const WINDOW_WIDTH: i32 = CARD_WIDTH + 2 * EDGE_MARGIN;
 const WINDOW_HEIGHT: i32 = 720;
 // Cards shown at full size before older ones collapse behind the stack
@@ -30,7 +44,6 @@ const GAP: f64 = 8.0;
 // Collapsed cards peek out below the last full card by this much per level
 const PEEK: f64 = 12.0;
 const PEEK_SCALE_STEP: f64 = 0.05;
-const PEEK_OPACITY_STEP: f64 = 0.15;
 const MAX_POPUPS: usize = 5;
 // How many cards one app may hold at once. Without this a chatty app fills
 // the stack and evicts everything you had not read yet; past the cap its
@@ -43,19 +56,12 @@ const MAX_POPUPS: usize = 5;
 // in a row from one app drop one immediately, which reads as a bug.
 const MAX_PER_APP: usize = FULL_VISIBLE;
 
-// ── Animation (durations and easing come from crate::anim) ──
-// Entry and exit fade the card while it settles a short SLIDE_PX from/toward
-// the right edge (motion on glass, anim.rs): the card itself is the glass
-// pane and rides the fast `glass_channel` tint ramp, while its content
-// (the inner hbox) fades over the full duration. The overshoot past the
-// canvas's right margin is clipped by the overlay clipper.
-
-// Drag-to-dismiss: how far before the gesture takes the event sequence off
-// the click handler, and how far before releasing means "gone".
 /// The action key a sender uses to ask for a reply field (KDE's convention,
 /// which is what the `inline-reply` capability promises).
 const INLINE_REPLY_KEY: &str = "inline-reply";
 
+// Drag-to-dismiss: how far before the gesture takes the event sequence off
+// the click handler, and how far before releasing means "gone".
 const DRAG_CLAIM_PX: f64 = 8.0;
 const DRAG_DISMISS_PX: f64 = 72.0;
 
@@ -73,30 +79,6 @@ static POPUP_CONFIG: LayerShellConfig = LayerShellConfig {
     keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
 };
 
-/// Animated properties of a card. `y` is the visual top edge, `x_off` a
-/// horizontal slide offset (entry/exit), `scale` shrinks collapsed cards.
-/// `opacity` is the card (glass pane) alpha — it also carries the collapsed
-/// stack dimming — and `content` is the inner hbox alpha on top of it.
-#[derive(Clone, Copy, PartialEq, Debug)]
-struct Pose {
-    y: f64,
-    x_off: f64,
-    scale: f64,
-    opacity: f64,
-    content: f64,
-}
-
-fn lerp_pose(a: Pose, b: Pose, t: f64) -> Pose {
-    let l = |a: f64, b: f64| a + (b - a) * t;
-    Pose {
-        y: l(a.y, b.y),
-        x_off: l(a.x_off, b.x_off),
-        scale: l(a.scale, b.scale),
-        opacity: l(a.opacity, b.opacity),
-        content: l(a.content, b.content),
-    }
-}
-
 enum Timer {
     None,
     Running {
@@ -110,90 +92,27 @@ enum Timer {
 
 struct Card {
     id: u32,
-    widget: gtk4::Box,
+    surface: GlassSurface,
     timer: Timer,
-    // Measured natural size (width can exceed CARD_WIDTH slightly for
-    // wide content; cards are right-aligned so it stays invisible)
-    width: f64,
-    height: f64,
-    cur: Pose,
-    from: Pose,
-    to: Pose,
-    anim_start: i64, // glib::monotonic_time() µs
-    anim_ms: f64,
-    animating: bool,
-    exiting: bool,
-    newborn: bool,
     /// Which app sent it, for the per-app cap.
     app: String,
     /// The card carries a field that has to be typed into, which is the only
-    /// reason the surface ever accepts keyboard focus.
+    /// reason its surface ever accepts keyboard focus.
     wants_keyboard: bool,
     /// When the notification arrived, for the age in the header.
     stamp: std::time::SystemTime,
     /// The header's age label, so the minute tick can rewrite it without
     /// rebuilding the card under the pointer.
     age: Option<gtk4::Label>,
-}
-
-/// Where an exiting card animates to: fade out while drifting a short settle
-/// toward the edge (motion on glass, anim.rs).
-///
-/// Note that for a card still sitting in its entry pose this is *the pose it
-/// is already in* — `x_off` at the slide offset, both alphas at zero. That
-/// equality is what `arm_exit` exists to survive.
-fn exit_pose(cur: Pose) -> Pose {
-    Pose {
-        x_off: anim::SLIDE_PX,
-        opacity: 0.0,
-        content: 0.0,
-        ..cur
-    }
-}
-
-impl Card {
-    /// Arm the exit animation. Unlike `retarget` this never short-circuits,
-    /// and the difference is load-bearing: `exiting` must only ever be set
-    /// together with a live animation, because the tick loop is the one path
-    /// that removes a card and it only visits animating ones.
-    ///
-    /// A card that stopped animating mid-exit is invisible to every consumer.
-    /// `reflow` filters exiting cards out, so it is never re-posed;
-    /// `update_input_region` filters them out, so no input region covers it
-    /// and clicks fall through; the tick skips it, so it is never unparented.
-    /// What is left on screen is an empty glass pane that tints whatever is
-    /// behind it and cannot be dismissed.
-    fn arm_exit(&mut self, ms: f64, now: i64) {
-        self.from = self.cur;
-        self.to = exit_pose(self.cur);
-        self.anim_start = now;
-        self.anim_ms = ms;
-        self.animating = true;
-    }
-
-    fn retarget(&mut self, to: Pose, ms: f64, now: i64) {
-        if self.animating && self.to == to {
-            return;
-        }
-        if !self.animating && self.cur == to {
-            return;
-        }
-        self.from = self.cur;
-        self.to = to;
-        self.anim_start = now;
-        self.anim_ms = ms;
-        self.animating = true;
-    }
+    /// On its way out: still on screen, but no longer part of the stack.
+    exiting: bool,
 }
 
 struct State {
-    window: gtk4::Window,
-    canvas: gtk4::Fixed,
-    // Oldest → newest; matches child paint order, so the newest card
-    // draws on top where collapsed cards overlap.
+    app: gtk4::Application,
+    // Oldest → newest.
     cards: Vec<Card>,
     store: Rc<RefCell<NotificationStore>>,
-    ticking: bool,
     hovered: bool,
     /// Cards an app has had pushed off the stack while it still holds one,
     /// shown as a count on its newest card. Cleared when the app's last card
@@ -205,66 +124,29 @@ struct State {
     age_timer: Option<glib::SourceId>,
 }
 
+impl State {
+    fn active(&self) -> impl Iterator<Item = &Card> {
+        self.cards.iter().filter(|c| !c.exiting)
+    }
+}
+
 /// Manages the popup notification stack at the top-right: newest on top,
 /// up to FULL_VISIBLE cards fully expanded, older ones collapsed behind
 /// the last full card with peeking edges.
 pub struct PopupManager;
 
 impl PopupManager {
-    /// Create the stack window and wire it to the store's callbacks.
+    /// Wire the stack to the store's callbacks. Nothing is on screen, and no
+    /// surface exists, until a notification arrives.
     pub fn register(app: &gtk4::Application, store: Rc<RefCell<NotificationStore>>) {
-        let window = layer_shell::create_layer_window(app, &POPUP_CONFIG);
-        window.add_css_class("notification-popup");
-
-        // The canvas must not drive the surface size: GtkFixed reports its
-        // children's transformed extents as its minimum size, so the entry
-        // slide (x_off past the right margin) would grow the surface — and a
-        // top+right-anchored surface grows leftward, dragging every visible
-        // card with it. Hosting the canvas as a non-measured, clipped overlay
-        // child keeps the surface at its default size; the slide overshoot is
-        // clipped at the screen edge, where it was never visible anyway.
-        let canvas = gtk4::Fixed::new();
-        let clipper = gtk4::Overlay::new();
-        clipper.add_overlay(&canvas);
-        clipper.set_measure_overlay(&canvas, false);
-        clipper.set_clip_overlay(&canvas, true);
-        window.set_child(Some(&clipper));
-
         let state = Rc::new(RefCell::new(State {
-            window: window.clone(),
-            canvas: canvas.clone(),
+            app: app.clone(),
             cards: Vec::new(),
             store: store.clone(),
-            ticking: false,
             hovered: false,
             overflow: std::collections::HashMap::new(),
             age_timer: None,
         }));
-
-        // Hovering the stack pauses auto-dismiss timers
-        let motion = gtk4::EventControllerMotion::new();
-        {
-            let st = state.clone();
-            motion.connect_enter(move |_, _, _| pause_timers(&st));
-        }
-        {
-            let st = state.clone();
-            motion.connect_leave(move |_| resume_timers(&st));
-        }
-        canvas.add_controller(motion);
-
-        // The input region only exists once the surface is mapped.
-        // try_borrow: map can fire synchronously from present() while the
-        // caller still holds the state borrow; the region is recomputed by
-        // the reflow that always follows, so skipping here is safe.
-        {
-            let st = state.clone();
-            window.connect_map(move |_| {
-                if let Ok(s) = st.try_borrow() {
-                    update_input_region(&s);
-                }
-            });
-        }
 
         {
             let st = state.clone();
@@ -278,13 +160,6 @@ impl PopupManager {
                 .borrow_mut()
                 .connect_close(move |id, _reason| dismiss(&st, id));
         }
-
-        // Premap: the empty canvas renders nothing and the map handler
-        // installs the empty input region, so the surface is inert — but
-        // the compositor's blur pipeline initializes now instead of
-        // flashing a black frame on the first notification (same parking
-        // rationale as anim::Reveal).
-        window.present();
     }
 }
 
@@ -296,7 +171,8 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
 
     let id = notif.id;
 
-    // Replacing an existing popup: rebuild its content in place.
+    // Replacing an existing popup: rebuild its content in place, keeping the
+    // surface so the card does not blink out and back.
     // populate_card unparents the old children, which can synthesize pointer
     // crossing events whose handlers borrow the state — run it unborrowed.
     let existing = {
@@ -308,18 +184,16 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
             .map(|card| {
                 cancel_timer(&mut card.timer);
                 card.timer = make_timer(&store, notif, hovered);
-                card.widget.clone()
+                card.surface.clone()
             })
     };
-    if let Some(widget) = existing {
-        let overflow = st
-            .borrow()
-            .overflow
-            .get(&notif.app_name)
-            .copied()
-            .unwrap_or(0);
-        let age = populate_card(&widget, notif, &store, st, overflow);
-        set_critical_class(&widget, notif);
+    if let Some(surface) = existing {
+        let overflow = overflow_for(st, &notif.app_name);
+        let age = populate_card(surface.pane(), notif, &store, st, overflow);
+        set_critical_class(surface.pane(), notif);
+        if let Some(content) = surface.pane().first_child() {
+            surface.set_content(&content);
+        }
         {
             let mut s = st.borrow_mut();
             if let Some(card) = s.cards.iter_mut().find(|c| c.id == id && !c.exiting) {
@@ -338,9 +212,8 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     let crowded = {
         let s = st.borrow();
         let mine: Vec<u32> = s
-            .cards
-            .iter()
-            .filter(|c| !c.exiting && c.app == notif.app_name)
+            .active()
+            .filter(|c| c.app == notif.app_name)
             .map(|c| c.id)
             .collect();
         (mine.len() >= MAX_PER_APP).then(|| mine[0])
@@ -357,103 +230,75 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     // stays open in the store/history)
     let evict = {
         let s = st.borrow();
-        if s.cards.iter().filter(|c| !c.exiting).count() >= MAX_POPUPS {
-            s.cards.iter().find(|c| !c.exiting).map(|c| c.id)
-        } else {
-            None
-        }
+        (s.active().count() >= MAX_POPUPS).then(|| s.active().map(|c| c.id).next())
     };
-    if let Some(old_id) = evict {
+    if let Some(Some(old_id)) = evict {
         start_exit(st, old_id);
     }
 
-    let card = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .build();
-    card.add_css_class("glass-card");
-    card.add_css_class("notification-popup-content");
-    card.set_size_request(CARD_WIDTH, -1);
-    set_critical_class(&card, notif);
-    let overflow = st
-        .borrow()
-        .overflow
-        .get(&notif.app_name)
-        .copied()
-        .unwrap_or(0);
-    let age = populate_card(&card, notif, &store, st, overflow);
-
-    // present() maps the window and the map signal fires synchronously —
-    // its handler borrows the state, so present outside any borrow.
-    let window = {
+    let (app, hovered) = {
         let s = st.borrow();
-        (!s.window.is_visible()).then(|| s.window.clone())
+        (s.app.clone(), s.hovered)
     };
-    if let Some(window) = window {
-        window.present();
+    let surface = GlassSurface::new(&app, &POPUP_CONFIG, anim::SLIDE_PX);
+    surface.pane().add_css_class("notification-popup-content");
+    surface.pane().set_size_request(CARD_WIDTH, -1);
+    // The surface spans the whole column so the card can be placed inside it
+    // without the surface moving, which means the card itself must hug its
+    // content. A pane left to fill would put `.glass-card` over the entire
+    // column, and the compositor would frost every bit of it.
+    surface.pane().set_valign(gtk4::Align::Start);
+    surface.pane().set_halign(gtk4::Align::End);
+    surface.pane().set_margin_end(EDGE_MARGIN);
+    surface.window().add_css_class("notification-popup");
+    set_critical_class(surface.pane(), notif);
+
+    let overflow = overflow_for(st, &notif.app_name);
+    let age = populate_card(surface.pane(), notif, &store, st, overflow);
+    if let Some(content) = surface.pane().first_child() {
+        surface.set_content(&content);
     }
 
-    // First card into an empty (parked) stack: re-arm the compositor frost
-    // the emptied branch dropped (see anim::set_layer_blur).
-    let was_empty = st.borrow().cards.iter().all(|c| c.exiting);
-    if was_empty {
-        anim::set_layer_blur(Some(POPUP_CONFIG.namespace.into()), true, || {});
+    // Hovering any card pauses every auto-dismiss timer, so reading one card
+    // does not cost you the ones under it.
+    let motion = gtk4::EventControllerMotion::new();
+    {
+        let st = st.clone();
+        motion.connect_enter(move |_, _, _| pause_timers(&st));
     }
-
-    // Parenting the card can synthesize a pointer enter whose handler
-    // borrows the state — put it on the canvas before taking the borrow.
-    let (canvas, hovered) = {
-        let s = st.borrow();
-        (s.canvas.clone(), s.hovered)
-    };
-    canvas.put(&card, 0.0, 0.0);
+    {
+        let st = st.clone();
+        motion.connect_leave(move |_| resume_timers(&st));
+    }
+    surface.pane().add_controller(motion);
 
     {
         let mut s = st.borrow_mut();
         let timer = make_timer(&store, notif, hovered);
         s.cards.push(Card {
             id,
-            widget: card,
+            surface,
             timer,
-            width: CARD_WIDTH as f64,
-            height: 0.0,
-            // Placeholder pose — reflow() measures the card and re-poses the
-            // newborn before the first frame.
-            cur: Pose {
-                y: 0.0,
-                x_off: anim::SLIDE_PX,
-                scale: 1.0,
-                opacity: 0.0,
-                content: 0.0,
-            },
-            from: Pose {
-                y: 0.0,
-                x_off: anim::SLIDE_PX,
-                scale: 1.0,
-                opacity: 0.0,
-                content: 0.0,
-            },
-            to: Pose {
-                y: 0.0,
-                x_off: 0.0,
-                scale: 1.0,
-                opacity: 1.0,
-                content: 1.0,
-            },
-            anim_start: 0,
-            anim_ms: anim_ms(anim::ENTER_MS),
-            animating: false,
-            exiting: false,
-            newborn: true,
             app: notif.app_name.clone(),
             wants_keyboard: wants_keyboard(notif),
             stamp: notif.timestamp,
             age,
+            exiting: false,
         });
     }
 
     ensure_age_timer(st);
     sync_keyboard_mode(st);
+    // Place before showing, so the card fades in where it belongs rather
+    // than sliding into its slot from wherever the last one left off.
     reflow(st);
+    if let Some(card) = st.borrow().cards.last() {
+        card.surface.show();
+    }
+}
+
+fn overflow_for(st: &Rc<RefCell<State>>, app: &str) -> u32 {
+    st.borrow().overflow.get(app).copied().unwrap_or(0)
 }
 
 /// Keep the header ages honest while cards are on screen.
@@ -489,333 +334,114 @@ fn dismiss(st: &Rc<RefCell<State>>, id: u32) {
     }
 }
 
-/// Begin the exit animation for a card. Returns false if no such card.
+/// Begin the exit for a card. Returns false if no such card.
+///
+/// The card stays in the list, marked `exiting`, until its surface says it is
+/// actually gone: it is still on screen until then, and dropping it early
+/// would take the surface out mid-fade.
 fn start_exit(st: &Rc<RefCell<State>>, id: u32) -> bool {
-    let started = {
+    let surface = {
         let mut s = st.borrow_mut();
-        let now = glib::monotonic_time();
         match s.cards.iter_mut().find(|c| c.id == id && !c.exiting) {
             Some(card) => {
                 cancel_timer(&mut card.timer);
                 card.exiting = true;
-                card.arm_exit(anim_ms(anim::EXIT_MS), now);
-                true
+                Some(card.surface.clone())
             }
-            None => false,
+            None => None,
         }
     };
-    if started {
-        ensure_tick(st);
-    }
-    started
+    let Some(surface) = surface else {
+        return false;
+    };
+    let st_c = st.clone();
+    surface.connect_hidden(move || retire(&st_c, id));
+    surface.hide();
+    true
 }
 
-/// Recompute layout targets for all active cards and retarget their
-/// animations. Newest card sits at the top; cards beyond FULL_VISIBLE
-/// collapse behind the last full card with peeking bottom edges.
-fn reflow(st: &Rc<RefCell<State>>) {
+/// Drop a card whose surface has finished leaving.
+fn retire(st: &Rc<RefCell<State>>, id: u32) {
     {
         let mut s = st.borrow_mut();
-        let now = glib::monotonic_time();
-        let canvas = s.canvas.clone();
-
-        // Cards are fixed-width: GtkFixed clamps a child's allocation to the
-        // canvas width, so anchoring on a wider natural measure would place
-        // the card for a box that never gets allocated (clipped at the left
-        // screen edge, right edge short of the margin).
-        for card in s.cards.iter_mut().filter(|c| !c.exiting) {
-            card.width = CARD_WIDTH as f64;
-            let (_, nat_h, _, _) = card.widget.measure(gtk4::Orientation::Vertical, CARD_WIDTH);
-            card.height = nat_h as f64;
-        }
-
-        // Walk newest → oldest assigning stack positions
-        let mut y = EDGE_MARGIN as f64;
-        let mut full_top = EDGE_MARGIN as f64;
-        let mut full_bottom = EDGE_MARGIN as f64;
-        let active: Vec<usize> = (0..s.cards.len())
-            .rev()
-            .filter(|&i| !s.cards[i].exiting)
-            .collect();
-        for (rank, &i) in active.iter().enumerate() {
-            let card = &mut s.cards[i];
-            let to = if rank < FULL_VISIBLE {
-                let pose = Pose {
-                    y,
-                    x_off: 0.0,
-                    scale: 1.0,
-                    opacity: 1.0,
-                    content: 1.0,
-                };
-                full_top = y;
-                full_bottom = y + card.height;
-                y += card.height + GAP;
-                pose
-            } else {
-                let k = (rank - FULL_VISIBLE + 1) as f64;
-                let scale = 1.0 - PEEK_SCALE_STEP * k;
-                let visual_h = card.height * scale;
-                // Bottom edge peeks PEEK px per level below the last full
-                // card; clamp so a tall collapsed card can't poke out above
-                let ty = (full_bottom + PEEK * k - visual_h).max(full_top + 2.0 * k);
-                Pose {
-                    y: ty,
-                    x_off: 0.0,
-                    scale,
-                    opacity: 1.0 - PEEK_OPACITY_STEP * k,
-                    content: 1.0,
-                }
-            };
-
-            if card.newborn {
-                card.newborn = false;
-                // Enter at the final slot, fading in while settling a short
-                // slide from the right (motion on glass, anim.rs)
-                card.cur = Pose {
-                    y: to.y,
-                    x_off: anim::SLIDE_PX,
-                    scale: to.scale,
-                    opacity: 0.0,
-                    content: 0.0,
-                };
-                card.from = card.cur;
-                card.to = to;
-                card.anim_start = now;
-                card.anim_ms = anim_ms(anim::ENTER_MS);
-                card.animating = true;
-                apply_pose(&canvas, card);
-            } else {
-                card.retarget(to, anim_ms(anim::MOVE_MS), now);
-            }
-        }
-
-        update_input_region(&s);
-    }
-    ensure_tick(st);
-}
-
-/// Every card duration goes through the shared scale, so reduced motion and
-/// `SWAYPPLET_ANIM_SCALE` reach the stack like they reach every other
-/// surface.
-fn anim_ms(ms: f64) -> f64 {
-    anim::duration(ms)
-}
-
-/// Apply a card's current pose as a Fixed child transform. The card widget
-/// is the glass pane; its first child (the hbox) is the content fading on
-/// top of it.
-fn apply_pose(canvas: &gtk4::Fixed, card: &Card) {
-    let right_x = (WINDOW_WIDTH - EDGE_MARGIN) as f64;
-    // Right-align the visual box; collapsed cards shrink toward the
-    // column's horizontal center
-    let tx = right_x - card.width * (1.0 + card.cur.scale) / 2.0 + card.cur.x_off;
-    let transform = gsk::Transform::new()
-        .translate(&graphene::Point::new(tx as f32, card.cur.y as f32))
-        .scale(card.cur.scale as f32, card.cur.scale as f32);
-    canvas.set_child_transform(&card.widget, Some(&transform));
-    card.widget.set_opacity(card.cur.opacity);
-    if let Some(content) = card.widget.first_child() {
-        content.set_opacity(card.cur.content);
-    }
-}
-
-fn ensure_tick(st: &Rc<RefCell<State>>) {
-    let canvas = {
-        let mut s = st.borrow_mut();
-        // Exiting cards wake the tick too, even when they have no animation
-        // left: the sweep inside it is what collects them.
-        if s.ticking || !s.cards.iter().any(|c| c.animating || c.exiting) {
+        let Some(i) = s.cards.iter().position(|c| c.id == id && c.exiting) else {
             return;
-        }
-        s.ticking = true;
-        s.canvas.clone()
-    };
-
-    let st = st.clone();
-    canvas.add_tick_callback(move |_, _| {
-        let mut s = st.borrow_mut();
-        let now = glib::monotonic_time();
-        let canvas = s.canvas.clone();
-        let mut any_running = false;
-        let mut finished_exits = Vec::new();
-
-        for (i, card) in s.cards.iter_mut().enumerate() {
-            if !card.animating {
-                // Nothing left to animate, so an exiting card is finished
-                // whether or not it ever ran a frame. Belt and braces behind
-                // `arm_exit`: this loop is the only path that unparents a
-                // card, and one that never reaches it stays on screen as an
-                // undismissable pane.
-                if card.exiting {
-                    finished_exits.push(i);
-                }
-                continue;
-            }
-            let t = (((now - card.anim_start) as f64 / 1000.0) / card.anim_ms).clamp(0.0, 1.0);
-            card.cur = lerp_pose(card.from, card.to, ease_out_cubic(t));
-            // The pane channel overrides the eased lerp: tint steps in and
-            // out with the compositor frost rather than crossfading through
-            // it (motion on glass, anim.rs). Driven off linear t.
-            card.cur.opacity = anim::glass_channel(card.from.opacity, card.to.opacity, t);
-            apply_pose(&canvas, card);
-            if t >= 1.0 {
-                card.animating = false;
-                if card.exiting {
-                    finished_exits.push(i);
-                }
-            } else {
-                any_running = true;
-            }
-        }
-
-        let removed: Vec<_> = finished_exits
-            .iter()
-            .rev()
-            .map(|&i| s.cards.remove(i).widget)
-            .collect();
+        };
+        s.cards.remove(i);
         // An app with no cards left starts its next burst from zero. The set
         // is collected first because `retain` holds the map borrowed while it
         // runs, and the predicate has to read `cards` on the same struct.
-        let live_apps: std::collections::HashSet<String> = s
-            .cards
-            .iter()
-            .filter(|c| !c.exiting)
-            .map(|c| c.app.clone())
-            .collect();
-        s.overflow.retain(|app, _| live_apps.contains(app));
-        let emptied = !any_running && s.cards.is_empty();
-        if !any_running {
-            s.ticking = false;
-        }
-        // Unparenting synthesizes pointer crossing events whose handlers
-        // (pause/resume_timers) borrow the state — release it first, or a
-        // hover during the last exit aborts on a nested borrow.
-        drop(s);
-        for widget in &removed {
-            canvas.remove(widget);
-        }
-        if !removed.is_empty() {
-            // A card that carried a field has gone, so the surface may no
-            // longer need to be reachable by keyboard at all.
-            sync_keyboard_mode(&st);
-        }
-        if emptied {
-            // Drop the frost, then UNMAP, which is the order and the reason
-            // Reveal::finish_hide already uses.
-            //
-            // Parking the surface mapped was the old answer here, on the
-            // grounds that map/unmap makes swayfx rebuild its blur pipeline
-            // and flash a black frame. It cannot work. A mapped surface
-            // shows whatever buffer it last committed, and once the last
-            // card is unparented this stack has nothing left to draw, so GTK
-            // never commits again: what the compositor keeps compositing is
-            // the frame from just before the removal, the card a hair above
-            // alpha 0. That is the ghost, and it is none of the things it
-            // looks like. Not the frost, since it outlives `blur disable`.
-            // Not a stranded widget, since the canvas is empty by then. Not
-            // stale damage, since a full output re-arrange does not clear
-            // it. The compositor is faithfully showing what the client last
-            // sent, and only an unmap takes that texture out of the scene.
-            //
-            // The black flash is avoided the way Reveal avoids it: the frost
-            // is gone before the unmap, and show() maps before re-arming it.
-            let st_blur = st.clone();
-            anim::set_layer_blur(Some(POPUP_CONFIG.namespace.into()), false, move || {
-                // A card that arrived while sway was replying already sent its
-                // own `blur enable`, which this disable may have overtaken.
-                let s = st_blur.borrow();
-                if s.cards.iter().any(|c| !c.exiting) {
-                    drop(s);
-                    anim::set_layer_blur(Some(POPUP_CONFIG.namespace.into()), true, || {});
-                } else {
-                    let window = s.window.clone();
-                    drop(s);
-                    window.set_visible(false);
-                }
-            });
-            if let Ok(s) = st.try_borrow() {
-                update_input_region(&s);
-            }
-        }
-
-        if any_running {
-            glib::ControlFlow::Continue
-        } else {
-            glib::ControlFlow::Break
-        }
-    });
-}
-
-/// Match the surface's keyboard mode to whether anything on it can be typed
-/// into.
-///
-/// The stack is `KeyboardMode::None` at rest, and must be: a surface that
-/// appears unbidden several times an hour has no business holding the
-/// keyboard. `OnDemand` is the mode that lets a click move focus here without
-/// ever taking it unasked — the compositor grants focus on the click and on
-/// nothing else, unlike `Exclusive`, which grabs on map.
-///
-/// The mode has to be raised *before* the click, not during it. Setting it
-/// from the click handler is too late: the compositor has already decided
-/// where that button press sends focus, so the entry drew a focus ring and
-/// then received no keys at all.
-fn sync_keyboard_mode(st: &Rc<RefCell<State>>) {
-    use gtk4_layer_shell::{KeyboardMode, LayerShell};
-    let (window, wanted) = {
-        let s = st.borrow();
-        (
-            s.window.clone(),
-            s.cards.iter().any(|c| !c.exiting && c.wants_keyboard),
-        )
-    };
-    window.set_keyboard_mode(if wanted {
-        KeyboardMode::OnDemand
-    } else {
-        KeyboardMode::None
-    });
-}
-
-/// Follow a drag with the card, without letting the animation fight it.
-///
-/// The offset is written straight into the card's current pose, so a release
-/// that dismisses starts its exit from where the finger left it rather than
-/// snapping back first.
-fn drag_card_to(st: &Rc<RefCell<State>>, id: u32, dx: f64) {
-    let mut s = st.borrow_mut();
-    let canvas = s.canvas.clone();
-    let Some(card) = s.cards.iter_mut().find(|c| c.id == id && !c.exiting) else {
-        return;
-    };
-    card.animating = false;
-    card.cur.x_off = dx;
-    // Fade with distance, so the card reads as leaving rather than sliding.
-    card.cur.opacity = (1.0 - dx / (DRAG_DISMISS_PX * 1.6)).clamp(0.0, 1.0);
-    apply_pose(&canvas, card);
-}
-
-/// Restrict pointer input to the area the cards occupy (current and
-/// target extents), so the rest of the transparent canvas clicks through.
-fn update_input_region(s: &State) {
-    let Some(surface) = s.window.surface() else {
-        return;
-    };
-    let region = cairo::Region::create();
-    let right_x = (WINDOW_WIDTH - EDGE_MARGIN) as f64;
-    for card in s.cards.iter().filter(|c| !c.exiting) {
-        for pose in [card.cur, card.to] {
-            let x0 = right_x - card.width * (1.0 + pose.scale) / 2.0 + pose.x_off;
-            let w = card.width * pose.scale;
-            let h = card.height * pose.scale;
-            let rect = cairo::RectangleInt::new(
-                x0.floor() as i32,
-                pose.y.floor() as i32,
-                w.ceil() as i32,
-                h.ceil() as i32,
-            );
-            let _ = region.union_rectangle(&rect);
-        }
+        let live: std::collections::HashSet<String> =
+            s.active().map(|c| c.app.clone()).collect();
+        s.overflow.retain(|app, _| live.contains(app));
     }
-    surface.set_input_region(Some(&region));
+    sync_keyboard_mode(st);
+    reflow(st);
+}
+
+/// Give every card its slot: newest at the top, cards past FULL_VISIBLE
+/// collapsed behind the last full one with their bottom edges peeking out.
+fn reflow(st: &Rc<RefCell<State>>) {
+    let plan: Vec<(GlassSurface, f64, f64, bool)> = {
+        let s = st.borrow();
+        let mut y = f64::from(EDGE_MARGIN);
+        let mut full_top = f64::from(EDGE_MARGIN);
+        let mut full_bottom = f64::from(EDGE_MARGIN);
+        let mut plan = Vec::new();
+        for (rank, card) in s.cards.iter().rev().filter(|c| !c.exiting).enumerate() {
+            let height = card.surface.height();
+            let (slot, scale) = if rank < FULL_VISIBLE {
+                let slot = y;
+                full_top = y;
+                full_bottom = y + height;
+                y += height + GAP;
+                (slot, 1.0)
+            } else {
+                let k = (rank - FULL_VISIBLE + 1) as f64;
+                let scale = 1.0 - PEEK_SCALE_STEP * k;
+                // Bottom edge peeks PEEK px per level below the last full
+                // card; clamp so a tall collapsed card can't poke out above.
+                let slot = (full_bottom + PEEK * k - height * scale).max(full_top + 2.0 * k);
+                (slot, scale)
+            };
+            plan.push((
+                card.surface.clone(),
+                slot,
+                scale,
+                rank >= FULL_VISIBLE,
+            ));
+        }
+        plan
+    };
+
+    for (surface, slot, scale, collapsed) in plan {
+        // A card that has not been shown yet is placed outright: it should
+        // fade in where it belongs, not travel there.
+        let ms = if surface.is_shown() {
+            anim::duration(anim::MOVE_MS)
+        } else {
+            0.0
+        };
+        surface.place_at(slot, ms);
+        surface.set_scale(scale);
+        if collapsed {
+            surface.pane().add_css_class("collapsed");
+        } else {
+            surface.pane().remove_css_class("collapsed");
+        }
+        surface.clip_input_to_card();
+    }
+}
+
+/// Match each surface's keyboard mode to whether its own card can be typed
+/// into. Per card, because the keyboard belongs to the card with the field
+/// and to nothing else on screen.
+fn sync_keyboard_mode(st: &Rc<RefCell<State>>) {
+    let s = st.borrow();
+    for card in &s.cards {
+        card.surface
+            .set_wants_keyboard(card.wants_keyboard && !card.exiting);
+    }
 }
 
 // ── Auto-dismiss timers ──
@@ -1400,21 +1026,6 @@ fn populate_card(
     // below never fires — otherwise flicking a card away would also focus
     // the app it came from.
     let drag = gtk4::GestureDrag::new();
-    let base = std::cell::Cell::new(0.0_f64);
-    {
-        let st_c = st.clone();
-        let id = notif.id;
-        drag.connect_drag_begin(move |_, _, _| {
-            base.set(
-                st_c.borrow()
-                    .cards
-                    .iter()
-                    .find(|c| c.id == id && !c.exiting)
-                    .map(|c| c.cur.x_off)
-                    .unwrap_or(0.0),
-            );
-        });
-    }
     {
         let st_c = st.clone();
         let id = notif.id;
@@ -1424,7 +1035,13 @@ fn populate_card(
             }
             // Only outward: dragging a right-anchored card leftward would
             // pull it across the screen rather than off it.
-            drag_card_to(&st_c, id, dx.max(0.0));
+            let dx = dx.max(0.0);
+            // Fade with distance, so the card reads as leaving rather than
+            // sliding. The surface carries both, so the frost goes with it.
+            let alpha = (1.0 - dx / (DRAG_DISMISS_PX * 1.6)).clamp(0.0, 1.0);
+            if let Some(card) = st_c.borrow().cards.iter().find(|c| c.id == id && !c.exiting) {
+                card.surface.drag_to(dx, alpha);
+            }
         });
     }
     {
@@ -1434,10 +1051,10 @@ fn populate_card(
         drag.connect_drag_end(move |_, dx, _| {
             if dx >= DRAG_DISMISS_PX {
                 store::store_close(&store_c, id, CloseReason::Dismissed);
-            } else {
-                // Short of the threshold the card settles back into its slot,
-                // which reflow already knows how to do.
-                reflow(&st_c);
+            } else if let Some(card) =
+                st_c.borrow().cards.iter().find(|c| c.id == id && !c.exiting)
+            {
+                card.surface.settle_back(anim::duration(anim::MOVE_MS));
             }
         });
     }
@@ -1676,60 +1293,6 @@ mod tests {
     use super::*;
     use crate::notifications::Notification;
 
-    /// The pose a card is pushed with in `show`, before `reflow` measures it
-    /// and gives it a slot. Duplicated here rather than shared, so that a
-    /// change to either one breaks this test instead of passing silently.
-    fn entry_pose() -> Pose {
-        Pose {
-            y: 0.0,
-            x_off: anim::SLIDE_PX,
-            scale: 1.0,
-            opacity: 0.0,
-            content: 0.0,
-        }
-    }
-
-    /// `exit_pose` has fixed points, so an exit can legitimately be a
-    /// zero-length animation. That is the hazard `arm_exit` exists for: build
-    /// it on `retarget`, whose "already at the target, nothing to do" guard
-    /// leaves `animating` false, and such a card is stranded — `exiting` and
-    /// invisible to the tick, to reflow and to the input region alike, which
-    /// is an empty pane on screen that no click can reach.
-    ///
-    /// The entry pose is exactly such a fixed point, which is why a
-    /// notification closed before its first reflow was the way to see it.
-    #[test]
-    fn an_exit_can_be_zero_length() {
-        for cur in [entry_pose(), settled_pose(), collapsed_pose()] {
-            assert_eq!(
-                exit_pose(exit_pose(cur)),
-                exit_pose(cur),
-                "exit_pose is idempotent, so its image is all fixed points"
-            );
-        }
-        assert_eq!(exit_pose(entry_pose()), entry_pose());
-    }
-
-    fn settled_pose() -> Pose {
-        Pose {
-            y: 12.0,
-            x_off: 0.0,
-            scale: 1.0,
-            opacity: 1.0,
-            content: 1.0,
-        }
-    }
-
-    fn collapsed_pose() -> Pose {
-        Pose {
-            y: 40.0,
-            x_off: 0.0,
-            scale: 1.0 - PEEK_SCALE_STEP,
-            opacity: 1.0 - PEEK_OPACITY_STEP,
-            content: 1.0,
-        }
-    }
-
     #[test]
     fn age_reads_as_metadata_not_a_countdown() {
         let base = std::time::UNIX_EPOCH + Duration::from_secs(1_000_000);
@@ -1797,18 +1360,5 @@ mod tests {
             category: Some("devicemanager.thing".into()),
             ..toast
         }));
-    }
-
-    /// A card anywhere in the stack does have somewhere to exit to, so the
-    /// guard in `retarget` is otherwise doing its job.
-    #[test]
-    fn a_card_in_the_stack_has_somewhere_to_exit_to() {
-        for cur in [settled_pose(), collapsed_pose()] {
-            assert_ne!(exit_pose(cur), cur);
-            // The exit leaves the card's slot and scale alone; only the slide
-            // and the two alphas move.
-            assert_eq!(exit_pose(cur).y, cur.y);
-            assert_eq!(exit_pose(cur).scale, cur.scale);
-        }
     }
 }

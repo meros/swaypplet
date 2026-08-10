@@ -21,6 +21,7 @@ mod polkit;
 mod preview;
 mod service;
 mod spawn;
+mod surface;
 mod sway_ipc;
 mod switch_user;
 mod task_state;

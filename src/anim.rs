@@ -161,6 +161,9 @@ struct RevealInner {
     /// The compositor's own alpha for this surface, when it offers one. Bound
     /// on the first show, because the surface does not exist before that.
     alpha: RefCell<Option<crate::alpha::SurfaceAlpha>>,
+    /// Run once the hide has finished and the surface is unmapped. A caller
+    /// that owns the surface (one card of a stack, say) drops it here.
+    on_hidden: RefCell<Option<Box<dyn Fn()>>>,
 }
 
 /// One show/hide transition for every glass surface (motion on glass, see
@@ -187,6 +190,7 @@ impl Reveal {
                 shown: Cell::new(false),
                 tick: RefCell::new(None),
                 alpha: RefCell::new(None),
+                on_hidden: RefCell::new(None),
             }),
         }
     }
@@ -198,11 +202,33 @@ impl Reveal {
         self
     }
 
+    /// Point at the content after the fact, for a surface whose contents are
+    /// rebuilt in place.
+    pub fn set_content(&self, content: &impl IsA<gtk4::Widget>) {
+        *self.inner.content.borrow_mut() = Some(content.clone().upcast());
+    }
+
+    /// Drive the material outright, for a gesture that is following a finger
+    /// rather than playing a transition. Cancels any transition in flight.
+    pub fn set_alpha(&self, a: f64) {
+        self.cancel_tick();
+        self.set_material_alpha(a);
+        if let Some(c) = &*self.inner.content.borrow() {
+            c.set_opacity(if self.inner.alpha.borrow().is_some() { 1.0 } else { a });
+        }
+    }
+
     /// Pair the fade with a settle: `bin` translates from `px` below its
     /// resting spot to 0 on show and back on hide.
     pub fn slide(self, bin: &SlideBin, px: f64) -> Self {
         *self.inner.slide.borrow_mut() = Some((bin.clone(), px));
         self
+    }
+
+    /// Called once the exit has finished and the surface is unmapped. Only
+    /// one hook; setting it again replaces the previous one.
+    pub fn connect_hidden(&self, f: impl Fn() + 'static) {
+        *self.inner.on_hidden.borrow_mut() = Some(Box::new(f));
     }
 
     /// Logical state: what the surface is transitioning toward.
@@ -321,6 +347,7 @@ impl Reveal {
             bin.jump_to(*px);
         }
         if !inner.window.is_visible() {
+            self.hidden();
             return;
         }
         if inner.window.is_layer_window() {
@@ -332,10 +359,21 @@ impl Reveal {
                     set_layer_blur(this.inner.window.namespace(), true, || {});
                 } else {
                     this.inner.window.set_visible(false);
+                    this.hidden();
                 }
             });
         } else {
             inner.window.set_visible(false);
+            self.hidden();
+        }
+    }
+
+    /// Announce the surface is gone. Taken rather than borrowed, so a hook
+    /// that drops the Reveal it belongs to cannot re-enter it.
+    fn hidden(&self) {
+        let hook = self.inner.on_hidden.borrow_mut().take();
+        if let Some(f) = hook {
+            f();
         }
     }
 
@@ -380,10 +418,22 @@ mod imp {
     use super::*;
     use std::cell::{Cell, RefCell};
 
-    #[derive(Default)]
     pub struct SlideBin {
-        pub dy: Cell<f64>,
+        pub d: Cell<f64>,
+        pub horizontal: Cell<bool>,
+        pub scale: Cell<f64>,
         pub tick: RefCell<Option<gtk4::TickCallbackId>>,
+    }
+
+    impl Default for SlideBin {
+        fn default() -> Self {
+            Self {
+                d: Cell::new(0.0),
+                horizontal: Cell::new(false),
+                scale: Cell::new(1.0),
+                tick: RefCell::new(None),
+            }
+        }
     }
 
     #[glib::object_subclass]
@@ -407,7 +457,22 @@ mod imp {
 
     impl WidgetImpl for SlideBin {
         fn snapshot(&self, snapshot: &gtk4::Snapshot) {
-            snapshot.translate(&graphene::Point::new(0.0, self.dy.get() as f32));
+            let d = self.d.get() as f32;
+            let offset = if self.horizontal.get() {
+                graphene::Point::new(d, 0.0)
+            } else {
+                graphene::Point::new(0.0, d)
+            };
+            snapshot.translate(&offset);
+            let scale = self.scale.get();
+            if scale != 1.0 {
+                // Shrink toward the top edge of the trailing side, which is
+                // where a right-anchored card is pinned.
+                let w = self.obj().width() as f32;
+                snapshot.translate(&graphene::Point::new(w, 0.0));
+                snapshot.scale(scale as f32, scale as f32);
+                snapshot.translate(&graphene::Point::new(-w, 0.0));
+            }
             let widget = self.obj();
             let mut child = widget.first_child();
             while let Some(c) = child {
@@ -419,12 +484,16 @@ mod imp {
 }
 
 glib::wrapper! {
-    /// Bin that renders its child vertically offset by an animatable `dy`,
-    /// without touching layout — measure and allocation pass through
-    /// unchanged, only the render nodes move. Anything translated past the
-    /// surface edge is clipped by the fixed-size layer surface, so the
-    /// child can start below its resting position (positive `dy`) and
-    /// settle up into place.
+    /// Bin that renders its child offset by an animatable distance, and
+    /// optionally scaled, without touching layout — measure and allocation
+    /// pass through unchanged, only the render nodes move. Anything
+    /// translated past the surface edge is clipped by the fixed-size layer
+    /// surface, so the child can start off its resting position and settle
+    /// into place.
+    ///
+    /// One axis each, so two of them nest cleanly: a card's slot in a stack
+    /// is vertical placement, and its entrance is a horizontal settle, and
+    /// neither animation can then tread on the other's tick.
     pub struct SlideBin(ObjectSubclass<imp::SlideBin>)
         @extends gtk4::Widget,
         @implements gtk4::Accessible, gtk4::Buildable, gtk4::ConstraintTarget;
@@ -433,6 +502,13 @@ glib::wrapper! {
 impl SlideBin {
     pub fn new() -> Self {
         glib::Object::new()
+    }
+
+    /// Offset along x instead of y.
+    pub fn horizontal() -> Self {
+        let bin: Self = glib::Object::new();
+        bin.imp().horizontal.set(true);
+        bin
     }
 
     pub fn set_child(&self, child: &impl IsA<gtk4::Widget>) {
@@ -444,7 +520,17 @@ impl SlideBin {
         if let Some(id) = self.imp().tick.take() {
             id.remove();
         }
-        self.imp().dy.set(dy);
+        self.imp().d.set(dy);
+        self.queue_draw();
+    }
+
+    /// Render at `scale`, pinned to the trailing edge. Layout is untouched,
+    /// so this costs nothing and cannot move the surface.
+    pub fn set_scale(&self, scale: f64) {
+        if self.imp().scale.get() == scale {
+            return;
+        }
+        self.imp().scale.set(scale);
         self.queue_draw();
     }
 
@@ -456,14 +542,14 @@ impl SlideBin {
         if let Some(id) = imp.tick.take() {
             id.remove();
         }
-        let from = imp.dy.get();
+        let from = imp.d.get();
         if from == target {
             return;
         }
         let start = glib::monotonic_time();
         let id = self.add_tick_callback(move |bin, _| {
             let t = (((glib::monotonic_time() - start) as f64 / 1000.0) / ms).clamp(0.0, 1.0);
-            bin.imp().dy.set(from + (target - from) * ease_out_cubic(t));
+            bin.imp().d.set(from + (target - from) * ease_out_cubic(t));
             bin.queue_draw();
             if t >= 1.0 {
                 bin.imp().tick.take();
