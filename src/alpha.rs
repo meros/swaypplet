@@ -39,6 +39,7 @@ const OPAQUE: u32 = u32::MAX;
 /// One surface's alpha, owned for as long as the caller keeps this.
 pub struct SurfaceAlpha {
     surface: WpAlphaModifierSurfaceV1,
+    wl_surface: wayland_client::protocol::wl_surface::WlSurface,
     conn: Connection,
     last: Cell<u32>,
 }
@@ -64,6 +65,7 @@ impl SurfaceAlpha {
         let _ = queue.flush();
         Some(SurfaceAlpha {
             surface: alpha,
+            wl_surface,
             conn,
             last: Cell::new(OPAQUE),
         })
@@ -84,6 +86,17 @@ impl SurfaceAlpha {
         }
         self.last.set(v);
         self.surface.set_multiplier(v);
+        // The multiplier is double-buffered surface state, so it lands on
+        // the surface's next commit — and a toolkit with nothing new to
+        // draw does not produce one. GTK redraws the pane alongside every
+        // set (anim.rs), but a surface whose widgets never change during
+        // the fade (the compositor is doing the fading) gives GTK nothing
+        // to damage, and the whole ramp can sit pending while the surface
+        // stays at whatever alpha its first commit carried. Committing here
+        // is the only thing that makes the number take effect on the frame
+        // it was set for; there is no buffer attached, so it applies the
+        // pending state and nothing else.
+        self.wl_surface.commit();
         let _ = self.conn.flush();
     }
 }
