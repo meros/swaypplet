@@ -1,6 +1,7 @@
 mod alpha;
 mod anim;
 mod app;
+mod audio;
 mod avatar;
 mod bar;
 mod clipboard;

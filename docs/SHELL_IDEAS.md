@@ -156,15 +156,37 @@ systemd unit). `zwlr_output_manager_v1` retires kanshi (63 lines), and
 of the session for very little code, and night-light temperature becomes a
 panel control rather than a rebuild.
 
-### 7. zbus and PipeWire, replacing text scraping (M)
+### 7. zbus and PipeWire, replacing text scraping (M) — audio DONE 2026-08-11
 
-13 external binaries, and the three heaviest are parsed as text: `nmcli` (17
-call sites), `bluetoothctl` (12), and `wpctl status` through a hand-written
-parser (6). zbus is already a dependency, so NetworkManager and BlueZ become
-property-change signals instead of poll-and-parse. Native PipeWire replaces the
-`wpctl` parser and brings per-app volume and mic-in-use with it.
+Three migrations, not one. Audio has landed; NetworkManager and BlueZ have not.
 
-This is the least visible item and the one that removes the most fragile code.
+**Audio (done).** `src/audio.rs` holds one connection to the sound server and
+pushes snapshots into an `Observed`, the same shape `sway_ipc` and `clipboard`
+use. Gone with it: the `wpctl status` parser (indentation depth, box-drawing
+characters, an asterisk for the default), a second `wpctl` call per device for
+its volume, and — the part worth naming — a **2-second poll** that existed only
+so plugging in headphones would eventually be noticed. The server had an event
+for that all along.
+
+Not libpipewire, and the reason is a build collision rather than a judgement:
+the `pipewire` crate generates bindings with bindgen 0.72, this binary already
+links `pam-sys` on bindgen 0.69, and cargo's unification of the shared
+`clang-sys` leaves the older one unable to load libclang. PipeWire's own
+PulseAudio server speaks a protocol with a mature binding and no bindgen at
+all. The dependency on `services.pipewire.pulse.enable` is real and is now
+stated in `audio.nix` rather than assumed.
+
+The OSD's volume keys stopped spawning anything: the level is computed from the
+snapshot on the GTK thread and drawn immediately, which also means the OSD and
+the panel slider can no longer disagree.
+
+Source outputs come free, which is what item 4 was waiting for:
+`AudioState::microphone_in_use` is a list being non-empty.
+
+**Still to do:** `nmcli` (17 call sites) and `bluetoothctl` (12) over zbus.
+Both are read-heavy and their mutating paths (connect to an SSID, toggle the
+radio, pair a device) cannot be verified without disrupting the session they
+run in, which is the main thing to plan for.
 
 ### 8. claude-dash retirement (S, mostly other repo)
 

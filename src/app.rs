@@ -129,7 +129,12 @@ pub fn run() {
         let window = layer_shell::create_layer_window(app, &PANEL_CONFIG);
         window.add_css_class("panel");
 
-        let panel = Panel::new(window, store_activate.clone());
+        // One connection to the sound server for the whole process: the
+        // panel section reads it, and (BAR_VISION increment 7) the hazard
+        // lane's microphone glyph reads the same snapshot.
+        let audio = crate::audio::AudioService::start();
+
+        let panel = Panel::new(window, store_activate.clone(), audio.clone());
         panel.window.present();
         panel.window.set_visible(false);
 
@@ -138,6 +143,7 @@ pub fn run() {
 
         // ── OSD overlay ──────────────────────────────────────────────────────
         let osd = Osd::new(app);
+        osd.set_audio(audio.clone());
 
         // ── Launcher ────────────────────────────────────────────────────────
         let launcher = Launcher::new(app);

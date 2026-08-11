@@ -30,6 +30,7 @@ wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 swayipc = "4"
 system-tray = { version = "0.8", default-features = false, features = ["data"] }
 gdk4-wayland = { version = "0.11", features = ["wayland_crate"] }
+libpulse-binding = "2.30.1"
 
 [build-dependencies]
 protobuf-codegen = "3.7"

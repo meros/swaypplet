@@ -29,6 +29,9 @@
           adwaita-icon-theme
           polkit
           pam
+          # Audio: src/audio.rs speaks the PulseAudio protocol to
+          # PipeWire's pulse server instead of parsing `wpctl status`.
+          libpulseaudio
         ];
     in
     {

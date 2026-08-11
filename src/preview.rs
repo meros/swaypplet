@@ -45,7 +45,7 @@ pub fn run(component: &str) {
                 .build()
                 .upcast();
             window.add_css_class("panel");
-            let panel = Panel::new(window, store.clone());
+            let panel = Panel::new(window, store.clone(), crate::audio::AudioService::start());
             panel.window.set_visible(true);
             std::mem::forget(panel);
             return;
@@ -219,7 +219,7 @@ pub fn run(component: &str) {
                 host.append(&grid);
             }
             "audio" => {
-                let s = Box::leak(Box::new(AudioSection::new()));
+                let s = Box::leak(Box::new(AudioSection::new(crate::audio::AudioService::start())));
                 s.expand_for_preview();
                 host.append(s.widget());
             }
