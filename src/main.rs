@@ -12,6 +12,7 @@ mod glib_unix;
 mod greet;
 mod icons;
 mod idle;
+mod keybinds;
 mod launcher;
 mod layer_shell;
 mod lock;

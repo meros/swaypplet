@@ -479,7 +479,7 @@ fn task_label(num: i32) -> Option<(usize, String)> {
 }
 
 /// Label for non-task workspaces.
-fn generic_label(num: i32, name: &str) -> &str {
+pub(crate) fn generic_label(num: i32, name: &str) -> &str {
     match GENERIC_LABELS.iter().find(|(n, _)| *n == num) {
         Some((_, label)) => label,
         // Waybar's default icon was blank; the name keeps ad-hoc

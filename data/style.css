@@ -2526,3 +2526,45 @@ revealer {
     margin-top: 2px;
     text-shadow: 0 1px 10px alpha(black, 0.6);
 }
+
+/* ── Keybinding sheet: derived from sway's own config (src/keybinds.rs) ──
+   Held-Super overlay. Monospace on the key column only: the keys are a
+   table and must align, the descriptions are prose and should not. */
+.keybinds-card {
+  padding: 22px 26px;
+}
+
+/* Column and row spacing are widget properties in GTK4 (`spacing`,
+   `row-spacing`), set in src/keybinds.rs — there is no CSS gap here. */
+
+.keybinds-column {
+  min-width: 250px;
+}
+
+.keybinds-section {
+  margin-bottom: 16px;
+}
+
+.keybinds-section:last-child {
+  margin-bottom: 0;
+}
+
+.keybinds-heading {
+  color: @accent;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  margin-bottom: 5px;
+}
+
+.keybinds-keys {
+  font-family: monospace;
+  font-size: 11px;
+  color: @fg;
+
+}
+
+.keybinds-label {
+  font-size: 11px;
+  color: @fg_dim;
+}

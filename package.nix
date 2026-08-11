@@ -94,6 +94,13 @@ rustPlatform.buildRustPackage {
     SCRIPT
     chmod +x $out/bin/swaypplet-polkit-agent
 
+    # Keybinding sheet — `show` / `hide` edges from the Super-hold watcher
+    cat > $out/bin/swaypplet-keybinds <<SCRIPT
+    #!/bin/sh
+    exec $out/bin/swaypplet keybinds "\$@"
+    SCRIPT
+    chmod +x $out/bin/swaypplet-keybinds
+
     # Session locker — swaylock replacement (ext-session-lock-v1 + PAM)
     cat > $out/bin/swaypplet-lock <<SCRIPT
     #!/bin/sh

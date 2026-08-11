@@ -21,7 +21,7 @@ mod media;
 mod popover;
 mod start;
 mod tray;
-mod workspaces;
+pub(crate) mod workspaces;
 
 use std::cell::RefCell;
 use std::rc::Rc;

@@ -8,6 +8,7 @@ use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
 use crate::bar::BarManager;
+use crate::keybinds::Keybinds;
 use crate::launcher::Launcher;
 use crate::layer_shell::{self, LayerShellConfig};
 use crate::notifications::store::NotificationStore;
@@ -53,6 +54,7 @@ struct AppState {
     panel: Option<Panel>,
     osd: Option<Osd>,
     launcher: Option<Launcher>,
+    keybinds: Option<Rc<Keybinds>>,
     /// Keep-alive only: the bar follows monitor hotplug by itself and has
     /// no external control surface.
     _bar: Option<Rc<BarManager>>,
@@ -68,6 +70,7 @@ pub fn run() {
         panel: None,
         osd: None,
         launcher: None,
+        keybinds: None,
         _bar: None,
     }));
 
@@ -136,6 +139,9 @@ pub fn run() {
         // ── Launcher ────────────────────────────────────────────────────────
         let launcher = Launcher::new(app);
 
+        // ── Keybinding sheet ────────────────────────────────────────────────
+        let keybinds = Keybinds::new(app);
+
         // ── Native bar (one card per output, src/bar/) ──────────────────────
         // SWAYPPLET_NO_BAR=1 skips it so an external bar (waybar) can keep
         // the strip — the nixos side sets this only during the migration
@@ -186,6 +192,7 @@ pub fn run() {
         st.panel = Some(panel);
         st.osd = Some(osd);
         st.launcher = Some(launcher);
+        st.keybinds = Some(keybinds);
     });
 
     // ── Command-line handling ────────────────────────────────────────────────
@@ -208,6 +215,25 @@ pub fn run() {
                 }
             } else if let Some(ref launcher) = st.launcher {
                 launcher.toggle();
+            }
+        } else if args.len() > 1 && args[1] == "keybinds" {
+            // The overlay is driven by key press and release, so the client
+            // says which edge it saw rather than asking for a toggle it
+            // cannot reason about.
+            let action = args.get(2).map(String::as_str).unwrap_or("toggle");
+            let st = state_clone.borrow();
+            if st.keybinds.is_none() {
+                drop(st);
+                app.activate();
+            }
+            let st = state_clone.borrow();
+            if let Some(ref keybinds) = st.keybinds {
+                match action {
+                    "show" => keybinds.show(),
+                    "hide" => keybinds.hide(),
+                    "reload" => keybinds.invalidate(),
+                    _ => keybinds.toggle(),
+                }
             }
         } else if args.len() > 1 && args[1] == "osd" {
             let osd_args: Vec<String> = args[2..].to_vec();
