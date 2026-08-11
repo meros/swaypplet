@@ -130,13 +130,25 @@ the `last-<pid>` Stop hook plus a task-number hint on notify-send. The hook is
 landing and `popover.rs:172` already renders the row, so only the notification
 hint is left.
 
-### 9. Keybinds overlay as a real surface (S)
+### 9. Keybinds overlay as a real surface (S) — DONE 2026-08-11
 
-Today it is a `foot` terminal running `cat` on a hand-curated text file, shown
-and hidden through sway window rules and two systemd timers. As a glass layer
-surface it would look like the rest of the shell, and deriving it from sway's
-IPC config would delete the "update the matching line in the same commit" tax
-that `keybinds-help.nix` opens with.
+Was a `foot` terminal running `cat` on a hand-curated text file, shown and
+hidden through a sway window rule and two transient systemd units. Now
+`src/keybinds.rs`: a centered glass layer surface whose rows come from sway's
+own `GET_CONFIG`, so the sheet cannot disagree with the bindings.
+
+The curated file had in fact drifted. It advertised four screens per task
+(`1234 / qwer / asdf / zxcv`) against a grid that has been two since screens c
+and d were retired, and called `⌘ Space` the launcher when it opens the control
+centre. Both were wrong on the sheet the moment the binding changed; neither is
+expressible now.
+
+Presentation is the only hand-written part: a section per command family and a
+short phrase per command. A command matching no rule still prints, under
+`OTHER`, with its store paths shortened — a cheat sheet that silently omits a
+binding is worse than none. The 1 s hold moved into the process
+(`HOLD_MS`), which is what let both systemd units go; the session keeps only
+the libinput watcher that reports the press and release edges.
 
 ### 10. Tailscale (S)
 

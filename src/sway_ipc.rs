@@ -133,6 +133,18 @@ pub fn run_command_then(cmd: &str, then: impl FnOnce() + 'static) {
     );
 }
 
+/// The config sway actually loaded, as text.
+///
+/// Blocking, so it runs on a worker thread (`spawn::spawn_work`); the reply is
+/// the whole config in one string and arrives in a few milliseconds. Only the
+/// keybinding sheet wants it, and only when it is first opened.
+pub fn config_text() -> Result<String, String> {
+    Connection::new()
+        .and_then(|mut c| c.get_config())
+        .map(|config| config.config)
+        .map_err(|e| format!("sway ipc: get_config failed: {e}"))
+}
+
 // ── Worker thread ───────────────────────────────────────────────────────
 
 fn run(tx: async_channel::Sender<SwayState>) {

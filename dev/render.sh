@@ -10,6 +10,11 @@
 # Usage:
 #   dev/render.sh [--bin PATH] [--res WxH] [--out FILE] [--mode panel|launcher|polkit|preview:NAME] [--css FILE]
 #   SWPP_SEED_CLIPBOARD=1 dev/render.sh --mode preview:clipboard   # rows to draw
+#   dev/render.sh --mode keybinds --res 1600x1000                  # the held-Super sheet
+#
+# --mode keybinds copies the live session's bindsym lines into the nested
+# config (SWPP_KEYBINDS_FROM overrides the source), because the sheet is
+# derived from whatever config sway loaded and an empty one renders empty.
 # No `set -e`: this harness polls with `cond && break` loops, which trip the
 # set -e + &&-list gotcha (a false test exits the script). Errors are checked
 # explicitly with `|| { …; exit 1; }` instead.
@@ -49,9 +54,16 @@ SOCK="$RUNTIME/sway-render-$$.sock"
   # sway's parser wants the block across lines: a one-liner is read as an
   # unmatched '}' and the whole rule is dropped, which renders every surface
   # here unfrosted while looking like it worked.
-  for ns in swaypplet swaypplet-launcher swaypplet-osd swaypplet-notification swaypplet-polkit; do
+  for ns in swaypplet swaypplet-launcher swaypplet-osd swaypplet-notification swaypplet-polkit swaypplet-keybinds; do
     printf 'layer_effects "%s" {\n    blur enable\n    blur_ignore_transparent enable\n}\n' "$ns"
   done
+  # The keybinding sheet reads the config sway loaded, so a nested session
+  # with no bindings renders an empty sheet. Borrow the outer session's
+  # bindsym lines (harmless here — nothing presses them) so the harness
+  # exercises the real IPC path against a realistic config.
+  if [ "$MODE" = "keybinds" ]; then
+    grep '^bindsym' "${SWPP_KEYBINDS_FROM:-$HOME/.config/sway/config}" 2>/dev/null || true
+  fi
 } > "$CFG"
 
 cleanup() { [ -n "${SWAY_PID:-}" ] && kill "$SWAY_PID" 2>/dev/null || true; rm -f "$CFG" "$LOG"; }
@@ -78,6 +90,16 @@ export WAYLAND_DISPLAY="$WD"
 rm -f "$RUNTIME/swaypplet.pid"
 case "$MODE" in
   polkit)    "$BIN" polkit-agent >/tmp/swpp-app.log 2>&1 & ;;
+  keybinds)
+    "$BIN" >/tmp/swpp-app.log 2>&1 &
+    # The sheet is a surface of the running panel, so it needs the panel up
+    # before the show command has anything to talk to.
+    for _ in $(seq 1 200); do
+      [ -e "$RUNTIME/swaypplet.pid" ] && break; sleep 0.1
+    done
+    sleep 1.5
+    "$BIN" keybinds show >>/tmp/swpp-app.log 2>&1 || true
+    ;;
   preview:*)
     "$BIN" --preview "${MODE#preview:}" >/tmp/swpp-app.log 2>&1 &
     # SWPP_SEED_CLIPBOARD=1 puts three selections on the nested session so
