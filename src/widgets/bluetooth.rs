@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::process::Command;
+
 use std::rc::Rc;
 
 use gtk4::prelude::*;
@@ -7,6 +7,7 @@ use gtk4::{Box, Button, Label, Orientation, Revealer, RevealerTransitionType, Sp
 
 use crate::icons;
 use crate::spawn::spawn_work;
+use crate::widgets::bluez;
 
 // ── Nerd Font icons ───────────────────────────────────────────────────────────
 const ICON_HEADPHONES: &str = "󰋋";
@@ -37,148 +38,61 @@ enum ConnectResult {
 }
 
 // ── Backend helpers ───────────────────────────────────────────────────────────
+//
+// Thin wrappers over `bluez`, which does the D-Bus work. They stay as named
+// functions because the shapes they return (`ConnectResult`, `BtDevice`)
+// belong to this section rather than to the bus.
 
-/// Returns `true` if Bluetooth is powered on.
-fn bt_is_powered() -> bool {
-    let Ok(out) = Command::new("bluetoothctl").arg("show").output() else {
-        return false;
-    };
-    let text = String::from_utf8_lossy(&out.stdout);
-    for line in text.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix("Powered: ") {
-            return rest.trim() == "yes";
+impl From<bluez::Device> for BtDevice {
+    fn from(device: bluez::Device) -> Self {
+        BtDevice {
+            mac: device.mac,
+            name: device.name,
+            icon_hint: device.icon_hint,
+            connected: device.connected,
+            battery: device.battery,
         }
     }
-    false
 }
 
-/// Returns `true` if `bluetoothctl` is available on the system.
-fn bt_available() -> bool {
-    Command::new("bluetoothctl")
-        .arg("--version")
-        .output()
-        .is_ok()
-}
-
-/// Run `bluetoothctl devices` and return every known device MAC address.
-fn bt_list_macs() -> Vec<String> {
-    let Ok(out) = Command::new("bluetoothctl").arg("devices").output() else {
-        return Vec::new();
-    };
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|line| {
-            // Format: "Device XX:XX:XX:XX:XX:XX Name…"
-            let mut parts = line.splitn(3, ' ');
-            if parts.next() == Some("Device") {
-                parts.next().map(str::to_owned)
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-/// Query `bluetoothctl info <MAC>` and build a `BtDevice`.
-fn bt_info(mac: &str) -> Option<BtDevice> {
-    let out = Command::new("bluetoothctl")
-        .args(["info", mac])
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&out.stdout);
-
-    if text.trim().is_empty() {
-        return None;
-    }
-
-    let mut name = mac.to_owned();
-    let mut connected = false;
-    let mut icon_hint: Option<String> = None;
-    let mut battery: Option<u8> = None;
-
-    for line in text.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix("Name: ") {
-            name = rest.to_owned();
-        } else if let Some(rest) = line.strip_prefix("Connected: ") {
-            connected = rest.trim() == "yes";
-        } else if let Some(rest) = line.strip_prefix("Icon: ") {
-            icon_hint = Some(rest.trim().to_owned());
-        } else if let Some(rest) = line.strip_prefix("Battery Percentage: ") {
-            // Format is "0x4b (75)" — grab the decimal inside the parens.
-            if let Some(inner) = rest.find('(').and_then(|s| {
-                let after = &rest[s + 1..];
-                after.find(')').map(|e| &after[..e])
-            }) {
-                battery = inner.trim().parse().ok();
-            }
+impl From<Result<(), String>> for ConnectResult {
+    fn from(result: Result<(), String>) -> Self {
+        match result {
+            Ok(()) => ConnectResult::Success,
+            Err(message) => ConnectResult::Failure(message),
         }
     }
-
-    Some(BtDevice {
-        mac: mac.to_owned(),
-        name,
-        icon_hint,
-        connected,
-        battery,
-    })
 }
 
-/// Connect to a device in the calling thread (blocking). Returns a `ConnectResult`.
+/// Connect in the calling thread (blocking).
+///
+/// Success is the method returning. The old version decided by looking for
+/// "Connection successful" in `bluetoothctl`'s output, which made the answer
+/// depend on the wording of a message.
 fn bt_connect_blocking(mac: &str) -> ConnectResult {
-    let result = Command::new("bluetoothctl").args(["connect", mac]).output();
-
-    match result {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            let combined = format!("{stdout}{stderr}");
-            if combined.contains("Connection successful") || combined.contains("Connected: yes") {
-                ConnectResult::Success
-            } else {
-                // Try to extract a useful reason from the output.
-                let reason = combined
-                    .lines()
-                    .find(|l| l.contains("Failed") || l.contains("Error") || l.contains("not"))
-                    .map(|l| l.trim().to_owned())
-                    .unwrap_or_else(|| "Unknown error".to_owned());
-                ConnectResult::Failure(reason)
-            }
-        }
-        Err(e) => ConnectResult::Failure(e.to_string()),
-    }
+    bluez::connect(mac).into()
 }
 
-/// Disconnect a device in the calling thread (blocking).
 fn bt_disconnect_blocking(mac: &str) -> ConnectResult {
-    let result = Command::new("bluetoothctl")
-        .args(["disconnect", mac])
-        .output();
+    bluez::disconnect(mac).into()
+}
 
-    match result {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            let combined = format!("{stdout}{stderr}");
-            if combined.contains("Successful") || combined.contains("Connected: no") {
-                ConnectResult::Success
-            } else {
-                let reason = combined
-                    .lines()
-                    .find(|l| l.contains("Failed") || l.contains("Error"))
-                    .map(|l| l.trim().to_owned())
-                    .unwrap_or_else(|| "Unknown error".to_owned());
-                ConnectResult::Failure(reason)
-            }
-        }
-        Err(e) => ConnectResult::Failure(e.to_string()),
+/// Unpair a device.
+fn bt_forget(mac: &str) {
+    if let Err(e) = bluez::forget(mac) {
+        log::warn!("bluetooth: could not forget {mac}: {e}");
     }
 }
 
-/// Remove a paired device from bluetoothctl.
-fn bt_forget(mac: &str) {
-    let _ = Command::new("bluetoothctl").args(["remove", mac]).spawn();
+/// Start or stop scanning. `InProgress` means the adapter is already in the
+/// state being asked for, which is not worth a log line.
+fn bt_set_discovery(on: bool) {
+    if let Err(e) = bluez::set_discovery(on)
+        && !e.contains("InProgress")
+        && !e.contains("progress")
+    {
+        log::debug!("bluetooth: discovery {on}: {e}");
+    }
 }
 
 /// Nerd Font glyph for a device based on its icon hint string.
@@ -209,31 +123,22 @@ struct BluetoothState {
     devices: Vec<BtDevice>,
 }
 
-/// Fetch all Bluetooth state by running blocking subprocess calls.
+/// Fetch all Bluetooth state in one D-Bus call.
 /// Must be called from a background thread — never the GTK main thread.
 fn read_bt_state_blocking() -> BluetoothState {
-    if !bt_available() {
-        return BluetoothState {
-            available: false,
-            powered: false,
-            devices: Vec::new(),
-        };
-    }
-
-    let powered = bt_is_powered();
-    let devices = if powered {
-        bt_list_macs()
-            .iter()
-            .filter_map(|mac| bt_info(mac))
-            .collect()
-    } else {
-        Vec::new()
-    };
-
+    let snapshot = bluez::snapshot();
     BluetoothState {
-        available: true,
-        powered,
-        devices,
+        available: snapshot.available,
+        powered: snapshot.powered,
+        // Paired devices only: the section's two lists are "connected" and
+        // "available to connect", and an unpaired stranger seen mid-scan
+        // belongs to neither until the scan sheet asks for it.
+        devices: snapshot
+            .devices
+            .into_iter()
+            .filter(|d| d.paired)
+            .map(BtDevice::from)
+            .collect(),
     }
 }
 
@@ -417,7 +322,7 @@ impl BluetoothSection {
 
                 if scanning {
                     // "Stop Scan" pressed — stop immediately.
-                    let _ = Command::new("bluetoothctl").args(["scan", "off"]).spawn();
+                    bt_set_discovery(false);
                     scan_spinner_c.stop();
                     scan_spinner_c.set_visible(false);
                     scan_btn_c.set_label("Scan");
@@ -433,7 +338,7 @@ impl BluetoothSection {
                 scan_btn_c.set_label("Stop Scan");
                 scan_status_c.set_label("Scanning.");
 
-                let _ = Command::new("bluetoothctl").args(["scan", "on"]).spawn();
+                bt_set_discovery(true);
 
                 // Animate dots and refresh list every 2 seconds; stop after 10 s (5 ticks).
                 let state_tick = state_c.clone();
@@ -460,7 +365,7 @@ impl BluetoothSection {
 
                     if ticks >= 5 {
                         // 10 seconds elapsed — stop.
-                        let _ = Command::new("bluetoothctl").args(["scan", "off"]).spawn();
+                        bt_set_discovery(false);
                         spinner_tick.stop();
                         spinner_tick.set_visible(false);
                         btn_tick.set_label("Scan");
@@ -815,10 +720,13 @@ fn schedule_populate_available(list: &Box) {
     let list_c = list.clone();
     spawn_work(
         || {
-            bt_list_macs()
-                .iter()
-                .filter_map(|mac| bt_info(mac))
-                .filter(|dev| !dev.connected)
+            // Everything the adapter can see and is not already using —
+            // paired or not, because this list is what a scan is for.
+            bluez::snapshot()
+                .devices
+                .into_iter()
+                .filter(|d| !d.connected)
+                .map(BtDevice::from)
                 .collect::<Vec<_>>()
         },
         move |devices| {

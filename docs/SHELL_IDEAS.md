@@ -162,37 +162,58 @@ systemd unit). `zwlr_output_manager_v1` retires kanshi (63 lines), and
 of the session for very little code, and night-light temperature becomes a
 panel control rather than a rebuild.
 
-### 7. zbus and PipeWire, replacing text scraping (M) — audio DONE 2026-08-11
+### 7. zbus and PipeWire, replacing text scraping (M) — DONE 2026-08-11
 
-Three migrations, not one. Audio has landed; NetworkManager and BlueZ have not.
+Three migrations, all landed. Thirteen external binaries became ten.
 
-**Audio (done).** `src/audio.rs` holds one connection to the sound server and
-pushes snapshots into an `Observed`, the same shape `sway_ipc` and `clipboard`
-use. Gone with it: the `wpctl status` parser (indentation depth, box-drawing
-characters, an asterisk for the default), a second `wpctl` call per device for
-its volume, and — the part worth naming — a **2-second poll** that existed only
-so plugging in headphones would eventually be noticed. The server had an event
-for that all along.
+**Audio.** `src/audio.rs` holds one connection to the sound server and pushes
+snapshots into an `Observed`, the shape `sway_ipc` and `clipboard` use. Gone
+with it: the `wpctl status` parser (indentation depth, box-drawing characters,
+an asterisk for the default), a second `wpctl` call per device for its volume,
+and a **2-second poll** that existed only so plugging in headphones would
+eventually be noticed. The server had an event for that all along.
 
 Not libpipewire, and the reason is a build collision rather than a judgement:
 the `pipewire` crate generates bindings with bindgen 0.72, this binary already
 links `pam-sys` on bindgen 0.69, and cargo's unification of the shared
 `clang-sys` leaves the older one unable to load libclang. PipeWire's own
 PulseAudio server speaks a protocol with a mature binding and no bindgen at
-all. The dependency on `services.pipewire.pulse.enable` is real and is now
-stated in `audio.nix` rather than assumed.
+all. `services.pipewire.pulse.enable` is therefore load bearing, and
+`audio.nix` now says so.
 
-The OSD's volume keys stopped spawning anything: the level is computed from the
-snapshot on the GTK thread and drawn immediately, which also means the OSD and
-the panel slider can no longer disagree.
+The OSD's volume keys stopped spawning anything: the level is computed from
+the snapshot on the GTK thread, so the OSD and the panel slider can no longer
+disagree.
 
-Source outputs come free, which is what item 4 was waiting for:
-`AudioState::microphone_in_use` is a list being non-empty.
+**NetworkManager.** `widgets/network/nm.rs` is the D-Bus layer;
+`backend.rs` kept every signature and its bodies became lookups, so the
+741-line section above it did not move. Seventeen `nmcli` spawns are gone, and
+with them the `\:` unescaping every parse had to remember — a network name
+containing a colon was one forgotten `.replace()` from being a different
+network. `iproute2` went too: addresses, gateway and DNS come from
+NetworkManager's own `IP4Config`.
 
-**Still to do:** `nmcli` (17 call sites) and `bluetoothctl` (12) over zbus.
-Both are read-heavy and their mutating paths (connect to an SSID, toggle the
-radio, pair a device) cannot be verified without disrupting the session they
-run in, which is the main thing to plan for.
+Two behaviour changes worth naming. The associated access point is now read
+from the device rather than matched by SSID against a scan, so two networks
+sharing a name can no longer be confused for each other. And a scan with the
+radio off returns "WiFi is off" immediately instead of waiting out the
+timeout to report an empty list.
+
+**BlueZ.** `widgets/bluez.rs`. `GetManagedObjects` answers the whole tree in
+one round trip, where `bluetoothctl` needed one process per device plus two.
+The battery percentage printed as `0x4b (75)` and parsed by finding the
+parentheses is now a typed property on `org.bluez.Battery1`. The worst of it
+was connect and disconnect: they decided success by **matching English** in
+the output ("Connection successful"), so a reworded message would have read
+as a failure. Now it is whether the method returned.
+
+Verified against the live daemons, read paths only: NetworkManager (active
+connection, connectivity, gateway, five known SSIDs, the VPN, four
+interfaces with IPs and DNS) and BlueZ (adapter powered, five paired devices
+with names, icons and pairing state). **The mutating paths are written but
+unexercised** — connect to an SSID, toggle the radio, VPN up/down, pair,
+unpair, scan — because verifying them means disrupting the session they run
+in. They are the next thing to try after a rebuild.
 
 ### 8. claude-dash retirement (S, mostly other repo)
 
