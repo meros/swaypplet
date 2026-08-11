@@ -21,7 +21,12 @@ use std::os::fd::{AsFd, OwnedFd};
 
 use wayland_client::protocol::{wl_buffer, wl_output, wl_registry, wl_shm, wl_shm_pool};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, delegate_noop};
+use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
+    ext_foreign_toplevel_handle_v1::{self, ExtForeignToplevelHandleV1},
+    ext_foreign_toplevel_list_v1::{self, ExtForeignToplevelListV1},
+};
 use wayland_protocols::ext::image_capture_source::v1::client::{
+    ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1,
     ext_image_capture_source_v1::ExtImageCaptureSourceV1,
     ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1,
 };
@@ -67,6 +72,53 @@ impl Image {
         }
     }
 
+    /// Box-average down to fit `max_w` × `max_h`, keeping the aspect ratio.
+    ///
+    /// Averaging rather than dropping pixels: a switcher thumbnail of a
+    /// terminal is mostly one-pixel-wide glyph strokes, and nearest-neighbour
+    /// turns those into noise that reads as a different window every time it
+    /// is drawn.
+    pub fn boxed_down(&self, max_w: u32, max_h: u32) -> Image {
+        if self.width == 0 || self.height == 0 {
+            return self.clone();
+        }
+        let factor = (self.width.div_ceil(max_w))
+            .max(self.height.div_ceil(max_h))
+            .max(1);
+        if factor == 1 {
+            return self.clone();
+        }
+
+        let width = (self.width / factor).max(1);
+        let height = (self.height / factor).max(1);
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+
+        for y in 0..height {
+            for x in 0..width {
+                let (mut acc, mut n) = ([0u32; 4], 0u32);
+                for sy in y * factor..((y + 1) * factor).min(self.height) {
+                    for sx in x * factor..((x + 1) * factor).min(self.width) {
+                        let i = ((sy * self.width + sx) * 4) as usize;
+                        for c in 0..4 {
+                            acc[c] += u32::from(self.pixels[i + c]);
+                        }
+                        n += 1;
+                    }
+                }
+                let n = n.max(1);
+                for c in acc {
+                    pixels.push((c / n) as u8);
+                }
+            }
+        }
+
+        Image {
+            width,
+            height,
+            pixels,
+        }
+    }
+
     /// The pixel at `(x, y)` as `(r, g, b)`, for the colour picker.
     pub fn pixel(&self, x: u32, y: u32) -> Option<(u8, u8, u8)> {
         if x >= self.width || y >= self.height {
@@ -79,9 +131,56 @@ impl Image {
 
 /// Capture one output whole, by connector name (`eDP-1`).
 ///
-/// Blocking. `None` when the compositor has no such output, does not advertise
+/// Blocking. `Err` when the compositor has no such output, does not advertise
 /// the capture protocol, or fails the copy.
 pub fn output(name: &str) -> Result<Image, String> {
+    with_source(|state, qh| {
+        let sources = state
+            .outputs_manager
+            .clone()
+            .ok_or("compositor does not advertise ext-output-image-capture-source-v1")?;
+        let output = state
+            .outputs
+            .iter()
+            .find(|(_, n)| n.as_deref() == Some(name))
+            .map(|(o, _)| o.clone())
+            .ok_or_else(|| format!("no output named {name}"))?;
+        Ok(sources.create_source(&output, qh, ()))
+    })
+}
+
+/// Capture one window, by the identifier sway also puts in its tree
+/// (`foreign_toplevel_identifier`), which is what joins a switcher entry to
+/// its pixels without matching on titles.
+///
+/// Blocking, and a window that is not currently rendered anywhere may never
+/// produce a frame — see [`with_source`] on why that is bounded.
+pub fn toplevel(identifier: &str) -> Result<Image, String> {
+    with_source(|state, qh| {
+        let sources = state
+            .toplevels_manager
+            .clone()
+            .ok_or("compositor does not advertise per-toplevel capture sources")?;
+        let handle = state
+            .toplevels
+            .iter()
+            .find(|(_, id)| id.as_deref() == Some(identifier))
+            .map(|(h, _)| h.clone())
+            .ok_or_else(|| format!("no toplevel {identifier}"))?;
+        Ok(sources.create_source(&handle, qh, ()))
+    })
+}
+
+/// The whole dance, once, on a connection of its own.
+///
+/// A fresh connection per capture rather than one long-lived thread: the
+/// toplevel handles a per-window source needs only exist on the connection
+/// that bound the list, so a shared connection would have to own both the
+/// enumeration and every capture, and serialise them. Two round trips is a
+/// cheaper price than that coupling.
+fn with_source(
+    make_source: impl FnOnce(&Capture, &QueueHandle<Capture>) -> Result<ExtImageCaptureSourceV1, String>,
+) -> Result<Image, String> {
     let conn = Connection::connect_to_env().map_err(|e| format!("wayland connect: {e}"))?;
     let display = conn.display();
     let mut queue = conn.new_event_queue();
@@ -90,31 +189,20 @@ pub fn output(name: &str) -> Result<Image, String> {
 
     let mut state = Capture::default();
     // Two round trips: the first brings the globals in, the second the
-    // per-output `name` events that identify which one the caller means.
-    queue
-        .roundtrip(&mut state)
-        .map_err(|e| format!("wayland roundtrip: {e}"))?;
-    queue
-        .roundtrip(&mut state)
-        .map_err(|e| format!("wayland roundtrip: {e}"))?;
+    // per-object `name` and `identifier` events that pick one out.
+    for _ in 0..2 {
+        queue
+            .roundtrip(&mut state)
+            .map_err(|e| format!("wayland roundtrip: {e}"))?;
+    }
 
     let manager = state
         .manager
         .clone()
         .ok_or("compositor does not advertise ext-image-copy-capture-v1")?;
-    let sources = state
-        .sources
-        .clone()
-        .ok_or("compositor does not advertise ext-output-image-capture-source-v1")?;
     let shm = state.shm.clone().ok_or("compositor has no wl_shm")?;
-    let output = state
-        .outputs
-        .iter()
-        .find(|(_, n)| n.as_deref() == Some(name))
-        .map(|(o, _)| o.clone())
-        .ok_or_else(|| format!("no output named {name}"))?;
+    let source = make_source(&state, &qh)?;
 
-    let source = sources.create_source(&output, &qh, ());
     let session = manager.create_session(
         &source,
         // Cursors are not part of a screenshot anyone asked for; the pointer
@@ -125,52 +213,73 @@ pub fn output(name: &str) -> Result<Image, String> {
     );
 
     // The session answers with a size and a set of formats, then `done`.
-    while state.constraints.is_none() && !state.stopped {
-        queue
-            .blocking_dispatch(&mut state)
-            .map_err(|e| format!("wayland dispatch: {e}"))?;
-    }
-    let Constraints {
-        width,
-        height,
-        format,
-    } = state.constraints.clone().ok_or("capture session stopped")?;
+    dispatch_until(&conn, &mut queue, &mut state, |s| {
+        s.constraints.is_some() || s.stopped
+    })?;
 
-    let stride = width * 4;
-    let len = (stride * height) as usize;
-    let memory = Shm::new(len)?;
-    let pool = shm.create_pool(memory.fd.as_fd(), len as i32, &qh, ());
-    let buffer = pool.create_buffer(
-        0,
-        width as i32,
-        height as i32,
-        stride as i32,
-        format,
-        &qh,
-        (),
-    );
+    // `buffer_constraints` is the compositor saying the buffer no longer
+    // matches — the source was resized between the `done` that described it
+    // and the capture. It re-sends the constraints with that failure, so the
+    // answer is to build the buffer again, once. Spotify hit this every time
+    // on this machine; everything else never did.
+    let mut attempt = 0;
+    let (memory, width, height, format) = loop {
+        let Constraints {
+            width,
+            height,
+            format,
+        } = state.constraints.clone().ok_or("capture session stopped")?;
 
-    let frame = session.create_frame(&qh, ());
-    frame.attach_buffer(&buffer);
-    frame.damage_buffer(0, 0, width as i32, height as i32);
-    frame.capture();
+        let stride = width * 4;
+        let len = (stride * height) as usize;
+        let memory = Shm::new(len)?;
+        let pool = shm.create_pool(memory.fd.as_fd(), len as i32, &qh, ());
+        let buffer = pool.create_buffer(
+            0,
+            width as i32,
+            height as i32,
+            stride as i32,
+            format,
+            &qh,
+            (),
+        );
 
-    while state.frame.is_none() {
-        queue
-            .blocking_dispatch(&mut state)
-            .map_err(|e| format!("wayland dispatch: {e}"))?;
-    }
-    match state.frame.clone() {
-        Some(Err(reason)) => return Err(format!("capture failed: {reason}")),
-        Some(Ok(())) => {}
-        None => unreachable!("loop only exits once the frame resolves"),
-    }
+        let frame = session.create_frame(&qh, ());
+        frame.attach_buffer(&buffer);
+        frame.damage_buffer(0, 0, width as i32, height as i32);
+        frame.capture();
+
+        dispatch_until(&conn, &mut queue, &mut state, |s| s.frame.is_some())?;
+        let outcome = state.frame.take();
+
+        frame.destroy();
+
+        match outcome {
+            Some(Ok(())) => {
+                buffer.destroy();
+                pool.destroy();
+                break (memory, width, height, format);
+            }
+            Some(Err(reason)) => {
+                buffer.destroy();
+                pool.destroy();
+                attempt += 1;
+                if attempt > 1 || !reason.contains("BufferConstraints") {
+                    return Err(format!("capture failed: {reason}"));
+                }
+                // The new constraints ride in on the same failure; wait for
+                // the `done` that closes them before trying again.
+                state.constraints = None;
+                dispatch_until(&conn, &mut queue, &mut state, |s| {
+                    s.constraints.is_some() || s.stopped
+                })?;
+            }
+            None => return Err("capture resolved to nothing".into()),
+        }
+    };
 
     let pixels = to_rgba(memory.as_slice(), width, height, format);
 
-    frame.destroy();
-    buffer.destroy();
-    pool.destroy();
     session.destroy();
     source.destroy();
 
@@ -204,6 +313,72 @@ fn to_rgba(src: &[u8], width: u32, height: u32, format: wl_shm::Format) -> Vec<u
         dst[3] = if opaque { 0xff } else { px[3] };
     }
     out
+}
+
+/// How long a capture may wait for the compositor before giving up.
+///
+/// An output always has something to copy. A *window* does not: a toplevel on
+/// a workspace nobody is looking at may not be rendered at all, and the
+/// protocol's answer to that is silence rather than `failed` — the session is
+/// allowed to "wait an indefinite amount of time for the source content to
+/// change". Indefinite is exactly what a switcher building eleven thumbnails
+/// cannot afford, so the wait is bounded and a thumbnail that does not arrive
+/// is simply not drawn.
+const CAPTURE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Dispatch until `ready` or the deadline, whichever comes first.
+///
+/// `blocking_dispatch` would be the obvious call and has no deadline, so this
+/// runs the read cycle by hand: flush, poll the connection's fd with what is
+/// left of the budget, then read and dispatch whatever arrived.
+fn dispatch_until(
+    conn: &Connection,
+    queue: &mut wayland_client::EventQueue<Capture>,
+    state: &mut Capture,
+    ready: impl Fn(&Capture) -> bool,
+) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + CAPTURE_TIMEOUT;
+
+    loop {
+        queue
+            .dispatch_pending(state)
+            .map_err(|e| format!("wayland dispatch: {e}"))?;
+        if ready(state) {
+            return Ok(());
+        }
+
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("capture timed out".into());
+        }
+
+        conn.flush().map_err(|e| format!("wayland flush: {e}"))?;
+        let Some(guard) = conn.prepare_read() else {
+            continue; // events arrived between the dispatch and here
+        };
+
+        let fd = std::os::fd::AsRawFd::as_raw_fd(&guard.connection_fd());
+        let mut poll_fd = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let millis = remaining.as_millis().min(i32::MAX as u128) as i32;
+        let polled = unsafe { libc::poll(&mut poll_fd, 1, millis) };
+        match polled {
+            0 => return Err("capture timed out".into()),
+            n if n < 0 => {
+                let err = std::io::Error::last_os_error();
+                if err.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(format!("poll: {err}"));
+            }
+            _ => {
+                guard.read().map_err(|e| format!("wayland read: {e}"))?;
+            }
+        }
+    }
 }
 
 // ── Shared memory ───────────────────────────────────────────────────────
@@ -267,9 +442,13 @@ struct Constraints {
 #[derive(Default)]
 struct Capture {
     manager: Option<ExtImageCopyCaptureManagerV1>,
-    sources: Option<ExtOutputImageCaptureSourceManagerV1>,
+    outputs_manager: Option<ExtOutputImageCaptureSourceManagerV1>,
+    toplevels_manager: Option<ExtForeignToplevelImageCaptureSourceManagerV1>,
     shm: Option<wl_shm::WlShm>,
     outputs: Vec<(wl_output::WlOutput, Option<String>)>,
+    /// Every window the compositor lists, with the identifier sway also
+    /// reports in its tree.
+    toplevels: Vec<(ExtForeignToplevelHandleV1, Option<String>)>,
     /// Filled in as the session reports, committed on `done`.
     pending_size: Option<(u32, u32)>,
     pending_format: Option<wl_shm::Format>,
@@ -299,7 +478,13 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Capture {
                 state.manager = Some(registry.bind(name, 1, qh, ()));
             }
             "ext_output_image_capture_source_manager_v1" => {
-                state.sources = Some(registry.bind(name, 1, qh, ()));
+                state.outputs_manager = Some(registry.bind(name, 1, qh, ()));
+            }
+            "ext_foreign_toplevel_image_capture_source_manager_v1" => {
+                state.toplevels_manager = Some(registry.bind(name, 1, qh, ()));
+            }
+            "ext_foreign_toplevel_list_v1" => {
+                let _: ExtForeignToplevelListV1 = registry.bind(name, 1, qh, ());
             }
             "wl_shm" => state.shm = Some(registry.bind(name, 1, qh, ())),
             "wl_output" => {
@@ -399,8 +584,48 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, ()> for Capture {
     }
 }
 
+impl Dispatch<ExtForeignToplevelListV1, ()> for Capture {
+    fn event(
+        state: &mut Self,
+        _: &ExtForeignToplevelListV1,
+        event: ext_foreign_toplevel_list_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let ext_foreign_toplevel_list_v1::Event::Toplevel { toplevel } = event {
+            state.toplevels.push((toplevel, None));
+        }
+    }
+
+    wayland_client::event_created_child!(Capture, ExtForeignToplevelListV1, [
+        ext_foreign_toplevel_list_v1::EVT_TOPLEVEL_OPCODE => (ExtForeignToplevelHandleV1, ()),
+    ]);
+}
+
+impl Dispatch<ExtForeignToplevelHandleV1, ()> for Capture {
+    fn event(
+        state: &mut Self,
+        handle: &ExtForeignToplevelHandleV1,
+        event: ext_foreign_toplevel_handle_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let ext_foreign_toplevel_handle_v1::Event::Identifier { identifier } = event
+            && let Some(slot) = state
+                .toplevels
+                .iter_mut()
+                .find(|(h, _)| h.id() == handle.id())
+        {
+            slot.1 = Some(identifier);
+        }
+    }
+}
+
 delegate_noop!(Capture: ignore ExtImageCopyCaptureManagerV1);
 delegate_noop!(Capture: ignore ExtOutputImageCaptureSourceManagerV1);
+delegate_noop!(Capture: ignore ExtForeignToplevelImageCaptureSourceManagerV1);
 delegate_noop!(Capture: ignore ExtImageCaptureSourceV1);
 delegate_noop!(Capture: ignore wl_shm::WlShm);
 delegate_noop!(Capture: ignore wl_shm_pool::WlShmPool);
@@ -452,6 +677,35 @@ mod tests {
     }
 
     #[test]
+    fn boxing_down_averages_rather_than_samples() {
+        // 4x2 of alternating black and white columns; halving must produce
+        // mid-grey, which a nearest-neighbour resize never would.
+        let mut pixels = Vec::new();
+        for _ in 0..2 {
+            for x in 0..4u8 {
+                let v = if x % 2 == 0 { 0 } else { 255 };
+                pixels.extend_from_slice(&[v, v, v, 255]);
+            }
+        }
+        let small = Image {
+            width: 4,
+            height: 2,
+            pixels,
+        }
+        .boxed_down(2, 1);
+
+        assert_eq!((small.width, small.height), (2, 1));
+        assert_eq!(small.pixel(0, 0), Some((127, 127, 127)));
+    }
+
+    #[test]
+    fn an_image_already_small_enough_is_returned_as_is() {
+        let img = solid(10, 10, [1, 2, 3, 255]);
+        let same = img.boxed_down(100, 100);
+        assert_eq!((same.width, same.height), (10, 10));
+    }
+
+    #[test]
     fn xrgb_arrives_byte_reversed_and_opaque() {
         // One pixel, little-endian XRGB8888: B, G, R, X.
         let src = [10u8, 20, 30, 0];
@@ -470,6 +724,21 @@ mod tests {
 #[cfg(test)]
 mod live {
     /// Grabs the real session's output. Ignored: needs a compositor.
+    /// Grabs one window by identifier. Ignored: needs a compositor.
+    ///
+    ///   TOPLEVEL=$(swaymsg -t get_tree -r | jq -r '..|objects
+    ///     |select(.foreign_toplevel_identifier!=null).foreign_toplevel_identifier' | head -1)
+    #[test]
+    #[ignore]
+    fn capture_a_toplevel() {
+        let id = std::env::var("TOPLEVEL").expect("TOPLEVEL=<identifier>");
+        let img = super::toplevel(&id).expect("capture");
+        let mut ppm = format!("P6\n{} {}\n255\n", img.width, img.height).into_bytes();
+        ppm.extend(img.pixels.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]));
+        std::fs::write("/tmp/toplevel.ppm", ppm).unwrap();
+        println!("captured {}x{}", img.width, img.height);
+    }
+
     #[test]
     #[ignore]
     fn capture_an_output() {

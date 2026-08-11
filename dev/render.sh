@@ -11,6 +11,7 @@
 #   dev/render.sh [--bin PATH] [--res WxH] [--out FILE] [--mode panel|launcher|polkit|preview:NAME] [--css FILE]
 #   SWPP_SEED_CLIPBOARD=1 dev/render.sh --mode preview:clipboard   # rows to draw
 #   dev/render.sh --mode keybinds --res 1600x1000                  # the held-Super sheet
+#   dev/render.sh --mode switcher --res 1400x900                   # the window switcher
 #   dev/render.sh --mode screenshot --res 1200x800                 # the region selector
 #   SWPP_SELECT_RECT=120,90,540,330 dev/render.sh --mode screenshot # with a selection drawn
 #
@@ -92,6 +93,22 @@ export WAYLAND_DISPLAY="$WD"
 rm -f "$RUNTIME/swaypplet.pid"
 case "$MODE" in
   polkit)    "$BIN" polkit-agent >/tmp/swpp-app.log 2>&1 & ;;
+  switcher)
+    "$BIN" >/tmp/swpp-app.log 2>&1 &
+    for _ in $(seq 1 200); do
+      [ -e "$RUNTIME/swaypplet.pid" ] && break; sleep 0.1
+    done
+    sleep 1.5
+    # Something to switch between. Two terminals is enough to show the grid,
+    # the selection ring and a thumbnail that is not the focused window.
+    for _ in 1 2 3; do
+      swaymsg exec "${SWPP_SWITCHER_APP:-foot}" >/dev/null 2>&1 || true
+      sleep 1
+    done
+    sleep 1
+    "$BIN" switcher >>/tmp/swpp-app.log 2>&1 || true
+    sleep 3
+    ;;
   screenshot)
     "$BIN" >/tmp/swpp-app.log 2>&1 &
     for _ in $(seq 1 200); do

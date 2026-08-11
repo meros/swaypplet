@@ -2649,3 +2649,54 @@ revealer {
 .annotate-canvas {
   background: @bg0_h;
 }
+
+/* ── Window switcher (src/switcher/) ──
+   A grid of live thumbnails on the shared glass. The card border is the
+   selection: everything else stays still, so the eye tracks one moving
+   outline rather than a grid that reflows. */
+.switcher-card {
+  padding: 18px;
+}
+
+.switcher-filter {
+  font-family: monospace;
+  font-size: 11px;
+  color: @fg_dim;
+  padding: 0 4px 2px 4px;
+}
+
+.switcher-item {
+  padding: 8px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: alpha(@bg0_h, 0.35);
+}
+
+.switcher-item:hover {
+  background: @surface_hover;
+}
+
+.switcher-item.selected {
+  border-color: @accent;
+  background: @accent_tint;
+}
+
+/* The thumbnail sits over the app icon, so a capture that never arrives
+   leaves the icon showing rather than a hole. */
+.switcher-thumb {
+  border-radius: 6px;
+}
+
+.switcher-icon {
+  opacity: 0.75;
+}
+
+.switcher-title {
+  font-size: 11px;
+  color: @fg;
+}
+
+.switcher-workspace {
+  font-size: 10px;
+  color: @text_faint;
+}
