@@ -1,354 +1,23 @@
+//! Audio section: output and input volume, device pickers, per-app mixer.
+//!
+//! All of the state comes from [`crate::audio`], which holds one connection to
+//! the sound server and pushes a snapshot whenever anything changes. This file
+//! used to own that too — a `wpctl status` parser, a second `wpctl` call per
+//! device for its volume, and a 2-second timer polling for a default-device
+//! change — and now owns none of it. The timer is the part worth naming: the
+//! section polled twice a second forever so that plugging in headphones would
+//! be noticed, and the server had an event for that the whole time.
+
 use std::cell::RefCell;
-use std::process::Command;
 use std::rc::Rc;
-use std::thread;
-use std::time::Duration;
 
 use gtk4::prelude::*;
-use log::{error, warn};
 
+use crate::audio::{AudioService, AudioState, Command, Device, Stream, VolumeState};
 use crate::icons;
 
+/// Marks the device currently in use in the sink and source pickers.
 const ICON_ACTIVE_CHECK: &str = "●";
-
-// ── Data types ────────────────────────────────────────────────────────────────
-
-#[derive(Clone, Debug)]
-struct VolumeState {
-    volume: f64, // 0.0 – 1.5
-    muted: bool,
-}
-
-#[derive(Clone, Debug)]
-struct Device {
-    id: String,
-    name: String,
-    is_default: bool,
-}
-
-/// A per-application playback stream (PipeWire `Stream/Output/Audio` node).
-#[derive(Clone, Debug)]
-struct Stream {
-    id: String,
-    name: String,
-    vol: VolumeState,
-}
-
-/// Result of a full state read. `None` means wpctl was unavailable.
-#[derive(Clone, Debug)]
-enum FetchedState {
-    Ok(AudioState),
-    Unavailable(String),
-}
-
-#[derive(Clone, Debug, Default)]
-struct AudioState {
-    sink: Option<VolumeState>,
-    source: Option<VolumeState>,
-    sinks: Vec<Device>,
-    sources: Vec<Device>,
-    streams: Vec<Stream>,
-}
-
-// ── Device name cleanup ───────────────────────────────────────────────────────
-
-/// Strip common Intel/AMD audio controller prefixes from device names so that
-/// the user sees concise names like "Speaker", "Headphones", or
-/// "HDMI / DisplayPort 1".
-///
-/// Examples:
-/// - "Lunar Lake-M HD Audio Controller Speaker"        → "Speaker"
-/// - "Alder Lake PCH-P High Definition Audio Speaker"  → "Speaker"
-/// - "AMD Rembrandt Radeon High Definition Audio HDMI / DisplayPort 1"
-///                                                      → "HDMI / DisplayPort 1"
-pub fn clean_device_name(name: &str) -> String {
-    // Ordered from most-specific to least-specific so the first match wins.
-    const PREFIXES: &[&str] = &[
-        // Intel – generation-specific names (keep alphabetical within brand)
-        "Alder Lake PCH-P High Definition Audio ",
-        "Alder Lake-S PCH High Definition Audio ",
-        "Alderlake-S HD Audio ",
-        "Broadwell-U Audio Controller ",
-        "Cannon Lake PCH cAVS ",
-        "Comet Lake PCH cAVS ",
-        "Ice Lake-LP Smart Sound Technology Audio Controller ",
-        "Jasper Lake HD Audio ",
-        "Lunar Lake-M HD Audio Controller ",
-        "Meteor Lake-P HD Audio Controller ",
-        "Raptor Lake-P/U/H cAVS ",
-        "Skylake Audio Controller ",
-        "Tiger Lake-LP Smart Sound Technology Audio Controller ",
-        "Tiger Lake-H HD Audio Controller ",
-        "Wildcat Point-LP High Definition Audio Controller ",
-        // Intel – generic patterns
-        "Intel High Definition Audio ",
-        "Intel HD Audio ",
-        // AMD – generation-specific
-        "AMD Rembrandt Radeon High Definition Audio ",
-        "AMD Renoir Radeon High Definition Audio ",
-        "AMD Navi 21/23 HDMI/DP Audio ",
-        "AMD Navi 31 HDMI/DP Audio ",
-        "Raven/Raven2/Fenghuang HDMI/DP Audio ",
-        "Starship/Matisse HD Audio Controller ",
-        // AMD – generic
-        "AMD High Definition Audio ",
-        "AMD HD Audio ",
-        // NVIDIA – generic
-        "NVIDIA High Definition Audio ",
-        "NVIDIA HD Audio ",
-    ];
-
-    for prefix in PREFIXES {
-        if let Some(rest) = name.strip_prefix(prefix) {
-            let cleaned = rest.trim();
-            if !cleaned.is_empty() {
-                return cleaned.to_string();
-            }
-        }
-    }
-
-    name.trim().to_string()
-}
-
-// ── wpctl helpers (blocking — run on background threads) ─────────────────────
-
-/// Run wpctl synchronously. Returns `None` when the binary is missing or the
-/// command exits with a non-zero status.
-fn wpctl_blocking(args: &[&str]) -> Option<String> {
-    let out = Command::new("wpctl")
-        .args(args)
-        .output()
-        .map_err(|e| {
-            warn!("wpctl spawn error: {e}");
-        })
-        .ok()?;
-
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        warn!(
-            "wpctl {:?} failed ({}): {}",
-            args,
-            out.status,
-            stderr.trim()
-        );
-        return None;
-    }
-
-    Some(String::from_utf8_lossy(&out.stdout).into_owned())
-}
-
-fn parse_volume_line(line: &str) -> Option<VolumeState> {
-    // "Volume: 0.75" or "Volume: 0.75 [MUTED]"
-    let rest = line.trim().strip_prefix("Volume:")?;
-    let mut parts = rest.split_whitespace();
-    let vol_str = parts.next()?;
-    let volume: f64 = vol_str.parse().ok()?;
-    let muted = rest.contains("[MUTED]");
-    Some(VolumeState { volume, muted })
-}
-
-fn get_volume_blocking(target: &str) -> Option<VolumeState> {
-    let out = wpctl_blocking(&["get-volume", target])?;
-    parse_volume_line(&out)
-}
-
-/// (sinks, sources, playback streams as `(id, name)`).
-type StatusSnapshot = (Vec<Device>, Vec<Device>, Vec<(String, String)>);
-
-/// Parse `wpctl status` to extract audio sinks, sources, and playback
-/// streams (as `(id, name)` — volumes are fetched separately).
-///
-/// The relevant section looks like:
-/// ```
-///  Audio
-///   ├─ Sinks:
-///   │   41. Headphones           [vol: 1.00]
-///   │ * 42. Speakers             [vol: 0.80]
-///   ├─ Sources:
-///   │   43. Microphone           [vol: 1.00]
-///   └─ Streams:
-///        97. Firefox
-///             98. output_FL    > Speakers:playback_FL    [active]
-/// ```
-///
-/// Stream port lines link with `>` for playback and `<` for capture; only
-/// streams with a `>` port are kept (a capture stream in the mixer would just
-/// duplicate the mic row).
-fn parse_status_blocking() -> Option<StatusSnapshot> {
-    let out = wpctl_blocking(&["status"])?;
-    Some(parse_status(&out))
-}
-
-fn parse_status(out: &str) -> StatusSnapshot {
-    let mut sinks: Vec<Device> = Vec::new();
-    let mut sources: Vec<Device> = Vec::new();
-    // (id, name, has_playback_port)
-    let mut streams: Vec<(String, String, bool)> = Vec::new();
-
-    #[derive(PartialEq)]
-    enum Section {
-        None,
-        Sinks,
-        Sources,
-        Streams,
-    }
-
-    let mut section = Section::None;
-    let mut in_audio_block = false;
-
-    for line in out.lines() {
-        let stripped = line.trim();
-
-        if stripped == "Audio" {
-            in_audio_block = true;
-            continue;
-        }
-        // Once we leave the Audio block (next top-level heading), stop.
-        if in_audio_block
-            && !line.starts_with(' ')
-            && !line.starts_with('\t')
-            && !stripped.is_empty()
-            && stripped != "Audio"
-        {
-            in_audio_block = false;
-        }
-        if !in_audio_block {
-            continue;
-        }
-
-        if stripped.contains("Sinks:") {
-            section = Section::Sinks;
-            continue;
-        }
-        if stripped.contains("Sources:") {
-            section = Section::Sources;
-            continue;
-        }
-        if stripped.contains("Streams:") {
-            section = Section::Streams;
-            continue;
-        }
-        // Lines that are section headers for other things (Devices, Filters…) end our interest.
-        if stripped.ends_with(':') {
-            section = Section::None;
-            continue;
-        }
-
-        if section == Section::None {
-            continue;
-        }
-
-        // Each device line contains a numeric ID followed by a dot.
-        // Strip tree-drawing characters (│, ├, └, ─, *, spaces).
-        let clean = stripped
-            .trim_start_matches(['│', '├', '└', '─', ' ', '\t', '*'])
-            .trim();
-
-        let is_default = stripped.contains('*');
-
-        if section == Section::Streams {
-            // Port lines link the stream to a device: `>` playback, `<` capture.
-            if clean.contains('>') || clean.contains('<') {
-                if clean.contains('>')
-                    && let Some(last) = streams.last_mut()
-                {
-                    last.2 = true;
-                }
-                continue;
-            }
-        }
-
-        // "42. Speakers  [vol: 0.80]"
-        if let Some(dot_pos) = clean.find(". ") {
-            let id_str = &clean[..dot_pos];
-            if id_str.chars().all(|c| c.is_ascii_digit()) {
-                let rest = &clean[dot_pos + 2..];
-                // Raw name is everything before the first '[' (metadata)
-                let raw_name = rest.split('[').next().unwrap_or(rest).trim();
-                let name = clean_device_name(raw_name);
-
-                match section {
-                    Section::Sinks | Section::Sources => {
-                        let dev = Device {
-                            id: id_str.to_string(),
-                            name,
-                            is_default,
-                        };
-                        if section == Section::Sinks {
-                            sinks.push(dev);
-                        } else {
-                            sources.push(dev);
-                        }
-                    }
-                    Section::Streams => {
-                        streams.push((id_str.to_string(), name, false));
-                    }
-                    Section::None => {}
-                }
-            }
-        }
-    }
-
-    let playback_streams = streams
-        .into_iter()
-        .filter(|(_, _, playback)| *playback)
-        .map(|(id, name, _)| (id, name))
-        .collect();
-
-    (sinks, sources, playback_streams)
-}
-
-/// Get the PipeWire node ID for a default target (e.g. "@DEFAULT_AUDIO_SINK@").
-/// Returns just the numeric ID string — cheap to call for change detection.
-fn get_default_id(target: &str) -> Option<String> {
-    let out = wpctl_blocking(&["inspect", target])?;
-    // First line: "id 56, type PipeWire:Interface:Node"
-    let first_line = out.lines().next()?;
-    let rest = first_line.strip_prefix("id ")?;
-    let id = rest.split(',').next()?.trim();
-    Some(id.to_string())
-}
-
-/// Snapshot of default device IDs for change detection.
-#[derive(Clone, Default, PartialEq)]
-struct DefaultIds {
-    sink: Option<String>,
-    source: Option<String>,
-}
-
-fn read_default_ids_blocking() -> DefaultIds {
-    DefaultIds {
-        sink: get_default_id("@DEFAULT_AUDIO_SINK@"),
-        source: get_default_id("@DEFAULT_AUDIO_SOURCE@"),
-    }
-}
-
-/// Collect the full audio state. Called on a background thread.
-fn read_state_blocking() -> FetchedState {
-    let sink = get_volume_blocking("@DEFAULT_AUDIO_SINK@");
-    let source = get_volume_blocking("@DEFAULT_AUDIO_SOURCE@");
-
-    let Some((sinks, sources, stream_nodes)) = parse_status_blocking() else {
-        error!("wpctl status unavailable — WirePlumber may not be running");
-        return FetchedState::Unavailable("WirePlumber not available".to_string());
-    };
-
-    // A stream can vanish between the status read and the volume read — skip.
-    let streams = stream_nodes
-        .into_iter()
-        .filter_map(|(id, name)| get_volume_blocking(&id).map(|vol| Stream { id, name, vol }))
-        .collect();
-
-    FetchedState::Ok(AudioState {
-        sink,
-        source,
-        sinks,
-        sources,
-        streams,
-    })
-}
-
-// ── Widget helpers ────────────────────────────────────────────────────────────
 
 fn volume_icon(state: &VolumeState, is_mic: bool) -> &'static str {
     icons::volume_icon(state.volume, state.muted, is_mic)
@@ -383,7 +52,8 @@ impl VolumeRow {
         icon_btn.add_css_class("volume-icon-btn");
         icon_btn.set_focusable(true);
 
-        // Scale range: 0–150 (maps to 0–1.5 in wpctl units).
+        // Scale range: 0–150, drawn as a percentage of the server's
+        // normal volume (1.0), so 150 is the over-amplification ceiling.
         // Marks at 0, 50, 100 and 150. Values >100 are over-amplification.
         let scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 150.0, 1.0);
         scale.set_hexpand(true);
@@ -492,7 +162,7 @@ impl DeviceList {
     }
 }
 
-// ── Placeholder for wpctl-unavailable state ───────────────────────────────────
+// ── Placeholder for a sound server that is not answering ─────────────────────
 
 struct UnavailableBanner {
     label: gtk4::Label,
@@ -527,20 +197,21 @@ struct Widgets {
     source_row_container: gtk4::Box, // wraps source_row + source_devices, shown/hidden
     source_devices: DeviceList,
     // Content containers
-    content: gtk4::Box,             // shown when wpctl is available
-    unavailable: UnavailableBanner, // shown when wpctl is unavailable
+    content: gtk4::Box,             // shown when the server is connected
+    unavailable: UnavailableBanner, // shown when it is not
 }
 
 pub struct AudioSection {
     root: gtk4::Box,
     widgets: Rc<Widgets>,
+    audio: Rc<AudioService>,
     /// Guard flag: true while we are programmatically updating the scale value
     /// so we don't feed our own update back as a user gesture.
     updating: Rc<RefCell<bool>>,
 }
 
 impl AudioSection {
-    pub fn new() -> Self {
+    pub fn new(audio: Rc<AudioService>) -> Self {
         let root = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(6)
@@ -743,66 +414,38 @@ impl AudioSection {
 
         let section = AudioSection {
             root,
-            widgets,
-            updating,
+            widgets: widgets.clone(),
+            audio: audio.clone(),
+            updating: updating.clone(),
         };
 
         section.connect_signals();
         section.refresh();
-        section.start_default_monitor();
+
+        // Every later redraw is the server telling us something changed —
+        // a device appearing, another application taking the volume down,
+        // headphones going in. No timer, and nothing to miss between ticks.
+        let audio_for_cb = audio.clone();
+        audio.connect_change(move || {
+            Self::apply_snapshot(&widgets, &updating, &audio_for_cb, &audio_for_cb.snapshot());
+        });
 
         section
-    }
-
-    /// Poll for default sink/source changes every 2 seconds. When the default
-    /// device changes (e.g. headphones plugged in), trigger a full refresh so
-    /// the volume slider and device list reflect the new default.
-    fn start_default_monitor(&self) {
-        let w = self.widgets.clone();
-        let updating = self.updating.clone();
-        let last_ids: Rc<RefCell<DefaultIds>> = Rc::new(RefCell::new(DefaultIds::default()));
-
-        glib::timeout_add_local(Duration::from_secs(2), move || {
-            let w2 = w.clone();
-            let upd2 = updating.clone();
-            let last = last_ids.clone();
-
-            crate::spawn::spawn_work(read_default_ids_blocking, move |new_ids| {
-                Self::apply_default_ids(&w2, &upd2, &last, new_ids)
-            });
-
-            glib::ControlFlow::Continue
-        });
-    }
-
-    fn apply_default_ids(
-        w: &Rc<Widgets>,
-        updating: &Rc<RefCell<bool>>,
-        last: &Rc<RefCell<DefaultIds>>,
-        new_ids: DefaultIds,
-    ) {
-        let mut prev = last.borrow_mut();
-        if *prev != new_ids {
-            *prev = new_ids;
-            drop(prev);
-            Self::schedule_refresh(w.clone(), updating.clone());
-        }
     }
 
     fn connect_signals(&self) {
         let w = self.widgets.clone();
         let updating = self.updating.clone();
+        let audio = self.audio.clone();
 
         // ── Sink mute toggle ──────────────────────────────────────────────────
         {
-            let w2 = w.clone();
-            let upd = updating.clone();
+            let audio = audio.clone();
             w.sink_row.icon_btn.connect_clicked(move |_| {
-                // Fire-and-forget: run wpctl on a background thread.
-                thread::spawn(|| {
-                    wpctl_blocking(&["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]);
-                });
-                Self::schedule_refresh(w2.clone(), upd.clone());
+                // No refresh call: the server's subscription event brings the
+                // new state back on its own, for this change and for one made
+                // by anything else on the system.
+                audio.send(Command::ToggleSinkMute);
             });
         }
 
@@ -810,18 +453,13 @@ impl AudioSection {
         {
             let w2 = w.clone();
             let upd = updating.clone();
+            let audio = audio.clone();
             w.sink_row.scale.connect_value_changed(move |scale| {
                 if *upd.borrow() {
                     return;
                 }
-                let raw = scale.value();
-                let vol_fraction = raw / 100.0;
-                let val_str = format!("{:.2}", vol_fraction);
-
-                // Non-blocking: spawn and forget.
-                thread::spawn(move || {
-                    wpctl_blocking(&["set-volume", "@DEFAULT_AUDIO_SINK@", &val_str]);
-                });
+                let vol_fraction = scale.value() / 100.0;
+                audio.send(Command::SetSinkVolume(vol_fraction));
 
                 // Update percentage label and overamp style immediately.
                 w2.sink_row.pct_label.set_text(&pct_text(vol_fraction));
@@ -835,13 +473,9 @@ impl AudioSection {
 
         // ── Source mute toggle ────────────────────────────────────────────────
         {
-            let w2 = w.clone();
-            let upd = updating.clone();
+            let audio = audio.clone();
             w.source_row.icon_btn.connect_clicked(move |_| {
-                thread::spawn(|| {
-                    wpctl_blocking(&["set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle"]);
-                });
-                Self::schedule_refresh(w2.clone(), upd.clone());
+                audio.send(Command::ToggleSourceMute);
             });
         }
 
@@ -849,17 +483,13 @@ impl AudioSection {
         {
             let w2 = w.clone();
             let upd = updating.clone();
+            let audio = audio.clone();
             w.source_row.scale.connect_value_changed(move |scale| {
                 if *upd.borrow() {
                     return;
                 }
-                let raw = scale.value();
-                let vol_fraction = raw / 100.0;
-                let val_str = format!("{:.2}", vol_fraction);
-
-                thread::spawn(move || {
-                    wpctl_blocking(&["set-volume", "@DEFAULT_AUDIO_SOURCE@", &val_str]);
-                });
+                let vol_fraction = scale.value() / 100.0;
+                audio.send(Command::SetSourceVolume(vol_fraction));
 
                 w2.source_row.pct_label.set_text(&pct_text(vol_fraction));
                 if vol_fraction > 1.0 {
@@ -871,33 +501,33 @@ impl AudioSection {
         }
     }
 
-    /// Schedule a full state refresh on a background thread. Results are
-    /// delivered back to the main thread by `spawn_work`.
-    fn schedule_refresh(w: Rc<Widgets>, updating: Rc<RefCell<bool>>) {
-        crate::spawn::spawn_work(read_state_blocking, move |fetched| {
-            Self::apply_fetched(&w, &updating, fetched)
-        });
-    }
-
-    fn apply_fetched(w: &Rc<Widgets>, updating: &Rc<RefCell<bool>>, fetched: FetchedState) {
-        match fetched {
-            FetchedState::Unavailable(msg) => {
-                error!("Audio section: {msg}");
-                w.content.set_visible(false);
-                w.unavailable.label.set_text(&msg);
-                w.unavailable.label.set_visible(true);
-                w.summary_icon.set_label(icons::SPEAKER_MUTED);
-                w.summary_text.set_label("Unavailable");
-            }
-            FetchedState::Ok(state) => {
-                w.unavailable.label.set_visible(false);
-                w.content.set_visible(true);
-                Self::apply_state(w, updating, &state);
-            }
+    /// Draw a snapshot. The only entry point now: nothing here reads the
+    /// server, it is handed the answer.
+    fn apply_snapshot(
+        w: &Rc<Widgets>,
+        updating: &Rc<RefCell<bool>>,
+        audio: &Rc<AudioService>,
+        s: &AudioState,
+    ) {
+        if !s.connected {
+            w.content.set_visible(false);
+            w.unavailable.label.set_text("Sound server unavailable");
+            w.unavailable.label.set_visible(true);
+            w.summary_icon.set_label(icons::SPEAKER_MUTED);
+            w.summary_text.set_label("Unavailable");
+            return;
         }
+        w.unavailable.label.set_visible(false);
+        w.content.set_visible(true);
+        Self::apply_state(w, updating, audio, s);
     }
 
-    fn apply_state(w: &Rc<Widgets>, updating: &Rc<RefCell<bool>>, s: &AudioState) {
+    fn apply_state(
+        w: &Rc<Widgets>,
+        updating: &Rc<RefCell<bool>>,
+        audio: &Rc<AudioService>,
+        s: &AudioState,
+    ) {
         *updating.borrow_mut() = true;
 
         if let Some(ref sink_state) = s.sink {
@@ -918,19 +548,15 @@ impl AudioSection {
 
         // Device selectors for sinks
         {
-            let w2 = w.clone();
-            let upd2 = updating.clone();
+            let audio = audio.clone();
             w.sink_devices.update(&s.sinks, move |id| {
-                thread::spawn(move || {
-                    wpctl_blocking(&["set-default", &id]);
-                });
-                Self::schedule_refresh(w2.clone(), upd2.clone());
+                audio.send(Command::SetDefaultSink(id));
             });
         }
 
         // Per-application playback streams
         w.streams_container.set_visible(!s.streams.is_empty());
-        Self::rebuild_streams(w, updating, &s.streams);
+        Self::rebuild_streams(w, audio, &s.streams);
 
         // Source section visibility
         let has_source = s.source.is_some();
@@ -941,13 +567,9 @@ impl AudioSection {
         }
 
         {
-            let w2 = w.clone();
-            let upd2 = updating.clone();
+            let audio = audio.clone();
             w.source_devices.update(&s.sources, move |id| {
-                thread::spawn(move || {
-                    wpctl_blocking(&["set-default", &id]);
-                });
-                Self::schedule_refresh(w2.clone(), upd2.clone());
+                audio.send(Command::SetDefaultSource(id));
             });
         }
 
@@ -958,7 +580,7 @@ impl AudioSection {
     /// on every refresh, so each slider is wired to its stream id directly and
     /// needs no `updating` guard: the initial value is set before the handler
     /// is connected.
-    fn rebuild_streams(w: &Rc<Widgets>, updating: &Rc<RefCell<bool>>, streams: &[Stream]) {
+    fn rebuild_streams(w: &Rc<Widgets>, audio: &Rc<AudioService>, streams: &[Stream]) {
         while let Some(child) = w.streams_list.first_child() {
             w.streams_list.remove(&child);
         }
@@ -971,21 +593,24 @@ impl AudioSection {
             row.add_css_class("volume-row");
             row.add_css_class("stream-row");
 
-            let mute_btn = gtk4::Button::with_label(volume_icon(&stream.vol, false));
+            let mute_btn = gtk4::Button::with_label(volume_icon(&stream.volume, false));
             mute_btn.add_css_class("volume-icon-btn");
-            if stream.vol.muted {
+            if stream.volume.muted {
                 mute_btn.add_css_class("muted");
             }
             {
-                let id = stream.id.clone();
-                let w2 = w.clone();
-                let upd2 = updating.clone();
+                // Per-stream mute has no command of its own: the server takes
+                // a volume of zero the same way, and one fewer command is one
+                // fewer thing to keep in step with the panel.
+                let index = stream.index;
+                let audio = audio.clone();
+                let muted = stream.volume.muted;
+                let level = stream.volume.volume;
                 mute_btn.connect_clicked(move |_| {
-                    let id = id.clone();
-                    thread::spawn(move || {
-                        wpctl_blocking(&["set-mute", &id, "toggle"]);
+                    audio.send(Command::SetStreamVolume {
+                        index,
+                        level: if muted { level.max(0.1) } else { 0.0 },
                     });
-                    Self::schedule_refresh(w2.clone(), upd2.clone());
                 });
             }
 
@@ -999,26 +624,23 @@ impl AudioSection {
             let scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 150.0, 1.0);
             scale.set_hexpand(true);
             scale.set_draw_value(false);
-            if stream.vol.volume > 1.0 {
+            if stream.volume.volume > 1.0 {
                 scale.add_css_class("overamplified");
             }
 
-            let pct_label = gtk4::Label::new(Some(&pct_text(stream.vol.volume)));
+            let pct_label = gtk4::Label::new(Some(&pct_text(stream.volume.volume)));
             pct_label.add_css_class("volume-pct");
             pct_label.set_width_chars(5);
             pct_label.set_xalign(1.0);
 
-            scale.set_value((stream.vol.volume * 100.0).round());
+            scale.set_value((stream.volume.volume * 100.0).round());
             {
-                let id = stream.id.clone();
+                let index = stream.index;
+                let audio = audio.clone();
                 let pct2 = pct_label.clone();
                 scale.connect_value_changed(move |scale| {
                     let frac = scale.value() / 100.0;
-                    let val_str = format!("{frac:.2}");
-                    let id = id.clone();
-                    thread::spawn(move || {
-                        wpctl_blocking(&["set-volume", &id, &val_str]);
-                    });
+                    audio.send(Command::SetStreamVolume { index, level: frac });
                     pct2.set_text(&pct_text(frac));
                     if frac > 1.0 {
                         scale.add_css_class("overamplified");
@@ -1038,10 +660,18 @@ impl AudioSection {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    /// Kick off a non-blocking state refresh. The UI is updated asynchronously
-    /// via the GLib main loop once the background thread completes.
+    /// Redraw from the service's current snapshot.
+    ///
+    /// Kept for the callers that used to force a re-read after changing
+    /// something (the OSD's volume keys). It no longer reads anything: the
+    /// snapshot is already correct by the time anyone asks.
     pub fn refresh(&self) {
-        Self::schedule_refresh(self.widgets.clone(), self.updating.clone());
+        Self::apply_snapshot(
+            &self.widgets,
+            &self.updating,
+            &self.audio,
+            &self.audio.snapshot(),
+        );
     }
 
     pub fn widget(&self) -> &gtk4::Box {
@@ -1061,74 +691,5 @@ impl AudioSection {
     /// underlying `GtkAdjustment`, so it stays in sync with this section.
     pub fn output_volume_scale(&self) -> gtk4::Scale {
         self.widgets.sink_row.scale.clone()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Captured from a real `wpctl status` (Lunar Lake laptop, ffplay running,
-    // plus a synthetic capture stream to exercise the `<` exclusion).
-    const STATUS: &str = "\
-Audio
- ├─ Devices:
- │      50. Lunar Lake-M HD Audio Controller    [alsa]
- │
- ├─ Sinks:
- │     125. Lunar Lake-M HD Audio Controller HDMI / DisplayPort 1 Output [vol: 1.00]
- │  *  128. Internal Speakers                   [vol: 1.00]
- │     194. Lunar Lake-M HD Audio Controller Headphones [vol: 0.00 MUTED]
- │
- ├─ Sources:
- │  *  130. Lunar Lake-M HD Audio Controller Digital Microphone [vol: 1.00]
- │
- ├─ Filters:
- │
- └─ Streams:
-       186. SDL Application
-             57. output_FR       > Pro 2:playback_AUX1\t[active]
-            124. output_FL       > Pro 2:playback_AUX0\t[active]
-       201. Chromium
-            202. input_MONO      < Digital Microphone:capture_MONO\t[active]
-
-Video
- └─ Streams:
-
-Settings
- └─ Default Configured Devices:
-         0. Audio/Sink    bluez_output.80_99_E7_E0_16_FC.1
-         1. Audio/Source  alsa_input.pci-0000_00_1f.3-platform-sof_sdw.HiFi__Mic__source
-";
-
-    #[test]
-    fn parses_sinks_sources_and_playback_streams() {
-        let (sinks, sources, streams) = parse_status(STATUS);
-
-        assert_eq!(sinks.len(), 3);
-        assert_eq!(sinks[1].id, "128");
-        assert_eq!(sinks[1].name, "Internal Speakers");
-        assert!(sinks[1].is_default);
-        assert!(!sinks[0].is_default);
-        // clean_device_name strips the controller prefix
-        assert_eq!(sinks[0].name, "HDMI / DisplayPort 1 Output");
-
-        assert_eq!(sources.len(), 1);
-        assert_eq!(sources[0].id, "130");
-        assert!(sources[0].is_default);
-
-        // Only the playback stream survives; the capture stream (`<` ports)
-        // and the Video/Settings blocks are ignored.
-        assert_eq!(
-            streams,
-            vec![("186".to_string(), "SDL Application".to_string())]
-        );
-    }
-
-    #[test]
-    fn empty_streams_section() {
-        let (_, _, streams) =
-            parse_status("Audio\n ├─ Sinks:\n │  *  1. X [vol: 1.0]\n └─ Streams:\n\nVideo\n");
-        assert!(streams.is_empty());
     }
 }

@@ -75,7 +75,11 @@ pub struct Panel {
 }
 
 impl Panel {
-    pub fn new(window: gtk4::Window, store: Rc<RefCell<NotificationStore>>) -> Self {
+    pub fn new(
+        window: gtk4::Window,
+        store: Rc<RefCell<NotificationStore>>,
+        audio_service: Rc<crate::audio::AudioService>,
+    ) -> Self {
         window.add_css_class("startmenu");
 
         // ── Backdrop (click outside the menu closes it) ──────────────────────
@@ -144,7 +148,7 @@ impl Panel {
         right_scroller.set_child(Some(&right));
 
         // ── Build sections ───────────────────────────────────────────────────
-        let audio = AudioSection::new();
+        let audio = AudioSection::new(audio_service.clone());
         let brightness = BrightnessSection::new();
         let network = NetworkSection::new();
         let bluetooth = BluetoothSection::new();

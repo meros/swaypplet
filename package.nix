@@ -15,6 +15,7 @@
   adwaita-icon-theme,
   polkit,
   pam,
+  libpulseaudio,
 }:
 
 let
@@ -31,6 +32,7 @@ let
     adwaita-icon-theme
     polkit
     pam
+    libpulseaudio
   ];
 in
 rustPlatform.buildRustPackage {

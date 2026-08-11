@@ -10,8 +10,10 @@ use crate::layer_shell::{self, LayerShellConfig};
 use crate::spawn::spawn_work;
 
 const OSD_TIMEOUT_MS: u32 = 1500;
-const VOLUME_STEP_PLUS: &str = "5%+";
-const VOLUME_STEP_MINUS: &str = "5%-";
+/// One press of a volume key. The ceiling is the over-amplification limit
+/// the panel's slider also stops at.
+const VOLUME_STEP: f64 = 0.05;
+const VOLUME_CEILING: f64 = 1.5;
 const BRIGHTNESS_STEP_UP: &str = "5%+";
 const BRIGHTNESS_STEP_DOWN: &str = "5%-";
 
@@ -89,38 +91,12 @@ enum OsdDisplay {
 
 // ── Action execution + state reading ─────────────────────────────────────────
 
+/// The commands that still need a process spawned. Volume left with the
+/// `wpctl` dependency: it is answered from `crate::audio`'s snapshot on the
+/// GTK thread, which is both faster and the only way the OSD and the panel
+/// slider can agree on what the volume is.
 fn execute_command(cmd: &OsdCommand) -> OsdDisplay {
     match cmd {
-        OsdCommand::OutputVolumeRaise => {
-            let _ = Command::new("wpctl")
-                .args([
-                    "set-volume",
-                    "-l",
-                    "1.5",
-                    "@DEFAULT_AUDIO_SINK@",
-                    VOLUME_STEP_PLUS,
-                ])
-                .output();
-            read_volume_display("@DEFAULT_AUDIO_SINK@", false)
-        }
-        OsdCommand::OutputVolumeLower => {
-            let _ = Command::new("wpctl")
-                .args(["set-volume", "@DEFAULT_AUDIO_SINK@", VOLUME_STEP_MINUS])
-                .output();
-            read_volume_display("@DEFAULT_AUDIO_SINK@", false)
-        }
-        OsdCommand::OutputVolumeMuteToggle => {
-            let _ = Command::new("wpctl")
-                .args(["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"])
-                .output();
-            read_volume_display("@DEFAULT_AUDIO_SINK@", false)
-        }
-        OsdCommand::InputVolumeMuteToggle => {
-            let _ = Command::new("wpctl")
-                .args(["set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle"])
-                .output();
-            read_volume_display("@DEFAULT_AUDIO_SOURCE@", true)
-        }
         OsdCommand::BrightnessRaise => {
             let _ = Command::new("brightnessctl")
                 .args(["set", BRIGHTNESS_STEP_UP])
@@ -138,26 +114,19 @@ fn execute_command(cmd: &OsdCommand) -> OsdDisplay {
         }
         OsdCommand::NumLock => read_lock_display("numlock", icons::NUM_ON, icons::NUM_OFF, "NUM"),
         OsdCommand::ScrollLock => read_lock_display("scrolllock", "S", "s", "SCROLL"),
+
+        // Handled on the main thread from the sound server's snapshot
+        // (`Osd::volume_key`); reaching here means the panel had no audio
+        // connection, and there is nothing to show.
+        OsdCommand::OutputVolumeRaise
+        | OsdCommand::OutputVolumeLower
+        | OsdCommand::OutputVolumeMuteToggle
+        | OsdCommand::InputVolumeMuteToggle => volume_display(0.0, true, false),
     }
 }
 
-fn read_volume_display(target: &str, is_mic: bool) -> OsdDisplay {
-    let output = Command::new("wpctl")
-        .args(["get-volume", target])
-        .output()
-        .ok();
-
-    let (volume, muted) = output
-        .and_then(|o| {
-            let text = String::from_utf8_lossy(&o.stdout).to_string();
-            let rest = text.trim().strip_prefix("Volume:")?.to_string();
-            let mut parts = rest.split_whitespace();
-            let vol: f64 = parts.next()?.parse().ok()?;
-            let muted = rest.contains("[MUTED]");
-            Some((vol, muted))
-        })
-        .unwrap_or((0.0, false));
-
+/// Turn a volume into what the OSD draws.
+fn volume_display(volume: f64, muted: bool, is_mic: bool) -> OsdDisplay {
     let icon = icons::volume_icon(volume, muted, is_mic);
 
     let pct = (volume * 100.0).round() as u32;
@@ -240,6 +209,9 @@ pub struct Osd {
     reveal: anim::Reveal,
     timeout_id: Rc<RefCell<Option<glib::SourceId>>>,
     bar_route: Rc<RefCell<Option<BarRoute>>>,
+    /// Set once the panel exists. Absent only in the standalone paths that
+    /// never send a volume command.
+    audio: Rc<RefCell<Option<Rc<crate::audio::AudioService>>>>,
 }
 
 impl Osd {
@@ -336,6 +308,7 @@ impl Osd {
             reveal,
             timeout_id: Rc::new(RefCell::new(None)),
             bar_route: Rc::new(RefCell::new(None)),
+            audio: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -347,15 +320,71 @@ impl Osd {
         *self.bar_route.borrow_mut() = Some(Box::new(route));
     }
 
+    /// Hand the OSD the sound server connection, so volume keys are answered
+    /// from the same snapshot the panel's slider draws.
+    pub fn set_audio(&self, audio: Rc<crate::audio::AudioService>) {
+        *self.audio.borrow_mut() = Some(audio);
+    }
+
     pub fn trigger(&self, cmd: &OsdCommand) {
-        // wpctl/brightnessctl can hang; run off the GTK main thread so a
-        // stuck command doesn't freeze the panel.
+        // Volume never leaves the main thread: the answer is already in the
+        // snapshot, and the command back to the server is a channel send.
+        if let Some(display) = self.volume_key(cmd) {
+            self.show_display(&display);
+            return;
+        }
+
+        // brightnessctl can hang; run it off the GTK main thread so a stuck
+        // command doesn't freeze the panel.
         let cmd = *cmd;
         let osd = self.clone();
         spawn_work(
             move || execute_command(&cmd),
             move |display| osd.show_display(&display),
         );
+    }
+
+    /// Answer a volume key, or `None` if this is not one.
+    ///
+    /// The new level is computed and drawn here rather than read back after
+    /// the fact: a read-back races the server's own event, and showing a
+    /// number the key press did not produce is worse than showing it a
+    /// millisecond early.
+    fn volume_key(&self, cmd: &OsdCommand) -> Option<OsdDisplay> {
+        use crate::audio::Command as AudioCommand;
+
+        let audio = self.audio.borrow().clone()?;
+        let state = audio.snapshot();
+
+        let current = match cmd {
+            OsdCommand::OutputVolumeRaise
+            | OsdCommand::OutputVolumeLower
+            | OsdCommand::OutputVolumeMuteToggle => state.sink.clone()?,
+            OsdCommand::InputVolumeMuteToggle => state.source.clone()?,
+            _ => return None,
+        };
+
+        Some(match cmd {
+            OsdCommand::OutputVolumeRaise => {
+                let level = (current.volume + VOLUME_STEP).min(VOLUME_CEILING);
+                audio.send(AudioCommand::SetSinkVolume(level));
+                volume_display(level, false, false)
+            }
+            OsdCommand::OutputVolumeLower => {
+                let level = (current.volume - VOLUME_STEP).max(0.0);
+                audio.send(AudioCommand::SetSinkVolume(level));
+                volume_display(level, current.muted, false)
+            }
+            OsdCommand::OutputVolumeMuteToggle => {
+                audio.send(AudioCommand::ToggleSinkMute);
+                volume_display(current.volume, !current.muted, false)
+            }
+            OsdCommand::InputVolumeMuteToggle => {
+                audio.send(AudioCommand::ToggleSourceMute);
+                volume_display(current.volume, !current.muted, true)
+            }
+            _ => return None,
+        })
     }
 
     fn show_display(&self, display: &OsdDisplay) {
