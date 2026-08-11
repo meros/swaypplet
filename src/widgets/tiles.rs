@@ -52,7 +52,10 @@ pub fn tile_specs() -> Vec<TileSpec> {
             tooltip_on: "Wi-Fi: enabled",
             tooltip_off: "Wi-Fi: disabled",
             action: |on| {
-                run_ok(Command::new("nmcli").args(["radio", "wifi", if on { "on" } else { "off" }]))
+                matches!(
+                    crate::widgets::network::set_wifi_radio(on),
+                    crate::widgets::network::NmResult::Success
+                )
             },
             read_state: read_wifi_state,
             on_state: None,
@@ -62,9 +65,7 @@ pub fn tile_specs() -> Vec<TileSpec> {
             label: "Bluetooth",
             tooltip_on: "Bluetooth: powered on",
             tooltip_off: "Bluetooth: powered off",
-            action: |on| {
-                run_ok(Command::new("bluetoothctl").args(["power", if on { "on" } else { "off" }]))
-            },
+            action: |on| crate::widgets::bluez::set_powered(on).is_ok(),
             read_state: read_bluetooth_state,
             on_state: None,
         },
@@ -313,48 +314,25 @@ fn run_ok(cmd: &mut Command) -> bool {
 // ── State readers (blocking — always called from a background thread) ─────────
 
 fn read_wifi_state() -> TileState {
-    match Command::new("nmcli").args(["radio", "wifi"]).output() {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            log::warn!("nmcli not found; Wi-Fi toggle disabled");
-            TileState::Unavailable
-        }
-        Err(e) => {
-            log::warn!("nmcli radio wifi failed: {e}");
-            TileState::Unavailable
-        }
-        Ok(out) => {
-            if String::from_utf8_lossy(&out.stdout)
-                .trim()
-                .eq_ignore_ascii_case("enabled")
-            {
-                TileState::Active
-            } else {
-                TileState::Inactive
-            }
-        }
+    if !crate::widgets::network::network_manager_available() {
+        return TileState::Unavailable;
+    }
+    if crate::widgets::network::wifi_radio_enabled() {
+        TileState::Active
+    } else {
+        TileState::Inactive
     }
 }
 
 fn read_bluetooth_state() -> TileState {
-    match Command::new("bluetoothctl").arg("show").output() {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            log::warn!("bluetoothctl not found; Bluetooth toggle disabled");
-            TileState::Unavailable
-        }
-        Err(e) => {
-            log::warn!("bluetoothctl show failed: {e}");
-            TileState::Unavailable
-        }
-        Ok(out) => {
-            let powered = String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .any(|l| l.trim().eq_ignore_ascii_case("Powered: yes"));
-            if powered {
-                TileState::Active
-            } else {
-                TileState::Inactive
-            }
-        }
+    let snapshot = crate::widgets::bluez::snapshot();
+    if !snapshot.available {
+        return TileState::Unavailable;
+    }
+    if snapshot.powered {
+        TileState::Active
+    } else {
+        TileState::Inactive
     }
 }
 

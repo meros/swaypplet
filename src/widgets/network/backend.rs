@@ -1,10 +1,21 @@
+//! Network state and actions, over NetworkManager's D-Bus interface.
+//!
+//! The types and the public functions are unchanged from when this file drove
+//! `nmcli`; only the bodies moved. See `nm.rs` for why.
+
 use std::collections::HashSet;
-use std::process::{Command, Stdio};
-use std::thread;
 use std::time::{Duration, Instant};
 
-/// Max time to wait for `nmcli device wifi list --rescan yes` before killing it.
-const WIFI_SCAN_TIMEOUT: Duration = Duration::from_secs(15);
+use super::nm;
+
+/// How long to wait for a rescan's results before drawing what we have.
+///
+/// A scan is asynchronous now: `RequestScan` returns immediately and the
+/// access-point list fills in behind it, so this is a poll on `LastScan`
+/// rather than a wait on a process. Shorter than the old 15 s process
+/// timeout because there is no process to hang — only a driver that may not
+/// answer, and 6 s of a spinner is already longer than anyone wants.
+const WIFI_SCAN_TIMEOUT: Duration = Duration::from_secs(6);
 
 // ── Nerd Font icons ───────────────────────────────────────────────────────────
 pub const ICON_SIGNAL_NONE: &str = "󰤯";
@@ -26,7 +37,7 @@ const NM_TYPE_ETHERNET: &str = "802-3-ethernet";
 const NM_TYPE_VPN: &str = "vpn";
 const NM_TYPE_WIREGUARD: &str = "wireguard";
 
-// ── Result type for async nmcli operations ────────────────────────────────────
+// ── Result type for the actions the panel can take ────────────────────────────
 
 #[derive(Debug)]
 pub enum NmResult {
@@ -34,13 +45,21 @@ pub enum NmResult {
     Failure(String),
 }
 
-/// Run `nmcli` with the given arguments (blocking — call from a background
-/// thread, e.g. via `spawn_work`).
-fn run_nmcli(args: &[&str]) -> NmResult {
-    match Command::new("nmcli").args(args).output() {
-        Ok(o) if o.status.success() => NmResult::Success,
-        Ok(o) => NmResult::Failure(String::from_utf8_lossy(&o.stderr).trim().to_string()),
-        Err(e) => NmResult::Failure(e.to_string()),
+impl From<Result<(), String>> for NmResult {
+    fn from(result: Result<(), String>) -> Self {
+        match result {
+            Ok(()) => NmResult::Success,
+            Err(message) => NmResult::Failure(message),
+        }
+    }
+}
+
+/// Do something on the bus, turning a connection failure into the same
+/// `NmResult` the operation itself would produce.
+fn acting(f: impl FnOnce(&zbus::blocking::Connection) -> Result<(), String>) -> NmResult {
+    match nm::system() {
+        Ok(conn) => f(&conn).into(),
+        Err(e) => NmResult::Failure(e),
     }
 }
 
@@ -135,76 +154,77 @@ impl ConnectivityState {
     }
 }
 
-// ── nmcli availability check ──────────────────────────────────────────────────
+// ── Is the daemon there? ──────────────────────────────────────────────────────
 
-pub fn nmcli_available() -> bool {
-    Command::new("nmcli").arg("--version").output().is_ok()
+/// Is NetworkManager there to talk to?
+///
+/// Named for what it answers rather than for the binary it used to look for;
+/// the callers ask "can this section draw anything".
+pub fn network_manager_available() -> bool {
+    let Ok(conn) = nm::system() else {
+        return false;
+    };
+    nm::prop::<u32>(&conn, nm::MANAGER_PATH, nm::IFACE_MANAGER, "State").is_some()
 }
 
 pub fn wifi_adapter_present() -> bool {
-    let Ok(out) = Command::new("nmcli")
-        .args(["-t", "-f", "DEVICE,TYPE", "device", "status"])
-        .output()
-    else {
+    let Ok(conn) = nm::system() else {
         return false;
     };
-    let text = String::from_utf8_lossy(&out.stdout);
-    text.lines().any(|line| {
-        let parts: Vec<&str> = line.splitn(2, ':').collect();
-        parts.len() == 2 && parts[1].trim() == "wifi"
-    })
+    nm::devices(&conn)
+        .iter()
+        .any(|d| d.device_type == nm::DEVICE_TYPE_WIFI)
 }
 
 // ── WiFi radio state ──────────────────────────────────────────────────────────
 
 pub fn wifi_radio_enabled() -> bool {
-    let Ok(out) = Command::new("nmcli").args(["radio", "wifi"]).output() else {
+    let Ok(conn) = nm::system() else {
         return false;
     };
-    String::from_utf8_lossy(&out.stdout).trim() == "enabled"
+    nm::prop::<bool>(
+        &conn,
+        nm::MANAGER_PATH,
+        nm::IFACE_MANAGER,
+        "WirelessEnabled",
+    )
+    .unwrap_or(false)
 }
 
 pub fn set_wifi_radio(enable: bool) -> NmResult {
-    run_nmcli(&["radio", "wifi", if enable { "on" } else { "off" }])
+    acting(|conn| {
+        nm::proxy(conn, nm::MANAGER_PATH, nm::IFACE_MANAGER)?
+            .set_property("WirelessEnabled", enable)
+            .map_err(|e| e.to_string())
+    })
 }
 
 // ── Backend helpers ───────────────────────────────────────────────────────────
 
-pub fn parse_wifi_list(output: &str, known_ssids: &[String]) -> Vec<WifiNetwork> {
+/// Collapse an access-point list into one row per network, best signal wins,
+/// then rank it the way the list draws it.
+///
+/// A network with three access points is one network to the person choosing
+/// it, and the strongest radio is the one they will actually associate with.
+/// Pure, so the ordering rules stay testable without a radio.
+pub fn merge_and_rank(found: Vec<WifiNetwork>) -> Vec<WifiNetwork> {
     let mut networks: Vec<WifiNetwork> = Vec::new();
-    for line in output.lines() {
-        let parts: Vec<&str> = line.splitn(5, ':').collect();
-        if parts.len() < 4 {
-            continue;
-        }
-        let ssid = parts[0].replace("\\:", ":").trim().to_string();
-        if ssid.is_empty() {
-            continue;
-        }
-        let signal: u8 = parts[1].trim().parse().unwrap_or(0);
-        let security = parts[2].trim().to_string();
-        let in_use = parts[3].trim() == "*";
-        let is_known = known_ssids.iter().any(|k| k == &ssid);
-        let freq_mhz: Option<u32> = parts.get(4).and_then(|s| s.trim().parse().ok());
 
-        if let Some(existing) = networks.iter_mut().find(|n| n.ssid == ssid) {
-            if signal > existing.signal {
-                existing.signal = signal;
-                existing.freq_mhz = freq_mhz;
+    for network in found {
+        if network.ssid.is_empty() {
+            continue;
+        }
+        if let Some(existing) = networks.iter_mut().find(|n| n.ssid == network.ssid) {
+            if network.signal > existing.signal {
+                existing.signal = network.signal;
+                existing.freq_mhz = network.freq_mhz;
+                existing.security = network.security;
             }
-            existing.in_use = existing.in_use || in_use;
-            existing.is_known = existing.is_known || is_known;
+            existing.in_use |= network.in_use;
+            existing.is_known |= network.is_known;
             continue;
         }
-
-        networks.push(WifiNetwork {
-            ssid,
-            signal,
-            security,
-            in_use,
-            is_known,
-            freq_mhz,
-        });
+        networks.push(network);
     }
 
     networks.sort_by(|a, b| {
@@ -221,91 +241,114 @@ pub fn parse_wifi_list(output: &str, known_ssids: &[String]) -> Vec<WifiNetwork>
 }
 
 pub fn get_known_ssids() -> Vec<String> {
-    let Ok(out) = Command::new("nmcli")
-        .args(["-t", "-f", "NAME,TYPE", "connection", "show"])
-        .output()
-    else {
+    let Ok(conn) = nm::system() else {
         return Vec::new();
     };
-    let text = String::from_utf8_lossy(&out.stdout);
-    text.lines()
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.splitn(2, ':').collect();
-            if parts.len() == 2 && parts[1].trim() == NM_TYPE_WIFI {
-                Some(parts[0].replace("\\:", ":").trim().to_string())
-            } else {
-                None
-            }
-        })
+    nm::stored_connections(&conn)
+        .into_iter()
+        .filter(|(_, _, kind)| kind == NM_TYPE_WIFI)
+        .map(|(_, id, _)| id)
         .collect()
 }
 
-/// Run the rescanning `nmcli` list with a bounded wait, killing it on timeout.
-/// A hung nmcli process (e.g. a stuck driver) must not wedge scanning forever.
-pub fn scan_wifi_raw() -> Result<String, String> {
-    let mut child = Command::new("nmcli")
-        .args([
-            "-t",
-            "-f",
-            "SSID,SIGNAL,SECURITY,IN-USE,FREQ",
-            "device",
-            "wifi",
-            "list",
-            "--rescan",
-            "yes",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| e.to_string())?;
+/// Ask every wifi device to rescan, then read what they can see.
+///
+/// `RequestScan` is asynchronous: it returns as soon as the driver accepts,
+/// and `LastScan` moves when results land. Waiting on that is the honest
+/// version of the old bounded wait on an `nmcli` process — and unlike a
+/// process, nothing here can be left running after we stop caring.
+pub fn scan_wifi() -> Result<Vec<WifiNetwork>, String> {
+    let conn = nm::system()?;
 
-    let deadline = Instant::now() + WIFI_SCAN_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                let out = child.wait_with_output().map_err(|e| e.to_string())?;
-                return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
-            }
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err("WiFi scan timed out".to_string());
-                }
-                thread::sleep(Duration::from_millis(100));
-            }
-            Err(e) => return Err(e.to_string()),
+    let radios: Vec<String> = nm::devices(&conn)
+        .into_iter()
+        .filter(|d| d.device_type == nm::DEVICE_TYPE_WIFI)
+        .map(|d| d.path)
+        .collect();
+
+    if radios.is_empty() {
+        return Err("No WiFi adapter".to_string());
+    }
+
+    // With the radio off there is nothing to wait for, and waiting the full
+    // timeout to report an empty list reads as a broken scan rather than a
+    // switched-off one.
+    if !nm::prop::<bool>(
+        &conn,
+        nm::MANAGER_PATH,
+        nm::IFACE_MANAGER,
+        "WirelessEnabled",
+    )
+    .unwrap_or(false)
+    {
+        return Err("WiFi is off".to_string());
+    }
+
+    let before: Vec<i64> = radios
+        .iter()
+        .map(|path| nm::prop::<i64>(&conn, path, nm::IFACE_WIRELESS, "LastScan").unwrap_or(-1))
+        .collect();
+
+    for path in &radios {
+        // A refused scan is not fatal: the device may have scanned a second
+        // ago, and its access-point list is still worth drawing.
+        if let Ok(proxy) = nm::proxy(&conn, path, nm::IFACE_WIRELESS) {
+            let options: std::collections::HashMap<&str, zbus::zvariant::Value> =
+                std::collections::HashMap::new();
+            let _ = proxy.call::<_, _, ()>("RequestScan", &(options,));
         }
     }
+
+    let deadline = Instant::now() + WIFI_SCAN_TIMEOUT;
+    while Instant::now() < deadline {
+        let moved = radios.iter().zip(&before).any(|(path, was)| {
+            nm::prop::<i64>(&conn, path, nm::IFACE_WIRELESS, "LastScan").unwrap_or(-1) > *was
+        });
+        if moved {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+
+    let known = get_known_ssids();
+    let mut found = Vec::new();
+
+    for path in &radios {
+        let active = nm::path_prop(&conn, path, nm::IFACE_WIRELESS, "ActiveAccessPoint");
+        for ap in nm::paths(&conn, path, nm::IFACE_WIRELESS, "AccessPoints") {
+            let Some(ssid) = nm::ssid_of(&conn, &ap) else {
+                continue;
+            };
+            let flags = nm::prop::<u32>(&conn, &ap, nm::IFACE_AP, "Flags").unwrap_or(0);
+            let wpa = nm::prop::<u32>(&conn, &ap, nm::IFACE_AP, "WpaFlags").unwrap_or(0);
+            let rsn = nm::prop::<u32>(&conn, &ap, nm::IFACE_AP, "RsnFlags").unwrap_or(0);
+
+            found.push(WifiNetwork {
+                is_known: known.contains(&ssid),
+                in_use: active.as_deref() == Some(ap.as_str()),
+                signal: nm::prop::<u8>(&conn, &ap, nm::IFACE_AP, "Strength").unwrap_or(0),
+                security: nm::security_label(flags, wpa, rsn),
+                freq_mhz: nm::prop::<u32>(&conn, &ap, nm::IFACE_AP, "Frequency"),
+                ssid,
+            });
+        }
+    }
+
+    Ok(merge_and_rank(found))
 }
 
 pub fn get_active_connection() -> ActiveConnection {
-    let Ok(out) = Command::new("nmcli")
-        .args([
-            "-t",
-            "-f",
-            "NAME,TYPE,DEVICE",
-            "connection",
-            "show",
-            "--active",
-        ])
-        .output()
-    else {
+    let Ok(conn) = nm::system() else {
         return ActiveConnection::Disconnected;
     };
 
-    let text = String::from_utf8_lossy(&out.stdout);
-    for line in text.lines() {
-        let parts: Vec<&str> = line.splitn(3, ':').collect();
-        if parts.len() < 3 {
+    for (_, kind, devices) in nm::active_connections(&conn) {
+        let Some(device) = devices.into_iter().next() else {
             continue;
-        }
-        let conn_type = parts[1].trim();
-        let device = parts[2].trim().to_string();
-        match conn_type {
+        };
+        match kind.as_str() {
             NM_TYPE_WIFI => {
-                let ssid = parts[0].replace("\\:", ":").trim().to_string();
-                let (signal, freq_mhz) = get_active_wifi_info(&ssid);
+                let (ssid, signal, freq_mhz) = active_wifi(&conn).unwrap_or_default();
                 return ActiveConnection::Wifi {
                     ssid,
                     signal,
@@ -313,43 +356,34 @@ pub fn get_active_connection() -> ActiveConnection {
                     freq_mhz,
                 };
             }
-            NM_TYPE_ETHERNET => {
-                return ActiveConnection::Ethernet { device };
-            }
+            NM_TYPE_ETHERNET => return ActiveConnection::Ethernet { device },
             _ => {}
         }
     }
     ActiveConnection::Disconnected
 }
 
-fn get_active_wifi_info(ssid: &str) -> (u8, Option<u32>) {
-    let Ok(out) = Command::new("nmcli")
-        .args([
-            "-t",
-            "-f",
-            "SSID,SIGNAL,IN-USE,FREQ",
-            "device",
-            "wifi",
-            "list",
-        ])
-        .output()
-    else {
-        return (0, None);
-    };
-    let text = String::from_utf8_lossy(&out.stdout);
-    for line in text.lines() {
-        let parts: Vec<&str> = line.splitn(4, ':').collect();
-        if parts.len() < 3 {
+/// The access point a wifi device is actually associated with.
+///
+/// Read from the device rather than matched by name against a scan: the
+/// association is a property NetworkManager already holds, and two networks
+/// sharing an SSID used to make the old lookup pick whichever came first.
+fn active_wifi(conn: &zbus::blocking::Connection) -> Option<(String, u8, Option<u32>)> {
+    for device in nm::devices(conn) {
+        if device.device_type != nm::DEVICE_TYPE_WIFI {
             continue;
         }
-        let line_ssid = parts[0].replace("\\:", ":").trim().to_string();
-        if line_ssid == ssid {
-            let signal = parts[1].trim().parse().unwrap_or(0);
-            let freq = parts.get(3).and_then(|s| s.trim().parse().ok());
-            return (signal, freq);
-        }
+        let Some(ap) = nm::path_prop(conn, &device.path, nm::IFACE_WIRELESS, "ActiveAccessPoint")
+        else {
+            continue;
+        };
+        return Some((
+            nm::ssid_of(conn, &ap)?,
+            nm::prop::<u8>(conn, &ap, nm::IFACE_AP, "Strength").unwrap_or(0),
+            nm::prop::<u32>(conn, &ap, nm::IFACE_AP, "Frequency"),
+        ));
     }
-    (0, None)
+    None
 }
 
 pub fn freq_band_label(freq_mhz: u32) -> &'static str {
@@ -375,130 +409,161 @@ pub fn freq_band_short(freq_mhz: u32) -> &'static str {
 // ── VPN ───────────────────────────────────────────────────────────────────────
 
 pub fn get_vpn_connections() -> Vec<VpnConnection> {
-    let Ok(out) = Command::new("nmcli")
-        .args(["-t", "-f", "NAME,TYPE", "connection", "show"])
-        .output()
-    else {
+    let Ok(conn) = nm::system() else {
         return Vec::new();
     };
 
-    let text = String::from_utf8_lossy(&out.stdout);
-    let all_vpns: Vec<String> = text
-        .lines()
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.splitn(2, ':').collect();
-            if parts.len() == 2 {
-                let t = parts[1].trim();
-                if t == NM_TYPE_VPN || t == NM_TYPE_WIREGUARD {
-                    return Some(parts[0].replace("\\:", ":").trim().to_string());
-                }
-            }
-            None
-        })
+    let is_vpn = |kind: &str| kind == NM_TYPE_VPN || kind == NM_TYPE_WIREGUARD;
+
+    let active: HashSet<String> = nm::active_connections(&conn)
+        .into_iter()
+        .filter(|(_, kind, _)| is_vpn(kind))
+        .map(|(id, _, _)| id)
         .collect();
 
-    if all_vpns.is_empty() {
-        return Vec::new();
-    }
-
-    let active_set: HashSet<String> = Command::new("nmcli")
-        .args(["-t", "-f", "NAME,TYPE", "connection", "show", "--active"])
-        .output()
-        .map(|active_out| {
-            let at = String::from_utf8_lossy(&active_out.stdout).into_owned();
-            at.lines()
-                .filter_map(|line| {
-                    let parts: Vec<&str> = line.splitn(2, ':').collect();
-                    if parts.len() == 2 {
-                        let t = parts[1].trim();
-                        if t == NM_TYPE_VPN || t == NM_TYPE_WIREGUARD {
-                            return Some(parts[0].replace("\\:", ":").trim().to_string());
-                        }
-                    }
-                    None
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    all_vpns
+    nm::stored_connections(&conn)
         .into_iter()
-        .map(|name| {
-            let active = active_set.contains(&name);
-            VpnConnection { name, active }
+        .filter(|(_, _, kind)| is_vpn(kind))
+        .map(|(_, name, _)| VpnConnection {
+            active: active.contains(&name),
+            name,
         })
         .collect()
 }
 
 pub fn vpn_up(name: &str) -> NmResult {
-    run_nmcli(&["connection", "up", name])
+    let name = name.to_string();
+    acting(move |conn| nm::activate_by_id(conn, &name))
 }
 
 pub fn vpn_down(name: &str) -> NmResult {
-    run_nmcli(&["connection", "down", name])
+    let name = name.to_string();
+    acting(move |conn| nm::deactivate_by_id(conn, &name))
 }
 
 // ── WiFi connect/forget ───────────────────────────────────────────────────────
 
 pub fn connect_known(ssid: &str) -> NmResult {
-    run_nmcli(&["connection", "up", ssid])
+    let ssid = ssid.to_string();
+    acting(move |conn| nm::activate_by_id(conn, &ssid))
 }
 
 pub fn connect_new(ssid: &str, password: &str, hidden: bool) -> NmResult {
-    let mut args = vec!["device", "wifi", "connect", ssid];
-    if !password.is_empty() {
-        args.extend(["password", password]);
-    }
-    if hidden {
-        args.extend(["hidden", "yes"]);
-    }
-    run_nmcli(&args)
+    let (ssid, password) = (ssid.to_string(), password.to_string());
+    acting(move |conn| {
+        let device = nm::devices(conn)
+            .into_iter()
+            .find(|d| d.device_type == nm::DEVICE_TYPE_WIFI)
+            .map(|d| d.path)
+            .ok_or("No WiFi adapter")?;
+        nm::add_and_activate(conn, &device, &ssid, &password, hidden)
+    })
 }
 
 pub fn forget_network(ssid: &str) -> NmResult {
-    run_nmcli(&["connection", "delete", ssid])
+    let ssid = ssid.to_string();
+    acting(move |conn| {
+        let path = nm::stored_connections(conn)
+            .into_iter()
+            .find(|(_, id, kind)| id == &ssid && kind == NM_TYPE_WIFI)
+            .map(|(path, _, _)| path)
+            .ok_or_else(|| format!("no saved network named {ssid}"))?;
+
+        nm::proxy(conn, &path, nm::IFACE_CONNECTION)?
+            .call::<_, _, ()>("Delete", &())
+            .map_err(|e| nm::dbus_message(&e))
+    })
 }
 
 // ── Interface management ──────────────────────────────────────────────────────
 
 pub fn get_network_interfaces() -> Vec<NetworkInterface> {
-    let Ok(out) = Command::new("nmcli")
-        .args(["-t", "-f", "DEVICE,TYPE,STATE", "device", "status"])
-        .output()
-    else {
+    let Ok(conn) = nm::system() else {
         return Vec::new();
     };
-    let text = String::from_utf8_lossy(&out.stdout);
-    text.lines()
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.splitn(3, ':').collect();
-            if parts.len() < 3 {
+    nm::devices(&conn)
+        .into_iter()
+        .filter_map(|device| {
+            let iface_type = device_type_name(device.device_type);
+            if iface_type == "loopback" || iface_type == "bridge" || device.interface == "lo" {
                 return None;
             }
-            let device = parts[0].trim().to_string();
-            let iface_type = parts[1].trim().to_string();
-            let raw_state = parts[2].trim();
-            if iface_type == "loopback" || iface_type == "bridge" || device == "lo" {
-                return None;
-            }
-            let enabled = raw_state != "disconnected"
-                && raw_state != "unavailable"
-                && raw_state != "unmanaged";
             Some(NetworkInterface {
-                device,
-                iface_type,
-                enabled,
+                enabled: device.state > nm::DEVICE_STATE_DISCONNECTED,
+                device: device.interface,
+                iface_type: iface_type.to_string(),
             })
         })
         .collect()
 }
 
+/// `NM_DEVICE_TYPE_*` as the strings the icon table and the filters above
+/// already speak, which are `nmcli`'s names for the same numbers.
+fn device_type_name(device_type: u32) -> &'static str {
+    match device_type {
+        1 => "ethernet",
+        2 => "wifi",
+        5 => "bluetooth",
+        13 => "bridge",
+        14 => "bond",
+        16 => "tun",
+        29 => NM_TYPE_WIREGUARD,
+        // Loopback got its own device type in NM 1.42; before that it was
+        // "generic" and filtered out by name.
+        32 => "loopback",
+        _ => "generic",
+    }
+}
+
+/// Bring a device up by activating whatever connection it last used.
+///
+/// NetworkManager has no "connect this device" call — `nmcli device connect`
+/// picks a connection itself. The same choice is made here: the device's own
+/// `AvailableConnections`, first entry, which is the list NM keeps in
+/// preference order.
 pub fn device_connect(device: &str) -> NmResult {
-    run_nmcli(&["device", "connect", device])
+    let device = device.to_string();
+    acting(move |conn| {
+        let path = nm::devices(conn)
+            .into_iter()
+            .find(|d| d.interface == device)
+            .map(|d| d.path)
+            .ok_or_else(|| format!("no device named {device}"))?;
+
+        let available = nm::paths(conn, &path, nm::IFACE_DEVICE, "AvailableConnections");
+        let target = available
+            .first()
+            .ok_or_else(|| format!("{device} has no connection to bring up"))?;
+
+        let target =
+            zbus::zvariant::ObjectPath::try_from(target.as_str()).map_err(|e| e.to_string())?;
+        let device_path =
+            zbus::zvariant::ObjectPath::try_from(path.as_str()).map_err(|e| e.to_string())?;
+        let root = zbus::zvariant::ObjectPath::try_from("/").map_err(|e| e.to_string())?;
+
+        nm::proxy(conn, nm::MANAGER_PATH, nm::IFACE_MANAGER)?
+            .call::<_, _, zbus::zvariant::OwnedObjectPath>(
+                "ActivateConnection",
+                &(&target, &device_path, &root),
+            )
+            .map(|_| ())
+            .map_err(|e| nm::dbus_message(&e))
+    })
 }
 
 pub fn device_disconnect(device: &str) -> NmResult {
-    run_nmcli(&["device", "disconnect", device])
+    let device = device.to_string();
+    acting(move |conn| {
+        let path = nm::devices(conn)
+            .into_iter()
+            .find(|d| d.interface == device)
+            .map(|d| d.path)
+            .ok_or_else(|| format!("no device named {device}"))?;
+
+        nm::proxy(conn, &path, nm::IFACE_DEVICE)?
+            .call::<_, _, ()>("Disconnect", &())
+            .map_err(|e| nm::dbus_message(&e))
+    })
 }
 
 pub fn iface_type_icon(iface_type: &str) -> &'static str {
@@ -512,129 +577,165 @@ pub fn iface_type_icon(iface_type: &str) -> &'static str {
 
 // ── IP info ───────────────────────────────────────────────────────────────────
 
+/// The device's IPv4 address, from NetworkManager's own view of it.
+///
+/// This used to shell out to `ip`; the daemon has the same answer and is
+/// already being asked about the device on the line above.
 pub fn get_device_ip(device: &str) -> Option<String> {
-    let out = Command::new("ip")
-        .args(["-4", "-o", "addr", "show", device])
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    for line in text.lines() {
-        if let Some(inet_pos) = line.find("inet ") {
-            let rest = &line[inet_pos + 5..];
-            if let Some(slash) = rest.find('/') {
-                return Some(rest[..slash].trim().to_string());
-            }
-            return Some(rest.split_whitespace().next()?.to_string());
-        }
-    }
-    None
+    let conn = nm::system().ok()?;
+    let ip4 = ip4_config(&conn, device)?;
+    let addresses: Vec<std::collections::HashMap<String, zbus::zvariant::OwnedValue>> =
+        nm::prop(&conn, &ip4, nm::IFACE_IP4, "AddressData")?;
+    addresses.first()?.get("address").and_then(nm::as_string)
 }
 
 pub fn get_default_gateway() -> Option<String> {
-    let out = Command::new("ip")
-        .args(["-4", "route", "show", "default"])
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    for line in text.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 3 && parts[0] == "default" && parts[1] == "via" {
-            return Some(parts[2].to_string());
-        }
-    }
-    None
+    let conn = nm::system().ok()?;
+    let primary = nm::path_prop(
+        &conn,
+        nm::MANAGER_PATH,
+        nm::IFACE_MANAGER,
+        "PrimaryConnection",
+    )?;
+    let device = nm::paths(&conn, &primary, nm::IFACE_ACTIVE, "Devices")
+        .into_iter()
+        .next()?;
+    let ip4 = nm::path_prop(&conn, &device, nm::IFACE_DEVICE, "Ip4Config")?;
+    let gateway: String = nm::prop(&conn, &ip4, nm::IFACE_IP4, "Gateway")?;
+    (!gateway.is_empty()).then_some(gateway)
 }
 
 pub fn get_dns_servers(device: &str) -> Vec<String> {
-    let Ok(out) = Command::new("nmcli")
-        .args(["-t", "-f", "IP4.DNS", "device", "show", device])
-        .output()
-    else {
+    let Ok(conn) = nm::system() else {
         return Vec::new();
     };
-    let text = String::from_utf8_lossy(&out.stdout);
-    text.lines()
-        .filter_map(|line| {
-            // Format: IP4.DNS[1]:1.1.1.1
-            let (_, addr) = line.split_once(':')?;
-            let addr = addr.trim();
-            if addr.is_empty() {
-                None
-            } else {
-                Some(addr.to_string())
-            }
-        })
-        .collect()
+    let Some(ip4) = ip4_config(&conn, device) else {
+        return Vec::new();
+    };
+    nm::prop::<Vec<std::collections::HashMap<String, zbus::zvariant::OwnedValue>>>(
+        &conn,
+        &ip4,
+        nm::IFACE_IP4,
+        "NameserverData",
+    )
+    .unwrap_or_default()
+    .into_iter()
+    .filter_map(|entry| entry.get("address").and_then(nm::as_string))
+    .collect()
+}
+
+fn ip4_config(conn: &zbus::blocking::Connection, device: &str) -> Option<String> {
+    let path = nm::devices(conn)
+        .into_iter()
+        .find(|d| d.interface == device)
+        .map(|d| d.path)?;
+    nm::path_prop(conn, &path, nm::IFACE_DEVICE, "Ip4Config")
 }
 
 // ── Connectivity ──────────────────────────────────────────────────────────────
 
 pub fn check_connectivity() -> ConnectivityState {
-    // Use `connectivity` (cached) not `connectivity check` (remote probe that blocks 1-5s).
-    let Ok(out) = Command::new("nmcli")
-        .args(["networking", "connectivity"])
-        .output()
-    else {
+    let Ok(conn) = nm::system() else {
         return ConnectivityState::Unknown;
     };
-    match String::from_utf8_lossy(&out.stdout).trim() {
-        "full" => ConnectivityState::Full,
-        "limited" => ConnectivityState::Limited,
-        "portal" => ConnectivityState::Portal,
-        "none" => ConnectivityState::None,
+    // The cached property, not `CheckConnectivity()` — that one runs a live
+    // probe and blocks for seconds, which is what the old comment here was
+    // avoiding by reading `nmcli networking connectivity` instead of
+    // `connectivity check`.
+    match nm::prop::<u32>(&conn, nm::MANAGER_PATH, nm::IFACE_MANAGER, "Connectivity") {
+        Some(1) => ConnectivityState::None,
+        Some(2) => ConnectivityState::Portal,
+        Some(3) => ConnectivityState::Limited,
+        Some(4) => ConnectivityState::Full,
         _ => ConnectivityState::Unknown,
     }
 }
 
 // ── WiFi power saving ─────────────────────────────────────────────────────────
 
+/// `802-11-wireless.powersave`: 0 default, 1 ignore, 2 disable, 3 enable.
+const POWERSAVE_DISABLE: u32 = 2;
+const POWERSAVE_ENABLE: u32 = 3;
+
 pub fn get_wifi_power_saving(conn_name: &str) -> bool {
-    let Ok(out) = Command::new("nmcli")
-        .args([
-            "-t",
-            "-f",
-            "802-11-wireless.powersave",
-            "connection",
-            "show",
-            conn_name,
-        ])
-        .output()
-    else {
+    let Ok(conn) = nm::system() else {
         return false;
     };
-    let text = String::from_utf8_lossy(&out.stdout);
-    // powersave: 3 = enabled, 2 = disabled, 0 = default, 1 = ignore
-    text.trim().ends_with(":3")
+    let Some(path) = wifi_connection_path(&conn, conn_name) else {
+        return false;
+    };
+    let Ok(proxy) = nm::proxy(&conn, &path, nm::IFACE_CONNECTION) else {
+        return false;
+    };
+    let settings: std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
+    > = match proxy.call("GetSettings", &()) {
+        Ok(s) => s,
+        Err(e) => {
+            log::debug!("nm: GetSettings for {conn_name}: {e}");
+            return false;
+        }
+    };
+
+    settings
+        .get(NM_TYPE_WIFI)
+        .and_then(|section| section.get("powersave"))
+        .and_then(nm::as_u32)
+        == Some(POWERSAVE_ENABLE)
 }
 
 pub fn set_wifi_power_saving(conn_name: &str, enable: bool) -> NmResult {
-    // powersave: 3 = enabled, 2 = disabled
-    let value = if enable { "3" } else { "2" };
-    run_nmcli(&[
-        "connection",
-        "modify",
-        conn_name,
-        "802-11-wireless.powersave",
-        value,
-    ])
+    let conn_name = conn_name.to_string();
+    acting(move |conn| {
+        let path = wifi_connection_path(conn, &conn_name)
+            .ok_or_else(|| format!("no saved network named {conn_name}"))?;
+        let proxy = nm::proxy(conn, &path, nm::IFACE_CONNECTION)?;
+
+        // Read-modify-write: `Update` replaces the whole connection, so
+        // anything not carried over here would be silently dropped.
+        let mut settings: std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
+        > = proxy
+            .call("GetSettings", &())
+            .map_err(|e| nm::dbus_message(&e))?;
+
+        let value = if enable {
+            POWERSAVE_ENABLE
+        } else {
+            POWERSAVE_DISABLE
+        };
+        settings
+            .entry(NM_TYPE_WIFI.to_string())
+            .or_default()
+            .insert(
+                "powersave".to_string(),
+                zbus::zvariant::Value::from(value)
+                    .try_into()
+                    .map_err(|e| format!("powersave: {e}"))?,
+            );
+
+        proxy
+            .call::<_, _, ()>("Update", &(settings,))
+            .map_err(|e| nm::dbus_message(&e))
+    })
 }
 
-/// Get the NM connection name for the active WiFi connection.
+fn wifi_connection_path(conn: &zbus::blocking::Connection, name: &str) -> Option<String> {
+    nm::stored_connections(conn)
+        .into_iter()
+        .find(|(_, id, kind)| id == name && kind == NM_TYPE_WIFI)
+        .map(|(path, _, _)| path)
+}
+
+/// The NM connection name of the active WiFi connection.
 pub fn get_active_wifi_conn_name() -> Option<String> {
-    let Ok(out) = Command::new("nmcli")
-        .args(["-t", "-f", "NAME,TYPE", "connection", "show", "--active"])
-        .output()
-    else {
-        return None;
-    };
-    let text = String::from_utf8_lossy(&out.stdout);
-    for line in text.lines() {
-        let parts: Vec<&str> = line.splitn(2, ':').collect();
-        if parts.len() == 2 && parts[1].trim() == NM_TYPE_WIFI {
-            return Some(parts[0].replace("\\:", ":").trim().to_string());
-        }
-    }
-    None
+    let conn = nm::system().ok()?;
+    nm::active_connections(&conn)
+        .into_iter()
+        .find(|(_, kind, _)| kind == NM_TYPE_WIFI)
+        .map(|(id, _, _)| id)
 }
 
 // ── Shared UI helpers ─────────────────────────────────────────────────────────
@@ -669,4 +770,118 @@ pub fn auto_hide_status(status_lbl: &gtk4::Label) {
     glib::timeout_add_local_once(std::time::Duration::from_secs(4), move || {
         status_hide.set_visible(false);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn net(ssid: &str, signal: u8, known: bool, in_use: bool) -> WifiNetwork {
+        WifiNetwork {
+            ssid: ssid.into(),
+            signal,
+            security: "WPA2".into(),
+            in_use,
+            is_known: known,
+            freq_mhz: Some(5180),
+        }
+    }
+
+    #[test]
+    fn one_network_per_ssid_keeps_the_strongest_radio() {
+        let merged = merge_and_rank(vec![
+            net("office", 40, false, false),
+            net("office", 78, false, false),
+        ]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].signal, 78);
+    }
+
+    #[test]
+    fn a_weaker_radio_can_still_contribute_the_flags() {
+        // The strong one was seen first and is not the associated AP; the
+        // weak one is. Dropping it would lose the "connected" mark.
+        let merged = merge_and_rank(vec![
+            net("office", 78, false, false),
+            net("office", 40, true, true),
+        ]);
+        assert_eq!(merged.len(), 1);
+        assert!(merged[0].in_use);
+        assert!(merged[0].is_known);
+        assert_eq!(merged[0].signal, 78);
+    }
+
+    #[test]
+    fn the_connected_network_sorts_first_then_saved_then_signal() {
+        let merged = merge_and_rank(vec![
+            net("weak-stranger", 20, false, false),
+            net("strong-stranger", 90, false, false),
+            net("saved", 30, true, false),
+            net("connected", 10, true, true),
+        ]);
+        let order: Vec<&str> = merged.iter().map(|n| n.ssid.as_str()).collect();
+        assert_eq!(
+            order,
+            vec!["connected", "saved", "strong-stranger", "weak-stranger"]
+        );
+    }
+
+    #[test]
+    fn a_nameless_access_point_is_not_a_network() {
+        assert!(merge_and_rank(vec![net("", 90, false, false)]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod live {
+    /// Every read path against the running daemon. Ignored: needs
+    /// NetworkManager on the system bus. Touches nothing.
+    #[test]
+    #[ignore]
+    fn read_the_session() {
+        use super::*;
+        println!("available:    {}", network_manager_available());
+        println!("wifi adapter: {}", wifi_adapter_present());
+        println!("wifi radio:   {}", wifi_radio_enabled());
+        println!("active:       {:?}", get_active_connection());
+        println!("connectivity: {:?}", check_connectivity());
+        println!("gateway:      {:?}", get_default_gateway());
+        println!("known ssids:  {:?}", get_known_ssids());
+        println!("vpns:         {:?}", get_vpn_connections());
+        for iface in get_network_interfaces() {
+            println!(
+                "  iface {:<12} {:<10} enabled={} ip={:?} dns={:?}",
+                iface.device,
+                iface.iface_type,
+                iface.enabled,
+                get_device_ip(&iface.device),
+                get_dns_servers(&iface.device),
+            );
+        }
+        if let Some(name) = get_active_wifi_conn_name() {
+            println!(
+                "active wifi conn: {name} powersave={}",
+                get_wifi_power_saving(&name)
+            );
+        }
+    }
+
+    /// A rescan. Ignored and separate: it asks the radio to do something,
+    /// even though it changes no configuration.
+    #[test]
+    #[ignore]
+    fn scan() {
+        match super::scan_wifi() {
+            Ok(networks) => {
+                for n in networks.iter().take(12) {
+                    println!(
+                        "{:>3}% {:<10} {:<24} known={} in_use={}",
+                        n.signal, n.security, n.ssid, n.is_known, n.in_use
+                    );
+                }
+                println!("{} networks", networks.len());
+            }
+            Err(e) => println!("scan failed: {e}"),
+        }
+    }
 }

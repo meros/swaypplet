@@ -1,6 +1,7 @@
 mod backend;
 mod interfaces;
 mod monitor;
+mod nm;
 mod vpn;
 mod wifi;
 
@@ -15,11 +16,16 @@ use gtk4::{
 use crate::spawn::spawn_work;
 use backend::*;
 
+// The quick-toggle tile drives the radio without going through this section
+// (widgets/tiles.rs), so the two calls it needs are re-exported here rather
+// than reaching into `backend` from outside the module.
+pub use backend::{NmResult, network_manager_available, set_wifi_radio, wifi_radio_enabled};
+
 // ── Async result types ───────────────────────────────────────────────────────
 
 /// Data gathered on a background thread during initial construction.
 struct InitResult {
-    nmcli_available: bool,
+    network_manager_available: bool,
     has_wifi: bool,
     wifi_radio: bool,
     active_wifi_conn_name: Option<String>,
@@ -478,7 +484,7 @@ impl NetworkSection {
                         .map(get_wifi_power_saving)
                         .unwrap_or(false);
                     InitResult {
-                        nmcli_available: nmcli_available(),
+                        network_manager_available: network_manager_available(),
                         has_wifi: wifi_adapter_present(),
                         wifi_radio: wifi_radio_enabled(),
                         active_wifi_conn_name,
@@ -486,7 +492,7 @@ impl NetworkSection {
                     }
                 },
                 move |init| {
-                    if !init.nmcli_available {
+                    if !init.network_manager_available {
                         placeholder_c.set_visible(true);
                         return;
                     }
@@ -706,11 +712,7 @@ impl NetworkSection {
         let state_c = state.clone();
 
         spawn_work(
-            || {
-                let raw = scan_wifi_raw()?;
-                let known = get_known_ssids();
-                Ok(parse_wifi_list(&raw, &known))
-            },
+            scan_wifi,
             move |result: Result<Vec<WifiNetwork>, String>| {
                 scan_spinner_c.stop();
                 scan_spinner_c.set_visible(false);
