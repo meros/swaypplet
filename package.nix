@@ -94,6 +94,13 @@ rustPlatform.buildRustPackage {
     SCRIPT
     chmod +x $out/bin/swaypplet-polkit-agent
 
+    # Screenshots — region / screen / pick, all through the running panel
+    cat > $out/bin/swaypplet-screenshot <<SCRIPT
+    #!/bin/sh
+    exec $out/bin/swaypplet screenshot "\$@"
+    SCRIPT
+    chmod +x $out/bin/swaypplet-screenshot
+
     # Keybinding sheet — `show` / `hide` edges from the Super-hold watcher
     cat > $out/bin/swaypplet-keybinds <<SCRIPT
     #!/bin/sh

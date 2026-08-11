@@ -260,6 +260,61 @@ pub fn run(component: &str) {
                 s.expand_for_page();
                 host.append(s.widget());
             }
+            "selector" => {
+                // Exercises the whole flow in-process, which is what tells a
+                // broken selector apart from a request that never arrived.
+                // The window is filled first and left on screen: a dimmed
+                // capture of an empty desktop is a black rectangle, which is
+                // also what a selector that never mapped looks like.
+                let card = gtk4::Label::new(Some("BEHIND THE SELECTOR"));
+                card.add_css_class("keybinds-heading");
+                card.set_vexpand(true);
+                card.set_hexpand(true);
+                host.append(&card);
+                window.set_child(Some(&host));
+                window.present();
+
+                if let Some(app) = window.application() {
+                    let store = store.clone();
+                    glib::timeout_add_local_once(
+                        std::time::Duration::from_millis(1500),
+                        move || {
+                            crate::screenshot::take(
+                                &app,
+                                &store,
+                                crate::screenshot::Shot::Region,
+                            );
+                        },
+                    );
+                }
+                return;
+            }
+            "annotate" => {
+                // A gradient with a hard edge: enough structure to tell a
+                // pixelated block from an untouched one at a glance.
+                let (w, h) = (640u32, 400u32);
+                let mut pixels = Vec::with_capacity((w * h * 4) as usize);
+                for y in 0..h {
+                    for x in 0..w {
+                        let band = if (x / 40 + y / 40) % 2 == 0 { 60 } else { 0 };
+                        pixels.extend_from_slice(&[
+                            (x * 255 / w) as u8,
+                            (y * 255 / h) as u8,
+                            band,
+                            255,
+                        ]);
+                    }
+                }
+                let image = crate::screenshot::capture::Image {
+                    width: w,
+                    height: h,
+                    pixels,
+                };
+                if let Some(app) = window.application() {
+                    crate::screenshot::annotate::open(&app, image, |_| {});
+                }
+                return;
+            }
             other => {
                 host.append(&gtk4::Label::new(Some(&format!(
                     "unknown preview component: {other}\n\nknown: panel, lock, polkit, tiles, audio, \

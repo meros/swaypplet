@@ -21,6 +21,7 @@ mod osd;
 mod panel;
 mod polkit;
 mod preview;
+mod screenshot;
 mod service;
 mod spawn;
 mod surface;

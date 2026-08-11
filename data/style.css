@@ -2568,3 +2568,84 @@ revealer {
   font-size: 11px;
   color: @fg_dim;
 }
+
+/* ── Annotation editor (src/screenshot/annotate.rs) ──
+   A normal window, not glass: it is an editor you sit in, and a frosted
+   canvas would fight the picture on it. */
+.annotate-window {
+  background: @bg0_h;
+}
+
+.annotate-toolbar {
+  padding: 8px 10px;
+  background: @surface_raised;
+  border-bottom: 1px solid @border_subtle;
+}
+
+.annotate-tool {
+  min-width: 34px;
+  min-height: 30px;
+  padding: 0;
+  font-size: 15px;
+  color: @fg_dim;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+}
+
+.annotate-tool:hover {
+  background: @surface_hover;
+  color: @fg;
+}
+
+.annotate-tool:checked {
+  background: @accent_tint;
+  color: @fg;
+}
+
+/* The swatch's colour is drawn by its child (src/screenshot/annotate.rs), so
+   the button itself only has to carry the selection ring. */
+.annotate-swatch {
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 13px;
+}
+
+.annotate-swatch:hover {
+  border-color: @border_strong;
+}
+
+.annotate-swatch:checked {
+  border-color: @fg;
+}
+
+.annotate-separator {
+  margin: 2px 6px;
+  background: @border_subtle;
+}
+
+.annotate-action {
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: @surface_hover;
+  color: @fg;
+  border: 1px solid @border_subtle;
+}
+
+.annotate-action:hover {
+  background: @surface_track;
+}
+
+.annotate-action.suggested-action {
+  background: @accent_tint_hi;
+  border-color: @accent;
+}
+
+/* Checkerboard-free: a screenshot is opaque, so the canvas only ever needs
+   somewhere neutral to letterbox against. */
+.annotate-canvas {
+  background: @bg0_h;
+}
