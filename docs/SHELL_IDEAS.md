@@ -64,22 +64,42 @@ reader deleting them is the wrong owner. If the accumulation ever matters, the
 Stop hook should clean up after itself. The correctness bug is closed either
 way, and a few thousand tiny files a year is untidy rather than harmful.
 
-### 3. Screenshot and annotate (M)
+### 3. Screenshot and annotate (M) — DONE 2026-08-11
 
-The single largest daily friction. `panel.rs:574` spawns `grim -g "$(slurp)"`
-and forgets it: no shutter feedback, no copy-and-save in one gesture, no
-annotation, no way to see what was captured. Every primitive is already here —
-layer-shell for the region selector, GTK4 snapshot drawing for annotation,
-`NotificationStore` actions for the Open/Copy/Delete follow-up.
+`src/screenshot/`, four modules: `capture` (pixels), `select` (region),
+`annotate` (marks), `deliver` (file, clipboard, card).
 
-Absorbs three packages: `grim`, `slurp`, and `hyprpicker` (carried for one
-colour-pick button, and a Hyprland tool at that). Gives `wf-recorder` a reason
-to exist — it is installed today and invoked by nothing.
+Capture is `ext-image-copy-capture-v1` rather than wlr-screencopy — the same
+protocol the window switcher (item 5) needs, so there is one capture path in
+the process instead of two. `zwlr_screencopy_manager_v1` is still advertised
+and deliberately unused.
 
-Design note: the region selector is a fullscreen layer surface with keyboard
-exclusive, which is exactly the dmenu chassis. The frost must be off for it
-(the point is seeing the screen), so it is the first surface that wants
-`layer_effects` blur disabled at map rather than enabled.
+The selector freezes first and selects second, which is the part slurp
+structurally cannot do: it draws on the live screen, so a notification
+arriving between the drag and the capture lands in the file. Freezing also
+made the colour picker free — the pixel under the pointer is already in hand —
+so `hyprpicker`, a Hyprland tool carried for one button, is gone too. The
+selector surface is the first one to want no frost, which it gets by being
+absent from `layer_effects` rather than disabling blur at map.
+
+The follow-up is a notification, not a new surface: `NotificationStore` already
+draws a picture, lays out actions, and treats a wide image as a screenshot.
+Annotate / Open / Delete hang off that card, and one gesture now produces both
+a file and a clipboard entry.
+
+Annotation has four tools. Pixelate is there because a screenshot of a terminal
+is how a token gets shared by accident, and it averages whole blocks rather
+than blurring — a Gaussian is invertible enough that text has been recovered
+from one.
+
+Absorbed `grim`, `slurp` and `hyprpicker`, plus the `wl-copy` that piped
+between them. `wf-recorder` is still installed and still invoked by nothing:
+recording is a different feature with a different surface, not a flag on this
+one.
+
+Verified headlessly: `dev/render.sh --mode screenshot` (add
+`SWPP_SELECT_RECT=x,y,w,h` for the selection chrome) and
+`--mode preview:annotate`.
 
 ### 4. Privacy indicators (S)
 

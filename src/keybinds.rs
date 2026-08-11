@@ -869,4 +869,3 @@ bindsym Mod4+Shift+Left move left
         assert_eq!(rows[0].label, "󰖟 b");
     }
 }
-

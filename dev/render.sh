@@ -11,6 +11,8 @@
 #   dev/render.sh [--bin PATH] [--res WxH] [--out FILE] [--mode panel|launcher|polkit|preview:NAME] [--css FILE]
 #   SWPP_SEED_CLIPBOARD=1 dev/render.sh --mode preview:clipboard   # rows to draw
 #   dev/render.sh --mode keybinds --res 1600x1000                  # the held-Super sheet
+#   dev/render.sh --mode screenshot --res 1200x800                 # the region selector
+#   SWPP_SELECT_RECT=120,90,540,330 dev/render.sh --mode screenshot # with a selection drawn
 #
 # --mode keybinds copies the live session's bindsym lines into the nested
 # config (SWPP_KEYBINDS_FROM overrides the source), because the sheet is
@@ -90,6 +92,26 @@ export WAYLAND_DISPLAY="$WD"
 rm -f "$RUNTIME/swaypplet.pid"
 case "$MODE" in
   polkit)    "$BIN" polkit-agent >/tmp/swpp-app.log 2>&1 & ;;
+  screenshot)
+    "$BIN" >/tmp/swpp-app.log 2>&1 &
+    for _ in $(seq 1 200); do
+      [ -e "$RUNTIME/swaypplet.pid" ] && break; sleep 0.1
+    done
+    sleep 1.5
+    # Put the panel on screen first: an empty nested desktop makes a dimmed
+    # frozen capture indistinguishable from a black rectangle.
+    if [ -n "${SWPP_SHOW_PANEL:-}" ]; then
+      p="$(cat "$RUNTIME/swaypplet.pid" 2>/dev/null || true)"
+      [ -n "$p" ] && kill -USR1 "$p" 2>/dev/null || true
+      sleep 1.5
+    fi
+    "$BIN" screenshot region >/tmp/swpp-client.log 2>&1
+    echo "client exit: $?" >> /tmp/swpp-client.log
+    # The client returns as soon as the running instance takes the request;
+    # the capture is a Wayland round trip after that, and the non-blank test
+    # below would otherwise pass on the frame before the selector maps.
+    sleep 3
+    ;;
   keybinds)
     "$BIN" >/tmp/swpp-app.log 2>&1 &
     # The sheet is a surface of the running panel, so it needs the panel up

@@ -257,12 +257,11 @@ impl Panel {
             .build();
         rail.add_css_class("startmenu-rail");
 
-        rail.append(&rail_action(
-            "󰄀",
-            "Screenshot region",
-            &window,
-            screenshot_region,
-        ));
+        rail.append(&rail_action("󰄀", "Screenshot region", &window, {
+            let window = window.clone();
+            let store = store.clone();
+            move || shot(&window, &store, crate::screenshot::Shot::Region)
+        }));
 
         // Clipboard — toggles the inline full-width history reveal (does NOT
         // hide the menu).
@@ -285,7 +284,11 @@ impl Panel {
         }
         rail.append(&clip_btn);
 
-        rail.append(&rail_action("󰏘", "Color picker", &window, color_pick));
+        rail.append(&rail_action("󰏘", "Color picker", &window, {
+            let window = window.clone();
+            let store = store.clone();
+            move || shot(&window, &store, crate::screenshot::Shot::Pick)
+        }));
 
         // Spacer pushes the session actions to the bottom of the rail.
         let rail_spacer = gtk4::Box::builder().vexpand(true).build();
@@ -555,7 +558,12 @@ fn copy_spec(spec: &tiles::TileSpec) -> tiles::TileSpec {
 /// A rail icon button that hides the menu instantly (no exit wipe — the
 /// action may capture the screen), then runs `action`. The stale reveal
 /// state this leaves behind is healed by `Panel::toggle`.
-fn rail_action(icon: &str, tooltip: &str, window: &gtk4::Window, action: fn()) -> gtk4::Button {
+fn rail_action(
+    icon: &str,
+    tooltip: &str,
+    window: &gtk4::Window,
+    action: impl Fn() + 'static,
+) -> gtk4::Button {
     let btn = gtk4::Button::builder()
         .child(&gtk4::Label::new(Some(icon)))
         .build();
@@ -571,29 +579,24 @@ fn rail_action(icon: &str, tooltip: &str, window: &gtk4::Window, action: fn()) -
 
 // ── Footer action implementations ─────────────────────────────────────────────
 
-fn screenshot_region() {
-    use std::process::Command;
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let dir = format!("{home}/Pictures/Screenshots");
-    let _ = std::fs::create_dir_all(&dir);
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let path = format!("{dir}/screenshot-{ts}.png");
-    let cmd = format!("grim -g \"$(slurp)\" {path}");
-    if let Err(e) = Command::new("sh").args(["-c", &cmd]).spawn() {
-        log::error!("Failed to spawn grim/slurp region capture: {e}");
-    }
-}
-
-fn color_pick() {
-    use std::process::Command;
-    if let Err(e) = Command::new("hyprpicker").arg("-a").spawn() {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            log::warn!("hyprpicker not found");
-        } else {
-            log::warn!("hyprpicker -a failed: {e}");
-        }
-    }
+/// Hand a shot to `screenshot`, which owns the whole flow.
+///
+/// The panel is dismissed first, and not because it would be untidy in the
+/// picture: the selector freezes the screen, so a panel still mapped would be
+/// frozen into it and then covered by the selector showing that frozen copy.
+fn shot(
+    window: &gtk4::Window,
+    store: &Rc<RefCell<NotificationStore>>,
+    shot: crate::screenshot::Shot,
+) {
+    let Some(app) = window.application() else {
+        return;
+    };
+    window.set_visible(false);
+    let store = store.clone();
+    // One frame for the unmap to reach the compositor before the capture
+    // does. Anything shorter races the surface the capture must not contain.
+    glib::timeout_add_local_once(std::time::Duration::from_millis(120), move || {
+        crate::screenshot::take(&app, &store, shot);
+    });
 }
