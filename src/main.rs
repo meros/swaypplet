@@ -27,6 +27,7 @@ mod spawn;
 mod surface;
 mod sway_ipc;
 mod switch_user;
+mod switcher;
 mod task_state;
 mod theme;
 mod widgets;

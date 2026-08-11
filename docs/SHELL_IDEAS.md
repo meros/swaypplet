@@ -112,18 +112,41 @@ portal's D-Bus session list.
 Fits P9 and P10 cleanly: each has an obvious stand-down (capture stops), and
 none of them is red.
 
-### 5. Window switcher with live thumbnails (L)
+### 5. Window switcher with live thumbnails (L) — DONE 2026-08-11
 
-sway has no switcher at all. `ext_foreign_toplevel_list_v1` gives the list,
-`ext_foreign_toplevel_image_capture_source_manager_v1` plus
-`ext_image_copy_capture_manager_v1` give live per-window frames. `wlr-shot` is
-the Rust reference for the capture path.
+`src/switcher/`, bound to `⌘ Tab`. A grid of every window with its own pixels
+on it, arrow keys and typeahead to narrow, Enter to focus.
 
-Caveat: per-toplevel capture has a known fractional-scale defect
-(swaywm/sway#9113). eDP-1 runs integer scale 2.0, so it misses this machine.
+The join turned out to be free. `ext-foreign-toplevel-list-v1` gives each
+window an opaque `identifier`, and sway puts that same string in its tree as
+`foreign_toplevel_identifier` — so the model comes from sway IPC (workspace,
+focus order, and the `[con_id=N] focus` that actually switches) and the pixels
+from `ext-image-copy-capture-v1`, with no title matching between them. The
+capture path is the screenshot module's, generalised from an output source to
+any capture source.
 
-The same machinery is a workspace overview, which is the more interesting
-surface: the board encodes task state abstractly, an overview would show it.
+Order is sway's own: each container's `focus` array lists its children most
+recently focused first, so a depth-first walk following it yields session MRU
+without swaypplet keeping a history.
+
+Two findings from running it against the live session (11 windows):
+
+- Windows on **invisible** workspaces capture fine — swayfx renders them. The
+  worry that a switcher could only show what is already on screen was
+  unfounded, which is what makes the surface worth having.
+- Spotify failed every time with `buffer_constraints` until the capture
+  learned to rebuild its buffer once and retry. The compositor re-sends the
+  constraints with that failure; the first implementation treated every
+  failure as terminal. 11 of 11 now.
+
+Captures are bounded (`CAPTURE_TIMEOUT`, 400 ms) because the protocol lets a
+compositor wait indefinitely for content that never changes; a thumbnail that
+does not arrive leaves its card showing the app icon.
+
+The fractional-scale caveat (swaywm/sway#9113) never came up: eDP-1 is at
+integer scale 2.0.
+
+Still backlog: the workspace overview this machinery also enables.
 
 ### 6. Night light and display profiles in-process (S each)
 

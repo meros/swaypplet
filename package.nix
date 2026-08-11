@@ -101,6 +101,13 @@ rustPlatform.buildRustPackage {
     SCRIPT
     chmod +x $out/bin/swaypplet-screenshot
 
+    # Window switcher — thumbnails of every window, one keypress away
+    cat > $out/bin/swaypplet-switcher <<SCRIPT
+    #!/bin/sh
+    exec $out/bin/swaypplet switcher "\$@"
+    SCRIPT
+    chmod +x $out/bin/swaypplet-switcher
+
     # Keybinding sheet — `show` / `hide` edges from the Super-hold watcher
     cat > $out/bin/swaypplet-keybinds <<SCRIPT
     #!/bin/sh

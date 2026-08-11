@@ -16,6 +16,7 @@ use crate::notifications::{dbus, popup::PopupManager};
 use crate::osd::{Osd, OsdCommand};
 use crate::panel::Panel;
 use crate::sway_ipc::SwayService;
+use crate::switcher::Switcher;
 use crate::theme;
 
 const APP_ID: &str = "dev.swaypplet.panel";
@@ -55,6 +56,7 @@ struct AppState {
     osd: Option<Osd>,
     launcher: Option<Launcher>,
     keybinds: Option<Rc<Keybinds>>,
+    switcher: Option<Rc<Switcher>>,
     /// Keep-alive only: the bar follows monitor hotplug by itself and has
     /// no external control surface.
     _bar: Option<Rc<BarManager>>,
@@ -71,6 +73,7 @@ pub fn run() {
         osd: None,
         launcher: None,
         keybinds: None,
+        switcher: None,
         _bar: None,
     }));
 
@@ -142,6 +145,9 @@ pub fn run() {
         // ── Keybinding sheet ────────────────────────────────────────────────
         let keybinds = Keybinds::new(app);
 
+        // ── Window switcher ─────────────────────────────────────────────────
+        let switcher = Switcher::new(app);
+
         // Screenshot card buttons (Annotate / Open / Delete). Registered on
         // activate rather than startup because the editor needs the
         // application to parent its window to.
@@ -198,6 +204,7 @@ pub fn run() {
         st.osd = Some(osd);
         st.launcher = Some(launcher);
         st.keybinds = Some(keybinds);
+        st.switcher = Some(switcher);
     });
 
     // ── Command-line handling ────────────────────────────────────────────────
@@ -221,6 +228,16 @@ pub fn run() {
                 }
             } else if let Some(ref launcher) = st.launcher {
                 launcher.toggle();
+            }
+        } else if args.len() > 1 && args[1] == "switcher" {
+            let st = state_clone.borrow();
+            if st.switcher.is_none() {
+                drop(st);
+                app.activate();
+            }
+            let st = state_clone.borrow();
+            if let Some(ref switcher) = st.switcher {
+                switcher.toggle();
             }
         } else if args.len() > 1 && args[1] == "screenshot" {
             let shot = crate::screenshot::Shot::parse(args.get(2).map(String::as_str));
