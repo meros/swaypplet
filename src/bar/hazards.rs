@@ -7,7 +7,7 @@
 //! static — armed, not act-now — and appear-only: no motion beyond the
 //! structural reveal (P2).
 //!
-//! Two hazards ship now; failed-units is deferred (severable):
+//! Three hazards ship now; failed-units is deferred (severable):
 //! - **Caffeine**: the idle manager is a systemd unit only knowable by
 //!   `systemctl` reads, so the lane subscribes to the Caffeine tile's
 //!   in-process path (widgets/tiles.rs `on_state`) instead of polling.
@@ -17,6 +17,19 @@
 //!   the first toggle onward (accepted in the vision).
 //! - **Binding mode**: non-default sway modes off the existing IPC
 //!   subscription's `mode` event; the mode name lives in the tooltip.
+//! - **Microphone**: something is recording. The sound server pushes this
+//!   (`crate::audio`), so it costs no timer, and its stand-down (P10) is
+//!   exactly the recorder list going empty. The tooltip names what is
+//!   listening, which is the question the glyph provokes.
+//!
+//! Camera and screencast were meant to ship beside the microphone and
+//! cannot yet. Neither has a signal a third party can read: v4l2 has no
+//! in-use broadcast, and `org.freedesktop.portal.Camera` reports only
+//! `IsCameraPresent` while `ScreenCast` exposes methods to *start* a cast
+//! and no way to enumerate live ones. Both are visible in PipeWire's node
+//! graph, which this process cannot reach — see `crate::audio` on the
+//! bindgen collision that keeps libpipewire out of the build. They are
+//! blocked on that, not on design.
 //!
 //! Cadence: in-process events and the existing sway subscription — this
 //! module adds no timer and no poll.
@@ -25,6 +38,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use crate::audio::AudioService;
 use crate::service::Observed;
 use crate::sway_ipc::SwayService;
 
@@ -44,7 +58,7 @@ pub(crate) fn set_caffeine(armed: bool) {
 // ── Widget ──────────────────────────────────────────────────────────────
 
 /// The hazard lane for one bar window.
-pub fn build(sway: &Rc<SwayService>) -> gtk4::Box {
+pub fn build(sway: &Rc<SwayService>, audio: &Rc<AudioService>) -> gtk4::Box {
     let lane = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .css_classes(["bar-hazards"])
@@ -55,6 +69,8 @@ pub fn build(sway: &Rc<SwayService>) -> gtk4::Box {
     lane.append(&caffeine);
     let (mode, mode_glyph) = hazard("󰌌");
     lane.append(&mode);
+    let (mic, mic_glyph) = hazard("󰍬");
+    lane.append(&mic);
 
     // Leftover observers after an output unplug paint unmapped widgets —
     // same leak-tolerant story as board.rs.
@@ -65,6 +81,21 @@ pub fn build(sway: &Rc<SwayService>) -> gtk4::Box {
         });
         caffeine.set_reveal_child(c.with(|v| *v));
     });
+
+    let apply_mic = {
+        let (mic, glyph, audio) = (mic.clone(), mic_glyph, audio.clone());
+        move || {
+            let state = audio.snapshot();
+            let names = state.recorder_names();
+            glyph.set_tooltip_text(Some(&match names.len() {
+                0 => "Microphone in use".to_string(),
+                _ => format!("Microphone: {}", names.join(", ")),
+            }));
+            mic.set_reveal_child(state.microphone_in_use());
+        }
+    };
+    apply_mic();
+    audio.connect_change(apply_mic);
 
     let apply_mode = {
         let (mode, glyph, sway) = (mode.clone(), mode_glyph, sway.clone());

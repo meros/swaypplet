@@ -70,6 +70,9 @@ pub struct BarManager {
     monitors: gio::ListModel,
     windows: RefCell<Vec<BarWindow>>,
     sway: Rc<SwayService>,
+    /// One sound-server connection per bar process; the hazard lane's
+    /// microphone glyph is its only reader here.
+    audio: Rc<crate::audio::AudioService>,
     tasks: Rc<TaskStateService>,
     tray: Rc<tray::TrayService>,
     /// What the start button does. In-process hosting passes a direct
@@ -82,6 +85,7 @@ impl BarManager {
     pub fn new(
         app: &gtk4::Application,
         sway: Rc<SwayService>,
+        audio: Rc<crate::audio::AudioService>,
         toggle_panel: Rc<dyn Fn()>,
     ) -> Rc<Self> {
         let display = gdk::Display::default().expect("no gdk display");
@@ -91,6 +95,7 @@ impl BarManager {
             monitors: display.monitors(),
             windows: RefCell::new(Vec::new()),
             sway,
+            audio,
             tasks,
             tray: tray::TrayService::start(),
             toggle_panel,
@@ -137,6 +142,7 @@ impl BarManager {
                     &self.app,
                     &monitor,
                     &self.sway,
+                    &self.audio,
                     &self.tasks,
                     &self.tray,
                     self.toggle_panel.clone(),
@@ -183,6 +189,7 @@ fn build_bar_window(
     app: &gtk4::Application,
     monitor: &gdk::Monitor,
     sway: &Rc<SwayService>,
+    audio: &Rc<crate::audio::AudioService>,
     tasks: &Rc<TaskStateService>,
     tray: &Rc<tray::TrayService>,
     toggle_panel: Rc<dyn Fn()>,
@@ -231,7 +238,7 @@ fn build_bar_window(
     // then the instrument track.
     right.append(&media::build(sway));
     right.append(&tray::build(tray));
-    right.append(&hazards::build(sway));
+    right.append(&hazards::build(sway, audio));
     // Battery + board + clock fuse into one segmented track (waybar's
     // group/right-track); a batteryless machine skips the segment so the
     // board keeps the rounded left end.
@@ -316,9 +323,13 @@ pub fn run() {
         theme::load_css();
         // Keeps itself alive through its main-context event loop.
         let sway = SwayService::start();
+        // The standalone bar starts its own sound-server connection: the
+        // microphone hazard is the only consumer here, and one connection
+        // costs a socket.
         *slot = Some(BarManager::new(
             app,
             sway,
+            crate::audio::AudioService::start(),
             Rc::new(start::toggle_panel_fallback),
         ));
     });
