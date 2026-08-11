@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::oneshot;
+use zbus::export::futures_util::StreamExt;
 use zbus::interface;
 use zbus::zvariant::OwnedValue;
 
@@ -172,6 +173,7 @@ pub fn start() -> std::sync::mpsc::Receiver<AgentEvent> {
 }
 
 const AGENT_OBJECT_PATH: &str = "/dev/swaypplet/PolkitAgent";
+const POLKIT_BUS_NAME: &str = "org.freedesktop.PolicyKit1";
 
 async fn run(sender: Arc<Mutex<std::sync::mpsc::Sender<AgentEvent>>>) -> zbus::Result<()> {
     let conn = zbus::Connection::system().await?;
@@ -182,25 +184,69 @@ async fn run(sender: Arc<Mutex<std::sync::mpsc::Sender<AgentEvent>>>) -> zbus::R
     let session_id = session::current_session_id(&conn).await?;
     log::info!("polkit agent: registering for session {session_id}");
 
+    // Subscribe before the first registration, so a polkitd that restarts
+    // while we are still starting up cannot slip through the gap between
+    // registering and watching.
+    let dbus = zbus::fdo::DBusProxy::new(&conn).await?;
+    let mut owner_changes = dbus
+        .receive_name_owner_changed_with_args(&[(0, POLKIT_BUS_NAME)])
+        .await?;
+
+    register(&conn, &session_id).await?;
+
+    // polkit drops every registered agent when it restarts and never tells
+    // the agent about it. A `nixos-rebuild switch` that touches polkit does
+    // exactly that: the agent survives, keeps answering on the bus, and the
+    // fingerprint prompt still appears — but polkitd no longer knows the
+    // session behind the cookie, so every authentication ends in
+    //
+    //   polkit-agent-helper-1: ... PolicyKit1.Error.Failed: No session for cookie
+    //
+    // and pkexec stays broken until the agent is restarted by hand. Watch
+    // the Authority's bus name instead and re-register whenever it comes
+    // back, whatever restarted it.
+    while let Some(signal) = owner_changes.next().await {
+        let args = match signal.args() {
+            Ok(args) => args,
+            Err(e) => {
+                log::warn!("polkit agent: malformed NameOwnerChanged: {e}");
+                continue;
+            }
+        };
+        // No new owner means polkitd just went away; the re-registration
+        // belongs to the signal that announces its replacement.
+        if args.new_owner().is_none() {
+            continue;
+        }
+        log::info!("polkit agent: {POLKIT_BUS_NAME} restarted, re-registering");
+        if let Err(e) = register(&conn, &session_id).await {
+            log::error!("polkit agent: re-registration failed: {e}");
+        }
+    }
+
+    Ok(())
+}
+
+/// Hand this agent to the polkit Authority as the one serving `session_id`.
+async fn register(conn: &zbus::Connection, session_id: &str) -> zbus::Result<()> {
     let authority = zbus::Proxy::new(
-        &conn,
-        "org.freedesktop.PolicyKit1",
+        conn,
+        POLKIT_BUS_NAME,
         "/org/freedesktop/PolicyKit1/Authority",
         "org.freedesktop.PolicyKit1.Authority",
     )
     .await?;
 
-    let subject_kind = "unix-session".to_string();
-    let subject_details = session::subject_details(&session_id)?;
-    let subject = (subject_kind, subject_details);
-
+    let subject = (
+        "unix-session".to_string(),
+        session::subject_details(session_id)?,
+    );
     let locale = std::env::var("LANG").unwrap_or_else(|_| "en_US.UTF-8".into());
-    let object_path = AGENT_OBJECT_PATH.to_string();
 
     if let Err(e) = authority
         .call::<_, _, ()>(
             "RegisterAuthenticationAgent",
-            &(&subject, locale.as_str(), object_path.as_str()),
+            &(&subject, locale.as_str(), AGENT_OBJECT_PATH),
         )
         .await
     {
@@ -212,10 +258,6 @@ async fn run(sender: Arc<Mutex<std::sync::mpsc::Sender<AgentEvent>>>) -> zbus::R
     }
 
     log::info!("polkit agent registered at {AGENT_OBJECT_PATH}");
-
-    // Park forever — when the process exits the bus closes and polkit
-    // automatically forgets us.
-    std::future::pending::<()>().await;
     Ok(())
 }
 
