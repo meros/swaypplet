@@ -101,16 +101,22 @@ Verified headlessly: `dev/render.sh --mode screenshot` (add
 `SWPP_SELECT_RECT=x,y,w,h` for the selection chrome) and
 `--mode preview:annotate`.
 
-### 4. Privacy indicators (S)
+### 4. Privacy indicators (S) — microphone DONE 2026-08-11, the rest blocked
 
-Nothing on wlroots ships them. Mic-in-use, camera-in-use and screencast-active
-are three glyphs in the hazard lane (`bar/hazards.rs`), which already has the
-appear-only Revealer pattern and the amber static rest state. Mic and camera
-come free with the PipeWire migration (item 7); screencast comes from the
-portal's D-Bus session list.
+The microphone glyph is in the hazard lane, fed by `crate::audio`'s snapshot:
+a source output exists, so something is recording. No timer, and its
+stand-down (P10) is that list going empty. The tooltip names what is
+listening, because that is the question a microphone glyph provokes.
 
-Fits P9 and P10 cleanly: each has an obvious stand-down (capture stops), and
-none of them is red.
+Camera and screencast were meant to ship beside it and cannot, for the same
+reason as each other: **there is no signal a third party can read.** v4l2 has
+no in-use broadcast; `/proc/*/fd` scanning would be a poll and needs to walk
+every process. The portal is no better — `org.freedesktop.portal.Camera`
+exposes `IsCameraPresent` (presence, not use) and `ScreenCast` exposes methods
+to *start* a cast with no way to enumerate live ones. Both conditions are
+plainly visible in PipeWire's node graph, which this process cannot reach
+while libpipewire is out of the build (item 7). They are blocked on that, not
+on design, and they become nearly free the day it is in.
 
 ### 5. Window switcher with live thumbnails (L) — DONE 2026-08-11
 

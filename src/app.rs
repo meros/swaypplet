@@ -190,7 +190,7 @@ pub fn run() {
                         Some(crate::notifications::store::TaskRef { task, visible })
                     }));
             }
-            let bar = BarManager::new(app, sway.clone(), toggle);
+            let bar = BarManager::new(app, sway.clone(), audio.clone(), toggle);
             // OSD interjection (BAR_VISION increment 5): volume/brightness
             // render in the bar's decision slot unless the focused window
             // is fullscreen — then the center-screen card stays.
