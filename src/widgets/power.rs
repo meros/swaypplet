@@ -62,11 +62,55 @@ pub(crate) fn find_battery_path() -> Option<String> {
 // Domain types
 // ---------------------------------------------------------------------------
 
+/// What the charger is doing, straight from `/sys/class/power_supply/BAT*/status`.
+///
+/// The distinction that matters is `Idle`: a ThinkPad holding at its
+/// `charge_control_end_threshold` reports "Not charging" while plugged in.
+/// Collapsing that into a charging bool made it indistinguishable from
+/// running on battery, so the bar showed a discharge icon and a time-to-empty
+/// for a machine sitting on mains.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChargeState {
+    Charging,
+    Discharging,
+    /// Plugged in, battery at 100 %.
+    Full,
+    /// Plugged in, not drawing — typically holding at a charge threshold.
+    Idle,
+    Unknown,
+}
+
+impl ChargeState {
+    fn parse(status: &str) -> Self {
+        if status.eq_ignore_ascii_case("Charging") {
+            Self::Charging
+        } else if status.eq_ignore_ascii_case("Discharging") {
+            Self::Discharging
+        } else if status.eq_ignore_ascii_case("Full") {
+            Self::Full
+        } else if status.eq_ignore_ascii_case("Not charging") {
+            Self::Idle
+        } else {
+            Self::Unknown
+        }
+    }
+
+    /// On mains, whether or not current is flowing.
+    pub(crate) fn plugged(self) -> bool {
+        matches!(self, Self::Charging | Self::Full | Self::Idle)
+    }
+}
+
+/// At or above this, the charge is close enough to done that a countdown is
+/// noise rather than information.
+pub(crate) const ALMOST_FULL_PCT: u8 = 95;
+
 #[derive(Debug, Clone)]
 pub(crate) struct BatteryState {
     /// 0–100
     pub(crate) capacity: u8,
     pub(crate) charging: bool,
+    pub(crate) state: ChargeState,
     /// Watts (power_now / 1_000_000)
     power_w: Option<f64>,
     /// Wh remaining
@@ -116,7 +160,10 @@ pub(crate) fn read_battery(bat_path: &str) -> Option<BatteryState> {
         "Discharging".to_owned()
     });
 
-    let charging = status.eq_ignore_ascii_case("Charging") || status.eq_ignore_ascii_case("Full");
+    let state = ChargeState::parse(&status);
+    // Kept as "the bolt should show": strictly current flowing in, so a
+    // full-but-plugged battery no longer claims to be charging.
+    let charging = state == ChargeState::Charging;
 
     let power_w = read_sysfs(&format!("{}/power_now", bat_path))
         .and_then(|s| s.parse::<u64>().ok())
@@ -144,6 +191,7 @@ pub(crate) fn read_battery(bat_path: &str) -> Option<BatteryState> {
     Some(BatteryState {
         capacity,
         charging,
+        state,
         power_w,
         energy_now_wh,
         energy_full_wh,
@@ -191,41 +239,56 @@ fn format_hours(h: f64) -> Option<String> {
 }
 
 fn battery_sub_text(bat: &BatteryState) -> String {
-    // Compute a time estimate string, or "Calculating..." when power_now is 0.
-    let time_str: Option<String> = match (bat.power_w, bat.energy_now_wh, bat.energy_full_wh) {
-        (Some(power), Some(energy_now), Some(energy_full)) => {
-            if power < 0.001 {
-                // power_now == 0 — meter hasn't settled yet.
-                Some("Calculating...".to_owned())
-            } else if bat.charging {
-                let to_full = (energy_full - energy_now).max(0.0);
-                match format_hours(to_full / power) {
-                    Some(t) => Some(format!("{} to full", t)),
-                    None => Some("Calculating...".to_owned()),
-                }
-            } else {
-                match format_hours(energy_now / power) {
-                    Some(t) => Some(format!("{} remaining", t)),
-                    None => Some("Calculating...".to_owned()),
-                }
-            }
-        }
-        _ => None,
+    let estimate = |wh: Option<f64>| -> Option<String> {
+        let power = bat.power_w.filter(|w| *w >= 0.001)?;
+        format_hours(wh? / power)
     };
 
-    if bat.charging {
-        match time_str.as_deref() {
-            Some("Calculating...") | None => "Charging".to_owned(),
-            Some(t) => format!("Charging — {}", t),
+    match bat.state {
+        ChargeState::Charging => {
+            let to_full = match (bat.energy_full_wh, bat.energy_now_wh) {
+                (Some(full), Some(now)) => Some((full - now).max(0.0)),
+                _ => None,
+            };
+            match estimate(to_full) {
+                Some(t) => format!("Charging — {} to full", t),
+                None => "Charging".to_owned(),
+            }
         }
-    } else if bat.capacity == 100 {
-        "Fully charged".to_owned()
-    } else {
-        match time_str.as_deref() {
-            Some("Calculating...") => "On battery — Calculating...".to_owned(),
-            None => "On battery".to_owned(),
-            Some(t) => format!("On battery — {}", t),
+        ChargeState::Full => "Fully charged".to_owned(),
+        // Plugged but idle: a ThinkPad holding at its charge threshold. Saying
+        // "On battery" here was the old bug; there is no direction to report.
+        ChargeState::Idle => "Plugged in".to_owned(),
+        ChargeState::Discharging | ChargeState::Unknown => {
+            match estimate(bat.energy_now_wh) {
+                Some(t) => format!("On battery — {} remaining", t),
+                None => "On battery".to_owned(),
+            }
         }
+    }
+}
+
+/// Time estimate for the bar's battery segment: time-to-full while charging,
+/// time-to-empty while discharging.
+///
+/// `None` once the charge is effectively done — plugged and not actively
+/// charging, or at/above [`ALMOST_FULL_PCT`] — because a countdown there says
+/// nothing the icon has not already said. Also `None` when the meter has not
+/// settled (`power_now == 0`), rather than showing a fabricated number.
+pub(crate) fn eta_text(bat: &BatteryState) -> Option<String> {
+    if bat.capacity >= ALMOST_FULL_PCT {
+        return None;
+    }
+    let power = bat.power_w.filter(|w| *w >= 0.001)?;
+    match bat.state {
+        ChargeState::Charging => {
+            let to_full = (bat.energy_full_wh? - bat.energy_now_wh?).max(0.0);
+            format_hours(to_full / power)
+        }
+        ChargeState::Discharging | ChargeState::Unknown => {
+            format_hours(bat.energy_now_wh? / power)
+        }
+        ChargeState::Full | ChargeState::Idle => None,
     }
 }
 
@@ -751,11 +814,52 @@ mod tests {
         BatteryState {
             capacity: 50,
             charging: false,
+            state: ChargeState::Discharging,
             power_w,
             energy_now_wh: None,
             energy_full_wh: None,
             health_pct: None,
         }
+    }
+
+    fn charged(state: ChargeState, capacity: u8, now: f64, full: f64) -> BatteryState {
+        BatteryState {
+            capacity,
+            charging: state == ChargeState::Charging,
+            state,
+            power_w: Some(10.0),
+            energy_now_wh: Some(now),
+            energy_full_wh: Some(full),
+            health_pct: None,
+        }
+    }
+
+    #[test]
+    fn eta_counts_down_while_discharging_and_up_while_charging() {
+        let d = charged(ChargeState::Discharging, 50, 50.0, 100.0);
+        assert_eq!(eta_text(&d).as_deref(), Some("5h 0m"));
+        let c = charged(ChargeState::Charging, 50, 50.0, 100.0);
+        assert_eq!(eta_text(&c).as_deref(), Some("5h 0m"));
+    }
+
+    #[test]
+    fn eta_goes_quiet_near_full_and_on_idle_mains() {
+        // At/above the almost-full mark, no countdown in either direction.
+        let c = charged(ChargeState::Charging, ALMOST_FULL_PCT, 95.0, 100.0);
+        assert_eq!(eta_text(&c), None);
+        // Plugged and holding at a threshold: there is no direction to report.
+        let idle = charged(ChargeState::Idle, 60, 60.0, 100.0);
+        assert_eq!(eta_text(&idle), None);
+        let full = charged(ChargeState::Full, 60, 60.0, 100.0);
+        assert_eq!(eta_text(&full), None);
+    }
+
+    #[test]
+    fn idle_mains_is_not_reported_as_running_on_battery() {
+        let idle = charged(ChargeState::Idle, 95, 95.0, 100.0);
+        assert_eq!(battery_sub_text(&idle), "Plugged in");
+        assert!(ChargeState::Idle.plugged());
+        assert!(!ChargeState::Discharging.plugged());
     }
 
     #[test]

@@ -22,12 +22,16 @@ use gtk4::prelude::*;
 
 use super::popover;
 use crate::anim::{self, SlideBin};
-use crate::widgets::power::{self, BatteryState};
+use crate::widgets::power::{self, BatteryState, ChargeState};
 
 const WARNING_PCT: u8 = 30;
 /// Shared with the decision slot's battery occupant (bar/decision.rs).
 pub(crate) const CRITICAL_PCT: u8 = 15;
 const ICON_CHARGING: &str = "󰂄";
+/// Plugged in with no current flowing: full, or holding at a charge
+/// threshold. A plug reads as "on mains" without implying a direction,
+/// which neither the bolt nor the discharge ladder can say.
+const ICON_PLUGGED: &str = "󰚥";
 // Waybar's format-icons: one glyph per 10 % bucket, 0–100.
 const ICONS: [&str; 11] = ["󰂎", "󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰁿", "󰂁", "󰂂", "󰁹"];
 
@@ -41,8 +45,8 @@ enum Tier {
     Critical,
 }
 
-fn tier(capacity: u8, charging: bool) -> Tier {
-    if charging {
+fn tier(capacity: u8, plugged: bool) -> Tier {
+    if plugged {
         Tier::Rest
     } else if capacity <= CRITICAL_PCT {
         Tier::Critical
@@ -57,6 +61,8 @@ struct Ui {
     icon: gtk4::Label,
     pct: gtk4::Label,
     pct_reveal: gtk4::Revealer,
+    eta: gtk4::Label,
+    eta_reveal: gtk4::Revealer,
     slide: SlideBin,
     /// Last applied tier; `None` before the first read so startup styling
     /// is an edge (a bar born at 12 % must still go red) but never a
@@ -80,11 +86,20 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
         .transition_duration(200)
         .child(&pct)
         .build();
+    let eta = gtk4::Label::builder()
+        .css_classes(["bar-battery-eta"])
+        .build();
+    let eta_reveal = gtk4::Revealer::builder()
+        .transition_type(gtk4::RevealerTransitionType::SlideRight)
+        .transition_duration(200)
+        .child(&eta)
+        .build();
     let content = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .build();
     content.append(&icon);
     content.append(&pct_reveal);
+    content.append(&eta_reveal);
     let slide = SlideBin::new();
     slide.set_child(&content);
     let root = gtk4::Box::builder()
@@ -119,6 +134,8 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
 
     let ui = Rc::new(Ui {
         icon,
+        eta,
+        eta_reveal,
         pct,
         pct_reveal,
         slide,
@@ -150,10 +167,21 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
 }
 
 fn apply(root: &gtk4::Box, ui: &Ui, bat: &BatteryState) {
-    ui.icon.set_label(icon(bat.capacity, bat.charging));
+    ui.icon.set_label(icon(bat.capacity, bat.state));
     root.set_tooltip_text(Some(&power::battery_summary_text(bat)));
 
-    let t = tier(bat.capacity, bat.charging);
+    // Time estimate in both directions. power::eta_text withholds it once the
+    // charge is effectively done, so this goes quiet on mains without the
+    // widget deciding when that is.
+    match power::eta_text(bat) {
+        Some(t) => {
+            ui.eta.set_label(&t);
+            ui.eta_reveal.set_reveal_child(true);
+        }
+        None => ui.eta_reveal.set_reveal_child(false),
+    }
+
+    let t = tier(bat.capacity, bat.state.plugged());
     if t != Tier::Rest {
         ui.pct.set_label(&format!("{}%", bat.capacity));
     }
@@ -179,12 +207,16 @@ fn set_class(widget: &impl IsA<gtk4::Widget>, class: &str, on: bool) {
     }
 }
 
-/// Waybar's icon pick: linear 10 % buckets (unit-tested).
-fn icon(capacity: u8, charging: bool) -> &'static str {
-    if charging {
-        return ICON_CHARGING;
+/// Waybar's icon pick: linear 10 % buckets, with the two mains states
+/// taking their own glyph (unit-tested).
+fn icon(capacity: u8, state: ChargeState) -> &'static str {
+    match state {
+        ChargeState::Charging => ICON_CHARGING,
+        ChargeState::Full | ChargeState::Idle => ICON_PLUGGED,
+        ChargeState::Discharging | ChargeState::Unknown => {
+            ICONS[(capacity as usize / 10).min(ICONS.len() - 1)]
+        }
     }
-    ICONS[(capacity as usize / 10).min(ICONS.len() - 1)]
 }
 
 #[cfg(test)]
@@ -193,18 +225,18 @@ mod tests {
 
     #[test]
     fn icon_buckets_cover_the_range() {
-        assert_eq!(icon(0, false), "󰂎");
-        assert_eq!(icon(9, false), "󰂎");
-        assert_eq!(icon(55, false), "󰁾");
-        assert_eq!(icon(100, false), "󰁹");
+        assert_eq!(icon(0, ChargeState::Discharging), "󰂎");
+        assert_eq!(icon(9, ChargeState::Discharging), "󰂎");
+        assert_eq!(icon(55, ChargeState::Discharging), "󰁾");
+        assert_eq!(icon(100, ChargeState::Discharging), "󰁹");
         // Out-of-spec capacity must not index past the table.
-        assert_eq!(icon(255, false), "󰁹");
+        assert_eq!(icon(255, ChargeState::Discharging), "󰁹");
     }
 
     #[test]
     fn charging_overrides_the_bucket() {
-        assert_eq!(icon(3, true), ICON_CHARGING);
-        assert_eq!(icon(100, true), ICON_CHARGING);
+        assert_eq!(icon(3, ChargeState::Charging), ICON_CHARGING);
+        assert_eq!(icon(100, ChargeState::Charging), ICON_CHARGING);
     }
 
     #[test]

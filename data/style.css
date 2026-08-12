@@ -221,13 +221,12 @@ button.bar-ws.urgent {
 }
 
 /* Task ribbons: 2px lane under each task group — off = no session, dim
-   solid = working, task hue = waiting. Fused segments make per-button
-   borders read as one ribbon spanning the group. */
+   solid = working, bright solid = waiting. Fused segments make per-button
+   borders read as one ribbon spanning the group. Task hue was removed
+   2026-08-12; the lane separates states by luminance alone, which it
+   already did under grayscale. */
 button.bar-ws.ribbon-working { border-bottom-color: alpha(@fg, 0.30); }
-button.bar-ws.ribbon-waiting.task1 { border-bottom-color: @accent; }
-button.bar-ws.ribbon-waiting.task2 { border-bottom-color: @accent_secondary; }
-button.bar-ws.ribbon-waiting.task3 { border-bottom-color: @accent_tertiary; }
-button.bar-ws.ribbon-waiting.task4 { border-bottom-color: @accent_quaternary; }
+button.bar-ws.ribbon-waiting { border-bottom-color: alpha(@fg, 0.85); }
 
 /* ── Bar center: the decision slot (src/bar/decision.rs) ──
    Empty at nominal. One occupant behind a Revealer: battery critical
@@ -250,10 +249,6 @@ button.bar-ws.ribbon-waiting.task4 { border-bottom-color: @accent_quaternary; }
 }
 
 /* Task-hue dot: hue reinforces identity, the description carries it. */
-.bar-decision-dot.t1 { color: @accent; }
-.bar-decision-dot.t2 { color: @accent_secondary; }
-.bar-decision-dot.t3 { color: @accent_tertiary; }
-.bar-decision-dot.t4 { color: @accent_quaternary; }
 
 /* Waiting age + "+N more wait" suffix. */
 .bar-decision-meta {
@@ -383,6 +378,50 @@ button.bar-clock:hover {
 
 .bar-battery-pct {
     margin-left: 4px;
+}
+
+/* Time estimate beside the glyph (time-to-full charging, time-to-empty
+   discharging). Dimmer than the percentage: the percentage appears only
+   when something is wrong, the estimate is ambient. power::eta_text
+   withholds it near full, so this is quiet on mains. */
+.bar-battery-eta {
+    margin-left: 4px;
+    color: alpha(@fg, 0.65);
+}
+
+/* ── Media pill (src/bar/media.rs) ──
+   Expanded 2026-08-12 from the single ♪ mark to art + title/artist + a
+   transport row. `.paused` dims the whole pill, so a stopped player recedes
+   without disappearing. The label ellipsizes at 24 chars; the pill must not
+   be able to push the clock off the bar. */
+.bar-media {
+    margin-right: 4px;
+}
+
+.bar-media.paused {
+    opacity: 0.55;
+}
+
+.bar-media-art {
+    border-radius: 3px;
+}
+
+.bar-media-text {
+    margin-right: 2px;
+}
+
+.bar-media-btn {
+    padding: 0 4px;
+    min-height: 0;
+    min-width: 0;
+    background: none;
+    border: none;
+    box-shadow: none;
+    color: alpha(@fg, 0.75);
+}
+
+.bar-media-btn:hover {
+    color: @fg;
 }
 
 /* ── Tray: SNI icon pill left of the instrument track (src/bar/tray/) ──
@@ -600,23 +639,13 @@ button.bar-popover-action {
     min-height: 28px;
 }
 
-/* ── Active-task accent ripple ──
-   board.rs stamps bar-task1..4 on this output's .bar-root; descendant
-   selectors push the task color across the right track's band lane and
-   onto the focused workspace segment. Colors follow waybar's taskColors
-   (accent order 1→4). */
-.bar-root.bar-task1 .bar-track > .bar-seg { border-top-color: @accent; }
-.bar-root.bar-task2 .bar-track > .bar-seg { border-top-color: @accent_secondary; }
-.bar-root.bar-task3 .bar-track > .bar-seg { border-top-color: @accent_tertiary; }
-.bar-root.bar-task4 .bar-track > .bar-seg { border-top-color: @accent_quaternary; }
+/* The active-task accent ripple lived here: board.rs stamped bar-task1..4
+   on .bar-root and descendant selectors pushed that hue across the right
+   track's band lane. Removed 2026-08-12 — the bar is achromatic now, and
+   task identity reads from position and numeral alone. */
 
-/* Workspace-strip dots (src/bar/workspaces.rs): every numbered workspace
-   1–16 carries its task's accent — same order, defined only here so a
-   palette retune reaches the dots too. */
-.bar-ws-dot.task1 { color: @accent; }
-.bar-ws-dot.task2 { color: @accent_secondary; }
-.bar-ws-dot.task3 { color: @accent_tertiary; }
-.bar-ws-dot.task4 { color: @accent_quaternary; }
+/* Workspace-strip dots (src/bar/workspaces.rs) inherit the strip's
+   foreground; their per-task accents were removed 2026-08-12. */
 
 /* The accent ripple deliberately stops at the track band above: it is
    keyed to this output's LOCAL task, so stamping it on the selected
