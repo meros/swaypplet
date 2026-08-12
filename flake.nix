@@ -32,10 +32,6 @@
           # Audio: src/audio.rs speaks the PulseAudio protocol to
           # PipeWire's pulse server instead of parsing `wpctl status`.
           libpulseaudio
-          # libwebauthn (src/passkey/) pulls hidapi for the USB authenticator
-          # transport, whose build script wants libudev. We only use the cable
-          # transport, but the dependency is not feature-gated upstream.
-          udev
         ];
     in
     {

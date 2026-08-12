@@ -5,15 +5,6 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
-# Phone-as-passkey auth (src/passkey/). Git-pinned: the crate is pre-1.0
-# and its cable/hybrid API is the part we depend on most heavily, so a
-# floating version would break the agent without warning. package.nix
-# carries the matching cargoLock.outputHashes entry.
-libwebauthn = { git = "https://github.com/linux-credentials/libwebauthn", rev = "5bd5f49cbf868b90e99edb5c0471949622992c79" }
-qrcode = "0.14"
-# libwebauthn's store trait is #[async_trait], so implementing it needs the
-# same attribute on our side.
-async-trait = "0.1"
 
 gtk4 = { version = "0.11", features = ["v4_12"] }
 gtk4-layer-shell = "0.8"
