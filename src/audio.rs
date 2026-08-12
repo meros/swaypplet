@@ -121,10 +121,20 @@ impl AudioState {
     }
 }
 
+/// Maximum output volume, as a fraction of nominal. Above 1.0 is software
+/// amplification. Defined here rather than in the OSD because this module
+/// clamps to it when applying a relative change.
+pub const VOLUME_CEILING: f64 = 1.5;
+
 /// What the GTK side can ask the server to do.
 #[derive(Clone, Debug)]
 pub enum Command {
     SetSinkVolume(f64),
+    /// Relative change, clamped to [0, ceiling]. The caller cannot do this
+    /// arithmetic itself: its snapshot may name a different device than the
+    /// one this command will land on, so the base value would be another
+    /// sink's. Only this thread knows the target and its level together.
+    AdjustSinkVolume(f64),
     SetSourceVolume(f64),
     ToggleSinkMute,
     ToggleSourceMute,
@@ -262,7 +272,28 @@ fn session(
         }
 
         while let Ok(command) = commands.try_recv() {
-            apply(&mut context, &last, command);
+            // Resolve the target from a fresh read, never from `last`. The
+            // default sink can change without any subscription event reaching
+            // us: a Bluetooth sink appearing fires SINK events and we re-read,
+            // but WirePlumber promotes it to default a moment *after* that,
+            // and the promotion arrives (if at all) as a SERVER event that
+            // pipewire-pulse does not reliably emit. `last` then names the
+            // laptop speakers forever, and every volume and mute press goes
+            // there while the audio plays on the headphones.
+            //
+            // Re-reading here costs four queries against a local socket, per
+            // key press. That is the same cost the subscription path already
+            // pays, and it makes a stale target impossible rather than
+            // unlikely.
+            match read(&mut mainloop, &context) {
+                Ok(fresh) => {
+                    apply(&mut context, &fresh, command);
+                    last = fresh;
+                }
+                // A read failure is no reason to swallow the key press; the
+                // cached snapshot is the best guess left.
+                Err(_) => apply(&mut context, &last, command),
+            }
             dirty.set(true);
         }
 
@@ -479,6 +510,12 @@ fn apply(context: &mut Context, state: &AudioState, command: Command) {
     match command {
         Command::SetSinkVolume(level) => {
             if let Some(device) = state.sinks.iter().find(|d| d.is_default) {
+                introspect.set_sink_volume_by_name(&device.id, &from_level(level), None);
+            }
+        }
+        Command::AdjustSinkVolume(delta) => {
+            if let Some(device) = state.sinks.iter().find(|d| d.is_default) {
+                let level = (device.volume.volume + delta).clamp(0.0, VOLUME_CEILING);
                 introspect.set_sink_volume_by_name(&device.id, &from_level(level), None);
             }
         }
