@@ -22,6 +22,7 @@ mod decision;
 pub(crate) mod hazards;
 mod media;
 mod popover;
+mod presence;
 mod start;
 mod tray;
 pub(crate) mod workspaces;
@@ -270,6 +271,9 @@ fn build_bar_window(
     // unreachable too. One flip restores the whole thing.
     board.set_visible(SHOW_BOARD);
     track.append(&board);
+    if let Some(presence) = presence::build() {
+        track.append(&presence);
+    }
     track.append(&clock::build());
     right.append(&track);
 
