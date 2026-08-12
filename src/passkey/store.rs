@@ -36,11 +36,35 @@ pub const STATE_DIR: &str = "/var/lib/swaypplet/passkey";
 const DEVICES_FILE: &str = "devices.json";
 const CREDENTIAL_FILE: &str = "credential.json";
 
-/// Relying-party id for local authentication. Fixed, local, and never a real
-/// domain: there is no web origin here, and the assertion is verified against
-/// a key in this store rather than by a remote server. Changing this value
-/// invalidates every enrolled credential.
-pub const RP_ID: &str = "swaypplet.local";
+/// Relying-party id for local authentication: this machine's hostname under
+/// `.local`. Never a real domain — there is no web origin here, and the
+/// assertion is verified against a key in this store rather than by a remote
+/// server.
+///
+/// It is derived from the hostname rather than fixed because this string is
+/// what the phone shows in its passkey list. "swaypplet.local" told the user
+/// which program had asked; "meros-laptop.local" tells them which machine they
+/// are unlocking, which is the question they actually have standing there.
+///
+/// Changing the hostname invalidates every enrolled credential. That is the
+/// right trade: a credential naming a machine that no longer exists under that
+/// name is worse than one re-enrollment.
+pub fn rp_id() -> String {
+    format!("{}.local", hostname())
+}
+
+/// Human label offered alongside [`rp_id`].
+pub fn rp_name() -> String {
+    hostname()
+}
+
+fn hostname() -> String {
+    std::fs::read_to_string("/etc/hostname")
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "linux".to_owned())
+}
 
 /// Serde mirror of [`CableKnownDeviceInfo`], which carries no derives of its
 /// own. Byte arrays become `Vec<u8>` because serde's array impls stop at 32
@@ -90,6 +114,8 @@ impl StoredDevice {
 pub struct EnrolledCredential {
     /// Local account this credential authenticates.
     pub user: String,
+    /// Recorded so a hostname change is detected as a mismatch rather than
+    /// silently failing every assertion.
     pub rp_id: String,
     /// Pinned in `allowCredentials` at assertion time and re-checked in the
     /// response, so no other credential the phone holds can be substituted.
@@ -251,7 +277,7 @@ mod tests {
         store
             .store_credential(&EnrolledCredential {
                 user: "meros".to_owned(),
-                rp_id: RP_ID.to_owned(),
+                rp_id: rp_id(),
                 credential_id: vec![9; 16],
                 public_key_cose: vec![8; 77],
             })
