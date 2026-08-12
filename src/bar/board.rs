@@ -10,9 +10,10 @@
 //! onset-only (P2): one SlideBin nudge when a bay turns unacked-waiting,
 //! then static rest; escalation at 10 min is a static luminance step.
 //!
-//! Accent ripple: the local bay's task stamps bar-task1..4 on this bar's
-//! root (moved verbatim from the deleted task pill); style.css colors the
-//! track band + focused workspace from there.
+//! Hidden since 2026-08-12 (see bar/mod.rs): the bays were not earning
+//! their width. The widget is still built, so nothing else in the bar had
+//! to change; flip `SHOW_BOARD` back to display it. The accent ripple it
+//! used to stamp is gone with the bar's task hue.
 //!
 //! Bay click opens the read-layer task popover (bar/popover.rs, vision
 //! increment 8); the old direct task-find/task-rename click bindings live
@@ -29,7 +30,6 @@ use crate::anim::{self, SlideBin};
 use crate::sway_ipc::SwayService;
 use crate::task_state::{Activity, SessionState, TaskState, TaskStateService, task_of_name};
 
-const TASK_CLASSES: [&str; 4] = ["bar-task1", "bar-task2", "bar-task3", "bar-task4"];
 const BAY_TASK_CLASSES: [&str; 4] = ["t1", "t2", "t3", "t4"];
 const STATE_CLASSES: [&str; 8] = [
     "socket", "working", "waiting", "blocked", "unacked", "overdue", "stopped", "stale",
@@ -282,15 +282,12 @@ fn local_task(output: Option<&str>, sway: &SwayService) -> Option<u8> {
         .and_then(|w| task_of_name(&w.name))
 }
 
-fn apply_accent(root: &gtk4::Widget, task: Option<u8>) {
-    for (i, class) in TASK_CLASSES.iter().enumerate() {
-        if task == Some(i as u8 + 1) {
-            root.add_css_class(class);
-        } else {
-            root.remove_css_class(class);
-        }
-    }
-}
+/// Was the accent ripple: stamped bar-task1..4 on the bar root so the right
+/// track's band lane took the local task's hue. The hue was removed from the
+/// bar on 2026-08-12 and style.css no longer defines those selectors, so this
+/// is a no-op kept only to leave the call sites and the local-task plumbing
+/// intact while the board is hidden.
+fn apply_accent(_root: &gtk4::Widget, _task: Option<u8>) {}
 
 struct Bay {
     button: gtk4::Button,

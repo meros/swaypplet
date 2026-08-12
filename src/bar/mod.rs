@@ -11,6 +11,9 @@
 //! a live panel, and `SWAYPPLET_NO_BAR=1` keeps the hosted bar off while
 //! an external bar owns the strip (see app.rs).
 
+/// The four-bay task board (bar/board.rs) is built but not shown.
+const SHOW_BOARD: bool = false;
+
 mod battery;
 mod board;
 mod clock;
@@ -255,12 +258,18 @@ fn build_bar_window(
         track.append(&bat);
     }
     // gdk connector names match sway output names under wlroots.
-    track.append(&board::build(
+    let board = board::build(
         sway,
         tasks,
         monitor.connector().map(|c| c.to_string()),
         &root,
-    ));
+    );
+    // Hidden rather than removed: the bays were not earning their width, but
+    // the instrument may come back, and an invisible child costs one layout
+    // skip. GTK gives no clicks to a hidden widget, so the bay popovers are
+    // unreachable too. One flip restores the whole thing.
+    board.set_visible(SHOW_BOARD);
+    track.append(&board);
     track.append(&clock::build());
     right.append(&track);
 
