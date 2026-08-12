@@ -29,24 +29,38 @@ use libwebauthn::ops::webauthn::{
 use libwebauthn::transport::cable::qr_code_device::{
     CableQrCodeDevice, CableTransports, QrCodeOperationHint,
 };
+use libwebauthn::transport::cable::channel::{CableUpdate, CableUxUpdate};
 use libwebauthn::transport::cable::is_available;
-use libwebauthn::transport::{ChannelSettings, Device as _};
+use libwebauthn::transport::{Channel as _, ChannelSettings, Device as _};
 use libwebauthn::webauthn::WebAuthn;
 
-use super::store::{EnrolledCredential, FileDeviceStore, RP_ID};
+use super::store::{rp_id, rp_name, EnrolledCredential, FileDeviceStore};
 
 /// Enrollment is a deliberate, attended act, so the window is generous: the
 /// user has to find their phone, open the camera and approve.
 const TIMEOUT_MS: u32 = 120_000;
 
 /// What the caller needs in order to drive a UI.
+///
+/// These come from libwebauthn's own UX stream rather than from the sequence
+/// of calls here. `Channel::channel()` returns before the phone has done
+/// anything, so inferring progress from it reports success while the user is
+/// still looking for their camera, and hides where a failure actually
+/// happened.
 #[derive(Debug, Clone)]
 pub enum Progress {
     /// caBLE QR payload. Render it as a QR code; the phone's camera reads it.
     ShowQr(String),
-    /// The phone answered and the encrypted channel is up. The QR is now
-    /// useless and should come off screen.
+    /// Phone is in BLE range and the proximity handshake is running.
+    ProximityCheck,
+    /// Reaching the phone through the tunnel.
+    Connecting,
+    /// Encrypted channel is up. The QR is now useless and can come off screen.
     Connected,
+    /// Phone is asking for the biometric.
+    AwaitingApproval,
+    /// Non-fatal note from the transport, worth showing but not the outcome.
+    Note(String),
 }
 
 /// Runs the ceremony to completion. Blocking: call it off the GTK thread.
@@ -55,18 +69,20 @@ pub enum Progress {
 /// for display only.
 pub fn run(
     user: &str,
-    progress: impl Fn(Progress) + Send + 'static,
+    allow_local: bool,
+    progress: impl Fn(Progress) + Clone + Send + Sync + 'static,
 ) -> Result<EnrolledCredential, String> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| format!("cannot start async runtime: {e}"))?;
-    runtime.block_on(ceremony(user, progress))
+    runtime.block_on(ceremony(user, allow_local, progress))
 }
 
 async fn ceremony(
     user: &str,
-    progress: impl Fn(Progress),
+    allow_local: bool,
+    progress: impl Fn(Progress) + Clone + Send + Sync + 'static,
 ) -> Result<EnrolledCredential, String> {
     if !is_available().await {
         return Err("No Bluetooth adapter. The phone is contacted over BLE, so \
@@ -81,10 +97,23 @@ async fn ceremony(
     // Persistent, not transient: the transient constructor discards the
     // phone's linking information, which would leave every future unlock
     // needing a fresh QR.
+    //
+    // Cloud-assisted only by default. Offering the direct BLE channel too
+    // means advertising QR key 6 as a CBOR array, and Google Play services
+    // Fido before CTAP 2.3 reads that key as a boolean and hard-rejects the
+    // array — which shows up as the phone connecting and then the request
+    // dying with Transport(ConnectionFailed), exactly what this machine's
+    // phone did on 2026-08-12. `allow_local` opts back in for peers new
+    // enough to cope, at the price of that failure mode.
+    let transports = if allow_local {
+        CableTransports::CloudAssistedOrLocal
+    } else {
+        CableTransports::CloudAssistedOnly
+    };
     let mut device = CableQrCodeDevice::new_persistent(
         QrCodeOperationHint::MakeCredential,
         store.clone(),
-        CableTransports::CloudAssistedOrLocal,
+        transports,
     )
     .map_err(|e| format!("cannot start cable ceremony: {e:?}"))?;
 
@@ -93,8 +122,11 @@ async fn ceremony(
     let mut channel = device
         .channel(ChannelSettings::default())
         .await
-        .map_err(|e| format!("phone did not connect: {e:?}"))?;
-    progress(Progress::Connected);
+        .map_err(|e| format!("cannot open cable channel: {e:?}"))?;
+
+    // The channel exists before the phone has done anything; everything that
+    // follows is reported on this stream.
+    forward_updates(channel.get_ux_update_receiver(), &progress);
 
     let request = MakeCredentialRequest::prepare(&origin()?, &request_json(user)?, &settings())
         .await
@@ -124,7 +156,7 @@ async fn ceremony(
 
     let credential = EnrolledCredential {
         user: user.to_owned(),
-        rp_id: RP_ID.to_owned(),
+        rp_id: rp_id(),
         credential_id: attested.credential_id,
         public_key_cose: attested.credential_public_key,
     };
@@ -133,6 +165,38 @@ async fn ceremony(
         .map_err(|e| format!("cannot persist credential: {e}"))?;
 
     Ok(credential)
+}
+
+/// Pumps libwebauthn's UX stream into our [`Progress`] sink on a background
+/// task. Ends when the channel drops the sender, which happens once the
+/// ceremony is over either way.
+fn forward_updates(
+    mut rx: tokio::sync::broadcast::Receiver<CableUxUpdate>,
+    progress: &(impl Fn(Progress) + Clone + Send + Sync + 'static),
+) {
+    let progress = progress.clone();
+    tokio::spawn(async move {
+        while let Ok(update) = rx.recv().await {
+            match update {
+                CableUxUpdate::CableUpdate(CableUpdate::ProximityCheck) => {
+                    progress(Progress::ProximityCheck)
+                }
+                CableUxUpdate::CableUpdate(CableUpdate::Connecting) => {
+                    progress(Progress::Connecting)
+                }
+                CableUxUpdate::CableUpdate(CableUpdate::Authenticating) => {
+                    progress(Progress::Note("authenticating with the phone".to_owned()))
+                }
+                CableUxUpdate::CableUpdate(CableUpdate::Connected) => {
+                    progress(Progress::Connected)
+                }
+                CableUxUpdate::CableUpdate(CableUpdate::Error(e)) => {
+                    progress(Progress::Note(format!("transport: {e}")))
+                }
+                CableUxUpdate::UvUpdate(_) => progress(Progress::AwaitingApproval),
+            }
+        }
+    });
 }
 
 /// There is no web origin here. The assertion is checked against a key in our
@@ -146,10 +210,11 @@ fn settings<'a>() -> RequestSettings<'a> {
 }
 
 fn origin() -> Result<RequestOrigin, String> {
-    format!("https://{RP_ID}")
+    let id = rp_id();
+    format!("https://{id}")
         .as_str()
         .try_into()
-        .map_err(|_| format!("invalid origin for rp id {RP_ID}"))
+        .map_err(|_| format!("invalid origin for rp id {id}"))
 }
 
 fn request_json(user: &str) -> Result<String, String> {
@@ -159,11 +224,15 @@ fn request_json(user: &str) -> Result<String, String> {
     // Stable per account, so re-enrolling the same user replaces rather than
     // accumulates on the phone.
     let user_handle = base64url(user.as_bytes());
-    let display = user;
+    // The phone lists this next to the machine name. A real name reads better
+    // there than a login, so use GECOS when the account has one.
+    let display = full_name(user).unwrap_or_else(|| user.to_owned());
+    let id = rp_id();
+    let name = rp_name();
 
     Ok(format!(
         r#"{{
-    "rp": {{ "id": "{RP_ID}", "name": "swaypplet" }},
+    "rp": {{ "id": "{id}", "name": "{name}" }},
     "user": {{ "id": "{user_handle}", "name": "{user}", "displayName": "{display}" }},
     "challenge": "{challenge}",
     "pubKeyCredParams": [
@@ -179,6 +248,19 @@ fn request_json(user: &str) -> Result<String, String> {
     "attestation": "none"
 }}"#
     ))
+}
+
+/// GECOS full name for an account, first comma-separated field, empty treated
+/// as absent.
+fn full_name(user: &str) -> Option<String> {
+    let passwd = std::fs::read_to_string("/etc/passwd").ok()?;
+    passwd.lines().find_map(|line| {
+        let mut f = line.split(':');
+        (f.next()? == user).then_some(())?;
+        let gecos = f.nth(3)?;
+        let name = gecos.split(',').next()?.trim();
+        (!name.is_empty()).then(|| name.to_owned())
+    })
 }
 
 /// Straight from the kernel CSPRNG. No crate needed for this, and a read that
@@ -251,7 +333,7 @@ mod tests {
     fn request_demands_user_verification() {
         let json = request_json("meros").unwrap();
         assert!(json.contains(r#""userVerification": "required""#));
-        assert!(json.contains(&format!(r#""id": "{RP_ID}""#)));
+        assert!(json.contains(&format!(r#""id": "{}""#, rp_id())));
         // Two ceremonies must not share a challenge.
         assert_ne!(json, request_json("meros").unwrap());
     }

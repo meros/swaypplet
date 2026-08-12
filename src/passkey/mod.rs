@@ -42,9 +42,13 @@ pub mod store;
 /// "run me with pkexec" beats a permission-denied traceback.
 pub fn enroll_cli(mut args: impl Iterator<Item = String>) {
     let mut user: Option<String> = None;
+    let mut allow_local = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--user" => user = args.next(),
+            // Offer the direct BLE data channel as well as the tunnel. Older
+            // Play services reject the QR key it adds, so this is opt-in.
+            "--allow-local" => allow_local = true,
             other => {
                 eprintln!("passkey-enroll: unexpected argument {other}");
                 std::process::exit(2);
@@ -71,7 +75,7 @@ pub fn enroll_cli(mut args: impl Iterator<Item = String>) {
         });
 
     println!("Enrolling a phone for {user}.");
-    let outcome = enroll::run(&user, |progress| match progress {
+    let outcome = enroll::run(&user, allow_local, |progress| match progress {
         enroll::Progress::ShowQr(payload) => match qrcode::QrCode::new(&payload) {
             Ok(code) => {
                 use qrcode::render::unicode;
@@ -87,15 +91,20 @@ pub fn enroll_cli(mut args: impl Iterator<Item = String>) {
             // user can still scan it from another QR tool rather than restart.
             Err(e) => println!("QR render failed ({e}); raw payload:\n{payload}"),
         },
-        enroll::Progress::Connected => println!("Phone connected. Approve on the device."),
+        enroll::Progress::ProximityCheck => println!("Phone is nearby; checking proximity."),
+        enroll::Progress::Connecting => println!("Reaching the phone."),
+        enroll::Progress::Connected => println!("Connected. The QR is no longer needed."),
+        enroll::Progress::AwaitingApproval => println!("Approve on the phone."),
+        enroll::Progress::Note(note) => println!("({note})"),
     });
 
     match outcome {
         Ok(cred) => println!(
-            "Enrolled {} for {} ({}-byte credential id).",
-            cred.rp_id,
+            "Enrolled {} on {}. The phone lists it as \"{}\"; unlocks from here \n\
+             need no QR.",
             cred.user,
-            cred.credential_id.len()
+            cred.rp_id,
+            store::rp_name(),
         ),
         Err(e) => {
             eprintln!("Enrollment failed: {e}");
