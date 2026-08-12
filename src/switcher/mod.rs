@@ -251,30 +251,46 @@ impl Switcher {
         let root = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(6)
+            .width_request(THUMB_W as i32)
             .build();
         root.add_css_class("switcher-item");
 
         let picture = gtk4::Picture::builder()
             .content_fit(gtk4::ContentFit::Cover)
-            .width_request(THUMB_W as i32)
-            .height_request(THUMB_H as i32)
+            .hexpand(true)
+            .vexpand(true)
             .build();
-        picture.add_css_class("switcher-thumb");
 
         // The icon stands in until (or instead of) a thumbnail, so a card is
         // never an empty rectangle.
-        let icon = gtk4::Image::from_icon_name(&window.app_id.to_lowercase());
+        let icon = gtk4::Image::from_icon_name(&icon_name(&window.app_id));
         icon.set_pixel_size(48);
+        icon.set_halign(gtk4::Align::Center);
+        icon.set_valign(gtk4::Align::Center);
         icon.add_css_class("switcher-icon");
 
+        // The *frame* holds the thumbnail's size, and the picture is the
+        // overlay's main child. An overlay measures only its main child, so a
+        // picture that requests 260x156 from the overlay side is drawn at that
+        // size inside a card the grid sized to a 48 px icon — every thumbnail
+        // spilling over its neighbours. Overflow::Hidden then keeps what
+        // `Cover` crops inside the rounded corners.
         let stack = gtk4::Overlay::new();
-        stack.set_child(Some(&icon));
-        stack.add_overlay(&picture);
+        stack.set_size_request(THUMB_W as i32, THUMB_H as i32);
+        stack.set_overflow(gtk4::Overflow::Hidden);
+        stack.add_css_class("switcher-thumb");
+        stack.set_child(Some(&picture));
+        stack.add_overlay(&icon);
 
+        // `max_width_chars(1)` with hexpand is how a label ellipsizes to the
+        // width it is given instead of asking for the width of its text: a
+        // 28-char title measures wider than a 260 px thumbnail and would set
+        // the column width itself.
         let title = gtk4::Label::builder()
             .label(&window.title)
             .xalign(0.0)
-            .max_width_chars(28)
+            .max_width_chars(1)
+            .hexpand(true)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
             .build();
         title.add_css_class("switcher-title");
@@ -412,6 +428,22 @@ impl Switcher {
         crate::sway_ipc::run_command(&format!("[con_id={}] focus", window.con_id));
         drop(entries);
         self.hide();
+    }
+}
+
+/// The app's own icon where a theme ships one, a generic window otherwise.
+/// `Image::from_icon_name` on an unknown name draws a broken-image
+/// placeholder, and an app id is only sometimes an icon name — `Alacritty`
+/// and `chrome-…-Default` are not.
+fn icon_name(app_id: &str) -> String {
+    let lower = app_id.to_lowercase();
+    let known = gdk::Display::default()
+        .map(|display| gtk4::IconTheme::for_display(&display).has_icon(&lower))
+        .unwrap_or(false);
+    if known {
+        lower
+    } else {
+        "application-x-executable".to_string()
     }
 }
 
