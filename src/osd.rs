@@ -13,7 +13,7 @@ const OSD_TIMEOUT_MS: u32 = 1500;
 /// One press of a volume key. The ceiling is the over-amplification limit
 /// the panel's slider also stops at.
 const VOLUME_STEP: f64 = 0.05;
-const VOLUME_CEILING: f64 = 1.5;
+use crate::audio::VOLUME_CEILING;
 const BRIGHTNESS_STEP_UP: &str = "5%+";
 const BRIGHTNESS_STEP_DOWN: &str = "5%-";
 
@@ -366,14 +366,12 @@ impl Osd {
 
         Some(match cmd {
             OsdCommand::OutputVolumeRaise => {
-                let level = (current.volume + VOLUME_STEP).min(VOLUME_CEILING);
-                audio.send(AudioCommand::SetSinkVolume(level));
-                volume_display(level, false, false)
+                audio.send(AudioCommand::AdjustSinkVolume(VOLUME_STEP));
+                volume_display((current.volume + VOLUME_STEP).min(VOLUME_CEILING), false, false)
             }
             OsdCommand::OutputVolumeLower => {
-                let level = (current.volume - VOLUME_STEP).max(0.0);
-                audio.send(AudioCommand::SetSinkVolume(level));
-                volume_display(level, current.muted, false)
+                audio.send(AudioCommand::AdjustSinkVolume(-VOLUME_STEP));
+                volume_display((current.volume - VOLUME_STEP).max(0.0), current.muted, false)
             }
             OsdCommand::OutputVolumeMuteToggle => {
                 audio.send(AudioCommand::ToggleSinkMute);
