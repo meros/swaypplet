@@ -170,7 +170,7 @@ async fn ceremony(
 /// Pumps libwebauthn's UX stream into our [`Progress`] sink on a background
 /// task. Ends when the channel drops the sender, which happens once the
 /// ceremony is over either way.
-fn forward_updates(
+pub(super) fn forward_updates(
     mut rx: tokio::sync::broadcast::Receiver<CableUxUpdate>,
     progress: &(impl Fn(Progress) + Clone + Send + Sync + 'static),
 ) {
@@ -203,13 +203,13 @@ fn forward_updates(
 /// own store rather than by a remote server, so origin-to-RP binding is ours
 /// to assert and `Trust` is the honest expression of that. Validation against
 /// the public suffix list would reject a local RP id anyway.
-fn settings<'a>() -> RequestSettings<'a> {
+pub(super) fn settings<'a>() -> RequestSettings<'a> {
     RequestSettings {
         origin: OriginValidation::Trust,
     }
 }
 
-fn origin() -> Result<RequestOrigin, String> {
+pub(super) fn origin() -> Result<RequestOrigin, String> {
     let id = rp_id();
     format!("https://{id}")
         .as_str()
@@ -266,7 +266,7 @@ fn full_name(user: &str) -> Option<String> {
 /// Straight from the kernel CSPRNG. No crate needed for this, and a read that
 /// returns short is treated as failure rather than quietly producing a weak
 /// challenge.
-fn random_bytes<const N: usize>() -> Result<[u8; N], String> {
+pub(super) fn random_bytes<const N: usize>() -> Result<[u8; N], String> {
     use std::io::Read as _;
     let mut buf = [0u8; N];
     std::fs::File::open("/dev/urandom")
@@ -276,7 +276,7 @@ fn random_bytes<const N: usize>() -> Result<[u8; N], String> {
 }
 
 /// base64url without padding, per WebAuthn's JSON encoding.
-fn base64url(bytes: &[u8]) -> String {
+pub(super) fn base64url(bytes: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
