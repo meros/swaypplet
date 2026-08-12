@@ -221,12 +221,13 @@ button.bar-ws.urgent {
 }
 
 /* Task ribbons: 2px lane under each task group — off = no session, dim
-   solid = working, bright solid = waiting. Fused segments make per-button
-   borders read as one ribbon spanning the group. Task hue was removed
-   2026-08-12; the lane separates states by luminance alone, which it
-   already did under grayscale. */
+   solid = working, task hue = waiting. Fused segments make per-button
+   borders read as one ribbon spanning the group. */
 button.bar-ws.ribbon-working { border-bottom-color: alpha(@fg, 0.30); }
-button.bar-ws.ribbon-waiting { border-bottom-color: alpha(@fg, 0.85); }
+button.bar-ws.ribbon-waiting.task1 { border-bottom-color: @accent; }
+button.bar-ws.ribbon-waiting.task2 { border-bottom-color: @accent_secondary; }
+button.bar-ws.ribbon-waiting.task3 { border-bottom-color: @accent_tertiary; }
+button.bar-ws.ribbon-waiting.task4 { border-bottom-color: @accent_quaternary; }
 
 /* ── Bar center: the decision slot (src/bar/decision.rs) ──
    Empty at nominal. One occupant behind a Revealer: battery critical
@@ -249,6 +250,10 @@ button.bar-ws.ribbon-waiting { border-bottom-color: alpha(@fg, 0.85); }
 }
 
 /* Task-hue dot: hue reinforces identity, the description carries it. */
+.bar-decision-dot.t1 { color: @accent; }
+.bar-decision-dot.t2 { color: @accent_secondary; }
+.bar-decision-dot.t3 { color: @accent_tertiary; }
+.bar-decision-dot.t4 { color: @accent_quaternary; }
 
 /* Waiting age + "+N more wait" suffix. */
 .bar-decision-meta {
@@ -641,11 +646,19 @@ button.bar-popover-action {
 
 /* The active-task accent ripple lived here: board.rs stamped bar-task1..4
    on .bar-root and descendant selectors pushed that hue across the right
-   track's band lane. Removed 2026-08-12 — the bar is achromatic now, and
-   task identity reads from position and numeral alone. */
+   track's band lane (battery/board/clock). Removed 2026-08-12: task hue
+   belongs on the things that ARE tasks — the workspace pills, their
+   ribbons and the decision dot, all still hued above — not smeared across
+   the status instruments, which report the machine rather than the work.
+   apply_accent in bar/board.rs is the matching no-op. */
 
-/* Workspace-strip dots (src/bar/workspaces.rs) inherit the strip's
-   foreground; their per-task accents were removed 2026-08-12. */
+/* Workspace-strip dots (src/bar/workspaces.rs): every numbered workspace
+   1–16 carries its task's accent — same order, defined only here so a
+   palette retune reaches the dots too. */
+.bar-ws-dot.task1 { color: @accent; }
+.bar-ws-dot.task2 { color: @accent_secondary; }
+.bar-ws-dot.task3 { color: @accent_tertiary; }
+.bar-ws-dot.task4 { color: @accent_quaternary; }
 
 /* The accent ripple deliberately stops at the track band above: it is
    keyed to this output's LOCAL task, so stamping it on the selected
