@@ -51,10 +51,93 @@ pub(crate) struct Window {
 const THUMB_W: u32 = 260;
 const THUMB_H: u32 = 156;
 
-/// Cards per row. Four keeps eleven windows to three rows on a 16:10 panel,
-/// which fits without scrolling and without shrinking the thumbnails past
-/// the point of being recognisable.
-const COLUMNS: i32 = 4;
+/// Below this a thumbnail stops being recognisable. A session with more
+/// windows than the screen holds at this size overflows rather than
+/// shrinking further: typing narrows the grid in one keystroke, and forty
+/// unreadable squares help nobody.
+const MIN_THUMB_W: i32 = 150;
+
+/// Cards per row, at most. Four keeps eleven windows to three rows on a
+/// 16:10 panel; a wider output gets more only up to the point where the eye
+/// still finds a card by position.
+const MAX_COLUMNS: i32 = 6;
+
+/// What a card costs around its thumbnail: `.switcher-item` padding and
+/// border on both sides, and under it the title and workspace lines with
+/// the box's spacing between them. Approximate on purpose — the fit leaves
+/// a margin wide enough to absorb a font that measures differently.
+const CARD_CHROME_W: i32 = 20;
+const CARD_CHROME_H: i32 = 64;
+
+/// Grid spacing and `.switcher-card` padding, mirrored from the builder and
+/// the stylesheet so the fit can subtract what it cannot measure yet.
+const GAP: i32 = 10;
+const CARD_PADDING: i32 = 18;
+
+/// The output to size against when no monitor can be resolved. Small enough
+/// that the grid fits anything real.
+const FALLBACK_OUTPUT: (i32, i32) = (1280, 800);
+
+/// How much of the output the grid may use. The rest is the breathing room
+/// a centred overlay needs to read as an overlay.
+const FILL_W: f64 = 0.94;
+const FILL_H: f64 = 0.90;
+
+/// The grid's shape for one opening: how many columns, and how big a
+/// thumbnail may be so that every card fits on the output at once.
+///
+/// The switcher shows *every* window, so its size is the session's, not the
+/// designer's — eleven windows on a 1440x900 laptop and twenty-six on a
+/// 2560x1440 desktop are both normal. A layer surface larger than its
+/// output is not scrolled or scaled by the compositor, it is simply cut off
+/// at the edge, so the fit happens here or not at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Fit {
+    columns: i32,
+    thumb_w: i32,
+    thumb_h: i32,
+}
+
+fn fit(count: usize, output_w: i32, output_h: i32) -> Fit {
+    let count = (count as i32).max(1);
+    let avail_w = (output_w as f64 * FILL_W) as i32 - 2 * CARD_PADDING;
+    let avail_h = (output_h as f64 * FILL_H) as i32 - 2 * CARD_PADDING;
+
+    let columns = ((avail_w + GAP) / (THUMB_W as i32 + CARD_CHROME_W + GAP))
+        .clamp(1, MAX_COLUMNS)
+        .min(count);
+    let rows = (count + columns - 1) / columns;
+
+    // What one card may occupy, minus its own chrome, is what its thumbnail
+    // may be. Width and height both bind; the tighter one wins and the
+    // aspect ratio follows from it.
+    let per_w = (avail_w - (columns - 1) * GAP) / columns - CARD_CHROME_W;
+    let per_h = (avail_h - (rows - 1) * GAP) / rows - CARD_CHROME_H;
+    let thumb_w = (THUMB_W as i32)
+        .min(per_w)
+        .min(per_h * THUMB_W as i32 / THUMB_H as i32)
+        .max(MIN_THUMB_W);
+
+    Fit {
+        columns,
+        thumb_w,
+        thumb_h: thumb_w * THUMB_H as i32 / THUMB_W as i32,
+    }
+}
+
+/// The output the switcher will map on, as GDK knows it.
+///
+/// The compositor would pick one for us, but the grid has to be sized before
+/// it maps and a grid sized to the wrong screen is a grid cut off at the
+/// edge of the smaller one. sway names its focused output; GDK names the
+/// same connector.
+fn monitor_named(connector: &str) -> Option<gdk::Monitor> {
+    let monitors = gdk::Display::default()?.monitors();
+    (0..monitors.n_items())
+        .filter_map(|i| monitors.item(i))
+        .filter_map(|obj| obj.downcast::<gdk::Monitor>().ok())
+        .find(|monitor| monitor.connector().as_deref() == Some(connector))
+}
 
 pub struct Switcher {
     window: gtk4::Window,
@@ -69,6 +152,10 @@ pub struct Switcher {
     query: RefCell<String>,
     filter_label: gtk4::Label,
     loading: Cell<bool>,
+    /// The shape the current opening was laid out to. Recomputed on every
+    /// show, because both the window count and the focused output change
+    /// between one Super+Tab and the next.
+    fit: Cell<Fit>,
 }
 
 /// The widgets of one card that can change after it is built.
@@ -140,6 +227,7 @@ impl Switcher {
             query: RefCell::new(String::new()),
             filter_label,
             loading: Cell::new(false),
+            fit: Cell::new(fit(1, FALLBACK_OUTPUT.0, FALLBACK_OUTPUT.1)),
         });
         switcher.wire();
         switcher
@@ -157,11 +245,11 @@ impl Switcher {
         self.query.borrow_mut().clear();
 
         let this = self.clone();
-        crate::spawn::spawn_work(read_windows, move |windows| {
+        crate::spawn::spawn_work(read_session, move |session| {
             this.loading.set(false);
-            match windows {
-                Ok(windows) if !windows.is_empty() => {
-                    this.build(windows);
+            match session {
+                Ok((windows, output)) if !windows.is_empty() => {
+                    this.build(windows, output.as_deref());
                     this.reveal.show();
                     this.load_thumbnails();
                 }
@@ -192,8 +280,8 @@ impl Switcher {
                 gdk::Key::Return | gdk::Key::KP_Enter => this.activate(),
                 gdk::Key::Left => this.step(-1),
                 gdk::Key::Right | gdk::Key::Tab => this.step(1),
-                gdk::Key::Up => this.step(-COLUMNS as isize),
-                gdk::Key::Down => this.step(COLUMNS as isize),
+                gdk::Key::Up => this.step(-(this.fit.get().columns as isize)),
+                gdk::Key::Down => this.step(this.fit.get().columns as isize),
                 gdk::Key::BackSpace => {
                     this.query.borrow_mut().pop();
                     this.refilter();
@@ -216,19 +304,33 @@ impl Switcher {
         self.window.add_controller(keys);
     }
 
-    /// Lay out a card per window.
-    fn build(self: &Rc<Self>, windows: Vec<Window>) {
+    /// Lay out a card per window, on the output the switcher is about to
+    /// appear on and at the size that output has room for.
+    fn build(self: &Rc<Self>, windows: Vec<Window>, output: Option<&str>) {
         while let Some(child) = self.grid.first_child() {
             self.grid.remove(&child);
         }
         self.cards.borrow_mut().clear();
 
+        let monitor = output.and_then(monitor_named);
+        // Setting it while unmapped is the only time it takes; `show` maps
+        // the surface right after this returns.
+        if let Some(monitor) = &monitor {
+            use gtk4_layer_shell::LayerShell;
+            self.window.set_monitor(Some(monitor));
+        }
+        let (output_w, output_h) = monitor
+            .map(|m| (m.geometry().width(), m.geometry().height()))
+            .unwrap_or(FALLBACK_OUTPUT);
+        let shape = fit(windows.len(), output_w, output_h);
+        self.fit.set(shape);
+
         for (index, window) in windows.iter().enumerate() {
             let card = self.card_for(window, index);
             self.grid.attach(
                 &card.root,
-                index as i32 % COLUMNS,
-                index as i32 / COLUMNS,
+                index as i32 % shape.columns,
+                index as i32 / shape.columns,
                 1,
                 1,
             );
@@ -251,7 +353,7 @@ impl Switcher {
         let root = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(6)
-            .width_request(THUMB_W as i32)
+            .width_request(self.fit.get().thumb_w)
             .build();
         root.add_css_class("switcher-item");
 
@@ -276,7 +378,7 @@ impl Switcher {
         // spilling over its neighbours. Overflow::Hidden then keeps what
         // `Cover` crops inside the rounded corners.
         let stack = gtk4::Overlay::new();
-        stack.set_size_request(THUMB_W as i32, THUMB_H as i32);
+        stack.set_size_request(self.fit.get().thumb_w, self.fit.get().thumb_h);
         stack.set_overflow(gtk4::Overflow::Hidden);
         stack.add_css_class("switcher-thumb");
         stack.set_child(Some(&picture));
@@ -327,8 +429,9 @@ impl Switcher {
                 continue;
             };
             let this = self.clone();
+            let (thumb_w, thumb_h) = (self.fit.get().thumb_w as u32, self.fit.get().thumb_h as u32);
             crate::spawn::spawn_work(
-                move || capture::toplevel(&identifier).map(|i| i.boxed_down(THUMB_W, THUMB_H)),
+                move || capture::toplevel(&identifier).map(|i| i.boxed_down(thumb_w, thumb_h)),
                 move |result| match result {
                     Ok(image) => this.set_thumbnail(index, &image),
                     // Expected for a window the compositor declines to render;
@@ -458,16 +561,24 @@ pub(crate) fn matches(window: &Window, query: &str) -> bool {
     window.app_id.to_lowercase().contains(query) || window.title.to_lowercase().contains(query)
 }
 
-/// Read every window out of sway's tree, most recently focused first.
+/// Read every window out of sway's tree, most recently focused first, and
+/// the output the switcher will be drawn on.
 ///
 /// Order comes from sway's own `focus` arrays: each container lists its
 /// children in the order they were last focused, so a depth-first walk that
 /// follows them produces the session's MRU order without swaypplet having to
-/// keep a history of its own.
-fn read_windows() -> Result<Vec<Window>, String> {
+/// keep a history of its own. The focused output rides along because it is
+/// needed before the surface maps, and one connection can answer both.
+fn read_session() -> Result<(Vec<Window>, Option<String>), String> {
     let mut conn = swayipc::Connection::new().map_err(|e| format!("sway ipc: {e}"))?;
     let tree = conn.get_tree().map_err(|e| format!("sway ipc: {e}"))?;
-    Ok(collect(&tree))
+    let focused = conn
+        .get_outputs()
+        .map_err(|e| format!("sway ipc: {e}"))?
+        .into_iter()
+        .find(|o| o.focused)
+        .map(|o| o.name);
+    Ok((collect(&tree), focused))
 }
 
 pub(crate) fn collect(root: &swayipc::Node) -> Vec<Window> {
@@ -556,6 +667,60 @@ mod tests {
         assert!(!matches(&w, "slack"));
     }
 
+    /// The size a card takes on screen, thumbnail plus chrome, which is what
+    /// the fit actually has to keep inside the output.
+    fn grid_size(count: usize, f: Fit) -> (i32, i32) {
+        let rows = (count as i32 + f.columns - 1) / f.columns;
+        (
+            f.columns * (f.thumb_w + CARD_CHROME_W) + (f.columns - 1) * GAP + 2 * CARD_PADDING,
+            rows * (f.thumb_h + CARD_CHROME_H) + (rows - 1) * GAP + 2 * CARD_PADDING,
+        )
+    }
+
+    #[test]
+    fn a_normal_session_gets_full_size_thumbnails() {
+        // Twelve windows on the laptop's 1440x900 logical output.
+        let f = fit(12, 1440, 900);
+        assert_eq!(f.thumb_w, THUMB_W as i32);
+        assert_eq!(f.columns, 4);
+    }
+
+    #[test]
+    fn the_grid_stays_inside_the_output_it_is_drawn_on() {
+        for (count, w, h) in [
+            (12, 1440, 900),
+            (26, 1440, 900),
+            (26, 2560, 1440),
+            (7, 1024, 768),
+            (40, 2560, 1440),
+        ] {
+            let f = fit(count, w, h);
+            let (gw, gh) = grid_size(count, f);
+            assert!(gw <= w, "{count} windows on {w}x{h}: {gw} px wide");
+            assert!(
+                gh <= h || f.thumb_w == MIN_THUMB_W,
+                "{count} windows on {w}x{h}: {gh} px tall"
+            );
+        }
+    }
+
+    #[test]
+    fn thumbnails_never_shrink_past_recognisable() {
+        // Forty windows on a small screen: the floor holds and the grid is
+        // allowed to overflow rather than drawing forty unreadable squares.
+        let f = fit(40, 1024, 768);
+        assert_eq!(f.thumb_w, MIN_THUMB_W);
+        assert!(f.thumb_h > 0);
+    }
+
+    #[test]
+    fn one_window_is_one_column() {
+        assert_eq!(fit(1, 2560, 1440).columns, 1);
+        // And none at all still produces a usable shape rather than a
+        // division by zero.
+        assert!(fit(0, 2560, 1440).columns >= 1);
+    }
+
     #[test]
     fn matching_ignores_case_on_the_window_side() {
         // The query is lowercased by the caller; the window's own strings
@@ -571,7 +736,7 @@ mod live {
     #[test]
     #[ignore]
     fn every_window_joins_to_its_pixels() {
-        let windows = super::read_windows().expect("tree");
+        let (windows, _output) = super::read_session().expect("tree");
         assert!(!windows.is_empty(), "no windows");
 
         let (mut ok, mut missing, mut failed) = (0, 0, 0);
