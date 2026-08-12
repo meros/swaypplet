@@ -34,6 +34,7 @@
 
 pub mod enroll;
 pub mod store;
+pub mod verify;
 
 /// `swaypplet passkey-enroll [--user NAME]` — the one attended ceremony.
 ///
@@ -123,4 +124,67 @@ fn uid_to_name(uid: String) -> Option<String> {
             (parsed == uid).then(|| name.to_owned())
         })
     })
+}
+
+/// `swaypplet passkey-verify [--user NAME]` — contact the linked phone with
+/// no QR.
+///
+/// The transport test for the unlock path. Prints a loud warning because it
+/// does not yet verify the assertion signature, so a success here means the
+/// phone answered, not that it proved possession of the key.
+pub fn verify_cli(mut args: impl Iterator<Item = String>) {
+    let mut user: Option<String> = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--user" => user = args.next(),
+            other => {
+                eprintln!("passkey-verify: unexpected argument {other}");
+                std::process::exit(2);
+            }
+        }
+    }
+
+    // SAFETY: geteuid cannot fail and touches no memory we own.
+    if unsafe { libc::geteuid() } != 0 {
+        eprintln!(
+            "passkey-verify must run as root; the credential store is root-owned.\n\
+             Try: pkexec swaypplet passkey-verify"
+        );
+        std::process::exit(1);
+    }
+
+    let user = user
+        .or_else(|| std::env::var("PKEXEC_UID").ok().and_then(uid_to_name))
+        .or_else(|| std::env::var("SUDO_USER").ok())
+        .unwrap_or_else(|| {
+            eprintln!("passkey-verify: cannot tell whom to verify; pass --user NAME");
+            std::process::exit(2);
+        });
+
+    println!("Contacting your phone for {user}. No QR: this uses the stored link.");
+    let outcome = verify::run(&user, |progress| match progress {
+        enroll::Progress::ShowQr(_) => {
+            // The known-device path has no QR stage; if one ever appears here
+            // the linking state was lost and the run is not testing what it
+            // claims to.
+            println!("WARNING: a QR was requested — the stored link is not being used.");
+        }
+        enroll::Progress::ProximityCheck => println!("Proximity check."),
+        enroll::Progress::Connecting => println!("Reaching the phone."),
+        enroll::Progress::Connected => println!("Connected."),
+        enroll::Progress::AwaitingApproval => println!("Approve on the phone."),
+        enroll::Progress::Note(note) => println!("({note})"),
+    });
+
+    match outcome {
+        Ok(()) => println!(
+            "\nPhone answered and verified you.\n\
+             NOTE: the signature is not checked yet, so this proves the transport \
+             works, not possession of the key. Not an auth path until that lands."
+        ),
+        Err(e) => {
+            eprintln!("Verification failed: {e}");
+            std::process::exit(1);
+        }
+    }
 }
