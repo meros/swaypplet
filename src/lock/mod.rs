@@ -17,6 +17,7 @@
 //! PAM success or a fingerprint match.
 
 pub(crate) mod auth;
+pub(crate) mod face;
 pub(crate) mod fprint;
 pub mod glass;
 pub mod ui;
@@ -189,6 +190,8 @@ pub fn run() -> ! {
     {
         let surfaces = surfaces.clone();
         let instance_for_fp = instance.clone();
+        let instance_for_face = instance.clone();
+        let user_for_face = user.clone();
         instance.connect_locked(move |_| {
             log::info!("session locked");
 
@@ -210,6 +213,30 @@ pub fn run() -> ! {
                 clock_surfaces.tick();
                 glib::ControlFlow::Continue
             });
+
+            // Face attempts share the fingerprint worker's event type but not
+            // its pill: the UI has one biometric indicator and the finger owns
+            // it, so a face match unlocks and everything else only logs.
+            {
+                let face_rx = face::start(user_for_face.clone());
+                let surfaces = surfaces.clone();
+                let instance = instance_for_face.clone();
+                glib::timeout_add_local(Duration::from_millis(200), move || {
+                    while let Ok(ev) = face_rx.try_recv() {
+                        match ev {
+                            EngineEvent::Match(_) => {
+                                surfaces.flash_success();
+                                instance.unlock();
+                                return glib::ControlFlow::Break;
+                            }
+                            EngineEvent::Unavailable(why) => log::info!("face: {why}"),
+                            EngineEvent::Hint(hint) => log::info!("face: {hint}"),
+                            EngineEvent::Ready => {}
+                        }
+                    }
+                    glib::ControlFlow::Continue
+                });
+            }
 
             let rx = fprint::start();
             let surfaces = surfaces.clone();
