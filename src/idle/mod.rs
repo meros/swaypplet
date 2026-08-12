@@ -57,6 +57,8 @@ use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use crate::presence::Presence;
+
 pub use wayland::Timeout;
 
 /// Everything the main loop reacts to, from any of the three sources.
@@ -98,6 +100,15 @@ const SLEEP_RELEASE_MAX: Duration = Duration::from_secs(3);
 /// Reblank idle tier powers the outputs off.
 const BLANK_DELAY: Duration = Duration::from_millis(600);
 
+/// Presence must read "gone" for this long before an absence lock fires. The
+/// sensor blips (see presence.rs), and a lock is disruptive enough that
+/// leaving should be certain rather than fast.
+const PRESENCE_GONE_AFTER: Duration = Duration::from_secs(10);
+
+/// ...and "back" for this long before the idle lock tier is suppressed again.
+/// Short: returning to a machine that locks in your face is the bad outcome.
+const PRESENCE_BACK_AFTER: Duration = Duration::from_secs(1);
+
 pub fn run() -> ! {
     let (tx, rx) = mpsc::channel::<Ev>();
     wayland::start(tx.clone());
@@ -119,6 +130,10 @@ pub fn run() -> ! {
     // Mirrors the logind session Active property.
     let mut session_active = true;
 
+    // None on hardware without the sensor, which keeps the timer-only
+    // behaviour intact.
+    let mut presence = Presence::detect();
+
     let release_inhibitor = |sleep_release: &mut Option<Instant>| {
         if sleep_release.take().is_some() {
             logind.release_sleep_inhibitor();
@@ -127,6 +142,27 @@ pub fn run() -> ! {
 
     log::info!("idle: manager started");
     loop {
+        // Presence rides the same 250 ms cadence as the deadlines below. The
+        // sensor samples at 10 Hz and the debounce is measured in seconds, so
+        // a quarter second of latency costs nothing.
+        if let Some(now_present) = presence
+            .as_mut()
+            .and_then(|p| p.poll(PRESENCE_GONE_AFTER, PRESENCE_BACK_AFTER))
+        {
+            if now_present {
+                log::info!("presence: user back");
+            } else {
+                log::info!("presence: user gone — locking");
+                ensure_locked(
+                    &tx,
+                    &mut locker_active,
+                    &mut locker_confirmed,
+                    &mut lock_reason,
+                    "presence",
+                );
+            }
+        }
+
         let ev = rx.recv_timeout(Duration::from_millis(250));
 
         // Deadlines fire on every pass, event traffic or not.
@@ -172,14 +208,22 @@ pub fn run() -> ! {
             }
 
             Ev::Idled(Timeout::Lock) => {
-                log::info!("idle.lock-300s: fire");
-                ensure_locked(
-                    &tx,
-                    &mut locker_active,
-                    &mut locker_confirmed,
-                    &mut lock_reason,
-                    "idle",
-                );
+                // Sitting still is not being away. While the sensor sees
+                // someone the 300 s tier is suppressed and the absence path
+                // owns locking instead; nothing re-arms this tier until input
+                // resumes, which is the intent.
+                if presence.as_ref().and_then(Presence::state) == Some(true) {
+                    log::info!("idle.lock-300s: skip (present)");
+                } else {
+                    log::info!("idle.lock-300s: fire");
+                    ensure_locked(
+                        &tx,
+                        &mut locker_active,
+                        &mut locker_confirmed,
+                        &mut lock_reason,
+                        "idle",
+                    );
+                }
             }
             Ev::Resumed(Timeout::Lock) => {}
 
@@ -289,7 +333,7 @@ pub fn run() -> ! {
                     // sleep and the inhibitor must not wait on a timer.
                     log::info!("lock: locker up — blanking outputs (sleep)");
                     run_cmd("lock.blank", "swaymsg", &["output", "*", "power", "off"]);
-                } else if lock_reason == "idle" {
+                } else if matches!(lock_reason, "idle" | "presence") {
                     log::info!("lock: locker up — blank in {BLANK_DELAY:?}");
                     pending_blank = Some(Instant::now() + BLANK_DELAY);
                 } else {
