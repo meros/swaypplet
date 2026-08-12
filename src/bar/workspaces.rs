@@ -53,7 +53,7 @@ const GROUP_GAP_PX: i32 = 8;
 // Label tables — mirror users/modules/workspace-config.nix (nixos repo):
 // nums 1–16 are the task grid, rendered "1¹".."4⁴" behind a task-colored
 // dot (`.bar-ws-dot.taskN`; colors live in data/style.css beside the
-// accent-ripple rules), nums 17–37 the generic keyed workspaces. Keep in
+// accent-ripple rules), nums 17–38 the generic keyed workspaces. Keep in
 // lockstep with that file.
 //
 // The grid is 4 tasks × 2 screens as of 2026-08-10; the superscript table
@@ -74,15 +74,16 @@ const GENERIC_LABELS: &[(i32, &str)] = &[
     (26, "i"),
     (27, "j"),
     (28, "k"),
-    (29, "󰍡 m"),
-    (30, "n"),
-    (31, "📧 o"),
-    (32, "󰓇 p"),
-    (33, "󰜎 r"),
-    (34, "󰓓 t"),
-    (35, "󰑴 u"),
-    (36, "󰕧 v"),
-    (37, "󰗃 y"),
+    (29, "l"),
+    (30, "󰍡 m"),
+    (31, "n"),
+    (32, "📧 o"),
+    (33, "󰓇 p"),
+    (34, "󰜎 r"),
+    (35, "󰓓 t"),
+    (36, "󰑴 u"),
+    (37, "󰕧 v"),
+    (38, "󰗃 y"),
 ];
 
 pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box {
@@ -640,8 +641,9 @@ mod tests {
     #[test]
     fn generic_labels_come_from_the_table() {
         assert_eq!(generic_label(19, "19:wb"), "󰖟 b");
-        assert_eq!(generic_label(37, "37:wy"), "󰗃 y");
-        assert_eq!(generic_label(33, "33:wr"), "󰜎 r");
+        assert_eq!(generic_label(38, "38:wy"), "󰗃 y");
+        assert_eq!(generic_label(34, "34:wr"), "󰜎 r");
+        assert_eq!(generic_label(29, "29:wl"), "l");
         assert_eq!(generic_label(17, "17:w3"), "3");
     }
 
