@@ -19,6 +19,7 @@ mod layer_shell;
 mod lock;
 mod notifications;
 mod osd;
+mod passkey;
 mod panel;
 mod polkit;
 mod preview;
