@@ -19,7 +19,6 @@ mod layer_shell;
 mod lock;
 mod notifications;
 mod osd;
-mod passkey;
 mod panel;
 mod polkit;
 mod preview;
@@ -54,10 +53,6 @@ fn main() {
         // its pam_exec token-check counterpart in greetd's PAM stack.
         Some("fp-agent") => fp::agent::run_agent(),
         Some("fp-check") => fp::agent::run_check(),
-        // Phone-as-passkey enrollment: the one attended QR ceremony that
-        // links a phone and registers the credential (src/passkey/).
-        Some("passkey-enroll") => passkey::enroll_cli(args),
-        Some("passkey-verify") => passkey::verify_cli(args),
         // Fast user switching: the host command behind every picker chip, and
         // a usable CLI from a getty when the graphical side is unhappy.
         Some("switch-user") => switch_user::run(args),

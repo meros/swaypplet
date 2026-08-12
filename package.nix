@@ -16,16 +16,10 @@
   polkit,
   pam,
   libpulseaudio,
-  # libwebauthn (src/passkey/) drags in libdbus-sys and hidapi for transports
-  # we do not use; both want their system library present at build time.
-  dbus,
-  udev,
 }:
 
 let
   runtimeDeps = [
-    dbus
-    udev
     gtk4
     gtk4-layer-shell
     glib
@@ -51,14 +45,7 @@ rustPlatform.buildRustPackage {
   # buildRustPackage's default bulk cargo-vendor fetcher, which hits
   # the crates.io API and now 403s (blocked/rate-limited User-Agent).
   # No git deps in Cargo.lock, so lockFile alone suffices.
-  cargoLock = {
-    lockFile = ./Cargo.lock;
-    # libwebauthn is a git pin (see Cargo.toml), and vendoring a git source
-    # needs its hash stated here. Update this whenever the rev moves.
-    outputHashes = {
-      "libwebauthn-0.10.0" = "sha256-u2MSN2KXr5zpb8m8dZLOWrannv22oa1HyDEg4fVj3t4=";
-    };
-  };
+  cargoLock.lockFile = ./Cargo.lock;
 
   nativeBuildInputs = [
     pkg-config
