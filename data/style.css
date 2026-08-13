@@ -2749,11 +2749,17 @@ revealer {
    shows a DISABLED button, so the shape of the prompt does not change under
    the user's hands when it becomes pressable — the wording changes, the
    layout does not, and nothing moves for a press to land on by accident. */
-.face-confirm .glass-card,
-.face-confirm > box {
-    background-color: @surface;
+/* @surface is alpha(#32302f, 0.72), which only works on a layer swayfx
+   blurs behind. swaypplet-face-confirm has no layer_effects entry, so the
+   translucency showed raw terminal text straight through the card. Same trap
+   the bar popovers documented: take the opaque raised fill and a real drop
+   shadow instead, since there is no frost to borrow depth from. */
+.face-confirm-card {
+    background-color: @surface_raised;
     border-radius: 18px;
     border: 1px solid @border_strong;
+    box-shadow: 0 12px 40px alpha(black, 0.5);
+    padding: 22px 24px;
 }
 
 .face-confirm-title {
