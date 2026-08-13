@@ -7,6 +7,7 @@ mod bar;
 mod clipboard;
 mod dmenu;
 mod elephant;
+mod face;
 mod fp;
 mod gdm_shim;
 mod glib_unix;
