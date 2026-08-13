@@ -2142,8 +2142,8 @@ revealer {
    Deliberately not on `.lock-shake` / `.lock-success`, whose own
    animations must win. */
 @keyframes auth-card-enter {
-    from { opacity: 0; margin-top: 14px; }
-    to   { opacity: 1; margin-top: 0; }
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
 }
 
 .lock-card {
@@ -2889,23 +2889,43 @@ revealer {
    a box-shadow is a real shadow rather than something blur_ignore_transparent
    frosts into a halo. Deliberately NOT put on .face-ring, which is also used
    on the polkit card, and that layer IS blurred. */
-.face-pill {
+/* Entrance as a transform, never as a margin.
+   margin-top is a layout property: animating it re-ran allocation on every
+   frame, and on the cue's own layer surface that renegotiated the surface
+   size too -- a Wayland roundtrip per frame, which is exactly as smooth as it
+   sounds. transform is a paint-time property. Same 18px of upward travel,
+   same curve, no layout at all.
+
+   On a WRAPPER, not on the pill. `animation` is one property, so the
+   entrance and the attention pulse cannot both live on .face-pill: the state
+   classes rewrite it, and every looking -> face -> looking edge replayed the
+   entrance, dropping the pill 18px and fading it out mid-check. That was most
+   of the stutter. Two nodes, two independent animations, and a state change
+   can no longer disturb an arrival that already happened. */
+.face-pill-enter {
     animation: face-pill-arrive 420ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 @keyframes face-pill-arrive {
-    from { opacity: 0; margin-top: 74px; }
-    to   { opacity: 1; margin-top: 56px; }
+    from { opacity: 0; transform: translateY(18px); }
+    to   { opacity: 1; transform: translateY(0); }
 }
 
 .face-pill-looking {
-    animation:
-        face-pill-arrive 420ms cubic-bezier(0.2, 0, 0, 1),
-        face-pill-attention 1.6s ease-in-out 2;
+    animation: face-pill-attention 1.6s ease-in-out 2;
 }
 
+/* The ring spins under its own transform. Keeping the pill's transform
+   animation off the ring matters: two transform animations on nested nodes
+   compose fine, but only if neither is a layout property. */
+
+/* Blur radius and spread are constant; only the alpha moves. Growing them
+   from 0 meant a differently sized gaussian on every frame, re-rasterised
+   from scratch each time. Fixed geometry lets the renderer keep one blurred
+   node and vary its colour, which is the difference between a pulse and a
+   stutter. */
 @keyframes face-pill-attention {
-    0%, 100% { box-shadow: 0 0 0 0 alpha(@accent_tertiary, 0); }
+    0%, 100% { box-shadow: 0 0 26px 5px alpha(@accent_tertiary, 0); }
     50%      { box-shadow: 0 0 26px 5px alpha(@accent_tertiary, 0.38); }
 }
 
@@ -2923,6 +2943,6 @@ revealer {
 }
 
 @keyframes face-pill-ok {
-    0%   { box-shadow: 0 0 0 0 alpha(@accent, 0.6); }
+    0%   { box-shadow: 0 0 30px 6px alpha(@accent, 0.6); }
     100% { box-shadow: 0 0 30px 6px alpha(@accent, 0); }
 }

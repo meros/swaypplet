@@ -29,9 +29,13 @@ static CUE_CONFIG: LayerShellConfig = LayerShellConfig {
     exclusive: false,
     default_width: None,
     default_height: None,
-    // Top centre: anchoring only the top edge lets the compositor centre it
-    // horizontally, which is where the lens is.
-    anchors: &[(Edge::Top, true)],
+    // Top strip, full width. The pill centres itself inside it, under the
+    // lens.
+    // Left and right anchored too, so the surface spans the output and its
+    // geometry never depends on the pill inside it. A surface that resized
+    // with its content renegotiated size mid-animation, and clipped the glow
+    // -- a 26px blur with 5px spread reaches well past the pill's own box.
+    anchors: &[(Edge::Top, true), (Edge::Left, true), (Edge::Right, true)],
     margins: &[],
     // Never takes the keyboard. The card owns every key that matters, and a
     // grab here would silently steal the Enter meant for the Allow button.
@@ -40,6 +44,9 @@ static CUE_CONFIG: LayerShellConfig = LayerShellConfig {
 
 pub struct Cue {
     window: gtk4::Window,
+    /// Carries the entrance animation, so a state change on the pill cannot
+    /// replay it. See .face-pill-enter in the stylesheet.
+    strip: gtk4::Box,
     pill: gtk4::Box,
     ring: gtk4::Box,
     label: gtk4::Label,
@@ -60,6 +67,16 @@ impl Cue {
         pill.add_css_class("face-pill");
         pill.set_margin_top(56);
 
+        // A fixed strip to hold it. Height is the pill's offset plus its own
+        // height plus room for the glow and the 18px the entrance travels;
+        // sizing to the content instead would clip both and make the surface
+        // resize on every animation frame.
+        let strip = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .height_request(180)
+            .build();
+        strip.append(&pill);
+
         let ring = gtk4::Box::builder()
             .width_request(18)
             .height_request(18)
@@ -70,10 +87,11 @@ impl Cue {
         label.add_css_class("face-pill-label");
         pill.append(&ring);
         pill.append(&label);
-        window.set_child(Some(&pill));
+        window.set_child(Some(&strip));
 
         Cue {
             window,
+            strip,
             pill,
             ring,
             label,
@@ -104,6 +122,11 @@ impl Cue {
         self.ring.add_css_class(&format!("face-ring-{state}"));
         self.pill.add_css_class(&format!("face-pill-{state}"));
         self.label.set_label(text);
+        if self.window.is_visible() {
+            // Already up: this is a state change, not an arrival. Touching the
+            // entrance here is what made the pill jump on every frame state.
+            return;
+        }
         // Re-resolved on every show: outputs come and go, and a monitor
         // handle kept from startup can name one the compositor has since
         // forgotten. Set while hidden, which is the only time layer-shell
@@ -111,7 +134,18 @@ impl Cue {
         if let Some(monitor) = layer_shell::internal_monitor() {
             gtk4_layer_shell::LayerShell::set_monitor(&self.window, Some(&monitor));
         }
+        // Map first, animate on the next frame the compositor gives us. The
+        // frame clock does not tick until the surface is mapped and drawing,
+        // so starting the entrance from here would spend its first frames
+        // racing surface allocation -- which is visible, and always as a
+        // stutter at exactly the moment the cue is trying to catch the eye.
+        self.strip.remove_css_class("face-pill-enter");
         self.window.set_visible(true);
+        let strip = self.strip.clone();
+        self.window.add_tick_callback(move |_, _| {
+            strip.add_css_class("face-pill-enter");
+            glib::ControlFlow::Break
+        });
         // Nothing here is clickable, so nothing here should swallow a click.
         // Without this the pill eats presses aimed at the backdrop behind it,
         // which is the cancel gesture.
