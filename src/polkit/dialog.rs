@@ -451,10 +451,19 @@ impl PolkitDialog {
             backdrop.add_controller(backdrop_gesture);
         }
 
-        // Swallow clicks on the card so they never reach the backdrop.
+        // Swallow clicks that land on the card but on nothing in particular,
+        // so they cancel nothing instead of falling through to the backdrop.
+        //
+        // Bubble phase, emphatically not capture. Capture runs root to target,
+        // so a claiming gesture here saw every press on its way DOWN to the
+        // widget it was aimed at and cancelled the button's own gesture before
+        // it existed -- Allow, Cancel and the details toggle were all
+        // unclickable, while the backdrop kept working, so a click read as
+        // simply doing nothing. Bubble runs target upward: the button gets
+        // first refusal, and only a press nothing wanted reaches this and
+        // stops here.
         {
             let card_gesture = gtk4::GestureClick::new();
-            card_gesture.set_propagation_phase(gtk4::PropagationPhase::Capture);
             card_gesture.connect_pressed(|gesture, _, _, _| {
                 gesture.set_state(gtk4::EventSequenceState::Claimed);
             });
