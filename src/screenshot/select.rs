@@ -55,12 +55,22 @@ pub enum Mode {
 struct Sheet {
     output: String,
     image: Image,
-    scale: f64,
     window: gtk4::Window,
     area: gtk4::DrawingArea,
     /// Drag rectangle in widget (logical) coordinates, `None` until a drag
     /// starts. Shared with the draw function.
     rect: Rc<RefCell<Option<Rect>>>,
+}
+
+impl Sheet {
+    /// Buffer pixels per logical pixel, for this output's capture and surface.
+    fn ratio(&self) -> (f64, f64) {
+        ratio(
+            (f64::from(self.image.width), f64::from(self.image.height)),
+            f64::from(self.area.width()),
+            f64::from(self.area.height()),
+        )
+    }
 }
 
 /// Everything the selector needs to answer once and then get out of the way.
@@ -89,7 +99,7 @@ pub fn region(app: &gtk4::Application, mode: Mode, done: impl FnOnce(Option<Sele
     let remaining = Rc::new(std::cell::Cell::new(monitors.len()));
     let done = Rc::new(RefCell::new(Some(Box::new(done) as Box<dyn FnOnce(_)>)));
 
-    for (name, scale) in monitors {
+    for name in monitors {
         let pending = pending.clone();
         let remaining = remaining.clone();
         let done = done.clone();
@@ -100,7 +110,7 @@ pub fn region(app: &gtk4::Application, mode: Mode, done: impl FnOnce(Option<Sele
             move || super::capture::output(&for_thread),
             move |result| {
                 match result {
-                    Ok(image) => pending.borrow_mut().push((name, scale, image)),
+                    Ok(image) => pending.borrow_mut().push((name, image)),
                     Err(e) => log::warn!("screenshot: {e}"),
                 }
                 remaining.set(remaining.get() - 1);
@@ -121,8 +131,12 @@ pub fn region(app: &gtk4::Application, mode: Mode, done: impl FnOnce(Option<Sele
     }
 }
 
-/// Connector name and scale factor of every monitor GDK knows about.
-fn monitors() -> Vec<(String, f64)> {
+/// Connector name of every monitor GDK knows about.
+///
+/// No scale factor travels with it. `gdk::Monitor::scale_factor()` is an
+/// integer, so an output running Sway's fractional 1.5 answers 2; the number
+/// a crop needs is measured later instead, by `Sheet::ratio`.
+fn monitors() -> Vec<String> {
     let Some(display) = gdk::Display::default() else {
         return Vec::new();
     };
@@ -130,14 +144,11 @@ fn monitors() -> Vec<(String, f64)> {
         .monitors()
         .iter::<gdk::Monitor>()
         .filter_map(Result::ok)
-        .filter_map(|m| {
-            m.connector()
-                .map(|c| (c.to_string(), f64::from(m.scale_factor())))
-        })
+        .filter_map(|m| m.connector().map(|c| c.to_string()))
         .collect()
 }
 
-fn present(app: &gtk4::Application, mode: Mode, captured: Vec<(String, f64, Image)>, done: Done) {
+fn present(app: &gtk4::Application, mode: Mode, captured: Vec<(String, Image)>, done: Done) {
     static CONFIG: LayerShellConfig = LayerShellConfig {
         // Absent from the compositor's layer_effects list on purpose: this is
         // the one surface that must show the screen, not frost it.
@@ -161,7 +172,7 @@ fn present(app: &gtk4::Application, mode: Mode, captured: Vec<(String, f64, Imag
     let display = gdk::Display::default();
     let mut sheets = Vec::new();
 
-    for (output, scale, image) in captured {
+    for (output, image) in captured {
         let monitor = display.as_ref().and_then(|d| {
             d.monitors()
                 .iter::<gdk::Monitor>()
@@ -201,7 +212,6 @@ fn present(app: &gtk4::Application, mode: Mode, captured: Vec<(String, f64, Imag
         sheets.push(Sheet {
             output,
             image,
-            scale,
             window,
             area,
             rect: Rc::new(RefCell::new(None)),
@@ -256,7 +266,8 @@ fn wire(session: &Rc<Session>, index: usize, mode: Mode) {
 
     // ── Drawing ──
     let rect = sheet.rect.clone();
-    sheet.area.set_draw_func(move |area, cr, w, h| {
+    let buffer = (f64::from(sheet.image.width), f64::from(sheet.image.height));
+    sheet.area.set_draw_func(move |_, cr, w, h| {
         let (w, h) = (f64::from(w), f64::from(h));
         // Dim everything, then clear the selection back to fully transparent
         // so the frozen screen below shows through at full brightness.
@@ -278,7 +289,7 @@ fn wire(session: &Rc<Session>, index: usize, mode: Mode) {
         cr.rectangle(x + 0.5, y + 0.5, rw - 1.0, rh - 1.0);
         let _ = cr.stroke();
 
-        draw_size_chip(area, cr, x, y, rw, rh, h);
+        draw_size_chip(cr, ratio(buffer, w, h), x, y, rw, rh, h);
     });
 
     // ── Dragging ──
@@ -341,16 +352,15 @@ fn normalized(rect: &Option<Rect>, max_w: f64, max_h: f64) -> Option<Rect> {
 /// The pixel count, printed just outside the rectangle so it never covers the
 /// thing being measured — and inside it when the rectangle is at the top edge.
 fn draw_size_chip(
-    area: &gtk4::DrawingArea,
     cr: &cairo::Context,
+    (sx, sy): (f64, f64),
     x: f64,
     y: f64,
     w: f64,
     h: f64,
     max_h: f64,
 ) {
-    let scale = f64::from(area.scale_factor());
-    let text = format!("{} × {}", (w * scale) as i64, (h * scale) as i64);
+    let text = format!("{} × {}", (w * sx) as i64, (h * sy) as i64);
     cr.select_font_face(
         "monospace",
         cairo::FontSlant::Normal,
@@ -419,7 +429,7 @@ impl Session {
         if mode == Mode::Pick {
             // A one-pixel crop carries the colour, so the picker and the
             // region share one result type; the caller reads `pixel(0, 0)`.
-            let (px, py) = to_buffer(from, sheet.scale);
+            let (px, py) = to_buffer(from, sheet.ratio());
             let image = sheet.image.crop(px as i32, py as i32, 1, 1);
             self.answer((!image.pixels.is_empty()).then(|| Selection {
                 output: sheet.output.clone(),
@@ -435,12 +445,13 @@ impl Session {
         );
         match normalized(&rect, w, h) {
             Some((x, y, rw, rh)) => {
-                let (bx, by) = to_buffer((x, y), sheet.scale);
+                let (sx, sy) = sheet.ratio();
+                let (bx, by) = to_buffer((x, y), (sx, sy));
                 let image = sheet.image.crop(
                     bx as i32,
                     by as i32,
-                    (rw * sheet.scale).round() as u32,
-                    (rh * sheet.scale).round() as u32,
+                    (rw * sx).round() as u32,
+                    (rh * sy).round() as u32,
                 );
                 if image.pixels.is_empty() {
                     self.answer(None);
@@ -457,11 +468,29 @@ impl Session {
 }
 
 /// Logical widget coordinates to the buffer pixels the capture is in.
-fn to_buffer((x, y): (f64, f64), scale: f64) -> (u32, u32) {
+fn to_buffer((x, y): (f64, f64), (sx, sy): (f64, f64)) -> (u32, u32) {
     (
-        (x * scale).round().max(0.0) as u32,
-        (y * scale).round().max(0.0) as u32,
+        (x * sx).round().max(0.0) as u32,
+        (y * sy).round().max(0.0) as u32,
     )
+}
+
+/// Buffer pixels per logical pixel, measured from the capture against the
+/// surface showing it.
+///
+/// Asking GDK gives the wrong answer on a fractionally scaled output:
+/// `scale_factor()` is an integer, so Sway's 1.5 comes back as 2 and every
+/// crop lands 4/3 too large, drifting further from the drag the nearer the
+/// pointer gets to the far edge. A 3840×2160 capture on a 2560×1440 surface
+/// says 1.5 without anyone having to ask.
+///
+/// Per axis, because a capture whose aspect ratio disagrees with its surface
+/// should skew the crop the same way the `ContentFit::Fill` picture skews the
+/// image the user is dragging on.
+fn ratio((bw, bh): (f64, f64), w: f64, h: f64) -> (f64, f64) {
+    let sx = if w > 0.0 { bw / w } else { 1.0 };
+    let sy = if h > 0.0 { bh / h } else { 1.0 };
+    (sx, sy)
 }
 
 #[cfg(test)]
@@ -492,7 +521,25 @@ mod tests {
 
     #[test]
     fn logical_coordinates_scale_up_to_buffer_pixels() {
-        assert_eq!(to_buffer((10.0, 20.0), 2.0), (20, 40));
-        assert_eq!(to_buffer((10.0, 20.0), 1.0), (10, 20));
+        assert_eq!(to_buffer((10.0, 20.0), (2.0, 2.0)), (20, 40));
+        assert_eq!(to_buffer((10.0, 20.0), (1.0, 1.0)), (10, 20));
+    }
+
+    #[test]
+    fn a_fractional_output_measures_its_own_ratio() {
+        // 3840×2160 captured, shown on a 2560×1440 surface: Sway scale 1.5,
+        // which gdk::Monitor::scale_factor() would have called 2.
+        assert_eq!(ratio((3840.0, 2160.0), 2560.0, 1440.0), (1.5, 1.5));
+        assert_eq!(to_buffer((1000.0, 500.0), (1.5, 1.5)), (1500, 750));
+    }
+
+    #[test]
+    fn an_integer_output_is_unchanged() {
+        assert_eq!(ratio((2880.0, 1800.0), 1440.0, 900.0), (2.0, 2.0));
+    }
+
+    #[test]
+    fn an_unmapped_surface_does_not_divide_by_zero() {
+        assert_eq!(ratio((3840.0, 2160.0), 0.0, 0.0), (1.0, 1.0));
     }
 }
