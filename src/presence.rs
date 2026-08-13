@@ -13,14 +13,20 @@
 //!
 //! The IIO index moves across boots, so the device is resolved by name.
 //!
-//! Transitions are debounced asymmetrically. Measured, the sensor emitted
-//! 1 → 0 → 0 (attention 100) → 1 across 8 s for a step away and back, so an
-//! undebounced absence would lock on a glance aside: leaving must be sure,
-//! coming back should be quick.
+//! Transitions are reported raw. The sensor does its own filtering in the
+//! ISH, so debouncing here was a second layer over one that already exists,
+//! and it cost the thing presence is for: a 10 s absence hold meant the screen
+//! stayed lit for ten seconds after you left, and a 1 s return hold delayed
+//! every wake and every face-unlock attempt.
+//!
+//! An older note here measured 1 → 0 → 0 (attention 100) → 1 across 8 s for a
+//! step away and back, which is what the debounce was built for. If a glance
+//! aside starts locking the session, that blip is back and the fix is a hold
+//! on the *absence* edge only — never on the return, which must stay
+//! immediate.
 
 use std::fs;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
 
 const IIO_DEVICES: &str = "/sys/bus/iio/devices";
 const RAW: &str = "in_proximity0_raw";
@@ -28,10 +34,8 @@ const ATTENTION: &str = "in_attention_input";
 
 pub struct Presence {
     dir: PathBuf,
-    /// Debounced state; seeded by the first reading without reporting it.
+    /// Last reported state; seeded by the first reading without reporting it.
     state: Option<bool>,
-    /// Candidate awaiting its debounce, and when it was first seen.
-    pending: Option<(bool, Instant)>,
 }
 
 impl Presence {
@@ -57,7 +61,6 @@ impl Presence {
             return Some(Self {
                 dir,
                 state: None,
-                pending: None,
             });
         }
         log::info!("presence: no IIO device named \"prox\" — presence rules off");
@@ -77,7 +80,7 @@ impl Presence {
         self.state
     }
 
-    /// Instantaneous reading, no debounce. For readouts that redraw anyway;
+    /// Instantaneous reading. For readouts that redraw anyway;
     /// anything that acts on presence should use [`Self::poll`].
     pub fn read(&self) -> Option<bool> {
         Some(self.read_i32(RAW)? != 0)
@@ -90,32 +93,25 @@ impl Presence {
 
     /// Read once. Returns `Some(new_state)` only on a settled transition, so
     /// callers can drive this from an existing tick without tracking edges.
-    pub fn poll(&mut self, gone_after: Duration, back_after: Duration) -> Option<bool> {
+    /// Report a change in presence, or `None` when nothing changed.
+    ///
+    /// Edge-triggered: every caller acts on transitions, and the first reading
+    /// is the starting state rather than a transition — reporting it would
+    /// fire "user back" at every service start, which on the lock screen would
+    /// arm a face attempt against whoever locked the machine a moment ago.
+    pub fn poll(&mut self) -> Option<bool> {
         let present = self.read_i32(RAW)? != 0;
 
-        // First reading is the starting state, not a transition: reporting it
-        // would fire "user back" at every service start.
         if self.state.is_none() {
             self.state = Some(present);
             return None;
         }
 
         if Some(present) == self.state {
-            self.pending = None;
             return None;
         }
 
-        let needed = if present { back_after } else { gone_after };
-        match self.pending {
-            Some((candidate, since)) if candidate == present => {
-                if since.elapsed() >= needed {
-                    self.pending = None;
-                    self.state = Some(present);
-                    return Some(present);
-                }
-            }
-            _ => self.pending = Some((present, Instant::now())),
-        }
-        None
+        self.state = Some(present);
+        Some(present)
     }
 }

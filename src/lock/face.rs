@@ -60,13 +60,6 @@ fn compare_command() -> String {
 /// soon after arrival the first attempt starts.
 const POLL: Duration = Duration::from_millis(250);
 
-/// Debounce into "gone". Shorter than the idle manager's, because here it only
-/// stops attempts rather than locking anything.
-const GONE_AFTER: Duration = Duration::from_secs(3);
-
-/// Debounce into "back". An attempt takes seconds anyway.
-const BACK_AFTER: Duration = Duration::from_secs(1);
-
 /// Gap between attempts while presence holds.
 const RETRY_AFTER: Duration = Duration::from_secs(6);
 
@@ -105,7 +98,7 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
     loop {
         sleep(POLL);
 
-        match presence.poll(GONE_AFTER, BACK_AFTER) {
+        match presence.poll() {
             Some(true) => {
                 log::info!("face: presence returned — arming");
                 attempts = 0;
