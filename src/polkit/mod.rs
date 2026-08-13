@@ -446,8 +446,10 @@ fn apply_helper_event(state: &Rc<RefCell<PolkitState>>, event: HelperEvent) -> b
             true
         }
         HelperEvent::Success => {
-            dialog.show_fingerprint(false, "");
-            dialog.set_status("Authenticated", StatusKind::Success);
+            // The pills stay. Hiding them here collapsed their row at the same
+            // instant the status line appeared, so the card resized twice in
+            // opposite directions while the user was still looking at it.
+            dialog.set_status("Authorised", StatusKind::Success);
             dialog.flash_success();
             // Brief celebratory hold before dismissing. Guarded by cookie:
             // the user can cancel during the hold, which pops a queued

@@ -28,7 +28,11 @@ static CUE_CONFIG: LayerShellConfig = LayerShellConfig {
     layer: Layer::Overlay,
     exclusive: false,
     default_width: None,
-    default_height: None,
+    // Explicit, so the surface never asks the compositor to choose. A layer
+    // surface that requests zero on an unanchored axis gets the whole output,
+    // and a full-screen surface above the card with a live input region would
+    // swallow every click aimed at it.
+    default_height: Some(180),
     // Top strip, full width. The pill centres itself inside it, under the
     // lens.
     // Left and right anchored too, so the surface spans the output and its
@@ -57,6 +61,9 @@ impl Cue {
         let window = create_layer_window(app, &CUE_CONFIG);
         window.add_css_class("face-cue");
         window.set_visible(false);
+        // Re-applied on every map: the region lives on the GdkSurface, which
+        // is created at map and re-laid-out on output changes.
+        window.connect_map(|w| clear_input_region(w));
 
         let pill = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
