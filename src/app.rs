@@ -140,9 +140,6 @@ pub fn run() {
 
         // ── Popup manager ────────────────────────────────────────────────────
         PopupManager::register(app, store_activate.clone());
-        // Face authentication confirm surface. Registering the agent is what
-        // makes faced willing to run Verify(elevate) at all.
-        crate::face_ui::register(app);
 
         // ── OSD overlay ──────────────────────────────────────────────────────
         let osd = Osd::new(app);
