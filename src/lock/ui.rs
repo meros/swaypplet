@@ -113,6 +113,9 @@ struct Surface {
     /// This surface is on the built-in panel, the one with the camera above
     /// it. The face indicator appears here and nowhere else.
     internal: bool,
+    /// Wrapper carrying the pill's entrance animation, kept off the pill so
+    /// state changes cannot replay it.
+    face_wrap: gtk4::Box,
     window: gtk4::Window,
     card: gtk4::Box,
     /// The client-side glass behind the card; its sigma is animatable
@@ -356,7 +359,6 @@ impl SurfaceSet {
             .visible(false)
             .build();
         face_pill.add_css_class("face-pill");
-        face_pill.set_margin_top(56);
         // The ring is drawn in CSS, not set as a glyph: it has to sweep while
         // looking, lock when a face is found, complete on a match and break
         // on a failure, and a font glyph can do none of that.
@@ -370,8 +372,21 @@ impl SurfaceSet {
         face_pill.append(&face_ring);
         face_pill.append(&face_label);
 
+        // The entrance rides on a wrapper rather than on the pill. `animation`
+        // is a single property, so an entrance on .face-pill would be rewritten
+        // by every state class -- and every looking -> face edge would replay
+        // the arrival, dropping the pill mid-check. Two nodes, two independent
+        // animations.
+        let face_wrap = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .halign(gtk4::Align::Center)
+            .valign(gtk4::Align::Start)
+            .build();
+        face_wrap.set_margin_top(56);
+        face_wrap.append(&face_pill);
+
         overlay.add_overlay(&column);
-        overlay.add_overlay(&face_pill);
+        overlay.add_overlay(&face_wrap);
 
         entry.connect_activate(move |e| on_submit(e.text().to_string()));
 
@@ -405,6 +420,7 @@ impl SurfaceSet {
 
         let surface = Surface {
             internal,
+            face_wrap,
             window: window.clone(),
             card,
             pane,
@@ -659,9 +675,21 @@ impl SurfaceSet {
                 s.face_pill.set_visible(false);
                 continue;
             }
+            let arriving = visible && !s.face_pill.is_visible();
             s.face_pill.set_visible(visible);
             if !visible {
+                s.face_wrap.remove_css_class("face-pill-enter");
                 continue;
+            }
+            if arriving {
+                // Re-added on the next main-loop turn so the style actually
+                // recomputes between removal and addition; adding it back in
+                // the same frame would not restart the animation.
+                s.face_wrap.remove_css_class("face-pill-enter");
+                let wrap = s.face_wrap.clone();
+                glib::idle_add_local_once(move || {
+                    wrap.add_css_class("face-pill-enter");
+                });
             }
             s.face_label.set_label(label);
             for old in ["looking", "dark", "found", "ok", "fail"] {
