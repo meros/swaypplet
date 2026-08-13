@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::process::Command;
 use std::rc::Rc;
 
@@ -126,6 +126,12 @@ fn execute_command(cmd: &OsdCommand) -> OsdDisplay {
 }
 
 /// Turn a volume into what the OSD draws.
+/// What the card would read for this level, as the comparison that decides
+/// whether a redraw is worth restarting the auto-hide timer for.
+fn drawn_key(volume: f64, muted: bool) -> (i32, bool) {
+    ((volume * 100.0).round() as i32, muted)
+}
+
 fn volume_display(volume: f64, muted: bool, is_mic: bool) -> OsdDisplay {
     let icon = icons::volume_icon(volume, muted, is_mic);
 
@@ -198,6 +204,35 @@ fn read_lock_display(lock_name: &str, icon_on: &str, icon_off: &str, label: &str
 /// text) → handled? Installed by app.rs once the bar exists.
 type BarRoute = Box<dyn Fn(&str, f64, &str) -> bool>;
 
+/// How long after the last press the server's own number takes over.
+///
+/// Long enough to cover a key repeat gap (~33 ms) and the round trip, short
+/// enough to land well inside the OSD's 1500 ms on screen.
+const SETTLE_MS: u64 = 150;
+
+/// What the card is currently showing, so a snapshot from the sound server
+/// knows whether it has anything to say about it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Showing {
+    /// Brightness, a lock indicator, or nothing at all.
+    Other,
+    OutputVolume,
+    InputVolume,
+}
+
+/// The level the volume keys have asked for and the server has not yet
+/// confirmed.
+///
+/// Presses accumulate here rather than each one reading the last snapshot:
+/// a burst arrives faster than the server echoes, so every press in it
+/// would otherwise compute the same "current + one step" and the card would
+/// sit still while the volume moved.
+#[derive(Default)]
+struct Pending {
+    level: Option<f64>,
+    settle: Option<glib::SourceId>,
+}
+
 #[derive(Clone)]
 pub struct Osd {
     icon_label: gtk4::Label,
@@ -212,6 +247,12 @@ pub struct Osd {
     /// Set once the panel exists. Absent only in the standalone paths that
     /// never send a volume command.
     audio: Rc<RefCell<Option<Rc<crate::audio::AudioService>>>>,
+    showing: Rc<Cell<Showing>>,
+    pending: Rc<RefCell<Pending>>,
+    /// The rounded percentage and mute currently on the card. A snapshot
+    /// that would redraw the same thing is dropped, because showing a card
+    /// restarts its 1500 ms life and unrelated audio events are frequent.
+    drawn: Rc<Cell<Option<(i32, bool)>>>,
 }
 
 impl Osd {
@@ -309,6 +350,9 @@ impl Osd {
             timeout_id: Rc::new(RefCell::new(None)),
             bar_route: Rc::new(RefCell::new(None)),
             audio: Rc::new(RefCell::new(None)),
+            showing: Rc::new(Cell::new(Showing::Other)),
+            pending: Rc::new(RefCell::new(Pending::default())),
+            drawn: Rc::new(Cell::new(None)),
         }
     }
 
@@ -323,7 +367,73 @@ impl Osd {
     /// Hand the OSD the sound server connection, so volume keys are answered
     /// from the same snapshot the panel's slider draws.
     pub fn set_audio(&self, audio: Rc<crate::audio::AudioService>) {
-        *self.audio.borrow_mut() = Some(audio);
+        *self.audio.borrow_mut() = Some(audio.clone());
+        let osd = self.clone();
+        audio.connect_change(move || osd.reconcile());
+    }
+
+    /// Redraw a volume card from the server's own number.
+    ///
+    /// The level drawn on the key press is a prediction, and on a sink that
+    /// carries its volume in hardware it is a wrong one: the server
+    /// quantises to the hardware's dB steps, so asking for 70% comes back
+    /// as 72%. The prediction is what makes the card feel instant; this is
+    /// what makes it true. It also covers the volume moving with no key
+    /// press at all, which is what the speakers' own knob does.
+    ///
+    /// Skipped while presses are still arriving, so a burst shows where it
+    /// is heading rather than where it has got to.
+    fn reconcile(&self) {
+        if self.pending.borrow().level.is_some() {
+            return;
+        }
+        let Some(audio) = self.audio.borrow().clone() else {
+            return;
+        };
+        let state = audio.snapshot();
+        let (volume, is_mic) = match self.showing.get() {
+            Showing::OutputVolume => (state.sink, false),
+            Showing::InputVolume => (state.source, true),
+            Showing::Other => return,
+        };
+        let Some(volume) = volume else { return };
+        let key = drawn_key(volume.volume, volume.muted);
+        if self.drawn.get() == Some(key) {
+            return;
+        }
+        self.drawn.set(Some(key));
+        self.show_display(&volume_display(volume.volume, volume.muted, is_mic));
+    }
+
+    /// Note a press, and return the level to draw for it.
+    ///
+    /// Each press advances the pending level rather than the snapshot's, so
+    /// ten of them in one burst move ten steps on the card and ten steps at
+    /// the server. The settle timer hands the card back to [`reconcile`]
+    /// once the presses stop.
+    fn advance(&self, from: f64, delta: f64) -> f64 {
+        let mut pending = self.pending.borrow_mut();
+        let target = (pending.level.unwrap_or(from) + delta).clamp(0.0, VOLUME_CEILING);
+        pending.level = Some(target);
+
+        if let Some(id) = pending.settle.take() {
+            id.remove();
+        }
+        let slot = self.pending.clone();
+        let osd = self.clone();
+        pending.settle = Some(glib::timeout_add_local_once(
+            std::time::Duration::from_millis(SETTLE_MS),
+            move || {
+                {
+                    let mut pending = slot.borrow_mut();
+                    pending.settle = None;
+                    pending.level = None;
+                }
+                osd.reconcile();
+            },
+        ));
+
+        target
     }
 
     pub fn trigger(&self, cmd: &OsdCommand) {
@@ -333,6 +443,9 @@ impl Osd {
             self.show_display(&display);
             return;
         }
+
+        // Nothing the sound server says bears on a brightness or lock card.
+        self.showing.set(Showing::Other);
 
         // brightnessctl can hang; run it off the GTK main thread so a stuck
         // command doesn't freeze the panel.
@@ -364,25 +477,32 @@ impl Osd {
             _ => return None,
         };
 
-        Some(match cmd {
+        let (level, muted, is_mic) = match cmd {
             OsdCommand::OutputVolumeRaise => {
+                self.showing.set(Showing::OutputVolume);
                 audio.send(AudioCommand::AdjustSinkVolume(VOLUME_STEP));
-                volume_display((current.volume + VOLUME_STEP).min(VOLUME_CEILING), false, false)
+                (self.advance(current.volume, VOLUME_STEP), current.muted, false)
             }
             OsdCommand::OutputVolumeLower => {
+                self.showing.set(Showing::OutputVolume);
                 audio.send(AudioCommand::AdjustSinkVolume(-VOLUME_STEP));
-                volume_display((current.volume - VOLUME_STEP).max(0.0), current.muted, false)
+                (self.advance(current.volume, -VOLUME_STEP), current.muted, false)
             }
             OsdCommand::OutputVolumeMuteToggle => {
+                self.showing.set(Showing::OutputVolume);
                 audio.send(AudioCommand::ToggleSinkMute);
-                volume_display(current.volume, !current.muted, false)
+                (current.volume, !current.muted, false)
             }
             OsdCommand::InputVolumeMuteToggle => {
+                self.showing.set(Showing::InputVolume);
                 audio.send(AudioCommand::ToggleSourceMute);
-                volume_display(current.volume, !current.muted, true)
+                (current.volume, !current.muted, true)
             }
             _ => return None,
-        })
+        };
+
+        self.drawn.set(Some(drawn_key(level, muted)));
+        Some(volume_display(level, muted, is_mic))
     }
 
     fn show_display(&self, display: &OsdDisplay) {
@@ -442,10 +562,14 @@ impl Osd {
         // window when the exit finishes)
         let reveal_c = self.reveal.clone();
         let timeout_ref = self.timeout_id.clone();
+        let showing = self.showing.clone();
+        let drawn = self.drawn.clone();
         let id = glib::timeout_add_local_once(
             std::time::Duration::from_millis(OSD_TIMEOUT_MS as u64),
             move || {
                 *timeout_ref.borrow_mut() = None;
+                showing.set(Showing::Other);
+                drawn.set(None);
                 reveal_c.hide();
             },
         );
