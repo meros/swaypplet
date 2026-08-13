@@ -138,7 +138,26 @@ pub fn run() -> ! {
         // latency between the sensor changing and us acting on it.
         if let Some(now_present) = presence.as_mut().and_then(|p| p.poll()) {
             if now_present {
-                log::info!("presence: user back");
+                log::info!("presence: user back — powering outputs on");
+                // The mirror of the blank invariant. Blanking is dangerous
+                // without a confirmed lock, so it is guarded; powering on
+                // never is, so this is unconditional. Without it, returning to
+                // a blanked session leaves you facing a dark screen until you
+                // touch something — and the locker is by then already
+                // attempting face unlock behind it, so the machine looks dead
+                // at exactly the moment it is working.
+                //
+                // Outputs only, no brightness restore. If the dim tier had
+                // faded the screen it stays faded, which is still legible, and
+                // the existing input-driven Resumed(Dim) path is what should
+                // own brightness — presence is not input, and overriding a
+                // deliberate brightness setting from a walk-past would be
+                // worse than a dim lock screen.
+                //
+                // This does not reset the idle tiers: the reblank timer keeps
+                // running, so presence that turns out to be someone walking
+                // past re-blanks on its own rather than holding the panel lit.
+                run_cmd("presence.back", "swaymsg", &["output", "*", "power", "on"]);
             } else {
                 log::info!("presence: user gone — locking");
                 ensure_locked(
