@@ -241,14 +241,7 @@ fn start_session(
     let s_pwd = state.clone();
     let on_password = Box::new(move |pwd: String| handle_user_password(&s_pwd, pwd));
     let s_cancel = state.clone();
-    let on_cancel = Box::new(move || {
-        // Refuse any face check riding on this session first. Leaving it to
-        // time out would keep the camera and the IR emitter running for a
-        // request the user has visibly declined.
-        face::abandon(&s_cancel);
-        face::answer(&s_cancel, false);
-        end_session(&s_cancel, AuthOutcome::Cancelled)
-    });
+    let on_cancel = Box::new(move || end_session(&s_cancel, AuthOutcome::Cancelled));
     let s_ident = state.clone();
     let on_identity = Box::new(move |uid: u32| handle_identity_change(&s_ident, uid));
     // Typing is a decision: it abandons a face check still waiting on the
@@ -557,10 +550,11 @@ fn handle_identity_change(state: &Rc<RefCell<PolkitState>>, uid: u32) {
 }
 
 fn end_session(state: &Rc<RefCell<PolkitState>>, outcome: AuthOutcome) {
-    // Any face check attached to this session dies with it. It was asked on
-    // behalf of a PAM conversation that is over, so an answer now would apply
-    // to nothing, and leaving it pending holds the camera open.
-    face::abandon(state);
+    // Any face check attached to this session dies with it, armed or not. It
+    // was asked on behalf of a PAM conversation that is over, so a deny costs
+    // nothing, and leaving it pending holds the camera and the infrared
+    // emitter open until faced times its own confirm window out.
+    face::answer(state, false);
     let dialog = state.borrow().dialog.clone();
     {
         let mut s = state.borrow_mut();
