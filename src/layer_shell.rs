@@ -62,3 +62,38 @@ pub fn create_layer_window_on(
 
     window
 }
+
+/// The output with the camera above it.
+///
+/// Everything that reports a face check has to appear on the built-in panel,
+/// because that is the only screen with a lens over it. On the focused output
+/// it is worse than useless: it invites the user to look at an external
+/// monitor, which points their face away from the sensor at exactly the
+/// moment it is trying to read one.
+///
+/// Connector names are the signal. Wayland gives them straight through from
+/// DRM, where the internal panel is eDP (laptops), LVDS (older ones) or DSI
+/// (tablets and some ARM machines). Nothing else can be internal, so an
+/// unmatched name is external and a machine with no match at all has no
+/// built-in panel to prefer.
+pub fn is_internal(monitor: &gdk::Monitor) -> bool {
+    let Some(connector) = monitor.connector() else {
+        return false;
+    };
+    let name = connector.to_uppercase();
+    name.starts_with("EDP") || name.starts_with("LVDS") || name.starts_with("DSI")
+}
+
+/// Resolve the built-in panel, or `None` when there is not one.
+///
+/// Looked up per call rather than cached: monitors come and go, and a stale
+/// `gdk::Monitor` pins a surface to an output the compositor has forgotten.
+pub fn internal_monitor() -> Option<gdk::Monitor> {
+    let display = gdk::Display::default()?;
+    display
+        .monitors()
+        .into_iter()
+        .flatten()
+        .filter_map(|obj| obj.downcast::<gdk::Monitor>().ok())
+        .find(is_internal)
+}

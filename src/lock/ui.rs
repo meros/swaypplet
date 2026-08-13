@@ -110,6 +110,9 @@ pub enum StatusKind {
 }
 
 struct Surface {
+    /// This surface is on the built-in panel, the one with the camera above
+    /// it. The face indicator appears here and nowhere else.
+    internal: bool,
     window: gtk4::Window,
     card: gtk4::Box,
     /// The client-side glass behind the card; its sigma is animatable
@@ -164,10 +167,19 @@ impl SurfaceSet {
 
     /// Build a lock window for one monitor and register it in the set.
     /// `on_submit` receives the entry text on Enter.
-    pub fn build_surface(&self, on_submit: Rc<dyn Fn(String)>) -> gtk4::Window {
+    ///
+    /// `monitor` is the output this surface will be assigned to, needed only
+    /// so the face indicator can tell the built-in panel from an external
+    /// one — the camera is over exactly one of them.
+    pub fn build_surface(
+        &self,
+        on_submit: Rc<dyn Fn(String)>,
+        monitor: Option<&gdk4::Monitor>,
+    ) -> gtk4::Window {
         let window = gtk4::Window::new();
         window.add_css_class("lock");
-        let content = self.build_content(&window, on_submit);
+        let internal = monitor.is_some_and(crate::layer_shell::is_internal);
+        let content = self.build_content(&window, on_submit, internal);
         window.set_child(Some(&content));
         window
     }
@@ -178,6 +190,7 @@ impl SurfaceSet {
         &self,
         window: &gtk4::Window,
         on_submit: Rc<dyn Fn(String)>,
+        internal: bool,
     ) -> gtk4::Widget {
         let overlay = gtk4::Overlay::new();
 
@@ -391,6 +404,7 @@ impl SurfaceSet {
         window.add_controller(motion);
 
         let surface = Surface {
+            internal,
             window: window.clone(),
             card,
             pane,
@@ -633,8 +647,18 @@ impl SurfaceSet {
     /// `state` is a CSS class rather than an enum of drawing instructions, so
     /// the whole visual vocabulary lives in the stylesheet and this stays a
     /// state broadcast.
+    /// Shown on the built-in panel only. The camera is above that screen and
+    /// no other, so a pill on an external monitor asks the user to look away
+    /// from the sensor reading their face. On a machine with no internal
+    /// panel there is nothing to prefer, so every surface gets it.
     pub fn show_face(&self, visible: bool, state: &str, label: &str) {
-        for s in self.inner.borrow().iter() {
+        let surfaces = self.inner.borrow();
+        let has_internal = surfaces.iter().any(|s| s.internal);
+        for s in surfaces.iter() {
+            if has_internal && !s.internal {
+                s.face_pill.set_visible(false);
+                continue;
+            }
             s.face_pill.set_visible(visible);
             if !visible {
                 continue;
