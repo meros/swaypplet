@@ -4,10 +4,11 @@
 //! fingerprint worker, so a face match unlocks by the same path a finger does.
 //!
 //! Presence-triggered rather than continuously polled, because every attempt
-//! costs something visible: the camera LED lights, and v4l2-relayd swaps
-//! icamerasrc in for the idle splash (a second or two, which is why the howdy
-//! timeout is 8 s). Polling an empty room would blink the LED at nobody and
-//! hold the IPU7 awake on battery.
+//! costs something: the IR emitter lights for the duration of the attempt, and
+//! the sensor plus the IPU7 spin up behind it. Polling an empty room would
+//! burn the emitter at nobody and hold the IPU7 awake on battery. (It no
+//! longer lights the visible camera LED — this runs on the infrared sensor,
+//! so an attempt is not announced.)
 //!
 //! Only a *transition* into presence arms an attempt, never presence that was
 //! already there. Locking deliberately while sitting at the machine has to
@@ -15,20 +16,28 @@
 //! itself within seconds. So the working sequence is: walk away (the idle
 //! manager locks on absence), come back, face unlocks.
 //!
-//! Verification shells out to `howdy-compare <user>`, a wrapper around howdy's
-//! compare.py (nixos repo, modules/nixos/security/face-unlock.nix). Not a PAM
-//! module, for the same reason fingerprint uses fprintd's bus API: the locker's
-//! PAM stack stays password-only.
+//! Verification shells out to `howdy-verify <user>` (nixos repo,
+//! pkgs/howdy-verify), the one face-verification implementation on the system —
+//! the same binary PAM uses for sudo and pkexec, so "is this the user" is
+//! decided in exactly one place. It reads howdy's config, model format and
+//! dlib data, but replaces howdy's compare.py, which is a script rather than a
+//! library and whose only route into PAM synthesises an Enter keypress through
+//! uinput. Not a PAM module here either, for the same reason fingerprint uses
+//! fprintd's bus API: the locker's PAM stack stays password-only.
 //!
-//! compare.py exit codes (howdy 3.0.0): 0 match, 11 no match before its own
-//! timeout, 13 every frame too dark, 10 no enrolled model, 1 detector init
-//! failed, 12 no username given. The first three are worth retrying; the rest
-//! are permanent for this session, and retrying them would just burn the
-//! camera, so they stop the worker.
+//! Exit codes (inherited from compare.py, so the contract predates the
+//! rewrite): 0 match, 11 no match before its own timeout, 13 every frame too
+//! dark, 10 no enrolled model, 1 detector or camera init failed, 12 no
+//! username given. The first three are worth retrying; the rest are permanent
+//! for this session, and retrying them would just burn the emitter, so they
+//! stop the worker.
 //!
 //! This runs as the session user, so it needs read access to the models
-//! (group `howdy`) and the camera (group `video`). Group changes need a fresh
-//! login before the locker inherits them.
+//! (/var/lib/howdy/models) and the camera node, both group `howdy` — the IR
+//! node is deliberately not group `video`, because whoever can open the
+//! loopback's OUTPUT side can inject frames, and an injected frame is a face
+//! unlock bypass needing neither a photo nor physical access. Group changes
+//! need a fresh login before the locker inherits them.
 
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -41,7 +50,7 @@ use crate::presence::Presence;
 /// Fallback when the unit does not set `SWAYPPLET_FACE_COMPARE`. The locker
 /// inherits a curated PATH from swaypplet-idle.service, so in practice the
 /// absolute path from the environment is what runs.
-const COMPARE: &str = "howdy-compare";
+const COMPARE: &str = "howdy-verify";
 
 fn compare_command() -> String {
     std::env::var("SWAYPPLET_FACE_COMPARE").unwrap_or_else(|_| COMPARE.to_string())
