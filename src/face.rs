@@ -25,20 +25,9 @@
 //! the user to press a key whenever one appears, which is exactly the
 //! behaviour an attacker wants.
 
-// Not wired into the panel yet: nothing calls start(), so the protocol layer
-// below is dead code on purpose.
-//
-// That is the safe state, not an oversight. faced refuses Verify(elevate)
-// outright when no confirm agent is registered, and refuses it *before*
-// opening the camera. An agent that registered but had no surface to draw
-// would be strictly worse: the daemon would light the emitter, spend a full
-// burst, wait out the six-second confirm window and then deny, every time.
-// So this stays unregistered until there is a surface that can answer.
-#![allow(dead_code)]
-
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
-use std::sync::mpsc::Sender;
+use async_channel::Sender;
 use std::time::Duration;
 
 const SOCKET: &str = "/run/faced/session.sock";
@@ -177,7 +166,7 @@ fn run(tx: &Sender<Request>) -> std::io::Result<()> {
             peer_cmdline: field(text, "cmdline").unwrap_or("").to_string(),
             expires_ms: number(text, "expires_ms").unwrap_or(0),
         };
-        if tx.send(request).is_err() {
+        if tx.send_blocking(request).is_err() {
             return Ok(());
         }
     }

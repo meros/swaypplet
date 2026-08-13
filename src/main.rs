@@ -8,6 +8,7 @@ mod clipboard;
 mod dmenu;
 mod elephant;
 mod face;
+mod face_ui;
 mod fp;
 mod gdm_shim;
 mod glib_unix;
