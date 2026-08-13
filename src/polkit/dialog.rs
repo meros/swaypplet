@@ -33,6 +33,9 @@ static POLKIT_CONFIG: LayerShellConfig = LayerShellConfig {
     keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
 };
 
+/// Nerd Font check, for the approved state.
+const ICON_OK: &str = "\u{f012c}";
+
 /// Visual treatment of the status line below the fingerprint pill.
 #[derive(Clone, Copy)]
 pub enum StatusKind {
@@ -398,6 +401,7 @@ impl PolkitDialog {
             let cbs = callbacks.clone();
             let entry = password_entry.clone();
             auth_btn.connect_clicked(move |_| {
+                log::info!("polkit: auth button clicked");
                 let text = entry.text().to_string();
                 entry.set_text("");
                 let cb = cbs.borrow().on_password.clone();
@@ -422,6 +426,7 @@ impl PolkitDialog {
         {
             let cbs = callbacks.clone();
             cancel_btn.connect_clicked(move |_| {
+                log::info!("polkit: cancel button clicked");
                 let cb = cbs.borrow().on_cancel.clone();
                 cb();
             });
@@ -440,34 +445,33 @@ impl PolkitDialog {
             });
         }
 
-        // Backdrop click → cancel
+        // Backdrop click → cancel, but only when the click really landed on
+        // the apron.
+        //
+        // This used to be enforced by a claiming gesture on the card, which
+        // is a trap: any ancestor gesture that claims a press can starve the
+        // widget the press was aimed at, and the failure is silent -- the
+        // button highlights under the pointer and then does nothing, while
+        // the keyboard keeps working because a layer surface's keyboard grab
+        // does not go through gesture propagation at all. Hit-testing the
+        // apron asks the question directly and cannot interfere with anything
+        // inside the card.
         {
             let cbs = callbacks.clone();
             let backdrop_gesture = gtk4::GestureClick::new();
-            backdrop_gesture.connect_released(move |_, _, _, _| {
+            backdrop_gesture.connect_released(move |gesture, _, x, y| {
+                let Some(apron) = gesture.widget() else { return };
+                let landed_on_apron = apron
+                    .pick(x, y, gtk4::PickFlags::DEFAULT)
+                    .is_some_and(|hit| hit == apron);
+                log::debug!("polkit: backdrop release, on apron: {landed_on_apron}");
+                if !landed_on_apron {
+                    return;
+                }
                 let cb = cbs.borrow().on_cancel.clone();
                 cb();
             });
             backdrop.add_controller(backdrop_gesture);
-        }
-
-        // Swallow clicks that land on the card but on nothing in particular,
-        // so they cancel nothing instead of falling through to the backdrop.
-        //
-        // Bubble phase, emphatically not capture. Capture runs root to target,
-        // so a claiming gesture here saw every press on its way DOWN to the
-        // widget it was aimed at and cancelled the button's own gesture before
-        // it existed -- Allow, Cancel and the details toggle were all
-        // unclickable, while the backdrop kept working, so a click read as
-        // simply doing nothing. Bubble runs target upward: the button gets
-        // first refusal, and only a press nothing wanted reaches this and
-        // stops here.
-        {
-            let card_gesture = gtk4::GestureClick::new();
-            card_gesture.connect_pressed(|gesture, _, _, _| {
-                gesture.set_state(gtk4::EventSequenceState::Claimed);
-            });
-            card.add_controller(card_gesture);
         }
 
         // Esc cancels — capture-phase so it beats the password entry.
@@ -637,14 +641,20 @@ impl PolkitDialog {
 
     // ─── State updates from the controller ───────────────────────────
 
+    /// Set the status line. Its space is reserved whether or not it says
+    /// anything.
+    ///
+    /// It used to be hidden when empty, so the first error or the final
+    /// "Authorised" grew the card and shoved everything below it down -- at
+    /// exactly the moment the user is reading, and for the success case at
+    /// exactly the moment they are reaching for a button. A blank line costs
+    /// one line of height; a card that resizes under the pointer costs a
+    /// misclick.
     pub fn set_status(&self, text: &str, kind: StatusKind) {
-        if text.is_empty() {
-            self.status_label.set_visible(false);
-            self.status_label.set_label("");
-        } else {
-            self.status_label.set_visible(true);
-            self.status_label.set_label(text);
-        }
+        self.status_label.set_visible(true);
+        // A space, not the empty string: an empty label collapses to zero
+        // height and the reservation is the entire point.
+        self.status_label.set_label(if text.is_empty() { " " } else { text });
         self.status_label.remove_css_class("polkit-status-error");
         self.status_label.remove_css_class("polkit-status-success");
         self.status_label.remove_css_class("polkit-status-info");
@@ -733,8 +743,21 @@ impl PolkitDialog {
         });
     }
 
+    /// Say it was approved, inside the card, without moving anything.
+    ///
+    /// Deliberately does not hide the fingerprint or face pill. Hiding them
+    /// collapsed their row at the same instant the status line appeared, so
+    /// the card resized twice in opposite directions. They stay where they
+    /// are and simply stop asking: the pulse comes off, and what they last
+    /// reported stands as the record of which method actually worked.
     pub fn flash_success(&self) {
         self.card.add_css_class("polkit-success");
+        self.icon_image.set_visible(false);
+        self.icon_label.set_visible(true);
+        self.icon_label.set_label(ICON_OK);
+        self.icon_label.add_css_class("polkit-icon-ok");
+        self.fp_pill.remove_css_class("polkit-fp-active");
+        self.face_pill.remove_css_class("polkit-fp-active");
     }
 
     pub fn lock_inputs(&self) {
@@ -757,6 +780,7 @@ impl PolkitDialog {
     }
 
     fn set_icon(&self, icon_name: &str, action_id: &str) {
+        self.icon_label.remove_css_class("polkit-icon-ok");
         // Try the icon name from polkit first.
         if !icon_name.is_empty() {
             let display = gtk4::prelude::WidgetExt::display(&self.icon_image);
