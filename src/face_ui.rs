@@ -89,74 +89,110 @@ fn summarise(cmdline: &str, exe: &str) -> String {
 struct Ui {
     window: gtk4::Window,
     ring: GtkBox,
-    title: Label,
-    detail: Label,
-    hint: Label,
-    button: Button,
+    command: Label,
+    status: Label,
+    allow: Button,
+    cancel: Button,
 }
 
+/// The card, laid out around what the user has to decide.
+///
+/// Four things, in the order a person actually needs them:
+///
+///   1. WHAT this is. "Administrator access", not "Authorise as meros". You
+///      are not authorising as yourself; you are letting something run as
+///      root, and the title has to name that consequence or the prompt is
+///      hiding its own point.
+///   2. WHAT is asking. The command, in a recessed well so it reads as
+///      quoted evidence rather than as instruction. It is the only thing on
+///      the card that distinguishes a request you made from one you did not.
+///   3. WHAT it becomes. "Runs as root" stated plainly, because the
+///      escalation is the entire reason to think before pressing.
+///   4. WHAT is happening and WHAT you can do. The ring and its status share
+///      a row, so motion and wording change together, and both actions are
+///      always visible.
+///
+/// Cancel is present and enabled from the first frame. Refusing must never
+/// be harder or slower than accepting; a prompt where the only easy path is
+/// "yes" is a prompt that manufactures consent.
 fn build(app: &gtk4::Application) -> Ui {
     let window = create_layer_window(app, &CONFIRM_CONFIG);
     window.add_css_class("face-confirm");
 
-    let root = GtkBox::new(Orientation::Vertical, 12);
+    let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("glass-card");
     root.add_css_class("face-confirm-card");
-    // Do not stretch to the layer surface. Without this the box fills
-    // whatever width the compositor hands out and the button drifts off the
-    // painted card, which is exactly what it did.
+    // Do not stretch to the layer surface, or the buttons drift off the
+    // painted card onto whatever is behind it.
     root.set_halign(Align::Center);
     root.set_valign(Align::Center);
-    root.set_width_request(400);
-    root.set_margin_top(20);
-    root.set_margin_bottom(20);
-    root.set_margin_start(24);
-    root.set_margin_end(24);
+    root.set_width_request(420);
 
-    let header = GtkBox::new(Orientation::Horizontal, 12);
-    header.set_halign(Align::Start);
+    let title = Label::new(Some("Administrator access"));
+    title.add_css_class("face-confirm-title");
+    title.set_halign(Align::Start);
+
+    // The command, in a well. Monospace because it is a command, recessed
+    // because it is evidence.
+    let command = Label::new(None);
+    command.add_css_class("face-confirm-command");
+    command.set_halign(Align::Start);
+    command.set_wrap(true);
+    command.set_selectable(true);
+    let well = GtkBox::new(Orientation::Vertical, 0);
+    well.add_css_class("face-confirm-well");
+    well.append(&command);
+    well.set_margin_top(12);
+
+    let consequence = Label::new(Some("Runs as root"));
+    consequence.add_css_class("face-confirm-consequence");
+    consequence.set_halign(Align::Start);
+    consequence.set_margin_top(8);
+
+    // Status row: the ring and the words it belongs to, together.
+    let status_row = GtkBox::new(Orientation::Horizontal, 10);
+    status_row.set_margin_top(16);
     let ring = GtkBox::builder()
-        .width_request(22)
-        .height_request(22)
+        .width_request(20)
+        .height_request(20)
         .valign(Align::Center)
         .build();
     ring.add_css_class("face-ring");
+    let status = Label::new(None);
+    status.add_css_class("face-confirm-status");
+    status.set_halign(Align::Start);
+    status.set_wrap(true);
+    status_row.append(&ring);
+    status_row.append(&status);
 
-    let title = Label::new(None);
-    title.add_css_class("face-confirm-title");
-    title.set_halign(Align::Start);
-    title.set_wrap(true);
-    header.append(&ring);
-    header.append(&title);
+    let actions = GtkBox::new(Orientation::Horizontal, 10);
+    actions.set_halign(Align::End);
+    actions.set_margin_top(18);
+    let cancel = Button::with_label("Cancel");
+    cancel.add_css_class("face-confirm-cancel");
+    let allow = Button::with_label("Allow");
+    allow.add_css_class("face-confirm-button");
+    // Disabled, not absent. A button that appears only once the face matches
+    // would move the layout under the user's hands at the exact moment a
+    // press becomes consequential.
+    allow.set_sensitive(false);
+    actions.append(&cancel);
+    actions.append(&allow);
 
-    let detail = Label::new(None);
-    detail.add_css_class("face-confirm-detail");
-    detail.set_halign(Align::Start);
-    detail.set_wrap(true);
-    detail.set_selectable(false);
-
-    let hint = Label::new(None);
-    hint.add_css_class("face-confirm-hint");
-    hint.set_halign(Align::Start);
-    hint.set_wrap(true);
-
-    let button = Button::with_label("Authorise");
-    button.add_css_class("face-confirm-button");
-    button.set_halign(Align::End);
-
-    root.append(&header);
-    root.append(&detail);
-    root.append(&hint);
-    root.append(&button);
+    root.append(&title);
+    root.append(&well);
+    root.append(&consequence);
+    root.append(&status_row);
+    root.append(&actions);
     window.set_child(Some(&root));
 
     Ui {
         window,
         ring,
-        title,
-        detail,
-        hint,
-        button,
+        command,
+        status,
+        allow,
+        cancel,
     }
 }
 
@@ -198,7 +234,11 @@ pub fn register(app: &gtk4::Application) {
 
     {
         let answer = answer.clone();
-        ui.button.connect_clicked(move |_| answer(true));
+        ui.allow.connect_clicked(move |_| answer(true));
+    }
+    {
+        let answer = answer.clone();
+        ui.cancel.connect_clicked(move |_| answer(false));
     }
 
     let keys = gtk4::EventControllerKey::new();
@@ -235,13 +275,11 @@ pub fn register(app: &gtk4::Application) {
                 Stage::Announce => {
                     *pending.borrow_mut() = Some(req.id.clone());
                     armed.set(false);
-                    ui.title
-                        .set_text(&format!("Authorise as {}", req.target_user));
-                    ui.detail
+                    ui.command
                         .set_text(&summarise(&req.peer_cmdline, &req.peer_exe));
                     set_ring(&ui.ring, "looking");
-                    ui.hint.set_text("Looking for your face…");
-                    ui.button.set_sensitive(false);
+                    ui.status.set_text("Checking your face…");
+                    ui.allow.set_sensitive(false);
                     ui.window.set_visible(true);
                 }
                 Stage::Confirm => {
@@ -249,10 +287,9 @@ pub fn register(app: &gtk4::Application) {
                     *pending.borrow_mut() = Some(req.id.clone());
                     armed.set(true);
                     set_ring(&ui.ring, "ok");
-                    ui.hint
-                        .set_text("Recognised you. Press Enter to authorise, Esc to cancel.");
-                    ui.button.set_sensitive(true);
-                    ui.button.grab_focus();
+                    ui.status.set_text("Recognised you. Enter to allow, Esc to cancel.");
+                    ui.allow.set_sensitive(true);
+                    ui.allow.grab_focus();
                     ui.window.set_visible(true);
                 }
                 Stage::Cancel => {
