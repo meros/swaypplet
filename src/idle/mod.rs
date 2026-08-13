@@ -4,7 +4,7 @@
 //! deliberately NOT inside the panel daemon: the lock lifecycle must not die
 //! with a panel crash. Three sources feed one event loop on this thread:
 //!
-//!   - wayland.rs   ext-idle-notify-v1 timeouts (dim / lock / reblank / suspend)
+//!   - wayland.rs   ext-idle-notify-v1 timeouts (dim / lock / lock-idle / suspend)
 //!   - logind.rs    PrepareForSleep + sleep delay-inhibitor, session Lock/Unlock
 //!   - locker.rs    supervised `swaypplet lock` child (relaunch-while-locked)
 //!
@@ -13,9 +13,15 @@
 //! rule):
 //!
 //!   240 s  dim to 10% brightness, restore on resume
-//!   300 s  lock the session (supervised locker, then blank outputs)
-//!    30 s  re-blank after an input bump *while locked*; resume re-powers
+//!   300 s  lock the session (the screen stays LIT; locking does not blank)
+//!    15 m  power outputs off after this much idle time *while locked*;
+//!          any input disarms it and re-powers
 //!  1200 s  suspend, only on battery
+//!
+//! Locking and blanking are deliberately unrelated. They used to be welded
+//! together in three places, so any lock put the panel out within a second
+//! and the lock screen was effectively never visible — including while face
+//! unlock was trying to tell the user what it was doing.
 //!
 //! before-sleep: lock + blank while holding the logind sleep delay-inhibitor,
 //! release only once the compositor has CONFIRMED the lock (bounded by
@@ -31,16 +37,16 @@
 //! startup, so the machine slept unlocked and the desktop was visible for
 //! ~5 s after lid-open until the lock request finally landed.
 //!
-//! Fast user switching adds a second rule: only an idle-triggered lock arms
-//! the post-lock blank, deferred (BLANK_DELAY) and skipped when the session
-//! has gone inactive by then — a switch-away lock races the VT change, and
-//! blanking mid-handover leaves the returning user staring at powered-off
-//! outputs. Manual and switch locks keep the lock UI lit; the Reblank tier
-//! powers the outputs off after 30 s of no input. Correspondingly,
-//! SessionActive(true) on a locked session re-powers the outputs, and
-//! SessionActive(false) locks the session behind any departure (including a
-//! bare Ctrl+Alt+Fn that skipped the switcher script). The sleep path keeps
-//! its immediate blank.
+//! Fast user switching no longer needs a rule of its own. The blank deadline
+//! is checked at fire time rather than arm time, so a lock that races a VT
+//! change simply finds the session inactive fifteen minutes later and skips;
+//! there is nothing to defer and nothing to cancel. That used to need a
+//! deferred blank with a skip condition, purely because the blank fired
+//! within a second of locking. Correspondingly, SessionActive(true) on a
+//! locked session re-powers the outputs, and SessionActive(false) locks the
+//! session behind any departure (including a bare Ctrl+Alt+Fn that skipped
+//! the switcher script). The sleep path keeps its immediate blank, because
+//! that is the machine powering down rather than an idle policy.
 //!
 //! The locker child inherits this process's env (SWAYPPLET_LOCK_WALLPAPER,
 //! SWAYPPLET_LOCK_WAKE_CMD set by the service unit) plus
@@ -97,11 +103,20 @@ pub enum Ev {
 /// anyway. Suspend must not hang on a locker that fails to start.
 const SLEEP_RELEASE_MAX: Duration = Duration::from_secs(3);
 
-/// Post-lock blank delay for idle-triggered locks: long enough for a
-/// user-switch VT change to land (the blank is then skipped). Manual and
-/// switch locks never arm this — the lock UI stays visible until the
-/// Reblank idle tier powers the outputs off.
-const BLANK_DELAY: Duration = Duration::from_millis(600);
+/// How long the lock screen may sit idle before the outputs are powered off.
+///
+/// This is the ONLY thing that blanks the screen. Blanking used to be tangled
+/// into three separate paths: a 600 ms deferred blank after any idle or
+/// presence lock, a 30 s re-blank tier after input while locked, and the
+/// pre-suspend blank. Two of those meant that locking for any reason, or
+/// glancing at the machine and looking away, put the panel out within a
+/// second, and the lock screen was effectively never visible.
+///
+/// Now: lock and blank are unrelated. Locking leaves the screen lit. The
+/// outputs go off only after this much continuous idle time *while locked*,
+/// and any input resets it. The suspend path still blanks, because that is
+/// the machine powering down rather than an idle policy.
+const BLANK_AFTER_LOCK_IDLE: Duration = Duration::from_secs(15 * 60);
 
 pub fn run() -> ! {
     let (tx, rx) = mpsc::channel::<Ev>();
@@ -121,8 +136,9 @@ pub fn run() -> ! {
     // flight. Some(_) means PrepareForSleep(true) arrived and we still hold
     // the inhibitor.
     let mut sleep_release: Option<Instant> = None;
-    // Deadline for the deferred post-lock blank (see BLANK_DELAY).
-    let mut pending_blank: Option<Instant> = None;
+    // When the locked, idle session's outputs should go off. Some(_) only
+    // while locked AND idle; any input clears it. See BLANK_AFTER_LOCK_IDLE.
+    let mut blank_at: Option<Instant> = None;
     // Why the current locker was started ("idle" | "manual" | "sleep" |
     // "switch"); decides whether LockerUp blanks the outputs.
     let mut lock_reason: &'static str = "manual";
@@ -189,9 +205,15 @@ pub fn run() -> ! {
                 // deliberate brightness setting from a walk-past would be
                 // worse than a dim lock screen.
                 //
-                // This does not reset the idle tiers: the reblank timer keeps
-                // running, so presence that turns out to be someone walking
-                // past re-blanks on its own rather than holding the panel lit.
+                // Presence is not input, so it does not *disarm* the blank
+                // deadline — but it does light the screen, so it must arm
+                // one. Without this, a walk-past after the deadline had
+                // already fired would power the panel on with nothing left
+                // to turn it off again, and the lock screen would sit lit
+                // until someone touched a key.
+                if locker_confirmed {
+                    blank_at = Some(Instant::now() + BLANK_AFTER_LOCK_IDLE);
+                }
                 outputs.power("presence.back", Power::On);
             } else {
                 log::info!("presence: user gone — locking");
@@ -214,14 +236,16 @@ pub fn run() -> ! {
             );
             release_inhibitor(&mut sleep_release);
         }
-        if pending_blank.is_some_and(|d| Instant::now() >= d) {
-            pending_blank = None;
-            // Gates checked at fire time: the lock must still be confirmed
-            // (security invariant; a crash relaunch keeps the compositor
-            // lock held, so confirmed stays true through the gap) and the
-            // session still on the seat — a switch-away lock skips the
-            // blank entirely.
+        if blank_at.is_some_and(|d| Instant::now() >= d) {
+            blank_at = None;
+            // Gates checked at fire time, not at arm time: the lock must
+            // still be confirmed (the security invariant — never blank an
+            // unlocked session; a crash relaunch keeps the compositor lock
+            // held, so confirmed stays true through the gap) and the session
+            // must still be on the seat, since a switch-away lock leaves our
+            // idle timers running on a VT we no longer own.
             if locker_confirmed && session_active {
+                log::info!("lock.blank: {BLANK_AFTER_LOCK_IDLE:?} idle while locked");
                 outputs.power("lock.blank", Power::Off);
             } else {
                 log::info!("lock.blank: skipped (session inactive or locker gone)");
@@ -265,22 +289,23 @@ pub fn run() -> ! {
             }
             Ev::Resumed(Timeout::Lock) => {}
 
-            Ev::Idled(Timeout::Reblank) => {
-                // Only blank a locked session that is still on the seat. On an
-                // inactive VT (fast user switch) our idle timers keep firing;
-                // blanking then would fight the SessionActive(true) re-power.
-                if locker_confirmed && session_active {
-                    outputs.power("idle.reblank-30s", Power::Off);
-                } else {
-                    log::info!(
-                        "idle.reblank-30s: skip (locker_confirmed={locker_confirmed} session_active={session_active})"
-                    );
+            // Input stopped while locked: start counting toward the blank.
+            // This no longer blanks anything by itself.
+            Ev::Idled(Timeout::LockIdle) => {
+                if locker_confirmed {
+                    blank_at = Some(Instant::now() + BLANK_AFTER_LOCK_IDLE);
+                    log::info!("lock.blank: armed for {BLANK_AFTER_LOCK_IDLE:?}");
                 }
             }
-            // Unconditional (matches old config): if the locker died, a gated
-            // resume would leave the panel stuck off on next input.
-            Ev::Resumed(Timeout::Reblank) => {
-                outputs.power("idle.reblank-30s.resume", Power::On);
+            // Input while locked: the user is here, so cancel the pending
+            // blank and light the outputs. Powering on is unconditional
+            // (matches the old config): if the locker died, a gated resume
+            // would leave the panel stuck off on the next keypress.
+            Ev::Resumed(Timeout::LockIdle) => {
+                if blank_at.take().is_some() {
+                    log::info!("lock.blank: disarmed (input)");
+                }
+                outputs.power("idle.lock-idle.resume", Power::On);
             }
 
             Ev::Idled(Timeout::Suspend) => {
@@ -337,6 +362,7 @@ pub fn run() -> ! {
             }
             Ev::UnlockSignal => {
                 log::info!("unlock: signal");
+                blank_at = None;
                 outputs.power_brightness("unlock", Power::On, 100);
             }
 
@@ -356,17 +382,23 @@ pub fn run() -> ! {
             Ev::LockerUp => {
                 locker_confirmed = true;
                 if sleep_release.is_some() {
-                    // Suspend path: blank now — the machine is about to
-                    // sleep and the inhibitor must not wait on a timer.
+                    // Suspend path: blank now. The machine is about to sleep
+                    // and the inhibitor must not wait on a timer. This is the
+                    // one blank that is not an idle policy.
                     log::info!("lock: locker up — blanking outputs (sleep)");
+                    blank_at = None;
                     outputs.power("lock.blank", Power::Off);
-                } else if matches!(lock_reason, "idle" | "presence") {
-                    log::info!("lock: locker up — blank in {BLANK_DELAY:?}");
-                    pending_blank = Some(Instant::now() + BLANK_DELAY);
                 } else {
-                    // Manual/switch/recover lock: leave the lock UI visible;
-                    // the Reblank idle tier powers the outputs off later.
-                    log::info!("lock: locker up — no auto-blank ({lock_reason})");
+                    // Every other lock reason, without exception, leaves the
+                    // screen lit. The lock screen is meant to be seen: it is
+                    // where face unlock reports what it is doing, and a panel
+                    // that goes dark a second after locking made that
+                    // invisible. Blanking waits for real idle time.
+                    blank_at = Some(Instant::now() + BLANK_AFTER_LOCK_IDLE);
+                    log::info!(
+                        "lock: locker up ({lock_reason}) — screen stays lit, \
+                         blank in {BLANK_AFTER_LOCK_IDLE:?}"
+                    );
                 }
                 // Record the lock in logind so a service restart can recover
                 // it (see Ev::RecoverLock).
@@ -397,6 +429,12 @@ pub fn run() -> ! {
             Ev::LockerGone { rc } => {
                 locker_active = false;
                 locker_confirmed = false;
+                // The lock episode is over, so the blank deadline goes with
+                // it. The fire-time gate would refuse anyway, but leaving a
+                // live deadline pointing at an unlocked session is the kind
+                // of state that survives one refactor and blanks a desktop
+                // after the next.
+                blank_at = None;
                 // Locked-or-bailed either way: don't hold suspend for this.
                 release_inhibitor(&mut sleep_release);
                 match rc {

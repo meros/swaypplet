@@ -22,7 +22,10 @@ use super::Ev;
 pub enum Timeout {
     Dim,
     Lock,
-    Reblank,
+    /// Activity detector while locked. Not a blank tier any more: it only
+    /// says "input stopped" / "input resumed", and the blank deadline in
+    /// mod.rs is armed and cleared off it.
+    LockIdle,
     Suspend,
 }
 
@@ -30,7 +33,7 @@ impl Timeout {
     const ALL: [Timeout; 4] = [
         Timeout::Dim,
         Timeout::Lock,
-        Timeout::Reblank,
+        Timeout::LockIdle,
         Timeout::Suspend,
     ];
 
@@ -38,7 +41,7 @@ impl Timeout {
         match self {
             Timeout::Dim => 240_000,
             Timeout::Lock => 300_000,
-            Timeout::Reblank => 30_000,
+            Timeout::LockIdle => 30_000,
             Timeout::Suspend => 1_200_000,
         }
     }

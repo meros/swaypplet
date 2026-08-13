@@ -7,7 +7,7 @@
 //! `swaypplet lock` exit codes: 0 only on a real unlock; 2 when the lock
 //! could not be acquired at all (relaunching would spin — bail); anything
 //! else is a crash while locked (relaunch after re-powering outputs so the
-//! new lock surface can commit; the 30 s reblank tier re-blanks if idle).
+//! new lock surface can commit; the lock-idle deadline blanks it later).
 //!
 //! Readiness: the child prints "LOCKED" on stdout once the compositor
 //! confirms the lock; only that emits LockerUp. Time-based settle windows
