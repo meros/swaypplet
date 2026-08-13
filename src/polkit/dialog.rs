@@ -567,6 +567,7 @@ impl PolkitDialog {
         self.set_status("", StatusKind::Info);
         self.fp_pill.set_visible(false);
         self.fp_pill.remove_css_class("polkit-fp-active");
+        self.password_entry.set_text("");
         self.password_entry.set_visible(false);
         self.caps_label.set_visible(false);
         self.identity_row.set_visible(false);
