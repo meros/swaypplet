@@ -176,18 +176,14 @@ fn progress(state: &Rc<RefCell<PolkitState>>, req: Request) {
     if !live {
         return;
     }
-    let (ring, text) = match req.state.as_str() {
-        "looking" => ("looking", "Looking for you"),
-        // Never phrased as the user's fault. The emitter or the relay is
-        // wrong, and telling somebody to move their face sends them after the
-        // wrong thing entirely.
-        "dark" => ("dark", "Too dark to see"),
-        "face" => ("found", "Hold still"),
-        _ => return,
+    // Same vocabulary as the lock screen, from the same source, so the ring
+    // cannot come to mean two things.
+    let Some(progress) = crate::face::Progress::parse(&req.state) else {
+        return;
     };
     let dialog = state.borrow().dialog.clone();
-    dialog.show_face(true, ring, text);
-    state.borrow().cue.set(true, ring, text);
+    dialog.show_face(true, progress.ring(), progress.text());
+    state.borrow().cue.set(true, progress.ring(), progress.text());
 }
 
 fn confirm(state: &Rc<RefCell<PolkitState>>, req: Request) {

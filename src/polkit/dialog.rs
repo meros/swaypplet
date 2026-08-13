@@ -401,7 +401,6 @@ impl PolkitDialog {
             let cbs = callbacks.clone();
             let entry = password_entry.clone();
             auth_btn.connect_clicked(move |_| {
-                log::info!("polkit: auth button clicked");
                 let text = entry.text().to_string();
                 entry.set_text("");
                 let cb = cbs.borrow().on_password.clone();
@@ -426,7 +425,6 @@ impl PolkitDialog {
         {
             let cbs = callbacks.clone();
             cancel_btn.connect_clicked(move |_| {
-                log::info!("polkit: cancel button clicked");
                 let cb = cbs.borrow().on_cancel.clone();
                 cb();
             });
@@ -689,11 +687,11 @@ impl PolkitDialog {
     /// rather than the user, `ok` once the face has matched.
     pub fn show_face(&self, active: bool, state: &str, label: &str) {
         self.face_pill.set_visible(active);
-        for old in ["looking", "dark", "found", "ok", "fail"] {
-            self.face_ring.remove_css_class(&format!("face-ring-{old}"));
-        }
+        // No pill classes here: the glow they carry is a box-shadow, and this
+        // card sits on a compositor-blurred layer where that frosts into a
+        // halo. The cue's own surface is where the glow belongs.
+        crate::face_ring::apply(&self.face_ring, None, if active { state } else { "" });
         if active {
-            self.face_ring.add_css_class(&format!("face-ring-{state}"));
             self.face_label.set_label(label);
             self.face_pill.add_css_class("polkit-fp-active");
         } else {
