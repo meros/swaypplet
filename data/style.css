@@ -2763,39 +2763,69 @@ revealer {
 }
 
 .face-confirm-title {
-    font-size: 1.1rem;
+    font-size: 1.05rem;
     font-weight: 700;
     color: @fg;
 }
 
-/* The command requesting elevation. Monospace because it is a command, and
-   dimmed because it is evidence rather than instruction. */
-.face-confirm-detail {
+/* The command, recessed. Sinking it below the card surface is what makes it
+   read as quoted evidence rather than as a label the dialog wrote about
+   itself — it is the one element on the card that came from outside. */
+.face-confirm-well {
+    background-color: alpha(black, 0.22);
+    border: 1px solid @border_strong;
+    border-radius: 10px;
+    padding: 10px 12px;
+}
+
+.face-confirm-command {
     font-family: monospace;
-    font-size: 0.9rem;
+    font-size: 0.92rem;
+    color: @fg;
+}
+
+/* Stated, not shouted. The escalation is the reason to think, but colouring
+   it as a warning on every legitimate sudo would spend the alarm on nothing
+   and leave none for when it matters. */
+.face-confirm-consequence {
+    font-size: 0.85rem;
     color: @fg_dim;
 }
 
-.face-confirm-hint {
-    font-size: 0.95rem;
+.face-confirm-status {
+    font-size: 0.92rem;
     color: @fg_dim;
 }
 
 .face-confirm-button {
-    padding: 6px 18px;
-    border-radius: 12px;
+    padding: 7px 20px;
+    border-radius: 10px;
     background-color: @accent;
     color: @bg0_h;
     font-weight: 600;
 }
 
 .face-confirm-button:disabled {
-    background-color: @bg2;
+    background-color: @surface_track;
     color: @fg_dim;
 }
 
 .face-confirm-button:hover:not(:disabled) {
     background-color: @accent_tertiary;
+}
+
+/* Cancel is quieter than Allow but never disabled and never hidden.
+   Refusing has to stay as reachable as accepting; a prompt whose only easy
+   path is "yes" manufactures consent rather than collecting it. */
+.face-confirm-cancel {
+    padding: 7px 18px;
+    border-radius: 10px;
+    background-color: @surface_hover;
+    color: @fg;
+}
+
+.face-confirm-cancel:hover {
+    background-color: @surface_track;
 }
 
 /* ── Face unlock indicator ──
