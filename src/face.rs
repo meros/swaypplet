@@ -224,3 +224,155 @@ mod tests {
         assert_eq!(Stage::parse("confirm"), Some(Stage::Confirm));
     }
 }
+
+// ── Verification, streamed ──────────────────────────────────────────────
+//
+// The lock screen used to fork `howdy-verify` per attempt and get one exit
+// code back three seconds later. There was nothing to show the user in
+// between, so the lock screen sat inert through the entire attempt and then
+// either unlocked or did not.
+//
+// faced streams `looking` / `dark` / `face` while the burst runs. Holding the
+// connection here instead of forking a process turns that into something the
+// UI can render, and costs one socket rather than an interpreter start.
+
+/// What the daemon is doing right now. Carries no biometric content.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Progress {
+    /// Frames arriving, no face found yet. The user should move into frame.
+    Looking,
+    /// Frames arriving but failing the darkness gate. NOT the user's fault:
+    /// the emitter or the relay is wrong, and telling someone to reposition
+    /// their face here would be actively misleading.
+    Dark,
+    /// A face was found and is being compared. Hold still.
+    Face,
+}
+
+impl Progress {
+    fn parse(s: &str) -> Option<Progress> {
+        match s {
+            "looking" => Some(Progress::Looking),
+            "dark" => Some(Progress::Dark),
+            "face" => Some(Progress::Face),
+            _ => None,
+        }
+    }
+}
+
+/// A terminal verdict.
+pub struct Verdict {
+    /// The authoritative exit code, taken off the reply rather than derived.
+    pub exit: i32,
+    pub outcome: String,
+    /// Whether a face was seen at any point in the burst.
+    ///
+    /// This is what separates "didn't recognise you" from "didn't see you",
+    /// which send the user to completely different actions. The daemon knows
+    /// which it was; the UI must not guess.
+    pub saw_face: bool,
+}
+
+fn nonce() -> std::io::Result<String> {
+    use std::io::Read;
+    let mut buf = [0u8; 12];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut buf)?;
+    Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Register as the lock agent and keep the stream open.
+///
+/// The returned stream must be held for the whole lock episode: faced treats
+/// the connection itself as the registration, so dropping it deregisters. That
+/// is what lets the daemon refuse unlock verification when no lock screen is
+/// actually up.
+pub fn register_lock() -> std::io::Result<UnixStream> {
+    let mut stream = UnixStream::connect(SOCKET)?;
+    send(
+        &mut stream,
+        &format!(
+            "{{\"method\":\"{INTERFACE}.RegisterAgent\",\"more\":true,\
+             \"parameters\":{{\"role\":\"lock\"}}}}"
+        ),
+    )?;
+    Ok(stream)
+}
+
+/// Run one verification, reporting progress as it arrives.
+pub fn verify(mut on_progress: impl FnMut(Progress)) -> std::io::Result<Verdict> {
+    let mut stream = UnixStream::connect(SOCKET)?;
+    let nonce = nonce()?;
+    send(
+        &mut stream,
+        &format!(
+            "{{\"method\":\"{INTERFACE}.Verify\",\"more\":true,\"parameters\":\
+             {{\"purpose\":\"unlock\",\"nonce\":\"{nonce}\",\"progress\":true}}}}"
+        ),
+    )?;
+
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut frame = Vec::new();
+    let mut saw_face = false;
+
+    loop {
+        frame.clear();
+        if reader.read_until(0, &mut frame)? == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "faced closed without a verdict",
+            ));
+        }
+        if frame.last() == Some(&0) {
+            frame.pop();
+        }
+        let Ok(text) = std::str::from_utf8(&frame) else {
+            continue;
+        };
+        if text.trim().is_empty() {
+            continue;
+        }
+
+        if text.contains("\"error\"") {
+            // Errors are pre-camera refusals. Map the ones with distinct
+            // handling; anything unrecognised becomes 11, which the caller
+            // treats as retryable. An unknown refusal must not disable face
+            // unlock for the session.
+            let name = field(text, "error").unwrap_or("");
+            let short = name.rsplit('.').next().unwrap_or(name);
+            let exit = match short {
+                "NoModel" | "RecipeMismatch" => 10,
+                "Busy" | "Cooldown" => 14,
+                "LockedOut" => 15,
+                "Unavailable" => 1,
+                "Denied" | "Replay" | "InvalidArgument" => 16,
+                _ => 11,
+            };
+            return Ok(Verdict {
+                exit,
+                outcome: short.to_string(),
+                saw_face,
+            });
+        }
+
+        match field(text, "event") {
+            Some("progress") => {
+                if let Some(state) = field(text, "state").and_then(Progress::parse) {
+                    if state == Progress::Face {
+                        saw_face = true;
+                    }
+                    on_progress(state);
+                }
+            }
+            Some("result") => {
+                let outcome = field(text, "outcome").unwrap_or("unknown").to_string();
+                let exit = number(text, "exit").unwrap_or(11) as i32;
+                return Ok(Verdict {
+                    exit,
+                    outcome,
+                    saw_face,
+                });
+            }
+            _ => {}
+        }
+    }
+}

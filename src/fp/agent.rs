@@ -208,6 +208,11 @@ async fn client(stream: UnixStream, conn: zbus::Connection, sleeping: watch::Rec
             EngineEvent::Hint(msg) => {
                 let _ = out.send(Ev::Hint { msg });
             }
+            // Face progress has no place in the polkit protocol: the elevate
+            // prompt is drawn by the confirm agent from faced's own stream,
+            // not relayed through here. Dropping it keeps this path
+            // fingerprint-shaped.
+            EngineEvent::Progress(_) => {}
             EngineEvent::Unavailable(msg) => {
                 let _ = out.send(Ev::Unavailable { msg });
             }
