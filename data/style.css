@@ -2921,3 +2921,64 @@ revealer {
     25%      { transform: translateX(-4px); }
     75%      { transform: translateX(4px); }
 }
+
+/* ── Drawing the eye to the camera ──
+   This overlay has a job beyond reporting status: it has to get the user to
+   look at the lens. A face presented off-axis is the single most common
+   reason a good enrolment fails to match, and no amount of daemon tuning
+   fixes a head pointed at the terminal.
+
+   Two mechanisms, both chosen for how peripheral vision actually works.
+
+   Onset motion first. The periphery is far better at detecting a change in
+   motion than a steady state, so the pill ARRIVES rather than appearing, and
+   it arrives travelling upward — toward the camera. Direction matters:
+   motion leads the gaze, so an upward drift walks the eye to the lens
+   instead of merely announcing itself somewhere near it.
+
+   Then a glow that pulses exactly twice and stops. Twice is enough to catch
+   the periphery once; an indefinite pulse becomes a strobe the user resents
+   within a day, and this fires every single time they sit down. The cue has
+   to be forgettable when it works.
+
+   Safe here because the lock surface is ext-session-lock and has no
+   layer_effects entry, so a box-shadow is a real shadow rather than
+   something blur_ignore_transparent frosts into a halo. Deliberately NOT put
+   on .face-ring, which is shared with the elevate card on a blurred layer. */
+.face-pill {
+    animation: face-pill-arrive 420ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes face-pill-arrive {
+    from { opacity: 0; margin-top: 74px; }
+    to   { opacity: 1; margin-top: 56px; }
+}
+
+.face-pill-looking {
+    animation:
+        face-pill-arrive 420ms cubic-bezier(0.2, 0, 0, 1),
+        face-pill-attention 1.6s ease-in-out 2;
+}
+
+@keyframes face-pill-attention {
+    0%, 100% { box-shadow: 0 0 0 0 alpha(@accent_tertiary, 0); }
+    50%      { box-shadow: 0 0 26px 5px alpha(@accent_tertiary, 0.38); }
+}
+
+/* Too dark is the one state worth a steadier, warmer pull: the user cannot
+   fix it by holding still, and the thing they should do is check the light
+   rather than keep staring. */
+.face-pill-dark {
+    box-shadow: 0 0 22px 3px alpha(@accent_secondary, 0.28);
+}
+
+/* Success glows once and stops. It plays while the session is already
+   unlocking, so it must never read as something to wait for. */
+.face-pill-ok {
+    animation: face-pill-ok 550ms ease-out;
+}
+
+@keyframes face-pill-ok {
+    0%   { box-shadow: 0 0 0 0 alpha(@accent, 0.6); }
+    100% { box-shadow: 0 0 30px 6px alpha(@accent, 0); }
+}
