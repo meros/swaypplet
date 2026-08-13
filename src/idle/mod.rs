@@ -51,7 +51,10 @@
 
 mod locker;
 mod logind;
+mod outputs;
 mod wayland;
+
+use outputs::{Outputs, Power};
 
 use std::process::Command;
 use std::sync::mpsc;
@@ -102,6 +105,11 @@ const BLANK_DELAY: Duration = Duration::from_millis(600);
 
 pub fn run() -> ! {
     let (tx, rx) = mpsc::channel::<Ev>();
+    // Display changes go through here, never inline. `swaymsg output * power
+    // on` takes 782-820 ms to return, and this loop must stay responsive
+    // across exactly that window: the presence edge that lights the screen is
+    // the same edge that starts a face attempt.
+    let outputs = Outputs::start();
     wayland::start(tx.clone());
     let logind = logind::start(tx.clone());
 
@@ -184,7 +192,7 @@ pub fn run() -> ! {
                 // This does not reset the idle tiers: the reblank timer keeps
                 // running, so presence that turns out to be someone walking
                 // past re-blanks on its own rather than holding the panel lit.
-                run_cmd("presence.back", "swaymsg", &["output", "*", "power", "on"]);
+                outputs.power("presence.back", Power::On);
             } else {
                 log::info!("presence: user gone — locking");
                 ensure_locked(
@@ -214,7 +222,7 @@ pub fn run() -> ! {
             // session still on the seat — a switch-away lock skips the
             // blank entirely.
             if locker_confirmed && session_active {
-                run_cmd("lock.blank", "swaymsg", &["output", "*", "power", "off"]);
+                outputs.power("lock.blank", Power::Off);
             } else {
                 log::info!("lock.blank: skipped (session inactive or locker gone)");
             }
@@ -231,14 +239,10 @@ pub fn run() -> ! {
 
         match ev {
             Ev::Idled(Timeout::Dim) => {
-                run_cmd("idle.dim-240s", "brightnessctl", &["set", "10%", "-n"]);
+                outputs.brightness("idle.dim-240s", 10);
             }
             Ev::Resumed(Timeout::Dim) => {
-                run_cmd(
-                    "idle.dim-240s.resume",
-                    "brightnessctl",
-                    &["set", "100%", "-n"],
-                );
+                outputs.brightness("idle.dim-240s.resume", 100);
             }
 
             Ev::Idled(Timeout::Lock) => {
@@ -266,11 +270,7 @@ pub fn run() -> ! {
                 // inactive VT (fast user switch) our idle timers keep firing;
                 // blanking then would fight the SessionActive(true) re-power.
                 if locker_confirmed && session_active {
-                    run_cmd(
-                        "idle.reblank-30s",
-                        "swaymsg",
-                        &["output", "*", "power", "off"],
-                    );
+                    outputs.power("idle.reblank-30s", Power::Off);
                 } else {
                     log::info!(
                         "idle.reblank-30s: skip (locker_confirmed={locker_confirmed} session_active={session_active})"
@@ -280,11 +280,7 @@ pub fn run() -> ! {
             // Unconditional (matches old config): if the locker died, a gated
             // resume would leave the panel stuck off on next input.
             Ev::Resumed(Timeout::Reblank) => {
-                run_cmd(
-                    "idle.reblank-30s.resume",
-                    "swaymsg",
-                    &["output", "*", "power", "on"],
-                );
+                outputs.power("idle.reblank-30s.resume", Power::On);
             }
 
             Ev::Idled(Timeout::Suspend) => {
@@ -326,8 +322,7 @@ pub fn run() -> ! {
             }
             Ev::Sleep(false) => {
                 // logind.rs re-takes the inhibitor itself on resume.
-                run_cmd("after-resume", "swaymsg", &["output", "*", "power", "on"]);
-                run_cmd("after-resume", "brightnessctl", &["set", "100%", "-n"]);
+                outputs.power_brightness("after-resume", Power::On, 100);
             }
 
             Ev::LockSignal => {
@@ -342,16 +337,14 @@ pub fn run() -> ! {
             }
             Ev::UnlockSignal => {
                 log::info!("unlock: signal");
-                run_cmd("unlock", "swaymsg", &["output", "*", "power", "on"]);
-                run_cmd("unlock", "brightnessctl", &["set", "100%", "-n"]);
+                outputs.power_brightness("unlock", Power::On, 100);
             }
 
             Ev::RecoverLock => {
                 // Re-power outputs first: the dead locker may have left them
                 // blanked, and the new lock surface needs a lit output to be
                 // seen. Then lock with a reason that keeps the UI visible.
-                run_cmd("recover", "swaymsg", &["output", "*", "power", "on"]);
-                run_cmd("recover", "brightnessctl", &["set", "100%", "-n"]);
+                outputs.power_brightness("recover", Power::On, 100);
                 ensure_locked(
                     &tx,
                     &mut locker_active,
@@ -366,7 +359,7 @@ pub fn run() -> ! {
                     // Suspend path: blank now — the machine is about to
                     // sleep and the inhibitor must not wait on a timer.
                     log::info!("lock: locker up — blanking outputs (sleep)");
-                    run_cmd("lock.blank", "swaymsg", &["output", "*", "power", "off"]);
+                    outputs.power("lock.blank", Power::Off);
                 } else if matches!(lock_reason, "idle" | "presence") {
                     log::info!("lock: locker up — blank in {BLANK_DELAY:?}");
                     pending_blank = Some(Instant::now() + BLANK_DELAY);
@@ -398,8 +391,7 @@ pub fn run() -> ! {
                 if locker_active {
                     // Returning to a locked session: light the outputs so
                     // the lock screen shows instead of a dead panel.
-                    run_cmd("switch.return", "swaymsg", &["output", "*", "power", "on"]);
-                    run_cmd("switch.return", "brightnessctl", &["set", "100%", "-n"]);
+                    outputs.power_brightness("switch.return", Power::On, 100);
                 }
             }
             Ev::LockerGone { rc } => {
@@ -411,8 +403,7 @@ pub fn run() -> ! {
                     0 => {
                         log::info!("lock: clean unlock");
                         logind.set_locked_hint(false);
-                        run_cmd("unlock", "swaymsg", &["output", "*", "power", "on"]);
-                        run_cmd("unlock", "brightnessctl", &["set", "100%", "-n"]);
+                        outputs.power_brightness("unlock", Power::On, 100);
                     }
                     2 => {
                         log::warn!("lock: lock unavailable (rc=2) — another locker or no protocol")
@@ -450,14 +441,29 @@ fn ensure_locked(
 /// `<scope>: <event>` format the old swayidle lifecycle scripts used.
 /// swaymsg gets `-q` so its JSON reply doesn't pollute the journal.
 fn run_cmd(scope: &str, cmd: &str, args: &[&str]) {
+    run_cmd_timed(scope, cmd, args, Duration::ZERO);
+}
+
+/// As `run_cmd`, plus how long the request sat in the display worker's queue
+/// before it ran.
+///
+/// The two numbers are logged separately on purpose. Queue wait is this
+/// process's latency and command duration is the compositor's, and the display
+/// power-on budget in docs/face-unlock-architecture.md §7.4 branches on which
+/// of the two dominates. One combined number cannot answer that.
+pub(super) fn run_cmd_timed(scope: &str, cmd: &str, args: &[&str], waited: Duration) {
     log::info!("{scope}: fire — {cmd} {}", args.join(" "));
     let mut command = Command::new(cmd);
     if cmd == "swaymsg" {
         command.arg("-q");
     }
-    match command.args(args).status() {
-        Ok(st) if st.success() => log::info!("{scope}: ok"),
-        Ok(st) => log::warn!("{scope}: {cmd} exited {st}"),
+    let started = Instant::now();
+    let status = command.args(args).status();
+    let took = started.elapsed().as_millis();
+    let queued = waited.as_millis();
+    match status {
+        Ok(st) if st.success() => log::info!("{scope}: ok in {took}ms (queued {queued}ms)"),
+        Ok(st) => log::warn!("{scope}: {cmd} exited {st} after {took}ms (queued {queued}ms)"),
         Err(e) => log::warn!("{scope}: {cmd} failed to spawn: {e}"),
     }
 }
