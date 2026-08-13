@@ -104,6 +104,8 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
     // Some(deadline) means an attempt is armed for that instant.
     let mut armed: Option<Instant> = None;
     let mut attempts = 0u32;
+    // Transient Unavailable results, reset on each fresh arrival. See attempt().
+    let mut transient = 0u32;
     let compare = compare_command();
 
     loop {
@@ -128,6 +130,7 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
             Some(true) => {
                 log::info!("face: presence returned — arming");
                 attempts = 0;
+                transient = 0;
                 armed = Some(Instant::now());
             }
             Some(false) => {
@@ -142,7 +145,7 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
             continue;
         }
 
-        match attempt(&compare, user) {
+        match attempt(&compare, user, &mut transient) {
             Attempt::Match => {
                 log::info!("face: match — unlocking");
                 let _ = tx.send(EngineEvent::Match(user.to_string()));
@@ -172,7 +175,17 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
     }
 }
 
-fn attempt(compare: &str, user: &str) -> Attempt {
+/// The exit-code contract, as documented in docs/face-unlock-architecture.md
+/// §4.2 in the nixos repo. The verifier is the authority; this is the reader.
+///
+/// The default arm is `Retryable`, deliberately. It used to be `Fatal`, which
+/// meant any code this match did not know about ended the worker thread and
+/// disabled face unlock for the whole lock episode. Two things made that bad:
+/// a single transient stall looked identical to a broken install, and adding
+/// any new code on the verifier side would silently disable the feature on an
+/// older locker. Unknown means unknown, and the safe reading of unknown is
+/// "try again"; the attempt counter already bounds how long that goes on.
+fn attempt(compare: &str, user: &str, transient: &mut u32) -> Attempt {
     let status = Command::new(compare)
         .arg(user)
         .stdin(Stdio::null())
@@ -183,11 +196,34 @@ fn attempt(compare: &str, user: &str) -> Attempt {
     match status {
         Ok(status) => match status.code() {
             Some(0) => Attempt::Match,
+            // no_match | no_face | deadline
             Some(11) => Attempt::Retryable(None),
             Some(13) => Attempt::Retryable(Some("too dark for face unlock".to_string())),
+            // Busy | Cooldown | preempted. Another claimant holds the camera,
+            // or the emitter is cooling down. Both pass.
+            Some(14) => Attempt::Retryable(Some("face unlock busy".to_string())),
+            // Unavailable: camera, relay or models. Usually transient (the
+            // relay restarting), so allow exactly one retry before giving up
+            // rather than treating the first stall as terminal.
+            Some(1) => {
+                *transient += 1;
+                if *transient <= 1 {
+                    Attempt::Retryable(None)
+                } else {
+                    Attempt::Fatal("face unlock unavailable".to_string())
+                }
+            }
             Some(10) => Attempt::Fatal("no enrolled face model".to_string()),
             Some(12) => Attempt::Fatal("compare rejected the username".to_string()),
-            Some(code) => Attempt::Fatal(format!("{compare} exited {code}")),
+            // Too many failures. Deliberately terminal: it clears on a
+            // password or fingerprint unlock, not by trying more faces.
+            Some(15) => Attempt::Fatal("too many failed face attempts".to_string()),
+            // Denied | Replay | InvalidArgument. A protocol or policy refusal;
+            // retrying reproduces it exactly.
+            Some(16) => Attempt::Fatal("face unlock refused".to_string()),
+            // The user said no. Intent, not failure.
+            Some(17) => Attempt::Fatal("face unlock declined".to_string()),
+            Some(code) => Attempt::Retryable(Some(format!("{compare} exited {code}"))),
             None => Attempt::Fatal(format!("{compare} killed by a signal")),
         },
         Err(e) => Attempt::Fatal(format!("{compare}: {e}")),
