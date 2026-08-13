@@ -100,15 +100,6 @@ const SLEEP_RELEASE_MAX: Duration = Duration::from_secs(3);
 /// Reblank idle tier powers the outputs off.
 const BLANK_DELAY: Duration = Duration::from_millis(600);
 
-/// Presence must read "gone" for this long before an absence lock fires. The
-/// sensor blips (see presence.rs), and a lock is disruptive enough that
-/// leaving should be certain rather than fast.
-const PRESENCE_GONE_AFTER: Duration = Duration::from_secs(10);
-
-/// ...and "back" for this long before the idle lock tier is suppressed again.
-/// Short: returning to a machine that locks in your face is the bad outcome.
-const PRESENCE_BACK_AFTER: Duration = Duration::from_secs(1);
-
 pub fn run() -> ! {
     let (tx, rx) = mpsc::channel::<Ev>();
     wayland::start(tx.clone());
@@ -143,12 +134,9 @@ pub fn run() -> ! {
     log::info!("idle: manager started");
     loop {
         // Presence rides the same 250 ms cadence as the deadlines below. The
-        // sensor samples at 10 Hz and the debounce is measured in seconds, so
-        // a quarter second of latency costs nothing.
-        if let Some(now_present) = presence
-            .as_mut()
-            .and_then(|p| p.poll(PRESENCE_GONE_AFTER, PRESENCE_BACK_AFTER))
-        {
+        // sensor samples at 10 Hz and reports raw edges, so this is the only
+        // latency between the sensor changing and us acting on it.
+        if let Some(now_present) = presence.as_mut().and_then(|p| p.poll()) {
             if now_present {
                 log::info!("presence: user back");
             } else {
