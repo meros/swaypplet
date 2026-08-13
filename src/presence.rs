@@ -29,7 +29,24 @@
 //!
 //! Both attributes are plain sysfs files and neither is cheap: a read is a
 //! synchronous round trip to the sensor hub that parks the calling thread in
-//! uninterruptible sleep for **250–400 ms** (measured 2026-08-13).
+//! uninterruptible sleep for **94–200 ms** (re-measured 2026-08-13, after the
+//! contention below was removed; the earlier 250–400 ms figure was mostly
+//! three readers queueing behind each other).
+//!
+//! # The buffered path
+//!
+//! The driver also exposes an IIO buffer, and that is what this reads when it
+//! is available. udev enables the proximity and attention scan elements and
+//! turns the buffer on, so samples land in a kernel FIFO at the sensor's own
+//! 10 Hz and a read is a memcpy rather than a round trip to the hub.
+//!
+//! Two things this buys. Reads stop costing the idle loop 94–200 ms of its
+//! 250 ms tick, and a change is visible within one sample period rather than
+//! whenever the next poll happens to land.
+//!
+//! The sysfs path stays as a fallback for a kernel or a device without the
+//! buffer, and it keeps working while the buffer is on (verified on this
+//! hardware), so the fallback is not theoretical.
 //!
 //! # Why one reader
 //!
@@ -68,6 +85,9 @@
 //! below [`POLL`] a reader spends its time queueing rather than sampling.
 
 use std::fs;
+use std::fs::File;
+use std::io::Read;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -101,6 +121,17 @@ pub struct Presence {
     dir: PathBuf,
     /// Last reported state; seeded by the first reading without reporting it.
     state: Option<bool>,
+    /// The IIO buffer chardev, open non-blocking, when the buffer is enabled.
+    /// `None` falls the whole struct back to sysfs reads.
+    chardev: Option<File>,
+    /// Bytes per buffered record: 4 per enabled scan element.
+    record: usize,
+    /// Position of each channel within a record, in units of 4 bytes.
+    prox_slot: usize,
+    attention_slot: Option<usize>,
+    /// Newest attention value seen on the buffered path, so `attention()`
+    /// costs nothing when the buffer is running.
+    last_attention: Option<i32>,
 }
 
 impl Presence {
@@ -123,10 +154,114 @@ impl Presence {
                 continue;
             }
             log::info!("presence: sensor at {}", dir.display());
-            return Some(Self { dir, state: None });
+            let mut sensor = Self {
+                dir,
+                state: None,
+                chardev: None,
+                record: 0,
+                prox_slot: 0,
+                attention_slot: None,
+                last_attention: None,
+            };
+            sensor.open_buffer();
+            return Some(sensor);
         }
         log::info!("presence: no IIO device named \"prox\" — presence rules off");
         None
+    }
+
+    /// Attach to the IIO buffer if udev has enabled it.
+    ///
+    /// Deliberately read-only: this process never writes the scan elements or
+    /// buffer/enable. Configuring the sensor is root's job (a udev rule), and
+    /// leaving it that way means an unprivileged session can read presence but
+    /// cannot reconfigure or disable the sensor that locks the machine.
+    fn open_buffer(&mut self) {
+        let enabled = |attr: &str| {
+            std::fs::read_to_string(self.dir.join("scan_elements").join(attr))
+                .is_ok_and(|v| v.trim() == "1")
+        };
+        if !std::fs::read_to_string(self.dir.join("buffer/enable"))
+            .is_ok_and(|v| v.trim() == "1")
+        {
+            log::info!("presence: IIO buffer not enabled — using sysfs reads");
+            return;
+        }
+        if !enabled("in_proximity0_en") {
+            log::info!("presence: proximity not in the buffer — using sysfs reads");
+            return;
+        }
+
+        // Records pack enabled channels in scan-index order, each padded to
+        // its 4-byte storage size. Derive the layout rather than assuming it:
+        // if the attention channel is left disabled the record halves, and a
+        // hardcoded stride would silently read every other sample as garbage.
+        let with_attention = enabled("in_attention_en");
+        self.prox_slot = 0;
+        self.attention_slot = with_attention.then_some(1);
+        self.record = if with_attention { 8 } else { 4 };
+
+        let Some(node) = self.dir.file_name().and_then(|n| n.to_str()) else {
+            return;
+        };
+        let path = format!("/dev/{node}");
+        match std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&path)
+        {
+            Ok(f) => {
+                log::info!(
+                    "presence: buffered via {path} ({}-byte records)",
+                    self.record
+                );
+                self.chardev = Some(f);
+            }
+            Err(e) => log::info!("presence: cannot open {path} ({e}) — using sysfs reads"),
+        }
+    }
+
+    /// Drain the FIFO and return the newest record as (present, attention).
+    ///
+    /// Newest, not oldest: this is a level signal, and after a stall the only
+    /// interesting sample is the current one. Returning the oldest would walk
+    /// the state machine through history one tick at a time.
+    fn drain_buffer(&mut self) -> Option<(bool, Option<i32>)> {
+        let record = self.record;
+        let file = self.chardev.as_mut()?;
+        let mut buf = [0u8; 64];
+        let len = record.min(buf.len());
+        let mut newest: Option<[u8; 8]> = None;
+        loop {
+            match file.read(&mut buf[..len]) {
+                Ok(n) if n == record => {
+                    let mut r = [0u8; 8];
+                    r[..record].copy_from_slice(&buf[..record]);
+                    newest = Some(r);
+                }
+                // A short read means a torn record; treat what we already
+                // have as current rather than misparsing the remainder.
+                Ok(_) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => {
+                    log::warn!("presence: buffered read failed ({e}) — falling back to sysfs");
+                    self.chardev = None;
+                    return None;
+                }
+            }
+        }
+        let r = newest?;
+        let slot = |i: usize| {
+            let b = &r[i * 4..i * 4 + 4];
+            i32::from_le_bytes([b[0], b[1], b[2], b[3]])
+        };
+        let present = slot(self.prox_slot) != 0;
+        let attention = self.attention_slot.map(slot);
+        if let Some(a) = attention {
+            self.last_attention = Some(a);
+        }
+        Some((present, attention))
     }
 
     fn read_i32(&self, file: &str) -> Option<i32> {
@@ -143,9 +278,14 @@ impl Presence {
         Some(self.read_i32(RAW)? != 0)
     }
 
-    /// Engagement, 0-100, unsmoothed and undebounced. Display only, and as
-    /// expensive as [`Self::read`].
+    /// Engagement, 0-100, unsmoothed and undebounced. Display only.
+    ///
+    /// Free on the buffered path, since the value rides along in every record.
+    /// Only the sysfs fallback pays the read.
     pub fn attention(&self) -> Option<i32> {
+        if self.chardev.is_some() {
+            return self.last_attention;
+        }
         self.read_i32(ATTENTION)
     }
 
@@ -158,7 +298,14 @@ impl Presence {
     /// fire "user back" at every service start, which on the lock screen would
     /// arm a face attempt against whoever locked the machine a moment ago.
     pub fn poll(&mut self) -> Option<bool> {
-        let present = self.read_i32(RAW)? != 0;
+        let present = match self.drain_buffer() {
+            Some((present, _)) => present,
+            // No new sample since the last drain. On the buffered path that
+            // means nothing changed, which is exactly what `None` says; only
+            // fall through to sysfs when there is no buffer at all.
+            None if self.chardev.is_some() => return None,
+            None => self.read_i32(RAW)? != 0,
+        };
 
         if self.state.is_none() {
             self.state = Some(present);
