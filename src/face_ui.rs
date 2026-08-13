@@ -41,13 +41,40 @@ static CONFIRM_CONFIG: LayerShellConfig = LayerShellConfig {
     keyboard_mode: KeyboardMode::Exclusive,
 };
 
+/// Swap the ring's state class. The visual vocabulary lives in the
+/// stylesheet, shared with the lock screen's indicator, so the thing the user
+/// learns to read is the same widget in both places.
+fn set_ring(ring: &GtkBox, state: &str) {
+    for old in ["looking", "dark", "found", "ok", "fail"] {
+        ring.remove_css_class(&format!("face-ring-{old}"));
+    }
+    ring.add_css_class(&format!("face-ring-{state}"));
+}
+
 /// Shorten a command line for display without hiding what it does.
 ///
 /// The tail is what matters (`systemctl restart foo`), but so is the leading
 /// binary, so this keeps both ends and elides the middle.
+fn prettify(word: &str) -> String {
+    // /nix/store/<hash>-sudo-1.9.17p2/bin/sudo -> sudo
+    //
+    // The store path is true but useless: sixty characters of hash in a
+    // prompt whose whole job is letting someone recognise what they asked
+    // for at a glance. Everything here is a store path, so showing them
+    // distinguishes nothing.
+    match word.rsplit_once('/') {
+        Some((head, tail)) if head.starts_with("/nix/store/") && !tail.is_empty() => {
+            tail.to_string()
+        }
+        _ => word.to_string(),
+    }
+}
+
 fn summarise(cmdline: &str, exe: &str) -> String {
-    let text = if cmdline.trim().is_empty() { exe } else { cmdline };
-    let text = text.trim();
+    let raw = if cmdline.trim().is_empty() { exe } else { cmdline };
+    let joined: Vec<String> = raw.split_whitespace().map(prettify).collect();
+    let joined = joined.join(" ");
+    let text = joined.trim();
     if text.chars().count() <= 72 {
         return text.to_string();
     }
@@ -61,6 +88,7 @@ fn summarise(cmdline: &str, exe: &str) -> String {
 
 struct Ui {
     window: gtk4::Window,
+    ring: GtkBox,
     title: Label,
     detail: Label,
     hint: Label,
@@ -72,17 +100,34 @@ fn build(app: &gtk4::Application) -> Ui {
     window.add_css_class("face-confirm");
 
     let root = GtkBox::new(Orientation::Vertical, 12);
-    // Same floating-surface base the OSD, launcher and polkit card use.
     root.add_css_class("glass-card");
+    root.add_css_class("face-confirm-card");
+    // Do not stretch to the layer surface. Without this the box fills
+    // whatever width the compositor hands out and the button drifts off the
+    // painted card, which is exactly what it did.
+    root.set_halign(Align::Center);
+    root.set_valign(Align::Center);
+    root.set_width_request(400);
     root.set_margin_top(20);
     root.set_margin_bottom(20);
     root.set_margin_start(24);
     root.set_margin_end(24);
 
+    let header = GtkBox::new(Orientation::Horizontal, 12);
+    header.set_halign(Align::Start);
+    let ring = GtkBox::builder()
+        .width_request(22)
+        .height_request(22)
+        .valign(Align::Center)
+        .build();
+    ring.add_css_class("face-ring");
+
     let title = Label::new(None);
     title.add_css_class("face-confirm-title");
     title.set_halign(Align::Start);
     title.set_wrap(true);
+    header.append(&ring);
+    header.append(&title);
 
     let detail = Label::new(None);
     detail.add_css_class("face-confirm-detail");
@@ -99,7 +144,7 @@ fn build(app: &gtk4::Application) -> Ui {
     button.add_css_class("face-confirm-button");
     button.set_halign(Align::End);
 
-    root.append(&title);
+    root.append(&header);
     root.append(&detail);
     root.append(&hint);
     root.append(&button);
@@ -107,6 +152,7 @@ fn build(app: &gtk4::Application) -> Ui {
 
     Ui {
         window,
+        ring,
         title,
         detail,
         hint,
@@ -193,6 +239,7 @@ pub fn register(app: &gtk4::Application) {
                         .set_text(&format!("Authorise as {}", req.target_user));
                     ui.detail
                         .set_text(&summarise(&req.peer_cmdline, &req.peer_exe));
+                    set_ring(&ui.ring, "looking");
                     ui.hint.set_text("Looking for your face…");
                     ui.button.set_sensitive(false);
                     ui.window.set_visible(true);
@@ -201,6 +248,7 @@ pub fn register(app: &gtk4::Application) {
                     // Only now does a press mean anything.
                     *pending.borrow_mut() = Some(req.id.clone());
                     armed.set(true);
+                    set_ring(&ui.ring, "ok");
                     ui.hint
                         .set_text("Recognised you. Press Enter to authorise, Esc to cancel.");
                     ui.button.set_sensitive(true);
