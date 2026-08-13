@@ -2749,17 +2749,24 @@ revealer {
    shows a DISABLED button, so the shape of the prompt does not change under
    the user's hands when it becomes pressable — the wording changes, the
    layout does not, and nothing moves for a press to land on by accident. */
-/* @surface is alpha(#32302f, 0.72), which only works on a layer swayfx
-   blurs behind. swaypplet-face-confirm has no layer_effects entry, so the
-   translucency showed raw terminal text straight through the card. Same trap
-   the bar popovers documented: take the opaque raised fill and a real drop
-   shadow instead, since there is no frost to borrow depth from. */
+/* Frosted like every other swaypplet card: the swaypplet-face-confirm layer
+   has a layer_effects entry (users/modules/sway.nix), so @surface's 0.72
+   alpha is blurred by the compositor rather than showing whatever is behind
+   it. It briefly used an opaque fill because the layer was NOT listed there,
+   which is the same trap the bar popovers documented.
+
+   No box-shadow, deliberately, matching the polkit and launcher cards.
+   blur_ignore_transparent only skips pixels at alpha exactly 0, so a GTK
+   drop shadow overhanging the transparent apron gets frosted into a halo the
+   size of the whole window. Depth comes from the blur and the border. */
 .face-confirm-card {
-    background-color: @surface_raised;
+    background-color: @surface;
     border-radius: 18px;
     border: 1px solid @border_strong;
-    box-shadow: 0 12px 40px alpha(black, 0.5);
     padding: 22px 24px;
+    /* The same entrance every auth surface uses, so a face prompt arrives
+       the way the lock card and the polkit modal do. */
+    animation: auth-card-enter 300ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .face-confirm-title {
@@ -2772,7 +2779,7 @@ revealer {
    read as quoted evidence rather than as a label the dialog wrote about
    itself — it is the one element on the card that came from outside. */
 .face-confirm-well {
-    background-color: alpha(black, 0.22);
+    background-color: alpha(black, 0.28);
     border: 1px solid @border_strong;
     border-radius: 10px;
     padding: 10px 12px;
