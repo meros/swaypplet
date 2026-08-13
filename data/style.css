@@ -2742,3 +2742,52 @@ revealer {
   font-size: 10px;
   color: @text_faint;
 }
+
+/* ── Face authentication confirm surface ──
+   Two stages on one card: an announce stage naming what asked, then a
+   confirm stage once the face has matched. The announce stage deliberately
+   shows a DISABLED button, so the shape of the prompt does not change under
+   the user's hands when it becomes pressable — the wording changes, the
+   layout does not, and nothing moves for a press to land on by accident. */
+.face-confirm .glass-card,
+.face-confirm > box {
+    background-color: @surface;
+    border-radius: 18px;
+    border: 1px solid @border_strong;
+}
+
+.face-confirm-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: @fg;
+}
+
+/* The command requesting elevation. Monospace because it is a command, and
+   dimmed because it is evidence rather than instruction. */
+.face-confirm-detail {
+    font-family: monospace;
+    font-size: 0.9rem;
+    color: @fg_dim;
+}
+
+.face-confirm-hint {
+    font-size: 0.95rem;
+    color: @fg_dim;
+}
+
+.face-confirm-button {
+    padding: 6px 18px;
+    border-radius: 12px;
+    background-color: @accent;
+    color: @bg0_h;
+    font-weight: 600;
+}
+
+.face-confirm-button:disabled {
+    background-color: @bg2;
+    color: @fg_dim;
+}
+
+.face-confirm-button:hover:not(:disabled) {
+    background-color: @accent_tertiary;
+}
