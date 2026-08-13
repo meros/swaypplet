@@ -142,16 +142,28 @@ impl Cue {
         self.strip.remove_css_class("face-pill-enter");
         self.window.set_visible(true);
         let strip = self.strip.clone();
-        self.window.add_tick_callback(move |_, _| {
+        self.window.add_tick_callback(move |window, _| {
             strip.add_css_class("face-pill-enter");
+            // Re-applied here as well as below: the region is a property of
+            // the GdkSurface, which does not exist until the window maps, and
+            // the strip spans the whole width of the output. An unset region
+            // means a 180px band across the top of the screen eating every
+            // press aimed at whatever is behind it.
+            clear_input_region(window);
             glib::ControlFlow::Break
         });
-        // Nothing here is clickable, so nothing here should swallow a click.
-        // Without this the pill eats presses aimed at the backdrop behind it,
-        // which is the cancel gesture.
-        if let Some(surface) = self.window.surface() {
-            let empty = gdk4::cairo::Region::create();
-            surface.set_input_region(Some(&empty));
-        }
+        clear_input_region(&self.window);
+    }
+}
+
+/// Make a window transparent to input.
+///
+/// Nothing on the cue is clickable, so nothing on it should swallow a click.
+/// It spans the full width of the output, so without this it is a band across
+/// the top of the screen that eats presses aimed at whatever is behind it --
+/// including the card's own backdrop, whose click is the cancel gesture.
+fn clear_input_region(window: &gtk4::Window) {
+    if let Some(surface) = window.surface() {
+        surface.set_input_region(Some(&gdk4::cairo::Region::create()));
     }
 }
