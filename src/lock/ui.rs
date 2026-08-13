@@ -692,16 +692,7 @@ impl SurfaceSet {
                 });
             }
             s.face_label.set_label(label);
-            for old in ["looking", "dark", "found", "ok", "fail"] {
-                s.face_ring.remove_css_class(&format!("face-ring-{old}"));
-                s.face_pill.remove_css_class(&format!("face-pill-{old}"));
-            }
-            s.face_ring.add_css_class(&format!("face-ring-{state}"));
-            // The pill carries the state too, so the attention cue can live
-            // on the whole pill rather than the ring. The ring is shared with
-            // the elevate card, which sits on a compositor-blurred layer
-            // where a glow would frost into a halo.
-            s.face_pill.add_css_class(&format!("face-pill-{state}"));
+            crate::face_ring::apply(&s.face_ring, Some(&s.face_pill), state);
         }
     }
 

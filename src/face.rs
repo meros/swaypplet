@@ -266,7 +266,30 @@ pub enum Progress {
 }
 
 impl Progress {
-    fn parse(s: &str) -> Option<Progress> {
+    /// The ring class this state renders as. Note `Face` is `found`: the
+    /// engine names what it is doing, the stylesheet names what it looks
+    /// like, and they are not the same word.
+    pub fn ring(self) -> &'static str {
+        match self {
+            Progress::Looking => "looking",
+            Progress::Dark => "dark",
+            Progress::Face => "found",
+        }
+    }
+
+    /// What to tell the user. One wording, wherever the indicator appears.
+    pub fn text(self) -> &'static str {
+        match self {
+            Progress::Looking => "Looking for you",
+            // Never phrased as the user's fault: the emitter or the relay is
+            // what is wrong, and telling somebody to move their face sends
+            // them after nothing.
+            Progress::Dark => "Too dark to see",
+            Progress::Face => "Hold still",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Progress> {
         match s {
             "looking" => Some(Progress::Looking),
             "dark" => Some(Progress::Dark),

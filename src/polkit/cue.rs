@@ -63,7 +63,7 @@ impl Cue {
         window.set_visible(false);
         // Re-applied on every map: the region lives on the GdkSurface, which
         // is created at map and re-laid-out on output changes.
-        window.connect_map(|w| clear_input_region(w));
+        window.connect_map(clear_input_region);
 
         let pill = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
@@ -122,12 +122,7 @@ impl Cue {
             self.window.set_visible(false);
             return;
         }
-        for old in ["looking", "dark", "found", "ok", "fail"] {
-            self.ring.remove_css_class(&format!("face-ring-{old}"));
-            self.pill.remove_css_class(&format!("face-pill-{old}"));
-        }
-        self.ring.add_css_class(&format!("face-ring-{state}"));
-        self.pill.add_css_class(&format!("face-pill-{state}"));
+        crate::face_ring::apply(&self.ring, Some(&self.pill), state);
         self.label.set_label(text);
         if self.window.is_visible() {
             // Already up: this is a state change, not an arrival. Touching the
@@ -159,7 +154,6 @@ impl Cue {
             clear_input_region(window);
             glib::ControlFlow::Break
         });
-        clear_input_region(&self.window);
     }
 }
 

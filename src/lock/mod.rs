@@ -238,22 +238,7 @@ pub fn run() -> ! {
                                 return glib::ControlFlow::Break;
                             }
                             EngineEvent::Progress(p) => {
-                                let (state, text) = match p {
-                                    crate::face::Progress::Looking => {
-                                        ("looking", "Looking for you")
-                                    }
-                                    // Never phrased as the user's fault: the
-                                    // emitter or the relay is wrong, and
-                                    // telling someone to move their face
-                                    // would send them after the wrong thing.
-                                    crate::face::Progress::Dark => {
-                                        ("dark", "Too dark to see")
-                                    }
-                                    crate::face::Progress::Face => {
-                                        ("found", "Hold still")
-                                    }
-                                };
-                                surfaces.show_face(true, state, text);
+                                surfaces.show_face(true, p.ring(), p.text());
                             }
                             EngineEvent::Hint(hint) => {
                                 log::info!("face: {hint}");
