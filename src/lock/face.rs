@@ -45,7 +45,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use crate::fp::EngineEvent;
-use crate::presence::Presence;
+use crate::presence::{self, Event as PresenceEvent, Presence};
 
 /// Fallback when the unit does not set `SWAYPPLET_FACE_COMPARE`. The locker
 /// inherits a curated PATH from swaypplet-idle.service, so in practice the
@@ -56,8 +56,10 @@ fn compare_command() -> String {
     std::env::var("SWAYPPLET_FACE_COMPARE").unwrap_or_else(|_| COMPARE.to_string())
 }
 
-/// Presence poll cadence. The sensor samples at 10 Hz; this only decides how
-/// soon after arrival the first attempt starts.
+/// Tick for this engine's own deadlines. Presence itself is pushed from
+/// whoever owns the sensor (see `crate::presence`), so this no longer sets
+/// a sampling rate — it only decides how soon after arrival an attempt
+/// starts, and how finely `RETRY_AFTER` is honoured.
 const POLL: Duration = Duration::from_millis(250);
 
 /// Gap between attempts while presence holds.
@@ -83,12 +85,21 @@ pub fn start(user: String) -> mpsc::Receiver<EngineEvent> {
 }
 
 fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
-    let Some(mut presence) = Presence::detect() else {
+    if Presence::detect().is_none() {
         let _ = tx.send(EngineEvent::Unavailable(
             "no presence sensor — face unlock idle".to_string(),
         ));
         return;
-    };
+    }
+
+    // The idle manager owns the device and publishes it; this listens. Doing
+    // its own reads here put a third 4 Hz reader on hardware that serves
+    // about three reads a second, and every reader queued behind the others.
+    let events = presence::subscribe();
+    // None until the first reading lands, so the opening state is a starting
+    // point rather than an arrival — arming on it would run face unlock
+    // against whoever locked the machine a moment ago.
+    let mut present: Option<bool> = None;
 
     // Some(deadline) means an attempt is armed for that instant.
     let mut armed: Option<Instant> = None;
@@ -98,7 +109,22 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
     loop {
         sleep(POLL);
 
-        match presence.poll() {
+        // Collapse everything queued since the last tick into one edge; only
+        // a change in settled state is an arrival or a departure.
+        let mut edge = None;
+        while let Ok(event) = events.try_recv() {
+            if let PresenceEvent::Changed(state) = event
+                && present != Some(state)
+            {
+                let first = present.is_none();
+                present = Some(state);
+                if !first {
+                    edge = Some(state);
+                }
+            }
+        }
+
+        match edge {
             Some(true) => {
                 log::info!("face: presence returned — arming");
                 attempts = 0;

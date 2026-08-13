@@ -57,7 +57,7 @@ use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use crate::presence::Presence;
+use crate::presence::{self, Event as PresenceEvent};
 
 pub use wayland::Timeout;
 
@@ -121,9 +121,18 @@ pub fn run() -> ! {
     // Mirrors the logind session Active property.
     let mut session_active = true;
 
+    // This process owns the sensor for the whole session and publishes it on
+    // the session bus; the bar and the lock screen's face engine listen there
+    // rather than reading the device themselves. Reads cost 250-400 ms each
+    // and the hardware serves about three a second, so three independent
+    // readers meant all three queued. See `crate::presence`.
+    //
     // None on hardware without the sensor, which keeps the timer-only
     // behaviour intact.
-    let mut presence = Presence::detect();
+    let presence = presence::serve();
+    // Mirrors the sensor, for the tiers that ask whether anyone is here.
+    // None until the first reading lands.
+    let mut present: Option<bool> = None;
 
     let release_inhibitor = |sleep_release: &mut Option<Instant>| {
         if sleep_release.take().is_some() {
@@ -133,10 +142,28 @@ pub fn run() -> ! {
 
     log::info!("idle: manager started");
     loop {
-        // Presence rides the same 250 ms cadence as the deadlines below. The
-        // sensor samples at 10 Hz and reports raw edges, so this is the only
-        // latency between the sensor changing and us acting on it.
-        if let Some(now_present) = presence.as_mut().and_then(|p| p.poll()) {
+        // Transitions arrive from the owner thread, which samples on its own
+        // cadence; this drain rides the 250 ms tick below, so that tick is
+        // the only latency between the sensor changing and us acting on it.
+        let mut now_present = None;
+        if let Some(events) = &presence {
+            while let Ok(event) = events.try_recv() {
+                match event {
+                    PresenceEvent::Changed(state) => {
+                        // Only a change in the settled state is an edge to act
+                        // on; the owner sends its opening reading too.
+                        if present != Some(state) {
+                            present = Some(state);
+                            now_present = Some(state);
+                        }
+                    }
+                    // Display only; the bar is what reads it.
+                    PresenceEvent::Attention(_) => {}
+                }
+            }
+        }
+
+        if let Some(now_present) = now_present {
             if now_present {
                 log::info!("presence: user back — powering outputs on");
                 // The mirror of the blank invariant. Blanking is dangerous
@@ -219,7 +246,7 @@ pub fn run() -> ! {
                 // someone the 300 s tier is suppressed and the absence path
                 // owns locking instead; nothing re-arms this tier until input
                 // resumes, which is the intent.
-                if presence.as_ref().and_then(Presence::state) == Some(true) {
+                if present == Some(true) {
                     log::info!("idle.lock-300s: skip (present)");
                 } else {
                     log::info!("idle.lock-300s: fire");
