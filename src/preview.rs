@@ -102,6 +102,7 @@ pub fn run(component: &str) {
                         feedback.shake();
                     }
                 }),
+                true,
             );
             window.set_child(Some(&content));
             window.present();

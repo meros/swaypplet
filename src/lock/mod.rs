@@ -180,7 +180,7 @@ pub fn run() -> ! {
         let surfaces = surfaces.clone();
         let on_submit = on_submit.clone();
         instance.connect_monitor(move |instance, monitor| {
-            let window = surfaces.build_surface(on_submit.clone());
+            let window = surfaces.build_surface(on_submit.clone(), Some(monitor));
             instance.assign_window_to_monitor(&window, monitor);
             window.present();
         });

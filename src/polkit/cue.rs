@@ -21,7 +21,7 @@
 use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer};
 
-use crate::layer_shell::{create_layer_window, LayerShellConfig};
+use crate::layer_shell::{self, create_layer_window, LayerShellConfig};
 
 static CUE_CONFIG: LayerShellConfig = LayerShellConfig {
     namespace: "swaypplet-face-cue",
@@ -82,6 +82,12 @@ impl Cue {
 
     /// Show the cue in `state`, or hide it.
     ///
+    /// Always on the built-in panel, because that is the screen with the lens
+    /// over it. Left to the compositor this lands on whichever output has
+    /// focus, and on a docked laptop that is usually the external monitor —
+    /// a cue that says "look here" while pointing the user's face away from
+    /// the sensor trying to read it.
+    ///
     /// Hiding destroys the CSS animation state, so the next show replays the
     /// arrival from the top — which is the behaviour wanted. The cue has to
     /// arrive to be seen peripherally; a pill that was already there is a
@@ -98,6 +104,13 @@ impl Cue {
         self.ring.add_css_class(&format!("face-ring-{state}"));
         self.pill.add_css_class(&format!("face-pill-{state}"));
         self.label.set_label(text);
+        // Re-resolved on every show: outputs come and go, and a monitor
+        // handle kept from startup can name one the compositor has since
+        // forgotten. Set while hidden, which is the only time layer-shell
+        // will take it.
+        if let Some(monitor) = layer_shell::internal_monitor() {
+            gtk4_layer_shell::LayerShell::set_monitor(&self.window, Some(&monitor));
+        }
         self.window.set_visible(true);
         // Nothing here is clickable, so nothing here should swallow a click.
         // Without this the pill eats presses aimed at the backdrop behind it,

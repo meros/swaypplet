@@ -238,7 +238,10 @@ pub fn run() -> ! {
         let st = st.clone();
         Rc::new(move |password: String| submit(&st, password))
     };
-    let window = surfaces.build_surface(on_submit);
+    // The greeter has no face check, so which output this is does not
+    // matter to it; it is the lock screen's indicator that has to sit under
+    // the camera.
+    let window = surfaces.build_surface(on_submit, None);
     window.fullscreen();
     window.present();
 
