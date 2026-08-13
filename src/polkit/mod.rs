@@ -26,7 +26,9 @@
 //! configures.
 
 pub(crate) mod agent;
+mod cue;
 pub(crate) mod dialog;
+mod face;
 mod helper;
 mod session;
 
@@ -43,7 +45,9 @@ use tokio::sync::oneshot;
 use crate::theme;
 
 use agent::{AgentEvent, AuthOutcome, AuthRequest};
+use cue::Cue;
 use dialog::{PolkitDialog, StatusKind};
+use face::FaceSession;
 use helper::{Helper, HelperEvent};
 
 const APP_ID: &str = "dev.swaypplet.polkit";
@@ -71,6 +75,14 @@ struct ActiveSession {
     selected_uid: u32,
     /// True after PAM_PROMPT_ECHO_OFF/ON until the user submits a response.
     waiting_password: bool,
+    /// A password submitted before PAM asked for one.
+    ///
+    /// The card shows the entry from the first prompt onward, including while
+    /// pam_face still holds the stack, so a fast user can submit before the
+    /// conversation is ready for it. Dropping that keystroke silently is the
+    /// one thing worse than not showing the entry at all, so it is held here
+    /// and flushed into the next prompt.
+    buffered_password: Option<String>,
 }
 
 impl ActiveSession {
@@ -88,8 +100,13 @@ impl ActiveSession {
 
 struct PolkitState {
     dialog: Rc<PolkitDialog>,
+    /// The look-at-the-camera pill, on its own unblurred surface. See cue.rs.
+    cue: Cue,
     active: Option<ActiveSession>,
     queue: VecDeque<PendingRequest>,
+    /// A face confirm on screen, from faced. Independent of `active`: for
+    /// pkexec it rides on a live polkit session, for sudo there is none.
+    face: Option<FaceSession>,
 }
 
 struct PendingRequest {
@@ -110,12 +127,22 @@ pub fn run() {
         theme::load_css();
 
         let dialog = PolkitDialog::new(app);
+        // After the dialog on purpose: sway stacks surfaces within a layer in
+        // creation order, and the cue has to sit above the card's backdrop.
+        let cue = Cue::new(app);
         let inner = Rc::new(RefCell::new(PolkitState {
             dialog,
+            cue,
             active: None,
             queue: VecDeque::new(),
+            face: None,
         }));
         *state_startup.borrow_mut() = Some(inner.clone());
+
+        // The confirm agent for face-authenticated sudo and pkexec lives
+        // here rather than in the panel, so one process owns every surface
+        // that can authorise something. Two processes meant two cards.
+        face::register(&inner);
 
         // Start zbus agent thread, then poll its event channel from the
         // GTK main loop.
@@ -150,8 +177,14 @@ pub fn run() {
 fn handle_agent_event(state: &Rc<RefCell<PolkitState>>, event: AgentEvent) {
     match event {
         AgentEvent::Begin { request, reply } => {
-            let has_active = state.borrow().active.is_some();
-            if has_active {
+            // A standalone face card owns the dialog just as a session does;
+            // presenting over it would swap the card under the user's hands
+            // while a press was pending on it.
+            let busy = {
+                let s = state.borrow();
+                s.active.is_some() || s.face.as_ref().is_some_and(|f| f.standalone)
+            };
+            if busy {
                 state
                     .borrow_mut()
                     .queue
@@ -198,6 +231,7 @@ fn start_session(
             reply: Some(reply),
             selected_uid,
             waiting_password: false,
+            buffered_password: None,
         });
     }
 
@@ -207,11 +241,22 @@ fn start_session(
     let s_pwd = state.clone();
     let on_password = Box::new(move |pwd: String| handle_user_password(&s_pwd, pwd));
     let s_cancel = state.clone();
-    let on_cancel = Box::new(move || end_session(&s_cancel, AuthOutcome::Cancelled));
+    let on_cancel = Box::new(move || {
+        // Refuse any face check riding on this session first. Leaving it to
+        // time out would keep the camera and the IR emitter running for a
+        // request the user has visibly declined.
+        face::abandon(&s_cancel);
+        face::answer(&s_cancel, false);
+        end_session(&s_cancel, AuthOutcome::Cancelled)
+    });
     let s_ident = state.clone();
     let on_identity = Box::new(move |uid: u32| handle_identity_change(&s_ident, uid));
+    // Typing is a decision: it abandons a face check still waiting on the
+    // camera so PAM can reach the password without waiting out the burst.
+    let s_typing = state.clone();
+    let on_typing = Box::new(move || face::abandon(&s_typing));
 
-    dialog.present(&request, on_password, on_cancel, on_identity);
+    dialog.present(&request, on_password, on_cancel, on_identity, on_typing);
 
     spawn_helper(state, &initial_username);
 }
@@ -374,8 +419,20 @@ fn apply_helper_event(state: &Rc<RefCell<PolkitState>>, event: HelperEvent) -> b
                 dialog.set_status("", StatusKind::Info);
             }
             dialog.set_verifying(false);
-            if let Some(active) = state.borrow_mut().active.as_mut() {
-                active.waiting_password = true;
+            let buffered = {
+                let mut s = state.borrow_mut();
+                match s.active.as_mut() {
+                    Some(active) => {
+                        active.waiting_password = true;
+                        active.buffered_password.take()
+                    }
+                    None => None,
+                }
+            };
+            // The user answered before PAM asked. Send it now rather than
+            // making them type it twice.
+            if let Some(password) = buffered {
+                handle_user_password(state, password);
             }
             true
         }
@@ -434,6 +491,12 @@ fn apply_helper_event(state: &Rc<RefCell<PolkitState>>, event: HelperEvent) -> b
 // ────────────────────────────────────────────────────────────────────────
 
 fn handle_user_password(state: &Rc<RefCell<PolkitState>>, password: String) {
+    // An empty submit while a face is armed is the Allow press, not a blank
+    // password. A non-empty one is a password, and the user typing it has
+    // already abandoned the face check via on_typing.
+    if password.is_empty() && face::answer(state, true) {
+        return;
+    }
     let mut s = state.borrow_mut();
     let Some(active) = s.active.as_mut() else {
         return;
@@ -442,7 +505,11 @@ fn handle_user_password(state: &Rc<RefCell<PolkitState>>, password: String) {
         return;
     };
     if !active.waiting_password {
-        // Helper isn't ready for input yet — ignore stray submits.
+        // The helper is not ready for input yet. Hold the response rather
+        // than dropping it; the next prompt flushes it.
+        active.buffered_password = Some(password);
+        drop(s);
+        state.borrow().dialog.set_verifying(true);
         return;
     }
     if let Err(e) = helper.send_response(&password) {
@@ -490,16 +557,34 @@ fn handle_identity_change(state: &Rc<RefCell<PolkitState>>, uid: u32) {
 }
 
 fn end_session(state: &Rc<RefCell<PolkitState>>, outcome: AuthOutcome) {
+    // Any face check attached to this session dies with it. It was asked on
+    // behalf of a PAM conversation that is over, so an answer now would apply
+    // to nothing, and leaving it pending holds the camera open.
+    face::abandon(state);
     let dialog = state.borrow().dialog.clone();
     {
         let mut s = state.borrow_mut();
+        s.face = None;
         if let Some(mut active) = s.active.take() {
             active.finish(outcome);
         }
     }
+    dialog.show_face(false, "", "");
+    state.borrow().cue.set(false, "", "");
     dialog.hide();
 
-    // Pop the next queued request, if any.
+    pop_queue(state);
+}
+
+/// Start the next queued request, if the card is free.
+fn pop_queue(state: &Rc<RefCell<PolkitState>>) {
+    let free = {
+        let s = state.borrow();
+        s.active.is_none() && !s.face.as_ref().is_some_and(|f| f.standalone)
+    };
+    if !free {
+        return;
+    }
     let next = state.borrow_mut().queue.pop_front();
     if let Some(next) = next {
         start_session(state, next.request, next.reply);

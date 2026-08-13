@@ -2743,37 +2743,16 @@ revealer {
   color: @text_faint;
 }
 
-/* ── Face authentication confirm surface ──
-   Two stages on one card: an announce stage naming what asked, then a
-   confirm stage once the face has matched. The announce stage deliberately
-   shows a DISABLED button, so the shape of the prompt does not change under
-   the user's hands when it becomes pressable — the wording changes, the
-   layout does not, and nothing moves for a press to land on by accident. */
-/* Frosted like every other swaypplet card: the swaypplet-face-confirm layer
-   has a layer_effects entry (users/modules/sway.nix), so @surface's 0.72
-   alpha is blurred by the compositor rather than showing whatever is behind
-   it. It briefly used an opaque fill because the layer was NOT listed there,
-   which is the same trap the bar popovers documented.
+/* ── Elevation, on the polkit card ──
+   `sudo` and `pkexec` are one question — may this run as root? — so they get
+   one card, the polkit one. These rules are what that card grows when the
+   request arrives through pam_face instead of through polkit: a command well
+   and a consequence line, because pam_face carries no action id and no
+   vendor message, only the process that asked.
 
-   No box-shadow, deliberately, matching the polkit and launcher cards.
-   blur_ignore_transparent only skips pixels at alpha exactly 0, so a GTK
-   drop shadow overhanging the transparent apron gets frosted into a halo the
-   size of the whole window. Depth comes from the blur and the border. */
-.face-confirm-card {
-    background-color: @surface;
-    border-radius: 18px;
-    border: 1px solid @border_strong;
-    padding: 22px 24px;
-    /* The same entrance every auth surface uses, so a face prompt arrives
-       the way the lock card and the polkit modal do. */
-    animation: auth-card-enter 300ms cubic-bezier(0.2, 0, 0, 1);
-}
-
-.face-confirm-title {
-    font-size: 1.05rem;
-    font-weight: 700;
-    color: @fg;
-}
+   Everything else on the card is already styled above: the face pill borrows
+   .polkit-fp-pill so the two biometrics read as the pair they are, and the
+   buttons are the card's own. */
 
 /* The command, recessed. Sinking it below the card surface is what makes it
    read as quoted evidence rather than as a label the dialog wrote about
@@ -2797,42 +2776,6 @@ revealer {
 .face-confirm-consequence {
     font-size: 0.85rem;
     color: @fg_dim;
-}
-
-.face-confirm-status {
-    font-size: 0.92rem;
-    color: @fg_dim;
-}
-
-.face-confirm-button {
-    padding: 7px 20px;
-    border-radius: 10px;
-    background-color: @accent;
-    color: @bg0_h;
-    font-weight: 600;
-}
-
-.face-confirm-button:disabled {
-    background-color: @surface_track;
-    color: @fg_dim;
-}
-
-.face-confirm-button:hover:not(:disabled) {
-    background-color: @accent_tertiary;
-}
-
-/* Cancel is quieter than Allow but never disabled and never hidden.
-   Refusing has to stay as reachable as accepting; a prompt whose only easy
-   path is "yes" manufactures consent rather than collecting it. */
-.face-confirm-cancel {
-    padding: 7px 18px;
-    border-radius: 10px;
-    background-color: @surface_hover;
-    color: @fg;
-}
-
-.face-confirm-cancel:hover {
-    background-color: @surface_track;
 }
 
 /* ── Face unlock indicator ──
@@ -2941,10 +2884,11 @@ revealer {
    within a day, and this fires every single time they sit down. The cue has
    to be forgettable when it works.
 
-   Safe here because the lock surface is ext-session-lock and has no
-   layer_effects entry, so a box-shadow is a real shadow rather than
-   something blur_ignore_transparent frosts into a halo. Deliberately NOT put
-   on .face-ring, which is shared with the elevate card on a blurred layer. */
+   Safe on both surfaces that use it: the lock surface is ext-session-lock,
+   and the elevate cue has its own namespace with no layer_effects entry, so
+   a box-shadow is a real shadow rather than something blur_ignore_transparent
+   frosts into a halo. Deliberately NOT put on .face-ring, which is also used
+   on the polkit card, and that layer IS blurred. */
 .face-pill {
     animation: face-pill-arrive 420ms cubic-bezier(0.2, 0, 0, 1);
 }

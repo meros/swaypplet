@@ -38,11 +38,12 @@ const INTERFACE: &str = "se.meros.Face1";
 pub struct Request {
     pub id: String,
     pub stage: Stage,
-    pub purpose: String,
-    pub target_user: String,
+    /// The process asking for elevation. This is the whole reason the
+    /// announce stage exists: a confirmation prompt with no attribution
+    /// trains the user to press a key whenever one appears, which is exactly
+    /// the behaviour an attacker wants.
     pub peer_exe: String,
     pub peer_cmdline: String,
-    pub expires_ms: u64,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -160,11 +161,8 @@ fn run(tx: &Sender<Request>) -> std::io::Result<()> {
         let request = Request {
             id: id.to_string(),
             stage,
-            purpose: field(text, "purpose").unwrap_or("elevate").to_string(),
-            target_user: field(text, "target_user").unwrap_or("").to_string(),
             peer_exe: field(text, "exe").unwrap_or("").to_string(),
             peer_cmdline: field(text, "cmdline").unwrap_or("").to_string(),
-            expires_ms: number(text, "expires_ms").unwrap_or(0),
         };
         if tx.send_blocking(request).is_err() {
             return Ok(());

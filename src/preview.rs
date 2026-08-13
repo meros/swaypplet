@@ -145,6 +145,7 @@ pub fn run(component: &str) {
                 }),
                 Box::new(|| std::process::exit(0)),
                 Box::new(|_uid| {}),
+                Box::new(|| {}),
             );
             dialog.show_fingerprint(true, "Touch fingerprint reader");
             dialog.set_password_prompt("Password");

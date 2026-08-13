@@ -47,6 +47,10 @@ struct Callbacks {
     on_password: Box<dyn Fn(String)>,
     on_cancel: Box<dyn Fn()>,
     on_identity: Box<dyn Fn(u32)>,
+    /// Fired on the first keystroke in the password entry. The controller
+    /// uses it to abandon a face check that is still running, so the user
+    /// who has decided to type does not have to wait out the camera.
+    on_typing: Box<dyn Fn()>,
 }
 
 impl Default for Callbacks {
@@ -55,6 +59,7 @@ impl Default for Callbacks {
             on_password: Box::new(|_| {}),
             on_cancel: Box::new(|| {}),
             on_identity: Box::new(|_| {}),
+            on_typing: Box::new(|| {}),
         }
     }
 }
@@ -66,6 +71,12 @@ pub struct PolkitDialog {
     message_label: gtk4::Label,
     fp_pill: gtk4::Box,
     fp_label: gtk4::Label,
+    face_pill: gtk4::Box,
+    face_ring: gtk4::Box,
+    face_label: gtk4::Label,
+    face_well: gtk4::Box,
+    face_command: gtk4::Label,
+    face_consequence: gtk4::Label,
     password_entry: gtk4::PasswordEntry,
     caps_label: gtk4::Label,
     identity_row: gtk4::Box,
@@ -140,6 +151,60 @@ impl PolkitDialog {
             .max_width_chars(48)
             .build();
         message_label.add_css_class("polkit-message");
+
+        // ── The command, for requests polkit never described ──────────
+        //
+        // `sudo` reaches this card through pam_face rather than through
+        // polkit, so there is no action id and no vendor message to show. The
+        // command line is the only thing that distinguishes a request the
+        // user made from one they did not, so it gets a well of its own:
+        // monospace because it is a command, recessed because it is evidence
+        // rather than instruction.
+        let face_command = gtk4::Label::builder()
+            .halign(gtk4::Align::Start)
+            .wrap(true)
+            .wrap_mode(gtk4::pango::WrapMode::WordChar)
+            .max_width_chars(48)
+            .selectable(true)
+            .build();
+        face_command.add_css_class("face-confirm-command");
+        let face_well = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .visible(false)
+            .build();
+        face_well.add_css_class("face-confirm-well");
+        face_well.append(&face_command);
+
+        let face_consequence = gtk4::Label::builder()
+            .label("Runs as root")
+            .halign(gtk4::Align::Center)
+            .visible(false)
+            .build();
+        face_consequence.add_css_class("face-confirm-consequence");
+
+        // ── Face pill (hidden by default) ─────────────────────────────
+        //
+        // Same shape as the fingerprint pill on purpose. Both are biometrics
+        // that either work or get out of the way, and a user who has learned
+        // to read one should not have to learn the other. The ring is the
+        // same widget the lock screen uses.
+        let face_pill = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(10)
+            .halign(gtk4::Align::Center)
+            .visible(false)
+            .build();
+        face_pill.add_css_class("polkit-fp-pill");
+        let face_ring = gtk4::Box::builder()
+            .width_request(18)
+            .height_request(18)
+            .valign(gtk4::Align::Center)
+            .build();
+        face_ring.add_css_class("face-ring");
+        let face_label = gtk4::Label::builder().label("Checking your face\u{2026}").build();
+        face_label.add_css_class("polkit-fp-label");
+        face_pill.append(&face_ring);
+        face_pill.append(&face_label);
 
         // ── Fingerprint pill (hidden by default) ──────────────────────
         let fp_pill = gtk4::Box::builder()
@@ -256,6 +321,9 @@ impl PolkitDialog {
         content.append(&icon_box);
         content.append(&title_label);
         content.append(&message_label);
+        content.append(&face_well);
+        content.append(&face_consequence);
+        content.append(&face_pill);
         content.append(&fp_pill);
         content.append(&password_entry);
         content.append(&caps_label);
@@ -282,6 +350,12 @@ impl PolkitDialog {
             message_label,
             fp_pill,
             fp_label,
+            face_pill,
+            face_ring,
+            face_label,
+            face_well,
+            face_command,
+            face_consequence,
             password_entry: password_entry.clone(),
             caps_label: caps_label.clone(),
             identity_row,
@@ -318,6 +392,18 @@ impl PolkitDialog {
                 let text = entry.text().to_string();
                 entry.set_text("");
                 (cbs.borrow().on_password)(text);
+            });
+        }
+
+        // First keystroke means the user has chosen the password. Tell the
+        // controller so a running face check can get out of the way instead
+        // of holding PAM until its own deadline.
+        {
+            let cbs = callbacks.clone();
+            password_entry.connect_changed(move |entry| {
+                if !entry.text().is_empty() {
+                    (cbs.borrow().on_typing)();
+                }
             });
         }
 
@@ -396,6 +482,7 @@ impl PolkitDialog {
         on_password: Box<dyn Fn(String)>,
         on_cancel: Box<dyn Fn()>,
         on_identity: Box<dyn Fn(u32)>,
+        on_typing: Box<dyn Fn()>,
     ) {
         // Reset state
         self.password_entry.set_text("");
@@ -409,6 +496,10 @@ impl PolkitDialog {
         self.fp_pill.remove_css_class("polkit-fp-active");
         self.password_entry.set_visible(false);
         self.auth_btn.set_visible(false);
+        self.auth_btn.set_label("Authenticate");
+        self.show_face(false, "", "");
+        self.face_well.set_visible(false);
+        self.face_consequence.set_visible(false);
         self.card.remove_css_class("polkit-shake");
         self.card.remove_css_class("polkit-success");
         self.card.remove_css_class("polkit-verifying");
@@ -449,6 +540,65 @@ impl PolkitDialog {
             on_password,
             on_cancel,
             on_identity,
+            on_typing,
+        };
+
+        self.reveal.show();
+    }
+
+    /// Present the card for an elevation that polkit knows nothing about.
+    ///
+    /// `sudo` reaches face authentication through pam_face directly, so there
+    /// is no polkit action, no vendor message and no identity list — only the
+    /// process that asked. The card is otherwise the same card, because from
+    /// the user's side it is the same decision: something wants to run as
+    /// root, and they are being asked whether it may.
+    ///
+    /// There is no password entry here. pam_face never prompts (a prompt is
+    /// answerable by a pipe, which is the whole reason the confirm lives in
+    /// the session), so offering a text box would offer something that cannot
+    /// work; the terminal that ran `sudo` is where a password gets typed.
+    pub fn present_elevate(
+        &self,
+        command: &str,
+        on_allow: Box<dyn Fn(String)>,
+        on_cancel: Box<dyn Fn()>,
+    ) {
+        self.set_status("", StatusKind::Info);
+        self.fp_pill.set_visible(false);
+        self.fp_pill.remove_css_class("polkit-fp-active");
+        self.password_entry.set_visible(false);
+        self.caps_label.set_visible(false);
+        self.identity_row.set_visible(false);
+        self.card.remove_css_class("polkit-shake");
+        self.card.remove_css_class("polkit-success");
+        self.card.remove_css_class("polkit-verifying");
+
+        // Name the consequence, not the ceremony. "Authenticate as meros"
+        // describes the mechanism; "Administrator access" describes what the
+        // user is about to hand out, which is the thing worth reading.
+        self.title_label.set_label("Administrator access");
+        self.message_label.set_label("A program is asking to run as root.");
+        self.set_icon("", "");
+
+        self.face_command.set_label(command);
+        self.face_well.set_visible(true);
+        self.face_consequence.set_visible(true);
+        self.details_label.set_label(&format!("Command: {command}"));
+        self.details_revealer.set_reveal_child(false);
+
+        // Disabled, not absent. A button that appeared only once the face
+        // matched would move the layout under the user's hands at exactly the
+        // moment a press becomes consequential.
+        self.auth_btn.set_label("Allow");
+        self.auth_btn.set_visible(true);
+        self.auth_btn.set_sensitive(false);
+
+        *self.callbacks.borrow_mut() = Callbacks {
+            on_password: on_allow,
+            on_cancel,
+            on_identity: Box::new(|_| {}),
+            on_typing: Box::new(|| {}),
         };
 
         self.reveal.show();
@@ -485,15 +635,48 @@ impl PolkitDialog {
         if active {
             self.fp_label.set_label(label);
             self.fp_pill.add_css_class("polkit-fp-active");
-            // Fingerprint is the active method: hide the password fallback so
-            // the card shows one clear action. PAM isn't waiting on a password
-            // here, so a stray keystroke can't desync the conversation. The
-            // entry reappears via set_password_prompt() if PAM falls back to it.
-            self.password_entry.set_visible(false);
-            self.auth_btn.set_visible(false);
+            // The password stays on screen alongside it. Hiding it made the
+            // card tidier and the user's life worse: someone whose finger is
+            // not going to be read has to fail the reader before the machine
+            // admits a password was ever an option. Every method the stack
+            // will accept is visible for as long as it is accepted, and the
+            // user picks. Text typed before PAM asks for it is buffered by
+            // the controller rather than dropped, so showing the entry early
+            // cannot desync the conversation.
         } else {
             self.fp_pill.remove_css_class("polkit-fp-active");
         }
+    }
+
+    /// Show or hide the face pill. `state` selects the ring animation, which
+    /// is the same vocabulary the lock screen uses: `looking` while frames
+    /// are arriving, `dark` when the illuminator or the relay is at fault
+    /// rather than the user, `ok` once the face has matched.
+    pub fn show_face(&self, active: bool, state: &str, label: &str) {
+        self.face_pill.set_visible(active);
+        for old in ["looking", "dark", "found", "ok", "fail"] {
+            self.face_ring.remove_css_class(&format!("face-ring-{old}"));
+        }
+        if active {
+            self.face_ring.add_css_class(&format!("face-ring-{state}"));
+            self.face_label.set_label(label);
+            self.face_pill.add_css_class("polkit-fp-active");
+        } else {
+            self.face_pill.remove_css_class("polkit-fp-active");
+        }
+    }
+
+    /// Arm the confirm press once the face has matched.
+    ///
+    /// The press stays explicit. A match is evidence that the right person is
+    /// in front of the camera; it is not evidence that they asked for this,
+    /// and a face is presented by walking into a room. The button is what a
+    /// pipe cannot forge, so it is never skipped.
+    pub fn arm_allow(&self) {
+        self.auth_btn.set_label("Allow");
+        self.auth_btn.set_visible(true);
+        self.auth_btn.set_sensitive(true);
+        self.auth_btn.grab_focus();
     }
 
     pub fn set_password_prompt(&self, prompt: &str) {
@@ -506,8 +689,11 @@ impl PolkitDialog {
             cleaned
         };
         self.password_entry.set_placeholder_text(Some(&placeholder));
-        // PAM is requesting a password — reveal the entry and focus it.
+        // PAM is requesting a password — reveal the entry and focus it. The
+        // button goes back to submitting one, in case a face confirm relabelled
+        // it to "Allow" earlier in the same conversation.
         self.password_entry.set_visible(true);
+        self.auth_btn.set_label("Authenticate");
         self.auth_btn.set_visible(true);
         self.password_entry.grab_focus();
     }
