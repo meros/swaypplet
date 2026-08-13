@@ -15,10 +15,13 @@
 //!
 //! What the daemon sends
 //! ---------------------
-//! Two stages on one held stream. `announce` when the camera opens, so the
-//! user learns immediately that something asked for elevation and can see
-//! what asked. `confirm` once the face has matched, which is when a press
-//! becomes meaningful. `cancel` if the attempt ends first.
+//! Four stages on one held stream. `announce` when the camera opens, so the
+//! user learns immediately that something asked for elevation, can see what
+//! asked, and knows to look at the lens while the burst runs. `progress`
+//! carries the same looking/dark/face states the lock screen renders, so one
+//! indicator means one thing wherever it appears. `confirm` once the face has
+//! matched, which is when a press becomes meaningful. `cancel` when the
+//! attempt ends, by any route including success.
 //!
 //! The peer fields say which process is asking. They are the whole reason the
 //! announce stage exists: a confirmation prompt with no attribution trains
@@ -44,12 +47,17 @@ pub struct Request {
     /// the behaviour an attacker wants.
     pub peer_exe: String,
     pub peer_cmdline: String,
+    /// The engine state, on `Progress` only: `looking`, `dark` or `face`.
+    pub state: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Stage {
     /// The camera has opened. Tell the user what is asking; no press yet.
     Announce,
+    /// The burst is running and the engine's state has changed. Carries no
+    /// biometric content, only what the indicator should be doing.
+    Progress,
     /// The face matched. A press now authorises.
     Confirm,
     /// The attempt ended without a decision. Take the surface down.
@@ -60,6 +68,7 @@ impl Stage {
     fn parse(s: &str) -> Option<Stage> {
         match s {
             "announce" => Some(Stage::Announce),
+            "progress" => Some(Stage::Progress),
             "confirm" => Some(Stage::Confirm),
             "cancel" => Some(Stage::Cancel),
             _ => None,
@@ -163,6 +172,7 @@ fn run(tx: &Sender<Request>) -> std::io::Result<()> {
             stage,
             peer_exe: field(text, "exe").unwrap_or("").to_string(),
             peer_cmdline: field(text, "cmdline").unwrap_or("").to_string(),
+            state: field(text, "state").unwrap_or("").to_string(),
         };
         if tx.send_blocking(request).is_err() {
             return Ok(());
@@ -220,6 +230,14 @@ mod tests {
     fn an_unknown_stage_is_ignored_rather_than_guessed() {
         assert_eq!(Stage::parse("allow"), None);
         assert_eq!(Stage::parse("confirm"), Some(Stage::Confirm));
+        assert_eq!(Stage::parse("progress"), Some(Stage::Progress));
+    }
+
+    #[test]
+    fn a_progress_frame_carries_the_engine_state() {
+        let msg = r#"{"parameters":{"id":"q7","stage":"progress","state":"dark"}}"#;
+        assert_eq!(field(msg, "stage"), Some("progress"));
+        assert_eq!(field(msg, "state"), Some("dark"));
     }
 }
 

@@ -101,6 +101,7 @@ pub(super) fn register(state: &Rc<RefCell<PolkitState>>) {
 fn on_request(state: &Rc<RefCell<PolkitState>>, req: Request) {
     match req.stage {
         Stage::Announce => announce(state, req),
+        Stage::Progress => progress(state, req),
         Stage::Confirm => confirm(state, req),
         Stage::Cancel => {
             // The daemon gave up. Drop the request without answering: it is
@@ -145,8 +146,11 @@ fn announce(state: &Rc<RefCell<PolkitState>>, req: Request) {
         );
     }
 
-    dialog.show_face(true, "looking", "Checking your face…");
+    dialog.show_face(true, "looking", "Looking for you");
     dialog.set_status("", StatusKind::Info);
+    // The cue says what to do; the card says what is happening. The cue is
+    // read peripherally, on the way to the lens, and "looking for you" is not
+    // an instruction.
     state.borrow().cue.set(true, "looking", "Look at the camera");
 
     state.borrow_mut().face = Some(FaceSession {
@@ -154,6 +158,36 @@ fn announce(state: &Rc<RefCell<PolkitState>>, req: Request) {
         armed: false,
         standalone: !attached,
     });
+}
+
+/// Report what the camera is doing, in the lock screen's vocabulary.
+///
+/// Same three states, same wording, same ring. Someone who has learned to read
+/// the pill while unlocking should not have to learn a second dialect to read
+/// it while authorising `sudo`.
+fn progress(state: &Rc<RefCell<PolkitState>>, req: Request) {
+    // Only for the request currently on screen, and never after it has armed:
+    // a late frame state must not overwrite "Recognised you" and un-explain a
+    // button that is already asking to be pressed.
+    let live = matches!(
+        state.borrow().face.as_ref(),
+        Some(f) if f.id == req.id && !f.armed
+    );
+    if !live {
+        return;
+    }
+    let (ring, text) = match req.state.as_str() {
+        "looking" => ("looking", "Looking for you"),
+        // Never phrased as the user's fault. The emitter or the relay is
+        // wrong, and telling somebody to move their face sends them after the
+        // wrong thing entirely.
+        "dark" => ("dark", "Too dark to see"),
+        "face" => ("found", "Hold still"),
+        _ => return,
+    };
+    let dialog = state.borrow().dialog.clone();
+    dialog.show_face(true, ring, text);
+    state.borrow().cue.set(true, ring, text);
 }
 
 fn confirm(state: &Rc<RefCell<PolkitState>>, req: Request) {
