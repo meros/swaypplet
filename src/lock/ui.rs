@@ -127,6 +127,15 @@ struct Surface {
     status: gtk4::Label,
     fp_pill: gtk4::Box,
     fp_label: gtk4::Label,
+    /// Face unlock indicator. Pinned to the top of the screen rather than
+    /// placed in the card, so it sits under the camera and does not move
+    /// between the lock screen and the elevate prompt. A fixed position is
+    /// the point: the eye learns one place to look, and looking there aims
+    /// the face on-axis to the lens, which is worth real match accuracy on a
+    /// sensor with no depth channel.
+    face_pill: gtk4::Box,
+    face_ring: gtk4::Box,
+    face_label: gtk4::Label,
     caps: gtk4::Label,
     clock: gtk4::Label,
     date: gtk4::Label,
@@ -325,7 +334,31 @@ impl SurfaceSet {
         column.append(&clock);
         column.append(&date);
         column.append(&pane);
+        // Face unlock indicator, pinned top-centre under the camera.
+        let face_pill = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(12)
+            .halign(gtk4::Align::Center)
+            .valign(gtk4::Align::Start)
+            .visible(false)
+            .build();
+        face_pill.add_css_class("face-pill");
+        face_pill.set_margin_top(56);
+        // The ring is drawn in CSS, not set as a glyph: it has to sweep while
+        // looking, lock when a face is found, complete on a match and break
+        // on a failure, and a font glyph can do none of that.
+        let face_ring = gtk4::Box::builder()
+            .width_request(22)
+            .height_request(22)
+            .build();
+        face_ring.add_css_class("face-ring");
+        let face_label = gtk4::Label::builder().label("").build();
+        face_label.add_css_class("face-pill-label");
+        face_pill.append(&face_ring);
+        face_pill.append(&face_label);
+
         overlay.add_overlay(&column);
+        overlay.add_overlay(&face_pill);
 
         entry.connect_activate(move |e| on_submit(e.text().to_string()));
 
@@ -369,6 +402,9 @@ impl SurfaceSet {
             status,
             fp_pill,
             fp_label,
+            face_pill,
+            face_ring,
+            face_label,
             caps,
             clock,
             date,
@@ -589,6 +625,25 @@ impl SurfaceSet {
         for s in self.inner.borrow().iter() {
             s.card.add_css_class("lock-success");
             s.entry.set_sensitive(false);
+        }
+    }
+
+    /// Drive the face indicator on every surface.
+    ///
+    /// `state` is a CSS class rather than an enum of drawing instructions, so
+    /// the whole visual vocabulary lives in the stylesheet and this stays a
+    /// state broadcast.
+    pub fn show_face(&self, visible: bool, state: &str, label: &str) {
+        for s in self.inner.borrow().iter() {
+            s.face_pill.set_visible(visible);
+            if !visible {
+                continue;
+            }
+            s.face_label.set_label(label);
+            for old in ["looking", "dark", "found", "ok", "fail"] {
+                s.face_ring.remove_css_class(&format!("face-ring-{old}"));
+            }
+            s.face_ring.add_css_class(&format!("face-ring-{state}"));
         }
     }
 

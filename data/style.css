@@ -2791,3 +2791,90 @@ revealer {
 .face-confirm-button:hover:not(:disabled) {
     background-color: @accent_tertiary;
 }
+
+/* ── Face unlock indicator ──
+   Pinned top-centre, under the camera, in every context that runs a face
+   check. Fixed position is the feature: one place to look, and looking there
+   puts the face on-axis to the lens, which is worth real accuracy on a sensor
+   with no depth channel.
+
+   The ring is drawn here rather than set as a font glyph because it has to
+   move: sweep while looking, lock when a face is found, complete on a match,
+   break on a failure. A glyph can do none of that. */
+.face-pill {
+    background-color: @surface;
+    border: 1px solid @border_strong;
+    border-radius: 999px;
+    padding: 8px 18px 8px 14px;
+}
+
+.face-pill-label {
+    color: @fg;
+    font-size: 0.95rem;
+}
+
+.face-ring {
+    border: 2px solid @bg3;
+    border-radius: 50%;
+    min-width: 18px;
+    min-height: 18px;
+}
+
+/* Looking: one arc lit, spinning. Reads as searching rather than progress,
+   because there is no progress to report — the daemon does not know how long
+   finding a face will take, and a determinate bar would be a lie. */
+.face-ring-looking {
+    border-color: @bg3;
+    border-top-color: @accent_tertiary;
+    animation: face-ring-spin 1.1s linear infinite;
+}
+
+/* Dark: no motion at all. Nothing is being searched, because no usable frame
+   is arriving, and a spinner would imply the system is making progress. */
+.face-ring-dark {
+    border-color: @bg2;
+    border-top-color: @accent_secondary;
+}
+
+/* Found: the sweep stops and the whole ring lights. The stop is the signal —
+   it tells the user to hold still without a word of instruction. */
+.face-ring-found {
+    border-color: @accent_tertiary;
+    animation: face-ring-pulse 0.9s ease-in-out infinite;
+}
+
+.face-ring-ok {
+    border-color: @accent;
+    background-color: @accent;
+    animation: face-ring-ok 550ms ease-out;
+}
+
+.face-ring-fail {
+    border-color: @accent_quinary;
+    animation: face-ring-fail 350ms ease-out;
+}
+
+@keyframes face-ring-spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes face-ring-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.55; }
+}
+
+/* Completes outward and settles. Short on purpose: it plays while the session
+   is already unlocking, so it must never become something the user waits on. */
+@keyframes face-ring-ok {
+    0%   { transform: scale(0.7); opacity: 0.4; }
+    60%  { transform: scale(1.12); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+/* A shake, not a cross. The attempt will retry on its own, so the failure
+   should read as "that didn't work" rather than as a verdict. */
+@keyframes face-ring-fail {
+    0%, 100% { transform: translateX(0); }
+    25%      { transform: translateX(-4px); }
+    75%      { transform: translateX(4px); }
+}

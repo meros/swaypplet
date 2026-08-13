@@ -39,22 +39,12 @@
 //! unlock bypass needing neither a photo nor physical access. Group changes
 //! need a fresh login before the locker inherits them.
 
-use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use crate::fp::EngineEvent;
 use crate::presence::{self, Event as PresenceEvent, Presence};
-
-/// Fallback when the unit does not set `SWAYPPLET_FACE_COMPARE`. The locker
-/// inherits a curated PATH from swaypplet-idle.service, so in practice the
-/// absolute path from the environment is what runs.
-const COMPARE: &str = "howdy-verify";
-
-fn compare_command() -> String {
-    std::env::var("SWAYPPLET_FACE_COMPARE").unwrap_or_else(|_| COMPARE.to_string())
-}
 
 /// Tick for this engine's own deadlines. Presence itself is pushed from
 /// whoever owns the sensor (see `crate::presence`), so this no longer sets
@@ -63,12 +53,21 @@ fn compare_command() -> String {
 const POLL: Duration = Duration::from_millis(250);
 
 /// Gap between attempts while presence holds.
-const RETRY_AFTER: Duration = Duration::from_secs(6);
+///
+/// Was 6 s, sized around a verifier that spent 2.097 s on interpreter and
+/// dlib startup before looking at a frame: retrying sooner mostly bought more
+/// startup. That cost is now zero, an attempt is about 0.6 s warm, and the
+/// daemon enforces its own 1.5 s cooldown, so the gap only has to be long
+/// enough for a person to react to "didn't recognise you" and adjust.
+const RETRY_AFTER: Duration = Duration::from_millis(2500);
 
-/// Attempts per arrival before falling silent until the next one. Three failed
-/// tries means the light is wrong or it is not you; the password field is
-/// right there.
-const MAX_ATTEMPTS: u32 = 3;
+/// Attempts per arrival before falling silent until the next one.
+///
+/// Four rather than three, because each one now costs a fraction of what it
+/// did and the whole sequence finishes in about 12 s instead of 21 s. Beyond
+/// that the light is wrong or it is not you, and the password field is right
+/// there.
+const MAX_ATTEMPTS: u32 = 4;
 
 enum Attempt {
     Match,
@@ -92,6 +91,25 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
         return;
     }
 
+    // Register as the lock agent and hold the connection for the whole lock
+    // episode. faced treats the connection itself as the registration, so
+    // this must outlive every attempt; dropping it deregisters.
+    //
+    // This is what lets the daemon refuse unlock verification when no lock
+    // screen is actually up, rather than trusting that whoever asked had a
+    // good reason. Held in a binding rather than discarded: `let _ = ...`
+    // would drop it immediately and deregister on the spot.
+    let _lock_agent = match crate::face::register_lock() {
+        Ok(stream) => Some(stream),
+        Err(e) => {
+            // Not fatal. The daemon only enforces the requirement when
+            // configured to, and face unlock working without the extra guard
+            // is better than not working at all.
+            log::warn!("face: could not register as lock agent: {e}");
+            None
+        }
+    };
+
     // The idle manager owns the device and publishes it; this listens. Doing
     // its own reads here put a third 4 Hz reader on hardware that serves
     // about three reads a second, and every reader queued behind the others.
@@ -106,7 +124,6 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
     let mut attempts = 0u32;
     // Transient Unavailable results, reset on each fresh arrival. See attempt().
     let mut transient = 0u32;
-    let compare = compare_command();
 
     loop {
         sleep(POLL);
@@ -145,7 +162,7 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
             continue;
         }
 
-        match attempt(&compare, user, &mut transient) {
+        match attempt(tx, &mut transient) {
             Attempt::Match => {
                 log::info!("face: match — unlocking");
                 let _ = tx.send(EngineEvent::Match(user.to_string()));
@@ -185,47 +202,74 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
 /// any new code on the verifier side would silently disable the feature on an
 /// older locker. Unknown means unknown, and the safe reading of unknown is
 /// "try again"; the attempt counter already bounds how long that goes on.
-fn attempt(compare: &str, user: &str, transient: &mut u32) -> Attempt {
-    let status = Command::new(compare)
-        .arg(user)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+/// Run one verification against faced, forwarding progress to the UI.
+///
+/// Holds a socket for the length of the burst rather than forking a process.
+/// The old path forked `howdy-verify`, which paid 2.1 s of interpreter and
+/// dlib startup before looking at a frame and could report nothing until it
+/// exited. The exit-code contract is unchanged; it now arrives over the wire
+/// instead of through a process status.
+fn attempt(tx: &mpsc::Sender<EngineEvent>, transient: &mut u32) -> Attempt {
+    let verdict = crate::face::verify(|state| {
+        let _ = tx.send(EngineEvent::Progress(state));
+    });
 
-    match status {
-        Ok(status) => match status.code() {
-            Some(0) => Attempt::Match,
-            // no_match | no_face | deadline
-            Some(11) => Attempt::Retryable(None),
-            Some(13) => Attempt::Retryable(Some("too dark for face unlock".to_string())),
-            // Busy | Cooldown | preempted. Another claimant holds the camera,
-            // or the emitter is cooling down. Both pass.
-            Some(14) => Attempt::Retryable(Some("face unlock busy".to_string())),
-            // Unavailable: camera, relay or models. Usually transient (the
-            // relay restarting), so allow exactly one retry before giving up
-            // rather than treating the first stall as terminal.
-            Some(1) => {
-                *transient += 1;
-                if *transient <= 1 {
-                    Attempt::Retryable(None)
-                } else {
-                    Attempt::Fatal("face unlock unavailable".to_string())
-                }
+    let verdict = match verdict {
+        Ok(v) => v,
+        // The daemon is unreachable. Retryable once: faced is socket
+        // activated and may legitimately be restarting underneath us.
+        Err(e) => {
+            *transient += 1;
+            return if *transient <= 1 {
+                Attempt::Retryable(None)
+            } else {
+                Attempt::Fatal(format!("faced unreachable: {e}"))
+            };
+        }
+    };
+
+    map_exit(verdict.exit, verdict.saw_face, &verdict.outcome, transient)
+}
+
+/// The exit-code contract, as documented in docs/face-unlock-architecture.md
+/// §4.2 in the nixos repo. faced is the authority; this is the reader.
+///
+/// The default arm is `Retryable`, deliberately. It used to be `Fatal`, which
+/// meant any code this match did not know about ended the worker thread and
+/// disabled face unlock for the whole lock episode. A single transient stall
+/// then looked identical to a broken install, and adding any new code on the
+/// verifier side would silently disable the feature on an older locker.
+fn map_exit(exit: i32, saw_face: bool, outcome: &str, transient: &mut u32) -> Attempt {
+    match exit {
+        0 => Attempt::Match,
+        // no_match | no_face | deadline. Which of the three decides the
+        // wording, and the daemon is the only thing that knows: "didn't
+        // recognise you" and "didn't see you" send the user to completely
+        // different actions, so this must not guess.
+        11 => Attempt::Retryable(Some(
+            if saw_face || outcome == "no_match" {
+                "Didn't recognise you".to_string()
+            } else {
+                "Didn't see you".to_string()
+            },
+        )),
+        // Never the user's fault. The emitter or the relay is wrong, and
+        // asking someone to reposition their face would be misleading.
+        13 => Attempt::Retryable(Some("Too dark to see".to_string())),
+        14 => Attempt::Retryable(Some("Face unlock busy".to_string())),
+        1 => {
+            *transient += 1;
+            if *transient <= 1 {
+                Attempt::Retryable(None)
+            } else {
+                Attempt::Fatal("face unlock unavailable".to_string())
             }
-            Some(10) => Attempt::Fatal("no enrolled face model".to_string()),
-            Some(12) => Attempt::Fatal("compare rejected the username".to_string()),
-            // Too many failures. Deliberately terminal: it clears on a
-            // password or fingerprint unlock, not by trying more faces.
-            Some(15) => Attempt::Fatal("too many failed face attempts".to_string()),
-            // Denied | Replay | InvalidArgument. A protocol or policy refusal;
-            // retrying reproduces it exactly.
-            Some(16) => Attempt::Fatal("face unlock refused".to_string()),
-            // The user said no. Intent, not failure.
-            Some(17) => Attempt::Fatal("face unlock declined".to_string()),
-            Some(code) => Attempt::Retryable(Some(format!("{compare} exited {code}"))),
-            None => Attempt::Fatal(format!("{compare} killed by a signal")),
-        },
-        Err(e) => Attempt::Fatal(format!("{compare}: {e}")),
+        }
+        10 => Attempt::Fatal("no enrolled face model".to_string()),
+        12 => Attempt::Fatal("compare rejected the username".to_string()),
+        15 => Attempt::Fatal("too many failed face attempts".to_string()),
+        16 => Attempt::Fatal("face unlock refused".to_string()),
+        17 => Attempt::Fatal("face unlock declined".to_string()),
+        code => Attempt::Retryable(Some(format!("face unlock returned {code}"))),
     }
 }

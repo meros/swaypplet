@@ -225,12 +225,51 @@ pub fn run() -> ! {
                     while let Ok(ev) = face_rx.try_recv() {
                         match ev {
                             EngineEvent::Match(_) => {
+                                // Show the success state and unlock in the
+                                // same pass. The animation plays *as* the
+                                // session unlocks, never before it: half a
+                                // second of celebration in front of the
+                                // unlock is half a second of added latency,
+                                // which would undo the work that made the
+                                // attempt fast in the first place.
+                                surfaces.show_face(true, "ok", "Recognised you");
                                 surfaces.flash_success();
                                 instance.unlock();
                                 return glib::ControlFlow::Break;
                             }
-                            EngineEvent::Unavailable(why) => log::info!("face: {why}"),
-                            EngineEvent::Hint(hint) => log::info!("face: {hint}"),
+                            EngineEvent::Progress(p) => {
+                                let (state, text) = match p {
+                                    crate::face::Progress::Looking => {
+                                        ("looking", "Looking for you")
+                                    }
+                                    // Never phrased as the user's fault: the
+                                    // emitter or the relay is wrong, and
+                                    // telling someone to move their face
+                                    // would send them after the wrong thing.
+                                    crate::face::Progress::Dark => {
+                                        ("dark", "Too dark to see")
+                                    }
+                                    crate::face::Progress::Face => {
+                                        ("found", "Hold still")
+                                    }
+                                };
+                                surfaces.show_face(true, state, text);
+                            }
+                            EngineEvent::Hint(hint) => {
+                                log::info!("face: {hint}");
+                                surfaces.show_face(true, "fail", &hint);
+                                // Clear it rather than leaving a stale
+                                // failure on screen between attempts.
+                                let surfaces = surfaces.clone();
+                                glib::timeout_add_local_once(
+                                    Duration::from_millis(2200),
+                                    move || surfaces.show_face(false, "", ""),
+                                );
+                            }
+                            EngineEvent::Unavailable(why) => {
+                                log::info!("face: {why}");
+                                surfaces.show_face(false, "", "");
+                            }
                             EngineEvent::Ready => {}
                         }
                     }
@@ -257,6 +296,9 @@ pub fn run() -> ! {
                             log::info!("fingerprint unavailable: {why}");
                             surfaces.show_fp(false, "");
                         }
+                        // fprintd reports nothing between touch and verdict,
+                        // so the fingerprint engine never emits this.
+                        EngineEvent::Progress(_) => {}
                     }
                 }
                 glib::ControlFlow::Continue

@@ -396,6 +396,11 @@ pub enum EngineEvent {
     Ready,
     /// Transient guidance ("not recognized", "center your finger", …).
     Hint(String),
+    /// Face verification progress, streamed while a burst runs. The
+    /// fingerprint engine never emits this: fprintd reports nothing between
+    /// touch and verdict, whereas faced reports every frame, and the lock
+    /// screen would otherwise sit inert for the whole attempt.
+    Progress(crate::face::Progress),
     /// No usable reader right now — hide the pill. `Ready` may follow later.
     Unavailable(String),
     /// `user`'s finger matched. The sink performs the terminal action (unlock
