@@ -43,23 +43,31 @@ pub enum StatusKind {
 
 /// Callbacks the controller installs each time it presents the dialog.
 /// Defaults are no-ops so it's always safe to fire signals.
+///
+/// `Rc`, not `Box`, so a handler can be lifted out of the `RefCell` and the
+/// borrow dropped before it runs. Every one of these ends up in the
+/// orchestrator, and the orchestrator's paths reach `hide()`, which installs
+/// fresh callbacks -- a `borrow_mut` while the fire site still held a
+/// `borrow`. GTK signal trampolines cannot unwind, so that panic aborted the
+/// process rather than raising: the agent died, its faced registration went
+/// with it, and elevation quietly stopped working until systemd restarted it.
 struct Callbacks {
-    on_password: Box<dyn Fn(String)>,
-    on_cancel: Box<dyn Fn()>,
-    on_identity: Box<dyn Fn(u32)>,
+    on_password: Rc<dyn Fn(String)>,
+    on_cancel: Rc<dyn Fn()>,
+    on_identity: Rc<dyn Fn(u32)>,
     /// Fired on the first keystroke in the password entry. The controller
     /// uses it to abandon a face check that is still running, so the user
     /// who has decided to type does not have to wait out the camera.
-    on_typing: Box<dyn Fn()>,
+    on_typing: Rc<dyn Fn()>,
 }
 
 impl Default for Callbacks {
     fn default() -> Self {
         Self {
-            on_password: Box::new(|_| {}),
-            on_cancel: Box::new(|| {}),
-            on_identity: Box::new(|_| {}),
-            on_typing: Box::new(|| {}),
+            on_password: Rc::new(|_| {}),
+            on_cancel: Rc::new(|| {}),
+            on_identity: Rc::new(|_| {}),
+            on_typing: Rc::new(|| {}),
         }
     }
 }
@@ -380,7 +388,8 @@ impl PolkitDialog {
             password_entry.connect_activate(move |_| {
                 let text = entry.text().to_string();
                 entry.set_text("");
-                (cbs.borrow().on_password)(text);
+                let cb = cbs.borrow().on_password.clone();
+                cb(text);
             });
         }
 
@@ -391,7 +400,8 @@ impl PolkitDialog {
             auth_btn.connect_clicked(move |_| {
                 let text = entry.text().to_string();
                 entry.set_text("");
-                (cbs.borrow().on_password)(text);
+                let cb = cbs.borrow().on_password.clone();
+                cb(text);
             });
         }
 
@@ -402,7 +412,8 @@ impl PolkitDialog {
             let cbs = callbacks.clone();
             password_entry.connect_changed(move |entry| {
                 if !entry.text().is_empty() {
-                    (cbs.borrow().on_typing)();
+                    let cb = cbs.borrow().on_typing.clone();
+                cb();
                 }
             });
         }
@@ -411,7 +422,8 @@ impl PolkitDialog {
         {
             let cbs = callbacks.clone();
             cancel_btn.connect_clicked(move |_| {
-                (cbs.borrow().on_cancel)();
+                let cb = cbs.borrow().on_cancel.clone();
+                cb();
             });
         }
 
@@ -422,7 +434,8 @@ impl PolkitDialog {
             identity_combo.connect_selected_notify(move |combo| {
                 let idx = combo.selected() as usize;
                 if let Some(uid) = identities_c.borrow().get(idx).copied() {
-                    (cbs.borrow().on_identity)(uid);
+                    let cb = cbs.borrow().on_identity.clone();
+                cb(uid);
                 }
             });
         }
@@ -432,7 +445,8 @@ impl PolkitDialog {
             let cbs = callbacks.clone();
             let backdrop_gesture = gtk4::GestureClick::new();
             backdrop_gesture.connect_released(move |_, _, _, _| {
-                (cbs.borrow().on_cancel)();
+                let cb = cbs.borrow().on_cancel.clone();
+                cb();
             });
             backdrop.add_controller(backdrop_gesture);
         }
@@ -454,7 +468,8 @@ impl PolkitDialog {
             key.set_propagation_phase(gtk4::PropagationPhase::Capture);
             key.connect_key_pressed(move |_, key, _, _| {
                 if key == gtk4::gdk::Key::Escape {
-                    (cbs.borrow().on_cancel)();
+                    let cb = cbs.borrow().on_cancel.clone();
+                cb();
                     return glib::Propagation::Stop;
                 }
                 glib::Propagation::Proceed
@@ -537,10 +552,10 @@ impl PolkitDialog {
 
         // Install fresh callbacks
         *self.callbacks.borrow_mut() = Callbacks {
-            on_password,
-            on_cancel,
-            on_identity,
-            on_typing,
+            on_password: on_password.into(),
+            on_cancel: on_cancel.into(),
+            on_identity: on_identity.into(),
+            on_typing: on_typing.into(),
         };
 
         self.reveal.show();
@@ -596,10 +611,10 @@ impl PolkitDialog {
         self.auth_btn.set_sensitive(false);
 
         *self.callbacks.borrow_mut() = Callbacks {
-            on_password: on_allow,
-            on_cancel,
-            on_identity: Box::new(|_| {}),
-            on_typing: Box::new(|| {}),
+            on_password: on_allow.into(),
+            on_cancel: on_cancel.into(),
+            on_identity: Rc::new(|_| {}),
+            on_typing: Rc::new(|| {}),
         };
 
         self.reveal.show();
