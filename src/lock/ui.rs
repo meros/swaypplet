@@ -113,6 +113,8 @@ struct Surface {
     /// This surface is on the built-in panel, the one with the camera above
     /// it. The face indicator appears here and nowhere else.
     internal: bool,
+    /// The one pixel that gives this surface something to commit.
+    commit_pixel: gtk4::DrawingArea,
     /// Wrapper carrying the pill's entrance animation, kept off the pill so
     /// state changes cannot replay it.
     face_wrap: gtk4::Box,
@@ -164,6 +166,8 @@ pub struct SurfaceSet {
     /// The compositor is cross-fading the whole surface, so the surfaces must
     /// not also animate themselves in.
     crossfade: Rc<Cell<bool>>,
+    /// Which of the two colours every surface's commit pixel is drawing.
+    pulse: Rc<Cell<u32>>,
 }
 
 impl SurfaceSet {
@@ -228,6 +232,26 @@ impl SurfaceSet {
             backdrop.add_css_class("lock-scrim");
         } else {
             overlay.set_child(Some(&backdrop));
+        }
+
+        // One pixel that changes on demand, so the surface has something to
+        // commit. See `pulse` for why a lock screen needs that.
+        let commit_pixel = gtk4::DrawingArea::new();
+        commit_pixel.set_content_width(1);
+        commit_pixel.set_content_height(1);
+        commit_pixel.set_halign(gtk4::Align::Start);
+        commit_pixel.set_valign(gtk4::Align::Start);
+        commit_pixel.set_can_target(false);
+        commit_pixel.set_can_focus(false);
+        {
+            let phase = self.pulse.clone();
+            commit_pixel.set_draw_func(move |_, cr, _, _| {
+                // Two alphas one 255th apart: different enough that GSK sees
+                // a changed node and damages it, far too close to be seen.
+                let a = f64::from(1 + phase.get() % 2) / 255.0;
+                cr.set_source_rgba(0.0, 0.0, 0.0, a);
+                let _ = cr.paint();
+            });
         }
 
         // ── Centered column: clock, date, card ───────────────────────
@@ -373,6 +397,8 @@ impl SurfaceSet {
         column.append(&clock);
         column.append(&date);
         column.append(&pane);
+        overlay.add_overlay(&commit_pixel);
+
         // Face unlock indicator, pinned top-centre under the camera.
         let face_pill = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
@@ -443,6 +469,7 @@ impl SurfaceSet {
 
         let surface = Surface {
             internal,
+            commit_pixel,
             face_wrap,
             window: window.clone(),
             card,
@@ -474,6 +501,29 @@ impl SurfaceSet {
         });
 
         overlay.upcast()
+    }
+
+    /// Repaint one pixel on every surface, so the frame GTK is about to
+    /// draw carries a `wl_surface.commit`.
+    ///
+    /// The cross-fade lives in the surface's `wp_alpha_modifier` multiplier,
+    /// which is double-buffered state: it reaches the compositor only on the
+    /// surface's next commit. A lock surface may not be committed by hand —
+    /// `null_buffer` and `dimensions_mismatch` are both fatal — so
+    /// `lock/fade.rs` asks GTK for the commit with `queue_draw`, and GTK,
+    /// finding a render node tree identical to the last one, produces no
+    /// frame at all. Measured over one entrance: 38 multiplier values set,
+    /// 11 commits, and a 185 ms stretch in the middle where the value went
+    /// 0.22 to 0.97 with nothing reaching the compositor. That is a cross-
+    /// fade that holds at a fifth opacity and then snaps to full.
+    ///
+    /// The exit never showed it because an unlock always follows an auth
+    /// success, and the success flash repaints the card on every frame.
+    pub fn pulse(&self) {
+        self.pulse.set(self.pulse.get().wrapping_add(1));
+        for s in self.inner.borrow().iter() {
+            s.commit_pixel.queue_draw();
+        }
     }
 
     /// Tick: clock, date, and caps-lock indicator on every surface.

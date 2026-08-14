@@ -89,6 +89,7 @@ pub struct LockFade {
     on_settled: RefCell<Vec<OnceCb>>,
     pending_paints: Cell<usize>,
     armed: Cell<bool>,
+    ticker: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
 impl LockFade {
@@ -122,11 +123,23 @@ impl LockFade {
             on_settled: RefCell::new(Vec::new()),
             pending_paints: Cell::new(0),
             armed: Cell::new(false),
+            ticker: RefCell::new(None),
         })
     }
 
     pub fn enabled(&self) -> bool {
         self.enabled.get()
+    }
+
+    /// The thing that makes each ramp value actually reach the compositor.
+    ///
+    /// `queue_draw` asks GTK for a frame; GTK gives one only when the render
+    /// node tree differs from the last, and a lock screen at rest is
+    /// pixel-identical frame to frame. So the surfaces hand over a way to
+    /// change one pixel (`SurfaceSet::pulse`), and every broadcast calls it
+    /// before asking for the frame that carries the multiplier.
+    pub fn set_ticker(&self, f: Rc<dyn Fn()>) {
+        *self.ticker.borrow_mut() = Some(f);
     }
 
     /// Hook one lock window. Must run before `assign_window_to_monitor`,
@@ -267,6 +280,12 @@ impl LockFade {
     fn broadcast(&self, value: f64) {
         let value = value.clamp(0.0, 1.0);
         self.value.set(value);
+        // Before the multiplier, so the pixel is already dirty when GTK
+        // decides whether this frame is worth drawing.
+        let ticker = self.ticker.borrow().clone();
+        if let Some(tick) = ticker {
+            tick();
+        }
         for e in self.surfaces.borrow().iter() {
             e.alpha.set_pending(value);
             // The multiplier only reaches the compositor on this surface's
@@ -457,12 +476,17 @@ impl LockFade {
     }
 }
 
-/// Paint cadence over one ramp, reported as a single line when it ends.
+/// Frame-clock cadence over one ramp, reported as a single line when it ends.
 ///
-/// The multiplier only reaches the compositor when GTK paints, so how a ramp
-/// *looks* is the sequence of paint intervals and not the timer's. One
-/// summary rather than a line per frame: enough to tell a dropped frame from
-/// an even ramp, cheap enough to leave on.
+/// One summary rather than a line per frame: enough to tell a dropped frame
+/// from an even ramp, cheap enough to leave on.
+///
+/// Read it for what it is. `after-paint` marks a frame-clock cycle, and GTK
+/// runs the cycle whether or not it ends up drawing anything — an entrance
+/// that logged 20 frames at a 16 ms median had committed 11 of them, because
+/// nothing on screen had changed (`SurfaceSet::pulse`). With the commit pixel
+/// dirtied on every broadcast the two are the same number again, which is the
+/// only condition under which this line describes what the eye sees.
 struct Cadence {
     clock: Option<gdk4::FrameClock>,
     handler: Option<glib::SignalHandlerId>,
