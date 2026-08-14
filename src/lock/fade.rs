@@ -406,6 +406,11 @@ fn arm_compositor() -> bool {
         Ok(outcome) => {
             let ok = !outcome.is_empty() && outcome.iter().all(|r| r.is_ok());
             if !ok {
+                for r in &outcome {
+                    if let Err(e) = r {
+                        log::info!("lock: lock_fade rejected: {e}");
+                    }
+                }
                 log::info!("lock: compositor has no lock_fade; cutting");
             }
             ok
