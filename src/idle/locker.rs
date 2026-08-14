@@ -17,12 +17,80 @@
 //! triggers (idle tier, logind Lock signal, before-sleep) land on the same
 //! thread.
 
-use std::io::BufRead;
-use std::process::{Command, Stdio};
+use std::io::{BufRead, Write};
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use super::Ev;
+
+/// A locker spawned early, warmed, and parked on stdin waiting to be told to
+/// lock.
+///
+/// The first GTK window a process presents costs ~880 ms, and for a locker
+/// spawned at lock time that window is the lock screen (measured;
+/// swaypplet docs/LOCK_TRANSITION_WIP.md). Paying it while nothing is waiting
+/// is the difference between a lock screen that appears in a second and one
+/// that appears in a frame.
+static ARMED: std::sync::Mutex<Option<Child>> = std::sync::Mutex::new(None);
+
+/// Spawn the next locker now and let it warm up. Idempotent: an armed child
+/// that is still alive is left alone.
+pub fn prewarm() {
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            log::warn!("lock: prewarm skipped, current_exe failed: {e}");
+            return;
+        }
+    };
+    let mut slot = match ARMED.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    if let Some(child) = slot.as_mut()
+        && matches!(child.try_wait(), Ok(None))
+    {
+        return;
+    }
+    match Command::new(&exe)
+        .arg("lock")
+        .env("SWAYPPLET_LOCK_WAIT", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => {
+            log::info!("lock: locker pre-warming (pid {})", child.id());
+            *slot = Some(child);
+        }
+        // Non-fatal in every case: a lock with no armed child spawns one cold,
+        // which is exactly the old behaviour.
+        Err(e) => log::warn!("lock: prewarm spawn failed: {e}"),
+    }
+}
+
+/// Take the armed child if there is one and it is still alive.
+fn take_armed() -> Option<Child> {
+    let mut slot = match ARMED.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    let mut child = slot.take()?;
+    match child.try_wait() {
+        // Parked and healthy.
+        Ok(None) => Some(child),
+        // Died while parked. Nothing to salvage; the caller spawns cold.
+        Ok(Some(status)) => {
+            log::warn!("lock: pre-warmed locker died while parked ({status})");
+            None
+        }
+        Err(e) => {
+            log::warn!("lock: could not check pre-warmed locker: {e}");
+            None
+        }
+    }
+}
 
 pub fn start(ev: Sender<Ev>, reason: &'static str) {
     std::thread::Builder::new()
@@ -43,19 +111,44 @@ fn supervise(ev: Sender<Ev>, reason: &'static str) {
         }
     };
 
+    // The armed child is used once. A relaunch after a crash spawns cold: it
+    // is the rare path, and warming there would mean holding a spare process
+    // for a case that should not happen.
+    let mut armed = take_armed();
+
     loop {
-        let mut child = match Command::new(&exe)
-            .arg("lock")
-            .env("SWAYPPLET_LOCK_REASON", reason)
-            .stdout(Stdio::piped())
-            .spawn()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                log::error!("lock: failed to spawn locker: {e}");
-                let _ = ev.send(Ev::LockerGone { rc: -1 });
-                return;
+        let mut child = match armed.take() {
+            Some(mut child) => {
+                // The reason cannot ride on the environment of a process that
+                // was spawned before anybody knew it.
+                let sent = child
+                    .stdin
+                    .as_mut()
+                    .ok_or_else(|| std::io::Error::other("no stdin pipe"))
+                    .and_then(|stdin| writeln!(stdin, "LOCK {reason}").and_then(|()| stdin.flush()));
+                match sent {
+                    Ok(()) => child,
+                    Err(e) => {
+                        log::warn!("lock: could not command pre-warmed locker: {e}");
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        continue;
+                    }
+                }
             }
+            None => match Command::new(&exe)
+                .arg("lock")
+                .env("SWAYPPLET_LOCK_REASON", reason)
+                .stdout(Stdio::piped())
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    log::error!("lock: failed to spawn locker: {e}");
+                    let _ = ev.send(Ev::LockerGone { rc: -1 });
+                    return;
+                }
+            },
         };
 
         // Readiness handshake: the child prints "LOCKED" on stdout once the

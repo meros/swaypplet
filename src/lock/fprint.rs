@@ -57,7 +57,10 @@ async fn run(tx: mpsc::Sender<EngineEvent>) {
     // land, and must not claim the reader on the way into suspend. The
     // watcher's own read of logind's current state overwrites this within
     // a round trip either way.
-    let born_sleeping = std::env::var("SWAYPPLET_LOCK_REASON").as_deref() == Ok("sleep");
+    // Not the environment directly: a pre-warmed locker is spawned before
+    // anyone knows why the next lock will happen, so the reason arrives on
+    // stdin instead (crate::lock::reason).
+    let born_sleeping = crate::lock::reason() == "sleep";
     let (sleep_tx, sleep_rx) = tokio::sync::watch::channel(born_sleeping);
     tokio::spawn(watch_sleep(conn.clone(), sleep_tx));
 

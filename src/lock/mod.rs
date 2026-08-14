@@ -60,6 +60,103 @@ pub(super) fn stage(what: &str) {
     });
 }
 
+/// Why this lock is happening: `idle`, `manual`, `sleep`, `switch`.
+///
+/// Set from the `LOCK <reason>` line when the locker was pre-warmed, and from
+/// the environment when it was spawned the old way. The pre-warmed process is
+/// started before anybody knows why the next lock will happen, so the reason
+/// cannot ride on its environment.
+static REASON: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn reason() -> String {
+    REASON
+        .get()
+        .cloned()
+        .or_else(|| std::env::var("SWAYPPLET_LOCK_REASON").ok())
+        .unwrap_or_else(|| "unknown".into())
+}
+
+/// Pay the first-window cost now, then wait to be told to lock.
+///
+/// The first GTK window a process presents costs ~880 ms (measured;
+/// docs/LOCK_TRANSITION_WIP.md), and it lands on whichever window is first.
+/// For a locker spawned at lock time that is the lock screen itself, which is
+/// why the lock screen takes about a second to appear. Presenting a throwaway
+/// 1x1 transparent layer surface absorbs it, and doing that while nothing is
+/// waiting makes it free.
+///
+/// The process then blocks on stdin until the supervisor sends `LOCK
+/// <reason>`. Blocking is correct here: there is no main loop yet, nothing to
+/// service, and the supervisor may take hours to ask.
+fn warm_and_wait() {
+    stage("warm: start");
+    {
+        let app = gtk4::Application::builder()
+            .application_id("dev.swaypplet.lockwarm")
+            .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+            .build();
+        {
+            use gtk4::prelude::ApplicationExtManual;
+            let _ = app.register(None::<&gtk4::gio::Cancellable>);
+        }
+        let config = crate::layer_shell::LayerShellConfig {
+            layer: gtk4_layer_shell::Layer::Background,
+            namespace: "swaypplet-lock-warm",
+            keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
+            anchors: &[],
+            margins: &[],
+            exclusive: false,
+            default_width: Some(1),
+            default_height: Some(1),
+        };
+        let window = crate::layer_shell::create_layer_window(&app, &config);
+        // Invisible on every axis that matters: one pixel, fully transparent,
+        // on the background layer, and gone before the main loop ever runs.
+        window.set_opacity(0.0);
+        window.present();
+        window.destroy();
+    }
+    stage("warm: done");
+
+    // Tell the supervisor the expensive part is behind us. It does not wait
+    // for this -- a LOCK written early simply sits in the pipe -- but it makes
+    // the readiness visible in a log or a manual run.
+    {
+        use std::io::Write;
+        let mut out = std::io::stdout();
+        let _ = writeln!(out, "READY");
+        let _ = out.flush();
+    }
+
+    let mut line = String::new();
+    match std::io::BufRead::read_line(&mut std::io::stdin().lock(), &mut line) {
+        // EOF: the supervisor is gone, and a lock screen nobody is supervising
+        // is worse than none. Exiting here is the same outcome as never having
+        // been spawned.
+        Ok(0) => {
+            log::info!("lock: supervisor closed stdin before asking to lock");
+            std::process::exit(EXIT_UNLOCKED);
+        }
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("swaypplet lock: reading lock command failed: {e}");
+            std::process::exit(EXIT_ERROR);
+        }
+    }
+    let reason = line
+        .trim()
+        .strip_prefix("LOCK")
+        .map(|r| r.trim())
+        .unwrap_or("")
+        .to_string();
+    let _ = REASON.set(if reason.is_empty() {
+        "unknown".into()
+    } else {
+        reason
+    });
+    stage("lock commanded");
+}
+
 const EXIT_UNLOCKED: i32 = 0;
 const EXIT_ERROR: i32 = 1;
 const EXIT_UNAVAILABLE: i32 = 2;
@@ -85,6 +182,12 @@ pub fn run() -> ! {
 
     crate::theme::load_css();
     stage("css");
+
+    // Pre-warmed mode: absorb the first-window cost and park until told to
+    // lock. Spawned the old way (no supervisor), fall straight through.
+    if std::env::var_os("SWAYPPLET_LOCK_WAIT").is_some() {
+        warm_and_wait();
+    }
 
     let main_loop = glib::MainLoop::new(None, false);
     let exit_code = Rc::new(RefCell::new(EXIT_ERROR));
