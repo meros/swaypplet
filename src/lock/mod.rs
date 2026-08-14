@@ -253,6 +253,11 @@ pub fn run() -> ! {
     let exit_code = Rc::new(RefCell::new(EXIT_ERROR));
     let surfaces = SurfaceSet::new();
     surfaces.set_crossfade(fade.enabled());
+    // What turns a ramp value into a commit the compositor can act on.
+    fade.set_ticker({
+        let surfaces = surfaces.clone();
+        Rc::new(move || surfaces.pulse())
+    });
     surfaces.set_current_user(&user);
     let gate = Rc::new(RefCell::new(auth::AttemptGate::default()));
 

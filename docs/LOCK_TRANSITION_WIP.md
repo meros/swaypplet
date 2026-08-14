@@ -5,11 +5,12 @@ directions, with no screenshots and no bad frames. Not a fade to black, not a
 frozen capture of the session: the real desktop, composited live, dissolving
 into the real lock screen.
 
-**Status.** All four steps built and wired. `T₀` is 65 ms, the client ramps
-its own surface, the patched compositor defers `locked` until the ramp
-finishes, and an unpatched one degrades to today's hard cut. What has NOT
-happened is anyone looking at it: every result here is from a headless nested
-compositor. The visual verification is the remaining work.
+**Status.** Built, wired, and looked at. `T₀` is 65 ms, the client ramps its
+own surface, the patched compositor defers `locked` until the ramp finishes,
+and an unpatched one degrades to today's hard cut. The first human look found
+the entrance stuttering and the card moving under itself; both are fixed and
+measured, see "What looking at it found" below. The exit was right the first
+time.
 
 ---
 
@@ -93,8 +94,87 @@ currently takes about a second to appear after Super+L.**
       no protocol errors, `LOCKED` emitted once, the locker still alive 8 s
       after locking, and `session locked` arriving *after* the first painted
       frame, which is the deferral doing its job.
-- [ ] **Step 5 — Look at it.** Nothing here has been seen by a human. See
-      "How to verify" below.
+- [x] **Step 5 — Look at it.** Done, and it found two things the headless
+      tests could not. See below.
+
+---
+
+## What looking at it found
+
+The exit was smooth on the first try. The entrance stuttered and the card
+grew a row halfway through it. Two causes, neither visible to any test that
+does not either watch pixels or read the wire.
+
+### The multiplier reached the compositor ten times out of thirty-eight
+
+This is the important one, and it invalidates the obvious instrument.
+
+The ramp value is `wp_alpha_modifier_v1` multiplier state, which is
+double-buffered: it reaches the compositor only on the surface's next
+`wl_surface.commit`. A lock surface may not be committed by hand
+(`null_buffer`, `dimensions_mismatch`, both fatal), so `fade.rs` asks GTK for
+the commit with `queue_draw` and rides GTK's own. **GTK produces no frame when
+the render node tree is identical to the last one**, and a lock screen at rest
+is pixel-identical frame to frame — the more so since `.lock-crossfade
+.lock-card { animation: none }` removed the card's entrance.
+
+Measured on the real session with `WAYLAND_DEBUG=1` (`~/scratch/fade-probe.sh`):
+
+```
+entrance 356 ms:  38 multipliers set,  11 commits
+    143 ms  COMMIT          <- last one for 185 ms
+    145 ms  mult 0.220
+    ...     0.25 ... 0.97 set, none of it leaving the client
+    328 ms  COMMIT          <- screen jumps 0.22 -> 0.97
+```
+
+The screen held at a fifth opacity for 185 ms and then snapped to full. The
+frame clock, meanwhile, was flawless: `after-paint` fired 20 times at a 16 ms
+median, because GTK runs the frame cycle whether or not it draws. **Counting
+frames measures nothing here; count commits.**
+
+The fix is `SurfaceSet::pulse` — one pixel in the corner, alternating between
+two alphas a 255th apart, invalidated on every broadcast. GSK sees a changed
+node, damages it, and commits. Nested headless, same binary, same ramp:
+
+```
+before:  10 frames the compositor could act on, ramp visibly stalls at 0.28
+after:   23 frames, one every 16.3 ms, 0.000 -> 1.000, biggest step 0.080
+damage:  (0,0,1,1) per frame, and nothing else after the card settles
+```
+
+The exit never showed the fault because an unlock always follows an auth
+success, and `.lock-success`'s 200 ms border transition repaints the card on
+every frame. It was smooth by accident.
+
+### The card grew a row mid-fade
+
+`switch_user::list` is two D-Bus round trips (logind, then fprintd). It was
+started when the lock command arrived and answered inside the entrance, where
+applying it rebuilds every chip, decodes every avatar and re-lays out the
+card — all of it seen through a half-transparent surface. The list is now
+fetched during the warm-up (13 ms, measured, with nothing waiting on it), so
+the chips are in the first painted frame; the lock-time query stays as a
+refresh, is held until the entrance ends (`LockFade::on_settled`), and no-ops
+when it agrees with what is already on screen.
+
+### Two smaller things, same pass
+
+- The entrance used `ease_out_cubic`, which spends its biggest step on the
+  first frame of the ramp — the frame right behind the surface's cold first
+  paint. That is the argument `start_exit_ramp` already makes for smoothstep;
+  the entrance now uses it too.
+- The ramp parks at 0 for two refresh periods before moving, which covers the
+  double-commit burst visible at +19 and +20 ms while the initial configure
+  settles. Invisible, and it costs only `T₀`.
+
+### Tools
+
+- `~/scratch/fade-probe.sh` — locks the real session under `WAYLAND_DEBUG=1`.
+- `~/scratch/lockfade-nested.sh` — same, in a nested headless swayfx, so the
+  wire can be read without locking anything. Takes a binary path.
+- `~/scratch/fade-analyze.py <log>` — pairs `set_multiplier` against the
+  commits that promote it and prints the longest stretch with no commit.
 
 ---
 
@@ -172,9 +252,6 @@ own because `lock_fade` stops answering.
 
 ## What is NOT verified
 
-- **Anything visual.** No human has seen this transition. The headless tests
-  prove the state machine, the protocol health and the timings; they cannot
-  prove it looks right.
 - **The midpoint.** The predicted sRGB dip and the exact feel of the curve are
   unmeasured.
 - **Multi-monitor.** Tested with one and two headless outputs for the timing
