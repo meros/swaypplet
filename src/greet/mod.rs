@@ -156,12 +156,12 @@ impl State {
     fn retarget_fp(&mut self) {
         match self.username() {
             Some(user) if self.fp_enrolled(&user) && !self.has_session(&user) => {
-                self.surfaces.show_fp(false, "");
+                self.surfaces.set_fp_armed(false);
                 let _ = self.fp_tx.send(FpCmd::Verify { user });
             }
             _ => {
                 let _ = self.fp_tx.send(FpCmd::Stop);
-                self.surfaces.show_fp(false, "");
+                self.surfaces.set_fp_armed(false);
             }
         }
     }
@@ -209,13 +209,6 @@ pub fn run() -> ! {
 
     let surfaces = SurfaceSet::new();
     surfaces.enable_user_field(&default_user);
-    // Leave room for the fingerprint pill whenever there is an fp-agent to
-    // arm the reader, and never mind which user is selected: the pill fades
-    // between targets inside a slot that was laid out before the greeter was
-    // ever presented, so retargeting cannot move the card. Without an agent
-    // the reader is unreachable from here and the slot would only ever be
-    // blank, so the card is built without one.
-    surfaces.set_fp_expected(std::path::Path::new(&crate::fp::agent::sock_path()).exists());
 
     let st = Rc::new(RefCell::new(State {
         tx,
@@ -429,16 +422,14 @@ fn restart_conversation(s: &mut State, user: String) {
 fn handle_fp_event(st: &Rc<RefCell<State>>, ev: FpEv) {
     match ev {
         FpEv::Ready => {
-            st.borrow()
-                .surfaces
-                .show_fp(true, "Touch the fingerprint reader");
+            st.borrow().surfaces.set_fp_armed(true);
         }
         FpEv::Hint { msg } => {
-            st.borrow().surfaces.show_fp(true, &msg);
+            st.borrow().surfaces.fp_hint(&msg);
         }
         FpEv::Unavailable { msg } => {
             log::info!("fingerprint unavailable: {msg}");
-            st.borrow().surfaces.show_fp(false, "");
+            st.borrow().surfaces.set_fp_armed(false);
         }
         FpEv::Match { user, token } => {
             // The agent verified `user`'s finger on the reader. Guard
@@ -449,7 +440,7 @@ fn handle_fp_event(st: &Rc<RefCell<State>>, ev: FpEv) {
                 log::info!("discarding fingerprint match for deselected {user}");
                 return;
             }
-            st.borrow().surfaces.show_fp(true, "Fingerprint OK");
+            st.borrow().surfaces.fp_hint("Fingerprint OK");
             submit(st, token);
         }
     }

@@ -105,11 +105,17 @@ Vertical ledger, **identical in every state**:
 | 147 | border bottom | 1 |
 | | **total** | **148** |
 
-Card 360 wide, content column 306. With the switch-user fallback
-(`users < 2`): caption ends at 127, `margin-top 16`, button 30, padding 20,
-border → **194**. The 16 px gap against the caption's 6 px is a 2.7:1 group
-ratio, so the button reads as a separate register rather than a fourth item in
-a loose list.
+Card 360 wide, content column 306.
+
+**The switch-user button lives outside the card**, in the centred column below
+the glass, `margin-top: 20`. This was decided during implementation and is a
+change from the first draft, which put it inside: measured at 194 px, a button
+under the caption bounded the caption's reserved second line on both sides and
+turned it back into exactly the hole this design exists to remove. Below the
+glass it leaves the caption as the card's last element, so the slack falls
+against the bottom padding and reads as margin. It is also the card's only
+non-authentication action, and a link on the wallpaper is what GNOME does with
+"Not listed?" for the same reason.
 
 ```
    ┌──────────────────────────────────────────────────────┐ 0
@@ -190,7 +196,15 @@ fingerprint row disappears.
 | 307 | margin | 14 |
 | 321 | `.polkit-actions` | 46 |
 | 367 | padding bottom | 20 |
-| | **total** | **388** (was 529) |
+| | **as specified** | **388** |
+
+**As built: 456** (was 529, so −14%). The row structure is the one specified —
+one field, one caption, no pills — and the geometry is constant across every
+state. What is not yet applied is the finer re-proportioning of the rows the
+field does not touch: the icon block, the title/message margins, the details
+toggle and the button sizes. Those are worth doing and are not what the
+complaint was about, so they are left as a follow-up rather than smuggled into
+a change whose claim is about dead space.
 
 With the identity row: `+10 margin +32 row` after the caption → **430**.
 
@@ -326,3 +340,15 @@ SWAYPPLET_PREVIEW_POLKIT_STATE=fp,prompt,error dev/render.sh --mode preview:polk
 
 Required: identical bounding boxes within each surface, including the long-PAM
 two-line case, which is the one the `line-height` trap breaks.
+
+Measured at implementation, all bounding boxes identical within each surface:
+
+| surface | states verified | before | after |
+|---|---|---|---|
+| lock | idle, armed, hint, error, long two-line error, Caps Lock, error+Caps | 289 | **148** |
+| greeter | idle, armed, error+Caps | 379 | **~290** |
+| polkit | fresh, armed, prompt, error+Caps | 529 | **456** |
+
+The `long` preview token exists for the two-line case specifically: without it
+a stylesheet regression that reintroduces `line-height` passes every other
+check and only shows up in front of a user whose account has expired.

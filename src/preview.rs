@@ -63,9 +63,6 @@ pub fn run(component: &str) {
                 .upcast();
             window.add_css_class("lock");
             let set = crate::lock::ui::SurfaceSet::new();
-            // The card is built with a fingerprint slot unless asked
-            // otherwise, so the preview shows the shape the laptop gets.
-            set.set_fp_expected(std::env::var("SWAYPPLET_PREVIEW_FP").as_deref() != Ok("0"));
             // Greeter-mode preview: SWAYPPLET_GREET_USERS=meros,melvin adds
             // the user chips + username row on top of the lock card.
             let users: Vec<String> = std::env::var("SWAYPPLET_GREET_USERS")
@@ -114,14 +111,21 @@ pub fn run(component: &str) {
             // rendering them separately is that the card's geometry is
             // identical in every shot: diff two captures and only the
             // contents of the reserved rows may differ.
+            // Caps first: a rejection composes the warning onto its own line,
+            // so the card has to know about the key before it hears about the
+            // rejection. The real surfaces tick once a second and always do.
+            set.tick();
             for state in std::env::var("SWAYPPLET_PREVIEW_LOCK_STATE")
                 .unwrap_or_default()
                 .split(',')
                 .map(str::trim)
             {
                 match state {
-                    "fp" => set.show_fp(true, "Touch fingerprint reader"),
-                    "fp-hint" => set.show_fp(true, "Remove and try again"),
+                    "fp" => set.set_fp_armed(true),
+                    "fp-hint" => {
+                        set.set_fp_armed(true);
+                        set.fp_hint("Remove and try again");
+                    }
                     "face" => set.show_face(true, "looking", "Looking for you"),
                     "face-ok" => set.show_face(true, "ok", "Recognised you"),
                     "face-fail" => set.show_face(true, "fail", "Didn't recognise you"),
@@ -130,10 +134,15 @@ pub fn run(component: &str) {
                         crate::lock::ui::StatusKind::Error,
                     ),
                     "info" => set.set_status("Switching\u{2026}", crate::lock::ui::StatusKind::Info),
+                    // The case the reserved second line exists for, and the
+                    // one a stray `line-height` in the stylesheet breaks.
+                    "long" => set.set_status(
+                        "Your account has expired; please contact your system administrator",
+                        crate::lock::ui::StatusKind::Error,
+                    ),
                     _ => {}
                 }
             }
-            set.tick();
             std::mem::forget(set);
             return;
         }
