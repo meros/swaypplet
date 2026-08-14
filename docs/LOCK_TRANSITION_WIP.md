@@ -5,9 +5,11 @@ directions, with no screenshots and no bad frames. Not a fade to black, not a
 frozen capture of the session: the real desktop, composited live, dissolving
 into the real lock screen.
 
-**Status.** Steps 1-3 done. `T₀` is 65 ms, the client ramps its own surface,
-and with an unpatched compositor the whole thing degrades to today's hard cut.
-Step 4 is wiring the compositor patch and seeing it actually fade.
+**Status.** All four steps built and wired. `T₀` is 65 ms, the client ramps
+its own surface, the patched compositor defers `locked` until the ramp
+finishes, and an unpatched one degrades to today's hard cut. What has NOT
+happened is anyone looking at it: every result here is from a headless nested
+compositor. The visual verification is the remaining work.
 
 ---
 
@@ -86,8 +88,13 @@ currently takes about a second to appear after Super+L.**
       client commit on a lock surface is `null_buffer` or
       `dimensions_mismatch` and both are fatal. Verified degrading cleanly on
       an unpatched compositor: "compositor has no lock_fade; cutting".
-- [ ] **Step 4 — Wire the compositor patch** into the NixOS flake and verify
-      the whole transition on hardware.
+- [x] **Step 4 — Wire the compositor patch.** `patches/swayfx-lock-crossfade.patch`
+      is in `flake.nix`. Headless smoke test with the fade genuinely armed:
+      no protocol errors, `LOCKED` emitted once, the locker still alive 8 s
+      after locking, and `session locked` arriving *after* the first painted
+      frame, which is the deferral doing its job.
+- [ ] **Step 5 — Look at it.** Nothing here has been seen by a human. See
+      "How to verify" below.
 
 ---
 
@@ -138,6 +145,47 @@ at any time, so a parked one grants it nothing it did not have. It holds no
 secrets before the lock it was spawned for.
 
 ---
+
+## How to verify
+
+After `nx-switch` (which restarts the compositor, so the patched swayfx is
+only live in a fresh session):
+
+1. Lock with Super+L. The desktop should dissolve into the lock screen over
+   ~300 ms rather than cutting. Nothing should flash black, and the lock
+   screen must never appear at full opacity and then fade.
+2. Unlock. The lock screen should dissolve back into the desktop, and the
+   desktop should already be drawn when it becomes visible rather than
+   appearing after it.
+3. `journalctl --user -t swaypplet-idle -g lock_fade` should be silent. Any
+   "compositor has no lock_fade; cutting" means the session is still running
+   the old compositor.
+4. Close the lid and reopen. This path deliberately does NOT fade
+   (`locker.rs` sends `nofade` for `sleep`), so it should cut exactly as it
+   does today, and suspend should not be delayed.
+
+If anything misbehaves, in ascending order of blast radius: set
+`SWAYPPLET_LOCK_FADE=0` in the locker's environment to disable the client
+half; or drop `./patches/swayfx-lock-crossfade.patch` from `flake.nix` and
+rebuild, which returns the compositor to stock and makes the client cut on its
+own because `lock_fade` stops answering.
+
+## What is NOT verified
+
+- **Anything visual.** No human has seen this transition. The headless tests
+  prove the state machine, the protocol health and the timings; they cannot
+  prove it looks right.
+- **The midpoint.** The predicted sRGB dip and the exact feel of the curve are
+  unmeasured.
+- **Multi-monitor.** Tested with one and two headless outputs for the timing
+  work, never for the fade itself.
+- **A real 4K external.** Frame cost at that resolution is untested.
+
+A note on method, because it cost an afternoon: nested compositors on the
+**wayland** backend put a real window on the user's desktop, and a lock screen
+there is indistinguishable from the real one. Two "findings" during this work
+turned out to be the user authenticating to a nested lock screen. Test
+headless, where nothing is visible and nothing invites interaction.
 
 ## Artifacts
 
