@@ -73,6 +73,21 @@ pub(super) fn stage(what: &str) {
 static WARM_USERS: std::sync::OnceLock<Vec<crate::switch_user::SwitchUser>> =
     std::sync::OnceLock::new();
 
+/// Whether this user has enrolled fingerprints, asked during the warm-up.
+///
+/// The card needs the answer before it is built, because it decides whether
+/// there is a fingerprint slot in it at all — and the reader's own report
+/// (`EngineEvent::Ready`) lands a few hundred milliseconds into the entrance,
+/// which is precisely when a card must not change size. Unset means nobody
+/// asked (cold `swaypplet lock`) or fprintd would not say; both read as
+/// "leave room", since blank space costs less than a jump.
+static WARM_FP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Should the card carry a fingerprint slot?
+fn fp_expected() -> bool {
+    WARM_FP.get().copied().unwrap_or(true)
+}
+
 /// Why this lock is happening: `idle`, `manual`, `sleep`, `switch`.
 ///
 /// Set from the `LOCK <reason>` line when the locker was pre-warmed, and from
@@ -149,6 +164,14 @@ fn warm_and_wait() {
         let _ = WARM_USERS.set(list);
     }
     stage("warm: users");
+
+    // Read-only: it neither claims the reader nor disturbs whoever holds it,
+    // so asking here — while the desktop is still in use and nothing is
+    // waiting on us — is free.
+    if let Some(enrolled) = crate::fp::self_enrolled_blocking() {
+        let _ = WARM_FP.set(enrolled);
+    }
+    stage("warm: fingerprint");
 
     // Tell the supervisor the expensive part is behind us. It does not wait
     // for this -- a LOCK written early simply sits in the pipe -- but it makes
@@ -253,6 +276,7 @@ pub fn run() -> ! {
     let exit_code = Rc::new(RefCell::new(EXIT_ERROR));
     let surfaces = SurfaceSet::new();
     surfaces.set_crossfade(fade.enabled());
+    surfaces.set_fp_expected(fp_expected());
     // What turns a ramp value into a commit the compositor can act on.
     fade.set_ticker({
         let surfaces = surfaces.clone();
@@ -485,6 +509,12 @@ pub fn run() -> ! {
                 return;
             }
 
+            // Once now, then every second. Without the first call the Caps
+            // Lock warning is a second late, which puts it inside the
+            // entrance — the card does not resize for it any more, but a
+            // warning that fades in behind a card still fading in reads as
+            // something having gone wrong.
+            surfaces.tick();
             let clock_surfaces = surfaces.clone();
             glib::timeout_add_seconds_local(1, move || {
                 clock_surfaces.tick();

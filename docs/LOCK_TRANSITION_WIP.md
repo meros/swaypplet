@@ -302,3 +302,38 @@ headless, where nothing is visible and nothing invites interaction.
   Revealing the desktop early to someone who just authenticated is not an
   exposure; the blanking requirement exists to stop showing the session to
   someone who has not.
+
+## The card must not move while the fade plays
+
+A cross-fade can carry a card onto the screen. It cannot carry a card that
+changes shape halfway through, and the lock card used to change shape twice on
+every entrance: the fingerprint pill appeared when fprintd finished claiming
+the reader (a few hundred milliseconds in, squarely inside the fade), and the
+status and Caps Lock rows appeared and vanished under it afterwards. Each
+arrival grew the card downward and re-centred the whole column, so the thing
+the fade was ramping up was also sliding around.
+
+The rule now, enforced by `src/slot.rs`: **a card's geometry is decided when it
+is built and never changes again.** Anything that can arrive late is laid out
+from the first frame and only painted or not — a fingerprint pill in a
+reserved row, one message line carrying the status and the Caps Lock warning
+between them. Anything that genuinely differs card to card (a greeter's
+username row, a polkit identity picker, whether there is a fingerprint reader
+on this machine at all) is settled *before* the surface is presented, where a
+size change costs nothing.
+
+That last one is why the lock's warm-up asks fprintd whether this user has
+enrolled prints (`fp::self_enrolled_blocking`) alongside the user list: the
+answer decides whether there is a fingerprint row at all, and it has to be
+known before the card exists rather than when the reader reports in.
+
+Verify with the render harness — the card's bounding box must be identical in
+every one of these:
+
+    for st in "" fp fp,error fp,face; do
+      SWAYPPLET_PREVIEW_LOCK_STATE="$st" dev/render.sh --mode preview:lock --out /tmp/lock-$st.png
+    done
+
+`SWAYPPLET_PREVIEW_CAPS=1` adds the Caps Lock line (headless sway has no
+keyboard to latch), and `SWAYPPLET_PREVIEW_POLKIT_STATE` does the same job for
+`--mode preview:polkit`.

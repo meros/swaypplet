@@ -63,6 +63,9 @@ pub fn run(component: &str) {
                 .upcast();
             window.add_css_class("lock");
             let set = crate::lock::ui::SurfaceSet::new();
+            // The card is built with a fingerprint slot unless asked
+            // otherwise, so the preview shows the shape the laptop gets.
+            set.set_fp_expected(std::env::var("SWAYPPLET_PREVIEW_FP").as_deref() != Ok("0"));
             // Greeter-mode preview: SWAYPPLET_GREET_USERS=meros,melvin adds
             // the user chips + username row on top of the lock card.
             let users: Vec<String> = std::env::var("SWAYPPLET_GREET_USERS")
@@ -106,6 +109,31 @@ pub fn run(component: &str) {
             );
             window.set_child(Some(&content));
             window.present();
+            // SWAYPPLET_PREVIEW_LOCK_STATE drives the card into one of the
+            // states that used to arrive after it was on screen. The point of
+            // rendering them separately is that the card's geometry is
+            // identical in every shot: diff two captures and only the
+            // contents of the reserved rows may differ.
+            for state in std::env::var("SWAYPPLET_PREVIEW_LOCK_STATE")
+                .unwrap_or_default()
+                .split(',')
+                .map(str::trim)
+            {
+                match state {
+                    "fp" => set.show_fp(true, "Touch fingerprint reader"),
+                    "fp-hint" => set.show_fp(true, "Remove and try again"),
+                    "face" => set.show_face(true, "looking", "Looking for you"),
+                    "face-ok" => set.show_face(true, "ok", "Recognised you"),
+                    "face-fail" => set.show_face(true, "fail", "Didn't recognise you"),
+                    "error" => set.set_status(
+                        "Wrong password (3 attempts)",
+                        crate::lock::ui::StatusKind::Error,
+                    ),
+                    "info" => set.set_status("Switching\u{2026}", crate::lock::ui::StatusKind::Info),
+                    _ => {}
+                }
+            }
+            set.tick();
             std::mem::forget(set);
             return;
         }
@@ -148,8 +176,24 @@ pub fn run(component: &str) {
                 Box::new(|_uid| {}),
                 Box::new(|| {}),
             );
-            dialog.show_fingerprint(true, "Touch fingerprint reader");
-            dialog.set_password_prompt("Password");
+            // SWAYPPLET_PREVIEW_POLKIT_STATE picks which of the late
+            // arrivals to draw. The card's geometry must be the same in every
+            // one of them: that is the property the shots are taken to check.
+            for state in std::env::var("SWAYPPLET_PREVIEW_POLKIT_STATE")
+                .unwrap_or_else(|_| "fp,prompt".into())
+                .split(',')
+                .map(str::trim)
+            {
+                match state {
+                    "fp" => dialog.show_fingerprint(true, "Touch fingerprint reader"),
+                    "prompt" => dialog.set_password_prompt("Password"),
+                    "error" => dialog.set_status(
+                        "Authentication failed",
+                        crate::polkit::dialog::StatusKind::Error,
+                    ),
+                    _ => {}
+                }
+            }
             std::mem::forget(dialog);
             return;
         }

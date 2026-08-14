@@ -913,6 +913,41 @@ fn targeted(target: &tokio::sync::watch::Receiver<Option<String>>, user: &str) -
     target.borrow().as_deref() == Some(user)
 }
 
+/// Does the calling user have enrolled fingerprints? Blocking — call it off
+/// the main thread, and well before the answer is needed.
+///
+/// `None` means fprintd would not say (cold, restarting, no default device).
+/// Callers reserving layout for a fingerprint pill should treat that as yes:
+/// a slot held open for a reader that never arms costs one pill of blank
+/// card, while a slot that appears late costs a card that jumps under the
+/// user's eyes — and that is the whole reason this question is asked here
+/// rather than when the reader reports in.
+///
+/// Read-only: `ListEnrolledFingers` neither claims the device nor disturbs
+/// another client's claim, so this is safe to call while the desktop is in
+/// use.
+pub fn self_enrolled_blocking() -> Option<bool> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()?;
+    rt.block_on(async {
+        let conn = tokio::time::timeout(CALL_TIMEOUT, zbus::Connection::system())
+            .await
+            .ok()?
+            .ok()?;
+        let device = tokio::time::timeout(CALL_TIMEOUT, device_proxy(&conn))
+            .await
+            .ok()?
+            .ok()?;
+        match enrollment(&device, "").await {
+            Enrollment::Enrolled => Some(true),
+            Enrollment::None => Some(false),
+            Enrollment::Unknown => None,
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
