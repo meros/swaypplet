@@ -218,6 +218,18 @@ impl Reveal {
         }
     }
 
+    /// Give up the compositor alpha handle while the surface it is bound to
+    /// still exists.
+    ///
+    /// `wp_alpha_modifier_surface_v1` must be destroyed *before* its
+    /// `wl_surface`: once the surface is gone, every request on the handle,
+    /// the destructor included, is a fatal protocol error (see
+    /// [`crate::alpha`]). Anyone about to destroy the window calls this
+    /// first.
+    pub fn release_alpha(&self) {
+        drop(self.inner.alpha.borrow_mut().take());
+    }
+
     /// Pair the fade with a settle: `bin` translates from `px` below its
     /// resting spot to 0 on show and back on hide.
     pub fn slide(self, bin: &SlideBin, px: f64) -> Self {

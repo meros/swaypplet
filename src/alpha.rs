@@ -103,9 +103,20 @@ impl SurfaceAlpha {
 
 impl Drop for SurfaceAlpha {
     fn drop(&mut self) {
-        // Leaving a surface destroyed with a multiplier still set is a
-        // protocol error on some compositors, and harmless everywhere.
-        self.surface.set_multiplier(OPAQUE);
+        // "This object has to be destroyed before the associated wl_surface.
+        // Once the wl_surface is destroyed, all requests on this object will
+        // raise the no_surface error." A protocol error takes the whole
+        // client down, so a window torn down ahead of its alpha handle must
+        // not be spoken to at all — including the destructor.
+        //
+        // Owners are expected to drop this first (GlassSurface does); the
+        // check is what keeps a path that forgets from killing the process.
+        if !self.wl_surface.is_alive() {
+            return;
+        }
+        // destroy() is "equivalent to set_multiplier with a value of
+        // UINT32_MAX", so resetting the multiplier first sends a second
+        // request to say the same thing.
         self.surface.destroy();
         let _ = self.conn.flush();
     }
