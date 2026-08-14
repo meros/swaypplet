@@ -203,7 +203,9 @@ impl SurfaceSet {
         // blur covers neither ext-session-lock surfaces nor own content).
         let backdrop = gtk4::Box::builder().hexpand(true).vexpand(true).build();
         backdrop.add_css_class("lock-backdrop");
+        super::stage("wallpaper decode start");
         let wallpaper = wallpaper_path().and_then(|p| gdk4::Texture::from_filename(p).ok());
+        super::stage("wallpaper decode done");
         if let Some(ref texture) = wallpaper {
             let picture = gtk4::Picture::for_paintable(texture);
             picture.set_content_fit(gtk4::ContentFit::Cover);
