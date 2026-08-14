@@ -1998,7 +1998,11 @@ revealer {
 
 .polkit-container,
 .lock-card {
-    padding: 24px 26px;
+    /* Bottom lighter than top on purpose: the caption's reserved second line
+       sits directly above this edge, so the optical margin down there is the
+       padding plus whatever the caption did not use. 20 against 24 makes the
+       two read as equal. */
+    padding: 24px 26px 20px 26px;
 }
 
 /* The lock layer has no layer_effects entry, so it isn't compositor-blurred
@@ -2036,39 +2040,153 @@ revealer {
     margin-bottom: 2px;
 }
 
-/* ── Fingerprint pill (primary affordance when active) ── */
-.polkit-fp-pill,
-.lock-fp-pill {
-    background-color: alpha(@accent, 0.10);
-    border: 1px solid alpha(@accent, 0.32);
-    border-radius: 12px;
-    padding: 12px 17px;
-    margin: 2px 0;
-    transition: border-color 200ms ease;
+/* ── The authentication field ──
+   One bordered box carrying everything a password row has to say: the entry
+   (stripped to a text node), a mark at each edge, and all the chrome that
+   used to live on the entry itself. Rationale in docs/AUTH_CARD.md.
+
+   Its height is a constant of these three declarations — min-height plus
+   padding plus border, 38 + 22 + 2 = 62 — and no state below touches any of
+   them. That is what lets the card be laid out once and never move. */
+.auth-field {
+    background-color: alpha(@bg0, 0.70);
+    border: 1px solid @border_strong;
+    border-radius: 10px;
+    padding: 11px 12px;
+    min-height: 38px;
+    transition: border-color 150ms ease, background-color 150ms ease;
 }
 
-/* Pulse only while the reader is actually armed. The pill's space is held
-   whether or not it is, and a blank slot breathing its border is a repaint
-   every frame for a row nobody can see. */
-.polkit-fp-pill.polkit-fp-active,
-.lock-fp-pill:not(.slot-empty) {
+/* :focus-within on the box, because the focus lands on the entry inside it.
+   Same trick, and same reason, as the launcher's search row above. */
+.auth-field:focus-within {
+    border-color: @accent;
+    background-color: alpha(@bg0, 0.92);
+}
+
+/* Armed: the whole field breathes rather than a pill inside it. This is the
+   largest piece of moving accent on the card, which is what the affordance
+   needs to survive being folded into the entry. */
+.auth-field.auth-fp-armed {
     animation: auth-fp-pulse 2s ease-in-out infinite;
 }
 
-.polkit-fp-glyph,
-.lock-fp-glyph {
+/* PAM is working. A local signal: the card used to drop to opacity 0.75 as a
+   whole, which on a card this size reads as a fault rather than as progress. */
+.auth-field.auth-busy {
+    animation: none;
+    border-color: alpha(@accent, 0.55);
+    background-color: alpha(@bg0, 0.55);
+}
+
+/* Rejected. Paint only, so it composes with the card's shake instead of
+   fighting it for the same frame. */
+.auth-field.auth-reject {
+    animation: auth-field-reject 900ms ease-out;
+}
+
+@keyframes auth-field-reject {
+    0%   { border-color: @red; background-color: alpha(@red, 0.12); }
+    100% { border-color: @border_strong; background-color: alpha(@bg0, 0.70); }
+}
+
+/* The entry itself is now a text node and nothing else. min-height has to be
+   zeroed on BOTH nodes: the theme's default content height is on `text`, and
+   leaving it there silently sets the field's floor from the inside. */
+.auth-input,
+.auth-input text {
+    background: none;
+    background-color: transparent;
+    border: none;
+    outline: none;
+    box-shadow: none;
+    padding: 0;
+    min-height: 0;
+    color: @fg;
+    caret-color: @accent;
+    font-size: 14px;
+}
+
+.auth-input text selection {
+    background-color: alpha(@accent, 0.35);
+}
+
+.auth-input placeholder,
+.auth-input text placeholder {
+    color: alpha(@fg, 0.42);
+}
+
+/* ── The marks ──
+   Attributes of the field, not controls in it: no hover, no background, no
+   radius, nothing that would offer a press. Both are built untargetable. */
+.auth-mark-fp {
     font-size: 22px;
+    color: @fg;
+    opacity: 0;
+    transition: opacity 160ms ease, color 160ms ease;
+}
+
+/* Painted only between Ready and Unavailable. A ghosted resting whorl was
+   considered and rejected: a mark shown while the reader will not accept a
+   touch is the card gesturing at a reader that cannot read. */
+.auth-mark-fp.armed {
+    opacity: 1;
     color: @accent;
 }
 
-.polkit-fp-label,
-.lock-fp-label {
-    font-size: 13px;
-    font-weight: 500;
-    color: @fg;
+.auth-mark-fp.reject {
+    color: @red;
 }
 
-/* Calmer pulse: breathe the border only, no jarring fill jump. */
+.auth-mark-caps {
+    font-size: 14px;
+    color: @yellow;
+    opacity: 0;
+    transition: opacity 160ms ease;
+}
+
+.auth-mark-caps.on {
+    opacity: 1;
+}
+
+/* Gaps between the card's rows. The box carries spacing 0 and every gap is
+   declared here, because they are deliberately unequal: 10 binds the greeter's
+   username to the password under it, 18 separates the picker as a different
+   kind of decision, and 16 above the switch-user button against the caption's
+   6 is a 2.7:1 group ratio, so the button reads as its own register rather
+   than as a fourth item in one loose list. */
+.lock-chip-row     { margin-bottom: 18px; }
+.auth-field-user   { margin-bottom: 10px; }
+.lock-switch-user  { margin-top: 20px; }
+
+/* ── The caption ──
+   Two reserved lines that are never empty. Top-aligned so a one-line message
+   leaves its slack against the card's bottom padding, where it reads as
+   margin; centred, the same slack is bounded on both sides, which is a hole.
+
+   Deliberately no line-height. GTK maps it to pango_attr_line_height_new(),
+   a factor on the LOGICAL line height rather than on font-size, so 1.35 on a
+   12px font gives ~21.6px a line and two lines overrun this min-height — and
+   min-height is a floor, not a cap. Bare, two lines measure ~32 and fit. The
+   cap is lines(2) + ellipsize on the label. */
+.auth-caption {
+    font-size: 12px;
+    min-height: 34px;
+    margin: 6px 13px 0 13px;
+    color: alpha(@fg, 0.55);
+    font-weight: 400;
+    transition: color 160ms ease;
+}
+
+.auth-caption-info    { color: @fg_dim;  font-weight: 500; }
+.auth-caption-fp      { color: @accent;  font-weight: 500; }
+.auth-caption-caps    { color: @yellow;  font-weight: 600; }
+.auth-caption-error   { color: @red;     font-weight: 600; }
+.auth-caption-success { color: @accent;  font-weight: 600; }
+
+/* Calmer pulse: breathe the border only, no jarring fill jump. Now driven by
+   .auth-field.auth-fp-armed, so it is the field that breathes rather than a
+   pill inside it. */
 @keyframes auth-fp-pulse {
     0%, 100% { border-color: alpha(@accent, 0.28); }
     50%      { border-color: alpha(@accent, 0.72); }
@@ -2140,9 +2258,8 @@ revealer {
     transition: opacity 150ms ease, transform 150ms cubic-bezier(0.2, 0, 0, 1);
 }
 
-.lock-card.lock-handoff .lock-entry,
-.lock-card.lock-handoff .lock-fp-pill,
-.lock-card.lock-handoff .lock-message,
+.lock-card.lock-handoff .auth-field,
+.lock-card.lock-handoff .auth-caption,
 .lock-card.lock-handoff .lock-switch-user {
     opacity: 0;
     transition: opacity 180ms ease 50ms;
@@ -2198,57 +2315,6 @@ revealer {
     color: @fg;
 }
 
-/* ── Password entry ── */
-.polkit-entry,
-.lock-entry {
-    background-color: alpha(@bg0, 0.7);
-    color: @fg;
-    border: 1px solid @border_strong;
-    border-radius: 10px;
-    padding: 11px 14px;
-    font-size: 14px;
-    min-height: 38px;
-    caret-color: @accent;
-    outline: none;
-    transition: border-color 150ms ease, background-color 150ms ease;
-}
-
-.polkit-entry:focus,
-.polkit-entry:focus-within,
-.lock-entry:focus,
-.lock-entry:focus-within {
-    border-color: @accent;
-    background-color: alpha(@bg0, 0.92);
-    outline: none;
-    box-shadow: none;
-}
-
-.polkit-entry text,
-.lock-entry text {
-    color: @fg;
-    outline: none;
-    box-shadow: none;
-}
-
-.polkit-entry text:focus,
-.polkit-entry text:focus-within,
-.lock-entry text:focus,
-.lock-entry text:focus-within {
-    outline: none;
-    box-shadow: none;
-}
-
-.polkit-entry text selection,
-.lock-entry text selection {
-    background-color: alpha(@accent, 0.35);
-}
-
-/* ── Caps Lock warning ──
-   No row of its own anywhere. It shares the message line with the status on
-   all three cards, because a rejected password with Caps Lock on is one fact
-   and used to be printed as two — in two rows that appeared and vanished
-   independently, which is two ways for a card to resize under a reader. */
-
 /* ── Identity picker ── */
 .polkit-identity-row {
     margin-top: 2px;
@@ -2268,31 +2334,6 @@ revealer {
     padding: 4px 8px;
     color: @fg;
 }
-
-/* ── Status line ──
-   Two lines of height, reserved, always. One line would fit everything this
-   code says itself ("Wrong password", "Switching\2026"), but not everything
-   PAM and greetd hand it, and a card that grows for the one long message is a
-   card that grows exactly when someone is reading it. The labels are capped
-   at two lines to match, so nothing can claim a third. */
-.polkit-status,
-.lock-message {
-    font-size: 13px;
-    margin-top: 2px;
-    min-height: 36px;
-}
-
-.polkit-status-info,
-.lock-status-info      { color: @fg_dim; }
-.polkit-status-error,
-.lock-status-error     { color: @red; font-weight: 600; }
-.polkit-status-success { color: @accent; font-weight: 600; }
-
-/* Caps Lock, when it has the message line to itself. Warning-coloured rather
-   than error-coloured: nothing has gone wrong yet, and saying so in red would
-   spend on a shift key the alarm that belongs to a refused password. */
-.polkit-status-caps,
-.lock-status-caps      { color: @yellow; font-weight: 600; }
 
 /* ── Details disclosure ── */
 .polkit-details-toggle {
@@ -2360,12 +2401,6 @@ revealer {
 
 .polkit-auth-btn:disabled {
     opacity: 0.45;
-}
-
-/* ── Verifying: grey the card while PAM works ── */
-.polkit-container.polkit-verifying,
-.lock-card.lock-verifying {
-    opacity: 0.75;
 }
 
 /* ── Shake on error (margin-based; GTK4 transform support varies) ── */
@@ -2805,9 +2840,10 @@ revealer {
    and a consequence line, because pam_face carries no action id and no
    vendor message, only the process that asked.
 
-   Everything else on the card is already styled above: the face pill borrows
-   .polkit-fp-pill so the two biometrics read as the pair they are, and the
-   buttons are the card's own. */
+   Everything else on the card is already styled above: the face check reports
+   through the same .auth-field mark and .auth-caption the fingerprint uses, so
+   the two biometrics read as the pair they are, and the buttons are the
+   card's own. */
 
 /* The command, recessed. Sinking it below the card surface is what makes it
    read as quoted evidence rather than as a label the dialog wrote about
@@ -2851,11 +2887,12 @@ revealer {
     background-color: @surface;
     border: 1px solid @border_strong;
     border-radius: 999px;
-    padding: 8px 18px 8px 14px;
-    /* Exactly the width of the card's rows below it (360 card - 2x26 padding,
-       less this pill's own padding and border), so the indicator, the
-       password box and the fingerprint pill share one pair of edges. */
-    min-width: 274px;
+    padding: 6px 12px;
+    /* Exactly the width of the card's rows below it: 360 card less 2x26
+       padding less the card's own 1px border each side is a 306px content
+       column, and this pill's padding (2x12) and border (2x1) come off that.
+       The old 274 forgot the card's border and overhung by a pixel a side. */
+    min-width: 280px;
 }
 
 .face-pill-label {

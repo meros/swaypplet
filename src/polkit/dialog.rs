@@ -12,7 +12,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
-use crate::icons;
+use crate::auth_field::{AuthField, Caption, Tone};
 use crate::layer_shell::{self, LayerShellConfig};
 
 use super::agent::AuthRequest;
@@ -81,18 +81,18 @@ pub struct PolkitDialog {
     icon_label: gtk4::Label,
     title_label: gtk4::Label,
     message_label: gtk4::Label,
-    fp_pill: gtk4::Box,
-    fp_label: gtk4::Label,
-    face_pill: gtk4::Box,
-    face_ring: gtk4::Box,
-    face_label: gtk4::Label,
+    /// The password field, with the fingerprint whorl and the face ring
+    /// sharing its leading mark and Caps Lock at its trailing edge. See
+    /// docs/AUTH_CARD.md — the pills this replaces were containers whose only
+    /// job was to hold those next to each other, and the field already is one.
+    field: AuthField,
+    caption: Caption,
     face_well: gtk4::Box,
     face_command: gtk4::Label,
     face_consequence: gtk4::Label,
     password_entry: gtk4::PasswordEntry,
     identity_row: gtk4::Box,
     identity_combo: gtk4::DropDown,
-    status_label: gtk4::Label,
     details_revealer: gtk4::Revealer,
     details_label: gtk4::Label,
     auth_btn: gtk4::Button,
@@ -100,10 +100,14 @@ pub struct PolkitDialog {
     reveal: crate::anim::Reveal,
     identities: Rc<RefCell<Vec<u32>>>,
     callbacks: Rc<RefCell<Callbacks>>,
-    /// The two things the message line renders from. Kept here rather than
-    /// read back off the label, because either can change without the other.
+    /// Caps Lock, so a rejection composes the warning onto its own line.
     caps: Cell<bool>,
-    status: RefCell<(String, StatusKind)>,
+    /// Is the reader armed right now? The caption's resting sentence is
+    /// computed from this and nothing else — the honesty rule.
+    fp_armed: Cell<bool>,
+    /// The elevate path has no password to type, so its resting sentence
+    /// names the camera instead.
+    elevate: Cell<bool>,
     /// Does the calling user have enrolled fingerprints? Answered off-thread
     /// once, at agent start, so `present` knows whether to lay out a
     /// fingerprint row long before PAM offers one. `None` until it lands (and
@@ -203,64 +207,16 @@ impl PolkitDialog {
             .build();
         face_consequence.add_css_class("face-confirm-consequence");
 
-        // ── Face pill (hidden by default) ─────────────────────────────
-        //
-        // Same shape as the fingerprint pill on purpose. Both are biometrics
-        // that either work or get out of the way, and a user who has learned
-        // to read one should not have to learn the other. The ring is the
-        // same widget the lock screen uses.
-        let face_pill = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(12)
-            .halign(gtk4::Align::Fill)
-            .build();
-        face_pill.add_css_class("polkit-fp-pill");
-        let face_ring = gtk4::Box::builder()
-            .width_request(18)
-            .height_request(18)
-            .valign(gtk4::Align::Center)
-            .build();
-        face_ring.add_css_class("face-ring");
-        // Left-aligned and hexpanding: the ring holds the left edge and the
-        // wording changes beside it. A centred label would slide the ring
-        // sideways on every state change, and the ring is the part being
-        // watched.
-        let face_label = gtk4::Label::builder()
-            .label("Checking your face\u{2026}")
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .xalign(0.0)
-            .hexpand(true)
-            .build();
-        face_label.add_css_class("polkit-fp-label");
-        face_pill.append(&face_ring);
-        face_pill.append(&face_label);
-
-        // ── Fingerprint pill (hidden by default) ──────────────────────
-        let fp_pill = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(12)
-            .halign(gtk4::Align::Fill)
-            .build();
-        fp_pill.add_css_class("polkit-fp-pill");
-        let fp_glyph = gtk4::Label::builder().label(icons::FINGERPRINT).build();
-        fp_glyph.add_css_class("polkit-fp-glyph");
-        let fp_label = gtk4::Label::builder()
-            .label("Touch fingerprint reader")
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .xalign(0.0)
-            .hexpand(true)
-            .build();
-        fp_label.add_css_class("polkit-fp-label");
-        fp_pill.append(&fp_glyph);
-        fp_pill.append(&fp_label);
-
         // ── Password entry (the fallback) ─────────────────────────────
         let password_entry = gtk4::PasswordEntry::builder()
             .show_peek_icon(false)
             .placeholder_text("Password")
             .hexpand(true)
             .build();
-        password_entry.add_css_class("polkit-entry");
+        // One box for the entry, the biometric mark and Caps Lock. The face
+        // ring and the fingerprint whorl share the leading slot: they are two
+        // answers to one question and never need two edges.
+        let field = AuthField::new(&password_entry);
 
         // ── Identity picker (hidden when only one identity) ───────────
         let identity_row = gtk4::Box::builder()
@@ -276,18 +232,7 @@ impl PolkitDialog {
         identity_row.append(&identity_lbl);
         identity_row.append(&identity_combo);
 
-        // ── Status line (errors / info) ───────────────────────────────
-        let status_label = gtk4::Label::builder()
-            .halign(gtk4::Align::Center)
-            .justify(gtk4::Justification::Center)
-            .wrap(true)
-            .wrap_mode(gtk4::pango::WrapMode::WordChar)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .lines(2)
-            .max_width_chars(46)
-            .build();
-        status_label.add_css_class("polkit-status");
-        crate::slot::reserve(&status_label);
+        let caption = Caption::new(46);
 
         // ── Details revealer (action_id, vendor, command, pid) ────────
         let details_toggle = gtk4::Button::builder()
@@ -352,11 +297,9 @@ impl PolkitDialog {
         content.append(&message_label);
         content.append(&face_well);
         content.append(&face_consequence);
-        content.append(&face_pill);
-        content.append(&fp_pill);
-        content.append(&password_entry);
+        content.append(field.widget());
+        content.append(caption.widget());
         content.append(&identity_row);
-        content.append(&status_label);
         content.append(&details_toggle);
         content.append(&details_revealer);
         content.append(&actions);
@@ -376,18 +319,14 @@ impl PolkitDialog {
             icon_label,
             title_label,
             message_label,
-            fp_pill,
-            fp_label,
-            face_pill,
-            face_ring,
-            face_label,
+            field: field.clone(),
+            caption: caption.clone(),
             face_well,
             face_command,
             face_consequence,
             password_entry: password_entry.clone(),
             identity_row,
             identity_combo: identity_combo.clone(),
-            status_label,
             details_revealer,
             details_label,
             auth_btn: auth_btn.clone(),
@@ -396,7 +335,8 @@ impl PolkitDialog {
             identities: identities.clone(),
             callbacks: callbacks.clone(),
             caps: Cell::new(false),
-            status: RefCell::new(<(String, StatusKind)>::default()),
+            fp_armed: Cell::new(false),
+            elevate: Cell::new(false),
             fp_expected: Cell::new(None),
         });
 
@@ -443,7 +383,9 @@ impl PolkitDialog {
         // of holding PAM until its own deadline.
         {
             let cbs = callbacks.clone();
+            let caption_clear = caption.clone();
             password_entry.connect_changed(move |entry| {
+                caption_clear.clear_status();
                 if !entry.text().is_empty() {
                     let cb = cbs.borrow().on_typing.clone();
                     cb();
@@ -525,8 +467,12 @@ impl PolkitDialog {
         if let Some(keyboard) = keyboard_device() {
             let dialog_caps = dialog.clone();
             keyboard.connect_caps_lock_state_notify(move |_| {
-                dialog_caps.caps.set(caps_lock_on());
-                dialog_caps.render_message();
+                let on = caps_lock_on();
+                dialog_caps.caps.set(on);
+                dialog_caps.field.set_caps(on);
+                if on {
+                    dialog_caps.caption.caps_edge();
+                }
             });
         }
 
@@ -560,24 +506,25 @@ impl PolkitDialog {
         // before PAM asks for it is buffered rather than dropped, so an entry
         // that is ready early costs nothing and answers the question every
         // user of this dialog asks first — can I just type it?
-        crate::slot::reserve_if(&self.fp_pill, self.fp_expected.get().unwrap_or(true));
-        self.fp_pill.remove_css_class("polkit-fp-active");
+        self.elevate.set(false);
+        self.field.widget().set_visible(true);
+        self.field.set_fp_armed(false);
+        self.fp_armed.set(false);
         self.password_entry.set_visible(true);
         self.password_entry.set_placeholder_text(Some("Password"));
         self.auth_btn.set_visible(true);
         self.auth_btn.set_sensitive(true);
         self.auth_btn.set_label("Authenticate");
-        // No face check is running yet, and one that attaches to a dialog
-        // already on screen is a new thing happening — worth an arrival.
-        self.face_pill.set_visible(false);
-        self.show_face(false, "", "");
+        self.field.set_face(false, "");
         self.face_well.set_visible(false);
         self.face_consequence.set_visible(false);
         self.card.remove_css_class("polkit-shake");
         self.card.remove_css_class("polkit-success");
         self.card.remove_css_class("polkit-verifying");
-        self.caps.set(caps_lock_on());
-        self.render_message();
+        let caps = caps_lock_on();
+        self.caps.set(caps);
+        self.field.set_caps(caps);
+        self.refresh_resting();
 
         // Title + message
         self.title_label.set_label("Authentication Required");
@@ -643,16 +590,15 @@ impl PolkitDialog {
         on_cancel: Box<dyn Fn()>,
     ) {
         self.set_status("", StatusKind::Info);
-        // No password here (see below), no fingerprint either: pam_face is
-        // the only thing that can answer this, so the card carries one
-        // biometric row and holds its space from the first frame — the face
-        // check reports in a moment later and must not resize anything.
-        self.fp_pill.set_visible(false);
-        self.fp_pill.remove_css_class("polkit-fp-active");
-        crate::slot::reserve_if(&self.face_pill, true);
+        // No password here (see below) and no fingerprint: pam_face is the
+        // only thing that can answer this. The field goes with them, and the
+        // face reports through the caption, which the card has anyway.
+        self.elevate.set(true);
+        self.field.widget().set_visible(false);
         self.password_entry.set_text("");
-        self.password_entry.set_visible(false);
         self.caps.set(false);
+        self.field.set_caps(false);
+        self.refresh_resting();
         self.identity_row.set_visible(false);
         self.card.remove_css_class("polkit-shake");
         self.card.remove_css_class("polkit-success");
@@ -707,104 +653,50 @@ impl PolkitDialog {
     /// one line of height; a card that resizes under the pointer costs a
     /// misclick.
     pub fn set_status(&self, text: &str, kind: StatusKind) {
-        *self.status.borrow_mut() = (text.to_string(), kind);
-        self.render_message();
-    }
-
-    /// Paint the message line from the status and the Caps Lock state.
-    ///
-    /// One line for both, as on the lock screen: a refused password with Caps
-    /// Lock on is one fact, and it used to be printed as two rows that came
-    /// and went independently — which is two chances for the card to resize
-    /// while someone is reading it.
-    fn render_message(&self) {
-        let (text, kind) = self.status.borrow().clone();
-        let caps = self.caps.get();
-        const CAPS: &str = "\u{f0632}  Caps Lock is on";
-        // Markup, so the note can be set in a quieter voice than the verdict
-        // above it. PAM writes some of these strings — escape first.
-        let (markup, class) = if !text.is_empty() {
-            let text = glib::markup_escape_text(&text);
-            let markup = match kind {
-                StatusKind::Error if caps => {
-                    format!("{text}\n<span size=\"smaller\" alpha=\"75%\">{CAPS}</span>")
-                }
-                _ => text.to_string(),
-            };
-            (
-                markup,
-                match kind {
-                    StatusKind::Info => "polkit-status-info",
-                    StatusKind::Error => "polkit-status-error",
-                    StatusKind::Success => "polkit-status-success",
-                },
-            )
-        } else if caps {
-            (CAPS.to_string(), "polkit-status-caps")
-        } else {
-            (String::new(), "polkit-status-info")
+        let tone = match kind {
+            StatusKind::Info => Tone::Info,
+            StatusKind::Error => Tone::Error,
+            StatusKind::Success => Tone::Success,
         };
-
-        for c in [
-            "polkit-status-info",
-            "polkit-status-error",
-            "polkit-status-success",
-            "polkit-status-caps",
-        ] {
-            if c != class {
-                self.status_label.remove_css_class(c);
-            }
-        }
-        self.status_label.add_css_class(class);
-        // Keep the old words while the line fades out — replacing them first
-        // flashes the next message at zero opacity and back.
-        if !markup.is_empty() {
-            self.status_label.set_markup(&markup);
-        }
-        crate::slot::show(&self.status_label, !markup.is_empty());
+        self.caption.status(text, tone, self.caps.get());
     }
 
+    /// The sentence under everything else: what the user may do right now.
+    ///
+    /// The honesty rule. It names the reader only while the reader is armed,
+    /// and never on the elevate path, where there is nothing to type and the
+    /// camera is the only thing being asked.
+    fn refresh_resting(&self) {
+        self.caption.set_resting(if self.elevate.get() {
+            "Look at the camera to allow this"
+        } else if self.fp_armed.get() {
+            "Touch the reader or enter your password to allow this"
+        } else {
+            "Enter your password to allow this"
+        });
+    }
+
+    /// The reader armed, or stood down. A mark and a sentence, not a row.
     pub fn show_fingerprint(&self, active: bool, label: &str) {
-        crate::slot::show(&self.fp_pill, active);
-        if active {
-            self.fp_label.set_label(label);
-            self.fp_pill.add_css_class("polkit-fp-active");
-            // The password stays on screen alongside it. Hiding it made the
-            // card tidier and the user's life worse: someone whose finger is
-            // not going to be read has to fail the reader before the machine
-            // admits a password was ever an option. Every method the stack
-            // will accept is visible for as long as it is accepted, and the
-            // user picks. Text typed before PAM asks for it is buffered by
-            // the controller rather than dropped, so showing the entry early
-            // cannot desync the conversation.
-        } else {
-            self.fp_pill.remove_css_class("polkit-fp-active");
+        // fprintd's own words when it has some; otherwise the resting
+        // sentence already says what to do and repeating it is noise.
+        if active && !label.is_empty() && label != "Touch fingerprint reader" {
+            self.caption.fp_hint(label);
+        }
+        if self.fp_armed.replace(active) != active {
+            self.field.set_fp_armed(active);
+            self.refresh_resting();
         }
     }
 
-    /// Show or hide the face pill. `state` selects the ring animation, which
-    /// is the same vocabulary the lock screen uses: `looking` while frames
-    /// are arriving, `dark` when the illuminator or the relay is at fault
-    /// rather than the user, `ok` once the face has matched.
+    /// Show or hide the face check on the field's leading mark. `state`
+    /// selects the ring animation, the same vocabulary the lock screen uses:
+    /// `looking` while frames arrive, `dark` when the illuminator or the relay
+    /// is at fault rather than the user, `ok` once the face has matched.
     pub fn show_face(&self, active: bool, state: &str, label: &str) {
-        // Reserved by `present_elevate`, where the check is the whole point.
-        // Attached to a polkit prompt that was already on screen it has no
-        // slot to fade into, so it arrives — that case is a second
-        // authentication method turning up unannounced, and a card that says
-        // nothing about it would be worse than one that grows a row.
-        if active {
-            self.face_pill.set_visible(true);
-        }
-        crate::slot::show(&self.face_pill, active);
-        // No pill classes here: the glow they carry is a box-shadow, and this
-        // card sits on a compositor-blurred layer where that frosts into a
-        // halo. The cue's own surface is where the glow belongs.
-        crate::face_ring::apply(&self.face_ring, None, if active { state } else { "" });
-        if active {
-            self.face_label.set_label(label);
-            self.face_pill.add_css_class("polkit-fp-active");
-        } else {
-            self.face_pill.remove_css_class("polkit-fp-active");
+        self.field.set_face(active, state);
+        if active && !label.is_empty() {
+            self.caption.status(label, Tone::Info, self.caps.get());
         }
     }
 
@@ -863,8 +755,9 @@ impl PolkitDialog {
         self.icon_label.set_visible(true);
         self.icon_label.set_label(ICON_OK);
         self.icon_label.add_css_class("polkit-icon-ok");
-        self.fp_pill.remove_css_class("polkit-fp-active");
-        self.face_pill.remove_css_class("polkit-fp-active");
+        // The pulse comes off; the marks stay lit as the record of which
+        // method actually worked.
+        self.field.widget().remove_css_class("auth-fp-armed");
     }
 
     pub fn lock_inputs(&self) {

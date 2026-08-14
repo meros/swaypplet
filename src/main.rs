@@ -2,6 +2,7 @@ mod alpha;
 mod anim;
 mod app;
 mod audio;
+mod auth_field;
 mod avatar;
 mod bar;
 mod clipboard;

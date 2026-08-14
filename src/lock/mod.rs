@@ -83,7 +83,13 @@ static WARM_USERS: std::sync::OnceLock<Vec<crate::switch_user::SwitchUser>> =
 /// "leave room", since blank space costs less than a jump.
 static WARM_FP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
-/// Should the card carry a fingerprint slot?
+/// Is there a reader worth claiming for this user?
+///
+/// It used to decide the card's height. It does not any more — the card is
+/// one size whether or not a reader exists (docs/AUTH_CARD.md) — so all it
+/// governs now is whether the fingerprint worker starts at all. Unknown reads
+/// as yes: a claim that fails costs a log line, and refusing to try because
+/// fprintd was cold at warm-up would cost the feature.
 fn fp_expected() -> bool {
     WARM_FP.get().copied().unwrap_or(true)
 }
@@ -281,7 +287,6 @@ pub fn run() -> ! {
     let exit_code = Rc::new(RefCell::new(EXIT_ERROR));
     let surfaces = SurfaceSet::new();
     surfaces.set_crossfade(fade.enabled());
-    surfaces.set_fp_expected(fp_expected());
     // What turns a ramp value into a commit the compositor can act on.
     fade.set_ticker({
         let surfaces = surfaces.clone();
@@ -583,6 +588,12 @@ pub fn run() -> ! {
                 });
             }
 
+            // Nothing here sizes the card any more, so this is purely about
+            // whether to go near the reader at all.
+            if !fp_expected() {
+                log::info!("fingerprint: no enrolled prints for this user, not claiming");
+                return;
+            }
             let rx = fprint::start();
             let surfaces = surfaces.clone();
             let end_lock = end_lock.clone();
@@ -591,9 +602,9 @@ pub fn run() -> ! {
                 while let Ok(ev) = rx.try_recv() {
                     match ev {
                         EngineEvent::Ready => {
-                            surfaces.show_fp(true, "Touch fingerprint reader");
+                            surfaces.set_fp_armed(true);
                         }
-                        EngineEvent::Hint(h) => surfaces.show_fp(true, &h),
+                        EngineEvent::Hint(h) => surfaces.fp_hint(&h),
                         EngineEvent::Match(_) => {
                             if unlocking.replace(true) {
                                 return glib::ControlFlow::Break;
@@ -604,7 +615,7 @@ pub fn run() -> ! {
                         }
                         EngineEvent::Unavailable(why) => {
                             log::info!("fingerprint unavailable: {why}");
-                            surfaces.show_fp(false, "");
+                            surfaces.set_fp_armed(false);
                         }
                         // fprintd reports nothing between touch and verdict,
                         // so the fingerprint engine never emits this.

@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use gtk4::prelude::*;
 
 use crate::anim::animations_enabled;
+use crate::auth_field::{AuthField, Caption, Tone};
 use crate::avatar::avatar;
 use crate::icons;
 use crate::switch_user;
@@ -134,12 +135,13 @@ struct Surface {
     chip_row: Option<gtk4::Box>,
     user_chips: Vec<(String, gtk4::Button)>,
     entry: gtk4::PasswordEntry,
-    /// The fingerprint pill's slot, or `None` on a card built without one.
-    /// Reserved from the first frame when it exists (see [`crate::slot`]):
-    /// fprintd answers hundreds of milliseconds after the surface maps, and
-    /// that is exactly the window the entrance is playing in.
-    fp_pill: Option<gtk4::Box>,
-    fp_label: gtk4::Label,
+    /// The password field, chrome and marks included. See
+    /// [`crate::auth_field`] and docs/AUTH_CARD.md: everything the card used
+    /// to say in rows under the entry, it now says on or below this one box.
+    field: AuthField,
+    /// The greeter's username row — the same field with its marks unpainted,
+    /// which is what puts both rows' text on one rail.
+    user_field: Option<AuthField>,
     /// Face unlock indicator. Pinned to the top of the screen rather than
     /// placed in the card, so it sits under the camera and does not move
     /// between the lock screen and the elevate prompt. A fixed position is
@@ -149,11 +151,10 @@ struct Surface {
     face_pill: gtk4::Box,
     face_ring: gtk4::Box,
     face_label: gtk4::Label,
-    /// One reserved line for everything the card has to say: the status of
-    /// the last attempt, or the Caps Lock warning when there is no status.
-    /// They used to be two rows that came and went independently, which is
-    /// two ways for the card to resize while someone is reading it.
-    msg: gtk4::Label,
+    /// Two reserved lines that are never empty. The resting sentence is the
+    /// floor; errors, the Caps Lock edge and fingerprint hints take the line
+    /// in that order and hand it back.
+    caption: Caption,
     clock: gtk4::Label,
     date: gtk4::Label,
 }
@@ -175,15 +176,13 @@ pub struct SurfaceSet {
     /// The compositor is cross-fading the whole surface, so the surfaces must
     /// not also animate themselves in.
     crossfade: Rc<Cell<bool>>,
-    /// Whether to lay out a fingerprint slot at all. Answered before the
-    /// first surface is built (`crate::fp::self_enrolled_blocking` during the
-    /// lock's warm-up); a card built without one can never grow a pill, and a
-    /// card built with one can never be surprised by it.
-    fp_slot: Rc<Cell<bool>>,
-    /// Message-line state, kept here rather than read back off the labels:
-    /// both inputs can change independently and the line renders from both.
+    /// Whether the reader is armed right now. The caption's resting sentence
+    /// is computed from this and nothing else, which is the honesty rule:
+    /// the card names a method only while that method is accepting input.
+    fp_armed: Rc<Cell<bool>>,
+    /// Caps Lock, so a rejection can compose the warning onto its own line
+    /// rather than needing a second row for it.
     caps: Rc<Cell<bool>>,
-    status: Rc<RefCell<(String, StatusKind)>>,
     /// Which of the two colours every surface's commit pixel is drawing.
     pulse: Rc<Cell<u32>>,
 }
@@ -200,18 +199,6 @@ impl SurfaceSet {
     /// motion, not three.
     pub fn set_crossfade(&self, on: bool) {
         self.crossfade.set(on);
-    }
-
-    /// Call before any `build_surface`: does this machine have a fingerprint
-    /// reader worth leaving room for?
-    ///
-    /// The answer decides the card's height, so it has to be known before the
-    /// card exists. `true` lays out a pill-sized slot that stays blank until
-    /// the reader reports in (and goes blank again if it drops out) without
-    /// ever moving anything; `false` builds a card with no slot, which is
-    /// then equally incapable of growing one.
-    pub fn set_fp_expected(&self, expected: bool) {
-        self.fp_slot.set(expected);
     }
 
     /// Build a lock window for one monitor and register it in the set.
@@ -297,9 +284,12 @@ impl SurfaceSet {
         let date = gtk4::Label::builder().label("").build();
         date.add_css_class("lock-date");
 
+        // spacing 0: every gap below is an explicit margin, because the gaps
+        // are deliberately unequal (6 under the field, 16 above the switch
+        // button) and a GtkBox has exactly one spacing to give.
         let card = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
-            .spacing(14)
+            .spacing(0)
             .width_request(360)
             .build();
         card.add_css_class("glass-card");
@@ -341,6 +331,7 @@ impl SurfaceSet {
                 .spacing(10)
                 .halign(gtk4::Align::Center)
                 .build();
+            row.add_css_class("lock-chip-row");
             let active = self.active_user.borrow().clone();
             user_chips = fill_chip_row(&row, &users, &active, &self.on_user_select);
             // One face is no choice at all — the password entry already says
@@ -360,13 +351,20 @@ impl SurfaceSet {
         // Username row (greeter mode only) — the lock authenticates the
         // session user implicitly and never shows it.
         let user_entry = self.user_field.borrow().as_ref().map(|prefill| {
-            let ue = gtk4::Entry::builder()
+            gtk4::Entry::builder()
                 .placeholder_text("Username")
                 .text(prefill)
                 .hexpand(true)
-                .build();
-            ue.add_css_class("lock-entry");
-            ue
+                .build()
+        });
+        // Wrapped in the same field as the password row. Its mark slot is
+        // never painted and is reserved anyway: it is what makes both rows'
+        // text start at the same x, which is a visible benefit where a blank
+        // row is not.
+        let user_field = user_entry.as_ref().map(|ue| {
+            let f = AuthField::new(ue);
+            f.widget().add_css_class("auth-field-user");
+            f
         });
 
         let entry = gtk4::PasswordEntry::builder()
@@ -374,78 +372,40 @@ impl SurfaceSet {
             .placeholder_text("Password")
             .hexpand(true)
             .build();
-        entry.add_css_class("lock-entry");
+        let field = AuthField::new(&entry);
 
-        // Fingerprint pill. Built only when a reader is expected, and then
-        // laid out for good — blank until fprintd claims the device, blank
-        // again if it drops out, never absent. The label is capped rather
-        // than wrapped: a hint long enough to wrap would push the pill past
-        // the card and widen it, which is the same jump sideways.
-        // Hints replace each other in place: the glyph is pinned to the left
-        // edge and the label grows rightwards into space the pill already
-        // owns. Sized to the row above it rather than to its own text, so
-        // "Touch fingerprint reader" and "Try again" are the same object.
-        let fp_label = gtk4::Label::builder()
-            .label("Touch fingerprint reader")
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .xalign(0.0)
-            .hexpand(true)
-            .build();
-        fp_label.add_css_class("lock-fp-label");
-        let fp_pill = self.fp_slot.get().then(|| {
-            let pill = gtk4::Box::builder()
-                .orientation(gtk4::Orientation::Horizontal)
-                .spacing(12)
-                .halign(gtk4::Align::Fill)
-                .build();
-            pill.add_css_class("lock-fp-pill");
-            let fp_glyph = gtk4::Label::builder().label(icons::FINGERPRINT).build();
-            fp_glyph.add_css_class("lock-fp-glyph");
-            pill.append(&fp_glyph);
-            pill.append(&fp_label);
-            crate::slot::reserve(&pill);
-            pill
-        });
-
-        // The card's one message line. Two lines' worth of height, always,
-        // whether it is showing a two-line PAM error, "Wrong password", the
-        // Caps Lock warning or nothing at all. Capped at two lines so no
-        // message can ever claim a third.
-        let msg = gtk4::Label::builder()
-            .halign(gtk4::Align::Center)
-            .justify(gtk4::Justification::Center)
-            .wrap(true)
-            .wrap_mode(gtk4::pango::WrapMode::WordChar)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .lines(2)
-            .max_width_chars(40)
-            .valign(gtk4::Align::Center)
-            .build();
-        msg.add_css_class("lock-message");
-        crate::slot::reserve(&msg);
+        let caption = Caption::new(40);
 
         if let Some(row) = &chip_row {
             card.append(row);
         }
-        if let Some(ue) = &user_entry {
-            card.append(ue);
-            let pw = entry.clone();
-            ue.connect_activate(move |_| {
-                pw.grab_focus();
-            });
+        if let Some(uf) = &user_field {
+            card.append(uf.widget());
+            if let Some(ue) = &user_entry {
+                let pw = entry.clone();
+                ue.connect_activate(move |_| {
+                    pw.grab_focus();
+                });
+            }
         }
-        card.append(&entry);
-        if let Some(pill) = &fp_pill {
-            card.append(pill);
-        }
-        card.append(&msg);
-        if let Some(btn) = &lock_switch {
-            card.append(btn);
-        }
+        card.append(field.widget());
+        card.append(caption.widget());
 
         column.append(&clock);
         column.append(&date);
         column.append(&pane);
+        // Outside the card, deliberately. Inside it, the button bounded the
+        // caption's reserved second line on both sides and turned it back
+        // into the hole this design exists to remove; below the glass it
+        // leaves the caption as the card's last element, so that slack falls
+        // against the bottom padding and reads as margin.
+        //
+        // It is also the card's only non-authentication action, and a link on
+        // the wallpaper is what GNOME does with "Not listed?" for the same
+        // reason.
+        if let Some(btn) = &lock_switch {
+            column.append(btn);
+        }
         overlay.add_overlay(&commit_pixel);
 
         // Face unlock indicator, pinned top-centre under the camera.
@@ -497,6 +457,14 @@ impl SurfaceSet {
         overlay.add_overlay(&column);
         overlay.add_overlay(&face_wrap);
 
+        // An error holds until the next keystroke. A keystroke means the user
+        // has chosen the password path and no longer needs telling what went
+        // wrong with the last one; holding it longer would sit on top of the
+        // resting sentence for no reason.
+        {
+            let caption = caption.clone();
+            entry.connect_changed(move |_| caption.clear_status());
+        }
         entry.connect_activate(move |e| on_submit(e.text().to_string()));
 
         // Keyboard focus lands in the entry as soon as the surface maps;
@@ -538,17 +506,17 @@ impl SurfaceSet {
             chip_row,
             user_chips,
             entry,
-            fp_pill,
-            fp_label,
+            field,
+            user_field,
             face_pill,
             face_ring,
             face_label,
-            msg,
+            caption,
             clock,
             date,
         };
         self.update_surface_clock(&surface);
-        self.render_message(&surface);
+        surface.caption.set_resting(self.resting_text());
         self.inner.borrow_mut().push(surface);
 
         // Deregister when the compositor destroys the surface (monitor
@@ -592,7 +560,14 @@ impl SurfaceSet {
         for s in self.inner.borrow().iter() {
             self.update_surface_clock(s);
             if caps_changed {
-                self.render_message(s);
+                // The mark holds for as long as Caps Lock is on; the words
+                // only mark the edge, because a permanent sentence about a
+                // shift key would sit on top of everything else the caption
+                // has to say for as long as the key is latched.
+                s.field.set_caps(caps_on);
+                if caps_on {
+                    s.caption.caps_edge();
+                }
             }
         }
     }
@@ -689,66 +664,37 @@ impl SurfaceSet {
             .find(|t| !t.is_empty())
     }
 
-    /// What the card has to say about the last attempt. Empty clears it.
-    ///
-    /// The line it lands on is already laid out, so this only ever changes
-    /// what is painted there.
+    /// What the card has to say about the last attempt. Empty clears it,
+    /// dropping the caption back to its resting sentence.
     pub fn set_status(&self, text: &str, kind: StatusKind) {
-        *self.status.borrow_mut() = (text.to_string(), kind);
+        let tone = match kind {
+            StatusKind::Info => Tone::Info,
+            StatusKind::Error => Tone::Error,
+        };
+        let caps = self.caps.get();
         for s in self.inner.borrow().iter() {
-            self.render_message(s);
+            s.caption.status(text, tone, caps);
         }
     }
 
-    /// Paint the message line from the two things that feed it.
+    /// The sentence under everything else: what the user may do right now.
     ///
-    /// A status wins the line, because it answers something the user just
-    /// did; Caps Lock gets it when there is nothing else to say. When both
-    /// are true and the status is a failure they share it, since a rejected
-    /// password with Caps Lock on is one fact, not two — splitting them
-    /// across separate rows left the reader to join them up, and cost a
-    /// resize for the privilege.
-    fn render_message(&self, s: &Surface) {
-        let (text, kind) = self.status.borrow().clone();
-        let caps = self.caps.get();
-        const CAPS: &str = "\u{f0632}  Caps Lock is on";
-        // Markup, so the two facts can be weighted differently on one label:
-        // the rejection in the status colour, the Caps Lock note under it in
-        // a quieter voice. PAM and greetd write some of these strings, so
-        // escape before doing so.
-        let (markup, class) = if !text.is_empty() {
-            let text = glib::markup_escape_text(&text);
-            let markup = match kind {
-                StatusKind::Error if caps => {
-                    format!("{text}\n<span size=\"smaller\" alpha=\"75%\">{CAPS}</span>")
-                }
-                _ => text.to_string(),
-            };
-            (
-                markup,
-                match kind {
-                    StatusKind::Info => "lock-status-info",
-                    StatusKind::Error => "lock-status-error",
-                },
-            )
-        } else if caps {
-            (CAPS.to_string(), "lock-status-caps")
+    /// The honesty rule in one function. It names the reader only while the
+    /// reader is armed — not while fprintd is enumerating, not while the
+    /// device is claimed elsewhere, not on a machine that has none.
+    fn resting_text(&self) -> &'static str {
+        if self.fp_armed.get() {
+            "Touch the reader or enter your password"
         } else {
-            (String::new(), "lock-status-info")
-        };
+            "Enter your password"
+        }
+    }
 
-        for c in ["lock-status-info", "lock-status-error", "lock-status-caps"] {
-            if c != class {
-                s.msg.remove_css_class(c);
-            }
+    fn refresh_resting(&self) {
+        let text = self.resting_text();
+        for s in self.inner.borrow().iter() {
+            s.caption.set_resting(text);
         }
-        s.msg.add_css_class(class);
-        // Keep the old words while the line fades out; replacing them first
-        // would flash the new message at zero opacity and back.
-        if !markup.is_empty() {
-            s.msg.set_markup(&markup);
-        }
-        crate::slot::show(&s.msg, !markup.is_empty());
     }
 
     /// Grey out input while PAM is working; re-enable (and clear) after.
@@ -759,9 +705,13 @@ impl SurfaceSet {
                 ue.set_sensitive(!verifying);
             }
             if verifying {
-                s.card.add_css_class("lock-verifying");
-            } else {
-                s.card.remove_css_class("lock-verifying");
+                s.caption.status("Checking\u{2026}", Tone::Info, false);
+            }
+            s.field.set_busy(verifying);
+            if let Some(uf) = &s.user_field {
+                uf.set_busy(verifying);
+            }
+            if !verifying {
                 s.entry.set_text("");
             }
         }
@@ -831,6 +781,7 @@ impl SurfaceSet {
     /// Wrong password: shake every card (CSS keyframe re-trigger).
     pub fn shake(&self) {
         for s in self.inner.borrow().iter() {
+            s.field.flash_reject();
             let card = s.card.clone();
             card.remove_css_class("lock-shake");
             glib::idle_add_local_once(move || {
@@ -885,18 +836,26 @@ impl SurfaceSet {
         }
     }
 
-    /// Fade the fingerprint pill in or out inside its reserved slot.
+    /// The reader armed, or stood down.
     ///
-    /// No-op on a card built without one — `set_fp_expected(false)` said
-    /// there would be no reader, and a card that grew one anyway would be
-    /// the jump this whole arrangement exists to prevent.
-    pub fn show_fp(&self, visible: bool, label: &str) {
+    /// Lights the mark inside the field, starts the field's pulse, and swaps
+    /// the caption's resting sentence for one that names the reader. Nothing
+    /// here changes an allocation.
+    pub fn set_fp_armed(&self, armed: bool) {
+        if self.fp_armed.replace(armed) == armed {
+            return;
+        }
         for s in self.inner.borrow().iter() {
-            let Some(pill) = &s.fp_pill else { continue };
-            if visible {
-                s.fp_label.set_label(label);
-            }
-            crate::slot::show(pill, visible);
+            s.field.set_fp_armed(armed);
+        }
+        self.refresh_resting();
+    }
+
+    /// Something the reader said about the last touch. Holds the caption for
+    /// a beat, then the resting sentence comes back on its own.
+    pub fn fp_hint(&self, text: &str) {
+        for s in self.inner.borrow().iter() {
+            s.caption.fp_hint(text);
         }
     }
 
