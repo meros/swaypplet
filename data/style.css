@@ -2869,8 +2869,9 @@ revealer {
     50%      { opacity: 0.55; }
 }
 
-/* Completes outward and settles. Short on purpose: it plays while the session
-   is already unlocking, so it must never become something the user waits on. */
+/* Completes outward and settles. Short on purpose: the session holds for the
+   overshoot and then goes (FACE_SETTLE in src/lock/mod.rs), so the part after
+   it is a settle nobody waits on. Lengthening this lengthens the unlock. */
 @keyframes face-ring-ok {
     0%   { transform: scale(0.7); opacity: 0.4; }
     60%  { transform: scale(1.12); opacity: 1; }
@@ -2956,8 +2957,8 @@ revealer {
     box-shadow: 0 0 22px 3px alpha(@accent_secondary, 0.28);
 }
 
-/* Success glows once and stops. It plays while the session is already
-   unlocking, so it must never read as something to wait for. */
+/* Success glows once and stops. The session holds only for the ring's
+   overshoot, so the tail of this plays into a surface on its way out. */
 .face-pill-ok {
     animation: face-pill-ok 550ms ease-out;
 }

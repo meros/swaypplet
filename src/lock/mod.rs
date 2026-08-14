@@ -22,7 +22,7 @@ pub(crate) mod fprint;
 pub mod glass;
 pub mod ui;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -32,6 +32,16 @@ use gtk4::prelude::*;
 use crate::fp::EngineEvent;
 use crate::spawn::spawn_work;
 use ui::{StatusKind, SurfaceSet};
+
+/// How long a matched face stays on screen before the session unlocks.
+///
+/// Sized to the animation rather than picked: `@keyframes face-ring-ok`
+/// (data/style.css) runs 550 ms and does its visible work by the overshoot at
+/// 60%, so holding to roughly there is the whole gesture as far as the eye is
+/// concerned, and the remaining settle is something nobody needs to watch.
+/// The face channel is already polled every 200 ms, so this is under two
+/// ticks and is not what governs how fast an unlock feels.
+const FACE_SETTLE: Duration = Duration::from_millis(350);
 
 const EXIT_UNLOCKED: i32 = 0;
 const EXIT_ERROR: i32 = 1;
@@ -105,11 +115,20 @@ pub fn run() -> ! {
         });
     }
 
+    // One unlock, whoever gets there first. `unlock()` consumes the
+    // session-lock object, so calling it twice is a protocol error that takes
+    // the locker down with it. Password, fingerprint and face all reach it,
+    // and the face path now waits FACE_SETTLE before it calls, which is long
+    // enough for a fingerprint touch or an Enter already queued in the entry
+    // to arrive and unlock the same session again.
+    let unlocking = Rc::new(Cell::new(false));
+
     // ── Password submission ───────────────────────────────────────────
     let on_submit: Rc<dyn Fn(String)> = {
         let surfaces = surfaces.clone();
         let gate = gate.clone();
         let instance = instance.clone();
+        let unlocking = unlocking.clone();
         let user = user.clone();
         Rc::new(move |password: String| {
             if !gate.borrow_mut().try_begin(&password) {
@@ -121,11 +140,15 @@ pub fn run() -> ! {
             let surfaces = surfaces.clone();
             let gate = gate.clone();
             let instance = instance.clone();
+            let unlocking = unlocking.clone();
             spawn_work(
                 move || auth::pam_verify(&user, &password),
                 move |result| match result {
                     Ok(()) => {
                         gate.borrow_mut().finish(true);
+                        if unlocking.replace(true) {
+                            return;
+                        }
                         surfaces.flash_success();
                         instance.unlock();
                     }
@@ -221,20 +244,29 @@ pub fn run() -> ! {
                 let face_rx = face::start(user_for_face.clone());
                 let surfaces = surfaces.clone();
                 let instance = instance_for_face.clone();
+                let unlocking = unlocking.clone();
                 glib::timeout_add_local(Duration::from_millis(200), move || {
                     while let Ok(ev) = face_rx.try_recv() {
                         match ev {
                             EngineEvent::Match(_) => {
-                                // Show the success state and unlock in the
-                                // same pass. The animation plays *as* the
-                                // session unlocks, never before it: half a
-                                // second of celebration in front of the
-                                // unlock is half a second of added latency,
-                                // which would undo the work that made the
-                                // attempt fast in the first place.
+                                // Show the success state, then unlock a beat
+                                // later. Unlocking on the same pass drew the
+                                // feedback onto a surface that was already
+                                // going away, so the one moment the indicator
+                                // had something to say was the one moment it
+                                // could not be read. The hold is the shortest
+                                // thing that fixes that (see FACE_SETTLE);
+                                // long enough to see, short enough that the
+                                // attempt still reads as instant.
+                                if unlocking.replace(true) {
+                                    return glib::ControlFlow::Break;
+                                }
                                 surfaces.show_face(true, "ok", "Recognised you");
                                 surfaces.flash_success();
-                                instance.unlock();
+                                let instance = instance.clone();
+                                glib::timeout_add_local_once(FACE_SETTLE, move || {
+                                    instance.unlock();
+                                });
                                 return glib::ControlFlow::Break;
                             }
                             EngineEvent::Progress(p) => {
@@ -265,6 +297,7 @@ pub fn run() -> ! {
             let rx = fprint::start();
             let surfaces = surfaces.clone();
             let instance = instance_for_fp.clone();
+            let unlocking = unlocking.clone();
             glib::timeout_add_local(Duration::from_millis(40), move || {
                 while let Ok(ev) = rx.try_recv() {
                     match ev {
@@ -273,6 +306,9 @@ pub fn run() -> ! {
                         }
                         EngineEvent::Hint(h) => surfaces.show_fp(true, &h),
                         EngineEvent::Match(_) => {
+                            if unlocking.replace(true) {
+                                return glib::ControlFlow::Break;
+                            }
                             surfaces.flash_success();
                             instance.unlock();
                             return glib::ControlFlow::Break;
