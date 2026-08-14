@@ -30,7 +30,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 
 use crate::alpha::SurfaceAlpha;
-use crate::anim::{ENTER_MS, EXIT_MS, duration, ease_out_cubic};
+use crate::anim::{ENTER_MS, EXIT_MS, duration};
 
 /// Ramp tick. Faster than any refresh rate this machine has, so the value
 /// GTK picks up when it paints is at most one tick stale.
@@ -57,6 +57,20 @@ const WAKE_HOLD_FRAMES: f64 = 4.0;
 const WAKE_HOLD_MIN_MS: f64 = 67.0;
 const WAKE_HOLD_MAX_MS: f64 = 134.0;
 
+/// The entrance parks at 0 for this long before it starts moving.
+///
+/// The first frame a lock surface paints is the most expensive one this
+/// process ever renders — GSK uploads the wallpaper, rasterises the clock's
+/// glyphs and builds the blur pipeline — and the compositor takes on a new
+/// full-screen surface on the same beat. So the frames right after it are the
+/// ones most likely to arrive late, and stepping the multiplier across them
+/// spends the curve's largest deltas exactly where the cadence is worst,
+/// which is what the eye reads as stutter. The hold is invisible (the surface
+/// is transparent throughout) and costs only T0.
+const WARMUP_FRAMES: f64 = 2.0;
+const WARMUP_MIN_MS: f64 = 24.0;
+const WARMUP_MAX_MS: f64 = 40.0;
+
 /// A callback that runs at most once, boxed so it can be taken out of a cell.
 type OnceCb = Box<dyn FnOnce()>;
 
@@ -71,6 +85,8 @@ pub struct LockFade {
     surfaces: RefCell<Vec<Entry>>,
     ramp: RefCell<Option<glib::SourceId>>,
     entered: Cell<bool>,
+    settled: Cell<bool>,
+    on_settled: RefCell<Vec<OnceCb>>,
     pending_paints: Cell<usize>,
     armed: Cell<bool>,
 }
@@ -102,6 +118,8 @@ impl LockFade {
             surfaces: RefCell::new(Vec::new()),
             ramp: RefCell::new(None),
             entered: Cell::new(false),
+            settled: Cell::new(false),
+            on_settled: RefCell::new(Vec::new()),
             pending_paints: Cell::new(0),
             armed: Cell::new(false),
         })
@@ -151,6 +169,7 @@ impl LockFade {
             // still failed, nobody fades, or the outputs would disagree.
             self.enabled.set(false);
             self.broadcast(1.0);
+            self.settle();
             return;
         };
         alpha.set_pending(self.value.get());
@@ -216,6 +235,35 @@ impl LockFade {
         });
     }
 
+    /// Run `cb` once the entrance is over, i.e. once the surface is opaque
+    /// and a layout change can no longer be seen through it.
+    ///
+    /// Everything that arrives from a worker while the lock screen is
+    /// see-through has to come through here. A card that grows mid-ramp is a
+    /// jump the fade cannot hide, and the work behind it (a chip rebuild, an
+    /// avatar decode) lands on the frames with the least slack, so a late
+    /// answer costs both the layout and the cadence.
+    pub fn on_settled(self: &Rc<Self>, cb: impl FnOnce() + 'static) {
+        if !self.enabled.get() || self.settled.get() {
+            cb();
+            return;
+        }
+        self.on_settled.borrow_mut().push(Box::new(cb));
+    }
+
+    /// Idempotent, and never skipped: the ramp runs on a wall clock and
+    /// `arm_fallback` guarantees it starts, so anything queued here runs even
+    /// on the paths where no frame is ever painted.
+    fn settle(&self) {
+        if self.settled.replace(true) {
+            return;
+        }
+        let queued: Vec<OnceCb> = self.on_settled.borrow_mut().drain(..).collect();
+        for cb in queued {
+            cb();
+        }
+    }
+
     fn broadcast(&self, value: f64) {
         let value = value.clamp(0.0, 1.0);
         self.value.set(value);
@@ -278,16 +326,30 @@ impl LockFade {
         if !self.enabled.get() || self.entered.replace(true) {
             return;
         }
+        let hold = self.frames_ms(WARMUP_FRAMES, WARMUP_MIN_MS, WARMUP_MAX_MS);
         let span = duration(ENTER_MS);
         let start = Instant::now();
+        let cadence = RefCell::new(Some(Cadence::start(self)));
         let this = self.clone();
         let id = glib::timeout_add_local(TICK, move || {
-            let t = (start.elapsed().as_secs_f64() * 1000.0 / span).min(1.0);
-            // ease_out_cubic(1.0) is exactly 1.0, which is what promotes the
-            // backdrop to CONFIRMED and releases `locked`.
-            this.broadcast(ease_out_cubic(t));
+            let ms = start.elapsed().as_secs_f64() * 1000.0;
+            if ms < hold {
+                return glib::ControlFlow::Continue;
+            }
+            let t = ((ms - hold) / span).min(1.0);
+            // Smoothstep, for the same reason the exit uses it rather than an
+            // ease: an ease-out spends its biggest step on the very first
+            // frame of the ramp, which on the way in is the frame right
+            // behind the surface's cold first paint. Smoothstep(1.0) is
+            // exactly 1.0, which is what promotes the backdrop to CONFIRMED
+            // and releases `locked`.
+            this.broadcast(t * t * (3.0 - 2.0 * t));
             if t >= 1.0 {
                 *this.ramp.borrow_mut() = None;
+                if let Some(c) = cadence.borrow_mut().take() {
+                    c.finish("enter");
+                }
+                this.settle();
                 return glib::ControlFlow::Break;
             }
             glib::ControlFlow::Continue
@@ -308,6 +370,7 @@ impl LockFade {
         self.cancel();
         self.entered.set(true);
         self.broadcast(1.0);
+        self.settle();
     }
 
     /// Ramp out, then run `then` (always `instance.unlock()`).
@@ -332,9 +395,10 @@ impl LockFade {
     fn start_exit_ramp(self: &Rc<Self>, then: impl FnOnce() + 'static) {
         self.broadcast(WAKE_ALPHA);
 
-        let hold = self.wake_hold_ms();
+        let hold = self.frames_ms(WAKE_HOLD_FRAMES, WAKE_HOLD_MIN_MS, WAKE_HOLD_MAX_MS);
         let span = duration(EXIT_MS);
         let start = Instant::now();
+        let cadence = RefCell::new(Some(Cadence::start(self)));
         let this = self.clone();
         let done: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(Some(Box::new(then)));
 
@@ -353,6 +417,9 @@ impl LockFade {
             if t >= 1.0 {
                 this.broadcast(0.0);
                 *this.ramp.borrow_mut() = None;
+                if let Some(c) = cadence.borrow_mut().take() {
+                    c.finish("exit");
+                }
                 let cb = done.borrow_mut().take();
                 // One more frame, so 0.0 rides a real commit. At 0.0 with a
                 // see-through backdrop, destroying the lock surfaces is then
@@ -369,9 +436,10 @@ impl LockFade {
         *self.ramp.borrow_mut() = Some(id);
     }
 
-    /// Four refresh periods of the slowest attached monitor. Not routed
-    /// through `anim::duration`: this is a vblank count, not an animation.
-    fn wake_hold_ms(&self) -> f64 {
+    /// `frames` refresh periods of the slowest attached monitor, clamped.
+    /// Not routed through `anim::duration`: these are vblank counts, not
+    /// animations, and they do not stretch with the debug scale.
+    fn frames_ms(&self, frames: f64, min: f64, max: f64) -> f64 {
         let mut slowest_mhz = 60_000;
         if let Some(display) = gdk4::Display::default() {
             let monitors = display.monitors();
@@ -385,7 +453,69 @@ impl LockFade {
             }
         }
         let frame_ms = 1_000_000.0 / f64::from(slowest_mhz);
-        (WAKE_HOLD_FRAMES * frame_ms).clamp(WAKE_HOLD_MIN_MS, WAKE_HOLD_MAX_MS)
+        (frames * frame_ms).clamp(min, max)
+    }
+}
+
+/// Paint cadence over one ramp, reported as a single line when it ends.
+///
+/// The multiplier only reaches the compositor when GTK paints, so how a ramp
+/// *looks* is the sequence of paint intervals and not the timer's. One
+/// summary rather than a line per frame: enough to tell a dropped frame from
+/// an even ramp, cheap enough to leave on.
+struct Cadence {
+    clock: Option<gdk4::FrameClock>,
+    handler: Option<glib::SignalHandlerId>,
+    gaps: Rc<RefCell<Vec<f64>>>,
+}
+
+impl Cadence {
+    fn start(fade: &LockFade) -> Cadence {
+        let gaps: Rc<RefCell<Vec<f64>>> = Rc::new(RefCell::new(Vec::new()));
+        let clock = fade
+            .surfaces
+            .borrow()
+            .first()
+            .and_then(|e| e.window.frame_clock());
+        let handler = clock.as_ref().map(|clock| {
+            let gaps = gaps.clone();
+            let last = Cell::new(Instant::now());
+            clock.connect_after_paint(move |_| {
+                let now = Instant::now();
+                gaps.borrow_mut()
+                    .push(now.duration_since(last.get()).as_secs_f64() * 1000.0);
+                last.set(now);
+            })
+        });
+        Cadence {
+            clock,
+            handler,
+            gaps,
+        }
+    }
+
+    fn finish(mut self, what: &str) {
+        if let (Some(clock), Some(id)) = (self.clock.take(), self.handler.take()) {
+            clock.disconnect(id);
+        }
+        let mut gaps = self.gaps.borrow().clone();
+        if gaps.is_empty() {
+            log::info!("lock: {what} fade painted no frames");
+            return;
+        }
+        // The first interval runs from the ramp being armed to the first
+        // frame after it, which on the way in spans the warm-up hold. It is
+        // not a paint interval and would be reported as the worst one.
+        if gaps.len() > 1 {
+            gaps.remove(0);
+        }
+        gaps.sort_by(f64::total_cmp);
+        let median = gaps[gaps.len() / 2];
+        let worst = gaps[gaps.len() - 1];
+        log::info!(
+            "lock: {what} fade {} frames, median {median:.0} ms, worst {worst:.0} ms",
+            gaps.len()
+        );
     }
 }
 

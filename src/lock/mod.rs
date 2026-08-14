@@ -61,6 +61,18 @@ pub(super) fn stage(what: &str) {
     });
 }
 
+/// The chip row's contents, fetched during the warm-up.
+///
+/// Asked for at lock time this answers mid-entrance — it is two D-Bus round
+/// trips, logind and fprintd — and applying it there grows the card while the
+/// surface is still half transparent, which is a jump no cross-fade can hide.
+/// The warm-up has nothing to wait for, so it asks there instead and the
+/// chips are in the first painted frame. What can go stale between warm-up
+/// and lock is the `logged_in` dot; the refresh below corrects it once the
+/// entrance is over.
+static WARM_USERS: std::sync::OnceLock<Vec<crate::switch_user::SwitchUser>> =
+    std::sync::OnceLock::new();
+
 /// Why this lock is happening: `idle`, `manual`, `sleep`, `switch`.
 ///
 /// Set from the `LOCK <reason>` line when the locker was pre-warmed, and from
@@ -131,6 +143,13 @@ fn warm_and_wait() {
     }
     stage("warm: done");
 
+    if crate::switch_user::available()
+        && let Some(list) = crate::switch_user::list()
+    {
+        let _ = WARM_USERS.set(list);
+    }
+    stage("warm: users");
+
     // Tell the supervisor the expensive part is behind us. It does not wait
     // for this -- a LOCK written early simply sits in the pipe -- but it makes
     // the readiness visible in a log or a manual run.
@@ -168,6 +187,26 @@ fn warm_and_wait() {
         reason
     });
     stage("lock commanded");
+}
+
+/// The warm-up's answer, in the shape the surfaces want. Empty when the
+/// warm-up never ran (a cold `swaypplet lock`) or found nobody to switch to,
+/// which leaves the old behaviour: no row, generic button, async refill.
+fn warm_chips() -> Vec<ui::UserChip> {
+    match WARM_USERS.get() {
+        Some(list) if list.len() > 1 => chips_from(list),
+        _ => Vec::new(),
+    }
+}
+
+fn chips_from(list: &[crate::switch_user::SwitchUser]) -> Vec<ui::UserChip> {
+    list.iter()
+        .map(|u| ui::UserChip {
+            user: u.user.clone(),
+            logged_in: u.logged_in,
+            icon: u.icon.clone(),
+        })
+        .collect()
 }
 
 const EXIT_UNLOCKED: i32 = 0;
@@ -225,7 +264,7 @@ pub fn run() -> ! {
     if crate::switch_user::available() {
         let surfaces_cb = surfaces.clone();
         surfaces.enable_user_chips(
-            &[],
+            &warm_chips(),
             Rc::new(move |target: String| {
                 if Some(&target) == auth::current_username().as_ref() {
                     surfaces_cb.focus_entry();
@@ -242,21 +281,18 @@ pub fn run() -> ! {
             }),
         );
         // Off-thread: logind + fprintd round trips must never delay the
-        // lock surface. The row is hidden until this lands.
+        // lock surface. Usually this only confirms what the warm-up already
+        // put on screen, in which case `set_user_chips` does nothing at all.
         let surfaces = surfaces.clone();
+        let fade_for_chips = fade.clone();
         spawn_work(crate::switch_user::list, move |list| {
             let Some(list) = list.filter(|l| l.len() > 1) else {
                 return;
             };
-            let chips: Vec<ui::UserChip> = list
-                .iter()
-                .map(|u| ui::UserChip {
-                    user: u.user.clone(),
-                    logged_in: u.logged_in,
-                    icon: u.icon.clone(),
-                })
-                .collect();
-            surfaces.set_user_chips(&chips);
+            let chips = chips_from(&list);
+            // Never mid-entrance: a row appearing under a half-transparent
+            // surface is the one layout change the fade cannot absorb.
+            fade_for_chips.on_settled(move || surfaces.set_user_chips(&chips));
         });
     }
 

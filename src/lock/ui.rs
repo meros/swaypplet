@@ -25,7 +25,7 @@ use crate::switch_user;
 /// takes you to that person's session. Only the plumbing behind the click
 /// differs (greetd start vs. `loginctl activate`), and the person tapping
 /// the screen should never have to know which one they are on.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct UserChip {
     pub user: String,
     pub logged_in: bool,
@@ -295,7 +295,11 @@ impl SurfaceSet {
         // Lock mode fallback for when the chip query comes back empty or
         // fails: one button to a greeter, which can pick for itself.
         // `set_user_chips` hides it as soon as real chips arrive.
-        let lock_switch = (!greet_mode && switch_user::available()).then(build_switch_button);
+        let lock_switch = (!greet_mode && switch_user::available()).then(|| {
+            let btn = build_switch_button();
+            btn.set_visible(users.len() < 2);
+            btn
+        });
 
         // Username row (greeter mode only) — the lock authenticates the
         // session user implicitly and never shows it.
@@ -519,6 +523,9 @@ impl SurfaceSet {
     /// the surface was on screen long before this landed. No-op for
     /// surfaces built without a chip row.
     pub fn set_user_chips(&self, users: &[UserChip]) {
+        if *self.users.borrow() == users {
+            return;
+        }
         *self.users.borrow_mut() = users.to_vec();
         let active = self.active_user.borrow().clone();
         for s in self.inner.borrow_mut().iter_mut() {
