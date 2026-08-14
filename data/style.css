@@ -1981,6 +1981,21 @@ revealer {
     background-color: transparent;
 }
 
+/* ── Reserved space (see src/slot.rs) ──
+   A row whose space is held for the life of the card, painted or not. The
+   authentication cards are assembled out of these: whether a fingerprint
+   reader armed, whether Caps Lock is on, what went wrong last time — all of
+   it arrives after the card does, and none of it may change the card's size.
+   Fading is the only thing left, and 160ms is short enough that a hint
+   replacing another reads as a change rather than a transition. */
+.slot {
+    transition: opacity 160ms ease;
+}
+
+.slot.slot-empty {
+    opacity: 0;
+}
+
 .polkit-container,
 .lock-card {
     padding: 24px 26px;
@@ -2032,9 +2047,11 @@ revealer {
     transition: border-color 200ms ease;
 }
 
-/* Pulse while the reader is armed (the lock pill only shows then). */
+/* Pulse only while the reader is actually armed. The pill's space is held
+   whether or not it is, and a blank slot breathing its border is a repaint
+   every frame for a row nobody can see. */
 .polkit-fp-pill.polkit-fp-active,
-.lock-fp-pill {
+.lock-fp-pill:not(.slot-empty) {
     animation: auth-fp-pulse 2s ease-in-out infinite;
 }
 
@@ -2125,8 +2142,7 @@ revealer {
 
 .lock-card.lock-handoff .lock-entry,
 .lock-card.lock-handoff .lock-fp-pill,
-.lock-card.lock-handoff .lock-caps,
-.lock-card.lock-handoff .lock-status,
+.lock-card.lock-handoff .lock-message,
 .lock-card.lock-handoff .lock-switch-user {
     opacity: 0;
     transition: opacity 180ms ease 50ms;
@@ -2227,13 +2243,11 @@ revealer {
     background-color: alpha(@accent, 0.35);
 }
 
-/* ── Caps Lock warning ── */
-.polkit-caps,
-.lock-caps {
-    font-size: 12px;
-    font-weight: 600;
-    color: @yellow;
-}
+/* ── Caps Lock warning ──
+   No row of its own anywhere. It shares the message line with the status on
+   all three cards, because a rejected password with Caps Lock on is one fact
+   and used to be printed as two — in two rows that appeared and vanished
+   independently, which is two ways for a card to resize under a reader. */
 
 /* ── Identity picker ── */
 .polkit-identity-row {
@@ -2255,11 +2269,17 @@ revealer {
     color: @fg;
 }
 
-/* ── Status line ── */
+/* ── Status line ──
+   Two lines of height, reserved, always. One line would fit everything this
+   code says itself ("Wrong password", "Switching\2026"), but not everything
+   PAM and greetd hand it, and a card that grows for the one long message is a
+   card that grows exactly when someone is reading it. The labels are capped
+   at two lines to match, so nothing can claim a third. */
 .polkit-status,
-.lock-status {
+.lock-message {
     font-size: 13px;
     margin-top: 2px;
+    min-height: 36px;
 }
 
 .polkit-status-info,
@@ -2267,6 +2287,12 @@ revealer {
 .polkit-status-error,
 .lock-status-error     { color: @red; font-weight: 600; }
 .polkit-status-success { color: @accent; font-weight: 600; }
+
+/* Caps Lock, when it has the message line to itself. Warning-coloured rather
+   than error-coloured: nothing has gone wrong yet, and saying so in red would
+   spend on a shift key the alarm that belongs to a refused password. */
+.polkit-status-caps,
+.lock-status-caps      { color: @yellow; font-weight: 600; }
 
 /* ── Details disclosure ── */
 .polkit-details-toggle {
@@ -2816,11 +2842,20 @@ revealer {
    The ring is drawn here rather than set as a font glyph because it has to
    move: sweep while looking, lock when a face is found, complete on a match,
    break on a failure. A glyph can do none of that. */
+/* Fixed width, shared by the lock screen's indicator and the elevate cue.
+   The wording changes as the check proceeds -- "Looking for you", "Hold
+   still", "Didn't recognise you" -- and a pill sized to its own text would
+   grow and shrink around a ring the user is watching. One box, one place,
+   the words change inside it. */
 .face-pill {
     background-color: @surface;
     border: 1px solid @border_strong;
     border-radius: 999px;
     padding: 8px 18px 8px 14px;
+    /* Exactly the width of the card's rows below it (360 card - 2x26 padding,
+       less this pill's own padding and border), so the indicator, the
+       password box and the fingerprint pill share one pair of edges. */
+    min-width: 274px;
 }
 
 .face-pill-label {

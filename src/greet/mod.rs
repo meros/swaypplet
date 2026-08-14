@@ -209,6 +209,13 @@ pub fn run() -> ! {
 
     let surfaces = SurfaceSet::new();
     surfaces.enable_user_field(&default_user);
+    // Leave room for the fingerprint pill whenever there is an fp-agent to
+    // arm the reader, and never mind which user is selected: the pill fades
+    // between targets inside a slot that was laid out before the greeter was
+    // ever presented, so retargeting cannot move the card. Without an agent
+    // the reader is unreachable from here and the slot would only ever be
+    // blank, so the card is built without one.
+    surfaces.set_fp_expected(std::path::Path::new(&crate::fp::agent::sock_path()).exists());
 
     let st = Rc::new(RefCell::new(State {
         tx,

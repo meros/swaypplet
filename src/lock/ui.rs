@@ -104,7 +104,11 @@ impl WakeCmd {
     }
 }
 
+/// Stored, not just passed through: the message line re-renders whenever
+/// Caps Lock changes, and it has to remember how the last status was meant.
+#[derive(Clone, Copy, Default)]
 pub enum StatusKind {
+    #[default]
     Info,
     Error,
 }
@@ -129,11 +133,12 @@ struct Surface {
     /// empty and hidden.
     chip_row: Option<gtk4::Box>,
     user_chips: Vec<(String, gtk4::Button)>,
-    /// Lock mode: the "Switch user" fallback, retired once real chips land.
-    switch_btn: Option<gtk4::Button>,
     entry: gtk4::PasswordEntry,
-    status: gtk4::Label,
-    fp_pill: gtk4::Box,
+    /// The fingerprint pill's slot, or `None` on a card built without one.
+    /// Reserved from the first frame when it exists (see [`crate::slot`]):
+    /// fprintd answers hundreds of milliseconds after the surface maps, and
+    /// that is exactly the window the entrance is playing in.
+    fp_pill: Option<gtk4::Box>,
     fp_label: gtk4::Label,
     /// Face unlock indicator. Pinned to the top of the screen rather than
     /// placed in the card, so it sits under the camera and does not move
@@ -144,7 +149,11 @@ struct Surface {
     face_pill: gtk4::Box,
     face_ring: gtk4::Box,
     face_label: gtk4::Label,
-    caps: gtk4::Label,
+    /// One reserved line for everything the card has to say: the status of
+    /// the last attempt, or the Caps Lock warning when there is no status.
+    /// They used to be two rows that came and went independently, which is
+    /// two ways for the card to resize while someone is reading it.
+    msg: gtk4::Label,
     clock: gtk4::Label,
     date: gtk4::Label,
 }
@@ -166,6 +175,15 @@ pub struct SurfaceSet {
     /// The compositor is cross-fading the whole surface, so the surfaces must
     /// not also animate themselves in.
     crossfade: Rc<Cell<bool>>,
+    /// Whether to lay out a fingerprint slot at all. Answered before the
+    /// first surface is built (`crate::fp::self_enrolled_blocking` during the
+    /// lock's warm-up); a card built without one can never grow a pill, and a
+    /// card built with one can never be surprised by it.
+    fp_slot: Rc<Cell<bool>>,
+    /// Message-line state, kept here rather than read back off the labels:
+    /// both inputs can change independently and the line renders from both.
+    caps: Rc<Cell<bool>>,
+    status: Rc<RefCell<(String, StatusKind)>>,
     /// Which of the two colours every surface's commit pixel is drawing.
     pulse: Rc<Cell<u32>>,
 }
@@ -182,6 +200,18 @@ impl SurfaceSet {
     /// motion, not three.
     pub fn set_crossfade(&self, on: bool) {
         self.crossfade.set(on);
+    }
+
+    /// Call before any `build_surface`: does this machine have a fingerprint
+    /// reader worth leaving room for?
+    ///
+    /// The answer decides the card's height, so it has to be known before the
+    /// card exists. `true` lays out a pill-sized slot that stays blank until
+    /// the reader reports in (and goes blank again if it drops out) without
+    /// ever moving anything; `false` builds a card with no slot, which is
+    /// then equally incapable of growing one.
+    pub fn set_fp_expected(&self, expected: bool) {
+        self.fp_slot.set(expected);
     }
 
     /// Build a lock window for one monitor and register it in the set.
@@ -313,17 +343,19 @@ impl SurfaceSet {
                 .build();
             let active = self.active_user.borrow().clone();
             user_chips = fill_chip_row(&row, &users, &active, &self.on_user_select);
+            // One face is no choice at all — the password entry already says
+            // who you are. Only a real picker earns the vertical space, and
+            // this is the only moment that judgement may be made: from here
+            // on the card's height is fixed.
+            row.set_visible(users.len() > 1);
             row
         });
 
-        // Lock mode fallback for when the chip query comes back empty or
-        // fails: one button to a greeter, which can pick for itself.
-        // `set_user_chips` hides it as soon as real chips arrive.
-        let lock_switch = (!greet_mode && switch_user::available()).then(|| {
-            let btn = build_switch_button();
-            btn.set_visible(users.len() < 2);
-            btn
-        });
+        // Lock mode fallback for when the warm-up found nobody to switch to:
+        // one button to a greeter, which can pick for itself. Shown or not
+        // shown for the life of the card, like everything else in it.
+        let lock_switch =
+            (!greet_mode && switch_user::available() && users.len() < 2).then(build_switch_button);
 
         // Username row (greeter mode only) — the lock authenticates the
         // session user implicitly and never shows it.
@@ -344,37 +376,53 @@ impl SurfaceSet {
             .build();
         entry.add_css_class("lock-entry");
 
-        // Fingerprint pill — hidden until the reader is claimed.
-        let fp_pill = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(10)
-            .halign(gtk4::Align::Center)
-            .visible(false)
-            .build();
-        fp_pill.add_css_class("lock-fp-pill");
-        let fp_glyph = gtk4::Label::builder().label(icons::FINGERPRINT).build();
-        fp_glyph.add_css_class("lock-fp-glyph");
+        // Fingerprint pill. Built only when a reader is expected, and then
+        // laid out for good — blank until fprintd claims the device, blank
+        // again if it drops out, never absent. The label is capped rather
+        // than wrapped: a hint long enough to wrap would push the pill past
+        // the card and widen it, which is the same jump sideways.
+        // Hints replace each other in place: the glyph is pinned to the left
+        // edge and the label grows rightwards into space the pill already
+        // owns. Sized to the row above it rather than to its own text, so
+        // "Touch fingerprint reader" and "Try again" are the same object.
         let fp_label = gtk4::Label::builder()
             .label("Touch fingerprint reader")
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .xalign(0.0)
+            .hexpand(true)
             .build();
         fp_label.add_css_class("lock-fp-label");
-        fp_pill.append(&fp_glyph);
-        fp_pill.append(&fp_label);
+        let fp_pill = self.fp_slot.get().then(|| {
+            let pill = gtk4::Box::builder()
+                .orientation(gtk4::Orientation::Horizontal)
+                .spacing(12)
+                .halign(gtk4::Align::Fill)
+                .build();
+            pill.add_css_class("lock-fp-pill");
+            let fp_glyph = gtk4::Label::builder().label(icons::FINGERPRINT).build();
+            fp_glyph.add_css_class("lock-fp-glyph");
+            pill.append(&fp_glyph);
+            pill.append(&fp_label);
+            crate::slot::reserve(&pill);
+            pill
+        });
 
-        let caps = gtk4::Label::builder()
-            .label("\u{f0632}  Caps Lock is on")
+        // The card's one message line. Two lines' worth of height, always,
+        // whether it is showing a two-line PAM error, "Wrong password", the
+        // Caps Lock warning or nothing at all. Capped at two lines so no
+        // message can ever claim a third.
+        let msg = gtk4::Label::builder()
             .halign(gtk4::Align::Center)
-            .visible(false)
-            .build();
-        caps.add_css_class("lock-caps");
-
-        let status = gtk4::Label::builder()
-            .halign(gtk4::Align::Center)
+            .justify(gtk4::Justification::Center)
             .wrap(true)
+            .wrap_mode(gtk4::pango::WrapMode::WordChar)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .lines(2)
             .max_width_chars(40)
-            .visible(false)
+            .valign(gtk4::Align::Center)
             .build();
-        status.add_css_class("lock-status");
+        msg.add_css_class("lock-message");
+        crate::slot::reserve(&msg);
 
         if let Some(row) = &chip_row {
             card.append(row);
@@ -387,9 +435,10 @@ impl SurfaceSet {
             });
         }
         card.append(&entry);
-        card.append(&fp_pill);
-        card.append(&caps);
-        card.append(&status);
+        if let Some(pill) = &fp_pill {
+            card.append(pill);
+        }
+        card.append(&msg);
         if let Some(btn) = &lock_switch {
             card.append(btn);
         }
@@ -400,6 +449,12 @@ impl SurfaceSet {
         overlay.add_overlay(&commit_pixel);
 
         // Face unlock indicator, pinned top-centre under the camera.
+        // Built like the fingerprint pill and for the same reason: the ring
+        // is what the eye tracks, so it is pinned to the left edge and the
+        // wording changes underneath a shape that does not. `.face-pill`
+        // carries a fixed width in the stylesheet, shared with the elevate
+        // cue, so "Looking for you" and "Didn't recognise you" occupy exactly
+        // the same box.
         let face_pill = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .spacing(12)
@@ -416,7 +471,12 @@ impl SurfaceSet {
             .height_request(22)
             .build();
         face_ring.add_css_class("face-ring");
-        let face_label = gtk4::Label::builder().label("").build();
+        let face_label = gtk4::Label::builder()
+            .label("")
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .xalign(0.0)
+            .hexpand(true)
+            .build();
         face_label.add_css_class("face-pill-label");
         face_pill.append(&face_ring);
         face_pill.append(&face_label);
@@ -477,19 +537,18 @@ impl SurfaceSet {
             user_entry,
             chip_row,
             user_chips,
-            switch_btn: lock_switch,
             entry,
-            status,
             fp_pill,
             fp_label,
             face_pill,
             face_ring,
             face_label,
-            caps,
+            msg,
             clock,
             date,
         };
         self.update_surface_clock(&surface);
+        self.render_message(&surface);
         self.inner.borrow_mut().push(surface);
 
         // Deregister when the compositor destroys the surface (monitor
@@ -526,12 +585,15 @@ impl SurfaceSet {
         }
     }
 
-    /// Tick: clock, date, and caps-lock indicator on every surface.
+    /// Tick: clock, date, and caps-lock state on every surface.
     pub fn tick(&self) {
         let caps_on = caps_lock_state();
+        let caps_changed = self.caps.replace(caps_on) != caps_on;
         for s in self.inner.borrow().iter() {
             self.update_surface_clock(s);
-            s.caps.set_visible(caps_on);
+            if caps_changed {
+                self.render_message(s);
+            }
         }
     }
 
@@ -569,9 +631,16 @@ impl SurfaceSet {
 
     /// Refill the chip rows once the session/enrollment query resolves —
     /// in the greeter, upgrading env-name chips to avatars + presence; on
-    /// the lock screen, populating the row for the first time. Either way
-    /// the surface was on screen long before this landed. No-op for
-    /// surfaces built without a chip row.
+    /// the lock screen, confirming what the warm-up already drew. Either way
+    /// the surface was on screen long before this landed. No-op for surfaces
+    /// built without a chip row.
+    ///
+    /// Contents only. Whether the row and the fallback button are on screen
+    /// was settled when the card was built, and stays settled: a picker that
+    /// materialised here would push the whole card down at a moment when the
+    /// user is already typing into it. The cost is a card that was built
+    /// without a picker keeping none for this one lock — the "Switch user"
+    /// button it does have reaches the same place by way of a greeter.
     pub fn set_user_chips(&self, users: &[UserChip]) {
         if *self.users.borrow() == users {
             return;
@@ -583,11 +652,6 @@ impl SurfaceSet {
                 continue;
             };
             s.user_chips = fill_chip_row(&row, users, &active, &self.on_user_select);
-            // Real faces beat a generic button; the greeter the button
-            // would have opened is one chip click away anyway.
-            if let Some(btn) = &s.switch_btn {
-                btn.set_visible(users.len() < 2);
-            }
         }
     }
 
@@ -625,17 +689,66 @@ impl SurfaceSet {
             .find(|t| !t.is_empty())
     }
 
+    /// What the card has to say about the last attempt. Empty clears it.
+    ///
+    /// The line it lands on is already laid out, so this only ever changes
+    /// what is painted there.
     pub fn set_status(&self, text: &str, kind: StatusKind) {
+        *self.status.borrow_mut() = (text.to_string(), kind);
         for s in self.inner.borrow().iter() {
-            s.status.set_visible(!text.is_empty());
-            s.status.set_label(text);
-            s.status.remove_css_class("lock-status-error");
-            s.status.remove_css_class("lock-status-info");
-            s.status.add_css_class(match kind {
-                StatusKind::Info => "lock-status-info",
-                StatusKind::Error => "lock-status-error",
-            });
+            self.render_message(s);
         }
+    }
+
+    /// Paint the message line from the two things that feed it.
+    ///
+    /// A status wins the line, because it answers something the user just
+    /// did; Caps Lock gets it when there is nothing else to say. When both
+    /// are true and the status is a failure they share it, since a rejected
+    /// password with Caps Lock on is one fact, not two — splitting them
+    /// across separate rows left the reader to join them up, and cost a
+    /// resize for the privilege.
+    fn render_message(&self, s: &Surface) {
+        let (text, kind) = self.status.borrow().clone();
+        let caps = self.caps.get();
+        const CAPS: &str = "\u{f0632}  Caps Lock is on";
+        // Markup, so the two facts can be weighted differently on one label:
+        // the rejection in the status colour, the Caps Lock note under it in
+        // a quieter voice. PAM and greetd write some of these strings, so
+        // escape before doing so.
+        let (markup, class) = if !text.is_empty() {
+            let text = glib::markup_escape_text(&text);
+            let markup = match kind {
+                StatusKind::Error if caps => {
+                    format!("{text}\n<span size=\"smaller\" alpha=\"75%\">{CAPS}</span>")
+                }
+                _ => text.to_string(),
+            };
+            (
+                markup,
+                match kind {
+                    StatusKind::Info => "lock-status-info",
+                    StatusKind::Error => "lock-status-error",
+                },
+            )
+        } else if caps {
+            (CAPS.to_string(), "lock-status-caps")
+        } else {
+            (String::new(), "lock-status-info")
+        };
+
+        for c in ["lock-status-info", "lock-status-error", "lock-status-caps"] {
+            if c != class {
+                s.msg.remove_css_class(c);
+            }
+        }
+        s.msg.add_css_class(class);
+        // Keep the old words while the line fades out; replacing them first
+        // would flash the new message at zero opacity and back.
+        if !markup.is_empty() {
+            s.msg.set_markup(&markup);
+        }
+        crate::slot::show(&s.msg, !markup.is_empty());
     }
 
     /// Grey out input while PAM is working; re-enable (and clear) after.
@@ -772,12 +885,18 @@ impl SurfaceSet {
         }
     }
 
+    /// Fade the fingerprint pill in or out inside its reserved slot.
+    ///
+    /// No-op on a card built without one — `set_fp_expected(false)` said
+    /// there would be no reader, and a card that grew one anyway would be
+    /// the jump this whole arrangement exists to prevent.
     pub fn show_fp(&self, visible: bool, label: &str) {
         for s in self.inner.borrow().iter() {
-            s.fp_pill.set_visible(visible);
+            let Some(pill) = &s.fp_pill else { continue };
             if visible {
                 s.fp_label.set_label(label);
             }
+            crate::slot::show(pill, visible);
         }
     }
 
@@ -805,6 +924,9 @@ impl SurfaceSet {
 /// shared select callback. Returns the (name, button) handles so the surface
 /// can toggle the active class on username changes. Shared by the initial
 /// `build_content` and the async `set_greet_chips` refill.
+///
+/// Whether the row is on screen is decided once, by `build_content`, and is
+/// deliberately not this function's business — see `set_user_chips`.
 fn fill_chip_row(
     row: &gtk4::Box,
     users: &[UserChip],
@@ -814,9 +936,6 @@ fn fill_chip_row(
     while let Some(child) = row.first_child() {
         row.remove(&child);
     }
-    // One face is no choice at all — the password entry already says who
-    // you are. Only a real picker earns the vertical space.
-    row.set_visible(users.len() > 1);
     let mut chips = Vec::with_capacity(users.len());
     for u in users {
         let chip = avatar_chip(&u.user, u.icon.as_deref(), u.logged_in, u.user == active);
@@ -893,6 +1012,12 @@ fn wallpaper_path() -> Option<String> {
 }
 
 fn caps_lock_state() -> bool {
+    // Dev hook, same family as SWAYPPLET_PREVIEW_AVATAR: the headless render
+    // harness has no keyboard to latch, and the Caps Lock line is one of the
+    // states whose arrival has to be shown not to move the card.
+    if let Ok(v) = std::env::var("SWAYPPLET_PREVIEW_CAPS") {
+        return v == "1";
+    }
     gdk4::Display::default()
         .and_then(|d| d.default_seat())
         .and_then(|seat| seat.keyboard())
