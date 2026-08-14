@@ -43,11 +43,29 @@ use ui::{StatusKind, SurfaceSet};
 /// ticks and is not what governs how fast an unlock feels.
 const FACE_SETTLE: Duration = Duration::from_millis(350);
 
+/// Startup timing, in milliseconds since `run()` was entered.
+///
+/// The lock screen takes about a second to appear, and the cross-fade work
+/// (docs/LOCK_TRANSITION_WIP.md) is gated on where that second goes. Attribute
+/// it rather than guess: every stage below is a point the measurement needed.
+/// Debug level, so it costs a branch in normal use.
+pub(super) fn stage(what: &str) {
+    thread_local! {
+        static START: std::cell::OnceCell<std::time::Instant> =
+            const { std::cell::OnceCell::new() };
+    }
+    START.with(|cell| {
+        let start = cell.get_or_init(std::time::Instant::now);
+        log::debug!("lock startup: {what} at {} ms", start.elapsed().as_millis());
+    });
+}
+
 const EXIT_UNLOCKED: i32 = 0;
 const EXIT_ERROR: i32 = 1;
 const EXIT_UNAVAILABLE: i32 = 2;
 
 pub fn run() -> ! {
+    stage("entry");
     if let Err(e) = gtk4::init() {
         eprintln!("swaypplet lock: GTK init failed: {e}");
         std::process::exit(EXIT_ERROR);
@@ -57,6 +75,7 @@ pub fn run() -> ! {
         std::process::exit(EXIT_UNAVAILABLE);
     }
 
+    stage("gtk init");
     let instance = gtk4_session_lock::Instance::new();
 
     let Some(user) = auth::current_username() else {
@@ -65,6 +84,7 @@ pub fn run() -> ! {
     };
 
     crate::theme::load_css();
+    stage("css");
 
     let main_loop = glib::MainLoop::new(None, false);
     let exit_code = Rc::new(RefCell::new(EXIT_ERROR));
@@ -202,10 +222,29 @@ pub fn run() -> ! {
     {
         let surfaces = surfaces.clone();
         let on_submit = on_submit.clone();
+        let first_frame_hooked = std::cell::Cell::new(false);
         instance.connect_monitor(move |instance, monitor| {
+            stage("monitor: build start");
             let window = surfaces.build_surface(on_submit.clone(), Some(monitor));
+            stage("monitor: built");
             instance.assign_window_to_monitor(&window, monitor);
+            stage("monitor: assigned");
             window.present();
+            stage("monitor: presented");
+            // T0, the number the cross-fade is gated on: the first frame GTK
+            // actually paints. Hooked on the first monitor only, and once.
+            if !first_frame_hooked.replace(true) {
+                if let Some(clock) = window.frame_clock() {
+                    let id = Rc::new(RefCell::new(None));
+                    let id_c = id.clone();
+                    *id.borrow_mut() = Some(clock.connect_after_paint(move |clock| {
+                        stage("FIRST FRAME painted");
+                        if let Some(id) = id_c.borrow_mut().take() {
+                            clock.disconnect(id);
+                        }
+                    }));
+                }
+            }
         });
     }
 
@@ -327,6 +366,7 @@ pub fn run() -> ! {
         });
     }
 
+    stage("before lock()");
     if !instance.lock() {
         // ::failed also fires (and would quit the loop), but when lock()
         // reports synchronous failure the loop may not be running yet.
