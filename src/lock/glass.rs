@@ -152,7 +152,7 @@ impl GlassPane {
         let start = glib::monotonic_time();
         let id = self.add_tick_callback(move |pane, _| {
             let t = (((glib::monotonic_time() - start) as f64 / 1000.0) / ms).clamp(0.0, 1.0);
-            pane.set_blur_radius(from + (target - from) * crate::anim::ease_out_cubic(t));
+            pane.set_blur_radius(from + (target - from) * crate::anim::decelerate(t));
             if t >= 1.0 {
                 pane.imp().ramp.take();
                 glib::ControlFlow::Break

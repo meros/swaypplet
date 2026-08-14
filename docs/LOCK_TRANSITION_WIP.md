@@ -313,7 +313,8 @@ status and Caps Lock rows appeared and vanished under it afterwards. Each
 arrival grew the card downward and re-centred the whole column, so the thing
 the fade was ramping up was also sliding around.
 
-The rule now, enforced by `src/slot.rs`: **a card's geometry is decided when it
+The rule now, stated in `docs/AUTH_CARD.md` and kept by `src/auth_field.rs`:
+**a card's geometry is decided when it
 is built and never changes again.** Anything that can arrive late is laid out
 from the first frame and only painted or not — a fingerprint pill in a
 reserved row, one message line carrying the status and the Caps Lock warning

@@ -428,7 +428,7 @@ impl DecisionSlot {
         let id = inner.hairline.add_tick_callback(move |area, _| {
             let t =
                 (((glib::monotonic_time() - start) as f64 / 1000.0) / OSD_EASE_MS).clamp(0.0, 1.0);
-            shown.set(from + (target - from) * anim::ease_out_cubic(t));
+            shown.set(from + (target - from) * anim::standard(t));
             area.queue_draw();
             if t >= 1.0 {
                 tick.borrow_mut().take();

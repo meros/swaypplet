@@ -446,13 +446,24 @@ impl SurfaceSet {
         // by every state class -- and every looking -> face edge would replay
         // the arrival, dropping the pill mid-check. Two nodes, two independent
         // animations.
+        // Frosted like everything else. On a layer surface the compositor
+        // does this (layer_effects, users/modules/sway.nix); a session-lock
+        // surface gets none of that, so the pill borrows the card's
+        // client-side glass and the wallpaper texture that is already
+        // decoded. Without it the pill is the one opaque sticker on an
+        // otherwise frosted screen.
+        let face_glass = super::glass::GlassPane::new();
+        face_glass.set_child(&face_pill);
+        face_glass.set_texture(wallpaper.clone());
+        face_glass.set_blur_radius(super::glass::BLUR_RADIUS);
+
         let face_wrap = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .halign(gtk4::Align::Center)
             .valign(gtk4::Align::Start)
             .build();
         face_wrap.set_margin_top(56);
-        face_wrap.append(&face_pill);
+        face_wrap.append(&face_glass);
 
         overlay.add_overlay(&column);
         overlay.add_overlay(&face_wrap);

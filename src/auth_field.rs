@@ -3,9 +3,16 @@
 //! Design and rationale: `docs/AUTH_CARD.md`. The short version is that the
 //! lock screen, the greeter and the polkit dialog used to be a stack of rows,
 //! one per thing that could ever need saying, each allocated whether or not it
-//! had anything to say. Geometry never moved (that rule is [`crate::slot`] and
-//! it stays), but the resting card was a password box with two empty bands
-//! under it.
+//! had anything to say. Geometry never moved — that rule is stated in
+//! docs/AUTH_CARD.md and it stays — but the resting card was a password box
+//! with two empty bands under it.
+//!
+//! **A card's geometry is decided when it is built and never changes again.**
+//! Anything that can arrive late is laid out from the first frame and only
+//! painted or not; anything that genuinely varies card-to-card is settled
+//! before the surface is presented, where a size change costs nothing. This
+//! module is where that rule is now kept, because the reserved-row machinery
+//! it replaced (`src/slot.rs`) had no callers left once the rows were gone.
 //!
 //! So the rows collapse into one object. [`AuthField`] is a box that carries
 //! all the chrome a text entry used to carry — border, fill, focus, the
@@ -190,7 +197,8 @@ impl AuthField {
     pub fn flash_fp_reject(&self) {
         let mark = self.fp_mark.clone();
         mark.add_css_class("reject");
-        glib::timeout_add_local_once(Duration::from_millis(380), move || {
+        let ms = crate::anim::duration(crate::anim::EMPHASIS_MS) as u64;
+        glib::timeout_add_local_once(Duration::from_millis(ms), move || {
             mark.remove_css_class("reject");
         });
     }

@@ -37,12 +37,12 @@ use ui::{StatusKind, SurfaceSet};
 /// How long a matched face stays on screen before the session unlocks.
 ///
 /// Sized to the animation rather than picked: `@keyframes face-ring-ok`
-/// (data/style.css) runs 550 ms and does its visible work by the overshoot at
-/// 60%, so holding to roughly there is the whole gesture as far as the eye is
+/// (data/style.css) runs 500 ms — the scale's dwell tier, docs/MOTION.md —
+/// and does its visible work by the overshoot at 60%, so holding to roughly there is the whole gesture as far as the eye is
 /// concerned, and the remaining settle is something nobody needs to watch.
 /// The face channel is already polled every 200 ms, so this is under two
 /// ticks and is not what governs how fast an unlock feels.
-const FACE_SETTLE: Duration = Duration::from_millis(350);
+const FACE_SETTLE: Duration = Duration::from_millis(300);
 
 /// Startup timing, in milliseconds since `run()` was entered.
 ///
