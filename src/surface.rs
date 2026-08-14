@@ -52,6 +52,35 @@ struct Inner {
     scale: Cell<f64>,
 }
 
+/// Take the surface down with the last handle to it.
+///
+/// The window is the application's from the moment it is built
+/// ([`layer_shell::create_layer_window`] passes `.application(app)`), and a
+/// `GtkApplication` holds that reference until the window is *destroyed*.
+/// Hiding only unmaps: the window stays on the application's list, realized,
+/// still owning the buffers the renderer allocated for it.
+///
+/// That is invisible for a surface built once and reused, and it is a leak
+/// for the notification stack, which builds one per card. Every stranded
+/// surface held four dmabufs and eight DRM syncobj fds open, so about
+/// eighty-five notifications walked the process into its file-descriptor
+/// limit; the panel then died wherever the next fd was asked for, usually
+/// `vkCreateSwapchainKHR` or the Wayland dispatch.
+///
+/// Destroying here rather than at the notification's call site keeps the
+/// module's contract in one piece: the surface exists while a handle to it
+/// does, and `connect_hidden` stays the moment it is safe to drop the last
+/// one.
+impl Drop for Inner {
+    fn drop(&mut self) {
+        // Order is load-bearing: the compositor alpha handle is bound to this
+        // window's `wl_surface` and has to be destroyed before it, so it goes
+        // first and the window follows.
+        self.reveal.release_alpha();
+        self.window.destroy();
+    }
+}
+
 impl GlassSurface {
     /// Build the surface. The pane starts empty; fill it through [`pane`]
     /// and point the transition at whatever you put there with
