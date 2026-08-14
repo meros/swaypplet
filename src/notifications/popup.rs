@@ -371,8 +371,7 @@ fn retire(st: &Rc<RefCell<State>>, id: u32) {
         // An app with no cards left starts its next burst from zero. The set
         // is collected first because `retain` holds the map borrowed while it
         // runs, and the predicate has to read `cards` on the same struct.
-        let live: std::collections::HashSet<String> =
-            s.active().map(|c| c.app.clone()).collect();
+        let live: std::collections::HashSet<String> = s.active().map(|c| c.app.clone()).collect();
         s.overflow.retain(|app, _| live.contains(app));
     }
     sync_keyboard_mode(st);
@@ -404,12 +403,7 @@ fn reflow(st: &Rc<RefCell<State>>) {
                 let slot = (full_bottom + PEEK * k - height * scale).max(full_top + 2.0 * k);
                 (slot, scale)
             };
-            plan.push((
-                card.surface.clone(),
-                slot,
-                scale,
-                rank >= FULL_VISIBLE,
-            ));
+            plan.push((card.surface.clone(), slot, scale, rank >= FULL_VISIBLE));
         }
         plan
     };
@@ -1039,7 +1033,12 @@ fn populate_card(
             // Fade with distance, so the card reads as leaving rather than
             // sliding. The surface carries both, so the frost goes with it.
             let alpha = (1.0 - dx / (DRAG_DISMISS_PX * 1.6)).clamp(0.0, 1.0);
-            if let Some(card) = st_c.borrow().cards.iter().find(|c| c.id == id && !c.exiting) {
+            if let Some(card) = st_c
+                .borrow()
+                .cards
+                .iter()
+                .find(|c| c.id == id && !c.exiting)
+            {
                 card.surface.drag_to(dx, alpha);
             }
         });
@@ -1051,8 +1050,11 @@ fn populate_card(
         drag.connect_drag_end(move |_, dx, _| {
             if dx >= DRAG_DISMISS_PX {
                 store::store_close(&store_c, id, CloseReason::Dismissed);
-            } else if let Some(card) =
-                st_c.borrow().cards.iter().find(|c| c.id == id && !c.exiting)
+            } else if let Some(card) = st_c
+                .borrow()
+                .cards
+                .iter()
+                .find(|c| c.id == id && !c.exiting)
             {
                 card.surface.settle_back(anim::duration(anim::MOVE_MS));
             }

@@ -177,7 +177,9 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
                     }
                 }
                 if attempts >= MAX_ATTEMPTS {
-                    log::info!("face: {attempts} attempts without a match — waiting for next arrival");
+                    log::info!(
+                        "face: {attempts} attempts without a match — waiting for next arrival"
+                    );
                     armed = None;
                 } else {
                     armed = Some(Instant::now() + RETRY_AFTER);
@@ -246,16 +248,16 @@ fn map_exit(exit: i32, saw_face: bool, outcome: &str, transient: &mut u32) -> At
         // wording, and the daemon is the only thing that knows: "didn't
         // recognise you" and "didn't see you" send the user to completely
         // different actions, so this must not guess.
-        11 => Attempt::Retryable(Some(
-            if saw_face || outcome == "no_match" {
-                "Didn't recognise you".to_string()
-            } else {
-                "Didn't see you".to_string()
-            },
-        )),
-        // Never the user's fault. The emitter or the relay is wrong, and
-        // asking someone to reposition their face would be misleading.
-        13 => Attempt::Retryable(Some("Too dark to see".to_string())),
+        11 => Attempt::Retryable(Some(if saw_face || outcome == "no_match" {
+            "Didn't recognise you".to_string()
+        } else {
+            "Didn't see you".to_string()
+        })),
+        // Never the user's fault, and never the room's: the camera carries
+        // its own illuminator, so nothing lit means the emitter or the relay
+        // is wrong. Asking someone to reposition their face, or to turn a
+        // light on, would be misleading.
+        13 => Attempt::Retryable(Some("No infrared light".to_string())),
         14 => Attempt::Retryable(Some("Face unlock busy".to_string())),
         1 => {
             *transient += 1;

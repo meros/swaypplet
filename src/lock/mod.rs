@@ -464,10 +464,10 @@ pub fn run() -> ! {
             if !first_frame_hooked.replace(true)
                 && let Some(clock) = window.frame_clock()
             {
-                    let id = Rc::new(RefCell::new(None));
-                    let id_c = id.clone();
-                    *id.borrow_mut() = Some(clock.connect_after_paint(move |clock| {
-                        stage("FIRST FRAME painted");
+                let id = Rc::new(RefCell::new(None));
+                let id_c = id.clone();
+                *id.borrow_mut() = Some(clock.connect_after_paint(move |clock| {
+                    stage("FIRST FRAME painted");
                     if let Some(id) = id_c.borrow_mut().take() {
                         clock.disconnect(id);
                     }

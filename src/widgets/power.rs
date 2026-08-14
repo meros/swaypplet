@@ -259,12 +259,10 @@ fn battery_sub_text(bat: &BatteryState) -> String {
         // Plugged but idle: a ThinkPad holding at its charge threshold. Saying
         // "On battery" here was the old bug; there is no direction to report.
         ChargeState::Idle => "Plugged in".to_owned(),
-        ChargeState::Discharging | ChargeState::Unknown => {
-            match estimate(bat.energy_now_wh) {
-                Some(t) => format!("On battery — {} remaining", t),
-                None => "On battery".to_owned(),
-            }
-        }
+        ChargeState::Discharging | ChargeState::Unknown => match estimate(bat.energy_now_wh) {
+            Some(t) => format!("On battery — {} remaining", t),
+            None => "On battery".to_owned(),
+        },
     }
 }
 
@@ -285,9 +283,7 @@ pub(crate) fn eta_text(bat: &BatteryState) -> Option<String> {
             let to_full = (bat.energy_full_wh? - bat.energy_now_wh?).max(0.0);
             format_hours(to_full / power)
         }
-        ChargeState::Discharging | ChargeState::Unknown => {
-            format_hours(bat.energy_now_wh? / power)
-        }
+        ChargeState::Discharging | ChargeState::Unknown => format_hours(bat.energy_now_wh? / power),
         ChargeState::Full | ChargeState::Idle => None,
     }
 }
