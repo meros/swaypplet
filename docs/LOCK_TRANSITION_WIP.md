@@ -5,9 +5,9 @@ directions, with no screenshots and no bad frames. Not a fade to black, not a
 frozen capture of the session: the real desktop, composited live, dissolving
 into the real lock screen.
 
-**Status.** Steps 1 and 2 done. `T₀` is 65 ms, inside the 250 ms budget, so
-the timing problem that blocked the fade is solved. Step 3 (the client-side
-ramp) is next; the compositor half is built and waiting.
+**Status.** Steps 1-3 done. `T₀` is 65 ms, the client ramps its own surface,
+and with an unpatched compositor the whole thing degrades to today's hard cut.
+Step 4 is wiring the compositor patch and seeing it actually fade.
 
 ---
 
@@ -79,10 +79,13 @@ currently takes about a second to appear after Super+L.**
       re-entrant. It is simply spawned early, absorbs the first-window cost
       while nothing waits, and parks on stdin until told `LOCK <reason>`.
       **`T₀` measured at 65 ms**, from 1000 ms.
-- [ ] **Step 3 — Client-side fade.** Ramp the lock surface's
-      `wp_alpha_modifier_v1` multiplier via the existing `SurfaceAlpha`
-      (`src/alpha.rs`), 0→1 on lock and 1→0 on unlock, per the spec in
-      `Artifacts` below.
+- [x] **Step 3 — Client-side fade.** `src/lock/fade.rs`. Multiplier set to 0
+      at `::realize` (before the first buffer, so the first presented frame is
+      exactly 0), ramp started on the first `after-paint`, and every value set
+      as *pending* state with a `queue_draw` rather than committed, because a
+      client commit on a lock surface is `null_buffer` or
+      `dimensions_mismatch` and both are fatal. Verified degrading cleanly on
+      an unpatched compositor: "compositor has no lock_fade; cutting".
 - [ ] **Step 4 — Wire the compositor patch** into the NixOS flake and verify
       the whole transition on hardware.
 

@@ -115,17 +115,26 @@ fn supervise(ev: Sender<Ev>, reason: &'static str) {
     // is the rare path, and warming there would mean holding a spare process
     // for a case that should not happen.
     let mut armed = take_armed();
+    // Suppressed on the sleep path (the deferral would be charged straight to
+    // the logind inhibitor window) and on every relaunch (the compositor is
+    // already holding an abandoned lock, whose backdrop is opaque and pinned,
+    // so a ramp would be ignored anyway).
+    let mut relaunch = false;
 
     loop {
+        let fade = !relaunch && reason != "sleep";
         let mut child = match armed.take() {
             Some(mut child) => {
                 // The reason cannot ride on the environment of a process that
                 // was spawned before anybody knew it.
+                let suffix = if fade { "" } else { " nofade" };
                 let sent = child
                     .stdin
                     .as_mut()
                     .ok_or_else(|| std::io::Error::other("no stdin pipe"))
-                    .and_then(|stdin| writeln!(stdin, "LOCK {reason}").and_then(|()| stdin.flush()));
+                    .and_then(|stdin| {
+                        writeln!(stdin, "LOCK {reason}{suffix}").and_then(|()| stdin.flush())
+                    });
                 match sent {
                     Ok(()) => child,
                     Err(e) => {
@@ -139,6 +148,7 @@ fn supervise(ev: Sender<Ev>, reason: &'static str) {
             None => match Command::new(&exe)
                 .arg("lock")
                 .env("SWAYPPLET_LOCK_REASON", reason)
+                .env("SWAYPPLET_LOCK_FADE", if fade { "1" } else { "0" })
                 .stdout(Stdio::piped())
                 .spawn()
             {
@@ -187,6 +197,7 @@ fn supervise(ev: Sender<Ev>, reason: &'static str) {
                 return;
             }
             _ => {
+                relaunch = true;
                 log::warn!("lock: locker died rc={rc} while locked — re-powering, relaunching");
                 let _ = Command::new("swaymsg")
                     .args(["-q", "output", "*", "power", "on"])
