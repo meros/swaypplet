@@ -128,6 +128,13 @@ pub fn run() -> ! {
     wayland::start(tx.clone());
     let logind = logind::start(tx.clone());
 
+    // Warm the next locker now. The first GTK window a process presents costs
+    // ~880 ms and for a locker spawned at lock time that window IS the lock
+    // screen, which is why locking used to take about a second to show
+    // anything (swaypplet docs/LOCK_TRANSITION_WIP.md). Paying it here, while
+    // the session is unlocked and nobody is waiting, makes it free.
+    locker::prewarm();
+
     let mut locker_active = false;
     // True only between the compositor's lock confirmation (LockerUp) and
     // LockerGone. locker_active alone means "a launch is in flight".
@@ -448,6 +455,10 @@ pub fn run() -> ! {
                     }
                     _ => log::error!("lock: locker never started (rc={rc}) — NOT blanking"),
                 }
+                // Arm the next one straight away, so the warm-up lands now
+                // rather than on whoever locks next. rc=2 included: a lock
+                // that could not be acquired says nothing about the next one.
+                locker::prewarm();
             }
 
             Ev::Fatal(msg) => {

@@ -5,9 +5,9 @@ directions, with no screenshots and no bad frames. Not a fade to black, not a
 frozen capture of the session: the real desktop, composited live, dissolving
 into the real lock screen.
 
-**Status.** Step 1 done, step 2 next. The compositor half is built and
-shelved; the client cannot yet hit the timing window it needs, and fixing that
-is the current work.
+**Status.** Steps 1 and 2 done. `T₀` is 65 ms, inside the 250 ms budget, so
+the timing problem that blocked the fade is solved. Step 3 (the client-side
+ramp) is next; the compositor half is built and waiting.
 
 ---
 
@@ -74,9 +74,11 @@ currently takes about a second to appear after Super+L.**
 - [x] **Step 1 — Break down the second.** Done, see above. `stage()` in
       `src/lock/mod.rs` is permanent, debug level. Answer: 881 ms of one-time
       first-window cost, recovered in full by residency.
-- [ ] **Step 2 — Make the locker resident.** The process starts with the
-      session and stays alive across locks. The supervisor tells it to lock
-      rather than spawning it. Re-measure `T₀`.
+- [x] **Step 2 — Pre-warm the locker.** Done, and smaller than full residency:
+      the process is still one-lock-per-process, so nothing had to become
+      re-entrant. It is simply spawned early, absorbs the first-window cost
+      while nothing waits, and parks on stdin until told `LOCK <reason>`.
+      **`T₀` measured at 65 ms**, from 1000 ms.
 - [ ] **Step 3 — Client-side fade.** Ramp the lock surface's
       `wp_alpha_modifier_v1` multiplier via the existing `SurfaceAlpha`
       (`src/alpha.rs`), 0→1 on lock and 1→0 on unlock, per the spec in
@@ -86,38 +88,51 @@ currently takes about a second to appear after Super+L.**
 
 ---
 
-## Step 2 design notes (not yet built)
+## Step 2 as built
 
-Shape: the supervisor spawns `swaypplet lock` once and keeps it. It writes a
-line to the locker's stdin to request a lock; the locker answers on stdout as it
-does today. That reuses the existing pipe plumbing in `src/idle/locker.rs`
-(which already pipes stdout and reads `LOCKED`) and adds no socket, no new
-protocol and no new permissions.
+Full residency was not needed, and the version that shipped is much smaller.
+The locker is still **one lock per process**: it is simply born early. Nothing
+had to become re-entrant, no worker needed a shutdown path, `AttemptGate` and
+the `unlocking` latch are fresh by construction, and every existing exit code
+and crash-relaunch rule is untouched.
 
-Open questions to settle while building it:
+- `swaypplet lock` with `SWAYPPLET_LOCK_WAIT=1` presents a 1×1 transparent
+  background-layer window to absorb the first-window cost, destroys it, prints
+  `READY`, and blocks reading stdin until it gets `LOCK <reason>`
+  (`src/lock/mod.rs`, `warm_and_wait`).
+- The supervisor keeps one armed child in `ARMED` and hands it the reason on
+  stdin (`src/idle/locker.rs`, `prewarm` / `take_armed`). The idle manager arms
+  one at startup and another after every `LockerGone`.
+- The reason moved from the spawn environment to the `LOCK` line, since the
+  process now exists before anyone knows why the next lock will happen.
+  `crate::lock::reason()` reads either, so a directly-spawned `swaypplet lock`
+  still behaves exactly as before.
 
-- **The warm window.** Residency only pays off if something is presented
-  early: the 881 ms lands on the first window whenever it happens. A 1×1
-  transparent layer-shell window presented and destroyed at startup is the
-  cheapest way to pay it at login instead of at first lock.
-- **What survives an unlock.** GTK init, CSS and the wallpaper texture clearly
-  should. The widget trees probably should, re-parented into fresh windows
-  each lock, which also keeps GSK's uploads warm. `gtk4-session-lock` creates
-  the windows in `connect_monitor` during `lock()` and destroys them at unlock,
-  so the content has to be separable from the window.
-- **What must not survive.** `AttemptGate` state, any typed password, the face
-  and fingerprint workers (currently started on `locked` and reaped by process
-  exit), and the `unlocking` latch.
-- **Crash handling.** Today the supervisor only watches the locker during a
-  lock. A resident process needs restarting if it dies while idle, and the
-  existing behaviour must be preserved if it dies while locked (the session
-  stays locked, sway shows the abandoned-lock screen).
-- **Cost of residency.** A GTK process alive for the whole session. Measure
-  RSS; the panel is ~50 MB for comparison.
+Measured end to end, nested sway:
+
+```
+warm: done            1948 ms      absorbed while idle
+lock commanded        3970 ms
+  build                 17 ms
+  assign                15 ms
+  present -> frame      31 ms
+FIRST FRAME painted   4035 ms      T₀ = 65 ms
+```
+
+Costs and open points:
+
+- **113 MB RSS** for the parked process (`VmRSS` while blocked on stdin). The
+  panel is ~50 MB. This is the price of the warm-up and it is paid for the
+  whole time the session is unlocked.
+- **Fallbacks are all cold, never broken.** No armed child, a child that died
+  while parked, or a broken stdin pipe each fall through to spawning the old
+  way. A crash-relaunch mid-lock also spawns cold, deliberately: it is the rare
+  path and holding a spare for it would mean a second parked process.
+- **Untested on hardware.** Everything above is the nested compositor.
 
 Security position: the locker already runs as the user and can lock the session
-at any time, so keeping it alive grants it nothing it did not have. It holds no
-secrets between locks.
+at any time, so a parked one grants it nothing it did not have. It holds no
+secrets before the lock it was spawned for.
 
 ---
 
