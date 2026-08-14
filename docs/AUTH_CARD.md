@@ -13,7 +13,7 @@ synthesis, including the corrections the feasibility judges found.
 ## The problem this solves
 
 The card obeyed one rule already: its geometry is decided when it is built and
-never changes again (`src/slot.rs`). That rule is right and is not up for
+never changes again. That rule is right and is not up for
 renegotiation — a card that resizes while it is fading in, or under a pointer
 already moving toward a button, is the bug it was written to kill.
 
@@ -85,10 +85,13 @@ GtkLabel .auth-caption        wrap, lines(2), ellipsize End, xalign 0, yalign 0
 to a text node with a caret. The greeter's username row is the same
 `.auth-field` with both marks unpainted.
 
-`slot::reserve` / `slot::show` survive, now driving glyph opacity rather than
-row opacity. `slot::reserve_if` survives for the things that genuinely vary
-card-to-card (the polkit identity row, the elevate face rows) and loses the
-fingerprint row, which no longer costs a pixel.
+`src/slot.rs` does not survive. It existed to hold rows open and fade them in
+place, and once the rows were gone it had no callers: the field paints its own
+marks and the caption is never empty, so there is nothing left to reserve. The
+rule it carried moved to `src/auth_field.rs`, which is where it is now
+enforced. What genuinely varies card-to-card — the polkit identity row, the
+elevate face rows, the greeter's username field — is still decided before the
+surface is presented, which is the same rule stated without a helper.
 
 ## Lock card
 
@@ -259,7 +262,7 @@ real widget behaviour, and each would have shipped a bug.
    `line-height: 1.35` gives ~21.6 px per line and two lines measure ~43 px
    against a reserved 34 — `min-height` is a floor, not a cap, so the card
    grows the first time PAM says something long. That is exactly the
-   regression `slot.rs` exists to prevent. Without it, 2 × 16 = 32 ≤ 34.
+   regression this whole rule exists to prevent. Without it, 2 × 16 = 32 ≤ 34.
 2. **Zeroing the entry needs `min-height: 0` on both the `entry` node and its
    `text` child**, or Adwaita's default 34 px content height silently sets the
    field's floor.
@@ -294,7 +297,8 @@ real widget behaviour, and each would have shipped a bug.
 
 Kept: `auth-shake` on the card, `auth-card-enter`, the handoff choreography,
 the glass pane and its blur ramp, the face ring animations, the chip row, the
-identity picker, the details revealer, and `slot.rs`'s rule. The rule is not
+identity picker, the details revealer, and the constant-geometry rule itself.
+The rule is not
 weakened — it is made cheap enough that obeying it stops costing 42% of the
 card.
 

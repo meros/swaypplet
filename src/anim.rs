@@ -1,12 +1,15 @@
 //! Shared motion scale for all animated surfaces.
 //!
-//! One easing (cubic ease-out) and three durations, so every surface moves
-//! the same way:
-//! - micro interactions (hover/press color changes): 150ms, CSS only
-//! - structural reveal/collapse: 200ms (GtkRevealer `transition_duration`)
-//! - enter/move: [`ENTER_MS`]/[`MOVE_MS`]; exit: [`EXIT_MS`]
+//! The scale, the curves and the reasoning are in `docs/MOTION.md`. This
+//! module implements the Rust half; `data/style.css` declares the CSS half,
+//! and the two evaluate the same curves so a card driven from here and a
+//! label driven from a stylesheet move together.
 //!
-//! The CSS side of this scale is documented in `data/style.css`.
+//! Three curves, from Material 3's standard set: [`standard`] between two
+//! on-screen states, [`decelerate`] for anything arriving, [`accelerate`] for
+//! anything leaving. Durations: [`EXIT_MS`], [`ENTER_MS`]
+//! (= [`MOVE_MS`]) and [`EMPHASIS_MS`]; the micro and dwell tiers are CSS-only
+//! and live in the stylesheet.
 //!
 //! # Motion on glass: split the pane from the content
 //!
@@ -41,17 +44,98 @@ use std::rc::Rc;
 use gtk4::{glib, graphene, prelude::*, subclass::prelude::*};
 use gtk4_layer_shell::LayerShell;
 
+/// Anything leaving. Shorter than an entrance on purpose — waiting for a
+/// thing to go is dead time, where an entrance is the thing being waited for.
+pub const EXIT_MS: f64 = 200.0;
+/// Anything arriving, and anything reflowing between two on-screen states.
 pub const ENTER_MS: f64 = 300.0;
 pub const MOVE_MS: f64 = 300.0;
-pub const EXIT_MS: f64 = 200.0;
+/// A one-shot that has to be noticed: a verdict, an arrival, a refusal.
+pub const EMPHASIS_MS: f64 = 400.0;
+// The scale's other two tiers, micro (150ms) and dwell (500ms), have no Rust
+// consumer: one is below the threshold where a hand-driven tick is worth its
+// wakeups and the other is only ever a keyframe. They are declared in
+// data/style.css instead of here, rather than sitting in this file as dead
+// constants that look authoritative and govern nothing.
 
 /// Travel distance of the settle that accompanies a fade on surfaces with a
 /// directional entrance. Short by design — the fade carries the transition,
 /// the slide only gives it a direction.
 pub const SLIDE_PX: f64 = 24.0;
 
-pub fn ease_out_cubic(t: f64) -> f64 {
-    1.0 - (1.0 - t).powi(3)
+/// Evaluate a CSS `cubic-bezier(x1, y1, x2, y2)` at `t`.
+///
+/// The curve is parametric — the CSS control points describe x and y
+/// separately — so getting y for a given time means solving x(u) = t for the
+/// parameter u first, then evaluating y(u). Newton-Raphson converges in a
+/// handful of steps here because x is monotonic for any legal CSS curve, with
+/// a bisection fallback for the flat-derivative case (`decelerate` starts with
+/// x' = 0, which is exactly where Newton stalls).
+///
+/// This exists so the Rust-driven surfaces and the stylesheet share curves
+/// rather than approximate each other. `ease_out_cubic` used to stand in for
+/// all of them, including exits, which meant everything left the screen
+/// decelerating — a thing going away should gather speed, not hesitate.
+fn cubic_bezier(x1: f64, y1: f64, x2: f64, y2: f64, t: f64) -> f64 {
+    if t <= 0.0 {
+        return 0.0;
+    }
+    if t >= 1.0 {
+        return 1.0;
+    }
+    // B(u) for a unit cubic with P0 = (0,0) and P3 = (1,1).
+    let curve = |a: f64, b: f64, u: f64| {
+        let v = 1.0 - u;
+        3.0 * v * v * u * a + 3.0 * v * u * u * b + u * u * u
+    };
+    let slope = |a: f64, b: f64, u: f64| {
+        let v = 1.0 - u;
+        3.0 * v * v * (a) + 6.0 * v * u * (b - a) + 3.0 * u * u * (1.0 - b)
+    };
+
+    let mut u = t;
+    for _ in 0..8 {
+        let dx = slope(x1, x2, u);
+        if dx.abs() < 1e-6 {
+            break;
+        }
+        let err = curve(x1, x2, u) - t;
+        if err.abs() < 1e-7 {
+            return curve(y1, y2, u);
+        }
+        u -= err / dx;
+    }
+    // Newton bailed: bisect, which cannot fail on a monotonic x.
+    let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
+    u = t;
+    for _ in 0..24 {
+        let x = curve(x1, x2, u);
+        if (x - t).abs() < 1e-7 {
+            break;
+        }
+        if x > t {
+            hi = u;
+        } else {
+            lo = u;
+        }
+        u = (lo + hi) / 2.0;
+    }
+    curve(y1, y2, u)
+}
+
+/// Between two on-screen states: reflow, colour, a value settling.
+pub fn standard(t: f64) -> f64 {
+    cubic_bezier(0.2, 0.0, 0.0, 1.0, t)
+}
+
+/// Arriving. Starts at speed and settles.
+pub fn decelerate(t: f64) -> f64 {
+    cubic_bezier(0.0, 0.0, 0.0, 1.0, t)
+}
+
+/// Leaving. Gathers speed and goes.
+pub fn accelerate(t: f64) -> f64 {
+    cubic_bezier(0.3, 0.0, 1.0, 1.0, t)
 }
 
 /// The one place an animation length is decided, so reduced motion and the
@@ -146,7 +230,7 @@ pub fn glass_channel(from: f64, to: f64, t: f64) -> f64 {
     if to == 0.0 {
         return if t >= 1.0 { to } else { from };
     }
-    from + (to - from) * ease_out_cubic(t)
+    from + (to - from) * standard(t)
 }
 
 // ── Reveal: the shared show/hide transition ────────────────────────────
@@ -407,18 +491,22 @@ impl Reveal {
         let content_from = inner.content.borrow().as_ref().map(|c| c.opacity());
         let target = if entering { 1.0 } else { 0.0 };
         let total = duration(if entering { ENTER_MS } else { EXIT_MS });
+        // Arriving decelerates into place; leaving gathers speed and goes.
+        // One curve for both directions made every surface hesitate on its
+        // way out. See docs/MOTION.md.
+        let ease: fn(f64) -> f64 = if entering { decelerate } else { accelerate };
         let start = glib::monotonic_time();
         let this = self.clone();
         let id = inner.pane.add_tick_callback(move |_, _| {
             let t = (((glib::monotonic_time() - start) as f64 / 1000.0) / total).clamp(0.0, 1.0);
             if compositor_owns {
                 // Material and content are one object now, eased together.
-                this.set_material_alpha(pane_from + (target - pane_from) * ease_out_cubic(t));
+                this.set_material_alpha(pane_from + (target - pane_from) * ease(t));
             } else {
                 this.set_material_alpha(glass_channel(pane_from, target, t));
                 if let (Some(from), Some(c)) = (content_from, this.inner.content.borrow().as_ref())
                 {
-                    c.set_opacity(from + (target - from) * ease_out_cubic(t));
+                    c.set_opacity(from + (target - from) * ease(t));
                 }
             }
             if t >= 1.0 {
@@ -570,7 +658,7 @@ impl SlideBin {
         let start = glib::monotonic_time();
         let id = self.add_tick_callback(move |bin, _| {
             let t = (((glib::monotonic_time() - start) as f64 / 1000.0) / ms).clamp(0.0, 1.0);
-            bin.imp().d.set(from + (target - from) * ease_out_cubic(t));
+            bin.imp().d.set(from + (target - from) * standard(t));
             bin.queue_draw();
             if t >= 1.0 {
                 bin.imp().tick.take();

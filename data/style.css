@@ -5,11 +5,11 @@
    Saturated color is reserved for state.
    Nested radii are concentric (inner = outer − gap) where
    corners sit close together (gap ≤ ~8px).
-   Motion scale (Rust side in src/anim.rs): micro
-   interactions 150ms ease, structural reveal/collapse
-   200ms, exits/fades 200ms, enter/move 300ms ease-out.
-   Deliberate attention loops (pulses, shake, breathing)
-   sit outside the scale.
+   Motion: docs/MOTION.md, restated in full further down
+   this file. Five durations (150/200/300/400/500) and
+   three curves, evaluated identically in src/anim.rs.
+   Attention loops (pulses, shake, breathing) sit outside
+   the scale on purpose.
    ══════════════════════════════════════════════════════ */
 
 /* ── Palette ── */
@@ -1981,20 +1981,30 @@ revealer {
     background-color: transparent;
 }
 
-/* ── Reserved space (see src/slot.rs) ──
-   A row whose space is held for the life of the card, painted or not. The
-   authentication cards are assembled out of these: whether a fingerprint
-   reader armed, whether Caps Lock is on, what went wrong last time — all of
-   it arrives after the card does, and none of it may change the card's size.
-   Fading is the only thing left, and 160ms is short enough that a hint
-   replacing another reads as a change rather than a transition. */
-.slot {
-    transition: opacity 160ms ease;
-}
+/* ════════════════════════════════════════════════════════════════════
+   MOTION. Full scale and reasoning: docs/MOTION.md.
 
-.slot.slot-empty {
-    opacity: 0;
-}
+   Curves — Material 3's standard set, evaluated identically in src/anim.rs
+   so a card driven from Rust and a label driven from here move together:
+     standard    cubic-bezier(0.2, 0, 0, 1)   between two on-screen states
+     decelerate  cubic-bezier(0, 0, 0, 1)     arriving
+     accelerate  cubic-bezier(0.3, 0, 1, 1)   leaving
+
+   Durations:
+     150ms  micro     colour, opacity, a mark lighting up
+     200ms  exit      anything leaving
+     300ms  enter     anything arriving, and anything reflowing
+     400ms  emphasis  a one-shot that has to be noticed
+     500ms  dwell     a flourish that has to stay readable
+
+   Exits are shorter than entrances deliberately. Ambient loops (pulses,
+   spinners, breathing glows) are rhythms rather than transitions and are
+   NOT on this ladder; their periods are chosen against a heartbeat.
+
+   There are no variables for any of this — GTK4 CSS has @define-color and
+   nothing else — so the values below are literals and the only thing keeping
+   them honest is dev/motion-census.sh. Run it after touching a duration.
+   ════════════════════════════════════════════════════════════════════ */
 
 .polkit-container,
 .lock-card {
@@ -2003,150 +2013,6 @@ revealer {
        padding plus whatever the caption did not use. 20 against 24 makes the
        two read as equal. */
     padding: 24px 26px 20px 26px;
-}
-
-/* The lock layer has no layer_effects entry, so it isn't compositor-blurred
-   and its card keeps a real CSS drop shadow. The polkit layer IS blurred
-   with blur_ignore_transparent, where a box-shadow's translucent pixels
-   frost into a halo around the card — so it takes its depth from the blur
-   and border alone, matching launcher/osd. */
-.lock-card {
-    box-shadow: 0 12px 40px alpha(black, 0.5);
-}
-
-/* ── Icon ── */
-.polkit-icon {
-    color: @fg;
-    margin-bottom: 2px;
-}
-
-.polkit-icon-glyph {
-    font-size: 38px;
-    color: @accent;
-    margin-bottom: 2px;
-}
-
-/* ── Title + message ── */
-.polkit-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: @fg;
-}
-
-.polkit-message {
-    font-size: 13px;
-    color: @fg_dim;
-    line-height: 1.45;
-    margin-bottom: 2px;
-}
-
-/* ── The authentication field ──
-   One bordered box carrying everything a password row has to say: the entry
-   (stripped to a text node), a mark at each edge, and all the chrome that
-   used to live on the entry itself. Rationale in docs/AUTH_CARD.md.
-
-   Its height is a constant of these three declarations — min-height plus
-   padding plus border, 38 + 22 + 2 = 62 — and no state below touches any of
-   them. That is what lets the card be laid out once and never move. */
-.auth-field {
-    background-color: alpha(@bg0, 0.70);
-    border: 1px solid @border_strong;
-    border-radius: 10px;
-    padding: 11px 12px;
-    min-height: 38px;
-    transition: border-color 150ms ease, background-color 150ms ease;
-}
-
-/* :focus-within on the box, because the focus lands on the entry inside it.
-   Same trick, and same reason, as the launcher's search row above. */
-.auth-field:focus-within {
-    border-color: @accent;
-    background-color: alpha(@bg0, 0.92);
-}
-
-/* Armed: the whole field breathes rather than a pill inside it. This is the
-   largest piece of moving accent on the card, which is what the affordance
-   needs to survive being folded into the entry. */
-.auth-field.auth-fp-armed {
-    animation: auth-fp-pulse 2s ease-in-out infinite;
-}
-
-/* PAM is working. A local signal: the card used to drop to opacity 0.75 as a
-   whole, which on a card this size reads as a fault rather than as progress. */
-.auth-field.auth-busy {
-    animation: none;
-    border-color: alpha(@accent, 0.55);
-    background-color: alpha(@bg0, 0.55);
-}
-
-/* Rejected. Paint only, so it composes with the card's shake instead of
-   fighting it for the same frame. */
-.auth-field.auth-reject {
-    animation: auth-field-reject 900ms ease-out;
-}
-
-@keyframes auth-field-reject {
-    0%   { border-color: @red; background-color: alpha(@red, 0.12); }
-    100% { border-color: @border_strong; background-color: alpha(@bg0, 0.70); }
-}
-
-/* The entry itself is now a text node and nothing else. min-height has to be
-   zeroed on BOTH nodes: the theme's default content height is on `text`, and
-   leaving it there silently sets the field's floor from the inside. */
-.auth-input,
-.auth-input text {
-    background: none;
-    background-color: transparent;
-    border: none;
-    outline: none;
-    box-shadow: none;
-    padding: 0;
-    min-height: 0;
-    color: @fg;
-    caret-color: @accent;
-    font-size: 14px;
-}
-
-.auth-input text selection {
-    background-color: alpha(@accent, 0.35);
-}
-
-.auth-input placeholder,
-.auth-input text placeholder {
-    color: alpha(@fg, 0.42);
-}
-
-/* ── The marks ──
-   Attributes of the field, not controls in it: no hover, no background, no
-   radius, nothing that would offer a press. Both are built untargetable. */
-.auth-mark-fp {
-    font-size: 22px;
-    color: @fg;
-    opacity: 0;
-    transition: opacity 160ms ease, color 160ms ease;
-}
-
-/* Painted only between Ready and Unavailable. A ghosted resting whorl was
-   considered and rejected: a mark shown while the reader will not accept a
-   touch is the card gesturing at a reader that cannot read. */
-.auth-mark-fp.armed {
-    opacity: 1;
-    color: @accent;
-}
-
-.auth-mark-fp.reject {
-    color: @red;
-}
-
-.auth-mark-caps {
-    font-size: 14px;
-    color: @yellow;
-    opacity: 0;
-    transition: opacity 160ms ease;
-}
-
-.auth-mark-caps.on {
-    opacity: 1;
 }
 
 /* Gaps between the card's rows. The box carries spacing 0 and every gap is
@@ -2175,7 +2041,7 @@ revealer {
     margin: 6px 13px 0 13px;
     color: alpha(@fg, 0.55);
     font-weight: 400;
-    transition: color 160ms ease;
+    transition: color 150ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .auth-caption-info    { color: @fg_dim;  font-weight: 500; }
@@ -2226,7 +2092,7 @@ revealer {
    the same frame (auth-card-enter below). The cut lands inside one move.
 
    Easing is M3's emphasized curve — a hard start and a long settle, which
-   is what makes a 280ms exit read as deliberate rather than merely slow.
+   is what makes a 300ms exit read as deliberate rather than merely slow.
    The `transform` scale is the topping: where GTK ignores it the outline
    bloom and the dissolve still carry the beat on their own. ── */
 @keyframes auth-handoff-bloom {
@@ -2240,14 +2106,15 @@ revealer {
     background-color: alpha(@accent, 0.18);
     color: @fg;
     transform: scale(1.06);
-    transition: transform 280ms cubic-bezier(0.2, 0, 0, 1),
-        background-color 180ms ease, border-color 180ms ease;
+    transition: transform 300ms cubic-bezier(0.2, 0, 0, 1),
+        background-color 150ms cubic-bezier(0.2, 0, 0, 1),
+        border-color 150ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .lock-user-chip.picked .user-avatar {
     outline: 2px solid @accent;
     outline-offset: 1px;
-    animation: auth-handoff-bloom 320ms cubic-bezier(0.2, 0, 0, 1) forwards;
+    animation: auth-handoff-bloom 300ms cubic-bezier(0.2, 0, 0, 1) forwards;
 }
 
 /* Everyone you didn't pick steps back first (~50ms ahead of the card), so
@@ -2255,18 +2122,19 @@ revealer {
 .lock-user-chip.dropped {
     opacity: 0;
     transform: scale(0.94);
-    transition: opacity 150ms ease, transform 150ms cubic-bezier(0.2, 0, 0, 1);
+    transition: opacity 150ms cubic-bezier(0.3, 0, 1, 1),
+        transform 150ms cubic-bezier(0.3, 0, 1, 1);
 }
 
 .lock-card.lock-handoff .auth-field,
 .lock-card.lock-handoff .auth-caption,
 .lock-card.lock-handoff .lock-switch-user {
     opacity: 0;
-    transition: opacity 180ms ease 50ms;
+    transition: opacity 200ms cubic-bezier(0.3, 0, 1, 1) 50ms;
 }
 
 .lock-card.lock-handoff {
-    transition: opacity 240ms cubic-bezier(0.2, 0, 0, 1) 120ms;
+    transition: opacity 300ms cubic-bezier(0.3, 0, 1, 1) 100ms;
     opacity: 0;
 }
 
@@ -2280,7 +2148,7 @@ revealer {
 }
 
 .lock-card {
-    animation: auth-card-enter 300ms cubic-bezier(0.2, 0, 0, 1);
+    animation: auth-card-enter 300ms cubic-bezier(0, 0, 0, 1);
 }
 
 /* ── Round avatar + presence dot (greeter chips, lock strip, users panel) ── */
@@ -2424,7 +2292,7 @@ revealer {
 }
 
 .lock-card.lock-shake {
-    animation: auth-shake 380ms cubic-bezier(.36,.07,.19,.97);
+    animation: auth-shake 400ms cubic-bezier(.36,.07,.19,.97);
 }
 
 /* ── Success: accent tint while the dialog dismisses / session unlocks ── */
@@ -2446,7 +2314,7 @@ revealer {
    so it must never read as something to wait for. */
 .polkit-icon-glyph.polkit-icon-ok {
     color: @accent;
-    animation: polkit-icon-ok 420ms cubic-bezier(0.2, 0, 0, 1);
+    animation: polkit-icon-ok 400ms cubic-bezier(0, 0, 0, 1);
 }
 
 @keyframes polkit-icon-ok {
@@ -2933,12 +2801,12 @@ revealer {
 .face-ring-ok {
     border-color: @accent;
     background-color: @accent;
-    animation: face-ring-ok 550ms ease-out;
+    animation: face-ring-ok 500ms cubic-bezier(0, 0, 0, 1);
 }
 
 .face-ring-fail {
     border-color: @accent_quinary;
-    animation: face-ring-fail 350ms ease-out;
+    animation: face-ring-fail 300ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 @keyframes face-ring-spin {
@@ -3005,7 +2873,7 @@ revealer {
    of the stutter. Two nodes, two independent animations, and a state change
    can no longer disturb an arrival that already happened. */
 .face-pill-enter {
-    animation: face-pill-arrive 420ms cubic-bezier(0.2, 0, 0, 1);
+    animation: face-pill-arrive 400ms cubic-bezier(0, 0, 0, 1);
 }
 
 @keyframes face-pill-arrive {
@@ -3026,9 +2894,19 @@ revealer {
    from scratch each time. Fixed geometry lets the renderer keep one blurred
    node and vary its colour, which is the difference between a pulse and a
    stutter. */
+/* Breathe the border, not a glow around it.
+   This used to be a 26px box-shadow at 5px spread, and that shadow is the
+   single reason the cue surface could not be frosted: scenefx's
+   blur_ignore_transparent discards only pixels at alpha exactly 0, so every
+   translucent pixel of a drop shadow frosts into a flat halo the size of the
+   surface. The choice was a glow or a blur, and the blur is worth more — an
+   unfrosted pill over a terminal reads as a sticker rather than as part of
+   the desktop.
+   The border carries the same job with the same vocabulary the armed auth
+   field uses, and does it in pixels the pill already owns. */
 @keyframes face-pill-attention {
-    0%, 100% { box-shadow: 0 0 26px 5px alpha(@accent_tertiary, 0); }
-    50%      { box-shadow: 0 0 26px 5px alpha(@accent_tertiary, 0.38); }
+    0%, 100% { border-color: @border_strong; }
+    50%      { border-color: alpha(@accent_tertiary, 0.85); }
 }
 
 /* Too dark is the one state worth a steadier, warmer pull: the user cannot
@@ -3041,10 +2919,13 @@ revealer {
 /* Success glows once and stops. The session holds only for the ring's
    overshoot, so the tail of this plays into a surface on its way out. */
 .face-pill-ok {
-    animation: face-pill-ok 550ms ease-out;
+    animation: face-pill-ok 500ms cubic-bezier(0, 0, 0, 1);
 }
 
+/* Same reason as the attention breathe above: no shadow, so the surface can
+   be frosted. The match lands on the border and the fill, which are the
+   pill's own pixels. */
 @keyframes face-pill-ok {
-    0%   { box-shadow: 0 0 30px 6px alpha(@accent, 0.6); }
-    100% { box-shadow: 0 0 30px 6px alpha(@accent, 0); }
+    0%   { border-color: @accent; background-color: alpha(@accent, 0.22); }
+    100% { border-color: @border_strong; background-color: @surface; }
 }

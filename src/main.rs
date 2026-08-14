@@ -28,7 +28,6 @@ mod presence;
 mod preview;
 mod screenshot;
 mod service;
-mod slot;
 mod spawn;
 mod surface;
 mod sway_ipc;
