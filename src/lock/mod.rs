@@ -165,13 +165,18 @@ fn warm_and_wait() {
     }
     stage("warm: users");
 
-    // Read-only: it neither claims the reader nor disturbs whoever holds it,
-    // so asking here — while the desktop is still in use and nothing is
-    // waiting on us — is free.
-    if let Some(enrolled) = crate::fp::self_enrolled_blocking() {
-        let _ = WARM_FP.set(enrolled);
-    }
-    stage("warm: fingerprint");
+    // Read-only: it neither claims the reader nor disturbs whoever holds it.
+    // Off-thread, though, and deliberately not joined: at boot fprintd can be
+    // cold, and this is two three-second deadlines standing in front of the
+    // READY line and the stdin wait behind it. Nothing reads the answer until
+    // a card is built, and a lock that beats the probe gets the default —
+    // leave room — which is the safe one.
+    std::thread::spawn(|| {
+        if let Some(enrolled) = crate::fp::self_enrolled_blocking() {
+            let _ = WARM_FP.set(enrolled);
+        }
+        stage("warm: fingerprint");
+    });
 
     // Tell the supervisor the expensive part is behind us. It does not wait
     // for this -- a LOCK written early simply sits in the pipe -- but it makes
