@@ -2353,6 +2353,15 @@ revealer {
 }
 
 .polkit-container.polkit-shake,
+/* The compositor cross-fades the whole lock surface (lock/fade.rs), which
+   already carries the entrance. Stacking the card's own fade on top makes its
+   opacity css x surface, so the card visibly lags the wallpaper under it.
+   Deliberately above .lock-shake / .lock-success, which have equal
+   specificity and must still win. */
+.lock-crossfade .lock-card {
+    animation: none;
+}
+
 .lock-card.lock-shake {
     animation: auth-shake 380ms cubic-bezier(.36,.07,.19,.97);
 }

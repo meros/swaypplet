@@ -135,6 +135,9 @@ impl GlassPane {
     /// eased like every other surface motion (anim.rs). Retargeting cancels
     /// a running ramp; respects reduced motion by jumping.
     pub fn ramp_blur_to(&self, target: f64, ms: f64) {
+        // Through the one place animation lengths are decided, so
+        // SWAYPPLET_ANIM_SCALE stretches every motion together.
+        let ms = crate::anim::duration(ms);
         if let Some(id) = self.imp().ramp.take() {
             id.remove();
         }

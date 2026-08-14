@@ -76,26 +76,42 @@ impl SurfaceAlpha {
         f64::from(self.last.get()) / f64::from(OPAQUE)
     }
 
-    /// Set the surface's opacity. Double-buffered like everything else on a
-    /// surface, so it lands with the next frame the toolkit commits, which is
-    /// why callers redraw alongside it.
-    pub fn set(&self, alpha: f64) {
+    /// Queue the multiplier as pending surface state, without committing.
+    ///
+    /// This is the only safe setter for an `ext_session_lock_surface_v1`. A
+    /// commit with no buffer attached is `null_buffer`, and a commit whose
+    /// size disagrees with the last acked configure is `dimensions_mismatch`
+    /// (wlroots `types/wlr_session_lock_v1.c`); both are fatal, and both are
+    /// reachable from a timer-driven ramp, because GDK acks configures
+    /// synchronously in the event handler and attaches the matching buffer a
+    /// frame later. The multiplier is double-buffered surface state, so
+    /// leaving it pending means the toolkit's own buffered commit promotes
+    /// it, atomically and at the right size. Callers ask for that commit with
+    /// `queue_draw`.
+    pub fn set_pending(&self, alpha: f64) {
         let v = (alpha.clamp(0.0, 1.0) * f64::from(OPAQUE)).round() as u32;
         if v == self.last.get() {
             return;
         }
         self.last.set(v);
         self.surface.set_multiplier(v);
-        // The multiplier is double-buffered surface state, so it lands on
-        // the surface's next commit — and a toolkit with nothing new to
-        // draw does not produce one. GTK redraws the pane alongside every
-        // set (anim.rs), but a surface whose widgets never change during
-        // the fade (the compositor is doing the fading) gives GTK nothing
-        // to damage, and the whole ramp can sit pending while the surface
-        // stays at whatever alpha its first commit carried. Committing here
-        // is the only thing that makes the number take effect on the frame
-        // it was set for; there is no buffer attached, so it applies the
-        // pending state and nothing else.
+        let _ = self.conn.flush();
+    }
+
+    /// Set the surface's opacity and commit it.
+    ///
+    /// For surfaces with no role restrictions (layer shell, via `anim::Reveal`),
+    /// where committing here is the only thing that makes the number take
+    /// effect on the frame it was set for: the multiplier is double-buffered
+    /// state, so it lands on the surface's next commit, and a toolkit with
+    /// nothing new to draw does not produce one. There is no buffer attached,
+    /// so the commit applies the pending state and nothing else.
+    pub fn set(&self, alpha: f64) {
+        let before = self.last.get();
+        self.set_pending(alpha);
+        if self.last.get() == before {
+            return;
+        }
         self.wl_surface.commit();
         let _ = self.conn.flush();
     }
@@ -120,6 +136,30 @@ impl Drop for SurfaceAlpha {
         self.surface.destroy();
         let _ = self.conn.flush();
     }
+}
+
+/// Bind the manager before any surface exists, and report whether the
+/// compositor offers the protocol at all.
+///
+/// [`manager`] does a roundtrip on first use, and for the lock screen that
+/// first use would otherwise land inside `gtk_window_realize`, inside
+/// `gtk_window_present`, inside the monitor callback, inside
+/// `ext_session_lock_v1.lock` — that is, inside the interval the compositor
+/// is holding the live desktop on screen for.
+pub fn preload() -> bool {
+    let Some(display) = gdk4::Display::default() else {
+        return false;
+    };
+    let Ok(display) = display.downcast::<gdk4_wayland::WaylandDisplay>() else {
+        return false;
+    };
+    let Some(wl_display) = display.wl_display() else {
+        return false;
+    };
+    let Some(backend) = wl_display.backend().upgrade() else {
+        return false;
+    };
+    manager(&Connection::from_backend(backend)).is_some()
 }
 
 /// Bind the manager once per process. The roundtrip runs on a queue of our

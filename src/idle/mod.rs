@@ -101,7 +101,15 @@ pub enum Ev {
 
 /// How long to wait for the locker before releasing the sleep inhibitor
 /// anyway. Suspend must not hang on a locker that fails to start.
-const SLEEP_RELEASE_MAX: Duration = Duration::from_secs(3);
+///
+/// 4 s rather than 3: the compositor now defers `locked` until the lock
+/// screen is fully opaque and that frame has been presented, which adds the
+/// entrance to the path this deadline bounds. The sleep path suppresses the
+/// cross-fade entirely (locker.rs), so in practice it pays none of that, but
+/// the deadline has to survive the case where it does. logind's
+/// InhibitDelayMaxSec is 5 s, so this still leaves room for the release round
+/// trip.
+const SLEEP_RELEASE_MAX: Duration = Duration::from_secs(4);
 
 /// How long the lock screen may sit idle before the outputs are powered off.
 ///
@@ -241,6 +249,11 @@ pub fn run() -> ! {
             log::warn!(
                 "before-sleep: locker not up after {SLEEP_RELEASE_MAX:?} — releasing inhibitor anyway"
             );
+            // Whatever is on the panel is not a locked screen, and with the
+            // cross-fade it may be a half-dissolved one. Blank before
+            // releasing, so the last frame scanned out — the one still on the
+            // panel at resume, before the compositor repaints — is nothing.
+            outputs.power("before-sleep.timeout", Power::Off);
             release_inhibitor(&mut sleep_release);
         }
         if blank_at.is_some_and(|d| Instant::now() >= d) {

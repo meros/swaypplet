@@ -161,11 +161,23 @@ pub struct SurfaceSet {
     /// when more than one).
     users: Rc<RefCell<Vec<UserChip>>>,
     on_user_select: Rc<RefCell<Option<Rc<dyn Fn(String)>>>>,
+    /// The compositor is cross-fading the whole surface, so the surfaces must
+    /// not also animate themselves in.
+    crossfade: Rc<Cell<bool>>,
 }
 
 impl SurfaceSet {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Call before any `build_surface`. With the compositor fading the whole
+    /// surface, the card's own `auth-card-enter` would multiply into it (the
+    /// card's opacity becomes css x surface, quadratic) and the card would
+    /// visibly lag the wallpaper it sits on. Same for the blur ramp: one
+    /// motion, not three.
+    pub fn set_crossfade(&self, on: bool) {
+        self.crossfade.set(on);
     }
 
     /// Build a lock window for one monitor and register it in the set.
@@ -204,7 +216,7 @@ impl SurfaceSet {
         let backdrop = gtk4::Box::builder().hexpand(true).vexpand(true).build();
         backdrop.add_css_class("lock-backdrop");
         super::stage("wallpaper decode start");
-        let wallpaper = wallpaper_path().and_then(|p| gdk4::Texture::from_filename(p).ok());
+        let wallpaper = wallpaper_texture();
         super::stage("wallpaper decode done");
         if let Some(ref texture) = wallpaper {
             let picture = gtk4::Picture::for_paintable(texture);
@@ -249,8 +261,13 @@ impl SurfaceSet {
         // (auth-card-enter, 300 ms = anim::ENTER_MS). This is client-side
         // GSK blur, the one glass in swaypplet with a real radius to
         // animate; ramp_blur_to jumps under reduced motion.
-        pane.set_blur_radius(0.0);
-        pane.ramp_blur_to(super::glass::BLUR_RADIUS, crate::anim::ENTER_MS);
+        if self.crossfade.get() {
+            window.add_css_class("lock-crossfade");
+            pane.set_blur_radius(super::glass::BLUR_RADIUS);
+        } else {
+            pane.set_blur_radius(0.0);
+            pane.ramp_blur_to(super::glass::BLUR_RADIUS, crate::anim::ENTER_MS);
+        }
 
         let greet_mode = self.user_field.borrow().is_some();
 
@@ -786,6 +803,27 @@ fn build_switch_button() -> gtk4::Button {
     btn.set_halign(gtk4::Align::Center);
     btn.connect_clicked(|_| switch_user::to_greeter());
     btn
+}
+
+/// Decode the wallpaper once, ahead of the lock request.
+///
+/// It used to be decoded inside `build_content`, i.e. once per monitor,
+/// inside the `connect_monitor` burst, inside `instance.lock()` — precisely
+/// the interval the compositor holds the live desktop on screen for.
+pub fn preload_wallpaper() {
+    let _ = wallpaper_texture();
+}
+
+/// Decoded once per process and shared by every surface.
+fn wallpaper_texture() -> Option<gdk4::Texture> {
+    thread_local! {
+        static TEXTURE: std::cell::OnceCell<Option<gdk4::Texture>> =
+            const { std::cell::OnceCell::new() };
+    }
+    TEXTURE.with(|cell| {
+        cell.get_or_init(|| wallpaper_path().and_then(|p| gdk4::Texture::from_filename(p).ok()))
+            .clone()
+    })
 }
 
 fn wallpaper_path() -> Option<String> {

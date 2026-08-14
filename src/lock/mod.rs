@@ -18,6 +18,7 @@
 
 pub(crate) mod auth;
 pub(crate) mod face;
+pub(crate) mod fade;
 pub(crate) mod fprint;
 pub mod glass;
 pub mod ui;
@@ -68,6 +69,21 @@ pub(super) fn stage(what: &str) {
 /// cannot ride on its environment.
 static REASON: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
+/// Set when the supervisor asked for this lock without a cross-fade.
+static NO_FADE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the supervisor suppressed the cross-fade for this lock.
+///
+/// Some locks must not fade: before-sleep spends the deferral straight out of
+/// the logind inhibitor window, and a relaunch after a crash arrives at a
+/// compositor already holding an abandoned lock whose backdrop is opaque and
+/// pinned, so a ramp would be ignored anyway. Saying so keeps both sides
+/// telling the same story.
+pub fn fade_suppressed() -> bool {
+    NO_FADE.load(std::sync::atomic::Ordering::Relaxed)
+        || std::env::var("SWAYPPLET_LOCK_FADE").as_deref() == Ok("0")
+}
+
 pub fn reason() -> String {
     REASON
         .get()
@@ -95,10 +111,7 @@ fn warm_and_wait() {
             .application_id("dev.swaypplet.lockwarm")
             .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
             .build();
-        {
-            use gtk4::prelude::ApplicationExtManual;
-            let _ = app.register(None::<&gtk4::gio::Cancellable>);
-        }
+        let _ = app.register(None::<&gtk4::gio::Cancellable>);
         let config = crate::layer_shell::LayerShellConfig {
             layer: gtk4_layer_shell::Layer::Background,
             namespace: "swaypplet-lock-warm",
@@ -143,12 +156,12 @@ fn warm_and_wait() {
             std::process::exit(EXIT_ERROR);
         }
     }
-    let reason = line
-        .trim()
-        .strip_prefix("LOCK")
-        .map(|r| r.trim())
-        .unwrap_or("")
-        .to_string();
+    let mut words = line.split_whitespace();
+    let _ = words.next(); // "LOCK"
+    let reason = words.next().unwrap_or("").to_string();
+    if words.any(|w| w == "nofade") {
+        NO_FADE.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     let _ = REASON.set(if reason.is_empty() {
         "unknown".into()
     } else {
@@ -181,6 +194,10 @@ pub fn run() -> ! {
     };
 
     crate::theme::load_css();
+    // Decoded here rather than per monitor inside the lock: that burst is
+    // exactly the interval the compositor holds the live desktop on screen
+    // for, and it is bounded by the fade's first-frame deadline.
+    ui::preload_wallpaper();
     stage("css");
 
     // Pre-warmed mode: absorb the first-window cost and park until told to
@@ -189,9 +206,14 @@ pub fn run() -> ! {
         warm_and_wait();
     }
 
+    // After the LOCK command, never before it: creating this arms the
+    // compositor's backdrop for one lock, and that arming expires.
+    let fade = fade::LockFade::new();
+
     let main_loop = glib::MainLoop::new(None, false);
     let exit_code = Rc::new(RefCell::new(EXIT_ERROR));
     let surfaces = SurfaceSet::new();
+    surfaces.set_crossfade(fade.enabled());
     surfaces.set_current_user(&user);
     let gate = Rc::new(RefCell::new(auth::AttemptGate::default()));
 
@@ -246,11 +268,39 @@ pub fn run() -> ! {
     // to arrive and unlock the same session again.
     let unlocking = Rc::new(Cell::new(false));
 
+    // `locked` is deferred until the entrance completes, which opens a window
+    // where the password entry is live but the session-lock object is not yet
+    // locked. gtk_session_lock_instance_unlock() is a silent no-op while
+    // is_locked is false, so an Enter landing in that window would wedge the
+    // session locked behind a UI that believes it is done.
+    let locked_yet = Rc::new(Cell::new(false));
+    let unlock_pending = Rc::new(Cell::new(false));
+
+    // The one way out of the lock: ramp the surfaces down to transparent,
+    // then hand the compositor unlock_and_destroy.
+    let end_lock: Rc<dyn Fn()> = {
+        let fade = fade.clone();
+        let instance = instance.clone();
+        let locked_yet = locked_yet.clone();
+        let unlock_pending = unlock_pending.clone();
+        Rc::new(move || {
+            if !locked_yet.get() {
+                // Finish arriving so the compositor can confirm the lock,
+                // rather than playing out an entrance nobody wants any more.
+                unlock_pending.set(true);
+                fade.rush_to_opaque();
+                return;
+            }
+            let instance = instance.clone();
+            fade.exit(move || instance.unlock());
+        })
+    };
+
     // ── Password submission ───────────────────────────────────────────
     let on_submit: Rc<dyn Fn(String)> = {
         let surfaces = surfaces.clone();
         let gate = gate.clone();
-        let instance = instance.clone();
+        let end_lock = end_lock.clone();
         let unlocking = unlocking.clone();
         let user = user.clone();
         Rc::new(move |password: String| {
@@ -262,7 +312,7 @@ pub fn run() -> ! {
             let user = user.clone();
             let surfaces = surfaces.clone();
             let gate = gate.clone();
-            let instance = instance.clone();
+            let end_lock = end_lock.clone();
             let unlocking = unlocking.clone();
             spawn_work(
                 move || auth::pam_verify(&user, &password),
@@ -273,7 +323,7 @@ pub fn run() -> ! {
                             return;
                         }
                         surfaces.flash_success();
-                        instance.unlock();
+                        end_lock();
                     }
                     Err(e) => {
                         let failures = gate.borrow_mut().finish(false);
@@ -326,27 +376,32 @@ pub fn run() -> ! {
         let surfaces = surfaces.clone();
         let on_submit = on_submit.clone();
         let first_frame_hooked = std::cell::Cell::new(false);
+        let fade_cb = fade.clone();
         instance.connect_monitor(move |instance, monitor| {
             stage("monitor: build start");
             let window = surfaces.build_surface(on_submit.clone(), Some(monitor));
             stage("monitor: built");
+            // Before assign_window_to_monitor: that call presents the window
+            // itself, and ::realize is the only hook early enough to set the
+            // multiplier before the first buffer is committed.
+            fade_cb.bind(&window);
             instance.assign_window_to_monitor(&window, monitor);
             stage("monitor: assigned");
             window.present();
             stage("monitor: presented");
             // T0, the number the cross-fade is gated on: the first frame GTK
             // actually paints. Hooked on the first monitor only, and once.
-            if !first_frame_hooked.replace(true) {
-                if let Some(clock) = window.frame_clock() {
+            if !first_frame_hooked.replace(true)
+                && let Some(clock) = window.frame_clock()
+            {
                     let id = Rc::new(RefCell::new(None));
                     let id_c = id.clone();
                     *id.borrow_mut() = Some(clock.connect_after_paint(move |clock| {
                         stage("FIRST FRAME painted");
-                        if let Some(id) = id_c.borrow_mut().take() {
-                            clock.disconnect(id);
-                        }
-                    }));
-                }
+                    if let Some(id) = id_c.borrow_mut().take() {
+                        clock.disconnect(id);
+                    }
+                }));
             }
         });
     }
@@ -354,8 +409,10 @@ pub fn run() -> ! {
     // Fingerprint + clock start once the compositor confirms the lock.
     {
         let surfaces = surfaces.clone();
-        let instance_for_fp = instance.clone();
-        let instance_for_face = instance.clone();
+        let locked_yet = locked_yet.clone();
+        let unlock_pending = unlock_pending.clone();
+        let end_lock_on_locked = end_lock.clone();
+        let unlocking = unlocking.clone();
         let user_for_face = user.clone();
         instance.connect_locked(move |_| {
             log::info!("session locked");
@@ -373,6 +430,20 @@ pub fn run() -> ! {
                 let _ = out.flush();
             }
 
+            locked_yet.set(true);
+            // Authentication landed during the entrance and parked here
+            // waiting for the lock to become real. Now it is.
+            if unlock_pending.replace(false) {
+                end_lock_on_locked();
+                return;
+            }
+            // Same, but the unlock is already in flight: do not spin up the
+            // IR camera and grab the fingerprint device milliseconds before
+            // this process exits.
+            if unlocking.get() {
+                return;
+            }
+
             let clock_surfaces = surfaces.clone();
             glib::timeout_add_seconds_local(1, move || {
                 clock_surfaces.tick();
@@ -385,7 +456,7 @@ pub fn run() -> ! {
             {
                 let face_rx = face::start(user_for_face.clone());
                 let surfaces = surfaces.clone();
-                let instance = instance_for_face.clone();
+                let end_lock = end_lock.clone();
                 let unlocking = unlocking.clone();
                 glib::timeout_add_local(Duration::from_millis(200), move || {
                     while let Ok(ev) = face_rx.try_recv() {
@@ -405,9 +476,9 @@ pub fn run() -> ! {
                                 }
                                 surfaces.show_face(true, "ok", "Recognised you");
                                 surfaces.flash_success();
-                                let instance = instance.clone();
+                                let end_lock = end_lock.clone();
                                 glib::timeout_add_local_once(FACE_SETTLE, move || {
-                                    instance.unlock();
+                                    end_lock();
                                 });
                                 return glib::ControlFlow::Break;
                             }
@@ -438,7 +509,7 @@ pub fn run() -> ! {
 
             let rx = fprint::start();
             let surfaces = surfaces.clone();
-            let instance = instance_for_fp.clone();
+            let end_lock = end_lock.clone();
             let unlocking = unlocking.clone();
             glib::timeout_add_local(Duration::from_millis(40), move || {
                 while let Ok(ev) = rx.try_recv() {
@@ -452,7 +523,7 @@ pub fn run() -> ! {
                                 return glib::ControlFlow::Break;
                             }
                             surfaces.flash_success();
-                            instance.unlock();
+                            end_lock();
                             return glib::ControlFlow::Break;
                         }
                         EngineEvent::Unavailable(why) => {
@@ -476,6 +547,10 @@ pub fn run() -> ! {
         eprintln!("swaypplet lock: lock request failed");
         std::process::exit(EXIT_UNAVAILABLE);
     }
+    // If a window never reports a first paint (an output powered off has no
+    // frame clock), start the entrance anyway rather than sitting on a
+    // see-through backdrop until the compositor's own deadline fires.
+    fade.arm_fallback();
 
     main_loop.run();
 
