@@ -181,9 +181,7 @@ impl Presence {
             std::fs::read_to_string(self.dir.join("scan_elements").join(attr))
                 .is_ok_and(|v| v.trim() == "1")
         };
-        if !std::fs::read_to_string(self.dir.join("buffer/enable"))
-            .is_ok_and(|v| v.trim() == "1")
-        {
+        if !std::fs::read_to_string(self.dir.join("buffer/enable")).is_ok_and(|v| v.trim() == "1") {
             log::info!("presence: IIO buffer not enabled — using sysfs reads");
             return;
         }
@@ -580,7 +578,10 @@ mod live {
         }
 
         let present = present.expect("no opening state in 5s");
-        println!("opening state: present={present} after {:?}", started.elapsed());
+        println!(
+            "opening state: present={present} after {:?}",
+            started.elapsed()
+        );
     }
 
     /// The device is only ever touched by the owner. Ignored: needs the

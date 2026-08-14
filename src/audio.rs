@@ -169,7 +169,10 @@ pub enum Command {
     ToggleSourceMute,
     SetDefaultSink(String),
     SetDefaultSource(String),
-    SetStreamVolume { index: u32, level: f64 },
+    SetStreamVolume {
+        index: u32,
+        level: f64,
+    },
 }
 
 /// The write end of the audio thread's wakeup pipe.
@@ -1059,7 +1062,10 @@ mod live {
             }
         }
         let elapsed = elapsed.unwrap_or_else(|| {
-            panic!("the server never moved from {:?} in 2s ({seen} snapshots seen)", first.volume)
+            panic!(
+                "the server never moved from {:?} in 2s ({seen} snapshots seen)",
+                first.volume
+            )
         });
         println!("one press reached the server in {elapsed:?}");
 

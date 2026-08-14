@@ -214,7 +214,11 @@ impl Reveal {
         self.cancel_tick();
         self.set_material_alpha(a);
         if let Some(c) = &*self.inner.content.borrow() {
-            c.set_opacity(if self.inner.alpha.borrow().is_some() { 1.0 } else { a });
+            c.set_opacity(if self.inner.alpha.borrow().is_some() {
+                1.0
+            } else {
+                a
+            });
         }
     }
 
@@ -283,7 +287,11 @@ impl Reveal {
         if !was_visible || self.material_alpha() == 0.0 {
             self.set_material_alpha(0.0);
             if let Some(c) = &*inner.content.borrow() {
-                c.set_opacity(if inner.alpha.borrow().is_some() { 1.0 } else { 0.0 });
+                c.set_opacity(if inner.alpha.borrow().is_some() {
+                    1.0
+                } else {
+                    0.0
+                });
             }
             if let Some((bin, px)) = &*inner.slide.borrow() {
                 bin.jump_to(*px);
@@ -408,7 +416,8 @@ impl Reveal {
                 this.set_material_alpha(pane_from + (target - pane_from) * ease_out_cubic(t));
             } else {
                 this.set_material_alpha(glass_channel(pane_from, target, t));
-                if let (Some(from), Some(c)) = (content_from, this.inner.content.borrow().as_ref()) {
+                if let (Some(from), Some(c)) = (content_from, this.inner.content.borrow().as_ref())
+                {
                     c.set_opacity(from + (target - from) * ease_out_cubic(t));
                 }
             }
@@ -594,10 +603,7 @@ pub fn nudge(slide: &SlideBin) {
     let onset = duration(NUDGE_MS);
     slide.slide_to(NUDGE_PX, onset);
     let slide = slide.clone();
-    glib::timeout_add_local_once(
-        std::time::Duration::from_millis(onset as u64),
-        move || {
-            slide.slide_to(0.0, duration(EXIT_MS));
-        },
-    );
+    glib::timeout_add_local_once(std::time::Duration::from_millis(onset as u64), move || {
+        slide.slide_to(0.0, duration(EXIT_MS));
+    });
 }

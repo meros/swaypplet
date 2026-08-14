@@ -228,7 +228,11 @@ impl ClipboardService {
     }
 
     fn snapshot(&self) -> Vec<EntryView> {
-        let history = self.shared.history.lock().unwrap_or_else(|e| e.into_inner());
+        let history = self
+            .shared
+            .history
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         history
             .iter()
             .take(VISIBLE_ENTRIES)
@@ -243,7 +247,11 @@ impl ClipboardService {
     /// that named it is from a snapshot, and the ring may have moved on.
     pub fn restore(&self, id: u64) {
         let payload = {
-            let history = self.shared.history.lock().unwrap_or_else(|e| e.into_inner());
+            let history = self
+                .shared
+                .history
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             match history.iter().find(|e| e.id == id) {
                 Some(e) => Payload {
                     mime: e.mime.clone(),
@@ -353,7 +361,11 @@ impl Watcher {
     /// wake the GTK side.
     fn file(&self, entry: Entry) {
         {
-            let mut history = self.shared.history.lock().unwrap_or_else(|e| e.into_inner());
+            let mut history = self
+                .shared
+                .history
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             if let Some(pos) = history.iter().position(|e| e.bytes == entry.bytes) {
                 // Re-copying something is a bump, not a second row.
                 let existing = history.remove(pos);

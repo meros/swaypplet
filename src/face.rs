@@ -28,9 +28,9 @@
 //! the user to press a key whenever one appears, which is exactly the
 //! behaviour an attacker wants.
 
+use async_channel::Sender;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
-use async_channel::Sender;
 use std::time::Duration;
 
 const SOCKET: &str = "/run/faced/session.sock";
@@ -166,7 +166,9 @@ fn run(tx: &Sender<Request>) -> std::io::Result<()> {
         let Some(stage) = field(text, "stage").and_then(Stage::parse) else {
             continue;
         };
-        let Some(id) = field(text, "id") else { continue };
+        let Some(id) = field(text, "id") else {
+            continue;
+        };
         let request = Request {
             id: id.to_string(),
             stage,
@@ -257,9 +259,17 @@ mod tests {
 pub enum Progress {
     /// Frames arriving, no face found yet. The user should move into frame.
     Looking,
-    /// Frames arriving but failing the darkness gate. NOT the user's fault:
-    /// the emitter or the relay is wrong, and telling someone to reposition
-    /// their face here would be actively misleading.
+    /// Not one frame in the burst carried usable illumination. NOT the
+    /// user's fault and not the room's: this camera brings its own infrared
+    /// light, so if nothing is lit then the emitter or the relay is wrong,
+    /// and telling someone to reposition their face or turn a lamp on would
+    /// be actively misleading.
+    ///
+    /// It used to be reported far more often than it was true. faced latched
+    /// this on the first frame that failed its darkness gate, and the first
+    /// frame of every burst fails it -- the sensor has only just been
+    /// streamed on -- so every attempt that simply found no face announced a
+    /// lighting fault instead.
     Dark,
     /// A face was found and is being compared. Hold still.
     Face,
@@ -284,7 +294,7 @@ impl Progress {
             // Never phrased as the user's fault: the emitter or the relay is
             // what is wrong, and telling somebody to move their face sends
             // them after nothing.
-            Progress::Dark => "Too dark to see",
+            Progress::Dark => "No infrared light",
             Progress::Face => "Hold still",
         }
     }

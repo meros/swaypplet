@@ -21,7 +21,7 @@
 use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer};
 
-use crate::layer_shell::{self, create_layer_window, LayerShellConfig};
+use crate::layer_shell::{self, LayerShellConfig, create_layer_window};
 
 static CUE_CONFIG: LayerShellConfig = LayerShellConfig {
     namespace: "swaypplet-face-cue",

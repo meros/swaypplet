@@ -491,9 +491,7 @@ fn clock_ticks() -> Option<u64> {
 /// Split out from [`proc_start_time`] so the arithmetic is testable
 /// without a process to point it at.
 fn start_time_from(ticks: u64, boot: SystemTime, hz: u64) -> Option<SystemTime> {
-    boot.checked_add(Duration::from_nanos(
-        ticks.checked_mul(1_000_000_000)? / hz,
-    ))
+    boot.checked_add(Duration::from_nanos(ticks.checked_mul(1_000_000_000)? / hz))
 }
 
 /// A minute of tolerance: timer latency and scheduling never add up to

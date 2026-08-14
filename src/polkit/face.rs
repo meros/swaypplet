@@ -37,7 +37,7 @@ use std::rc::Rc;
 use crate::face::{self, Request, Stage};
 
 use super::dialog::StatusKind;
-use super::{pop_queue, PolkitState};
+use super::{PolkitState, pop_queue};
 
 /// A face confirm currently on screen.
 pub(super) struct FaceSession {
@@ -70,7 +70,11 @@ fn prettify(word: &str) -> String {
 /// The tail is what matters (`systemctl restart foo`) and so is the leading
 /// binary, so the middle is what gets elided.
 pub(super) fn summarise(cmdline: &str, exe: &str) -> String {
-    let raw = if cmdline.trim().is_empty() { exe } else { cmdline };
+    let raw = if cmdline.trim().is_empty() {
+        exe
+    } else {
+        cmdline
+    };
     let joined: Vec<String> = raw.split_whitespace().map(prettify).collect();
     let text = joined.join(" ");
     let text = text.trim();
@@ -151,7 +155,10 @@ fn announce(state: &Rc<RefCell<PolkitState>>, req: Request) {
     // The cue says what to do; the card says what is happening. The cue is
     // read peripherally, on the way to the lens, and "looking for you" is not
     // an instruction.
-    state.borrow().cue.set(true, "looking", "Look at the camera");
+    state
+        .borrow()
+        .cue
+        .set(true, "looking", "Look at the camera");
 
     state.borrow_mut().face = Some(FaceSession {
         id: req.id,
@@ -183,7 +190,10 @@ fn progress(state: &Rc<RefCell<PolkitState>>, req: Request) {
     };
     let dialog = state.borrow().dialog.clone();
     dialog.show_face(true, progress.ring(), progress.text());
-    state.borrow().cue.set(true, progress.ring(), progress.text());
+    state
+        .borrow()
+        .cue
+        .set(true, progress.ring(), progress.text());
 }
 
 fn confirm(state: &Rc<RefCell<PolkitState>>, req: Request) {
@@ -285,7 +295,10 @@ mod tests {
         let out = summarise(&long, "");
         assert!(out.contains('…'), "expected elision, got {out}");
         assert!(out.starts_with("sudo sh -c"), "lost the head: {out}");
-        assert!(out.ends_with("systemctl restart foo"), "lost the tail: {out}");
+        assert!(
+            out.ends_with("systemctl restart foo"),
+            "lost the tail: {out}"
+        );
     }
 
     #[test]

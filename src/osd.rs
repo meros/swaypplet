@@ -481,12 +481,20 @@ impl Osd {
             OsdCommand::OutputVolumeRaise => {
                 self.showing.set(Showing::OutputVolume);
                 audio.send(AudioCommand::AdjustSinkVolume(VOLUME_STEP));
-                (self.advance(current.volume, VOLUME_STEP), current.muted, false)
+                (
+                    self.advance(current.volume, VOLUME_STEP),
+                    current.muted,
+                    false,
+                )
             }
             OsdCommand::OutputVolumeLower => {
                 self.showing.set(Showing::OutputVolume);
                 audio.send(AudioCommand::AdjustSinkVolume(-VOLUME_STEP));
-                (self.advance(current.volume, -VOLUME_STEP), current.muted, false)
+                (
+                    self.advance(current.volume, -VOLUME_STEP),
+                    current.muted,
+                    false,
+                )
             }
             OsdCommand::OutputVolumeMuteToggle => {
                 self.showing.set(Showing::OutputVolume);

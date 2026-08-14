@@ -180,7 +180,8 @@ impl ClipboardSection {
             if count == 1 { "" } else { "s" }
         ));
         for entry in entries {
-            w.entry_list.append(&Self::build_entry_row(entry, w.clone()));
+            w.entry_list
+                .append(&Self::build_entry_row(entry, w.clone()));
         }
     }
 
