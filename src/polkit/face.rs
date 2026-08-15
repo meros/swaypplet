@@ -8,7 +8,7 @@
 //!
 //! Two shapes, one card:
 //!
-//!   * **pkexec** — polkit is already showing the card, because pam_face runs
+//!   * **pkexec** — polkit is already showing the card, because pam_race runs
 //!     inside the PAM conversation polkit-agent-helper-1 is having. The face
 //!     pill and the camera cue attach to the card that is up.
 //!   * **sudo** — nothing else is asking, so the card is synthesised from the
@@ -24,12 +24,18 @@
 //!
 //! Why typing abandons the check
 //! -----------------------------
-//! PAM is serial. While pam_face waits, the stack has not reached fprintd or
-//! the password, so a user who has already decided to type would otherwise
-//! watch a camera they are not looking at hold up their prompt. The first
-//! keystroke answers `deny`, pam_face returns PAM_AUTHINFO_UNAVAIL, and the
-//! stack moves on immediately. Refusing your own face check costs nothing:
-//! the password was always going to be accepted.
+//! This used to be about unblocking the stack: PAM is serial, and while
+//! pam_face waited nothing else in it could run, so a user who had decided to
+//! type sat watching a camera they were not looking at hold up their prompt.
+//! pam_race removed that reason — the password prompt and the reader are live
+//! the whole time the camera is, and typing no longer has anything to unblock.
+//!
+//! The rule stays anyway, for the reason that outlived it. A keystroke says
+//! which method this person chose, and a camera that keeps looking after the
+//! answer is elsewhere is a camera running for nothing. So the first keystroke
+//! still answers `deny`, pam_race's face channel closes, and the emitter goes
+//! dark a few seconds early. Refusing your own face check costs nothing: the
+//! password was always going to be accepted.
 
 use std::cell::RefCell;
 use std::rc::Rc;

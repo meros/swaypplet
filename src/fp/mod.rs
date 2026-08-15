@@ -24,6 +24,7 @@
 //! fails "already open" until fprintd restarts).
 
 pub mod agent;
+pub mod verify;
 
 use std::time::Duration;
 

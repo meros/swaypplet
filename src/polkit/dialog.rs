@@ -179,7 +179,7 @@ impl PolkitDialog {
 
         // ── The command, for requests polkit never described ──────────
         //
-        // `sudo` reaches this card through pam_face rather than through
+        // `sudo` reaches this card through pam_race rather than through
         // polkit, so there is no action id and no vendor message to show. The
         // command line is the only thing that distinguishes a request the
         // user made from one they did not, so it gets a well of its own:
@@ -573,16 +573,18 @@ impl PolkitDialog {
 
     /// Present the card for an elevation that polkit knows nothing about.
     ///
-    /// `sudo` reaches face authentication through pam_face directly, so there
+    /// `sudo` reaches face authentication through pam_race directly, so there
     /// is no polkit action, no vendor message and no identity list — only the
     /// process that asked. The card is otherwise the same card, because from
     /// the user's side it is the same decision: something wants to run as
     /// root, and they are being asked whether it may.
     ///
-    /// There is no password entry here. pam_face never prompts (a prompt is
-    /// answerable by a pipe, which is the whole reason the confirm lives in
-    /// the session), so offering a text box would offer something that cannot
-    /// work; the terminal that ran `sudo` is where a password gets typed.
+    /// There is no password entry here. pam_race does prompt for a password,
+    /// but it prompts on the terminal that ran `sudo`, through that terminal's
+    /// own conversation — this card never sees it. What it can never prompt
+    /// for is the confirm, because a prompt is answerable by a pipe, which is
+    /// the whole reason the confirm lives in the session. So the card carries
+    /// the press and the terminal carries the password, and they race.
     pub fn present_elevate(
         &self,
         command: &str,
@@ -590,9 +592,10 @@ impl PolkitDialog {
         on_cancel: Box<dyn Fn()>,
     ) {
         self.set_status("", StatusKind::Info);
-        // No password here (see below) and no fingerprint: pam_face is the
-        // only thing that can answer this. The field goes with them, and the
-        // face reports through the caption, which the card has anyway.
+        // No password here (see above) and no fingerprint: the terminal owns
+        // one and pam_race's own child process owns the other. The field goes
+        // with them, and the face reports through the caption, which the card
+        // has anyway.
         self.elevate.set(true);
         self.field.widget().set_visible(false);
         self.password_entry.set_text("");
