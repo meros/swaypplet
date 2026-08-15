@@ -77,11 +77,13 @@ struct ActiveSession {
     waiting_password: bool,
     /// A password submitted before PAM asked for one.
     ///
-    /// The card shows the entry from the first prompt onward, including while
-    /// pam_face still holds the stack, so a fast user can submit before the
-    /// conversation is ready for it. Dropping that keystroke silently is the
-    /// one thing worse than not showing the entry at all, so it is held here
-    /// and flushed into the next prompt.
+    /// The card shows the entry from the first prompt onward, so a fast user
+    /// can submit before the conversation is ready for it. pam_race made that
+    /// window small — it prompts within about 200 ms of the stack starting,
+    /// rather than after a camera burst and a reader timeout — but small is
+    /// not zero, and dropping that keystroke silently is the one thing worse
+    /// than not showing the entry at all. It is held here and flushed into
+    /// the next prompt.
     buffered_password: Option<String>,
 }
 
