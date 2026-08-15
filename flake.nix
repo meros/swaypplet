@@ -94,6 +94,60 @@
               SCRIPT
               chmod +x $out/bin/swaypplet-toggle
 
+              # Launcher toggle
+              cat > $out/bin/swaypplet-launcher <<'SCRIPT'
+              #!/bin/sh
+              PID=$(cat "''${XDG_RUNTIME_DIR:-/tmp}/swaypplet.pid" 2>/dev/null)
+              if [ -n "$PID" ] && [ "$(cat /proc/$PID/comm 2>/dev/null)" = "swaypplet" ]; then
+                kill -USR2 "$PID"
+              else
+                swaypplet launcher &
+              fi
+              SCRIPT
+              chmod +x $out/bin/swaypplet-launcher
+
+              # OSD client — drop-in replacement for swayosd-client
+              cat > $out/bin/swaypplet-osd <<SCRIPT
+              #!/bin/sh
+              exec $out/bin/swaypplet osd "\$@"
+              SCRIPT
+              chmod +x $out/bin/swaypplet-osd
+
+              # Polkit authentication agent — runs as its own process
+              cat > $out/bin/swaypplet-polkit-agent <<SCRIPT
+              #!/bin/sh
+              exec $out/bin/swaypplet polkit-agent "\$@"
+              SCRIPT
+              chmod +x $out/bin/swaypplet-polkit-agent
+
+              # Screenshots — region / screen / pick, all through the running panel
+              cat > $out/bin/swaypplet-screenshot <<SCRIPT
+              #!/bin/sh
+              exec $out/bin/swaypplet screenshot "\$@"
+              SCRIPT
+              chmod +x $out/bin/swaypplet-screenshot
+
+              # Window switcher — thumbnails of every window, one keypress away
+              cat > $out/bin/swaypplet-switcher <<SCRIPT
+              #!/bin/sh
+              exec $out/bin/swaypplet switcher "\$@"
+              SCRIPT
+              chmod +x $out/bin/swaypplet-switcher
+
+              # Keybinding sheet — show / hide edges from the Super-hold watcher
+              cat > $out/bin/swaypplet-keybinds <<SCRIPT
+              #!/bin/sh
+              exec $out/bin/swaypplet keybinds "\$@"
+              SCRIPT
+              chmod +x $out/bin/swaypplet-keybinds
+
+              # Session locker — swaylock replacement (ext-session-lock-v1 + PAM)
+              cat > $out/bin/swaypplet-lock <<SCRIPT
+              #!/bin/sh
+              exec $out/bin/swaypplet lock "\$@"
+              SCRIPT
+              chmod +x $out/bin/swaypplet-lock
+
               mkdir -p $out/share/swaypplet
               cp -r data/* $out/share/swaypplet/
             '';
