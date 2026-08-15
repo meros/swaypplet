@@ -47,8 +47,16 @@
           craneLib = crane.mkLib pkgs;
           runtimeDeps = runtimeDepsFor pkgs;
 
-          # Filter source files, including proto and data directories
-          src = craneLib.cleanCargoSource (craneLib.path ./.);
+          # Filter source files, ensuring proto and data directories are included
+          protoOrCargo = path: type:
+            (builtins.match ".*proto$" path != null) ||
+            (builtins.match ".*css$" path != null) ||
+            (craneLib.filterCargoSources path type);
+
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = protoOrCargo;
+          };
 
           commonArgs = {
             inherit src;
