@@ -72,6 +72,19 @@ pub fn build(sway: &Rc<SwayService>, audio: &Rc<AudioService>) -> gtk4::Box {
     let (mic, mic_glyph) = hazard("󰍬");
     lane.append(&mic);
 
+    let (rec, rec_glyph) = hazard("󰑋");
+    rec_glyph.set_tooltip_text(Some("Screen recording in progress"));
+    rec_glyph.add_css_class("bar-hazard-rec");
+    lane.append(&rec);
+
+    crate::screenshot::record::RECORDING_OBSERVED.with(|r| {
+        r.connect_change({
+            let rec = rec.clone();
+            move || crate::screenshot::record::RECORDING_OBSERVED.with(|r| rec.set_reveal_child(r.with(|v| *v)))
+        });
+        rec.set_reveal_child(r.with(|v| *v));
+    });
+
     // Leftover observers after an output unplug paint unmapped widgets —
     // same leak-tolerant story as board.rs.
     CAFFEINE.with(|c| {
