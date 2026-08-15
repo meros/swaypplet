@@ -79,9 +79,10 @@
           # 1. Build & cache ALL third-party dependencies independently into /nix/store
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
-          # 2. Build swaypplet itself in seconds by reusing cargoArtifacts
+          # 2. Build swaypplet itself in seconds by reusing cargoArtifacts (tests run in checks output)
           swayppletPkg = craneLib.buildPackage (commonArgs // {
             inherit cargoArtifacts;
+            doCheck = false;
             postInstall = ''
               cat > $out/bin/swaypplet-toggle <<'SCRIPT'
               #!/bin/sh
