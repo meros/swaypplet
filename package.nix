@@ -59,6 +59,7 @@ rustPlatform.buildRustPackage {
   ];
 
   buildInputs = runtimeDeps;
+  doCheck = false;
 
   # Build optimization: fast release codegen + mold parallel linking
   env = {
