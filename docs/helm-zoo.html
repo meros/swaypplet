@@ -1,0 +1,1192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Swaypplet — Pilot's Helm & SOTA Command Deck Zoo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+  <style>
+    :root {
+      /* Gruvbox Dark Palette Tokens */
+      --bg-deep: #101213;
+      --bg0: #1d2021;
+      --bg1: #282828;
+      --bg2: #3c3836;
+      --bg3: #504945;
+      --fg: #ebdbb2;
+      --fg-dim: #a89984;
+      --fg-muted: #7c6f64;
+
+      --accent-green: #689d6a;
+      --accent-green-bright: #8ec07c;
+      --accent-yellow: #d79921;
+      --accent-yellow-bright: #fabd2f;
+      --accent-blue: #458588;
+      --accent-blue-bright: #83a598;
+      --accent-purple: #b16286;
+      --accent-red: #cc241d;
+      --accent-orange: #d65d0e;
+
+      --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      --font-mono: 'Fira Code', monospace;
+
+      /* SOTA Liquid Glass Optics */
+      --glass-tint: rgba(30, 32, 33, 0.72);
+      --glass-card-bg: rgba(40, 40, 40, 0.58);
+      --glass-border: rgba(235, 219, 178, 0.12);
+      --glass-border-focus: rgba(142, 192, 124, 0.45);
+      --specular-rim: inset 0 1px 1px 0 rgba(255, 255, 255, 0.14);
+      --shadow-elevation: 0 24px 60px rgba(0, 0, 0, 0.45), 0 4px 16px rgba(0, 0, 0, 0.3);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-deep);
+      color: var(--fg);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      padding: 36px 32px 100px;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+      position: relative;
+    }
+
+    /* Ambient Wallpaper & Desktop Grid */
+    .ambient-wallpaper {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background: 
+        radial-gradient(circle at 20% 25%, rgba(104, 157, 106, 0.18) 0%, transparent 40%),
+        radial-gradient(circle at 80% 20%, rgba(215, 153, 33, 0.16) 0%, transparent 45%),
+        radial-gradient(circle at 50% 85%, rgba(69, 133, 136, 0.20) 0%, transparent 50%),
+        #121415;
+      filter: contrast(1.05) saturate(1.15);
+    }
+
+    .ambient-grid {
+      position: fixed;
+      inset: 0;
+      background-image: 
+        linear-gradient(rgba(235, 219, 178, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(235, 219, 178, 0.025) 1px, transparent 1px);
+      background-size: 32px 32px;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      position: relative;
+      z-index: 2;
+    }
+
+    /* Header */
+    header {
+      margin-bottom: 36px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--glass-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(104, 157, 106, 0.15);
+      color: var(--accent-green-bright);
+      border: 1px solid rgba(104, 157, 106, 0.35);
+      border-radius: 999px;
+      padding: 4px 12px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .badge-yellow {
+      background: rgba(215, 153, 33, 0.15);
+      color: var(--accent-yellow-bright);
+      border-color: rgba(215, 153, 33, 0.35);
+    }
+
+    .badge-blue {
+      background: rgba(69, 133, 136, 0.15);
+      color: var(--accent-blue-bright);
+      border-color: rgba(69, 133, 136, 0.35);
+    }
+
+    h1 {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--fg);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    p.subtitle {
+      color: var(--fg-dim);
+      font-size: 14px;
+      margin-top: 6px;
+      max-width: 720px;
+      line-height: 1.5;
+    }
+
+    /* Navigation / Tabs */
+    .tab-bar {
+      display: flex;
+      gap: 8px;
+      background: rgba(29, 32, 33, 0.7);
+      padding: 6px;
+      border-radius: 14px;
+      border: 1px solid var(--glass-border);
+      box-shadow: var(--specular-rim);
+      flex-wrap: wrap;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--fg-dim);
+      padding: 10px 18px;
+      border-radius: 10px;
+      font-family: var(--font-sans);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .tab-btn:hover {
+      color: var(--fg);
+      background: rgba(235, 219, 178, 0.06);
+    }
+
+    .tab-btn.active {
+      background: var(--bg2);
+      color: var(--fg);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), var(--specular-rim);
+      border: 1px solid var(--glass-border);
+    }
+
+    .tab-btn .tab-num {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      opacity: 0.6;
+      background: rgba(0, 0, 0, 0.25);
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+
+    /* Interactive Viewport Stage */
+    .viewport-stage {
+      background: radial-gradient(circle at 50% 30%, rgba(35, 38, 39, 0.6) 0%, rgba(20, 22, 23, 0.85) 100%);
+      border: 1px solid var(--glass-border);
+      border-radius: 24px;
+      box-shadow: var(--shadow-elevation), var(--specular-rim);
+      min-height: 680px;
+      padding: 48px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      position: relative;
+      backdrop-filter: blur(var(--glass-blur));
+      margin-bottom: 40px;
+    }
+
+    .optical-marker {
+      position: absolute;
+      top: 28%;
+      left: 20px;
+      right: 20px;
+      border-top: 1px dashed rgba(235, 219, 178, 0.08);
+      pointer-events: none;
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--fg-muted);
+      padding-top: 4px;
+    }
+
+    /* Live HUD Containers */
+    .hud-window {
+      width: 100%;
+      max-width: 740px;
+      border-radius: 20px;
+      background: var(--glass-tint);
+      border: 1px solid var(--glass-border);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55), var(--specular-rim);
+      backdrop-filter: blur(28px) saturate(140%);
+      overflow: hidden;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
+      z-index: 10;
+    }
+
+    /* Option A: Unified Pilot's Helm */
+    .helm-telemetry-ribbon {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: rgba(20, 22, 23, 0.65);
+      border-bottom: 1px solid var(--glass-border);
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .telemetry-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: rgba(40, 40, 40, 0.6);
+      border: 1px solid rgba(235, 219, 178, 0.08);
+      border-radius: 10px;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--fg);
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s ease;
+    }
+
+    .telemetry-pill:hover {
+      background: rgba(60, 56, 54, 0.7);
+      border-color: rgba(235, 219, 178, 0.2);
+    }
+
+    .telemetry-pill.active {
+      border-color: var(--accent-green);
+      background: rgba(104, 157, 106, 0.15);
+      color: var(--accent-green-bright);
+    }
+
+    .telemetry-pill i {
+      font-size: 14px;
+      opacity: 0.85;
+    }
+
+    .slider-mini {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 110px;
+    }
+
+    .slider-mini input[type="range"] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 4px;
+      background: var(--bg3);
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .slider-mini input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent-green-bright);
+      box-shadow: 0 0 6px rgba(104, 157, 106, 0.6);
+      cursor: pointer;
+    }
+
+    /* Omnibox / Search Input */
+    .helm-search-row {
+      display: flex;
+      align-items: center;
+      padding: 14px 18px;
+      background: rgba(29, 32, 33, 0.45);
+      gap: 12px;
+      border-bottom: 1px solid var(--glass-border);
+    }
+
+    .search-icon {
+      font-size: 20px;
+      color: var(--accent-green-bright);
+      opacity: 0.9;
+    }
+
+    .search-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      font-family: var(--font-sans);
+      font-size: 16px;
+      font-weight: 500;
+      color: var(--fg);
+      letter-spacing: -0.01em;
+    }
+
+    .search-input::placeholder {
+      color: var(--fg-muted);
+      font-weight: 400;
+    }
+
+    .shortcut-badge {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      background: rgba(50, 48, 47, 0.8);
+      border: 1px solid var(--glass-border);
+      padding: 3px 7px;
+      border-radius: 6px;
+      color: var(--fg-dim);
+    }
+
+    /* Result Stream */
+    .helm-results {
+      padding: 8px;
+      max-height: 330px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .result-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 12px;
+      border-radius: 10px;
+      background: transparent;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.12s ease;
+    }
+
+    .result-item:hover, .result-item.selected {
+      background: rgba(60, 56, 54, 0.55);
+      border-color: rgba(235, 219, 178, 0.12);
+    }
+
+    .result-item.selected {
+      background: rgba(104, 157, 106, 0.16);
+      border-color: rgba(104, 157, 106, 0.35);
+    }
+
+    .result-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .result-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: rgba(20, 22, 23, 0.7);
+      border: 1px solid var(--glass-border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      color: var(--fg);
+    }
+
+    .result-title {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--fg);
+    }
+
+    .result-sub {
+      font-size: 11.5px;
+      color: var(--fg-muted);
+      margin-top: 1px;
+    }
+
+    .result-action-hint {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--fg-dim);
+      opacity: 0.8;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Action Deck / Flight Controls */
+    .helm-action-deck {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: rgba(20, 22, 23, 0.75);
+      border-top: 1px solid var(--glass-border);
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .deck-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .deck-btn {
+      background: rgba(45, 45, 45, 0.6);
+      border: 1px solid var(--glass-border);
+      color: var(--fg-dim);
+      padding: 6px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .deck-btn:hover {
+      background: var(--bg2);
+      color: var(--fg);
+      border-color: rgba(235, 219, 178, 0.25);
+    }
+
+    .deck-btn.active {
+      background: rgba(215, 153, 33, 0.2);
+      color: var(--accent-yellow-bright);
+      border-color: rgba(215, 153, 33, 0.4);
+    }
+
+    .deck-btn-danger:hover {
+      background: rgba(204, 36, 29, 0.25);
+      color: #fb4934;
+      border-color: rgba(204, 36, 29, 0.5);
+    }
+
+    /* Option B: Spotlight 2-Pane Split */
+    .split-layout {
+      display: grid;
+      grid-template-columns: 1.3fr 1fr;
+      min-height: 340px;
+    }
+
+    .split-left {
+      border-right: 1px solid var(--glass-border);
+      padding: 8px;
+      overflow-y: auto;
+    }
+
+    .split-right {
+      padding: 16px;
+      background: rgba(20, 22, 23, 0.4);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .preview-header {
+      text-align: center;
+      padding: 14px 0 10px;
+    }
+
+    .preview-icon-large {
+      width: 54px;
+      height: 54px;
+      border-radius: 14px;
+      background: rgba(40, 40, 40, 0.7);
+      border: 1px solid var(--glass-border);
+      margin: 0 auto 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      color: var(--accent-green-bright);
+    }
+
+    .preview-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--fg);
+    }
+
+    .preview-meta-list {
+      margin-top: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 11.5px;
+      font-family: var(--font-mono);
+    }
+
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      color: var(--fg-dim);
+      border-bottom: 1px dashed rgba(235, 219, 178, 0.08);
+      padding-bottom: 4px;
+    }
+
+    .meta-val {
+      color: var(--fg);
+      font-weight: 600;
+    }
+
+    /* Option C: Dynamic Island / Capsule */
+    .island-top-capsule {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      background: rgba(25, 27, 28, 0.85);
+      border: 1px solid var(--glass-border);
+      border-radius: 999px;
+      padding: 8px 18px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5), var(--specular-rim);
+      backdrop-filter: blur(24px);
+      margin-bottom: 14px;
+    }
+
+    .island-node {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--fg);
+    }
+
+    .island-node i {
+      color: var(--accent-green-bright);
+    }
+
+    .island-divider {
+      width: 1px;
+      height: 14px;
+      background: var(--glass-border);
+    }
+
+    /* Option D: Tactical Sci-Fi Flanked Helm */
+    .tactical-wrapper {
+      display: flex;
+      gap: 14px;
+      width: 100%;
+      max-width: 960px;
+      align-items: stretch;
+    }
+
+    .tactical-wing {
+      width: 180px;
+      background: var(--glass-tint);
+      border: 1px solid var(--glass-border);
+      border-radius: 18px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 12px;
+      backdrop-filter: blur(24px);
+      box-shadow: var(--shadow-elevation);
+    }
+
+    .wing-gauge {
+      background: rgba(20, 22, 23, 0.6);
+      border: 1px solid rgba(235, 219, 178, 0.08);
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 11px;
+    }
+
+    .gauge-label {
+      color: var(--fg-muted);
+      text-transform: uppercase;
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .gauge-bar-track {
+      width: 100%;
+      height: 6px;
+      background: var(--bg2);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    .gauge-bar-fill {
+      height: 100%;
+      background: var(--accent-green-bright);
+      border-radius: 99px;
+    }
+
+    /* Comparison Matrix Table */
+    .comparison-section {
+      margin-top: 48px;
+    }
+
+    .comparison-section h2 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 18px;
+      color: var(--fg);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .matrix-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: rgba(29, 32, 33, 0.6);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: var(--shadow-elevation);
+      font-size: 13px;
+    }
+
+    .matrix-table th, .matrix-table td {
+      padding: 14px 18px;
+      text-align: left;
+      border-bottom: 1px solid var(--glass-border);
+    }
+
+    .matrix-table th {
+      background: rgba(20, 22, 23, 0.85);
+      color: var(--fg-dim);
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+    }
+
+    .matrix-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .matrix-table tr:hover td {
+      background: rgba(235, 219, 178, 0.03);
+    }
+
+    .pill-score {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 11px;
+      font-family: var(--font-mono);
+    }
+
+    .score-great { background: rgba(104, 157, 106, 0.2); color: var(--accent-green-bright); }
+    .score-good  { background: rgba(215, 153, 33, 0.2); color: var(--accent-yellow-bright); }
+    .score-mid   { background: rgba(214, 93, 14, 0.2); color: #fe8019; }
+
+    /* Interactive Feedback Banner */
+    .interactive-hint {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--fg-dim);
+      margin-top: 14px;
+      background: rgba(40, 40, 40, 0.4);
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid rgba(235, 219, 178, 0.08);
+    }
+
+    .interactive-hint i {
+      color: var(--accent-yellow-bright);
+    }
+  </style>
+</head>
+<body>
+  <div class="ambient-wallpaper"></div>
+  <div class="ambient-grid"></div>
+
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <div class="badge"><i class="ti ti-compass"></i> SOTA Architectural Exploration</div>
+        <h1>Swaypplet — Pilot's Helm & Command Center Zoo</h1>
+        <p class="subtitle">
+          Retiring the bottom-left start menu with nested accordions in favor of a centered, optical sweet-spot Command Cockpit fusing instant Elephant launcher velocity with high-density glanceable telemetry.
+        </p>
+      </div>
+
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchOption('A')">
+          <span class="tab-num">1</span> Option A: Unified Pilot's Helm
+        </button>
+        <button class="tab-btn" onclick="switchOption('B')">
+          <span class="tab-num">2</span> Option B: Spotlight 2-Pane Deck
+        </button>
+        <button class="tab-btn" onclick="switchOption('C')">
+          <span class="tab-num">3</span> Option C: Modular Dynamic Island
+        </button>
+        <button class="tab-btn" onclick="switchOption('D')">
+          <span class="tab-num">4</span> Option D: Tactical Flanked Cockpit
+        </button>
+      </div>
+    </header>
+
+    <!-- Interactive Live Prototype Stage -->
+    <div class="viewport-stage" id="stage">
+      <div class="optical-marker">
+        <span>OPTICAL FOVEAL SWEET SPOT (Y: ~28%)</span>
+        <span>740px FIXED WIDTH — ZERO EYE FATIGUE</span>
+      </div>
+
+      <!-- OPTION A: Unified Pilot's Helm -->
+      <div id="option-A" class="hud-window" style="display: block;">
+        <!-- Top Telemetry Ribbon -->
+        <div class="helm-telemetry-ribbon">
+          <div class="telemetry-pill" id="pill-power" onclick="togglePill(this)">
+            <i class="ti ti-battery-charging" style="color: var(--accent-green-bright);"></i>
+            <span>88%</span>
+            <span class="badge" style="margin: 0; padding: 1px 6px; font-size: 9.5px;">Perf</span>
+          </div>
+
+          <div class="telemetry-pill" id="pill-audio">
+            <i class="ti ti-volume"></i>
+            <div class="slider-mini">
+              <input type="range" id="vol-slider" min="0" max="100" value="65" oninput="updateVol(this.value)">
+            </div>
+            <span id="vol-val" style="font-family: var(--font-mono); font-size: 11px;">65%</span>
+          </div>
+
+          <div class="telemetry-pill" id="pill-net" onclick="togglePill(this)">
+            <i class="ti ti-wifi" style="color: var(--accent-blue-bright);"></i>
+            <span>Home_5G</span>
+          </div>
+
+          <div class="telemetry-pill" id="pill-bt" onclick="togglePill(this)">
+            <i class="ti ti-brand-bluetooth" style="color: var(--accent-blue-bright);"></i>
+            <span>MX Master 3S</span>
+          </div>
+
+          <div class="telemetry-pill" id="pill-media" onclick="togglePill(this)">
+            <i class="ti ti-music" style="color: var(--accent-yellow-bright);"></i>
+            <span>Aphex Twin — #3</span>
+          </div>
+        </div>
+
+        <!-- Search / Omnibox -->
+        <div class="helm-search-row">
+          <i class="ti ti-search search-icon"></i>
+          <input type="text" id="search-input-A" class="search-input" placeholder="Type an app, calculation, window (#), or shell command (>)..." autofocus oninput="filterResults(this.value, 'results-A')">
+          <div class="shortcut-badge">Tab Actions</div>
+          <div class="shortcut-badge">Esc Close</div>
+        </div>
+
+        <!-- Results Stream -->
+        <div class="helm-results" id="results-A">
+          <div class="result-item selected" onclick="selectResult(this)">
+            <div class="result-left">
+              <div class="result-icon"><i class="ti ti-terminal-2" style="color: var(--accent-green-bright);"></i></div>
+              <div>
+                <div class="result-title">Ghostty Terminal</div>
+                <div class="result-sub">Primary GPU accelerated terminal emulator</div>
+              </div>
+            </div>
+            <div class="result-action-hint"><span>Launch</span> <span class="shortcut-badge">↵</span></div>
+          </div>
+
+          <div class="result-item" onclick="selectResult(this)">
+            <div class="result-left">
+              <div class="result-icon"><i class="ti ti-brand-firefox" style="color: #fe8019;"></i></div>
+              <div>
+                <div class="result-title">Firefox Nightly</div>
+                <div class="result-sub">Web browser (Wayland native)</div>
+              </div>
+            </div>
+            <div class="result-action-hint"><span>Focus WS 1</span> <span class="shortcut-badge">↵</span></div>
+          </div>
+
+          <div class="result-item" onclick="selectResult(this)">
+            <div class="result-left">
+              <div class="result-icon"><i class="ti ti-color-picker" style="color: var(--accent-yellow-bright);"></i></div>
+              <div>
+                <div class="result-title">Magnifying Eyedropper Loupe</div>
+                <div class="result-sub">Pick pixel color directly to clipboard with 16x zoom</div>
+              </div>
+            </div>
+            <div class="result-action-hint"><span>Inspect</span> <span class="shortcut-badge">↵</span></div>
+          </div>
+
+          <div class="result-item" onclick="selectResult(this)">
+            <div class="result-left">
+              <div class="result-icon"><i class="ti ti-code" style="color: var(--accent-blue-bright);"></i></div>
+              <div>
+                <div class="result-title">VS Code / Cursor</div>
+                <div class="result-sub">~/nixos-config</div>
+              </div>
+            </div>
+            <div class="result-action-hint"><span>Open</span> <span class="shortcut-badge">↵</span></div>
+          </div>
+        </div>
+
+        <!-- Bottom Action Deck & Flight Switches -->
+        <div class="helm-action-deck">
+          <div class="deck-group">
+            <button class="deck-btn" id="btn-night" onclick="toggleNight(this)">
+              <i class="ti ti-moon-stars"></i> Night Light <span id="night-k" style="font-family: var(--font-mono); font-size: 10px; opacity:0.8;">3500K</span>
+            </button>
+            <button class="deck-btn" id="btn-caff" onclick="toggleBtn(this)">
+              <i class="ti ti-coffee"></i> Caffeine
+            </button>
+            <button class="deck-btn" id="btn-dnd" onclick="toggleBtn(this)">
+              <i class="ti ti-bell-off"></i> DND
+            </button>
+            <button class="deck-btn" onclick="triggerAction('Snip Region')">
+              <i class="ti ti-crop"></i> Snip
+            </button>
+            <button class="deck-btn" onclick="triggerAction('Clipboard Drawer')">
+              <i class="ti ti-clipboard"></i> Clip
+            </button>
+          </div>
+
+          <div class="deck-group">
+            <button class="deck-btn" title="Lock Screen" onclick="triggerAction('Lock')"><i class="ti ti-lock"></i></button>
+            <button class="deck-btn" title="Suspend" onclick="triggerAction('Suspend')"><i class="ti ti-zzz"></i></button>
+            <button class="deck-btn" title="Reboot" onclick="triggerAction('Reboot')"><i class="ti ti-refresh"></i></button>
+            <button class="deck-btn deck-btn-danger" title="Power Off" onclick="triggerAction('Power Off')"><i class="ti ti-power"></i></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- OPTION B: Spotlight 2-Pane Split Deck -->
+      <div id="option-B" class="hud-window" style="display: none;">
+        <div class="helm-search-row">
+          <i class="ti ti-command search-icon" style="color: var(--accent-yellow-bright);"></i>
+          <input type="text" class="search-input" placeholder="Search applications, windows, actions..." oninput="filterResults(this.value, 'results-B')">
+          <div class="shortcut-badge">⌘K Action Menu</div>
+        </div>
+
+        <div class="split-layout">
+          <div class="split-left" id="results-B">
+            <div class="result-item selected" onclick="selectResult(this)">
+              <div class="result-left">
+                <div class="result-icon"><i class="ti ti-brand-spotify" style="color: var(--accent-green-bright);"></i></div>
+                <div>
+                  <div class="result-title">Spotify</div>
+                  <div class="result-sub">Media player</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="result-item" onclick="selectResult(this)">
+              <div class="result-left">
+                <div class="result-icon"><i class="ti ti-cpu" style="color: var(--accent-blue-bright);"></i></div>
+                <div>
+                  <div class="result-title">System Monitor</div>
+                  <div class="result-sub">btop / task state</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="result-item" onclick="selectResult(this)">
+              <div class="result-left">
+                <div class="result-icon"><i class="ti ti-settings" style="color: var(--fg-dim);"></i></div>
+                <div>
+                  <div class="result-title">Display Settings</div>
+                  <div class="result-sub">zwlr_gamma_control_v1</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="split-right">
+            <div class="preview-header">
+              <div class="preview-icon-large"><i class="ti ti-brand-spotify"></i></div>
+              <div class="preview-title">Spotify Desktop</div>
+              <div class="badge badge-yellow" style="margin-top: 6px;">Running (WS 4)</div>
+
+              <div class="preview-meta-list">
+                <div class="meta-row"><span>Audio Sink:</span> <span class="meta-val">PipeWire (ALC298)</span></div>
+                <div class="meta-row"><span>Track:</span> <span class="meta-val">Boards of Canada</span></div>
+                <div class="meta-row"><span>Volume:</span> <span class="meta-val">70%</span></div>
+                <div class="meta-row"><span>PID:</span> <span class="meta-val">4219</span></div>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 6px; margin-top: 12px;">
+              <button class="deck-btn" style="flex: 1; justify-content: center;"><i class="ti ti-player-play"></i> Play/Pause</button>
+              <button class="deck-btn" style="flex: 1; justify-content: center;"><i class="ti ti-focus"></i> Focus Window</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="helm-action-deck" style="font-size: 11px; color: var(--fg-muted); font-family: var(--font-mono);">
+          <span>[↑↓ Navigate]  [↵ Open]  [Tab Secondary Actions]</span>
+          <span style="color: var(--accent-green-bright);"><i class="ti ti-bolt"></i> Elephant 0.2ms latency</span>
+        </div>
+      </div>
+
+      <!-- OPTION C: Modular Dynamic Island & Command Deck -->
+      <div id="option-C" style="display: none; width: 100%; max-width: 740px; text-align: center;">
+        <div class="island-top-capsule">
+          <div class="island-node"><i class="ti ti-battery-4"></i> <span>94% (5h 12m)</span></div>
+          <div class="island-divider"></div>
+          <div class="island-node"><i class="ti ti-volume" style="color: var(--accent-yellow-bright);"></i> <span>72%</span></div>
+          <div class="island-divider"></div>
+          <div class="island-node"><i class="ti ti-sun" style="color: var(--accent-blue-bright);"></i> <span>80%</span></div>
+          <div class="island-divider"></div>
+          <div class="island-node"><i class="ti ti-wifi" style="color: var(--accent-green-bright);"></i> <span>5 GHz (120 Mb/s)</span></div>
+        </div>
+
+        <div class="hud-window">
+          <div class="helm-search-row">
+            <i class="ti ti-sparkles search-icon" style="color: var(--accent-purple);"></i>
+            <input type="text" class="search-input" placeholder="Omni Command Prompt...">
+            <div class="shortcut-badge">Space/Enter</div>
+          </div>
+
+          <div class="helm-results">
+            <div class="result-item selected">
+              <div class="result-left">
+                <div class="result-icon"><i class="ti ti-terminal" style="color: var(--accent-green-bright);"></i></div>
+                <div>
+                  <div class="result-title">Launch Ghostty</div>
+                  <div class="result-sub">Workspace 1</div>
+                </div>
+              </div>
+              <div class="result-action-hint"><span class="shortcut-badge">↵ Launch</span></div>
+            </div>
+            <div class="result-item">
+              <div class="result-left">
+                <div class="result-icon"><i class="ti ti-moon" style="color: var(--accent-yellow-bright);"></i></div>
+                <div>
+                  <div class="result-title">Night Light Warmth Step</div>
+                  <div class="result-sub">Ramp from 6500K -> 3500K</div>
+                </div>
+              </div>
+              <div class="result-action-hint"><span class="shortcut-badge">↵ Ramp</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- OPTION D: Tactical Flanked Cockpit -->
+      <div id="option-D" class="tactical-wrapper" style="display: none;">
+        <!-- Left Wing: Audio & Brightness Telemetry -->
+        <div class="tactical-wing">
+          <div>
+            <div class="badge" style="width: 100%; justify-content: center; margin-bottom: 12px;">AV TELEMETRY</div>
+            
+            <div class="wing-gauge" style="margin-bottom: 10px;">
+              <div class="gauge-label"><span>Master Vol</span> <span style="color: var(--accent-green-bright);">65%</span></div>
+              <div class="gauge-bar-track"><div class="gauge-bar-fill" style="width: 65%;"></div></div>
+            </div>
+
+            <div class="wing-gauge">
+              <div class="gauge-label"><span>Backlight</span> <span style="color: var(--accent-yellow-bright);">80%</span></div>
+              <div class="gauge-bar-track"><div class="gauge-bar-fill" style="width: 80%; background: var(--accent-yellow-bright);"></div></div>
+            </div>
+          </div>
+
+          <div style="font-size: 10px; font-family: var(--font-mono); color: var(--fg-muted);">
+            <div>SINK: ALC298</div>
+            <div>RATE: 48000 Hz</div>
+          </div>
+        </div>
+
+        <!-- Center Main Stage -->
+        <div class="hud-window" style="flex: 1;">
+          <div class="helm-search-row">
+            <i class="ti ti-target search-icon" style="color: var(--accent-red);"></i>
+            <input type="text" class="search-input" placeholder="Tactical launcher query...">
+          </div>
+
+          <div class="helm-results">
+            <div class="result-item selected">
+              <div class="result-left">
+                <div class="result-icon"><i class="ti ti-brand-github" style="color: var(--fg);"></i></div>
+                <div>
+                  <div class="result-title">nixos-config repo</div>
+                  <div class="result-sub">/home/meros/nixos</div>
+                </div>
+              </div>
+            </div>
+            <div class="result-item">
+              <div class="result-left">
+                <div class="result-icon"><i class="ti ti-palette" style="color: var(--accent-blue-bright);"></i></div>
+                <div>
+                  <div class="result-title">Swaypplet Palette Inspector</div>
+                  <div class="result-sub">Gruvbox Dark tokens</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="helm-action-deck">
+            <span style="font-size: 11px; font-family: var(--font-mono); color: var(--fg-dim);">[1] Apps [2] Win [3] Tools</span>
+            <button class="deck-btn deck-btn-danger"><i class="ti ti-power"></i> System Halt</button>
+          </div>
+        </div>
+
+        <!-- Right Wing: System Governor & Network -->
+        <div class="tactical-wing">
+          <div>
+            <div class="badge badge-blue" style="width: 100%; justify-content: center; margin-bottom: 12px;">SYSTEM STATE</div>
+
+            <div class="wing-gauge" style="margin-bottom: 10px;">
+              <div class="gauge-label"><span>Battery</span> <span style="color: var(--accent-green-bright);">92%</span></div>
+              <div class="gauge-bar-track"><div class="gauge-bar-fill" style="width: 92%;"></div></div>
+            </div>
+
+            <div class="wing-gauge">
+              <div class="gauge-label"><span>CPU Profile</span> <span style="color: var(--accent-blue-bright);">Perf</span></div>
+              <div style="font-size: 10.5px; color: var(--fg-dim); margin-top: 3px;">Governing: amd-pstate</div>
+            </div>
+          </div>
+
+          <div style="font-size: 10px; font-family: var(--font-mono); color: var(--fg-muted);">
+            <div>IP: 192.168.1.142</div>
+            <div>LINK: 866 Mbps</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="interactive-hint">
+        <i class="ti ti-info-circle"></i>
+        <span>Try typing in the search bar, adjusting the volume slider, clicking telemetry chips (Perf, Wi-Fi, Night Light), or pressing the bottom deck switches.</span>
+      </div>
+    </div>
+
+    <!-- Comparative Trade-offs Matrix -->
+    <div class="comparison-section">
+      <h2><i class="ti ti-table"></i> SOTA Architectural Trade-Offs & Scoring</h2>
+      <table class="matrix-table">
+        <thead>
+          <tr>
+            <th>Architecture Option</th>
+            <th>Ergonomics (Foveal Rest)</th>
+            <th>Information Density</th>
+            <th>Search Velocity</th>
+            <th>GTK4 / Layer-Shell Complexity</th>
+            <th>Recommendation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Option A: Unified Pilot's Helm</strong></td>
+            <td><span class="pill-score score-great">9.8 / 10</span> (Optical Center)</td>
+            <td><span class="pill-score score-great">High</span> (Glanceable Ribbon + Deck)</td>
+            <td><span class="pill-score score-great">&lt; 2ms</span> (Elephant Direct)</td>
+            <td><span class="pill-score score-great">Low</span> (Reuses LauncherView + Rails)</td>
+            <td><strong style="color: var(--accent-green-bright);">★ Primary Recommendation</strong></td>
+          </tr>
+          <tr>
+            <td><strong>Option B: Spotlight 2-Pane Deck</strong></td>
+            <td><span class="pill-score score-great">9.5 / 10</span> (Centered Raycast style)</td>
+            <td><span class="pill-score score-good">Medium</span> (Split Inspector Pane)</td>
+            <td><span class="pill-score score-great">&lt; 2ms</span> (Instant Filter)</td>
+            <td><span class="pill-score score-good">Medium</span> (Requires dynamic preview provider)</td>
+            <td><strong>Top Alternative</strong> for deep inspectors</td>
+          </tr>
+          <tr>
+            <td><strong>Option C: Modular Dynamic Island</strong></td>
+            <td><span class="pill-score score-good">8.7 / 10</span> (Dual Surface Stack)</td>
+            <td><span class="pill-score score-good">Medium</span> (Floating Pill + HUD)</td>
+            <td><span class="pill-score score-great">&lt; 2ms</span> (Keyboard First)</td>
+            <td><span class="pill-score score-mid">High</span> (Multi-surface layer-shell sync)</td>
+            <td>Great for minimalist aesthetics</td>
+          </tr>
+          <tr>
+            <td><strong>Option D: Tactical Flanked Cockpit</strong></td>
+            <td><span class="pill-score score-good">8.9 / 10</span> (Wide Focal Spread)</td>
+            <td><span class="pill-score score-great">Maximum</span> (Always-visible Gauges)</td>
+            <td><span class="pill-score score-great">&lt; 2ms</span> (Instant Filter)</td>
+            <td><span class="pill-score score-good">Medium</span> (3-box flex layout)</td>
+            <td>Best for ultrawide / sci-fi aesthetics</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    function switchOption(opt) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+
+      ['A', 'B', 'C', 'D'].forEach(o => {
+        const el = document.getElementById(`option-${o}`);
+        if (el) el.style.display = (o === opt) ? (o === 'D' ? 'flex' : 'block') : 'none';
+      });
+
+      const activeInput = document.querySelector(`#option-${opt} input[type="text"]`);
+      if (activeInput) activeInput.focus();
+    }
+
+    function togglePill(pill) {
+      pill.classList.toggle('active');
+    }
+
+    function toggleBtn(btn) {
+      btn.classList.toggle('active');
+    }
+
+    function toggleNight(btn) {
+      btn.classList.toggle('active');
+      const k = document.getElementById('night-k');
+      if (btn.classList.contains('active')) {
+        k.innerText = '6500K';
+      } else {
+        k.innerText = '3500K';
+      }
+    }
+
+    function updateVol(val) {
+      document.getElementById('vol-val').innerText = val + '%';
+    }
+
+    function selectResult(item) {
+      const parent = item.parentElement;
+      parent.querySelectorAll('.result-item').forEach(i => i.classList.remove('selected'));
+      item.classList.add('selected');
+    }
+
+    function filterResults(query, containerId) {
+      const q = query.toLowerCase().trim();
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      const items = container.querySelectorAll('.result-item');
+      items.forEach(item => {
+        const text = item.innerText.toLowerCase();
+        if (text.includes(q)) {
+          item.style.display = 'flex';
+        } else {
+          item.style.display = 'none';
+        }
+      });
+    }
+
+    function triggerAction(name) {
+      alert(`Triggered action: ${name}`);
+    }
+  </script>
+</body>
+</html>

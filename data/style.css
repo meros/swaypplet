@@ -2448,19 +2448,131 @@ revealer {
    restrained motion, soft single shadow — matches the polkit dialog.
    ════════════════════════════════════════════════════════════════════ */
 
-.startmenu {
+.startmenu,
+.helm-window {
     font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
     background-color: transparent;
 }
 
-.startmenu-backdrop {
+.startmenu-backdrop,
+.helm-backdrop {
     background-color: transparent;
 }
 
 /* The menu surface itself. */
-.startmenu-root {
+.startmenu-root,
+.helm-card {
     box-shadow: none;
-    padding: 16px;
+    padding: 12px 14px;
+    border-radius: 20px;
+}
+
+/* ── Top Telemetry Ribbon ── */
+.helm-telemetry-ribbon {
+    padding: 4px 4px 10px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid @border_subtle;
+}
+
+.telemetry-pill {
+    background-color: alpha(@bg1, 0.6);
+    background-image: none;
+    color: @fg;
+    border: 1px solid @border_subtle;
+    border-radius: 10px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    min-height: 32px;
+    box-shadow: none;
+    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.telemetry-pill:hover {
+    background-color: @surface_hover;
+    border-color: @border_strong;
+    color: @fg;
+}
+
+.telemetry-pill-interactive {
+    padding: 2px 8px;
+}
+
+.pill-icon-green {
+    color: @accent;
+    font-size: 14px;
+}
+
+.pill-icon-blue {
+    color: #83a598;
+    font-size: 14px;
+}
+
+.pill-icon-yellow {
+    color: @accent_secondary;
+    font-size: 14px;
+}
+
+/* ── Deck Stack & Sub-sheets ── */
+.helm-deck-stack {
+    margin-bottom: 6px;
+}
+
+.helm-launcher-stage {
+    padding: 2px 2px;
+}
+
+.helm-subsheet {
+    padding: 4px;
+}
+
+.subsheet-header {
+    padding: 4px 8px 10px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid @border_subtle;
+}
+
+.subsheet-back-btn {
+    background-color: alpha(@bg2, 0.7);
+    background-image: none;
+    color: @fg;
+    border: 1px solid @border_subtle;
+    border-radius: 8px;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+.subsheet-back-btn:hover {
+    background-color: @accent_tint;
+    border-color: alpha(@accent, 0.40);
+}
+
+.subsheet-title {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: @fg;
+}
+
+.subsheet-scroller {
+    min-height: 340px;
+    max-height: 420px;
+}
+
+/* ── Bottom Action Flight Deck ── */
+.helm-action-deck {
+    padding: 8px 2px 2px;
+    border-top: 1px solid @border_subtle;
+}
+
+.deck-tile-btn {
+    min-height: 38px;
+    padding: 0 10px;
+}
+
+.deck-session {
+    margin-left: 8px;
 }
 
 .startmenu-body {

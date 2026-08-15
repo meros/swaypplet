@@ -758,6 +758,47 @@ pub fn build_session_rail() -> gtk4::Box {
     col
 }
 
+/// Horizontal flight deck session cluster: Lock, Suspend, Logout, Reboot, Shutdown.
+pub fn build_session_row() -> gtk4::Box {
+    let row = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(6)
+        .build();
+    row.add_css_class("deck-session");
+
+    let lock = rail_btn("󰌾", "Lock", false);
+    lock.connect_clicked(|b| {
+        hide_panel_for_widget(b.upcast_ref());
+        spawn_session_cmd("loginctl", &["lock-session"]);
+    });
+    row.append(&lock);
+
+    let suspend = rail_btn("󰤄", "Suspend", false);
+    suspend.connect_clicked(|b| {
+        hide_panel_for_widget(b.upcast_ref());
+        spawn_session_cmd("systemctl", &["suspend"]);
+    });
+    row.append(&suspend);
+
+    let logout = rail_btn("󰍃", "Logout", false);
+    logout.connect_clicked(|_| spawn_session_cmd("swaymsg", &["exit"]));
+    row.append(&logout);
+
+    let reboot = rail_btn("󰜉", "Reboot", true);
+    wire_confirm(&reboot, "Reboot", || {
+        spawn_session_cmd("systemctl", &["reboot"])
+    });
+    row.append(&reboot);
+
+    let shutdown = rail_btn("󰐥", "Shutdown", true);
+    wire_confirm(&shutdown, "Shutdown", || {
+        spawn_session_cmd("systemctl", &["poweroff"])
+    });
+    row.append(&shutdown);
+
+    row
+}
+
 /// One icon-only rail button: a glyph child + tooltip, `.rail-btn` styling
 /// (plus `.rail-btn-danger` for destructive actions).
 fn rail_btn(icon: &str, tooltip: &str, danger: bool) -> gtk4::Button {
