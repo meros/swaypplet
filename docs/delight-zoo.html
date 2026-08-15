@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Swaypplet SOTA Delight & Micro-Gestures Zoo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+  <style>
+    :root {
+      /* Gruvbox Dark Palette Tokens */
+      --bg0-h: #1d2021;
+      --bg0: #32302f;
+      --bg1: #3c3836;
+      --bg2: #504945;
+      --bg3: #665c54;
+      --fg: #ebdbb2;
+      --fg-dim: #a89984;
+      --text-faint: #7c6f64;
+
+      --accent: #689d6a; /* Aqua / primary */
+      --accent-tint: rgba(104, 157, 106, 0.18);
+      --accent-secondary: #d79921; /* Yellow */
+      --accent-tertiary: #458588; /* Blue */
+      --accent-quaternary: #b16286; /* Purple */
+      --red: #cc241d;
+      --red-tint: rgba(204, 36, 29, 0.18);
+
+      --surface: rgba(50, 48, 47, 0.82);
+      --border-subtle: rgba(235, 219, 178, 0.08);
+      --border-strong: rgba(235, 219, 178, 0.15);
+
+      --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+      --font-mono: 'Fira Code', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: #111213;
+      color: var(--fg);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      padding: 32px 24px 80px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    header {
+      max-width: 1400px;
+      margin: 0 auto 36px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .title-group h1 {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .title-group h1 span.badge {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      background: var(--accent-tint);
+      color: var(--accent);
+      padding: 3px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(104, 157, 106, 0.35);
+    }
+
+    .title-group p {
+      font-size: 13.5px;
+      color: var(--fg-dim);
+      margin-top: 8px;
+      max-width: 750px;
+      line-height: 1.5;
+    }
+
+    .philosophy-banner {
+      max-width: 1400px;
+      margin: 0 auto 36px;
+      background: rgba(30, 32, 33, 0.9);
+      border: 1px solid var(--border-strong);
+      border-radius: 14px;
+      padding: 16px 20px;
+      font-size: 13px;
+      color: var(--fg-dim);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .philosophy-banner i {
+      font-size: 24px;
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+
+    .philosophy-banner strong {
+      color: var(--fg);
+    }
+
+    /* Grid of Delight Experiments */
+    .experiments-grid {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+      gap: 32px;
+    }
+
+    .exp-card {
+      background: radial-gradient(circle at 50% 10%, #292d2e 0%, #181a1b 100%);
+      border: 1px solid var(--border-subtle);
+      border-radius: 20px;
+      padding: 28px 24px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+      min-height: 480px;
+    }
+
+    .exp-tag {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .exp-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--fg);
+      margin-bottom: 6px;
+    }
+
+    .exp-desc {
+      font-size: 12.5px;
+      color: var(--fg-dim);
+      line-height: 1.45;
+      margin-bottom: 24px;
+      min-height: 38px;
+    }
+
+    .interactive-stage {
+      flex: 1;
+      background: rgba(20, 22, 23, 0.7);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      padding: 24px;
+      overflow: hidden;
+    }
+
+    .stage-prompt {
+      position: absolute;
+      bottom: 12px;
+      font-size: 11px;
+      color: var(--text-faint);
+      font-family: var(--font-mono);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* ════════ EXPERIMENT 1: AUTH RESOLUTION SPRING BLOOM ════════ */
+    .auth-bloom-target {
+      width: 280px;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 16px;
+      padding: 20px;
+      text-align: center;
+      backdrop-filter: blur(20px);
+      transition: transform 300ms cubic-bezier(0.2, 0, 0, 1), opacity 300ms cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    .face-bloom-ring {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 12px;
+      border-radius: 50%;
+      border: 3px solid var(--bg3);
+      border-top-color: var(--accent-tertiary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      color: transparent;
+      transition: all 400ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    .face-bloom-ring.scanning {
+      animation: spin 1s linear infinite;
+    }
+
+    .face-bloom-ring.success {
+      animation: none;
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #1d2021;
+      transform: scale(1.18);
+      box-shadow: 0 0 24px rgba(104, 157, 106, 0.6);
+    }
+
+    .auth-bloom-target.unlocked {
+      transform: scale(0.96) translateY(-8px);
+      opacity: 0;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ════════ EXPERIMENT 2: TACTILE HOLD-TO-COMMIT ════════ */
+    .hold-btn-wrapper {
+      position: relative;
+      user-select: none;
+    }
+
+    .btn-hold-power {
+      position: relative;
+      background: rgba(30, 32, 33, 0.9);
+      color: var(--red);
+      border: 1px solid rgba(204, 36, 29, 0.4);
+      padding: 14px 28px;
+      font-size: 14px;
+      font-weight: 700;
+      border-radius: 12px;
+      cursor: pointer;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+      transition: transform 150ms ease, border-color 150ms ease;
+    }
+
+    .btn-hold-power:active {
+      transform: scale(0.97);
+    }
+
+    .btn-hold-progress {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 0%;
+      background: linear-gradient(90deg, rgba(204, 36, 29, 0.3), rgba(204, 36, 29, 0.7));
+      transition: width 50ms linear;
+      pointer-events: none;
+    }
+
+    .hold-shockwave {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 10px;
+      height: 10px;
+      background: transparent;
+      border: 2px solid var(--red);
+      border-radius: 50%;
+      transform: translate(-50%, -50%) scale(0);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .hold-shockwave.burst {
+      animation: shockwave 600ms cubic-bezier(0, 0, 0.2, 1) forwards;
+    }
+
+    @keyframes shockwave {
+      0% { transform: translate(-50%, -50%) scale(0); opacity: 1; }
+      100% { transform: translate(-50%, -50%) scale(22); opacity: 0; }
+    }
+
+    /* ════════ EXPERIMENT 3: ELASTIC WORKSPACE MORPHING ════════ */
+    .bar-ws-container {
+      background: var(--bg0-h);
+      border: 1px solid var(--border-strong);
+      padding: 4px;
+      border-radius: 12px;
+      display: flex;
+      gap: 4px;
+      position: relative;
+    }
+
+    .ws-btn {
+      width: 38px;
+      height: 34px;
+      background: transparent;
+      border: none;
+      color: var(--fg-dim);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border-radius: 8px;
+      z-index: 2;
+      position: relative;
+      transition: color 150ms ease;
+    }
+
+    .ws-btn:hover {
+      color: var(--fg);
+    }
+
+    .ws-btn.active {
+      color: #1d2021;
+    }
+
+    .ws-active-pill {
+      position: absolute;
+      top: 4px;
+      bottom: 4px;
+      width: 38px;
+      background: var(--accent);
+      border-radius: 8px;
+      z-index: 1;
+      left: 4px;
+      transition: left 240ms cubic-bezier(0.34, 1.56, 0.64, 1), width 120ms ease;
+    }
+
+    /* ════════ EXPERIMENT 4: PLAY/PAUSE SVG MORPH & 3D TILT ════════ */
+    .media-card-preview {
+      width: 260px;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 16px;
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      backdrop-filter: blur(20px);
+      perspective: 800px;
+      cursor: pointer;
+      transition: transform 200ms ease, box-shadow 200ms ease;
+    }
+
+    .media-card-preview:hover {
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
+    }
+
+    .album-art-box {
+      width: 52px;
+      height: 52px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #b16286, #458588);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 22px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      transition: transform 250ms cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    .media-info {
+      flex: 1;
+    }
+
+    .media-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--fg);
+    }
+
+    .media-artist {
+      font-size: 11px;
+      color: var(--fg-dim);
+    }
+
+    .media-play-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--bg2);
+      border: 1px solid var(--border-strong);
+      color: var(--fg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      cursor: pointer;
+      transition: all 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .media-play-btn:hover {
+      background: var(--accent);
+      color: #1d2021;
+      transform: scale(1.1);
+    }
+
+    .media-play-btn:active {
+      transform: scale(0.92);
+    }
+
+    /* ════════ EXPERIMENT 5: SCREENSHOT MARQUEE SNAP & TOAST ════════ */
+    .snap-container {
+      width: 260px;
+      height: 140px;
+      border: 2px dashed rgba(235, 219, 178, 0.25);
+      border-radius: 12px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: crosshair;
+      transition: all 200ms ease;
+    }
+
+    .snap-container:hover {
+      border-color: var(--accent);
+      background: rgba(104, 157, 106, 0.05);
+    }
+
+    .snap-flash {
+      position: absolute;
+      inset: 0;
+      background: white;
+      opacity: 0;
+      pointer-events: none;
+      border-radius: 10px;
+    }
+
+    .snap-flash.fired {
+      animation: camera-flash 400ms ease-out;
+    }
+
+    @keyframes camera-flash {
+      0% { opacity: 0.8; }
+      100% { opacity: 0; }
+    }
+
+    .floating-toast {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      background: var(--bg0-h);
+      border: 1px solid var(--border-strong);
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      opacity: 0;
+      transform: translateY(12px) scale(0.9);
+      transition: all 300ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    .floating-toast.show {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    /* ════════ EXPERIMENT 6: LIQUID GLASS CHROMATIC BEVEL (SwayFX Simulation) ════════ */
+    .liquid-glass-lens {
+      width: 240px;
+      height: 110px;
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 20px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 
+        inset 0 1px 2px rgba(255, 255, 255, 0.3),
+        inset 0 -1px 2px rgba(0, 0, 0, 0.5),
+        0 12px 32px rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(16px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: transform 300ms cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    .liquid-glass-lens::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      padding: 1px;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.4), transparent 60%, rgba(104, 157, 106, 0.3));
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      pointer-events: none;
+    }
+
+    .lens-label {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--fg);
+      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+    }
+
+    .lens-sub {
+      font-size: 11px;
+      color: var(--accent);
+      font-family: var(--font-mono);
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="title-group">
+      <h1>
+        Swaypplet Delight & Micro-Gestures
+        <span class="badge">SOTA Research Zoo</span>
+      </h1>
+      <p>
+        Interactive catalog of purposeful micro-interactions, milestone flourishes, and physics-driven transitions designed for SwayFX and GTK4.
+      </p>
+    </div>
+  </header>
+
+  <div class="philosophy-banner">
+    <i class="ti ti-sparkles"></i>
+    <div>
+      <strong>The Philosophy of Shell Delight:</strong>
+      Flourishes should never act as gatekeepers or add latency to intentional actions. They celebrate milestones (auth success, command commit) and provide tactile clarity (spring snaps, holding tension).
+    </div>
+  </div>
+
+  <main class="experiments-grid">
+
+    <!-- EXPERIMENT 1: AUTH BLOOM -->
+    <div class="exp-card">
+      <div class="exp-tag"><i class="ti ti-fingerprint"></i> Milestone Reward</div>
+      <div class="exp-title">Auth Resolution Bloom</div>
+      <div class="exp-desc">
+        Face/Touch success punches with an elastic spring check, and the glass modal smoothly collapses as wallpaper sharpens.
+      </div>
+      <div class="interactive-stage">
+        <div class="auth-bloom-target" id="auth-box">
+          <div class="face-bloom-ring scanning" id="face-ring">
+            <i class="ti ti-check"></i>
+          </div>
+          <div style="font-size: 13px; font-weight: 600;" id="auth-status">Looking for face…</div>
+          <div style="font-size: 11px; color: var(--fg-dim); margin-top: 4px;">Click ring to simulate instant match</div>
+        </div>
+        <div class="stage-prompt">Click the ring to trigger unlock sequence</div>
+      </div>
+    </div>
+
+    <!-- EXPERIMENT 2: HOLD TO COMMIT -->
+    <div class="exp-card">
+      <div class="exp-tag"><i class="ti ti-power"></i> Tactile Tension</div>
+      <div class="exp-title">Hold-to-Commit Power Gesture</div>
+      <div class="exp-desc">
+        Destructive actions build tactile physical tension with a filling reservoir and commit with a localized ring shockwave.
+      </div>
+      <div class="interactive-stage">
+        <div class="hold-btn-wrapper">
+          <button class="btn-hold-power" id="hold-btn" onmousedown="startHold()" onmouseup="stopHold()" onmouseleave="stopHold()">
+            <div class="btn-hold-progress" id="hold-fill"></div>
+            <i class="ti ti-power"></i>
+            <span id="hold-text">Hold to Reboot</span>
+          </button>
+          <div class="hold-shockwave" id="shockwave"></div>
+        </div>
+        <div class="stage-prompt">Click and hold for 1.2s to trigger commit burst</div>
+      </div>
+    </div>
+
+    <!-- EXPERIMENT 3: ELASTIC WORKSPACE MORPH -->
+    <div class="exp-card">
+      <div class="exp-tag"><i class="ti ti-layout-navbar"></i> Spatial Continuity</div>
+      <div class="exp-title">Elastic Workspace Morph</div>
+      <div class="exp-desc">
+        The workspace selection pill stretches and overshoots like a physical droplet along the bar axis.
+      </div>
+      <div class="interactive-stage">
+        <div class="bar-ws-container">
+          <div class="ws-active-pill" id="ws-pill"></div>
+          <button class="ws-btn active" onclick="switchWs(0, this)">1</button>
+          <button class="ws-btn" onclick="switchWs(1, this)">2</button>
+          <button class="ws-btn" onclick="switchWs(2, this)">3</button>
+          <button class="ws-btn" onclick="switchWs(3, this)">4</button>
+          <button class="ws-btn" onclick="switchWs(4, this)">5</button>
+        </div>
+        <div class="stage-prompt">Click different workspace numbers to test elasticity</div>
+      </div>
+    </div>
+
+    <!-- EXPERIMENT 4: MEDIA PLAY/PAUSE & 3D TILT -->
+    <div class="exp-card">
+      <div class="exp-tag"><i class="ti ti-music"></i> Micro-Tactility</div>
+      <div class="exp-title">Play/Pause Morph & Cover Tilt</div>
+      <div class="exp-desc">
+        Album art calculates real-time 3D cursor tilt; the media toggle button springs elastically on interaction.
+      </div>
+      <div class="interactive-stage">
+        <div class="media-card-preview" id="media-card" onmousemove="handleTilt(event)" onmouseleave="resetTilt()">
+          <div class="album-art-box" id="album-art"><i class="ti ti-disc"></i></div>
+          <div class="media-info">
+            <div class="media-title">Midnight City</div>
+            <div class="media-artist">M83 — Hurry Up, We're Dreaming</div>
+          </div>
+          <button class="media-play-btn" onclick="togglePlay(this)">
+            <i class="ti ti-player-play" id="play-icon"></i>
+          </button>
+        </div>
+        <div class="stage-prompt">Hover card to tilt; click play to test toggle spring</div>
+      </div>
+    </div>
+
+    <!-- EXPERIMENT 5: SCREENSHOT MARQUEE FLASH -->
+    <div class="exp-card">
+      <div class="exp-tag"><i class="ti ti-camera"></i> Tooling Response</div>
+      <div class="exp-title">Capture Shutter & Toast Spring</div>
+      <div class="exp-desc">
+        Selection release triggers a high-contrast white-hot flash and materializes an interactive thumbnail toast.
+      </div>
+      <div class="interactive-stage">
+        <div class="snap-container" onclick="triggerSnap()">
+          <div class="snap-flash" id="snap-flash"></div>
+          <div style="font-size: 12px; color: var(--fg-dim); text-align: center;">
+            <i class="ti ti-crop" style="font-size: 20px; display: block; margin-bottom: 4px;"></i>
+            Click inside marquee box
+          </div>
+          <div class="floating-toast" id="snap-toast">
+            <i class="ti ti-photo-check" style="color: var(--accent);"></i>
+            <span>Captured to clipboard</span>
+          </div>
+        </div>
+        <div class="stage-prompt">Click anywhere inside the dashed region</div>
+      </div>
+    </div>
+
+    <!-- EXPERIMENT 6: LIQUID GLASS REFRACTION BEVEL -->
+    <div class="exp-card">
+      <div class="exp-tag"><i class="ti ti-flare"></i> SwayFX Specular Bevel</div>
+      <div class="exp-title">Liquid Glass Rim Specular</div>
+      <div class="exp-desc">
+        Adaptive specular rim lighting that highlights curvature normals when cursor moves over surfaces.
+      </div>
+      <div class="interactive-stage" style="background: radial-gradient(circle at 40% 40%, #3e3832 0%, #171819 100%);">
+        <div class="liquid-glass-lens" id="lens" onmousemove="handleLens(event)">
+          <div class="lens-label">SwayFX Liquid Surface</div>
+          <div class="lens-sub">Refraction Index: 1.52</div>
+        </div>
+        <div class="stage-prompt">Move cursor across the glass tile to shift specular rim</div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    /* Exp 1: Auth Resolution */
+    const faceRing = document.getElementById('face-ring');
+    const authBox = document.getElementById('auth-box');
+    const authStatus = document.getElementById('auth-status');
+
+    faceRing.addEventListener('click', () => {
+      faceRing.classList.remove('scanning');
+      faceRing.classList.add('success');
+      authStatus.textContent = 'Welcome back, meros';
+      authStatus.style.color = 'var(--accent)';
+
+      setTimeout(() => {
+        authBox.classList.add('unlocked');
+      }, 500);
+
+      setTimeout(() => {
+        authBox.classList.remove('unlocked');
+        faceRing.classList.remove('success');
+        faceRing.classList.add('scanning');
+        authStatus.textContent = 'Looking for face…';
+        authStatus.style.color = 'var(--fg)';
+      }, 2500);
+    });
+
+    /* Exp 2: Hold to commit */
+    let holdTimer = null;
+    let holdProgress = 0;
+    const holdFill = document.getElementById('hold-fill');
+    const shockwave = document.getElementById('shockwave');
+    const holdText = document.getElementById('hold-text');
+
+    function startHold() {
+      holdProgress = 0;
+      holdTimer = setInterval(() => {
+        holdProgress += 4;
+        holdFill.style.width = holdProgress + '%';
+        if (holdProgress >= 100) {
+          clearInterval(holdTimer);
+          commitHold();
+        }
+      }, 40);
+    }
+
+    function stopHold() {
+      if (holdProgress < 100) {
+        clearInterval(holdTimer);
+        holdProgress = 0;
+        holdFill.style.width = '0%';
+      }
+    }
+
+    function commitHold() {
+      shockwave.classList.add('burst');
+      holdText.textContent = 'Rebooting…';
+      setTimeout(() => {
+        shockwave.classList.remove('burst');
+        holdFill.style.width = '0%';
+        holdText.textContent = 'Hold to Reboot';
+      }, 1800);
+    }
+
+    /* Exp 3: Elastic Workspace */
+    function switchWs(index, btn) {
+      document.querySelectorAll('.ws-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const pill = document.getElementById('ws-pill');
+      const targetLeft = 4 + (index * 42);
+      
+      // Momentary stretch effect
+      pill.style.width = '48px';
+      pill.style.left = targetLeft + 'px';
+      
+      setTimeout(() => {
+        pill.style.width = '38px';
+      }, 120);
+    }
+
+    /* Exp 4: 3D Tilt & Play */
+    const mediaCard = document.getElementById('media-card');
+    const albumArt = document.getElementById('album-art');
+    let playing = false;
+
+    function handleTilt(e) {
+      const rect = mediaCard.getBoundingClientRect();
+      const x = e.clientX - rect.left - (rect.width / 2);
+      const y = e.clientY - rect.top - (rect.height / 2);
+      const tiltX = (y / (rect.height / 2)) * -12;
+      const tiltY = (x / (rect.width / 2)) * 12;
+      mediaCard.style.transform = `rotateX(${tiltX}deg) rotateY(${tiltY}deg)`;
+      albumArt.style.transform = `translateZ(18px) rotateX(${tiltX * 0.5}deg) rotateY(${tiltY * 0.5}deg)`;
+    }
+
+    function resetTilt() {
+      mediaCard.style.transform = 'rotateX(0deg) rotateY(0deg)';
+      albumArt.style.transform = 'translateZ(0px)';
+    }
+
+    function togglePlay(btn) {
+      playing = !playing;
+      const icon = document.getElementById('play-icon');
+      icon.className = playing ? 'ti ti-player-pause' : 'ti ti-player-play';
+    }
+
+    /* Exp 5: Capture Shutter */
+    function triggerSnap() {
+      const flash = document.getElementById('snap-flash');
+      const toast = document.getElementById('snap-toast');
+      flash.classList.remove('fired');
+      void flash.offsetWidth;
+      flash.classList.add('fired');
+
+      toast.classList.add('show');
+      setTimeout(() => {
+        toast.classList.remove('show');
+      }, 2000);
+    }
+
+    /* Exp 6: Specular Rim Lighting */
+    function handleLens(e) {
+      const lens = document.getElementById('lens');
+      const rect = lens.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+      lens.style.boxShadow = `
+        inset ${(x - 0.5) * 8}px ${(y - 0.5) * 8}px 4px rgba(255, 255, 255, 0.4),
+        inset ${(0.5 - x) * 8}px ${(0.5 - y) * 8}px 4px rgba(0, 0, 0, 0.6),
+        0 14px 34px rgba(0, 0, 0, 0.5)
+      `;
+    }
+  </script>
+</body>
+</html>

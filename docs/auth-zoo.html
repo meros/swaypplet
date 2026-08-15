@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Swaypplet Auth Cards Design Zoo</title>
+  <title>Swaypplet Complete Surface Alignment & Motion Zoo</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
   <style>
     :root {
-      /* Gruvbox Dark Palette & Tokens from swaypplet data/style.css */
+      /* Gruvbox Dark Palette Tokens */
       --bg0-h: #1d2021;
       --bg0: #32302f;
       --bg1: #3c3836;
@@ -23,10 +23,12 @@
       --accent: #689d6a; /* Aqua / primary */
       --accent-tint: rgba(104, 157, 106, 0.15);
       --accent-secondary: #d79921; /* Yellow */
+      --accent-tertiary: #458588; /* Blue */
+      --accent-quaternary: #b16286; /* Purple */
       --red: #cc241d;
-      --danger-tint: rgba(204, 36, 29, 0.15);
+      --red-tint: rgba(204, 36, 29, 0.15);
 
-      --surface: rgba(50, 48, 47, 0.78);
+      --surface: rgba(50, 48, 47, 0.82);
       --border-subtle: rgba(235, 219, 178, 0.08);
       --border-strong: rgba(235, 219, 178, 0.14);
 
@@ -35,7 +37,7 @@
       --radius-card: 16px;
       --radius-pill: 999px;
 
-      --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
       --font-mono: 'Fira Code', monospace;
     }
 
@@ -46,16 +48,16 @@
     }
 
     body {
-      background: #141617;
+      background: #121415;
       color: var(--fg);
       font-family: var(--font-sans);
       min-height: 100vh;
-      padding: 32px 24px 64px;
+      padding: 32px 24px 80px;
       -webkit-font-smoothing: antialiased;
     }
 
     header {
-      max-width: 1380px;
+      max-width: 1440px;
       margin: 0 auto 32px;
       padding-bottom: 24px;
       border-bottom: 1px solid var(--border-subtle);
@@ -67,10 +69,9 @@
     }
 
     .title-group h1 {
-      font-size: 24px;
+      font-size: 26px;
       font-weight: 700;
       letter-spacing: -0.02em;
-      color: var(--fg);
       display: flex;
       align-items: center;
       gap: 10px;
@@ -82,7 +83,7 @@
       letter-spacing: 0.08em;
       background: var(--accent-tint);
       color: var(--accent);
-      padding: 3px 8px;
+      padding: 4px 10px;
       border-radius: 6px;
       border: 1px solid rgba(104, 157, 106, 0.3);
     }
@@ -91,7 +92,7 @@
       font-size: 13px;
       color: var(--fg-dim);
       margin-top: 6px;
-      max-width: 650px;
+      max-width: 760px;
       line-height: 1.5;
     }
 
@@ -128,46 +129,68 @@
       color: #1d2021;
     }
 
-    .meta-principles {
-      max-width: 1380px;
+    /* System Pillars Banner */
+    .system-banner {
+      max-width: 1440px;
       margin: 0 auto 36px;
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
       gap: 16px;
     }
 
-    .principle-card {
+    .banner-card {
       background: var(--bg0);
       border: 1px solid var(--border-subtle);
-      padding: 14px 18px;
       border-radius: 12px;
+      padding: 14px 18px;
       font-size: 12px;
       line-height: 1.5;
     }
 
-    .principle-card strong {
+    .banner-card strong {
       color: var(--fg);
       display: block;
-      margin-bottom: 3px;
+      margin-bottom: 2px;
       font-size: 13px;
     }
 
-    .principle-card span {
+    .banner-card span {
       color: var(--fg-dim);
     }
 
-    /* Grid Layout for Surfaces */
+    /* Category Section Headers */
+    .section-header {
+      max-width: 1440px;
+      margin: 36px auto 16px;
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .section-header::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border-subtle);
+    }
+
+    /* Grid Layout */
     .surfaces-grid {
-      max-width: 1380px;
+      max-width: 1440px;
       margin: 0 auto;
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
       gap: 32px;
       align-items: start;
     }
 
     .surface-stage {
-      background: radial-gradient(circle at 50% 20%, #26292b 0%, #171819 100%);
+      background: radial-gradient(circle at 50% 15%, #292c2e 0%, #161718 100%);
       border: 1px solid var(--border-subtle);
       border-radius: 20px;
       padding: 32px 24px 40px;
@@ -176,7 +199,7 @@
       align-items: center;
       position: relative;
       overflow: hidden;
-      min-height: 620px;
+      min-height: 580px;
       box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
     }
 
@@ -185,7 +208,7 @@
       top: 14px;
       left: 18px;
       font-size: 11px;
-      font-weight: 600;
+      font-weight: 700;
       letter-spacing: 0.05em;
       text-transform: uppercase;
       color: var(--fg-dim);
@@ -203,9 +226,9 @@
       color: var(--text-faint);
     }
 
-    /* Top Camera Indicator (Externalized from modals) */
+    /* Camera Bezel Indicator Zone */
     .camera-bezel-zone {
-      margin-bottom: 24px;
+      margin-bottom: 20px;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -217,35 +240,23 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      background: rgba(30, 32, 33, 0.85);
+      background: rgba(30, 32, 33, 0.88);
       border: 1px solid var(--border-strong);
       padding: 6px 16px 6px 10px;
       border-radius: var(--radius-pill);
-      backdrop-filter: blur(12px);
-      transition: opacity 250ms ease, transform 250ms ease;
+      backdrop-filter: blur(14px);
     }
 
-    .face-ring {
+    .face-ring-scan {
       width: 20px;
       height: 20px;
       border-radius: 50%;
-      border: 2px solid var(--accent);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      animation: face-scan 2s infinite ease-in-out;
+      border: 2px solid var(--bg3);
+      border-top-color: var(--accent-tertiary);
+      animation: spin 1.1s linear infinite;
     }
 
-    @keyframes face-scan {
-      0%, 100% { transform: scale(0.95); opacity: 0.7; }
-      50% { transform: scale(1.08); opacity: 1; border-color: var(--accent); }
-    }
-
-    .face-indicator-label {
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--fg);
-    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     /* Shared Glass Card */
     .glass-card {
@@ -253,33 +264,28 @@
       border: 1px solid var(--border-strong);
       border-radius: var(--radius-card);
       backdrop-filter: blur(24px);
-      -webkit-backdrop-filter: blur(24px);
       box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
       padding: 24px 26px 20px 26px;
-      transition: all 200ms ease;
     }
 
     /* ── AUTH FIELD (Unified Geometry) ── */
     .auth-field {
       width: 100%;
-      height: 62px;
-      background: rgba(29, 32, 33, 0.8);
+      min-height: 42px;
+      background: alpha(#1d2021, 0.85);
       border: 1px solid var(--border-strong);
       border-radius: var(--radius-md);
       display: flex;
       align-items: center;
-      padding: 0 16px;
-      gap: 12px;
-      transition: border-color 200ms ease, box-shadow 200ms ease;
-      position: relative;
+      padding: 10px 14px;
+      transition: border-color 150ms ease, background-color 150ms ease;
     }
 
     .auth-field:focus-within {
+      background: alpha(#1d2021, 0.95);
       border-color: rgba(235, 219, 178, 0.4);
-      background: rgba(29, 32, 33, 0.95);
     }
 
-    /* Fingerprint armed breathing pulse (CSS only, no inline icon) */
     .auth-field.auth-fp-armed {
       animation: auth-fp-pulse 2.2s infinite ease-in-out;
     }
@@ -296,10 +302,10 @@
 
     @keyframes auth-shake {
       0%, 100% { transform: translateX(0); }
-      20% { transform: translateX(-6px); }
+      20% { transform: translateX(-7px); }
       40% { transform: translateX(6px); }
       60% { transform: translateX(-4px); }
-      80% { transform: translateX(4px); }
+      80% { transform: translateX(3px); }
     }
 
     .auth-input {
@@ -308,9 +314,8 @@
       border: none;
       outline: none;
       font-family: inherit;
-      font-size: 15px;
+      font-size: 14.5px;
       color: var(--fg);
-      letter-spacing: 0.02em;
     }
 
     .auth-input::placeholder {
@@ -326,10 +331,10 @@
       color: var(--fg-dim);
       font-weight: 400;
       text-align: left;
-      transition: color 150ms ease;
       display: flex;
       flex-direction: column;
       justify-content: flex-start;
+      transition: color 150ms ease;
     }
 
     .auth-caption.info { color: var(--fg-dim); }
@@ -337,213 +342,90 @@
     .auth-caption.error { color: var(--red); font-weight: 600; }
     .auth-caption.caps { color: var(--accent-secondary); font-weight: 600; }
 
-    /* Surface Specifics: 1. LOCK SCREEN */
-    .lock-card-box {
-      width: 360px;
-    }
+    /* Surface: Locker */
+    .lock-card-box { width: 360px; }
+    .lock-clock-zone { margin: 10px 0 20px; text-align: center; }
+    .lock-clock { font-size: 64px; font-weight: 300; letter-spacing: -0.04em; line-height: 1; color: var(--fg); text-shadow: 0 2px 18px rgba(0,0,0,0.6); }
+    .lock-date { font-size: 13.5px; color: var(--fg-dim); margin-top: 6px; }
+    .lock-switch-user-btn { margin-top: 20px; background: transparent; border: none; color: var(--fg-dim); font-size: 13px; font-weight: 500; cursor: pointer; padding: 6px 12px; border-radius: 8px; }
 
-    .lock-clock-zone {
-      margin-top: 10px;
-      margin-bottom: 24px;
-      text-align: center;
-    }
+    /* Surface: Polkit */
+    .polkit-card-box { width: 400px; }
+    .polkit-icon-glyph { font-size: 32px; color: rgba(235, 219, 178, 0.45); text-align: center; margin-bottom: 8px; }
+    .polkit-title { font-size: 1.1rem; font-weight: 700; color: var(--fg); text-align: center; margin-bottom: 6px; }
+    .polkit-message { font-size: 0.95rem; color: rgba(235, 219, 178, 0.92); text-align: center; line-height: 1.45; margin-bottom: 20px; }
+    .polkit-details-toggle { background: transparent; border: none; color: var(--fg-dim); font-size: 11px; cursor: pointer; padding: 3px 4px; margin-top: 8px; }
+    .polkit-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+    .btn-cancel { background: transparent; color: var(--fg-dim); border: 1px solid var(--border-strong); border-radius: 10px; padding: 8px 18px; font-size: 13px; font-weight: 500; cursor: pointer; }
+    .btn-auth { background: var(--accent); color: #1d2021; border: none; border-radius: 10px; padding: 8px 22px; font-size: 13px; font-weight: 600; cursor: pointer; }
 
-    .lock-clock {
-      font-size: 68px;
-      font-weight: 300;
-      letter-spacing: -0.04em;
-      line-height: 1;
-      color: var(--fg);
-      text-shadow: 0 2px 18px rgba(0, 0, 0, 0.6);
-    }
+    /* Surface: Sudo Elevation */
+    .sudo-card-box { width: 400px; }
+    .sudo-well { background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 14px; font-family: var(--font-mono); font-size: 12px; color: var(--fg); margin-bottom: 8px; }
+    .sudo-consequence { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-dim); font-weight: 600; margin-bottom: 20px; text-align: center; }
 
-    .lock-date {
-      font-size: 14px;
-      color: var(--fg-dim);
-      margin-top: 6px;
+    /* Surface: Start Menu / Control Center */
+    .startmenu-preview {
+      width: 440px;
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      gap: 14px;
+      padding: 16px;
     }
+    .launcher-col { border-right: 1px solid var(--border-subtle); padding-right: 14px; }
+    .launcher-search-box { background: rgba(29, 32, 33, 0.9); border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 12px; font-size: 13px; display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .launcher-item { padding: 8px 10px; border-radius: 8px; display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--fg-dim); cursor: pointer; }
+    .launcher-item.active { background: var(--accent-tint); color: var(--fg); border-left: 2px solid var(--accent); }
+    .quick-tiles-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+    .quick-tile { background: var(--bg0); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: var(--fg-dim); cursor: pointer; }
+    .quick-tile.active { background: var(--accent-tint); border-color: rgba(104, 157, 106, 0.4); color: var(--accent); }
 
-    .lock-switch-user-btn {
-      margin-top: 20px;
-      background: transparent;
-      border: none;
-      color: var(--fg-dim);
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      padding: 6px 12px;
-      border-radius: 8px;
-      transition: color 150ms ease, background 150ms ease;
-    }
-
-    .lock-switch-user-btn:hover {
-      color: var(--fg);
-      background: rgba(235, 219, 178, 0.05);
-    }
-
-    /* Surface Specifics: 2. POLKIT DIALOG */
-    .polkit-card-box {
-      width: 400px;
-    }
-
-    .polkit-icon-box {
-      margin: 0 auto 8px;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      background: rgba(235, 219, 178, 0.05);
-      color: var(--fg-dim);
-      font-size: 26px;
-    }
-
-    .polkit-title {
-      font-size: 17px;
-      font-weight: 700;
-      color: var(--fg);
-      text-align: center;
-      margin-bottom: 6px;
-      letter-spacing: -0.01em;
-    }
-
-    .polkit-message {
-      font-size: 13.5px;
-      color: rgba(235, 219, 178, 0.92);
-      text-align: center;
-      line-height: 1.45;
-      margin-bottom: 20px; /* Crucial 20px rhythm break into input */
-      padding: 0 4px;
-    }
-
-    .polkit-details-toggle {
-      background: transparent;
-      border: none;
-      color: var(--fg-dim);
-      font-size: 11px;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      cursor: pointer;
-      padding: 4px 6px;
-      margin-top: 8px;
-      border-radius: 6px;
-      transition: color 150ms ease;
-    }
-
-    .polkit-details-toggle:hover {
-      color: var(--fg);
-    }
-
-    .polkit-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 10px;
-      margin-top: 16px;
-    }
-
-    .btn-cancel {
-      background: transparent;
-      color: var(--fg-dim);
+    /* Surface: Bar Strip */
+    .bar-strip-preview {
+      width: 100%;
+      height: 38px;
+      background: alpha(#32302f, 0.85);
       border: 1px solid var(--border-strong);
-      border-radius: var(--radius-md);
-      padding: 8px 18px;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      font-family: inherit;
-      transition: all 150ms ease;
-    }
-
-    .btn-cancel:hover {
-      background: rgba(80, 73, 69, 0.5);
-      color: var(--fg);
-    }
-
-    .btn-auth {
-      background: var(--accent);
-      color: #1d2021;
-      border: none;
-      border-radius: var(--radius-md);
-      padding: 8px 22px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      font-family: inherit;
-      transition: background 150ms ease;
-    }
-
-    .btn-auth:hover {
-      background: #79b57b;
-    }
-
-    /* Surface Specifics: 3. SUDO / ELEVATE CONFIRMATION */
-    .sudo-card-box {
-      width: 400px;
-    }
-
-    .sudo-well {
-      background: rgba(29, 32, 33, 0.95);
-      border: 1px solid var(--border-subtle);
-      border-radius: 8px;
-      padding: 10px 14px;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--fg);
-      margin-bottom: 8px;
-      word-break: break-all;
-    }
-
-    .sudo-consequence {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--accent-secondary);
-      font-weight: 600;
-      margin-bottom: 20px;
-      text-align: center;
-    }
-
-    .greeter-chips-row {
+      border-radius: 12px;
+      padding: 4px 12px;
       display: flex;
-      justify-content: center;
+      align-items: center;
+      justify-content: space-between;
+      backdrop-filter: blur(20px);
+    }
+    .bar-ws-group { display: flex; gap: 2px; }
+    .bar-ws-item { padding: 4px 10px; font-size: 12px; color: var(--fg-dim); border-top: 2px solid transparent; }
+    .bar-ws-item.active { background: rgba(235, 219, 178, 0.14); color: var(--fg); border-top-color: var(--fg); }
+    .bar-clock { font-size: 12px; font-weight: 600; color: var(--fg); }
+    .bar-tray { display: flex; gap: 10px; color: var(--fg-dim); font-size: 14px; }
+
+    /* Surface: OSD Volume/Brightness */
+    .osd-card-preview {
+      width: 260px;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 14px;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
       gap: 12px;
-      margin-bottom: 18px;
+      backdrop-filter: blur(24px);
     }
+    .osd-slider-track { width: 100%; height: 6px; background: var(--bg0-h); border-radius: 999px; overflow: hidden; }
+    .osd-slider-fill { width: 65%; height: 100%; background: var(--accent); border-radius: 999px; }
 
-    .user-chip {
-      background: rgba(50, 48, 47, 0.7);
-      border: 1px solid var(--border-strong);
-      border-radius: var(--radius-pill);
-      padding: 6px 14px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--fg-dim);
-      cursor: pointer;
-      transition: all 150ms ease;
+    /* Surface: Window Switcher */
+    .switcher-grid-preview {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      width: 320px;
     }
-
-    .user-chip.active {
-      border-color: var(--accent);
-      background: rgba(50, 48, 47, 0.95);
-      color: var(--fg);
-    }
-
-    .user-avatar-dot {
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      background: var(--bg2);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      color: var(--fg);
-    }
+    .switcher-thumb-box { background: rgba(29, 32, 33, 0.7); border: 2px solid transparent; border-radius: 10px; padding: 8px; cursor: pointer; }
+    .switcher-thumb-box.selected { border-color: var(--accent); background: var(--accent-tint); }
+    .switcher-thumb-screen { width: 100%; height: 75px; background: #161819; border-radius: 6px; margin-bottom: 6px; display: flex; align-items: center; justify-content: center; font-size: 20px; color: var(--text-faint); }
+    .switcher-thumb-title { font-size: 11px; color: var(--fg); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     .rail-annotation {
       margin-top: 14px;
@@ -554,10 +436,7 @@
       align-items: center;
       gap: 6px;
     }
-
-    .rail-annotation i {
-      color: var(--accent);
-    }
+    .rail-annotation i { color: var(--accent); }
   </style>
 </head>
 <body>
@@ -565,12 +444,11 @@
   <header>
     <div class="title-group">
       <h1>
-        Swaypplet Auth Architecture
-        <span class="badge">GTK4 Spec-Accurate</span>
+        Swaypplet Surface Alignment & Motion
+        <span class="badge">Universal Blueprint</span>
       </h1>
       <p>
-        Unified <code>.auth-field</code> and <code>.auth-caption</code> design across Locker, Polkit, and Sudo/Greeter.
-        Biometric indicators are decoupled: Face is pinned top-centre under camera, Touch/Fingerprint is driven via honest copy and subtle border pulse.
+        Unified design tokens, physical geometries, and motion behaviors across all Swaypplet surfaces: Authentication, Bar, Launcher, Control Center, OSD, and Switcher.
       </p>
     </div>
 
@@ -582,38 +460,40 @@
     </div>
   </header>
 
-  <div class="meta-principles">
-    <div class="principle-card">
-      <strong>Zero Inline Clutter</strong>
-      <span>No fingerprint glyphs or pills inside modal inputs. Input is a pure, clean entry field on a stable x-rail.</span>
+  <div class="system-banner">
+    <div class="banner-card">
+      <strong>Single Input Model (.auth-field)</strong>
+      <span>No inline biometric glyphs in text fields. Clean, borderless entries aligned to an unwavering x-rail.</span>
     </div>
-    <div class="principle-card">
-      <strong>Honest Verbal Copy</strong>
-      <span>Caption names only methods currently accepting input. Two top-aligned lines permanently reserved to prevent pop-in.</span>
+    <div class="banner-card">
+      <strong>Zero-Resizing Honest Copy</strong>
+      <span>Two lines permanently reserved. The caption names only methods currently accepting input.</span>
     </div>
-    <div class="principle-card">
-      <strong>Pinned Face Geometry</strong>
-      <span>Face recognition indicator lives directly under the physical webcam bezel, keeping eye gaze aligned on-axis.</span>
+    <div class="banner-card">
+      <strong>Motion on Glass Scale</strong>
+      <span>Entrances decelerate (300ms); exits accelerate (200ms). Frost maps in 1 frame while content eases.</span>
     </div>
   </div>
 
+  <!-- ════════ SECTION 1: AUTHENTICATION SURFACES ════════ -->
+  <div class="section-header"><i class="ti ti-shield-lock"></i> 1. Authentication & Security Surfaces</div>
   <main class="surfaces-grid">
 
     <!-- SURFACE 1: LOCK SCREEN -->
     <div class="surface-stage">
       <div class="surface-tag"><i class="ti ti-lock"></i> Lock Screen</div>
-      <div class="surface-specs">Height: 148px (Fixed) · Width: 360px</div>
+      <div class="surface-specs">Height: 148px (Locked) · Width: 360px</div>
 
       <!-- Top Camera Bar -->
       <div class="camera-bezel-zone">
-        <div class="pinned-face-indicator" id="lock-face-indicator">
-          <div class="face-ring"></div>
-          <span class="face-indicator-label">Looking for face…</span>
+        <div class="pinned-face-indicator">
+          <div class="face-ring-scan"></div>
+          <span style="font-size: 12px; font-weight: 500;">Looking for face…</span>
         </div>
       </div>
 
       <div class="lock-clock-zone">
-        <div class="lock-clock">17:42</div>
+        <div class="lock-clock">17:55</div>
         <div class="lock-date">Saturday, August 15</div>
       </div>
 
@@ -627,90 +507,60 @@
         </div>
       </div>
 
-      <!-- Out-of-card action: leaves card bottom padding as natural optical margin -->
       <button class="lock-switch-user-btn"><i class="ti ti-users"></i> Switch User</button>
-
-      <div class="rail-annotation">
-        <i class="ti ti-check"></i> Caption slack falls against bottom padding
-      </div>
+      <div class="rail-annotation"><i class="ti ti-check"></i> Caption slack reads as bottom margin</div>
     </div>
 
-    <!-- SURFACE 2: POLKIT DIALOG -->
+    <!-- SURFACE 2: POLKIT MODAL -->
     <div class="surface-stage">
-      <div class="surface-tag"><i class="ti ti-shield-lock"></i> Polkit Modal</div>
+      <div class="surface-tag"><i class="ti ti-shield"></i> Polkit Modal</div>
       <div class="surface-specs">Height: 456px · Width: 400px</div>
 
       <div class="camera-bezel-zone"></div>
 
       <!-- Polkit Card -->
       <div class="glass-card polkit-card-box">
-        <div class="polkit-icon-box">
-          <i class="ti ti-shield"></i>
-        </div>
-
+        <div class="polkit-icon-glyph"><i class="ti ti-shield"></i></div>
         <div class="polkit-title">Authentication Required</div>
         <div class="polkit-message">
-          System policy requires privileges to modify network device configuration.
+          Authentication is needed to run `/nix/store/.../bin/echo` as the super user
         </div>
 
         <div class="auth-field auth-fp-armed" id="polkit-field">
           <input type="password" class="auth-input" placeholder="Password" id="polkit-input" />
         </div>
-
         <div class="auth-caption fp" id="polkit-caption">
           <span>Touch the reader or enter your password to allow this</span>
         </div>
 
-        <button class="polkit-details-toggle">
-          <i class="ti ti-info-circle"></i> Details
-        </button>
-
+        <button class="polkit-details-toggle"><i class="ti ti-info-circle"></i> Details</button>
         <div class="polkit-actions">
           <button class="btn-cancel">Cancel</button>
           <button class="btn-auth">Authenticate</button>
         </div>
       </div>
-
-      <div class="rail-annotation" style="margin-top: 24px;">
-        <i class="ti ti-layout-grid"></i> Strict 6px:20px hierarchy break around field
-      </div>
+      <div class="rail-annotation" style="margin-top: 24px;"><i class="ti ti-layout-grid"></i> 6px:20px hierarchy grouping around field</div>
     </div>
 
-    <!-- SURFACE 3: SUDO ELEVATION / GREETER -->
+    <!-- SURFACE 3: SUDO CONFIRMATION -->
     <div class="surface-stage">
-      <div class="surface-tag"><i class="ti ti-terminal-2"></i> Sudo / Greeter</div>
-      <div class="surface-specs">Width: 400px / 360px</div>
+      <div class="surface-tag"><i class="ti ti-terminal-2"></i> Sudo Elevation</div>
+      <div class="surface-specs">Width: 400px</div>
 
-      <!-- Top Camera Bar -->
       <div class="camera-bezel-zone">
         <div class="pinned-face-indicator">
-          <div class="face-ring"></div>
-          <span class="face-indicator-label">Verifying root privilege…</span>
+          <div class="face-ring-scan"></div>
+          <span style="font-size: 12px; font-weight: 500;">Verifying root privilege…</span>
         </div>
       </div>
 
-      <div class="greeter-chips-row">
-        <div class="user-chip active">
-          <div class="user-avatar-dot">M</div>
-          <span>meros</span>
-        </div>
-        <div class="user-chip">
-          <div class="user-avatar-dot">G</div>
-          <span>guest</span>
-        </div>
-      </div>
-
-      <!-- Sudo Card -->
       <div class="glass-card sudo-card-box">
-        <div class="sudo-well">
-          $ sudo nixos-rebuild switch --flake .#
-        </div>
+        <div class="sudo-well">$ sudo nixos-rebuild switch --flake .#</div>
         <div class="sudo-consequence">Action executes as root</div>
 
         <div class="auth-field auth-fp-armed" id="sudo-field">
           <input type="password" class="auth-input" placeholder="Password" id="sudo-input" />
         </div>
-
         <div class="auth-caption fp" id="sudo-caption">
           <span>Touch the reader or enter your password</span>
         </div>
@@ -720,10 +570,97 @@
           <button class="btn-auth">Authorize</button>
         </div>
       </div>
+      <div class="rail-annotation" style="margin-top: 24px;"><i class="ti ti-code"></i> Quoted evidence well with unified auth-field</div>
+    </div>
 
-      <div class="rail-annotation" style="margin-top: 24px;">
-        <i class="ti ti-code"></i> Unified field rail with monospace evidence block
+  </main>
+
+  <!-- ════════ SECTION 2: SHELL & SYSTEM SURFACES ════════ -->
+  <div class="section-header"><i class="ti ti-layout-bottombar"></i> 2. Shell Controls, OSD, Switcher & Bar</div>
+  <main class="surfaces-grid">
+
+    <!-- SURFACE 4: START MENU / CONTROL CENTER -->
+    <div class="surface-stage">
+      <div class="surface-tag"><i class="ti ti-layout-grid"></i> Start Menu / Quick Settings</div>
+      <div class="surface-specs">Width: 440px · Radius: 16px</div>
+
+      <div class="glass-card startmenu-preview">
+        <div class="launcher-col">
+          <div class="launcher-search-box">
+            <i class="ti ti-search" style="color: var(--fg-dim);"></i>
+            <input type="text" placeholder="Search apps & actions…" style="background: transparent; border: none; color: var(--fg); outline: none; width: 100%;" value="term" />
+          </div>
+          <div class="launcher-item active"><i class="ti ti-terminal"></i> Ghostty Terminal</div>
+          <div class="launcher-item"><i class="ti ti-code"></i> VSCode</div>
+          <div class="launcher-item"><i class="ti ti-brand-chrome"></i> Google Chrome</div>
+        </div>
+
+        <div class="quick-col">
+          <div class="quick-tiles-grid">
+            <div class="quick-tile active"><i class="ti ti-wifi"></i> Wi-Fi (Home)</div>
+            <div class="quick-tile active"><i class="ti ti-bluetooth"></i> Bluetooth</div>
+            <div class="quick-tile"><i class="ti ti-moon"></i> Night Light</div>
+            <div class="quick-tile"><i class="ti ti-bell-off"></i> Do Not Disturb</div>
+          </div>
+          <div style="font-size: 11px; color: var(--fg-dim); margin-bottom: 6px;">Output Volume (75%)</div>
+          <div class="osd-slider-track"><div class="osd-slider-fill" style="width: 75%;"></div></div>
+        </div>
       </div>
+      <div class="rail-annotation" style="margin-top: 24px;"><i class="ti ti-arrows-split"></i> Fused launcher + quick-settings panel</div>
+    </div>
+
+    <!-- SURFACE 5: HUD OSD & WINDOW SWITCHER -->
+    <div class="surface-stage">
+      <div class="surface-tag"><i class="ti ti-device-desktop"></i> OSD & Window Switcher</div>
+      <div class="surface-specs">Overlay Layer · Decelerate Settle</div>
+
+      <div class="osd-card-preview" style="margin-bottom: 24px;">
+        <i class="ti ti-volume" style="font-size: 26px; color: var(--fg);"></i>
+        <div class="osd-slider-track"><div class="osd-slider-fill"></div></div>
+        <div style="font-size: 11px; color: var(--fg-dim); font-family: var(--font-mono);">65% · Built-in Speaker</div>
+      </div>
+
+      <div class="glass-card" style="padding: 14px;">
+        <div style="font-size: 11px; color: var(--fg-dim); margin-bottom: 8px; font-weight: 600;">ACTIVE WINDOWS (3)</div>
+        <div class="switcher-grid-preview">
+          <div class="switcher-thumb-box selected">
+            <div class="switcher-thumb-screen"><i class="ti ti-terminal-2"></i></div>
+            <div class="switcher-thumb-title">meros@laptop: ~/nixos</div>
+          </div>
+          <div class="switcher-thumb-box">
+            <div class="switcher-thumb-screen"><i class="ti ti-brand-chrome"></i></div>
+            <div class="switcher-thumb-title">Google Chrome</div>
+          </div>
+        </div>
+      </div>
+      <div class="rail-annotation" style="margin-top: 24px;"><i class="ti ti-stack-2"></i> 16px directional slide settle on show</div>
+    </div>
+
+    <!-- SURFACE 6: NATIVE STATUS BAR -->
+    <div class="surface-stage">
+      <div class="surface-tag"><i class="ti ti-layout-bottombar"></i> Native Bar Strip</div>
+      <div class="surface-specs">Height: 38px · Bottom Anchored</div>
+
+      <div style="width: 100%; margin-top: 80px;">
+        <div class="bar-strip-preview">
+          <div class="bar-ws-group">
+            <div class="bar-ws-item active">1</div>
+            <div class="bar-ws-item">2</div>
+            <div class="bar-ws-item">3</div>
+            <div class="bar-ws-item">4</div>
+          </div>
+
+          <div class="bar-clock">17:55  ·  Sat Aug 15</div>
+
+          <div class="bar-tray">
+            <i class="ti ti-wifi"></i>
+            <i class="ti ti-volume"></i>
+            <i class="ti ti-battery-3"></i>
+          </div>
+        </div>
+      </div>
+
+      <div class="rail-annotation" style="margin-top: 80px;"><i class="ti ti-ruler-2"></i> Insets 0 4 4 4 matching Sway inner gaps</div>
     </div>
 
   </main>
@@ -742,7 +679,6 @@
       const sudoCaption = document.getElementById('sudo-caption');
 
       const fields = [lockField, polkitField, sudoField];
-      const captions = [lockCaption, polkitCaption, sudoCaption];
 
       fields.forEach(f => {
         f.classList.remove('auth-fp-armed', 'auth-error');
