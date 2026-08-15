@@ -69,9 +69,11 @@ pub struct NetworkSection {
     root: Box,
     state: Rc<RefCell<NetworkState>>,
     // Summary row
+    summary_btn: Button,
     summary_icon: Label,
     summary_text: Label,
     // Detail widgets
+    detail_revealer: Revealer,
     current_icon_label: Label,
     current_ssid_label: Label,
     current_signal_label: Label,
@@ -82,6 +84,7 @@ pub struct NetworkSection {
     portal_btn: Button,
     wifi_switch: Switch,
     wifi_controls_box: Box,
+    revealer: Revealer,
     power_save_row: Box,
     // Scan status
     scan_spinner: Spinner,
@@ -390,7 +393,27 @@ impl NetworkSection {
 
         wifi_controls_box.append(&toggle_button);
         wifi_controls_box.append(&revealer);
-        detail_box.append(&wifi_controls_box);
+        // ── Advanced Settings launcher (routes, static IP, DNS delegation) ─
+        let adv_btn = Button::builder()
+            .label("󰒓  Advanced Network Connections (nm-connection-editor)")
+            .halign(gtk4::Align::Fill)
+            .build();
+        adv_btn.add_css_class("network-adv-btn");
+        adv_btn.connect_clicked(|_| {
+            let _ = std::process::Command::new("nm-connection-editor")
+                .spawn()
+                .or_else(|_| {
+                    std::process::Command::new("ghostty")
+                        .args(["-e", "nmtui"])
+                        .spawn()
+                })
+                .or_else(|_| {
+                    std::process::Command::new("foot")
+                        .args(["-e", "nmtui"])
+                        .spawn()
+                });
+        });
+        detail_box.append(&adv_btn);
 
         detail_revealer.set_child(Some(&detail_box));
         root.append(&detail_revealer);
@@ -438,8 +461,10 @@ impl NetworkSection {
             let section = Self {
                 root,
                 state: state_ref,
+                summary_btn,
                 summary_icon,
                 summary_text,
+                detail_revealer,
                 current_icon_label,
                 current_ssid_label,
                 current_signal_label,
@@ -450,6 +475,7 @@ impl NetworkSection {
                 portal_btn,
                 wifi_switch,
                 wifi_controls_box,
+                revealer,
                 power_save_row,
                 scan_spinner,
                 scan_status_label,
@@ -735,6 +761,13 @@ impl NetworkSection {
                 }
             },
         );
+    }
+
+    pub fn expand_for_page(&self) {
+        self.summary_btn.set_visible(false);
+        self.detail_revealer.set_reveal_child(true);
+        self.revealer.set_reveal_child(true);
+        self.state.borrow_mut().list_visible = true;
     }
 
     pub fn widget(&self) -> &gtk4::Box {
