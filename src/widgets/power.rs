@@ -204,7 +204,7 @@ pub(crate) fn read_battery(bat_path: &str) -> Option<BatteryState> {
 // ---------------------------------------------------------------------------
 
 /// Battery icon (Nerd Font) based on charge level and charging status.
-fn battery_icon(capacity: u8, charging: bool) -> &'static str {
+pub(crate) fn battery_icon(capacity: u8, charging: bool) -> &'static str {
     if charging {
         return "󰂄";
     }

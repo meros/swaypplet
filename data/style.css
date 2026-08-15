@@ -2513,6 +2513,26 @@ revealer {
     font-size: 14px;
 }
 
+.pill-icon-red {
+    color: #fb4934;
+    font-size: 14px;
+}
+
+.telemetry-icon-sub-btn {
+    background: none;
+    border: none;
+    padding: 2px 4px;
+    border-radius: 6px;
+    box-shadow: none;
+    color: @fg;
+    transition: background-color 150ms ease, color 150ms ease;
+}
+
+.telemetry-icon-sub-btn:hover {
+    background-color: @surface_hover;
+    color: @accent;
+}
+
 /* ── Deck Stack & Sub-sheets ── */
 .helm-deck-stack {
     margin-bottom: 6px;

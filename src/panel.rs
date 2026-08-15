@@ -122,6 +122,7 @@ impl Panel {
         let power = PowerSection::new();
         let users = UserSection::new();
 
+        audio.expand_for_page();
         network.expand_for_page();
         bluetooth.expand_for_page();
         display.expand_for_page();
@@ -214,8 +215,15 @@ impl Panel {
             deck_stack.add_named(&media_sheet, Some("media"));
         }
 
+        // Page 9: Audio & Sound Devices
+        {
+            let ret = return_to_search.clone();
+            let audio_sheet = build_subsheet("Audio & Sound Devices", "󰕾", audio.widget(), move || ret());
+            deck_stack.add_named(&audio_sheet, Some("audio"));
+        }
+
         // ── Top Telemetry Ribbon ─────────────────────────────────────────────
-        let telemetry_ribbon = build_telemetry_ribbon(&deck_stack, &audio, &brightness);
+        let telemetry_ribbon = build_telemetry_ribbon(&deck_stack, &audio, &brightness, &store);
 
         // ── Specs & Toggle Tiles ─────────────────────────────────────────────
         let specs = tiles::tile_specs(); // [wifi, bluetooth, night, caffeine]
@@ -279,6 +287,8 @@ impl Panel {
                     deck_stack_c.set_visible_child_name("notifications");
                 } else if prefix.starts_with(":media") || prefix.starts_with(":music") {
                     deck_stack_c.set_visible_child_name("media");
+                } else if prefix.starts_with(":audio") || prefix.starts_with(":vol") || prefix.starts_with(":sound") || prefix.starts_with(":sink") || prefix.starts_with(":mic") {
+                    deck_stack_c.set_visible_child_name("audio");
                 } else if !prefix.starts_with(':') && deck_stack_c.visible_child_name().as_deref() != Some("launcher") {
                     deck_stack_c.set_visible_child_name("launcher");
                 }
@@ -427,24 +437,38 @@ fn build_telemetry_ribbon(
     deck_stack: &gtk4::Stack,
     audio: &AudioSection,
     brightness: &BrightnessSection,
+    store: &Rc<RefCell<NotificationStore>>,
 ) -> gtk4::Box {
     let ribbon = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
-        .spacing(8)
+        .spacing(6)
         .hexpand(true)
         .build();
     ribbon.add_css_class("helm-telemetry-ribbon");
 
-    // 1. Power / System pill
+    // 1. Power / Battery pill (dynamic)
     let pill_power = gtk4::Button::builder().build();
     pill_power.add_css_class("telemetry-pill");
     let power_box = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(6)
         .build();
-    let power_icon = gtk4::Label::builder().label("󰁹").build();
+    
+    let (icon_str, label_str) = if let Some(path) = power::find_battery_path() {
+        if let Some(bat) = power::read_battery(&path) {
+            let icon = power::battery_icon(bat.capacity, bat.charging);
+            let state_suffix = if bat.charging { " 󱐋" } else { "" };
+            (icon, format!("{}%{}", bat.capacity, state_suffix))
+        } else {
+            ("󰁹", "Power".to_string())
+        }
+    } else {
+        ("󰁹", "AC".to_string())
+    };
+
+    let power_icon = gtk4::Label::builder().label(icon_str).build();
     power_icon.add_css_class("pill-icon-green");
-    let power_lbl = gtk4::Label::builder().label("Power").build();
+    let power_lbl = gtk4::Label::builder().label(&label_str).build();
     power_box.append(&power_icon);
     power_box.append(&power_lbl);
     pill_power.set_child(Some(&power_box));
@@ -460,15 +484,31 @@ fn build_telemetry_ribbon(
     }
     ribbon.append(&pill_power);
 
-    // 2. Audio Volume scrubber pill
+    // 2. Audio Volume scrubber pill (click icon to open audio devices & mixer)
     let pill_audio = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
-        .spacing(6)
+        .spacing(4)
         .build();
     pill_audio.add_css_class("telemetry-pill");
     pill_audio.add_css_class("telemetry-pill-interactive");
-    let audio_icon = gtk4::Label::builder().label(icons::SPEAKER_HIGH).build();
-    pill_audio.append(&audio_icon);
+    
+    let audio_btn = gtk4::Button::builder()
+        .child(&gtk4::Label::new(Some(icons::SPEAKER_HIGH)))
+        .tooltip_text("Open Audio Devices & Mixer (:audio)")
+        .build();
+    audio_btn.add_css_class("telemetry-icon-sub-btn");
+    {
+        let stack_c = deck_stack.clone();
+        audio_btn.connect_clicked(move |_| {
+            if stack_c.visible_child_name().as_deref() == Some("audio") {
+                stack_c.set_visible_child_name("launcher");
+            } else {
+                stack_c.set_visible_child_name("audio");
+            }
+        });
+    }
+    pill_audio.append(&audio_btn);
+
     let scale = audio.output_volume_scale();
     scale.set_draw_value(false);
     scale.set_hexpand(true);
@@ -479,15 +519,31 @@ fn build_telemetry_ribbon(
     pill_audio.append(&scale);
     ribbon.append(&pill_audio);
 
-    // 3. Brightness scrubber pill
+    // 3. Brightness scrubber pill (click icon to open display settings)
     let pill_bright = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
-        .spacing(6)
+        .spacing(4)
         .build();
     pill_bright.add_css_class("telemetry-pill");
     pill_bright.add_css_class("telemetry-pill-interactive");
-    let bright_icon = gtk4::Label::builder().label(icons::BRIGHTNESS).build();
-    pill_bright.append(&bright_icon);
+    
+    let bright_btn = gtk4::Button::builder()
+        .child(&gtk4::Label::new(Some(icons::BRIGHTNESS)))
+        .tooltip_text("Open Display & Monitors (:disp)")
+        .build();
+    bright_btn.add_css_class("telemetry-icon-sub-btn");
+    {
+        let stack_c = deck_stack.clone();
+        bright_btn.connect_clicked(move |_| {
+            if stack_c.visible_child_name().as_deref() == Some("displays") {
+                stack_c.set_visible_child_name("launcher");
+            } else {
+                stack_c.set_visible_child_name("displays");
+            }
+        });
+    }
+    pill_bright.append(&bright_btn);
+
     let b_scale = brightness.brightness_scale();
     b_scale.set_draw_value(false);
     b_scale.set_hexpand(true);
@@ -572,6 +628,35 @@ fn build_telemetry_ribbon(
         });
     }
     ribbon.append(&pill_disp);
+
+    // 7. Notifications Pill
+    let pill_notif = gtk4::Button::builder().build();
+    pill_notif.add_css_class("telemetry-pill");
+    let notif_box = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(4)
+        .build();
+    let notif_icon = gtk4::Label::builder().label("󰂚").build();
+    notif_icon.add_css_class("pill-icon-red");
+    let notif_count = store.borrow().all().len();
+    let notif_count_str = if notif_count > 0 { format!("{notif_count}") } else { "0".to_string() };
+    let notif_lbl = gtk4::Label::builder()
+        .label(&notif_count_str)
+        .build();
+    notif_box.append(&notif_icon);
+    notif_box.append(&notif_lbl);
+    pill_notif.set_child(Some(&notif_box));
+    {
+        let stack_c = deck_stack.clone();
+        pill_notif.connect_clicked(move |_| {
+            if stack_c.visible_child_name().as_deref() == Some("notifications") {
+                stack_c.set_visible_child_name("launcher");
+            } else {
+                stack_c.set_visible_child_name("notifications");
+            }
+        });
+    }
+    ribbon.append(&pill_notif);
 
     ribbon
 }
