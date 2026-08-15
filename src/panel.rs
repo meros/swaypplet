@@ -294,6 +294,12 @@ impl Panel {
             move || shot(&window, &store, crate::screenshot::Shot::Pick)
         }));
 
+        rail.append(&rail_action("󰑋", "Record screen", &window, {
+            let window = window.clone();
+            let store = store.clone();
+            move || shot(&window, &store, crate::screenshot::Shot::Record)
+        }));
+
         // Spacer pushes the session actions to the bottom of the rail.
         let rail_spacer = gtk4::Box::builder().vexpand(true).build();
         rail.append(&rail_spacer);

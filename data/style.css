@@ -314,6 +314,11 @@ button.bar-media-mark.paused {
     color: @accent_secondary;
 }
 
+.bar-hazard.bar-hazard-rec {
+    color: @red;
+    font-weight: bold;
+}
+
 /* ── Bar right: battery + clock fused into one instrument track ──
    Same segmented geometry as .bar-workspaces; the 5px right margin keeps
    the concentric 6px gap at the card corner (waybar's #right-track). */

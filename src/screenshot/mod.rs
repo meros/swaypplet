@@ -25,6 +25,7 @@
 pub mod annotate;
 pub mod capture;
 pub mod deliver;
+pub mod record;
 pub mod select;
 
 use std::cell::RefCell;
@@ -42,6 +43,8 @@ pub enum Shot {
     Screen,
     /// Report the colour under the pointer instead of keeping an image.
     Pick,
+    /// Record video of a selected region.
+    Record,
 }
 
 impl Shot {
@@ -49,6 +52,7 @@ impl Shot {
         match arg {
             Some("screen") | Some("output") => Shot::Screen,
             Some("pick") | Some("color") | Some("colour") => Shot::Pick,
+            Some("record") | Some("rec") | Some("video") => Shot::Record,
             _ => Shot::Region,
         }
     }
@@ -110,8 +114,13 @@ pub fn install(app: &gtk4::Application, store: &StoreRef) {
     });
 }
 
-/// Take a shot.
+/// Take a shot or start a recording.
 pub fn take(app: &gtk4::Application, store: &StoreRef, shot: Shot) {
+    if shot == Shot::Record {
+        record::toggle(app, store);
+        return;
+    }
+
     let store = store.clone();
     let mode = match shot {
         Shot::Pick => select::Mode::Pick,
