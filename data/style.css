@@ -1469,6 +1469,16 @@ revealer {
     color: @green;
 }
 
+.vpn-type-badge {
+    font-size: 10px;
+    font-weight: 700;
+    color: @accent;
+    background-color: alpha(@accent, 0.14);
+    border-radius: 6px;
+    padding: 1px 6px;
+    margin-right: 4px;
+}
+
 .network-security {
     font-size: 12px;
     color: @fg_dim;
