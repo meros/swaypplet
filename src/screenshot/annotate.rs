@@ -43,6 +43,7 @@ const PIXELATE_MIN: u32 = 6;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
     Pen,
+    Highlight,
     Box_,
     Arrow,
     Pixelate,
@@ -54,7 +55,7 @@ pub enum Tool {
 struct Stroke {
     tool: Tool,
     colour: (f64, f64, f64),
-    /// Freehand path for `Pen`; first and last point define the rest.
+    /// Freehand path for `Pen` and `Highlight`; first and last point define the rest.
     points: Vec<(f64, f64)>,
 }
 
@@ -119,10 +120,11 @@ fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
     // single most important thing the bar says.
     let mut first: Option<gtk4::ToggleButton> = None;
     for (tool, icon, name) in [
-        (Tool::Box_, "󰆠", "Box"),
-        (Tool::Arrow, "󰁚", "Arrow"),
-        (Tool::Pen, "󰏫", "Pen"),
-        (Tool::Pixelate, "󰸉", "Pixelate"),
+        (Tool::Box_, "󰆠", "Box (B)"),
+        (Tool::Arrow, "󰁚", "Arrow (A)"),
+        (Tool::Pen, "󰏫", "Pen (P)"),
+        (Tool::Highlight, "󰚄", "Highlight (H)"),
+        (Tool::Pixelate, "󰸉", "Pixelate (X)"),
     ] {
         let btn = gtk4::ToggleButton::builder().label(icon).build();
         btn.set_tooltip_text(Some(name));
@@ -245,7 +247,7 @@ impl Editor {
             let scale = this.scale();
             let p = (sx + dx / scale, sy + dy / scale);
             if let Some(live) = this.live.borrow_mut().as_mut() {
-                if live.tool == Tool::Pen {
+                if live.tool == Tool::Pen || live.tool == Tool::Highlight {
                     live.points.push(p);
                 } else {
                     live.points.truncate(1);
@@ -270,9 +272,20 @@ impl Editor {
         let keys = gtk4::EventControllerKey::new();
         let this = self.clone();
         keys.connect_key_pressed(move |_, key, _, state| {
-            match (key, state.contains(gdk::ModifierType::CONTROL_MASK)) {
-                (gdk::Key::z, true) => this.undo(),
-                (gdk::Key::Escape, _) => this.window.close(),
+            if state.contains(gdk::ModifierType::CONTROL_MASK) {
+                if key == gdk::Key::z {
+                    this.undo();
+                    return glib::Propagation::Stop;
+                }
+            }
+            match key {
+                gdk::Key::b | gdk::Key::B => { this.tool.set(Tool::Box_); this.area.queue_draw(); }
+                gdk::Key::a | gdk::Key::A => { this.tool.set(Tool::Arrow); this.area.queue_draw(); }
+                gdk::Key::p | gdk::Key::P => { this.tool.set(Tool::Pen); this.area.queue_draw(); }
+                gdk::Key::h | gdk::Key::H => { this.tool.set(Tool::Highlight); this.area.queue_draw(); }
+                gdk::Key::x | gdk::Key::X => { this.tool.set(Tool::Pixelate); this.area.queue_draw(); }
+                gdk::Key::u | gdk::Key::U => { this.undo(); }
+                gdk::Key::Escape => this.window.close(),
                 _ => return glib::Propagation::Proceed,
             }
             glib::Propagation::Stop
@@ -370,6 +383,20 @@ fn paint(cr: &cairo::Context, stroke: &Stroke, source: &Image) {
                 cr.line_to(x, y);
             }
             let _ = cr.stroke();
+        }
+        Tool::Highlight => {
+            cr.save().unwrap();
+            let (r, g, b) = stroke.colour;
+            cr.set_source_rgba(r, g, b, 0.35); // 35% translucent marker
+            cr.set_line_width(STROKE_WIDTH * 4.5);
+            cr.set_line_cap(cairo::LineCap::Round);
+            cr.set_line_join(cairo::LineJoin::Round);
+            cr.move_to(x0, y0);
+            for &(x, y) in &stroke.points[1..] {
+                cr.line_to(x, y);
+            }
+            let _ = cr.stroke();
+            cr.restore().unwrap();
         }
         Tool::Box_ => {
             cr.rectangle(x0.min(x1), y0.min(y1), (x1 - x0).abs(), (y1 - y0).abs());
