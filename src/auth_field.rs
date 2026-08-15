@@ -147,10 +147,6 @@ impl AuthField {
         toggle(&self.root, "auth-fp-armed", armed);
     }
 
-    /// A face check is running, or has stopped. Face cues live on the top-pinned
-    /// indicator under the camera and in the caption copy rather than inline.
-    pub fn set_face(&self, _active: bool, _state: &str) {}
-
     /// PAM is working. A border and a word, not a card-wide dimming: greying
     /// the whole card for a field-scale event reads as a fault on a card this
     /// small.

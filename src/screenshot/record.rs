@@ -132,8 +132,12 @@ pub fn stop(store: &StoreRef) {
         return;
     };
 
-    // Send SIGINT to gracefully close the video container
-    let _ = state.child.kill(); // On Unix, we prefer SIGINT for ffmpeg/wf-recorder
+    // Send SIGINT to gracefully close the video container (avoids corrupt MP4 moov atom)
+    let pid = state.child.id() as i32;
+    unsafe {
+        libc::kill(pid, libc::SIGINT);
+    }
+    let _ = state.child.wait();
 
     let file_name = state
         .path
