@@ -113,11 +113,6 @@ const TONE_CLASSES: [&str; 5] = [
 #[derive(Clone)]
 pub struct AuthField {
     root: gtk4::Box,
-    /// The leading slot's occupant. The slot itself is always allocated, even
-    /// on a row that will never run a face check: it is what puts the
-    /// greeter's username and password text on one rail, and that alignment is
-    /// visible where a blank row is not.
-    face_mark: gtk4::Box,
 }
 
 impl AuthField {
@@ -127,55 +122,18 @@ impl AuthField {
     pub fn new(input: &impl IsA<gtk4::Widget>) -> Self {
         let root = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
-            .spacing(12)
+            .spacing(0)
             .hexpand(true)
             .build();
         root.add_css_class("auth-field");
-
-        // Leading slot. Sized and allocated whether or not anything ever draws
-        // in it, because it is the rail the rows above and below line up on;
-        // the face ring is the only thing that does draw here now.
-        let mark = gtk4::Box::builder()
-            .width_request(22)
-            .height_request(27)
-            .halign(gtk4::Align::Center)
-            .valign(gtk4::Align::Center)
-            .build();
-        mark.add_css_class("auth-mark");
-        // Anything inside a field looks like a button, and on a touchscreen
-        // someone will tap it. Untargetable, so the tap falls through and
-        // focuses the field, which is the right outcome.
-        mark.set_can_target(false);
-        mark.set_can_focus(false);
-
-        let face_mark = gtk4::Box::builder()
-            .width_request(22)
-            .height_request(22)
-            .valign(gtk4::Align::Center)
-            .build();
-        face_mark.add_css_class("auth-mark-face");
-        face_mark.add_css_class("face-ring");
-        face_mark.set_opacity(0.0);
-        mark.append(&face_mark);
-
-        // A counterweight, and nothing else: the leading rail is reserved
-        // whether or not anything draws in it, so without this the entry sits
-        // 34 px off the card's left edge and flush against its right. The
-        // Caps Lock glyph used to be what balanced it, and it is not coming
-        // back. Same width, no class that paints, untargetable.
-        let tail = gtk4::Box::builder().width_request(22).build();
-        tail.set_can_target(false);
-        tail.set_can_focus(false);
 
         let input = input.as_ref();
         input.add_css_class("auth-input");
         input.set_hexpand(true);
 
-        root.append(&mark);
         root.append(input);
-        root.append(&tail);
 
-        Self { root, face_mark }
+        Self { root }
     }
 
     pub fn widget(&self) -> &gtk4::Box {
@@ -189,12 +147,9 @@ impl AuthField {
         toggle(&self.root, "auth-fp-armed", armed);
     }
 
-    /// A face check is running, or has stopped. The ring holds the leading
-    /// slot on its own now, so this is opacity and state and nothing else.
-    pub fn set_face(&self, active: bool, state: &str) {
-        self.face_mark.set_opacity(if active { 1.0 } else { 0.0 });
-        crate::face_ring::apply(&self.face_mark, None, if active { state } else { "" });
-    }
+    /// A face check is running, or has stopped. Face cues live on the top-pinned
+    /// indicator under the camera and in the caption copy rather than inline.
+    pub fn set_face(&self, _active: bool, _state: &str) {}
 
     /// PAM is working. A border and a word, not a card-wide dimming: greying
     /// the whole card for a field-scale event reads as a fault on a card this

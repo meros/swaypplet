@@ -65,6 +65,10 @@
               clippy
               rustfmt
               pkg-config
+              # High-speed compilation & linking tooling
+              mold
+              clang
+              sccache
               # pam-sys generates its libpam bindings at build time
               rustPlatform.bindgenHook
 
@@ -86,6 +90,8 @@
             buildInputs = runtimeDeps;
 
             LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeDeps;
+            RUSTFLAGS = "-C linker=clang -C link-arg=-fuse-ld=mold";
+            RUSTC_WRAPPER = "sccache";
           };
         }
       );

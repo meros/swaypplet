@@ -2044,9 +2044,45 @@ revealer {
     transition: color 150ms cubic-bezier(0.2, 0, 0, 1);
 }
 
-.auth-caption-info    { color: @fg_dim;  font-weight: 500; }
-.auth-caption-fp      { color: @accent;  font-weight: 500; }
-.auth-caption-caps    { color: @yellow;  font-weight: 600; }
+/* ── The field ──
+   Carries all chrome: background, border, focus, pulse, reject.
+   Reduced input node inside is transparent and borderless. */
+.auth-field {
+    min-height: 38px;
+    padding: 10px 14px;
+    background-color: alpha(@bg0_h, 0.85);
+    border: 1px solid @border_strong;
+    border-radius: 10px;
+    transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.auth-field:focus-within {
+    background-color: alpha(@bg0_h, 0.95);
+    border-color: alpha(@fg, 0.40);
+}
+
+.auth-input {
+    min-height: 0;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    border: none;
+    outline: none;
+    box-shadow: none;
+    color: @fg;
+    font-size: 14px;
+}
+
+.auth-input text {
+    min-height: 0;
+    background: transparent;
+    color: @fg;
+}
+
+.auth-input placeholder {
+    color: @text_faint;
+}
+
 .auth-caption-error   { color: @red;     font-weight: 600; }
 .auth-caption-success { color: @accent;  font-weight: 600; }
 
