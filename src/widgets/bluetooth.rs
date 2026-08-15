@@ -275,6 +275,28 @@ impl BluetoothSection {
         available_list.add_css_class("device-list");
         revealer_box.append(&available_list);
 
+        // ── Advanced Bluetooth Settings launcher (blueman / bluetoothctl) ───
+        let adv_btn = Button::builder()
+            .label("󰂯  Advanced Bluetooth Manager (blueman / bluetoothctl)")
+            .halign(gtk4::Align::Fill)
+            .build();
+        adv_btn.add_css_class("network-adv-btn");
+        adv_btn.connect_clicked(|_| {
+            let _ = std::process::Command::new("blueman-manager")
+                .spawn()
+                .or_else(|_| {
+                    std::process::Command::new("ghostty")
+                        .args(["-e", "bluetoothctl"])
+                        .spawn()
+                })
+                .or_else(|_| {
+                    std::process::Command::new("foot")
+                        .args(["-e", "bluetoothctl"])
+                        .spawn()
+                });
+        });
+        revealer_box.append(&adv_btn);
+
         revealer.set_child(Some(&revealer_box));
         detail_box.append(&revealer);
 
@@ -474,6 +496,12 @@ impl BluetoothSection {
                     .set_label(&format!("{n} devices connected"));
             }
         }
+    }
+
+    pub fn expand_for_page(&self) {
+        self.summary_btn.set_visible(false);
+        self.detail_revealer.set_reveal_child(true);
+        self.revealer.set_reveal_child(true);
     }
 
     /// Return a reference to the root widget for embedding in the panel.

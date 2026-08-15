@@ -122,6 +122,8 @@ impl Panel {
         let power = PowerSection::new();
         let users = UserSection::new();
 
+        network.expand_for_page();
+        bluetooth.expand_for_page();
         display.expand_for_page();
         clipboard.expand_for_page();
         power.expand_for_page();
