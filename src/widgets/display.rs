@@ -213,6 +213,19 @@ impl DisplaySection {
         summary_btn.add_css_class("section-summary");
         root.append(&summary_btn);
 
+        // ── Detail revealer ───────────────────────────────────────────────────
+        let detail_revealer = Revealer::builder()
+            .transition_type(RevealerTransitionType::SlideDown)
+            .transition_duration(200)
+            .reveal_child(false)
+            .build();
+
+        let output_list = Box::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(2)
+            .build();
+        output_list.add_css_class("device-list");
+
         // ── Night light warmth controls in Display Section ───────────────────
         let night_box = Box::builder()
             .orientation(Orientation::Vertical)

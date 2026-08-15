@@ -8,10 +8,6 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
-use std::rc::Rc;
-
-use gtk4::gdk;
-use gtk4::prelude::*;
 
 use crate::notifications::store::{StoreRef, store_add};
 use crate::notifications::{Notification, Urgency};
@@ -66,7 +62,7 @@ pub fn start(app: &gtk4::Application, store: &StoreRef) {
     let store = store.clone();
     // Select region first, then start wf-recorder
     super::select::region(app, super::select::Mode::Region, move |selection| {
-        let Some(selection) = selection else {
+        let Some(_selection) = selection else {
             return;
         };
 
