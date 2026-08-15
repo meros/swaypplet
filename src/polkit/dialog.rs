@@ -522,7 +522,6 @@ impl PolkitDialog {
         self.auth_btn.set_visible(true);
         self.auth_btn.set_sensitive(true);
         self.auth_btn.set_label("Authenticate");
-        self.field.set_face(false, "");
         self.face_well.set_visible(false);
         self.face_consequence.set_visible(false);
         self.card.remove_css_class("polkit-shake");
@@ -696,12 +695,8 @@ impl PolkitDialog {
         }
     }
 
-    /// Show or hide the face check on the field's leading mark. `state`
-    /// selects the ring animation, the same vocabulary the lock screen uses:
-    /// `looking` while frames arrive, `dark` when the illuminator or the relay
-    /// is at fault rather than the user, `ok` once the face has matched.
-    pub fn show_face(&self, active: bool, state: &str, label: &str) {
-        self.field.set_face(active, state);
+    /// Show or hide the face check status on the dialog caption.
+    pub fn show_face(&self, active: bool, _state: &str, label: &str) {
         if active && !label.is_empty() {
             self.caption.status(label, Tone::Info, self.caps.get());
         }
