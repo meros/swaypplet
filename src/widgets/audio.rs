@@ -393,6 +393,27 @@ impl AudioSection {
         content.append(&source_row_container);
         detail_box.append(&content);
 
+        // ── Advanced Audio Settings (pavucontrol / helvum) ───────────────────
+        let adv_btn = gtk4::Button::builder()
+            .label("󰕾  Advanced Audio Control (pavucontrol / helvum)")
+            .halign(gtk4::Align::Fill)
+            .build();
+        adv_btn.add_css_class("network-adv-btn");
+        adv_btn.connect_clicked(|_| {
+            let _ = std::process::Command::new("pavucontrol")
+                .spawn()
+                .or_else(|_| {
+                    std::process::Command::new("helvum")
+                        .spawn()
+                })
+                .or_else(|_| {
+                    std::process::Command::new("ghostty")
+                        .args(["-e", "pulsemixer"])
+                        .spawn()
+                });
+        });
+        detail_box.append(&adv_btn);
+
         let widgets = Rc::new(Widgets {
             summary_icon,
             summary_text,
@@ -676,6 +697,12 @@ impl AudioSection {
 
     pub fn widget(&self) -> &gtk4::Box {
         &self.root
+    }
+
+    pub fn expand_for_page(&self) {
+        self.widgets.detail_revealer.set_reveal_child(true);
+        self.widgets.summary_arrow.set_label("▾");
+        self.widgets.streams_revealer.set_reveal_child(true);
     }
 
     /// Dev-preview helper: reveal the detail pane and the mixer rows so a
