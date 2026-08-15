@@ -2424,16 +2424,16 @@ revealer {
 }
 
 /* Authenticated. The one moment the ornament is worth looking at, so it takes
-   the accent and the emphasis tier's 400 ms. */
+   the accent, an elastic overshoot, and a subtle focal bloom. */
 .polkit-icon-glyph.polkit-icon-ok {
     color: @accent;
-    animation: polkit-icon-ok 400ms cubic-bezier(0, 0, 0, 1);
+    animation: polkit-icon-ok 400ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
 @keyframes polkit-icon-ok {
-    0%   { transform: scale(0.82); }
-    60%  { transform: scale(1.06); }
-    100% { transform: scale(1); }
+    0%   { transform: scale(0.75); opacity: 0.5; }
+    60%  { transform: scale(1.16); opacity: 1; }
+    100% { transform: scale(1.0); opacity: 1; }
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -2936,13 +2936,13 @@ revealer {
     50%      { opacity: 0.55; }
 }
 
-/* Completes outward and settles. Short on purpose: the session holds for the
-   overshoot and then goes (FACE_SETTLE in src/lock/mod.rs), so the part after
-   it is a settle nobody waits on. Lengthening this lengthens the unlock. */
+/* Completes outward with an elastic spring punch and settles.
+   Sized to FACE_SETTLE in src/lock/mod.rs so the visual punch aligns
+   with session unlock handoff. */
 @keyframes face-ring-ok {
-    0%   { transform: scale(0.7); opacity: 0.4; }
-    60%  { transform: scale(1.12); opacity: 1; }
-    100% { transform: scale(1); opacity: 1; }
+    0%   { transform: scale(0.6); opacity: 0.3; }
+    55%  { transform: scale(1.18); opacity: 1; box-shadow: 0 0 16px alpha(@accent, 0.5); }
+    100% { transform: scale(1.0); opacity: 1; box-shadow: 0 0 0px transparent; }
 }
 
 /* A shake, not a cross. The attempt will retry on its own, so the failure
