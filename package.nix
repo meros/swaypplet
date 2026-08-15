@@ -3,6 +3,8 @@
   rustPlatform,
   pkg-config,
   wrapGAppsHook4,
+  mold-wrapped,
+  clang,
   gtk4,
   gtk4-layer-shell,
   glib,
@@ -52,15 +54,19 @@ rustPlatform.buildRustPackage {
     wrapGAppsHook4
     # pam-sys generates its libpam bindings at build time
     rustPlatform.bindgenHook
+    mold-wrapped
+    clang
   ];
 
   buildInputs = runtimeDeps;
 
-  # Build optimization: fast release codegen
+  # Build optimization: fast release codegen + mold parallel linking
   env = {
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "16";
     CARGO_PROFILE_RELEASE_DEBUG = "0";
     CARGO_PROFILE_RELEASE_LTO = "false";
+    CARGO_PROFILE_RELEASE_OPT_LEVEL = "2";
+    RUSTFLAGS = "-C linker=clang -C link-arg=-fuse-ld=mold";
   };
 
   postInstall = ''
