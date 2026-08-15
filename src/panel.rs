@@ -1,5 +1,6 @@
-//! Start-menu popup: bottom-left anchored surface fusing an app launcher
-//! (left column) with a compact quick-settings control center (right column).
+//! Pilot's Helm: centered command cockpit and optical HUD fusing an instant
+//! app launcher with glanceable telemetry pills, deep sub-sheet utility decks,
+//! and flight action switches.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -37,9 +38,7 @@ struct Sections {
     clipboard: ClipboardSection,
     power: PowerSection,
     users: UserSection,
-    /// Quick-strip toggle tiles (Wi-Fi, Bluetooth, Night Light, Idle) paired
-    /// with their spec so state can be re-read on refresh. DND is store-backed
-    /// and refreshed separately.
+    /// Quick-strip toggle tiles (Night Light, Caffeine, etc.)
     tiles: RefCell<Vec<(gtk4::ToggleButton, tiles::TileSpec)>>,
 }
 
@@ -61,13 +60,14 @@ impl Sections {
     }
 }
 
-// ── Panel (start menu) ─────────────────────────────────────────────────────────
+// ── Panel (Pilot's Helm HUD) ──────────────────────────────────────────────────
 
 pub struct Panel {
     pub window: gtk4::Window,
     sections: Rc<Sections>,
     launcher: Rc<LauncherView>,
-    /// Enter/exit transition for the glass menu: fast pane tint, full-length
+    deck_stack: gtk4::Stack,
+    /// Enter/exit transition for the glass HUD: fast pane tint, full-length
     /// content fade, short [`anim::SlideBin`] settle (motion on glass,
     /// anim.rs). `is_shown()` is the intent flag; the window unmaps when the
     /// exit finishes.
@@ -81,71 +81,34 @@ impl Panel {
         audio_service: Rc<crate::audio::AudioService>,
     ) -> Self {
         window.add_css_class("startmenu");
+        window.add_css_class("helm-window");
 
-        // ── Backdrop (click outside the menu closes it) ──────────────────────
+        // ── Backdrop (full-screen transparent click-catcher) ────────────────
         let backdrop = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
-            .halign(gtk4::Align::Start)
-            .valign(gtk4::Align::End)
+            .halign(gtk4::Align::Fill)
+            .valign(gtk4::Align::Fill)
             .hexpand(true)
             .vexpand(true)
             .build();
         backdrop.add_css_class("startmenu-backdrop");
+        backdrop.add_css_class("helm-backdrop");
 
-        // ── Root container (the menu surface) ────────────────────────────────
+        // ── Top spacer (positions Helm at the optical foveal sweet spot ~25-28%) ──
+        let top_offset = crate::launcher::monitor_top_offset();
+        let top_spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        top_spacer.set_height_request(top_offset);
+
+        // ── Root container (the floating glass Helm card) ─────────────────────
         let root = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
-            .halign(gtk4::Align::Start)
-            .valign(gtk4::Align::End)
+            .halign(gtk4::Align::Center)
+            .valign(gtk4::Align::Start)
+            .width_request(740)
             .build();
         root.add_css_class("glass-card");
         root.add_css_class("startmenu-root");
-
-        // The menu fades in while settling up SLIDE_PX from below the
-        // window's bottom edge (4px above the bar), and fades out sinking
-        // back — pane tint fast, content over the full fade, plus the slide
-        // (motion on glass, anim.rs). The window is a fixed 780x700 layer
-        // surface, so only internal layout animates; the surface itself
-        // never resizes, and the settle overshoot is clipped at its bottom
-        // edge.
-
-        // ── Body: two columns ─────────────────────────────────────────────────
-        let body = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .hexpand(true)
-            .vexpand(true)
-            .spacing(0)
-            .build();
-        body.add_css_class("startmenu-body");
-
-        // LEFT column — launcher (~60%).
-        let launcher = Rc::new(LauncherView::new());
-        let left = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .hexpand(true)
-            .vexpand(true)
-            .build();
-        left.add_css_class("startmenu-launcher");
-        left.append(launcher.widget());
-
-        // RIGHT column — quick settings (~40%). propagate_natural_height lets
-        // the window grow to fit the whole column (its natural height would
-        // otherwise be near-zero, squeezing it to the left column's height and
-        // slicing the last card at the viewport edge); the scrollbar only
-        // appears when the column outgrows the monitor.
-        let right_scroller = gtk4::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk4::PolicyType::Never)
-            .vscrollbar_policy(gtk4::PolicyType::Automatic)
-            .vexpand(true)
-            .propagate_natural_height(true)
-            .width_request(300)
-            .build();
-        let right = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(10)
-            .build();
-        right.add_css_class("startmenu-quick");
-        right_scroller.set_child(Some(&right));
+        root.add_css_class("helm-card");
 
         // ── Build sections ───────────────────────────────────────────────────
         let audio = AudioSection::new(audio_service.clone());
@@ -159,183 +122,130 @@ impl Panel {
         let power = PowerSection::new();
         let users = UserSection::new();
 
-        // 1. Volume slider (hoisted from AudioSection).
-        right.append(&slider_row(
-            icons::SPEAKER_HIGH,
-            audio.output_volume_scale(),
-        ));
-        // 2. Brightness slider (hoisted from BrightnessSection).
-        right.append(&slider_row(
-            icons::BRIGHTNESS,
-            brightness.brightness_scale(),
-        ));
-
-        // 3. Toggle tiles — declarative spec → one factory.
-        let specs = tiles::tile_specs(); // [wifi, bluetooth, night, caffeine]
-        let grid = gtk4::Grid::builder()
-            .row_spacing(8)
-            .column_spacing(8)
-            .column_homogeneous(true)
-            .build();
-        grid.add_css_class("startmenu-tile-grid");
-
-        let mut tile_pairs: Vec<(gtk4::ToggleButton, tiles::TileSpec)> = Vec::new();
-        let mut col = 0i32;
-        let mut row_i = 0i32;
-
-        // Wi-Fi (with inline device-list reveal).
-        let wifi_tile = tile_with_reveal(&specs[0], network.widget(), &right, &mut tile_pairs);
-        grid_place(&grid, &wifi_tile, &mut col, &mut row_i);
-
-        // Bluetooth (with inline device-list reveal).
-        let bt_tile = tile_with_reveal(&specs[1], bluetooth.widget(), &right, &mut tile_pairs);
-        grid_place(&grid, &bt_tile, &mut col, &mut row_i);
-
-        // DND (store-backed).
-        let dnd_tile = tiles::build_dnd_tile(store.clone());
-        grid_place(&grid, &dnd_tile, &mut col, &mut row_i);
-
-        // Night Light.
-        let night_btn = tiles::build_tile(&specs[2]);
-        tiles::init_tile_state(&night_btn, &specs[2]);
-        grid_place(&grid, &night_btn, &mut col, &mut row_i);
-        tile_pairs.push((night_btn, copy_spec(&specs[2])));
-
-        // Caffeine.
-        let caffeine_btn = tiles::build_tile(&specs[3]);
-        tiles::init_tile_state(&caffeine_btn, &specs[3]);
-        grid_place(&grid, &caffeine_btn, &mut col, &mut row_i);
-        tile_pairs.push((caffeine_btn, copy_spec(&specs[3])));
-
-        // Display — reveal-only tile (no radio); chevron + button reveal the
-        // output/monitor controls inline, matching the Wi-Fi/Bluetooth pattern.
-        // Expand the section so its output list shows as soon as we reveal it.
         display.expand_for_page();
-        let display_tile = reveal_only_tile(icons::DISPLAY, "Display", display.widget(), &right);
-        grid_place(&grid, &display_tile, &mut col, &mut row_i);
-
-        right.append(&grid);
-
-        // 4. Media mini-card (MediaSection hides itself when nothing plays).
-        right.append(media.widget());
-
-        // 5. Notifications — compact, height-limited via the section's own
-        //    scroller (a second wrapping ScrolledWindow would nest three
-        //    vertical scrollers and clip the cards below).
-        notifications.expand_for_page();
-        notifications.set_list_max_height(200);
-        notifications
-            .widget()
-            .add_css_class("startmenu-notifications");
-        right.append(notifications.widget());
-
-        // 6. Power status card (battery + governor). Session *actions* now live
-        //    in the left rail; this card is the at-a-glance status readout.
-        power.expand_for_page();
-        right.append(power.widget());
-
-        // 7. Session-aware user switcher (avatars + presence). Hidden unless the
-        //    host exposes SWAYPPLET_SWITCH_USER_CMD; rows are filled on refresh.
-        right.append(users.widget());
-
-        // ── Full-width clipboard reveal (beneath the body) ───────────────────
-        // Clipboard rows are wide, so the ClipboardSection (cliphist history
-        // with click-to-copy) lives in a full-width Revealer rather than the
-        // narrow right column. Toggled by the rail Clipboard button.
         clipboard.expand_for_page();
-        let clipboard_revealer = gtk4::Revealer::builder()
-            .transition_type(gtk4::RevealerTransitionType::SlideDown)
-            .transition_duration(200)
-            .reveal_child(false)
-            .build();
-        clipboard_revealer.add_css_class("startmenu-clipboard");
-        clipboard_revealer.set_child(Some(clipboard.widget()));
+        power.expand_for_page();
+        notifications.expand_for_page();
 
-        // ── Left rail: utilities (top) + session actions (bottom) ────────────
-        // The rail absorbs the formerly-orphaned utility buttons and the power
-        // session actions into a single far-left zone, leaving the centre stage
-        // purely for launching and the right column purely for quick settings.
-        let rail = gtk4::Box::builder()
+        let launcher = Rc::new(LauncherView::new());
+
+        // ── Deck stack (Launcher stage ↔ In-place utility sub-sheets) ─────────
+        let deck_stack = gtk4::Stack::builder()
+            .transition_type(gtk4::StackTransitionType::Crossfade)
+            .transition_duration(150)
+            .vexpand(true)
+            .build();
+        deck_stack.add_css_class("helm-deck-stack");
+
+        // Page 1: Default Elephant launcher stage
+        let launcher_box = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
-            .spacing(6)
+            .vexpand(true)
             .build();
-        rail.add_css_class("startmenu-rail");
+        launcher_box.add_css_class("helm-launcher-stage");
+        launcher_box.append(launcher.widget());
+        deck_stack.add_named(&launcher_box, Some("launcher"));
 
-        rail.append(&rail_action("󰄀", "Screenshot region", &window, {
-            let window = window.clone();
-            let store = store.clone();
-            move || shot(&window, &store, crate::screenshot::Shot::Region)
-        }));
+        // Helper for returning from sub-sheets to search
+        let return_to_search = {
+            let deck_stack_c = deck_stack.clone();
+            let launcher_c = launcher.clone();
+            Rc::new(move || {
+                deck_stack_c.set_visible_child_name("launcher");
+                launcher_c.entry().set_text("");
+                launcher_c.focus_entry();
+            })
+        };
 
-        // Clipboard — toggles the inline full-width history reveal (does NOT
-        // hide the menu).
-        let clip_btn = gtk4::Button::builder()
-            .child(&gtk4::Label::new(Some("󰅍")))
-            .build();
-        clip_btn.add_css_class("rail-btn");
-        clip_btn.set_tooltip_text(Some("Clipboard history"));
+        // Page 2: Wi-Fi Networks
         {
-            let revealer_c = clipboard_revealer.clone();
-            clip_btn.connect_clicked(move |b| {
-                let open = !revealer_c.reveals_child();
-                revealer_c.set_reveal_child(open);
-                if open {
-                    b.add_css_class("active");
-                } else {
-                    b.remove_css_class("active");
-                }
-            });
+            let ret = return_to_search.clone();
+            let wifi_sheet = build_subsheet("Wi-Fi Networks", "󰤨", network.widget(), move || ret());
+            deck_stack.add_named(&wifi_sheet, Some("wifi"));
         }
-        rail.append(&clip_btn);
 
-        rail.append(&rail_action("󰏘", "Color picker", &window, {
-            let window = window.clone();
-            let store = store.clone();
-            move || shot(&window, &store, crate::screenshot::Shot::Pick)
-        }));
+        // Page 3: Bluetooth Devices
+        {
+            let ret = return_to_search.clone();
+            let bt_sheet = build_subsheet("Bluetooth Devices", "󰂯", bluetooth.widget(), move || ret());
+            deck_stack.add_named(&bt_sheet, Some("bluetooth"));
+        }
 
-        rail.append(&rail_action("󰑋", "Record screen", &window, {
-            let window = window.clone();
-            let store = store.clone();
-            move || shot(&window, &store, crate::screenshot::Shot::Record)
-        }));
+        // Page 4: Displays & Output configuration
+        {
+            let ret = return_to_search.clone();
+            let disp_sheet = build_subsheet("Display & Monitors", "󰍹", display.widget(), move || ret());
+            deck_stack.add_named(&disp_sheet, Some("displays"));
+        }
 
-        // Spacer pushes the session actions to the bottom of the rail.
-        let rail_spacer = gtk4::Box::builder().vexpand(true).build();
-        rail.append(&rail_spacer);
+        // Page 5: Clipboard History
+        {
+            let ret = return_to_search.clone();
+            let clip_sheet = build_subsheet("Clipboard History", "󰅍", clipboard.widget(), move || ret());
+            deck_stack.add_named(&clip_sheet, Some("clipboard"));
+        }
 
-        let rail_divider = gtk4::Separator::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .build();
-        rail_divider.add_css_class("startmenu-rail-divider");
-        rail.append(&rail_divider);
+        // Page 6: System Power Diagnostics & Users
+        {
+            let ret = return_to_search.clone();
+            let power_container = gtk4::Box::builder()
+                .orientation(gtk4::Orientation::Vertical)
+                .spacing(12)
+                .build();
+            power_container.append(power.widget());
+            power_container.append(users.widget());
+            let power_sheet = build_subsheet("System State & Power", "󰁹", &power_container, move || ret());
+            deck_stack.add_named(&power_sheet, Some("power"));
+        }
 
-        rail.append(&power::build_session_rail());
+        // Page 7: Notifications Center
+        {
+            let ret = return_to_search.clone();
+            let notif_sheet = build_subsheet("Notifications Center", "󰂚", notifications.widget(), move || ret());
+            deck_stack.add_named(&notif_sheet, Some("notifications"));
+        }
 
-        // ── Assemble body: rail | launcher (stage) | quick settings ──────────
-        body.append(&rail);
-        body.append(&left);
-        body.append(&right_scroller);
+        // Page 8: Media Player
+        {
+            let ret = return_to_search.clone();
+            let media_sheet = build_subsheet("Media Player", "󰝚", media.widget(), move || ret());
+            deck_stack.add_named(&media_sheet, Some("media"));
+        }
 
-        // Content sits on the glass (`root` carries the frosted background)
-        // and fades over the full duration while the pane tint arrives fast.
+        // ── Top Telemetry Ribbon ─────────────────────────────────────────────
+        let telemetry_ribbon = build_telemetry_ribbon(&deck_stack, &audio, &brightness);
+
+        // ── Specs & Toggle Tiles ─────────────────────────────────────────────
+        let specs = tiles::tile_specs(); // [wifi, bluetooth, night, caffeine]
+        let mut tile_pairs: Vec<(gtk4::ToggleButton, tiles::TileSpec)> = Vec::new();
+
+        // ── Bottom Action Flight Deck ─────────────────────────────────────────
+        let flight_deck = build_flight_deck(
+            &window,
+            &store,
+            &specs,
+            &mut tile_pairs,
+            &deck_stack,
+        );
+
+        // ── Assemble Content ─────────────────────────────────────────────────
         let content = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(0)
             .build();
-        content.append(&body);
-        content.append(&clipboard_revealer);
+        content.append(&telemetry_ribbon);
+        content.append(&deck_stack);
+        content.append(&flight_deck);
         root.append(&content);
 
         let slide = anim::SlideBin::new();
         slide.set_child(&root);
         slide.jump_to(anim::SLIDE_PX);
+        backdrop.append(&top_spacer);
         backdrop.append(&slide);
         window.set_child(Some(&backdrop));
 
-        // Every open/close path (bar toggle, backdrop click, Esc, rail
-        // actions) goes through this one Reveal, which also drives the
-        // SlideBin settle and unmaps the window once the exit finishes.
+        // Enter/exit transition for the glass menu
         let reveal = anim::Reveal::new(&window, &root)
             .content(&content)
             .slide(&slide, anim::SLIDE_PX);
@@ -346,32 +256,54 @@ impl Panel {
             Rc::new(move || reveal_c.hide())
         };
 
-        // ── Sections bundle ──────────────────────────────────────────────────
-        let sections = Rc::new(Sections {
-            audio,
-            brightness,
-            network,
-            bluetooth,
-            display,
-            media,
-            notifications,
-            clipboard,
-            power,
-            users,
-            tiles: RefCell::new(tile_pairs),
-        });
+        // ── Prefix routing from Omnibox ──────────────────────────────────────
+        {
+            let deck_stack_c = deck_stack.clone();
+            launcher.entry().connect_search_changed(move |entry| {
+                let text = entry.text().to_string();
+                let lower = text.to_lowercase();
+                let prefix = lower.trim();
+                if prefix.starts_with(":wifi") || prefix.starts_with(":net") {
+                    deck_stack_c.set_visible_child_name("wifi");
+                } else if prefix.starts_with(":bt") || prefix.starts_with(":blue") {
+                    deck_stack_c.set_visible_child_name("bluetooth");
+                } else if prefix.starts_with(":disp") || prefix.starts_with(":screen") {
+                    deck_stack_c.set_visible_child_name("displays");
+                } else if prefix.starts_with(":clip") || prefix.starts_with(":cb") {
+                    deck_stack_c.set_visible_child_name("clipboard");
+                } else if prefix.starts_with(":power") || prefix.starts_with(":sys") {
+                    deck_stack_c.set_visible_child_name("power");
+                } else if prefix.starts_with(":notif") {
+                    deck_stack_c.set_visible_child_name("notifications");
+                } else if prefix.starts_with(":media") || prefix.starts_with(":music") {
+                    deck_stack_c.set_visible_child_name("media");
+                } else if !prefix.starts_with(':') && deck_stack_c.visible_child_name().as_deref() != Some("launcher") {
+                    deck_stack_c.set_visible_child_name("launcher");
+                }
+            });
+        }
 
-        // ── Launcher activation + Esc hide the menu ──────────────────────────
+        // ── Launcher activation + Esc hide the menu / return to search ───────
         {
             let hide = hide_menu.clone();
             launcher.set_on_activate(move || hide());
         }
         {
             let hide = hide_menu.clone();
-            launcher.install_key_controller(&window, move || hide());
+            let deck_stack_c = deck_stack.clone();
+            let launcher_c = launcher.clone();
+            launcher.install_key_controller(&window, move || {
+                if deck_stack_c.visible_child_name().as_deref() != Some("launcher") {
+                    deck_stack_c.set_visible_child_name("launcher");
+                    launcher_c.entry().set_text("");
+                    launcher_c.focus_entry();
+                } else {
+                    hide();
+                }
+            });
         }
 
-        // ── Backdrop click → dismiss; clicks on the menu are claimed ─────────
+        // ── Backdrop click → dismiss; clicks on the root card are claimed ────
         let backdrop_gesture = gtk4::GestureClick::new();
         backdrop_gesture.set_propagation_phase(gtk4::PropagationPhase::Bubble);
         {
@@ -389,10 +321,26 @@ impl Panel {
         });
         root.add_controller(root_gesture);
 
+        // ── Sections bundle ──────────────────────────────────────────────────
+        let sections = Rc::new(Sections {
+            audio,
+            brightness,
+            network,
+            bluetooth,
+            display,
+            media,
+            notifications,
+            clipboard,
+            power,
+            users,
+            tiles: RefCell::new(tile_pairs),
+        });
+
         Self {
             window,
             sections,
             launcher,
+            deck_stack,
             reveal,
         }
     }
@@ -401,11 +349,8 @@ impl Panel {
         if self.reveal.is_shown() && self.window.is_visible() {
             self.reveal.hide();
         } else {
-            // Instant-hide paths (rail actions, power session actions) unmap
-            // the window without going through hide(); show() on an unmapped
-            // window restarts from the fully hidden pose, so the enter
-            // fade+settle plays instead of skipping.
             self.launcher.reset();
+            self.deck_stack.set_visible_child_name("launcher");
             self.reveal.show();
             let sections = self.sections.clone();
             let launcher = self.launcher.clone();
@@ -427,128 +372,296 @@ impl Panel {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Attach `child` to the 2-column grid, advancing the cursor.
-fn grid_place(grid: &gtk4::Grid, child: &impl IsA<gtk4::Widget>, col: &mut i32, row_i: &mut i32) {
-    grid.attach(child, *col, *row_i, 1, 1);
-    *col += 1;
-    if *col >= 2 {
-        *col = 0;
-        *row_i += 1;
-    }
-}
-
-/// A horizontal row: glyph icon + a hoisted scale. The scale already has its
-/// value-changed handler wired by its owning section.
-fn slider_row(icon: &str, scale: gtk4::Scale) -> gtk4::Box {
-    let row = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
+fn build_subsheet(
+    title: &str,
+    icon: &str,
+    content: &impl IsA<gtk4::Widget>,
+    on_back: impl Fn() + 'static,
+) -> gtk4::Box {
+    let container = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
         .spacing(8)
         .build();
-    row.add_css_class("startmenu-slider");
+    container.add_css_class("helm-subsheet");
 
-    let icon_lbl = gtk4::Label::builder()
-        .label(icon)
-        .halign(gtk4::Align::Center)
-        .valign(gtk4::Align::Center)
+    let header = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(10)
         .build();
-    icon_lbl.add_css_class("startmenu-slider-icon");
+    header.add_css_class("subsheet-header");
 
-    scale.set_hexpand(true);
+    let back_btn = gtk4::Button::builder()
+        .label("← Back (Esc)")
+        .build();
+    back_btn.add_css_class("subsheet-back-btn");
+    back_btn.connect_clicked(move |_| on_back());
+    header.append(&back_btn);
+
+    let title_lbl = gtk4::Label::builder()
+        .label(&format!("{icon}  {title}"))
+        .hexpand(true)
+        .halign(gtk4::Align::Start)
+        .build();
+    title_lbl.add_css_class("subsheet-title");
+    header.append(&title_lbl);
+
+    container.append(&header);
+
+    let scroller = gtk4::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk4::PolicyType::Never)
+        .vscrollbar_policy(gtk4::PolicyType::Automatic)
+        .vexpand(true)
+        .min_content_height(340)
+        .max_content_height(420)
+        .child(content)
+        .build();
+    scroller.add_css_class("subsheet-scroller");
+    container.append(&scroller);
+
+    container
+}
+
+fn build_telemetry_ribbon(
+    deck_stack: &gtk4::Stack,
+    audio: &AudioSection,
+    brightness: &BrightnessSection,
+) -> gtk4::Box {
+    let ribbon = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(8)
+        .hexpand(true)
+        .build();
+    ribbon.add_css_class("helm-telemetry-ribbon");
+
+    // 1. Power / System pill
+    let pill_power = gtk4::Button::builder().build();
+    pill_power.add_css_class("telemetry-pill");
+    let power_box = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(6)
+        .build();
+    let power_icon = gtk4::Label::builder().label("󰁹").build();
+    power_icon.add_css_class("pill-icon-green");
+    let power_lbl = gtk4::Label::builder().label("Power").build();
+    power_box.append(&power_icon);
+    power_box.append(&power_lbl);
+    pill_power.set_child(Some(&power_box));
+    {
+        let stack_c = deck_stack.clone();
+        pill_power.connect_clicked(move |_| {
+            if stack_c.visible_child_name().as_deref() == Some("power") {
+                stack_c.set_visible_child_name("launcher");
+            } else {
+                stack_c.set_visible_child_name("power");
+            }
+        });
+    }
+    ribbon.append(&pill_power);
+
+    // 2. Audio Volume scrubber pill
+    let pill_audio = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(6)
+        .build();
+    pill_audio.add_css_class("telemetry-pill");
+    pill_audio.add_css_class("telemetry-pill-interactive");
+    let audio_icon = gtk4::Label::builder().label(icons::SPEAKER_HIGH).build();
+    pill_audio.append(&audio_icon);
+    let scale = audio.output_volume_scale();
     scale.set_draw_value(false);
-
-    // The scale is hoisted from its owning section, where it already has a
-    // parent. GTK4 does not auto-reparent — append would hit the
-    // `gtk_widget_get_parent == NULL` assertion and silently drop it (the
-    // slider would never show). Detach it from its old parent first.
+    scale.set_hexpand(true);
+    scale.set_width_request(80);
     if scale.parent().is_some() {
         scale.unparent();
     }
+    pill_audio.append(&scale);
+    ribbon.append(&pill_audio);
 
-    row.append(&icon_lbl);
-    row.append(&scale);
-    row
-}
-
-/// Build a toggle tile whose chevron reveals the full device-list section
-/// widget inline (in a Revealer appended into the right column). The toggle
-/// button drives the radio on/off via the spec.
-fn tile_with_reveal(
-    spec: &tiles::TileSpec,
-    section_widget: &gtk4::Box,
-    right_column: &gtk4::Box,
-    tile_pairs: &mut Vec<(gtk4::ToggleButton, tiles::TileSpec)>,
-) -> gtk4::Overlay {
-    let btn = tiles::build_tile(spec);
-    tiles::init_tile_state(&btn, spec);
-    tile_pairs.push((btn.clone(), copy_spec(spec)));
-
-    let revealer = gtk4::Revealer::builder()
-        .transition_type(gtk4::RevealerTransitionType::SlideDown)
-        .transition_duration(200)
-        .reveal_child(false)
+    // 3. Brightness scrubber pill
+    let pill_bright = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(6)
         .build();
-    revealer.set_child(Some(section_widget));
-    right_column.append(&revealer);
+    pill_bright.add_css_class("telemetry-pill");
+    pill_bright.add_css_class("telemetry-pill-interactive");
+    let bright_icon = gtk4::Label::builder().label(icons::BRIGHTNESS).build();
+    pill_bright.append(&bright_icon);
+    let b_scale = brightness.brightness_scale();
+    b_scale.set_draw_value(false);
+    b_scale.set_hexpand(true);
+    b_scale.set_width_request(70);
+    if b_scale.parent().is_some() {
+        b_scale.unparent();
+    }
+    pill_bright.append(&b_scale);
+    ribbon.append(&pill_bright);
 
-    // Chevron floats at the tile's right edge; tapping the tile body toggles the
-    // radio, tapping the chevron reveals the device list inline below.
-    let (cell, chevron) = tiles::wrap_with_chevron(&btn);
+    // 4. Wi-Fi Pill
+    let pill_wifi = gtk4::Button::builder().build();
+    pill_wifi.add_css_class("telemetry-pill");
+    let wifi_box = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(6)
+        .build();
+    let wifi_icon = gtk4::Label::builder().label("󰤨").build();
+    wifi_icon.add_css_class("pill-icon-blue");
+    let wifi_lbl = gtk4::Label::builder().label("Wi-Fi").build();
+    wifi_box.append(&wifi_icon);
+    wifi_box.append(&wifi_lbl);
+    pill_wifi.set_child(Some(&wifi_box));
     {
-        let revealer_c = revealer.clone();
-        chevron.connect_clicked(move |b| {
-            let open = !revealer_c.reveals_child();
-            revealer_c.set_reveal_child(open);
-            tiles::set_chevron_open(b, open);
+        let stack_c = deck_stack.clone();
+        pill_wifi.connect_clicked(move |_| {
+            if stack_c.visible_child_name().as_deref() == Some("wifi") {
+                stack_c.set_visible_child_name("launcher");
+            } else {
+                stack_c.set_visible_child_name("wifi");
+            }
         });
     }
+    ribbon.append(&pill_wifi);
 
-    cell
+    // 5. Bluetooth Pill
+    let pill_bt = gtk4::Button::builder().build();
+    pill_bt.add_css_class("telemetry-pill");
+    let bt_box = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(6)
+        .build();
+    let bt_icon = gtk4::Label::builder().label("󰂯").build();
+    bt_icon.add_css_class("pill-icon-blue");
+    let bt_lbl = gtk4::Label::builder().label("Bluetooth").build();
+    bt_box.append(&bt_icon);
+    bt_box.append(&bt_lbl);
+    pill_bt.set_child(Some(&bt_box));
+    {
+        let stack_c = deck_stack.clone();
+        pill_bt.connect_clicked(move |_| {
+            if stack_c.visible_child_name().as_deref() == Some("bluetooth") {
+                stack_c.set_visible_child_name("launcher");
+            } else {
+                stack_c.set_visible_child_name("bluetooth");
+            }
+        });
+    }
+    ribbon.append(&pill_bt);
+
+    // 6. Displays Pill
+    let pill_disp = gtk4::Button::builder().build();
+    pill_disp.add_css_class("telemetry-pill");
+    let disp_box = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(6)
+        .build();
+    let disp_icon = gtk4::Label::builder().label("󰍹").build();
+    disp_icon.add_css_class("pill-icon-yellow");
+    let disp_lbl = gtk4::Label::builder().label("Displays").build();
+    disp_box.append(&disp_icon);
+    disp_box.append(&disp_lbl);
+    pill_disp.set_child(Some(&disp_box));
+    {
+        let stack_c = deck_stack.clone();
+        pill_disp.connect_clicked(move |_| {
+            if stack_c.visible_child_name().as_deref() == Some("displays") {
+                stack_c.set_visible_child_name("launcher");
+            } else {
+                stack_c.set_visible_child_name("displays");
+            }
+        });
+    }
+    ribbon.append(&pill_disp);
+
+    ribbon
 }
 
-/// A reveal-only tile: a non-radio toggle + chevron that both reveal the given
-/// section widget inline (in a Revealer appended into the right column). Used
-/// for Display, which has no on/off radio — only an inline panel to expand.
-fn reveal_only_tile(
-    icon: &str,
-    label: &str,
-    section_widget: &gtk4::Box,
-    right_column: &gtk4::Box,
-) -> gtk4::Overlay {
-    let btn = tiles::build_reveal_tile(icon, label);
-
-    let revealer = gtk4::Revealer::builder()
-        .transition_type(gtk4::RevealerTransitionType::SlideDown)
-        .transition_duration(200)
-        .reveal_child(false)
+fn build_flight_deck(
+    window: &gtk4::Window,
+    store: &Rc<RefCell<NotificationStore>>,
+    specs: &[tiles::TileSpec],
+    tile_pairs: &mut Vec<(gtk4::ToggleButton, tiles::TileSpec)>,
+    deck_stack: &gtk4::Stack,
+) -> gtk4::Box {
+    let deck = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(8)
+        .hexpand(true)
         .build();
-    revealer.set_child(Some(section_widget));
-    right_column.append(&revealer);
+    deck.add_css_class("helm-action-deck");
 
-    let (cell, chevron) = tiles::wrap_with_chevron(&btn);
+    // Flight switches (Left group)
+    let left_group = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(6)
+        .build();
 
-    // Reveal-only (no radio): both the toggle body and the chevron drive the
-    // same reveal. The button's toggled handler manages its `.active` class.
-    let sync = {
-        let revealer_c = revealer.clone();
-        let btn_c = btn.clone();
-        let chevron_c = chevron.clone();
-        move |open: bool| {
-            revealer_c.set_reveal_child(open);
-            btn_c.set_active(open);
-            tiles::set_chevron_open(&chevron_c, open);
-        }
-    };
+    // Night Light
+    let night_btn = tiles::build_tile(&specs[2]);
+    tiles::init_tile_state(&night_btn, &specs[2]);
+    night_btn.add_css_class("deck-tile-btn");
+    tile_pairs.push((night_btn.clone(), copy_spec(&specs[2])));
+    left_group.append(&night_btn);
+
+    // Caffeine
+    let caffeine_btn = tiles::build_tile(&specs[3]);
+    tiles::init_tile_state(&caffeine_btn, &specs[3]);
+    caffeine_btn.add_css_class("deck-tile-btn");
+    tile_pairs.push((caffeine_btn.clone(), copy_spec(&specs[3])));
+    left_group.append(&caffeine_btn);
+
+    // DND
+    let dnd_btn = tiles::build_dnd_tile(store.clone());
+    dnd_btn.add_css_class("deck-tile-btn");
+    left_group.append(&dnd_btn);
+
+    // Screenshot Region
+    left_group.append(&rail_action("󰄀", "Screenshot region", window, {
+        let window = window.clone();
+        let store = store.clone();
+        move || shot(&window, &store, crate::screenshot::Shot::Region)
+    }));
+
+    // Color Picker Loupe
+    left_group.append(&rail_action("󰏘", "Color picker loupe", window, {
+        let window = window.clone();
+        let store = store.clone();
+        move || shot(&window, &store, crate::screenshot::Shot::Pick)
+    }));
+
+    // Record Screen
+    left_group.append(&rail_action("󰑋", "Record screen", window, {
+        let window = window.clone();
+        let store = store.clone();
+        move || shot(&window, &store, crate::screenshot::Shot::Record)
+    }));
+
+    // Clipboard Drawer
+    let clip_btn = gtk4::Button::builder()
+        .child(&gtk4::Label::new(Some("󰅍")))
+        .build();
+    clip_btn.add_css_class("rail-btn");
+    clip_btn.set_tooltip_text(Some("Clipboard history"));
     {
-        let revealer_c = revealer.clone();
-        let sync_c = sync.clone();
-        btn.connect_clicked(move |_| sync_c(!revealer_c.reveals_child()));
+        let stack_c = deck_stack.clone();
+        clip_btn.connect_clicked(move |_| {
+            if stack_c.visible_child_name().as_deref() == Some("clipboard") {
+                stack_c.set_visible_child_name("launcher");
+            } else {
+                stack_c.set_visible_child_name("clipboard");
+            }
+        });
     }
-    {
-        let revealer_c = revealer.clone();
-        chevron.connect_clicked(move |_| sync(!revealer_c.reveals_child()));
-    }
+    left_group.append(&clip_btn);
 
-    cell
+    deck.append(&left_group);
+
+    // Spacer
+    let spacer = gtk4::Box::builder().hexpand(true).build();
+    deck.append(&spacer);
+
+    // Session cluster (Right group)
+    deck.append(&power::build_session_row());
+
+    deck
 }
 
 /// `TileSpec` holds only `Copy` fields (str slices + fn pointers); duplicate one

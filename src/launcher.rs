@@ -111,6 +111,10 @@ impl LauncherView {
         view
     }
 
+    pub fn entry(&self) -> &gtk4::SearchEntry {
+        &self.entry
+    }
+
     pub fn widget(&self) -> &gtk4::Box {
         &self.root
     }
@@ -544,7 +548,7 @@ fn default_action(result: &SearchResult) -> String {
 }
 
 /// Top offset ~25% of the primary monitor height (Spotlight-style).
-fn monitor_top_offset() -> i32 {
+pub(crate) fn monitor_top_offset() -> i32 {
     if let Some(display) = gtk4::gdk::Display::default() {
         let monitors = display.monitors();
         if let Some(obj) = monitors.item(0) {

@@ -30,24 +30,21 @@ pub(crate) fn pid_file_path() -> std::path::PathBuf {
     std::path::Path::new(&dir).join("swaypplet.pid")
 }
 
-// Start-menu popup: bottom-left anchored, ~780x700, clearing the waybar.
+// Pilot's Helm popup: centered optical HUD (~25-28% Y-offset), 740px wide,
+// with full-screen dismiss backdrop.
 static PANEL_CONFIG: LayerShellConfig = LayerShellConfig {
     namespace: "swaypplet",
     layer: gtk4_layer_shell::Layer::Overlay,
     exclusive: false,
-    default_width: Some(780),
-    default_height: Some(700),
-    anchors: &[(Edge::Bottom, true), (Edge::Left, true)],
-    // The native bar reserves an exclusive zone of 42px (38px card + 4px
-    // bottom margin, auto zone in src/bar/mod.rs — the same numbers waybar
-    // reserved before it). This surface keeps exclusive_zone 0, so the
-    // compositor places it above that strip and the bottom margin only needs
-    // to be a small visual gap, not the bar's full height (a 48px margin
-    // double-counted it and left a large gap above the bar). 4px matches the
-    // sway window gaps and the bar's screen-edge margins, so the menu aligns
-    // with the bar's left edge and floats 4px above its top edge. Reasoned
-    // from the zone arithmetic; not runtime-verified here (headless).
-    margins: &[(Edge::Bottom, 4), (Edge::Left, 4)],
+    default_width: None,
+    default_height: None,
+    anchors: &[
+        (Edge::Top, true),
+        (Edge::Bottom, true),
+        (Edge::Left, true),
+        (Edge::Right, true),
+    ],
+    margins: &[],
     keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
 };
 
