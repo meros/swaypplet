@@ -204,6 +204,50 @@ pub fn stored_connections(conn: &Connection) -> Vec<(String, String, String)> {
         .collect()
 }
 
+/// Stored connections with refined VPN subtype (OpenVPN, WireGuard, Cisco, etc.)
+pub fn stored_connections_with_vpn_type(conn: &Connection) -> Vec<(String, String, String, String)> {
+    let list: Vec<OwnedObjectPath> = proxy(conn, SETTINGS_PATH, IFACE_SETTINGS)
+        .and_then(|p| p.call("ListConnections", &()).map_err(|e| e.to_string()))
+        .unwrap_or_default();
+
+    list.into_iter()
+        .filter_map(|path| {
+            let path = path.as_str().to_string();
+            let settings: HashMap<String, HashMap<String, OwnedValue>> =
+                proxy(conn, &path, IFACE_CONNECTION)
+                    .ok()?
+                    .call("GetSettings", &())
+                    .ok()?;
+            let section = settings.get("connection")?;
+            let id = section.get("id").and_then(as_string)?;
+            let kind = section.get("type").and_then(as_string)?;
+
+            let vpn_sub = if kind == "wireguard" {
+                "WireGuard".to_string()
+            } else if let Some(vpn_sec) = settings.get("vpn") {
+                let st = vpn_sec.get("service-type").and_then(as_string).unwrap_or_default();
+                if st.contains("openvpn") {
+                    "OpenVPN".to_string()
+                } else if st.contains("wireguard") {
+                    "WireGuard".to_string()
+                } else if st.contains("openconnect") {
+                    "OpenConnect".to_string()
+                } else if st.contains("vpnc") || st.contains("cisco") {
+                    "Cisco".to_string()
+                } else {
+                    "VPN".to_string()
+                }
+            } else if kind == "vpn" {
+                "VPN".to_string()
+            } else {
+                kind.clone()
+            };
+
+            Some((path, id, kind, vpn_sub))
+        })
+        .collect()
+}
+
 /// Active connections as `(id, type, device interfaces)`.
 pub fn active_connections(conn: &Connection) -> Vec<(String, String, Vec<String>)> {
     paths(conn, MANAGER_PATH, IFACE_MANAGER, "ActiveConnections")

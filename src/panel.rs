@@ -273,7 +273,7 @@ impl Panel {
                 let text = entry.text().to_string();
                 let lower = text.to_lowercase();
                 let prefix = lower.trim();
-                if prefix.starts_with(":wifi") || prefix.starts_with(":net") {
+                if prefix.starts_with(":wifi") || prefix.starts_with(":net") || prefix.starts_with(":vpn") || prefix.starts_with(":ovpn") || prefix.starts_with(":openvpn") || prefix.starts_with(":wg") || prefix.starts_with(":wireguard") {
                     deck_stack_c.set_visible_child_name("wifi");
                 } else if prefix.starts_with(":bt") || prefix.starts_with(":blue") {
                     deck_stack_c.set_visible_child_name("bluetooth");

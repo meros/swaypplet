@@ -115,6 +115,7 @@ pub enum ActiveConnection {
 pub struct VpnConnection {
     pub name: String,
     pub active: bool,
+    pub vpn_type: String,
 }
 
 #[derive(Debug, Clone)]
@@ -421,12 +422,13 @@ pub fn get_vpn_connections() -> Vec<VpnConnection> {
         .map(|(id, _, _)| id)
         .collect();
 
-    nm::stored_connections(&conn)
+    nm::stored_connections_with_vpn_type(&conn)
         .into_iter()
-        .filter(|(_, _, kind)| is_vpn(kind))
-        .map(|(_, name, _)| VpnConnection {
+        .filter(|(_, _, kind, _)| is_vpn(kind))
+        .map(|(_, name, _, vpn_type)| VpnConnection {
             active: active.contains(&name),
             name,
+            vpn_type,
         })
         .collect()
 }
