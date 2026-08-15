@@ -3,10 +3,11 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    crane.url = "github:ipetkov/crane";
   };
 
   outputs =
-    { self, nixpkgs }:
+    { self, nixpkgs, crane }:
     let
       forAllSystems = nixpkgs.lib.genAttrs [
         "x86_64-linux"
@@ -36,17 +37,63 @@
     in
     {
       overlays.default = final: prev: {
-        swaypplet = final.callPackage ./package.nix { };
+        swaypplet = self.packages.${final.system}.swaypplet;
       };
 
       packages = forAllSystems (
         system:
         let
           pkgs = pkgsFor system;
+          craneLib = crane.mkLib pkgs;
+          runtimeDeps = runtimeDepsFor pkgs;
+
+          # Filter source files, including proto and data directories
+          src = craneLib.cleanCargoSource (craneLib.path ./.);
+
+          commonArgs = {
+            inherit src;
+            strictDeps = true;
+            nativeBuildInputs = with pkgs; [
+              pkg-config
+              wrapGAppsHook4
+              rustPlatform.bindgenHook
+              mold
+              clang
+            ];
+            buildInputs = runtimeDeps;
+            CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "16";
+            CARGO_PROFILE_RELEASE_DEBUG = "0";
+            CARGO_PROFILE_RELEASE_LTO = "false";
+            CARGO_PROFILE_RELEASE_OPT_LEVEL = "2";
+            RUSTFLAGS = "-C linker=clang -C link-arg=-fuse-ld=mold";
+          };
+
+          # 1. Build & cache ALL third-party dependencies independently into /nix/store
+          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+          # 2. Build swaypplet itself in seconds by reusing cargoArtifacts
+          swayppletPkg = craneLib.buildPackage (commonArgs // {
+            inherit cargoArtifacts;
+            postInstall = ''
+              cat > $out/bin/swaypplet-toggle <<'SCRIPT'
+              #!/bin/sh
+              PID=$(cat "''${XDG_RUNTIME_DIR:-/tmp}/swaypplet.pid" 2>/dev/null)
+              if [ -n "$PID" ] && [ "$(cat /proc/$PID/comm 2>/dev/null)" = "swaypplet" ]; then
+                kill -USR1 "$PID"
+              else
+                swaypplet &
+              fi
+              SCRIPT
+              chmod +x $out/bin/swaypplet-toggle
+
+              mkdir -p $out/share/swaypplet
+              cp -r data/* $out/share/swaypplet/
+            '';
+          });
         in
         {
-          default = pkgs.callPackage ./package.nix { };
-          swaypplet = pkgs.callPackage ./package.nix { };
+          default = swayppletPkg;
+          swaypplet = swayppletPkg;
         }
       );
 
