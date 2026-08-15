@@ -16,6 +16,22 @@
 //! itself within seconds. So the working sequence is: walk away (the idle
 //! manager locks on absence), come back, face unlocks.
 //!
+//! Resume from sleep arms an attempt too, and that is not the same rule in a
+//! different hat. Closing the lid is the one departure the sensor never sees:
+//! the machine locks and suspends with the user still in front of it, so
+//! presence reads the same either side of the suspend and no edge is ever
+//! produced. Face unlock was therefore dead exactly where it is wanted most --
+//! lid open, laptop in your hands -- until you got up and came back. The
+//! resume edge is the arrival the sensor could not report.
+//!
+//! Deliberate locks are unaffected. A resume exists only because the machine
+//! slept, which on this host means the lid was shut; pressing the lock key and
+//! staying put produces neither a resume nor an arrival, so the screen stays
+//! locked until a password, a finger, or actually leaving and returning. The
+//! one gap is logind's 30 s holdoff after a resume, inside which a lid close
+//! does not suspend and so a lid open does not resume; that window falls back
+//! to presence, as it did before.
+//!
 //! Verification shells out to `howdy-verify <user>` (nixos repo,
 //! pkgs/howdy-verify), the one face-verification implementation on the system —
 //! the same binary PAM uses for sudo and pkexec, so "is this the user" is
@@ -45,6 +61,39 @@ use std::time::{Duration, Instant};
 
 use crate::fp::EngineEvent;
 use crate::presence::{self, Event as PresenceEvent, Presence};
+
+/// Resume edges from logind, as a channel this thread can drain on its tick.
+///
+/// One item per PrepareForSleep(true) -> PrepareForSleep(false) transition.
+/// The seed reading is deliberately not an edge: a locker spawned *by* the
+/// sleep transition starts with the system already going down, and treating
+/// that opening `true` as anything but a starting point would be the same
+/// mistake presence made.
+fn watch_resume() -> mpsc::Receiver<()> {
+    let (tx, rx) = mpsc::channel();
+    crate::spawn::spawn_tokio_thread("lock-resume", async move {
+        let conn = match zbus::Connection::system().await {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!("face: no system bus, resume will not arm: {e}");
+                return;
+            }
+        };
+        let (sleep_tx, mut sleep_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn(crate::fp::watch_sleep(conn, sleep_tx));
+        let mut asleep = *sleep_rx.borrow_and_update();
+        while sleep_rx.changed().await.is_ok() {
+            let now = *sleep_rx.borrow_and_update();
+            // Only the wake half. Going *into* suspend must not arm anything:
+            // the camera would open on a machine that is powering down.
+            if asleep && !now && tx.send(()).is_err() {
+                return;
+            }
+            asleep = now;
+        }
+    });
+    rx
+}
 
 /// Tick for this engine's own deadlines. Presence itself is pushed from
 /// whoever owns the sensor (see `crate::presence`), so this no longer sets
@@ -84,11 +133,16 @@ pub fn start(user: String) -> mpsc::Receiver<EngineEvent> {
 }
 
 fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
+    // No sensor is not nothing to do. Presence is one of the two things that
+    // arm an attempt and resume is the other, and resume comes from logind, so
+    // a machine without the sensor still face-unlocks when the lid opens. It
+    // just never does so from someone walking up to it. Say that once and
+    // carry on rather than ending the worker, which is what used to happen and
+    // what would now silently take the lid with it.
     if Presence::detect().is_none() {
         let _ = tx.send(EngineEvent::Unavailable(
-            "no presence sensor — face unlock idle".to_string(),
+            "no presence sensor — face unlock waits for a resume".to_string(),
         ));
-        return;
     }
 
     // Register as the lock agent and hold the connection for the whole lock
@@ -114,6 +168,7 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
     // its own reads here put a third 4 Hz reader on hardware that serves
     // about three reads a second, and every reader queued behind the others.
     let events = presence::subscribe();
+    let resumes = watch_resume();
     // None until the first reading lands, so the opening state is a starting
     // point rather than an arrival — arming on it would run face unlock
     // against whoever locked the machine a moment ago.
@@ -155,6 +210,23 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
                 armed = None;
             }
             None => {}
+        }
+
+        // A resume outranks whatever presence last said. The lid was shut and
+        // is now open, which is an arrival however still the sensor reads, and
+        // it resets the attempt budget for the same reason an arrival does:
+        // this is a fresh approach to the machine, not the tail of the last
+        // one. Drained after presence so the two cannot arm twice for one
+        // return.
+        let mut woke = false;
+        while resumes.try_recv().is_ok() {
+            woke = true;
+        }
+        if woke {
+            log::info!("face: resumed from sleep — arming");
+            attempts = 0;
+            transient = 0;
+            armed = Some(Instant::now());
         }
 
         let Some(due) = armed else { continue };
