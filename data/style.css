@@ -2521,6 +2521,32 @@ revealer {
     color: @fg;
 }
 
+/* ── Display Section: Night light warmth controls ── */
+.display-night-box {
+    background-color: alpha(@bg1, 0.45);
+    border: 1px solid @border_subtle;
+    border-radius: 10px;
+    padding: 10px 12px 8px;
+    margin-bottom: 6px;
+}
+
+.display-night-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: @fg;
+}
+
+.display-night-val {
+    font-size: 11px;
+    font-family: @font_mono, monospace;
+    color: @accent_secondary;
+    font-weight: 500;
+}
+
+scale.night-scale highlight {
+    background-color: @accent_secondary;
+}
+
 .startmenu-notifications {
     border-radius: 12px;
     background-color: alpha(@bg0, 0.4);

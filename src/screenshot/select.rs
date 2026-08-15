@@ -60,6 +60,8 @@ struct Sheet {
     /// Drag rectangle in widget (logical) coordinates, `None` until a drag
     /// starts. Shared with the draw function.
     rect: Rc<RefCell<Option<Rect>>>,
+    /// Live pointer coordinates for the color picker loupe in `Mode::Pick`.
+    pointer: Rc<RefCell<Option<(f64, f64)>>>,
 }
 
 impl Sheet {
@@ -215,6 +217,7 @@ fn present(app: &gtk4::Application, mode: Mode, captured: Vec<(String, Image)>, 
             window,
             area,
             rect: Rc::new(RefCell::new(None)),
+            pointer: Rc::new(RefCell::new(None)),
         });
     }
 
@@ -260,12 +263,24 @@ fn texture_for(image: &Image) -> gdk::MemoryTexture {
     )
 }
 
-/// Hook up drawing, dragging, and the keys that end the session.
+/// Hook up drawing, dragging, motion tracking, and the keys that end the session.
 fn wire(session: &Rc<Session>, index: usize, mode: Mode) {
     let sheet = &session.sheets[index];
 
+    // ── Motion Tracking (for loupe in Pick mode) ──
+    let pointer = sheet.pointer.clone();
+    let area = sheet.area.clone();
+    let motion = gtk4::EventControllerMotion::new();
+    motion.connect_motion(move |_, x, y| {
+        *pointer.borrow_mut() = Some((x, y));
+        area.queue_draw();
+    });
+    sheet.area.add_controller(motion);
+
     // ── Drawing ──
     let rect = sheet.rect.clone();
+    let pointer = sheet.pointer.clone();
+    let image = sheet.image.clone();
     let buffer = (f64::from(sheet.image.width), f64::from(sheet.image.height));
     sheet.area.set_draw_func(move |_, cr, w, h| {
         let (w, h) = (f64::from(w), f64::from(h));
@@ -273,6 +288,13 @@ fn wire(session: &Rc<Session>, index: usize, mode: Mode) {
         // so the frozen screen below shows through at full brightness.
         cr.set_source_rgba(0.0, 0.0, 0.0, 0.42);
         let _ = cr.paint();
+
+        if mode == Mode::Pick {
+            if let Some((px, py)) = *pointer.borrow() {
+                draw_color_loupe(cr, &image, ratio(buffer, w, h), px, py, w, h);
+            }
+            return;
+        }
 
         let Some((x, y, rw, rh)) = normalized(&rect.borrow(), w, h) else {
             return;
@@ -292,7 +314,7 @@ fn wire(session: &Rc<Session>, index: usize, mode: Mode) {
         draw_size_chip(cr, ratio(buffer, w, h), x, y, rw, rh, h);
     });
 
-    // ── Dragging ──
+    // ── Dragging / Clicking ──
     let drag = gtk4::GestureDrag::new();
     let start = Rc::new(std::cell::Cell::new((0.0, 0.0)));
 
@@ -325,9 +347,16 @@ fn wire(session: &Rc<Session>, index: usize, mode: Mode) {
     // ── Keys ──
     let keys = gtk4::EventControllerKey::new();
     let session_c = session.clone();
+    let pointer = sheet.pointer.clone();
     keys.connect_key_pressed(move |_, key, _, _| {
         match key {
             gdk::Key::Escape => session_c.cancel(),
+            // 'c' or 'C' in pick mode immediately copies the color under the pointer
+            gdk::Key::c | gdk::Key::C if mode == Mode::Pick => {
+                if let Some(pos) = *pointer.borrow() {
+                    session_c.finish(index, mode, pos, pos);
+                }
+            }
             // Enter with nothing dragged takes the whole output, which is the
             // fastest path to "the screen as it is".
             gdk::Key::Return | gdk::Key::KP_Enter => session_c.whole(index),
@@ -336,6 +365,106 @@ fn wire(session: &Rc<Session>, index: usize, mode: Mode) {
         glib::Propagation::Stop
     });
     sheet.window.add_controller(keys);
+}
+
+/// Draw a magnified pixel loupe with live RGB/Hex readout for color picking.
+fn draw_color_loupe(
+    cr: &cairo::Context,
+    image: &Image,
+    (sx, sy): (f64, f64),
+    px: f64,
+    py: f64,
+    max_w: f64,
+    max_h: f64,
+) {
+    let (bx, by) = to_buffer((px, py), (sx, sy));
+    let center_color = image.pixel(bx, by).unwrap_or((0, 0, 0));
+
+    let radius = 64.0;
+    // Offset the loupe so it doesn't hide the cursor target
+    let offset_x = if px + radius + 40.0 > max_w { -(radius + 32.0) } else { radius + 32.0 };
+    let offset_y = if py - radius - 30.0 < 0.0 { radius + 32.0 } else { -(radius + 32.0) };
+    let lx = (px + offset_x).clamp(radius + 10.0, max_w - radius - 10.0);
+    let ly = (py + offset_y).clamp(radius + 10.0, max_h - radius - 40.0);
+
+    // 1. Draw outer circle shadow / backdrop
+    cr.save().unwrap();
+    cr.arc(lx, ly, radius, 0.0, std::f64::consts::TAU);
+    cr.clip();
+
+    // 2. Render magnified 15x15 pixel grid
+    let grid_dim = 11; // 11x11 grid
+    let cell_size = (radius * 2.0) / grid_dim as f64;
+    let half_grid = grid_dim / 2;
+
+    for gy in 0..grid_dim {
+        for gx in 0..grid_dim {
+            let sample_x = (bx as i32 + (gx - half_grid)).clamp(0, image.width.saturating_sub(1) as i32) as u32;
+            let sample_y = (by as i32 + (gy - half_grid)).clamp(0, image.height.saturating_sub(1) as i32) as u32;
+            let (r, g, b) = image.pixel(sample_x, sample_y).unwrap_or((0, 0, 0));
+
+            cr.set_source_rgb(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0);
+            cr.rectangle(
+                lx - radius + (gx as f64 * cell_size),
+                ly - radius + (gy as f64 * cell_size),
+                cell_size + 0.5,
+                cell_size + 0.5,
+            );
+            let _ = cr.fill();
+        }
+    }
+
+    // Grid lines inside loupe
+    cr.set_source_rgba(0.0, 0.0, 0.0, 0.25);
+    cr.set_line_width(0.5);
+    for i in 0..=grid_dim {
+        let pos = -radius + (i as f64 * cell_size);
+        cr.move_to(lx + pos, ly - radius);
+        cr.line_to(lx + pos, ly + radius);
+        cr.move_to(lx - radius, ly + pos);
+        cr.line_to(lx + radius, ly + pos);
+    }
+    let _ = cr.stroke();
+
+    // 3. Highlight center targeted pixel
+    let center_cell_x = lx - (cell_size / 2.0);
+    let center_cell_y = ly - (cell_size / 2.0);
+    cr.set_source_rgb(1.0, 1.0, 1.0);
+    cr.set_line_width(1.5);
+    cr.rectangle(center_cell_x, center_cell_y, cell_size, cell_size);
+    let _ = cr.stroke();
+
+    cr.restore().unwrap();
+
+    // 4. Outer chrome rim (Liquid glass bevel outline)
+    cr.set_source_rgba(0.922, 0.859, 0.698, 0.85); // Gruvbox light fg
+    cr.set_line_width(2.5);
+    cr.arc(lx, ly, radius, 0.0, std::f64::consts::TAU);
+    let _ = cr.stroke();
+
+    // 5. Hex badge beneath loupe
+    let hex_text = format!("#{r:02x}{g:02x}{b:02x}", r = center_color.0, g = center_color.1, b = center_color.2);
+    cr.select_font_face("monospace", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+    cr.set_font_size(12.0);
+    let Ok(extents) = cr.text_extents(&hex_text) else { return; };
+
+    let bw = extents.width() + 16.0;
+    let bh = 22.0;
+    let bx_pos = lx - (bw / 2.0);
+    let by_pos = ly + radius + 8.0;
+
+    cr.set_source_rgba(0.114, 0.106, 0.102, 0.95);
+    cr.rectangle(bx_pos, by_pos, bw, bh);
+    let _ = cr.fill();
+
+    cr.set_source_rgb(0.408, 0.616, 0.416); // Accent aqua border
+    cr.set_line_width(1.0);
+    cr.rectangle(bx_pos, by_pos, bw, bh);
+    let _ = cr.stroke();
+
+    cr.set_source_rgb(0.922, 0.859, 0.698);
+    cr.move_to(bx_pos + 8.0, by_pos + bh - 6.0);
+    let _ = cr.show_text(&hex_text);
 }
 
 /// A drag rectangle as origin + size, dropped if it is too small to mean a
