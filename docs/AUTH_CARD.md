@@ -356,3 +356,48 @@ Measured at implementation, all bounding boxes identical within each surface:
 The `long` preview token exists for the two-line case specifically: without it
 a stylesheet regression that reintroduces `line-height` passes every other
 check and only shows up in front of a user whose account has expired.
+
+## The two marks are gone (2026-08-15)
+
+The field's leading fingerprint whorl and its trailing Caps Lock arrow are
+removed. Neither had ever been given a CSS rule, so both painted in GTK's
+default label colour: two dark glyphs on a dark card, which is not an
+indicator, it is a smudge. Nor were they carrying much. What the reader is
+doing is already in the caption's resting sentence — in words, which a whorl
+cannot manage — and Caps Lock still marks its edge there and, where it changes
+what the user does, composes onto the rejection (`Wrong password · Caps Lock is
+on`) rather than leaving them to join a failed attempt to a lit glyph.
+
+The leading slot stays allocated: it is the rail the rows line up on, the face
+ring still draws in it, and nothing about the field's geometry may depend on
+state. A matching 22 px spacer went in at the trailing edge, because with only
+the leading rail reserved the entry sat 34 px off the card's left edge and
+flush against its right. It is a counterweight, not a slot for anything.
+
+The same omission had left `.polkit-title`, `.polkit-message` and
+`.polkit-icon-glyph` unstyled. All three now have rules: one step of hierarchy
+for the title, near-full contrast for the message that names what is about to
+run as root, and the shield sized to the 48 px the geometry above budgets for
+it and dimmed so it does not outrank the title.
+
+### One uniform gap was the layout bug
+
+The polkit card's content box carried `spacing(14)`, so every row was separated
+from every other by the same amount — the title from the message exactly as
+much as the message from the input. The first pair is one sentence in two
+registers and the second is the explanation and the thing being explained, and
+flattening that told the eye there were nine rows rather than three groups. It
+is also what made the field look crowded under the message.
+
+It now carries `spacing(0)`, with each gap declared on the element that owns
+it, which is how the lock card has always worked. The ladder: 8 under the icon,
+6 inside the title/message pair, **20** to break into the input, 6 back out to
+its caption, then 8 and 16 for the two rows that are about the card rather than
+about the question. The 6:20 ratio either side of the field does the grouping;
+the rest is rhythm.
+
+The 8 above the details toggle is the one number that is not what it looks
+like. The caption reserves two lines and usually says one, and on the lock card
+that leftover falls against the bottom padding and reads as margin. On this
+card there are three rows underneath it, so it reads as a hole, and the
+declared gap has to be the remainder rather than the whole thing.

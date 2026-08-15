@@ -155,6 +155,7 @@ impl PolkitDialog {
             .orientation(gtk4::Orientation::Vertical)
             .halign(gtk4::Align::Center)
             .build();
+        icon_box.add_css_class("polkit-icon-box");
         let icon_image = gtk4::Image::builder().pixel_size(44).visible(false).build();
         icon_image.add_css_class("polkit-icon");
         let icon_label = gtk4::Label::builder().label("\u{f0483}").build();
@@ -213,9 +214,8 @@ impl PolkitDialog {
             .placeholder_text("Password")
             .hexpand(true)
             .build();
-        // One box for the entry, the biometric mark and Caps Lock. The face
-        // ring and the fingerprint whorl share the leading slot: they are two
-        // answers to one question and never need two edges.
+        // One box for the entry and the face ring, which is the only mark
+        // left in it.
         let field = AuthField::new(&password_entry);
 
         // ── Identity picker (hidden when only one identity) ───────────
@@ -288,9 +288,17 @@ impl PolkitDialog {
         // ── Assemble the card ────────────────────────────────────────
         // Content box on the glass: fades over the full enter/exit while
         // the card (pane) tint arrives fast (motion on glass, anim.rs).
+        //
+        // Spacing 0, and every gap declared in the stylesheet instead. A
+        // uniform gap is the one thing a card like this cannot use: the title
+        // and the message are one unit and the message and the input are two,
+        // so separating both by 14 px said they were equally related and left
+        // the field looking crowded against the sentence that explains it.
+        // The lock card has worked this way for a while; this brings the two
+        // onto the same model. See the gap block in data/style.css.
         let content = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
-            .spacing(14)
+            .spacing(0)
             .build();
         content.append(&icon_box);
         content.append(&title_label);
@@ -469,7 +477,6 @@ impl PolkitDialog {
             keyboard.connect_caps_lock_state_notify(move |_| {
                 let on = caps_lock_on();
                 dialog_caps.caps.set(on);
-                dialog_caps.field.set_caps(on);
                 if on {
                     dialog_caps.caption.caps_edge();
                 }
@@ -521,9 +528,7 @@ impl PolkitDialog {
         self.card.remove_css_class("polkit-shake");
         self.card.remove_css_class("polkit-success");
         self.card.remove_css_class("polkit-verifying");
-        let caps = caps_lock_on();
-        self.caps.set(caps);
-        self.field.set_caps(caps);
+        self.caps.set(caps_lock_on());
         self.refresh_resting();
 
         // Title + message
@@ -600,7 +605,6 @@ impl PolkitDialog {
         self.field.widget().set_visible(false);
         self.password_entry.set_text("");
         self.caps.set(false);
-        self.field.set_caps(false);
         self.refresh_resting();
         self.identity_row.set_visible(false);
         self.card.remove_css_class("polkit-shake");
