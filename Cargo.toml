@@ -35,3 +35,14 @@ libpulse-binding = "2.30.1"
 
 [build-dependencies]
 protobuf-codegen = "3.7"
+
+[profile.dev]
+opt-level = 0
+debug = 1                # Line tables only: drastically cuts debuginfo emission & linker workload
+split-debuginfo = "unpacked"
+incremental = true
+
+# Optimize dependencies slightly so GTK event dispatch remains fast without slowing crate compilation
+[profile.dev.package."*"]
+opt-level = 1
+

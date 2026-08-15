@@ -144,7 +144,7 @@ impl PolkitDialog {
         // ── The card ─────────────────────────────────────────────────
         let card = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
-            .spacing(14)
+            .spacing(0)
             .width_request(400)
             .build();
         card.add_css_class("glass-card");
