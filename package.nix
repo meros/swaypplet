@@ -3,7 +3,7 @@
   rustPlatform,
   pkg-config,
   wrapGAppsHook4,
-  mold-wrapped,
+  mold,
   clang,
   gtk4,
   gtk4-layer-shell,
@@ -54,7 +54,7 @@ rustPlatform.buildRustPackage {
     wrapGAppsHook4
     # pam-sys generates its libpam bindings at build time
     rustPlatform.bindgenHook
-    mold-wrapped
+    mold
     clang
   ];
 
