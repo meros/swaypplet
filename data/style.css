@@ -2183,6 +2183,30 @@ revealer {
     color: @fg;
 }
 
+/* ── Title and message ──
+   Neither carried a rule until now, so both inherited GTK's default label
+   colour and default size: the title came out no larger than the sentence
+   under it and dimmer than it, which is backwards for the one line that says
+   what the card is. The card also floats over arbitrary content — a terminal,
+   a bright page — with only frost between it and them, so neither line can
+   rely on the background being dark enough to carry a low-contrast grey.
+
+   One step of hierarchy and no more. This is the card's only heading, and
+   much past 1.1rem it starts competing with the buttons for the eye. */
+.polkit-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: @fg;
+}
+
+/* Full contrast as well, because this is the sentence naming what is about to
+   run as root — the one thing on the card that has to be read before it is
+   answered. Dimming it would style the stakes as an aside. */
+.polkit-message {
+    font-size: 0.95rem;
+    color: alpha(@fg, 0.92);
+}
+
 /* ── Identity picker ── */
 .polkit-identity-row {
     margin-top: 2px;
