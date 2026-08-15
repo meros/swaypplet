@@ -195,6 +195,7 @@ impl ClipboardSection {
         row.set_can_focus(true);
 
         let preview_label = gtk4::Label::new(Some(&entry.preview));
+        preview_label.add_css_class("device-name");
         preview_label.set_hexpand(true);
         preview_label.set_xalign(0.0);
         preview_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);

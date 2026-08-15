@@ -88,6 +88,7 @@ scrolledwindow, viewport {
 window.panel {
     font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
     font-size: 10pt;
+    color: @fg;
 }
 
 /* ── Bar: bottom frosted card, one per output (src/bar/) ──
@@ -923,6 +924,7 @@ button.flat:hover {
     border-radius: 8px;
     min-height: 36px;
     transition: background-color 150ms ease;
+    color: @fg;
 }
 
 .device-row:hover {
@@ -2554,6 +2556,7 @@ revealer {
 
 .helm-subsheet {
     padding: 4px;
+    color: @fg;
 }
 
 .subsheet-header {

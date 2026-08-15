@@ -140,6 +140,7 @@ impl DeviceList {
             }
 
             let name_label = gtk4::Label::new(Some(&device.name));
+            name_label.add_css_class("device-name");
             name_label.set_hexpand(true);
             name_label.set_xalign(0.0);
             name_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
