@@ -570,15 +570,13 @@ impl SurfaceSet {
         let caps_changed = self.caps.replace(caps_on) != caps_on;
         for s in self.inner.borrow().iter() {
             self.update_surface_clock(s);
-            if caps_changed {
-                // The mark holds for as long as Caps Lock is on; the words
-                // only mark the edge, because a permanent sentence about a
-                // shift key would sit on top of everything else the caption
-                // has to say for as long as the key is latched.
-                s.field.set_caps(caps_on);
-                if caps_on {
-                    s.caption.caps_edge();
-                }
+            // The words mark the edge and then give the line back: a
+            // permanent sentence about a shift key would sit on top of
+            // everything else the caption has to say for as long as the key
+            // is latched. The standing warning is composed onto the rejection
+            // instead, which is the moment it changes what the user does.
+            if caps_changed && caps_on {
+                s.caption.caps_edge();
             }
         }
     }

@@ -40,16 +40,13 @@ use std::time::Duration;
 
 use gtk4::prelude::*;
 
-use crate::icons;
-
 /// How long a transient caption holds before the resting sentence returns.
 ///
 /// Long enough to read a four-word hint without hurrying, short enough that
 /// the card is not still explaining a finger the user has already lifted.
 const DWELL: Duration = Duration::from_millis(2000);
 
-/// Caps Lock's mark, and the words for it when the caption is free.
-const CAPS_GLYPH: &str = "\u{f0632}";
+/// The words for Caps Lock. There is no mark any more: see [`AuthField`].
 const CAPS_TEXT: &str = "Caps Lock is on";
 
 /// What the caption is currently saying, in priority order. The order is
@@ -96,7 +93,19 @@ const TONE_CLASSES: [&str; 5] = [
     "auth-caption-caps",
 ];
 
-/// The field: one bordered box holding a mark, an entry and a Caps Lock mark.
+/// The field: one bordered box holding the face ring, an entry, and nothing
+/// else.
+///
+/// It used to carry two glyph marks as well — a fingerprint whorl at the
+/// leading edge and a Caps Lock arrow at the trailing one. Both are gone. They
+/// were never given a CSS rule, so they painted in GTK's default label colour:
+/// two dark blobs on a dark card, which is not an indicator, it is a smudge.
+/// Neither was carrying much either. What the reader is doing is already in
+/// the caption's resting sentence, which names the methods accepting input
+/// right now and does so in words; Caps Lock still marks its edge in the
+/// caption and, where it actually matters, composes onto the rejection
+/// (`Wrong password · Caps Lock is on`) rather than leaving the reader to join
+/// a failed attempt to a lit glyph.
 ///
 /// Every state this shows is a paint property. Nothing in here is ever
 /// `set_visible`, and the box's height is a constant of its CSS — `min-height`
@@ -104,12 +113,11 @@ const TONE_CLASSES: [&str; 5] = [
 #[derive(Clone)]
 pub struct AuthField {
     root: gtk4::Box,
-    /// The leading slot. Always allocated, even on a row that will never have
-    /// a reader: it is what puts the greeter's username and password text on
-    /// one rail, and that alignment is visible where a blank row is not.
-    fp_mark: gtk4::Label,
+    /// The leading slot's occupant. The slot itself is always allocated, even
+    /// on a row that will never run a face check: it is what puts the
+    /// greeter's username and password text on one rail, and that alignment is
+    /// visible where a blank row is not.
     face_mark: gtk4::Box,
-    caps_mark: gtk4::Label,
 }
 
 impl AuthField {
@@ -124,23 +132,21 @@ impl AuthField {
             .build();
         root.add_css_class("auth-field");
 
-        // Leading slot: the fingerprint whorl and the face ring share it, so
-        // a surface that runs both never has two marks competing for one edge.
-        let mark = gtk4::Overlay::new();
+        // Leading slot. Sized and allocated whether or not anything ever draws
+        // in it, because it is the rail the rows above and below line up on;
+        // the face ring is the only thing that does draw here now.
+        let mark = gtk4::Box::builder()
+            .width_request(22)
+            .height_request(27)
+            .halign(gtk4::Align::Center)
+            .valign(gtk4::Align::Center)
+            .build();
         mark.add_css_class("auth-mark");
-        mark.set_size_request(22, 27);
-        // A glyph inside a field looks like a button, and on a touchscreen
+        // Anything inside a field looks like a button, and on a touchscreen
         // someone will tap it. Untargetable, so the tap falls through and
         // focuses the field, which is the right outcome.
         mark.set_can_target(false);
         mark.set_can_focus(false);
-
-        let fp_mark = gtk4::Label::builder()
-            .label(icons::FINGERPRINT)
-            .valign(gtk4::Align::Center)
-            .build();
-        fp_mark.add_css_class("auth-mark-fp");
-        mark.set_child(Some(&fp_mark));
 
         let face_mark = gtk4::Box::builder()
             .width_request(22)
@@ -150,20 +156,16 @@ impl AuthField {
         face_mark.add_css_class("auth-mark-face");
         face_mark.add_css_class("face-ring");
         face_mark.set_opacity(0.0);
-        mark.add_overlay(&face_mark);
+        mark.append(&face_mark);
 
-        // Trailing slot. M3 puts interactive icons here and attributes at the
-        // leading edge, which this breaks: Caps Lock is an attribute. It is
-        // styled exactly like the leading mark and is the only trailing thing
-        // the field ever holds, so it never acquires the look of a control.
-        let caps_mark = gtk4::Label::builder()
-            .label(CAPS_GLYPH)
-            .width_request(16)
-            .valign(gtk4::Align::Center)
-            .build();
-        caps_mark.add_css_class("auth-mark-caps");
-        caps_mark.set_can_target(false);
-        caps_mark.set_can_focus(false);
+        // A counterweight, and nothing else: the leading rail is reserved
+        // whether or not anything draws in it, so without this the entry sits
+        // 34 px off the card's left edge and flush against its right. The
+        // Caps Lock glyph used to be what balanced it, and it is not coming
+        // back. Same width, no class that paints, untargetable.
+        let tail = gtk4::Box::builder().width_request(22).build();
+        tail.set_can_target(false);
+        tail.set_can_focus(false);
 
         let input = input.as_ref();
         input.add_css_class("auth-input");
@@ -171,48 +173,26 @@ impl AuthField {
 
         root.append(&mark);
         root.append(input);
-        root.append(&caps_mark);
+        root.append(&tail);
 
-        Self {
-            root,
-            fp_mark,
-            face_mark,
-            caps_mark,
-        }
+        Self { root, face_mark }
     }
 
     pub fn widget(&self) -> &gtk4::Box {
         &self.root
     }
 
-    /// The reader has armed, or stood down. Paints the mark and starts or
-    /// stops the border pulse; never touches the allocation.
+    /// The reader has armed, or stood down. Starts or stops the field's border
+    /// pulse; never touches the allocation. What the reader is *for* is said
+    /// in the caption, which can use words.
     pub fn set_fp_armed(&self, armed: bool) {
-        toggle(&self.fp_mark, "armed", armed);
         toggle(&self.root, "auth-fp-armed", armed);
     }
 
-    /// Tint the fingerprint mark for the length of a rejection, so the mark
-    /// and the card's shake say the same thing at the same moment.
-    pub fn flash_fp_reject(&self) {
-        let mark = self.fp_mark.clone();
-        mark.add_css_class("reject");
-        let ms = crate::anim::duration(crate::anim::EMPHASIS_MS) as u64;
-        glib::timeout_add_local_once(Duration::from_millis(ms), move || {
-            mark.remove_css_class("reject");
-        });
-    }
-
-    pub fn set_caps(&self, on: bool) {
-        toggle(&self.caps_mark, "on", on);
-    }
-
-    /// The elevate path has no password to type and no reader to touch; the
-    /// slot carries the face ring instead, so the ring holds the left edge and
-    /// the wording changes beside it.
+    /// A face check is running, or has stopped. The ring holds the leading
+    /// slot on its own now, so this is opacity and state and nothing else.
     pub fn set_face(&self, active: bool, state: &str) {
         self.face_mark.set_opacity(if active { 1.0 } else { 0.0 });
-        self.fp_mark.set_opacity(if active { 0.0 } else { 1.0 });
         crate::face_ring::apply(&self.face_mark, None, if active { state } else { "" });
     }
 
@@ -230,7 +210,6 @@ impl AuthField {
         glib::idle_add_local_once(move || {
             root.add_css_class("auth-reject");
         });
-        self.flash_fp_reject();
     }
 }
 
@@ -301,8 +280,13 @@ impl Caption {
         self.transient(Rank::FpHint, text, Tone::Info, "auth-caption-fp");
     }
 
-    /// Caps Lock just changed. The words hold for [`DWELL`]; the mark in the
-    /// field stays lit for as long as it is true.
+    /// Caps Lock just changed. The words hold for [`DWELL`] and then give the
+    /// line back. They used to be the short half of a pair — a mark in the
+    /// field stayed lit for as long as the key was latched — but the mark is
+    /// gone, and a permanent sentence about a shift key would sit on top of
+    /// everything else the caption has to say. What catches the case that
+    /// matters is [`Caption::status`], which composes the warning onto a
+    /// rejection.
     pub fn caps_edge(&self) {
         self.transient(Rank::Caps, CAPS_TEXT, Tone::Info, "auth-caption-caps");
     }

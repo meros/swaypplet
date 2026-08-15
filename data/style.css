@@ -2183,6 +2183,27 @@ revealer {
     color: @fg;
 }
 
+/* ── The polkit card's gaps ──
+   The content box carries spacing 0 and every gap is declared here, for the
+   same reason the lock card's are: they are deliberately unequal. A uniform
+   14 px between every row said the title and the message were exactly as
+   related as the message and the input, which is the one thing that is not
+   true on this card — the first pair is one sentence in two registers, the
+   second is the explanation and the thing being explained. The field ended up
+   crowded against the text above it and the whole card read as a list rather
+   than as three groups.
+
+   The ladder: 8 under the icon, 6 inside the title/message pair, 20 to break
+   into the input, 6 back out to its caption (declared on .auth-caption, which
+   the lock card shares), then 14 and 16 for the two rows that are about the
+   card rather than about the question. The 6:20 ratio either side of the
+   field is what does the grouping work; the rest is rhythm. */
+   Every gap below is declared on the element that owns it, in that element's
+   own rule, rather than gathered here: a margin sitting apart from the box it
+   moves is a margin nobody finds when they change the box. This block holds
+   only the one gap with no other home. */
+.polkit-icon-box { margin-bottom: 8px; }
+
 /* ── Title and message ──
    Neither carried a rule until now, so both inherited GTK's default label
    colour and default size: the title came out no larger than the sentence
@@ -2197,6 +2218,8 @@ revealer {
     font-size: 1.1rem;
     font-weight: 700;
     color: @fg;
+    /* Tight to the message: the two are one sentence in two registers. */
+    margin-bottom: 6px;
 }
 
 /* Full contrast as well, because this is the sentence naming what is about to
@@ -2205,11 +2228,16 @@ revealer {
 .polkit-message {
     font-size: 0.95rem;
     color: alpha(@fg, 0.92);
+    /* And loose to the field. This is the break between the explanation and
+       the thing being explained, and it is the gap that was missing: at the
+       uniform 14 the input sat crowded under the sentence about it. */
+    margin-bottom: 20px;
 }
 
 /* ── Identity picker ── */
+/* Under the caption, and only on a card with somebody else to run as. */
 .polkit-identity-row {
-    margin-top: 2px;
+    margin-top: 10px;
 }
 
 .polkit-identity-label {
@@ -2236,6 +2264,14 @@ revealer {
     font-size: 11px;
     padding: 3px 4px;
     min-height: 0;
+    /* First of the two rows that are about the card rather than about the
+       question. Small, because the caption above it already contributes the
+       slack: it reserves two lines and usually says one, and on the lock card
+       that leftover falls against the bottom padding and reads as margin.
+       Here there are three more rows underneath, so it reads as a hole
+       instead, and the declared gap has to be the remainder rather than the
+       whole thing. */
+    margin-top: 8px;
 }
 
 .polkit-details-toggle:hover {
@@ -2255,7 +2291,9 @@ revealer {
 
 /* ── Action buttons ── */
 .polkit-actions {
-    margin-top: 6px;
+    /* The card's last row and its only commitment; it gets the widest gap on
+       the card so the eye lands on it rather than reading into it. */
+    margin-top: 16px;
 }
 
 /* Cancel: quiet ghost button. */
@@ -2336,6 +2374,21 @@ revealer {
    point and already occupies its space -- so nothing below it moves. A short
    settle rather than a flash: it plays while the dialog is already closing,
    so it must never read as something to wait for. */
+/* ── The card's one ornament ──
+   A shield, and the only thing on the card that is not a word or a control.
+   It had no rule either, so it painted at the default label size and colour:
+   a small dark smudge above the title, doing the opposite of announcing what
+   this card is. The geometry the card was designed to (docs/AUTH_CARD.md)
+   budgets 48 px for this row, so it is sized to fill that rather than to be
+   noticed — dimmer than the title beneath it, because it says the same thing
+   with less precision and must not outrank it. */
+.polkit-icon-glyph {
+    font-size: 32px;
+    color: alpha(@fg, 0.45);
+}
+
+/* Authenticated. The one moment the ornament is worth looking at, so it takes
+   the accent and the emphasis tier's 400 ms. */
 .polkit-icon-glyph.polkit-icon-ok {
     color: @accent;
     animation: polkit-icon-ok 400ms cubic-bezier(0, 0, 0, 1);
@@ -2745,6 +2798,10 @@ revealer {
     border: 1px solid @border_strong;
     border-radius: 10px;
     padding: 10px 12px;
+    /* Elevate card only, where these two sit between the message and a field
+       that is not there. Their own margins, so the password path pays for
+       neither. */
+    margin-bottom: 8px;
 }
 
 .face-confirm-command {
@@ -2759,6 +2816,7 @@ revealer {
 .face-confirm-consequence {
     font-size: 0.85rem;
     color: @fg_dim;
+    margin-bottom: 12px;
 }
 
 /* ── Face unlock indicator ──

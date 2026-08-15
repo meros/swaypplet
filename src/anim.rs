@@ -7,9 +7,9 @@
 //!
 //! Three curves, from Material 3's standard set: [`standard`] between two
 //! on-screen states, [`decelerate`] for anything arriving, [`accelerate`] for
-//! anything leaving. Durations: [`EXIT_MS`], [`ENTER_MS`]
-//! (= [`MOVE_MS`]) and [`EMPHASIS_MS`]; the micro and dwell tiers are CSS-only
-//! and live in the stylesheet.
+//! anything leaving. Durations: [`EXIT_MS`] and [`ENTER_MS`] (= [`MOVE_MS`]);
+//! the micro, emphasis and dwell tiers are CSS-only and live in the
+//! stylesheet.
 //!
 //! # Motion on glass: split the pane from the content
 //!
@@ -50,13 +50,13 @@ pub const EXIT_MS: f64 = 200.0;
 /// Anything arriving, and anything reflowing between two on-screen states.
 pub const ENTER_MS: f64 = 300.0;
 pub const MOVE_MS: f64 = 300.0;
-/// A one-shot that has to be noticed: a verdict, an arrival, a refusal.
-pub const EMPHASIS_MS: f64 = 400.0;
-// The scale's other two tiers, micro (150ms) and dwell (500ms), have no Rust
-// consumer: one is below the threshold where a hand-driven tick is worth its
-// wakeups and the other is only ever a keyframe. They are declared in
-// data/style.css instead of here, rather than sitting in this file as dead
-// constants that look authoritative and govern nothing.
+// The scale's other three tiers — micro (150ms), emphasis (400ms) and dwell
+// (500ms) — have no Rust consumer. Micro is below the threshold where a
+// hand-driven tick is worth its wakeups, and the other two are only ever
+// keyframes: emphasis lost its last caller when the field's glyph marks went,
+// and the tier lives on in data/style.css where the verdict animations are.
+// They are declared there rather than sitting in this file as dead constants
+// that look authoritative and govern nothing.
 
 /// Travel distance of the settle that accompanies a fade on surfaces with a
 /// directional entrance. Short by design — the fade carries the transition,
