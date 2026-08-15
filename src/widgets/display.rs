@@ -213,20 +213,58 @@ impl DisplaySection {
         summary_btn.add_css_class("section-summary");
         root.append(&summary_btn);
 
-        // ── Detail revealer ───────────────────────────────────────────────────
-        let detail_revealer = Revealer::builder()
-            .transition_type(RevealerTransitionType::SlideDown)
-            .transition_duration(200)
-            .reveal_child(false)
-            .build();
-
-        let output_list = Box::builder()
+        // ── Night light warmth controls in Display Section ───────────────────
+        let night_box = Box::builder()
             .orientation(Orientation::Vertical)
-            .spacing(2)
+            .spacing(4)
             .build();
-        output_list.add_css_class("device-list");
+        night_box.add_css_class("display-night-box");
 
-        detail_revealer.set_child(Some(&output_list));
+        let night_hdr = Box::builder()
+            .orientation(Orientation::Horizontal)
+            .spacing(6)
+            .build();
+        let night_lbl = Label::builder()
+            .label("Night Light Warmth")
+            .xalign(0.0)
+            .hexpand(true)
+            .build();
+        night_lbl.add_css_class("display-night-label");
+        let night_val_lbl = Label::builder()
+            .label("3500K")
+            .xalign(1.0)
+            .build();
+        night_val_lbl.add_css_class("display-night-val");
+        night_hdr.append(&night_lbl);
+        night_hdr.append(&night_val_lbl);
+
+        let night_scale = gtk4::Scale::builder()
+            .orientation(Orientation::Horizontal)
+            .adjustment(&gtk4::Adjustment::new(3500.0, 2000.0, 6500.0, 100.0, 500.0, 0.0))
+            .draw_value(false)
+            .hexpand(true)
+            .build();
+        night_scale.add_css_class("night-scale");
+
+        {
+            let val_lbl = night_val_lbl.clone();
+            night_scale.connect_value_changed(move |s| {
+                let temp = s.value().round() as u32;
+                val_lbl.set_label(&format!("{temp}K"));
+            });
+        }
+
+        night_box.append(&night_hdr);
+        night_box.append(&night_scale);
+
+        let detail_box = Box::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(8)
+            .build();
+        detail_box.append(&night_box);
+        detail_box.append(&output_list);
+
+        detail_revealer.set_child(Some(&detail_box));
         root.append(&detail_revealer);
 
         // ── Wire up summary row toggle ────────────────────────────────────────
