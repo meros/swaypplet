@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Swaypplet Liquid Glass Physics & SOTA Material Zoo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+  <style>
+    :root {
+      /* Gruvbox Dark Palette Tokens */
+      --bg-deep: #111213;
+      --bg0: #1d2021;
+      --bg1: #282828;
+      --bg2: #3c3836;
+      --bg3: #504945;
+      --fg: #ebdbb2;
+      --fg-dim: #a89984;
+      --text-faint: #7c6f64;
+
+      --accent-aqua: #689d6a;
+      --accent-yellow: #d79921;
+      --accent-blue: #458588;
+      --accent-purple: #b16286;
+      --accent-red: #cc241d;
+      --accent-orange: #d65d0e;
+
+      --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+      --font-mono: 'Fira Code', monospace;
+
+      /* Liquid Glass Optics */
+      --glass-blur: 24px;
+      --glass-tint: rgba(40, 40, 40, 0.45);
+      --glass-border: rgba(235, 219, 178, 0.12);
+      --specular-high: rgba(255, 255, 255, 0.25);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-deep);
+      color: var(--fg);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      padding: 40px 32px 100px;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+      position: relative;
+    }
+
+    /* Ambient dynamic desktop wallpaper background beneath liquid glass */
+    .ambient-wallpaper {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background: 
+        radial-gradient(circle at 15% 20%, rgba(104, 157, 106, 0.22) 0%, transparent 40%),
+        radial-gradient(circle at 85% 30%, rgba(215, 153, 33, 0.18) 0%, transparent 45%),
+        radial-gradient(circle at 50% 80%, rgba(69, 133, 136, 0.20) 0%, transparent 50%),
+        radial-gradient(circle at 75% 85%, rgba(177, 98, 134, 0.15) 0%, transparent 40%),
+        #141617;
+      filter: contrast(1.1) saturate(1.2);
+    }
+
+    .ambient-grid {
+      position: fixed;
+      inset: 0;
+      background-image: linear-gradient(rgba(235, 219, 178, 0.03) 1px, transparent 1px),
+                        linear-gradient(90deg, rgba(235, 219, 178, 0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .container {
+      max-width: 1440px;
+      margin: 0 auto;
+      position: relative;
+      z-index: 2;
+    }
+
+    header {
+      margin-bottom: 48px;
+      padding-bottom: 28px;
+      border-bottom: 1px solid var(--glass-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+
+    .header-left h1 {
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .glass-badge {
+      font-size: 11.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 4px 10px;
+      border-radius: 20px;
+      background: rgba(104, 157, 106, 0.2);
+      border: 1px solid rgba(104, 157, 106, 0.4);
+      color: var(--accent-aqua);
+      backdrop-filter: blur(8px);
+    }
+
+    .header-left p {
+      color: var(--fg-dim);
+      font-size: 15px;
+      margin-top: 8px;
+      max-width: 680px;
+      line-height: 1.5;
+    }
+
+    /* Grid of Liquid Glass Experiments */
+    .zoo-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+      gap: 28px;
+    }
+
+    .card {
+      background: var(--glass-tint);
+      backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+      border: 1px solid var(--glass-border);
+      border-radius: 20px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+      transition: transform 300ms cubic-bezier(0.2, 0.9, 0.3, 1), box-shadow 300ms ease, border-color 300ms ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card:hover {
+      border-color: rgba(235, 219, 178, 0.25);
+      box-shadow: 0 24px 54px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .card-header h2 {
+      font-size: 17px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      letter-spacing: -0.01em;
+    }
+
+    .card-header .rule-tag {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--accent-yellow);
+      background: rgba(215, 153, 33, 0.12);
+      padding: 3px 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(215, 153, 33, 0.25);
+    }
+
+    .card-desc {
+      font-size: 13.5px;
+      color: var(--fg-dim);
+      line-height: 1.45;
+    }
+
+    .stage {
+      background: rgba(18, 19, 20, 0.6);
+      border-radius: 14px;
+      border: 1px solid rgba(235, 219, 178, 0.06);
+      padding: 32px 20px;
+      min-height: 220px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* ── Exp 1: Liquid Caustic Refraction Lens ── */
+    .liquid-lens {
+      width: 140px;
+      height: 140px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.25) 0%, rgba(255, 255, 255, 0.05) 50%, rgba(0, 0, 0, 0.4) 100%),
+                  rgba(235, 219, 178, 0.04);
+      backdrop-filter: blur(16px) contrast(1.3) brightness(1.1);
+      -webkit-backdrop-filter: blur(16px) contrast(1.3) brightness(1.1);
+      border: 1.5px solid rgba(255, 255, 255, 0.35);
+      box-shadow: 
+        inset 0 2px 4px rgba(255, 255, 255, 0.4),
+        inset 0 -4px 8px rgba(0, 0, 0, 0.6),
+        0 18px 38px rgba(0, 0, 0, 0.6),
+        0 0 24px rgba(104, 157, 106, 0.3);
+      cursor: grab;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      position: absolute;
+      transition: box-shadow 200ms ease, transform 100ms cubic-bezier(0.1, 0.9, 0.2, 1);
+    }
+
+    .liquid-lens:active {
+      cursor: grabbing;
+      transform: scale(0.96);
+    }
+
+    .lens-inner-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 12px);
+      grid-template-rows: repeat(5, 12px);
+      gap: 3px;
+    }
+
+    .lens-inner-grid span {
+      background: rgba(235, 219, 178, 0.2);
+      border-radius: 2px;
+    }
+
+    /* ── Exp 2: Specular Edge Lighting with Mouse Gyro ── */
+    .specular-plate {
+      width: 280px;
+      padding: 16px 20px;
+      border-radius: 16px;
+      background: rgba(45, 45, 45, 0.4);
+      backdrop-filter: blur(28px) saturate(200%);
+      -webkit-backdrop-filter: blur(28px) saturate(200%);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+      position: relative;
+      cursor: pointer;
+      transform-style: preserve-3d;
+      transition: transform 120ms ease-out, box-shadow 120ms ease-out;
+    }
+
+    .specular-plate::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 16px;
+      padding: 1.5px;
+      background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(255, 255, 255, 0.8) 0%, transparent 60%);
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      pointer-events: none;
+    }
+
+    /* ── Exp 3: Elastic Frosted Quick Settings Tile ── */
+    .tile-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 140px);
+      gap: 12px;
+    }
+
+    .glass-tile {
+      background: rgba(50, 48, 47, 0.5);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(235, 219, 178, 0.08);
+      border-radius: 14px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+      position: relative;
+      overflow: hidden;
+      transition: all 250ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    .glass-tile:hover {
+      background: rgba(65, 62, 60, 0.6);
+      transform: translateY(-2px);
+      border-color: rgba(235, 219, 178, 0.2);
+    }
+
+    .glass-tile.active {
+      background: rgba(104, 157, 106, 0.25);
+      border-color: rgba(104, 157, 106, 0.6);
+      box-shadow: 0 0 20px rgba(104, 157, 106, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+
+    .glass-tile.active .tile-icon {
+      color: var(--accent-aqua);
+      transform: scale(1.1);
+    }
+
+    .tile-icon {
+      font-size: 20px;
+      color: var(--fg-dim);
+      transition: transform 250ms cubic-bezier(0.175, 0.885, 0.32, 1.275), color 200ms ease;
+    }
+
+    .tile-title {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .tile-sub {
+      font-size: 11px;
+      color: var(--text-faint);
+    }
+
+    /* ── Exp 4: Chromatic Dispersion Slider ── */
+    .dispersion-box {
+      width: 100%;
+      max-width: 320px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .slider-track {
+      width: 100%;
+      height: 24px;
+      border-radius: 12px;
+      background: rgba(30, 30, 30, 0.7);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      position: relative;
+      cursor: pointer;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+    }
+
+    .slider-fill {
+      height: 100%;
+      width: 65%;
+      background: linear-gradient(90deg, rgba(104, 157, 106, 0.3) 0%, rgba(215, 153, 33, 0.45) 50%, rgba(204, 36, 29, 0.5) 100%);
+      border-radius: 12px;
+      box-shadow: 0 0 16px rgba(215, 153, 33, 0.4);
+      position: relative;
+      transition: width 80ms ease-out;
+    }
+
+    .slider-fill::after {
+      content: '';
+      position: absolute;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: #fff;
+      box-shadow: 0 0 8px #fff, 0 0 14px var(--accent-yellow);
+      border-radius: 2px;
+    }
+
+    /* Code readout tag */
+    .code-pill {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      background: rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 6px 12px;
+      border-radius: 8px;
+      color: var(--accent-aqua);
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+  <div class="ambient-wallpaper"></div>
+  <div class="ambient-grid"></div>
+
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <h1>
+          Liquid Glass Physics Zoo
+          <span class="glass-badge">SOTA Material 2.0</span>
+        </h1>
+        <p>
+          Interactive optics & motion catalog exploring refraction, anisotropic specular bevels, chromatic diffusion, and elastic liquid response for the Swaypplet ecosystem.
+        </p>
+      </div>
+    </header>
+
+    <div class="zoo-grid">
+      <!-- Exp 1: Liquid Caustic Lens -->
+      <div class="card">
+        <div class="card-header">
+          <h2><i class="ti ti-droplet-filled" style="color: var(--accent-aqua);"></i> Caustic Magnification Loupe</h2>
+          <span class="rule-tag">PHYSICS: REFRACT</span>
+        </div>
+        <p class="card-desc">
+          Drag the lens over background graphics. Calculates dynamic specular highlight angles and refractive contrast amplification.
+        </p>
+        <div class="stage" id="stage-lens">
+          <div class="liquid-lens" id="lens" style="left: 150px; top: 40px;">
+            <div class="lens-inner-grid">
+              <span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span style="background: var(--accent-aqua);"></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span><span></span>
+            </div>
+          </div>
+          <div style="font-family: var(--font-mono); font-size: 18px; font-weight: 700; color: var(--accent-yellow); letter-spacing: 4px; pointer-events: none;">
+            SWAYPPLET 2026
+          </div>
+        </div>
+        <div class="code-pill">
+          <span>backdrop-filter: blur(16px) contrast(1.3)</span>
+          <span style="color: var(--fg-dim);">120px Caustic</span>
+        </div>
+      </div>
+
+      <!-- Exp 2: Specular Gyro Rim -->
+      <div class="card">
+        <div class="card-header">
+          <h2><i class="ti ti-flare" style="color: var(--accent-yellow);"></i> Specular Anisotropic Bevel</h2>
+          <span class="rule-tag">PHYSICS: SPECULAR</span>
+        </div>
+        <p class="card-desc">
+          Hover over the plate. The border dynamically tracks virtual light position to render liquid glass refraction along the chamfer.
+        </p>
+        <div class="stage">
+          <div class="specular-plate" id="spec-plate">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+              <i class="ti ti-shield-lock" style="font-size: 24px; color: var(--accent-aqua);"></i>
+              <div>
+                <div style="font-weight: 700; font-size: 14px;">Polkit Auth Dialog</div>
+                <div style="font-size: 11.5px; color: var(--fg-dim);">org.freedesktop.login1</div>
+              </div>
+            </div>
+            <div style="background: rgba(0,0,0,0.4); padding: 8px 12px; border-radius: 8px; font-size: 12px; font-family: var(--font-mono); color: var(--fg-dim);">
+              Enter password for meros...
+            </div>
+          </div>
+        </div>
+        <div class="code-pill">
+          <span>mask-composite: exclude (0.5px Bevel)</span>
+          <span style="color: var(--fg-dim);">Dynamic Light</span>
+        </div>
+      </div>
+
+      <!-- Exp 3: Elastic Frosted Tiles -->
+      <div class="card">
+        <div class="card-header">
+          <h2><i class="ti ti-layout-grid" style="color: var(--accent-blue);"></i> Elastic Frosted Glass Tiles</h2>
+          <span class="rule-tag">MOTION: SPRING(1.28)</span>
+        </div>
+        <p class="card-desc">
+          Click tiles to trigger liquid spring bounce with dynamic aqua diffusion glow and concentric corner bevels.
+        </p>
+        <div class="stage">
+          <div class="tile-grid">
+            <div class="glass-tile active" onclick="toggleTile(this)">
+              <i class="ti ti-wifi tile-icon"></i>
+              <div>
+                <div class="tile-title">Wi-Fi</div>
+                <div class="tile-sub">Connected</div>
+              </div>
+            </div>
+            <div class="glass-tile" onclick="toggleTile(this)">
+              <i class="ti ti-bluetooth tile-icon"></i>
+              <div>
+                <div class="tile-title">Bluetooth</div>
+                <div class="tile-sub">Idle</div>
+              </div>
+            </div>
+            <div class="glass-tile active" onclick="toggleTile(this)">
+              <i class="ti ti-moon-stars tile-icon"></i>
+              <div>
+                <div class="tile-title">Night Light</div>
+                <div class="tile-sub">3500K Warmth</div>
+              </div>
+            </div>
+            <div class="glass-tile" onclick="toggleTile(this)">
+              <i class="ti ti-coffee tile-icon"></i>
+              <div>
+                <div class="tile-title">Caffeine</div>
+                <div class="tile-sub">Off</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="code-pill">
+          <span>cubic-bezier(0.175, 0.885, 0.32, 1.275)</span>
+          <span style="color: var(--fg-dim);">Overshoot 1.18x</span>
+        </div>
+      </div>
+
+      <!-- Exp 4: Chromatic Dispersion Slider -->
+      <div class="card">
+        <div class="card-header">
+          <h2><i class="ti ti-adjustments-horizontal" style="color: var(--accent-orange);"></i> Chromatic Warmth Diffusion</h2>
+          <span class="rule-tag">COLOR: DISPERSION</span>
+        </div>
+        <p class="card-desc">
+          Interactive slider showing how liquid gamma warmth blends along the color spectrum without stepping artifacts.
+        </p>
+        <div class="stage">
+          <div class="dispersion-box">
+            <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 600;">
+              <span>Night Light Color Temperature</span>
+              <span id="temp-readout" style="color: var(--accent-yellow); font-family: var(--font-mono);">3500K</span>
+            </div>
+            <div class="slider-track" id="slider" onclick="updateSlider(event)">
+              <div class="slider-fill" id="fill"></div>
+            </div>
+          </div>
+        </div>
+        <div class="code-pill">
+          <span>linear-gradient(90deg, Aqua, Yellow, Red)</span>
+          <span style="color: var(--fg-dim);">2000K-6500K</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* Exp 1: Drag Lens */
+    const lens = document.getElementById('lens');
+    const stage = document.getElementById('stage-lens');
+    let isDragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    lens.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      const rect = lens.getBoundingClientRect();
+      offsetX = e.clientX - rect.left;
+      offsetY = e.clientY - rect.top;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const stageRect = stage.getBoundingClientRect();
+      let x = e.clientX - stageRect.left - offsetX;
+      let y = e.clientY - stageRect.top - offsetY;
+      
+      x = Math.max(0, Math.min(x, stageRect.width - 140));
+      y = Math.max(0, Math.min(y, stageRect.height - 140));
+
+      lens.style.left = `${x}px`;
+      lens.style.top = `${y}px`;
+    });
+
+    window.addEventListener('mouseup', () => {
+      isDragging = false;
+    });
+
+    /* Exp 2: Specular Plate Gyro */
+    const plate = document.getElementById('spec-plate');
+    plate.addEventListener('mousemove', (e) => {
+      const rect = plate.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      plate.style.setProperty('--mouse-x', `${(x / rect.width) * 100}%`);
+      plate.style.setProperty('--mouse-y', `${(y / rect.height) * 100}%`);
+
+      const tiltX = (y - rect.height / 2) / (rect.height / 2) * -8;
+      const tiltY = (x - rect.width / 2) / (rect.width / 2) * 8;
+      plate.style.transform = `perspective(800px) rotateX(${tiltX}deg) rotateY(${tiltY}deg)`;
+    });
+
+    plate.addEventListener('mouseleave', () => {
+      plate.style.transform = 'perspective(800px) rotateX(0deg) rotateY(0deg)';
+      plate.style.setProperty('--mouse-x', '50%');
+      plate.style.setProperty('--mouse-y', '50%');
+    });
+
+    /* Exp 3: Toggle Tiles */
+    function toggleTile(tile) {
+      tile.classList.toggle('active');
+    }
+
+    /* Exp 4: Slider */
+    function updateSlider(e) {
+      const slider = document.getElementById('slider');
+      const fill = document.getElementById('fill');
+      const tempReadout = document.getElementById('temp-readout');
+      const rect = slider.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      fill.style.width = `${pct * 100}%`;
+      
+      const kelvin = Math.round(2000 + pct * 4500);
+      tempReadout.textContent = `${kelvin}K`;
+    }
+  </script>
+</body>
+</html>
