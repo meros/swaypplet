@@ -56,6 +56,13 @@ rustPlatform.buildRustPackage {
 
   buildInputs = runtimeDeps;
 
+  # Build optimization: fast release codegen
+  env = {
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "16";
+    CARGO_PROFILE_RELEASE_DEBUG = "0";
+    CARGO_PROFILE_RELEASE_LTO = "false";
+  };
+
   postInstall = ''
     cat > $out/bin/swaypplet-toggle <<'SCRIPT'
     #!/bin/sh
