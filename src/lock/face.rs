@@ -62,15 +62,21 @@ use std::time::{Duration, Instant};
 use crate::fp::EngineEvent;
 use crate::presence::{self, Event as PresenceEvent, Presence};
 
-/// Resume edges from logind, as a channel this thread can drain on its tick.
+/// Checks if the laptop lid is currently open via ACPI.
+fn is_lid_open() -> bool {
+    if let Ok(state) = std::fs::read_to_string("/proc/acpi/button/lid/LID/state") {
+        state.contains("open")
+    } else {
+        true
+    }
+}
+
+/// Resume and lid-open edges, as a channel this thread can drain on its tick.
 ///
-/// One item per PrepareForSleep(true) -> PrepareForSleep(false) transition.
-/// The seed reading is deliberately not an edge: a locker spawned *by* the
-/// sleep transition starts with the system already going down, and treating
-/// that opening `true` as anything but a starting point would be the same
-/// mistake presence made.
+/// Arms when waking from sleep or when the laptop lid transitions from closed to open.
 fn watch_resume() -> mpsc::Receiver<()> {
     let (tx, rx) = mpsc::channel();
+    let tx_sleep = tx.clone();
     crate::spawn::spawn_tokio_thread("lock-resume", async move {
         let conn = match zbus::Connection::system().await {
             Ok(c) => c,
@@ -86,12 +92,29 @@ fn watch_resume() -> mpsc::Receiver<()> {
             let now = *sleep_rx.borrow_and_update();
             // Only the wake half. Going *into* suspend must not arm anything:
             // the camera would open on a machine that is powering down.
-            if asleep && !now && tx.send(()).is_err() {
+            if asleep && !now && tx_sleep.send(()).is_err() {
                 return;
             }
             asleep = now;
         }
     });
+
+    // Also watch lid open transitions (for Clamshell where system does not sleep on lid close)
+    std::thread::spawn(move || {
+        let mut was_open = is_lid_open();
+        loop {
+            sleep(Duration::from_millis(250));
+            let now_open = is_lid_open();
+            if !was_open && now_open {
+                log::info!("face: lid opened — arming");
+                if tx.send(()).is_err() {
+                    return;
+                }
+            }
+            was_open = now_open;
+        }
+    });
+
     rx
 }
 
