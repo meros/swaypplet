@@ -52,8 +52,15 @@
 //! SWAYPPLET_LOCK_WAKE_CMD set by the service unit) plus
 //! SWAYPPLET_LOCK_REASON=idle|manual|sleep for future locker-side use.
 //!
-//! Caffeine (panel tile) still works by stopping the whole service:
-//! `systemctl --user stop swaypplet-idle.service`.
+//! Inhibitors (panel tiles, `crate::inhibit`) reach this three ways, none of
+//! them a special case in here. **Awake** stops the whole service, so nothing
+//! below runs at all — including the before-sleep lock, which is why its
+//! tooltip says so. **Stay Lit** sets a compositor idle inhibitor, which
+//! `get_idle_notification` honours, so the timeout tiers simply never fire;
+//! the absence path is the one tier that has to ask (`idle_inhibited`).
+//! **Clamshell** holds a logind lid-switch inhibitor and never touches this
+//! process: logind stops suspending, and sway's `bindswitch lid:on` still
+//! locks and blanks.
 
 mod locker;
 mod logind;
@@ -230,27 +237,23 @@ pub fn run() -> ! {
                     blank_at = Some(Instant::now() + BLANK_AFTER_LOCK_IDLE);
                 }
                 outputs.power("presence.back", Power::On);
+            } else if crate::inhibit::idle_inhibited() {
+                // Absence is the one tier the compositor cannot suppress for
+                // us. The timeout tiers ride ext-idle-notify, which honours
+                // idle inhibitors on its own (wayland.rs), so Stay Lit or a
+                // video player already holds them off; walking away is not
+                // idle, so this path has to ask. One IPC round trip, on an
+                // edge rather than on the tick.
+                log::info!("presence: user gone — idle inhibited, not locking");
             } else {
-                // Check if Stay Lit / idle inhibitor is active before locking on absence
-                let inhibited = match Command::new("swaymsg").args(["-t", "get_tree"]).output() {
-                    Ok(out) => {
-                        let text = String::from_utf8_lossy(&out.stdout);
-                        text.contains("\"user\": \"focus\"") || text.contains("\"inhibit_idle\": true")
-                    }
-                    Err(_) => false,
-                };
-                if inhibited {
-                    log::info!("presence: user gone — but idle inhibited (Stay Lit); skip locking");
-                } else {
-                    log::info!("presence: user gone — locking");
-                    ensure_locked(
-                        &tx,
-                        &mut locker_active,
-                        &mut locker_confirmed,
-                        &mut lock_reason,
-                        "presence",
-                    );
-                }
+                log::info!("presence: user gone — locking");
+                ensure_locked(
+                    &tx,
+                    &mut locker_active,
+                    &mut locker_confirmed,
+                    &mut lock_reason,
+                    "presence",
+                );
             }
         }
 
@@ -349,6 +352,14 @@ pub fn run() -> ! {
                     log::info!("idle.suspend-1200s: session inactive — skip");
                 } else if on_ac() {
                     log::info!("idle.suspend-1200s: on AC — skip");
+                } else if crate::inhibit::Clamshell.read() == Some(true) {
+                    // Clamshell inhibits logind's *lid* handling, and this
+                    // tier is not logind's. Without this the second path
+                    // wins anyway: shut the lid on battery, and twenty
+                    // minutes later the machine this switch exists to keep
+                    // awake suspends itself. "Don't sleep with the lid
+                    // closed" has to mean both, or it means neither.
+                    log::info!("idle.suspend-1200s: clamshell armed — skip");
                 } else {
                     run_cmd("idle.suspend-1200s", "systemctl", &["suspend"]);
                 }
