@@ -681,19 +681,33 @@ fn build_flight_deck(
         .spacing(6)
         .build();
 
-    // Night Light
+    // Night Light (specs[2])
     let night_btn = tiles::build_tile(&specs[2]);
     tiles::init_tile_state(&night_btn, &specs[2]);
     night_btn.add_css_class("deck-tile-btn");
     tile_pairs.push((night_btn.clone(), copy_spec(&specs[2])));
     left_group.append(&night_btn);
 
-    // Caffeine
-    let caffeine_btn = tiles::build_tile(&specs[3]);
-    tiles::init_tile_state(&caffeine_btn, &specs[3]);
-    caffeine_btn.add_css_class("deck-tile-btn");
-    tile_pairs.push((caffeine_btn.clone(), copy_spec(&specs[3])));
-    left_group.append(&caffeine_btn);
+    // Awake (specs[3])
+    let awake_btn = tiles::build_tile(&specs[3]);
+    tiles::init_tile_state(&awake_btn, &specs[3]);
+    awake_btn.add_css_class("deck-tile-btn");
+    tile_pairs.push((awake_btn.clone(), copy_spec(&specs[3])));
+    left_group.append(&awake_btn);
+
+    // Stay Lit (specs[4])
+    let stay_lit_btn = tiles::build_tile(&specs[4]);
+    tiles::init_tile_state(&stay_lit_btn, &specs[4]);
+    stay_lit_btn.add_css_class("deck-tile-btn");
+    tile_pairs.push((stay_lit_btn.clone(), copy_spec(&specs[4])));
+    left_group.append(&stay_lit_btn);
+
+    // Clamshell (specs[5])
+    let clamshell_btn = tiles::build_tile(&specs[5]);
+    tiles::init_tile_state(&clamshell_btn, &specs[5]);
+    clamshell_btn.add_css_class("deck-tile-btn");
+    tile_pairs.push((clamshell_btn.clone(), copy_spec(&specs[5])));
+    left_group.append(&clamshell_btn);
 
     // DND
     let dnd_btn = tiles::build_dnd_tile(store.clone());

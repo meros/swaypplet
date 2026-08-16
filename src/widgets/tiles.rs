@@ -84,15 +84,11 @@ pub fn tile_specs() -> Vec<TileSpec> {
             read_state: read_night_state,
             on_state: None,
         },
-        // Caffeine stops the idle manager itself: idle timeouts (lock, screen
-        // blank) come from `swaypplet idle`, which only honors wayland
-        // idle-inhibit, so a logind systemd-inhibit approach would be a no-op
-        // here. Inverted mapping: tile active = idle manager stopped.
         TileSpec {
             icon: "󰅶",
-            label: "Caffeine",
-            tooltip_on: "Caffeine: idle lock and screen blank suspended",
-            tooltip_off: "Caffeine: off",
+            label: "Awake",
+            tooltip_on: "Awake: idle sleep suspended (screen still locks)",
+            tooltip_off: "Awake: off",
             action: |on| {
                 run_ok(Command::new("systemctl").args([
                     "--user",
@@ -100,10 +96,31 @@ pub fn tile_specs() -> Vec<TileSpec> {
                     "swaypplet-idle.service",
                 ]))
             },
-            read_state: read_caffeine_state,
-            // The bar's hazard lane rides this path instead of polling
-            // systemctl (docs/BAR_VISION.md, increment 7).
-            on_state: Some(crate::bar::hazards::set_caffeine),
+            read_state: read_awake_state,
+            on_state: Some(crate::bar::hazards::set_awake),
+        },
+        TileSpec {
+            icon: "󰍹",
+            label: "Stay Lit",
+            tooltip_on: "Stay Lit: screen blanking & lock inhibited",
+            tooltip_off: "Stay Lit: off",
+            action: |on| {
+                run_ok(Command::new("swaymsg").args([
+                    if on { "inhibit_idle" } else { "inhibit_idle" },
+                    if on { "focus" } else { "none" },
+                ]))
+            },
+            read_state: read_stay_lit_state,
+            on_state: Some(crate::bar::hazards::set_stay_lit),
+        },
+        TileSpec {
+            icon: "󰌢",
+            label: "Clamshell",
+            tooltip_on: "Clamshell: lid-close sleep inhibited",
+            tooltip_off: "Clamshell: off",
+            action: |_| true,
+            read_state: read_clamshell_state,
+            on_state: Some(crate::bar::hazards::set_clamshell),
         },
     ]
 }
@@ -118,10 +135,12 @@ pub fn build_tile(spec: &TileSpec) -> gtk4::ToggleButton {
     let tooltip_off = spec.tooltip_off;
     let on_state = spec.on_state;
 
+    let label = spec.label;
     let btn_h = btn.clone();
     btn.connect_clicked(move |_| {
         let target = btn_h.is_active();
         set_tooltip(&btn_h, target, tooltip_on, tooltip_off);
+        log::info!("tile[{label}]: toggle requested -> target: {target}");
 
         btn_h.add_css_class("loading");
         let btn_done = btn_h.clone();
@@ -130,12 +149,14 @@ pub fn build_tile(spec: &TileSpec) -> gtk4::ToggleButton {
             move |success| {
                 btn_done.remove_css_class("loading");
                 if success {
+                    log::info!("tile[{label}]: toggle succeeded -> active: {target}");
                     // Established, not optimistic: a failed toggle never
                     // reaches in-process consumers.
                     if let Some(observe) = on_state {
                         observe(target);
                     }
                 } else {
+                    log::warn!("tile[{label}]: toggle failed, reverting in 2s");
                     let b = btn_done.clone();
                     glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
                         b.set_active(!target);
@@ -360,9 +381,8 @@ fn read_night_state() -> TileState {
 }
 
 /// Caffeine state, inverted: Active = idle manager stopped. LoadState guards
-/// the "unit doesn't exist" case, where `is-active` would also say "inactive"
-/// and wrongly light the tile up.
-fn read_caffeine_state() -> TileState {
+/// Awake state: checks if swaypplet-idle is running.
+fn read_awake_state() -> TileState {
     match Command::new("systemctl")
         .args([
             "--user",
@@ -376,7 +396,7 @@ fn read_caffeine_state() -> TileState {
         .output()
     {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            log::warn!("systemctl not found; Caffeine toggle disabled");
+            log::warn!("systemctl not found; Awake toggle disabled");
             TileState::Unavailable
         }
         Err(e) => {
@@ -392,7 +412,7 @@ fn read_caffeine_state() -> TileState {
                     .to_string()
             };
             if prop("LoadState") != "loaded" {
-                log::warn!("swaypplet-idle.service not found; Caffeine toggle disabled");
+                log::warn!("swaypplet-idle.service not found; Awake toggle disabled");
                 TileState::Unavailable
             } else if prop("ActiveState") == "active" {
                 TileState::Inactive
@@ -402,3 +422,27 @@ fn read_caffeine_state() -> TileState {
         }
     }
 }
+
+/// Stay Lit state: checks sway tree for active idle inhibitors
+fn read_stay_lit_state() -> TileState {
+    match Command::new("swaymsg")
+        .args(["-t", "get_tree"])
+        .output()
+    {
+        Ok(out) => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            if text.contains("\"user\": \"focus\"") || text.contains("\"inhibit_idle\": true") {
+                TileState::Active
+            } else {
+                TileState::Inactive
+            }
+        }
+        Err(_) => TileState::Unavailable,
+    }
+}
+
+/// Clamshell state
+fn read_clamshell_state() -> TileState {
+    TileState::Inactive
+}
+
