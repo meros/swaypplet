@@ -118,7 +118,7 @@ pub fn tile_specs() -> Vec<TileSpec> {
             label: "Clamshell",
             tooltip_on: "Clamshell: lid-close sleep inhibited",
             tooltip_off: "Clamshell: off",
-            action: |_| true,
+            action: toggle_clamshell,
             read_state: read_clamshell_state,
             on_state: Some(crate::bar::hazards::set_clamshell),
         },
@@ -441,8 +441,64 @@ fn read_stay_lit_state() -> TileState {
     }
 }
 
-/// Clamshell state
-fn read_clamshell_state() -> TileState {
-    TileState::Inactive
+/// Clamshell inhibitor toggle: starts/stops a background sleep process under systemd-inhibit
+fn toggle_clamshell(on: bool) -> bool {
+    if on {
+        // Kill any existing instances first
+        let _ = Command::new("pkill").args(["-f", "swaypplet-clamshell-inhibit"]).status();
+        match Command::new("systemd-inhibit")
+            .args([
+                "--what=handle-lid-switch",
+                "--who=swaypplet",
+                "--why=Clamshell mode active",
+                "--mode=block",
+                "bash",
+                "-c",
+                "exec -a swaypplet-clamshell-inhibit sleep infinity",
+            ])
+            .spawn()
+        {
+            Ok(_) => {
+                log::info!("clamshell: inhibitor process spawned");
+                true
+            }
+            Err(e) => {
+                log::warn!("clamshell: failed to spawn systemd-inhibit: {e}");
+                false
+            }
+        }
+    } else {
+        let status = Command::new("pkill")
+            .args(["-f", "swaypplet-clamshell-inhibit"])
+            .status();
+        match status {
+            Ok(_) => {
+                log::info!("clamshell: inhibitor process killed");
+                true
+            }
+            Err(e) => {
+                log::warn!("clamshell: failed to kill inhibitor process: {e}");
+                false
+            }
+        }
+    }
 }
+
+/// Clamshell state: checks if our inhibitor is actively running
+fn read_clamshell_state() -> TileState {
+    match Command::new("pgrep")
+        .args(["-f", "swaypplet-clamshell-inhibit"])
+        .output()
+    {
+        Ok(out) => {
+            if out.status.success() && !out.stdout.is_empty() {
+                TileState::Active
+            } else {
+                TileState::Inactive
+            }
+        }
+        Err(_) => TileState::Unavailable,
+    }
+}
+
 
