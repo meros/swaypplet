@@ -7,14 +7,15 @@
 //! static — armed, not act-now — and appear-only: no motion beyond the
 //! structural reveal (P2).
 //!
-//! Three hazards ship now; failed-units is deferred (severable):
-//! - **Caffeine**: the idle manager is a systemd unit only knowable by
-//!   `systemctl` reads, so the lane subscribes to the Caffeine tile's
-//!   in-process path (widgets/tiles.rs `on_state`) instead of polling.
-//!   The hosted process builds the panel — and reads tile state — at
-//!   startup, so the initial state lands then; the standalone
-//!   `swaypplet bar` process has no panel and shows caffeine only from
-//!   the first toggle onward (accepted in the vision).
+//! Hazards shipping now; failed-units is deferred (severable):
+//! - **Session inhibitors** (Awake, Stay Lit, Clamshell): one glyph each,
+//!   driven off `crate::inhibit`'s observed state. That module owns the
+//!   readings and the wording; this lane only decides where the glyph
+//!   sits, so a fourth inhibitor arrives here for free. It is a push
+//!   path rather than a poll: whoever establishes a state publishes it
+//!   (the panel's tiles on toggle, `inhibit::prime` at startup), which
+//!   is also what fixed the standalone `swaypplet bar` process being
+//!   blind until the first toggle.
 //! - **Binding mode**: non-default sway modes off the existing IPC
 //!   subscription's `mode` event; the mode name lives in the tooltip.
 //! - **Microphone**: something is recording. The sound server pushes this
@@ -39,28 +40,8 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use crate::audio::AudioService;
-use crate::service::Observed;
+use crate::inhibit::{self, Inhibitor};
 use crate::sway_ipc::SwayService;
-
-// ── Hazard states (in-process, main thread) ────────────────────────────
-
-thread_local! {
-    static AWAKE: Observed<bool> = Observed::new(false);
-    static STAY_LIT: Observed<bool> = Observed::new(false);
-    static CLAMSHELL: Observed<bool> = Observed::new(false);
-}
-
-pub(crate) fn set_awake(armed: bool) {
-    AWAKE.with(|c| c.set_if_changed(armed));
-}
-
-pub(crate) fn set_stay_lit(armed: bool) {
-    STAY_LIT.with(|c| c.set_if_changed(armed));
-}
-
-pub(crate) fn set_clamshell(armed: bool) {
-    CLAMSHELL.with(|c| c.set_if_changed(armed));
-}
 
 // ── Widget ──────────────────────────────────────────────────────────────
 
@@ -71,17 +52,21 @@ pub fn build(sway: &Rc<SwayService>, audio: &Rc<AudioService>) -> gtk4::Box {
         .css_classes(["bar-hazards"])
         .build();
 
-    let (awake, awake_glyph) = hazard("󰅶");
-    awake_glyph.set_tooltip_text(Some("Awake: idle sleep suspended"));
-    lane.append(&awake);
-
-    let (stay_lit, stay_lit_glyph) = hazard("󰍹");
-    stay_lit_glyph.set_tooltip_text(Some("Stay Lit: screen blanking & lock inhibited"));
-    lane.append(&stay_lit);
-
-    let (clamshell, clamshell_glyph) = hazard("󰌢");
-    clamshell_glyph.set_tooltip_text(Some("Clamshell: lid-close sleep inhibited"));
-    lane.append(&clamshell);
+    for which in Inhibitor::ALL {
+        let (revealer, glyph) = hazard(which.icon());
+        glyph.set_tooltip_text(Some(which.tooltip_on()));
+        lane.append(&revealer);
+        inhibit::observed(which, |cell| {
+            revealer.set_reveal_child(cell.with(|armed| *armed));
+            cell.connect_change(move || {
+                inhibit::observed(which, |cell| {
+                    revealer.set_reveal_child(cell.with(|armed| *armed))
+                })
+            });
+        });
+    }
+    // A bar without a panel beside it never sees a toggle, so ask once.
+    inhibit::prime();
 
     let (mode, mode_glyph) = hazard("󰌌");
     lane.append(&mode);
@@ -96,33 +81,12 @@ pub fn build(sway: &Rc<SwayService>, audio: &Rc<AudioService>) -> gtk4::Box {
     crate::screenshot::record::RECORDING_OBSERVED.with(|r| {
         r.connect_change({
             let rec = rec.clone();
-            move || crate::screenshot::record::RECORDING_OBSERVED.with(|r| rec.set_reveal_child(r.with(|v| *v)))
+            move || {
+                crate::screenshot::record::RECORDING_OBSERVED
+                    .with(|r| rec.set_reveal_child(r.with(|v| *v)))
+            }
         });
         rec.set_reveal_child(r.with(|v| *v));
-    });
-
-    AWAKE.with(|c| {
-        c.connect_change({
-            let awake = awake.clone();
-            move || AWAKE.with(|c| awake.set_reveal_child(c.with(|v| *v)))
-        });
-        awake.set_reveal_child(c.with(|v| *v));
-    });
-
-    STAY_LIT.with(|c| {
-        c.connect_change({
-            let stay_lit = stay_lit.clone();
-            move || STAY_LIT.with(|c| stay_lit.set_reveal_child(c.with(|v| *v)))
-        });
-        stay_lit.set_reveal_child(c.with(|v| *v));
-    });
-
-    CLAMSHELL.with(|c| {
-        c.connect_change({
-            let clamshell = clamshell.clone();
-            move || CLAMSHELL.with(|c| clamshell.set_reveal_child(c.with(|v| *v)))
-        });
-        clamshell.set_reveal_child(c.with(|v| *v));
     });
 
     let apply_mic = {

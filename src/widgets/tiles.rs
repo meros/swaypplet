@@ -1,16 +1,25 @@
 //! Declarative quick-settings toggle tiles for the start-menu quick strip.
 //!
-//! Each tile is described once in [`tile_specs`]; a single [`build_tile`]
+//! Each tile is described once as a [`TileSpec`]; a single [`build_tile`]
 //! factory turns a spec into an optimistic toggle button with revert-on-failure
 //! and the `loading` CSS class. This replaces the per-toggle copy-pasted
 //! click-handler boilerplate that used to live in `header.rs`.
+//!
+//! A spec is presentation plus two function pointers, and that is the whole
+//! contract: this module knows how to *draw* a toggle and nothing about what
+//! any of them switch. The inhibitor tiles (Awake / Stay Lit / Clamshell) are
+//! generated from [`crate::inhibit`], which owns their wording, their actions
+//! and their state; Wi-Fi and Bluetooth delegate the same way to their own
+//! modules.
 
 use std::cell::RefCell;
 use std::process::Command;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gtk4::prelude::*;
 
+use crate::inhibit::{self, Inhibitor};
 use crate::notifications::store::NotificationStore;
 use crate::spawn;
 
@@ -23,8 +32,25 @@ pub enum TileState {
     Unavailable,
 }
 
+impl From<Option<bool>> for TileState {
+    /// `None` is "could not reach the authority", which is exactly
+    /// [`TileState::Unavailable`].
+    fn from(state: Option<bool>) -> Self {
+        match state {
+            Some(true) => TileState::Active,
+            Some(false) => TileState::Inactive,
+            None => TileState::Unavailable,
+        }
+    }
+}
+
 /// One tile: icon glyph, label, on/off tooltips, the async on/off action and
-/// the state reader. `action` and `read_state` run on a background thread.
+/// the state reader. `action` and `read_state` run on a background thread,
+/// hence `Arc<… + Send + Sync>`; `on_state` is main-thread only.
+///
+/// Cloning a spec is cheap (three `&'static str`s and three refcount bumps),
+/// which is what lets the panel keep one beside each button for refresh.
+#[derive(Clone)]
 pub struct TileSpec {
     pub icon: &'static str,
     pub label: &'static str,
@@ -32,97 +58,95 @@ pub struct TileSpec {
     pub tooltip_off: &'static str,
     /// Perform the toggle for the requested target state. Returns success.
     /// Runs on a background thread (blocking I/O allowed).
-    pub action: fn(bool) -> bool,
+    pub action: Arc<dyn Fn(bool) -> bool + Send + Sync>,
     /// Read current state. Runs on a background thread.
-    pub read_state: fn() -> TileState,
+    pub read_state: Arc<dyn Fn() -> TileState + Send + Sync>,
     /// Main-thread observer fired with each *established* state: every
     /// successful read and every successful toggle. Feeds in-process
     /// consumers (the bar's hazard lane) without them polling the tool.
-    pub on_state: Option<fn(bool)>,
+    pub on_state: Option<Rc<dyn Fn(bool)>>,
 }
 
-/// The declarative tile set for the quick strip: Wi-Fi, Bluetooth, DND,
-/// Night Light, Caffeine. DND is store-backed and handled specially by the
-/// panel; the rest drive external tools.
+/// Every tile the quick strip can show: Wi-Fi, Bluetooth, Night Light and
+/// the three session inhibitors. DND is store-backed and handled specially
+/// by the panel; the rest drive something outside this process.
 pub fn tile_specs() -> Vec<TileSpec> {
-    vec![
-        TileSpec {
-            icon: "󰤨",
-            label: "Wi-Fi",
-            tooltip_on: "Wi-Fi: enabled",
-            tooltip_off: "Wi-Fi: disabled",
-            action: |on| {
-                matches!(
-                    crate::widgets::network::set_wifi_radio(on),
-                    crate::widgets::network::NmResult::Success
-                )
-            },
-            read_state: read_wifi_state,
-            on_state: None,
-        },
-        TileSpec {
-            icon: "󰂯",
-            label: "Bluetooth",
-            tooltip_on: "Bluetooth: powered on",
-            tooltip_off: "Bluetooth: powered off",
-            action: |on| crate::widgets::bluez::set_powered(on).is_ok(),
-            read_state: read_bluetooth_state,
-            on_state: None,
-        },
-        TileSpec {
-            icon: "󰖔",
-            label: "Night Light",
-            tooltip_on: "Night Light: active",
-            tooltip_off: "Night Light: off",
-            action: |on| {
-                run_ok(Command::new("systemctl").args([
-                    "--user",
-                    if on { "start" } else { "stop" },
-                    "gammastep.service",
-                ]))
-            },
-            read_state: read_night_state,
-            on_state: None,
-        },
-        TileSpec {
-            icon: "󰅶",
-            label: "Awake",
-            tooltip_on: "Awake: idle sleep suspended (screen still locks)",
-            tooltip_off: "Awake: off",
-            action: |on| {
-                run_ok(Command::new("systemctl").args([
-                    "--user",
-                    if on { "stop" } else { "start" },
-                    "swaypplet-idle.service",
-                ]))
-            },
-            read_state: read_awake_state,
-            on_state: Some(crate::bar::hazards::set_awake),
-        },
-        TileSpec {
-            icon: "󰍹",
-            label: "Stay Lit",
-            tooltip_on: "Stay Lit: screen blanking & lock inhibited",
-            tooltip_off: "Stay Lit: off",
-            action: |on| {
-                run_ok(Command::new("swaymsg").args([
-                    if on { "inhibit_idle" } else { "inhibit_idle" },
-                    if on { "focus" } else { "none" },
-                ]))
-            },
-            read_state: read_stay_lit_state,
-            on_state: Some(crate::bar::hazards::set_stay_lit),
-        },
-        TileSpec {
-            icon: "󰌢",
-            label: "Clamshell",
-            tooltip_on: "Clamshell: lid-close sleep inhibited",
-            tooltip_off: "Clamshell: off",
-            action: toggle_clamshell,
-            read_state: read_clamshell_state,
-            on_state: Some(crate::bar::hazards::set_clamshell),
-        },
-    ]
+    let mut specs = vec![wifi_spec(), bluetooth_spec(), night_light_spec()];
+    specs.extend(Inhibitor::ALL.map(inhibitor_spec));
+    specs
+}
+
+/// The subset the panel's flight deck carries, in deck order. Built from the
+/// same constructors as [`tile_specs`] rather than indexed out of it — the
+/// deck used to reach in by position, and every tile added shifted the
+/// indices under it.
+pub fn deck_specs() -> Vec<TileSpec> {
+    let mut specs = vec![night_light_spec()];
+    specs.extend(Inhibitor::ALL.map(inhibitor_spec));
+    specs
+}
+
+fn wifi_spec() -> TileSpec {
+    TileSpec {
+        icon: "󰤨",
+        label: "Wi-Fi",
+        tooltip_on: "Wi-Fi: enabled",
+        tooltip_off: "Wi-Fi: disabled",
+        action: Arc::new(|on| {
+            matches!(
+                crate::widgets::network::set_wifi_radio(on),
+                crate::widgets::network::NmResult::Success
+            )
+        }),
+        read_state: Arc::new(read_wifi_state),
+        on_state: None,
+    }
+}
+
+fn bluetooth_spec() -> TileSpec {
+    TileSpec {
+        icon: "󰂯",
+        label: "Bluetooth",
+        tooltip_on: "Bluetooth: powered on",
+        tooltip_off: "Bluetooth: powered off",
+        action: Arc::new(|on| crate::widgets::bluez::set_powered(on).is_ok()),
+        read_state: Arc::new(read_bluetooth_state),
+        on_state: None,
+    }
+}
+
+fn night_light_spec() -> TileSpec {
+    TileSpec {
+        icon: "󰖔",
+        label: "Night Light",
+        tooltip_on: "Night Light: active",
+        tooltip_off: "Night Light: off",
+        action: Arc::new(|on| {
+            run_ok(Command::new("systemctl").args([
+                "--user",
+                if on { "start" } else { "stop" },
+                "gammastep.service",
+            ]))
+        }),
+        read_state: Arc::new(read_night_state),
+        on_state: None,
+    }
+}
+
+/// One tile per session inhibitor, all of it delegated: wording, action and
+/// reading come from [`crate::inhibit`], and the established state goes back
+/// there for the bar's hazard lane to observe. Adding a fourth inhibitor is
+/// a change in that module alone.
+fn inhibitor_spec(which: Inhibitor) -> TileSpec {
+    TileSpec {
+        icon: which.icon(),
+        label: which.label(),
+        tooltip_on: which.tooltip_on(),
+        tooltip_off: which.tooltip_off(),
+        action: Arc::new(move |on| which.arm(on)),
+        read_state: Arc::new(move || which.read().into()),
+        on_state: Some(Rc::new(move |armed| inhibit::publish(which, armed))),
+    }
 }
 
 /// Build a tile (vertical Box: toggle button + label) from a spec, wiring the
@@ -130,33 +154,31 @@ pub fn tile_specs() -> Vec<TileSpec> {
 pub fn build_tile(spec: &TileSpec) -> gtk4::ToggleButton {
     let btn = make_toggle(spec.icon, spec.label);
 
-    let action = spec.action;
-    let tooltip_on = spec.tooltip_on;
-    let tooltip_off = spec.tooltip_off;
-    let on_state = spec.on_state;
-
-    let label = spec.label;
+    let spec = spec.clone();
     let btn_h = btn.clone();
     btn.connect_clicked(move |_| {
         let target = btn_h.is_active();
+        let (label, tooltip_on, tooltip_off) = (spec.label, spec.tooltip_on, spec.tooltip_off);
         set_tooltip(&btn_h, target, tooltip_on, tooltip_off);
-        log::info!("tile[{label}]: toggle requested -> target: {target}");
+        log::info!("tile[{label}]: toggle requested — target {target}");
 
         btn_h.add_css_class("loading");
         let btn_done = btn_h.clone();
+        let action = spec.action.clone();
+        let on_state = spec.on_state.clone();
         spawn::spawn_work(
             move || action(target),
             move |success| {
                 btn_done.remove_css_class("loading");
                 if success {
-                    log::info!("tile[{label}]: toggle succeeded -> active: {target}");
+                    log::info!("tile[{label}]: now {target}");
                     // Established, not optimistic: a failed toggle never
                     // reaches in-process consumers.
                     if let Some(observe) = on_state {
                         observe(target);
                     }
                 } else {
-                    log::warn!("tile[{label}]: toggle failed, reverting in 2s");
+                    log::warn!("tile[{label}]: toggle failed — reverting in 2s");
                     let b = btn_done.clone();
                     glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
                         b.set_active(!target);
@@ -199,10 +221,9 @@ pub fn wrap_with_chevron(btn: &gtk4::ToggleButton) -> (gtk4::Overlay, gtk4::Butt
 /// Read the initial state for a tile (on a background thread) and apply it.
 pub fn init_tile_state(btn: &gtk4::ToggleButton, spec: &TileSpec) {
     let btn = btn.clone();
-    let read_state = spec.read_state;
-    let tooltip_on = spec.tooltip_on;
-    let tooltip_off = spec.tooltip_off;
-    let on_state = spec.on_state;
+    let read_state = spec.read_state.clone();
+    let (tooltip_on, tooltip_off) = (spec.tooltip_on, spec.tooltip_off);
+    let on_state = spec.on_state.clone();
     spawn::spawn_work(
         move || read_state(),
         move |state| {
@@ -379,143 +400,3 @@ fn read_night_state() -> TileState {
         }
     }
 }
-
-/// Caffeine state, inverted: Active = idle manager stopped. LoadState guards
-/// Awake state: checks if swaypplet-idle is running.
-fn read_awake_state() -> TileState {
-    match Command::new("systemctl")
-        .args([
-            "--user",
-            "show",
-            "-p",
-            "LoadState",
-            "-p",
-            "ActiveState",
-            "swaypplet-idle.service",
-        ])
-        .output()
-    {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            log::warn!("systemctl not found; Awake toggle disabled");
-            TileState::Unavailable
-        }
-        Err(e) => {
-            log::warn!("systemctl --user show swaypplet-idle.service failed: {e}");
-            TileState::Unavailable
-        }
-        Ok(out) => {
-            let text = String::from_utf8_lossy(&out.stdout);
-            let prop = |key: &str| {
-                text.lines()
-                    .find_map(|l| l.strip_prefix(key)?.strip_prefix('='))
-                    .unwrap_or("")
-                    .to_string()
-            };
-            if prop("LoadState") != "loaded" {
-                log::warn!("swaypplet-idle.service not found; Awake toggle disabled");
-                TileState::Unavailable
-            } else if prop("ActiveState") == "active" {
-                TileState::Inactive
-            } else {
-                TileState::Active
-            }
-        }
-    }
-}
-
-/// Stay Lit state: checks sway tree for active idle inhibitors
-fn read_stay_lit_state() -> TileState {
-    match Command::new("swaymsg")
-        .args(["-t", "get_tree"])
-        .output()
-    {
-        Ok(out) => {
-            let text = String::from_utf8_lossy(&out.stdout);
-            if text.contains("\"user\": \"focus\"") || text.contains("\"inhibit_idle\": true") {
-                TileState::Active
-            } else {
-                TileState::Inactive
-            }
-        }
-        Err(_) => TileState::Unavailable,
-    }
-}
-
-/// Clamshell inhibitor toggle: starts/stops a transient systemd user service with systemd-inhibit
-fn toggle_clamshell(on: bool) -> bool {
-    if on {
-        let status = Command::new("systemd-run")
-            .args([
-                "--user",
-                "--unit=swaypplet-clamshell-inhibit",
-                "systemd-inhibit",
-                "--what=handle-lid-switch",
-                "--who=swaypplet",
-                "--why=Clamshell mode active",
-                "--mode=block",
-                "sleep",
-                "infinity",
-            ])
-            .status();
-        match status {
-            Ok(st) if st.success() => {
-                log::info!("clamshell: transient inhibitor service started");
-                true
-            }
-            Ok(st) => {
-                log::warn!("clamshell: systemd-run exited with {st}");
-                false
-            }
-            Err(e) => {
-                log::warn!("clamshell: failed to spawn systemd-run: {e}");
-                false
-            }
-        }
-    } else {
-        let status = Command::new("systemctl")
-            .args([
-                "--user",
-                "stop",
-                "swaypplet-clamshell-inhibit.service",
-            ])
-            .status();
-        match status {
-            Ok(st) if st.success() => {
-                log::info!("clamshell: transient inhibitor service stopped");
-                true
-            }
-            Ok(st) => {
-                log::warn!("clamshell: systemctl stop exited with {st}");
-                false
-            }
-            Err(e) => {
-                log::warn!("clamshell: failed to execute systemctl stop: {e}");
-                false
-            }
-        }
-    }
-}
-
-/// Clamshell state: checks if swaypplet-clamshell-inhibit.service is actively running
-fn read_clamshell_state() -> TileState {
-    match Command::new("systemctl")
-        .args([
-            "--user",
-            "is-active",
-            "swaypplet-clamshell-inhibit.service",
-        ])
-        .output()
-    {
-        Ok(out) => {
-            if String::from_utf8_lossy(&out.stdout).trim() == "active" {
-                TileState::Active
-            } else {
-                TileState::Inactive
-            }
-        }
-        Err(_) => TileState::Unavailable,
-    }
-}
-
-
-

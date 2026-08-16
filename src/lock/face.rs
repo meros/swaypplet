@@ -27,10 +27,16 @@
 //! Deliberate locks are unaffected. A resume exists only because the machine
 //! slept, which on this host means the lid was shut; pressing the lock key and
 //! staying put produces neither a resume nor an arrival, so the screen stays
-//! locked until a password, a finger, or actually leaving and returning. The
-//! one gap is logind's 30 s holdoff after a resume, inside which a lid close
-//! does not suspend and so a lid open does not resume; that window falls back
-//! to presence, as it did before.
+//! locked until a password, a finger, or actually leaving and returning.
+//!
+//! A lid *opening* arms an attempt too, and for once that is not the same
+//! argument again. Two cases close the lid without a suspend behind it, and
+//! in both the resume edge above never comes: logind's 30 s holdoff after a
+//! resume, and Clamshell mode (`crate::inhibit`), where inhibiting the lid
+//! switch is the whole point. sway's `bindswitch lid:on` still locks and
+//! blanks in both, so without this the machine sits locked with the lid open
+//! and the one signal that should unlock it never fires. The lid edge is the
+//! arrival neither the sensor nor logind reports.
 //!
 //! Verification shells out to `howdy-verify <user>` (nixos repo,
 //! pkgs/howdy-verify), the one face-verification implementation on the system —
@@ -62,21 +68,15 @@ use std::time::{Duration, Instant};
 use crate::fp::EngineEvent;
 use crate::presence::{self, Event as PresenceEvent, Presence};
 
-/// Checks if the laptop lid is currently open via ACPI.
-fn is_lid_open() -> bool {
-    if let Ok(state) = std::fs::read_to_string("/proc/acpi/button/lid/LID/state") {
-        state.contains("open")
-    } else {
-        true
-    }
-}
-
-/// Resume and lid-open edges, as a channel this thread can drain on its tick.
+/// Resume edges from logind, as a channel this thread can drain on its tick.
 ///
-/// Arms when waking from sleep or when the laptop lid transitions from closed to open.
+/// One item per PrepareForSleep(true) -> PrepareForSleep(false) transition.
+/// The seed reading is deliberately not an edge: a locker spawned *by* the
+/// sleep transition starts with the system already going down, and treating
+/// that opening `true` as anything but a starting point would be the same
+/// mistake presence made.
 fn watch_resume() -> mpsc::Receiver<()> {
     let (tx, rx) = mpsc::channel();
-    let tx_sleep = tx.clone();
     crate::spawn::spawn_tokio_thread("lock-resume", async move {
         let conn = match zbus::Connection::system().await {
             Ok(c) => c,
@@ -92,29 +92,12 @@ fn watch_resume() -> mpsc::Receiver<()> {
             let now = *sleep_rx.borrow_and_update();
             // Only the wake half. Going *into* suspend must not arm anything:
             // the camera would open on a machine that is powering down.
-            if asleep && !now && tx_sleep.send(()).is_err() {
+            if asleep && !now && tx.send(()).is_err() {
                 return;
             }
             asleep = now;
         }
     });
-
-    // Also watch lid open transitions (for Clamshell where system does not sleep on lid close)
-    std::thread::spawn(move || {
-        let mut was_open = is_lid_open();
-        loop {
-            sleep(Duration::from_millis(250));
-            let now_open = is_lid_open();
-            if !was_open && now_open {
-                log::info!("face: lid opened — arming");
-                if tx.send(()).is_err() {
-                    return;
-                }
-            }
-            was_open = now_open;
-        }
-    });
-
     rx
 }
 
@@ -192,6 +175,7 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
     // about three reads a second, and every reader queued behind the others.
     let events = presence::subscribe();
     let resumes = watch_resume();
+    let lid = crate::lid::watch();
     // None until the first reading lands, so the opening state is a starting
     // point rather than an arrival — arming on it would run face unlock
     // against whoever locked the machine a moment ago.
@@ -235,18 +219,24 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
             None => {}
         }
 
-        // A resume outranks whatever presence last said. The lid was shut and
+        // A wake outranks whatever presence last said. The lid was shut and
         // is now open, which is an arrival however still the sensor reads, and
         // it resets the attempt budget for the same reason an arrival does:
         // this is a fresh approach to the machine, not the tail of the last
         // one. Drained after presence so the two cannot arm twice for one
-        // return.
-        let mut woke = false;
+        // return, and both sources collapse into one edge for the same
+        // reason: a lid open that also resumes must arm once, not twice.
+        let mut woke = None;
         while resumes.try_recv().is_ok() {
-            woke = true;
+            woke = Some("resumed from sleep");
         }
-        if woke {
-            log::info!("face: resumed from sleep — arming");
+        while let Ok(open) = lid.try_recv() {
+            if open {
+                woke = Some("lid opened");
+            }
+        }
+        if let Some(why) = woke {
+            log::info!("face: {why} — arming");
             attempts = 0;
             transient = 0;
             armed = Some(Instant::now());

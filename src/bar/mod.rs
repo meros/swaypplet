@@ -18,8 +18,7 @@ mod battery;
 mod board;
 mod clock;
 mod decision;
-// pub(crate): widgets/tiles.rs feeds the caffeine hazard through it.
-pub(crate) mod hazards;
+mod hazards;
 mod media;
 mod popover;
 mod presence;

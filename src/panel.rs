@@ -225,18 +225,11 @@ impl Panel {
         // ── Top Telemetry Ribbon ─────────────────────────────────────────────
         let telemetry_ribbon = build_telemetry_ribbon(&deck_stack, &audio, &brightness, &store);
 
-        // ── Specs & Toggle Tiles ─────────────────────────────────────────────
-        let specs = tiles::tile_specs(); // [wifi, bluetooth, night, caffeine]
-        let mut tile_pairs: Vec<(gtk4::ToggleButton, tiles::TileSpec)> = Vec::new();
-
         // ── Bottom Action Flight Deck ─────────────────────────────────────────
-        let flight_deck = build_flight_deck(
-            &window,
-            &store,
-            &specs,
-            &mut tile_pairs,
-            &deck_stack,
-        );
+        // Each deck tile is kept beside its spec so `refresh` can re-read it
+        // when the menu opens.
+        let mut tile_pairs: Vec<(gtk4::ToggleButton, tiles::TileSpec)> = Vec::new();
+        let flight_deck = build_flight_deck(&window, &store, &mut tile_pairs, &deck_stack);
 
         // ── Assemble Content ─────────────────────────────────────────────────
         let content = gtk4::Box::builder()
@@ -664,7 +657,6 @@ fn build_telemetry_ribbon(
 fn build_flight_deck(
     window: &gtk4::Window,
     store: &Rc<RefCell<NotificationStore>>,
-    specs: &[tiles::TileSpec],
     tile_pairs: &mut Vec<(gtk4::ToggleButton, tiles::TileSpec)>,
     deck_stack: &gtk4::Stack,
 ) -> gtk4::Box {
@@ -681,33 +673,14 @@ fn build_flight_deck(
         .spacing(6)
         .build();
 
-    // Night Light (specs[2])
-    let night_btn = tiles::build_tile(&specs[2]);
-    tiles::init_tile_state(&night_btn, &specs[2]);
-    night_btn.add_css_class("deck-tile-btn");
-    tile_pairs.push((night_btn.clone(), copy_spec(&specs[2])));
-    left_group.append(&night_btn);
-
-    // Awake (specs[3])
-    let awake_btn = tiles::build_tile(&specs[3]);
-    tiles::init_tile_state(&awake_btn, &specs[3]);
-    awake_btn.add_css_class("deck-tile-btn");
-    tile_pairs.push((awake_btn.clone(), copy_spec(&specs[3])));
-    left_group.append(&awake_btn);
-
-    // Stay Lit (specs[4])
-    let stay_lit_btn = tiles::build_tile(&specs[4]);
-    tiles::init_tile_state(&stay_lit_btn, &specs[4]);
-    stay_lit_btn.add_css_class("deck-tile-btn");
-    tile_pairs.push((stay_lit_btn.clone(), copy_spec(&specs[4])));
-    left_group.append(&stay_lit_btn);
-
-    // Clamshell (specs[5])
-    let clamshell_btn = tiles::build_tile(&specs[5]);
-    tiles::init_tile_state(&clamshell_btn, &specs[5]);
-    clamshell_btn.add_css_class("deck-tile-btn");
-    tile_pairs.push((clamshell_btn.clone(), copy_spec(&specs[5])));
-    left_group.append(&clamshell_btn);
+    // Night Light + the session inhibitors, in the order tiles.rs gives them.
+    for spec in tiles::deck_specs() {
+        let btn = tiles::build_tile(&spec);
+        tiles::init_tile_state(&btn, &spec);
+        btn.add_css_class("deck-tile-btn");
+        tile_pairs.push((btn.clone(), spec));
+        left_group.append(&btn);
+    }
 
     // DND
     let dnd_btn = tiles::build_dnd_tile(store.clone());
@@ -763,20 +736,6 @@ fn build_flight_deck(
     deck.append(&power::build_session_row());
 
     deck
-}
-
-/// `TileSpec` holds only `Copy` fields (str slices + fn pointers); duplicate one
-/// cheaply to keep a copy alongside its button for refresh.
-fn copy_spec(spec: &tiles::TileSpec) -> tiles::TileSpec {
-    tiles::TileSpec {
-        icon: spec.icon,
-        label: spec.label,
-        tooltip_on: spec.tooltip_on,
-        tooltip_off: spec.tooltip_off,
-        action: spec.action,
-        read_state: spec.read_state,
-        on_state: spec.on_state,
-    }
 }
 
 /// A rail icon button that hides the menu instantly (no exit wipe — the
