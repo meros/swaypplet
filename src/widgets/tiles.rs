@@ -441,57 +441,73 @@ fn read_stay_lit_state() -> TileState {
     }
 }
 
-/// Clamshell inhibitor toggle: starts/stops a background sleep process under systemd-inhibit
+/// Clamshell inhibitor toggle: starts/stops a transient systemd user service with systemd-inhibit
 fn toggle_clamshell(on: bool) -> bool {
     if on {
-        // Kill any existing instances first
-        let _ = Command::new("pkill").args(["-f", "swaypplet-clamshell-inhibit"]).status();
-        match Command::new("systemd-inhibit")
+        let status = Command::new("systemd-run")
             .args([
+                "--user",
+                "--unit=swaypplet-clamshell-inhibit",
+                "systemd-inhibit",
                 "--what=handle-lid-switch",
                 "--who=swaypplet",
                 "--why=Clamshell mode active",
                 "--mode=block",
-                "bash",
-                "-c",
-                "exec -a swaypplet-clamshell-inhibit sleep infinity",
+                "sleep",
+                "infinity",
             ])
-            .spawn()
-        {
-            Ok(_) => {
-                log::info!("clamshell: inhibitor process spawned");
+            .status();
+        match status {
+            Ok(st) if st.success() => {
+                log::info!("clamshell: transient inhibitor service started");
                 true
             }
+            Ok(st) => {
+                log::warn!("clamshell: systemd-run exited with {st}");
+                false
+            }
             Err(e) => {
-                log::warn!("clamshell: failed to spawn systemd-inhibit: {e}");
+                log::warn!("clamshell: failed to spawn systemd-run: {e}");
                 false
             }
         }
     } else {
-        let status = Command::new("pkill")
-            .args(["-f", "swaypplet-clamshell-inhibit"])
+        let status = Command::new("systemctl")
+            .args([
+                "--user",
+                "stop",
+                "swaypplet-clamshell-inhibit.service",
+            ])
             .status();
         match status {
-            Ok(_) => {
-                log::info!("clamshell: inhibitor process killed");
+            Ok(st) if st.success() => {
+                log::info!("clamshell: transient inhibitor service stopped");
                 true
             }
+            Ok(st) => {
+                log::warn!("clamshell: systemctl stop exited with {st}");
+                false
+            }
             Err(e) => {
-                log::warn!("clamshell: failed to kill inhibitor process: {e}");
+                log::warn!("clamshell: failed to execute systemctl stop: {e}");
                 false
             }
         }
     }
 }
 
-/// Clamshell state: checks if our inhibitor is actively running
+/// Clamshell state: checks if swaypplet-clamshell-inhibit.service is actively running
 fn read_clamshell_state() -> TileState {
-    match Command::new("pgrep")
-        .args(["-f", "swaypplet-clamshell-inhibit"])
+    match Command::new("systemctl")
+        .args([
+            "--user",
+            "is-active",
+            "swaypplet-clamshell-inhibit.service",
+        ])
         .output()
     {
         Ok(out) => {
-            if out.status.success() && !out.stdout.is_empty() {
+            if String::from_utf8_lossy(&out.stdout).trim() == "active" {
                 TileState::Active
             } else {
                 TileState::Inactive
@@ -500,5 +516,6 @@ fn read_clamshell_state() -> TileState {
         Err(_) => TileState::Unavailable,
     }
 }
+
 
 
