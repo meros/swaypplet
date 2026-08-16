@@ -231,14 +231,26 @@ pub fn run() -> ! {
                 }
                 outputs.power("presence.back", Power::On);
             } else {
-                log::info!("presence: user gone — locking");
-                ensure_locked(
-                    &tx,
-                    &mut locker_active,
-                    &mut locker_confirmed,
-                    &mut lock_reason,
-                    "presence",
-                );
+                // Check if Stay Lit / idle inhibitor is active before locking on absence
+                let inhibited = match Command::new("swaymsg").args(["-t", "get_tree"]).output() {
+                    Ok(out) => {
+                        let text = String::from_utf8_lossy(&out.stdout);
+                        text.contains("\"user\": \"focus\"") || text.contains("\"inhibit_idle\": true")
+                    }
+                    Err(_) => false,
+                };
+                if inhibited {
+                    log::info!("presence: user gone — but idle inhibited (Stay Lit); skip locking");
+                } else {
+                    log::info!("presence: user gone — locking");
+                    ensure_locked(
+                        &tx,
+                        &mut locker_active,
+                        &mut locker_confirmed,
+                        &mut lock_reason,
+                        "presence",
+                    );
+                }
             }
         }
 
