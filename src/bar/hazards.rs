@@ -42,17 +42,24 @@ use crate::audio::AudioService;
 use crate::service::Observed;
 use crate::sway_ipc::SwayService;
 
-// ── Caffeine state (in-process, main thread) ────────────────────────────
+// ── Hazard states (in-process, main thread) ────────────────────────────
 
 thread_local! {
-    /// Fed by the Caffeine tile's read/toggle path; main-thread only,
-    /// like every widget consumer.
-    static CAFFEINE: Observed<bool> = Observed::new(false);
+    static AWAKE: Observed<bool> = Observed::new(false);
+    static STAY_LIT: Observed<bool> = Observed::new(false);
+    static CLAMSHELL: Observed<bool> = Observed::new(false);
 }
 
-/// Publish the Caffeine tile's established state (widgets/tiles.rs).
-pub(crate) fn set_caffeine(armed: bool) {
-    CAFFEINE.with(|c| c.set_if_changed(armed));
+pub(crate) fn set_awake(armed: bool) {
+    AWAKE.with(|c| c.set_if_changed(armed));
+}
+
+pub(crate) fn set_stay_lit(armed: bool) {
+    STAY_LIT.with(|c| c.set_if_changed(armed));
+}
+
+pub(crate) fn set_clamshell(armed: bool) {
+    CLAMSHELL.with(|c| c.set_if_changed(armed));
 }
 
 // ── Widget ──────────────────────────────────────────────────────────────
@@ -64,9 +71,18 @@ pub fn build(sway: &Rc<SwayService>, audio: &Rc<AudioService>) -> gtk4::Box {
         .css_classes(["bar-hazards"])
         .build();
 
-    let (caffeine, caffeine_glyph) = hazard("󰅶");
-    caffeine_glyph.set_tooltip_text(Some("Caffeine: idle lock and screen blank suspended"));
-    lane.append(&caffeine);
+    let (awake, awake_glyph) = hazard("󰅶");
+    awake_glyph.set_tooltip_text(Some("Awake: idle sleep suspended"));
+    lane.append(&awake);
+
+    let (stay_lit, stay_lit_glyph) = hazard("󰍹");
+    stay_lit_glyph.set_tooltip_text(Some("Stay Lit: screen blanking & lock inhibited"));
+    lane.append(&stay_lit);
+
+    let (clamshell, clamshell_glyph) = hazard("󰌢");
+    clamshell_glyph.set_tooltip_text(Some("Clamshell: lid-close sleep inhibited"));
+    lane.append(&clamshell);
+
     let (mode, mode_glyph) = hazard("󰌌");
     lane.append(&mode);
     let (mic, mic_glyph) = hazard("󰍬");
@@ -85,14 +101,28 @@ pub fn build(sway: &Rc<SwayService>, audio: &Rc<AudioService>) -> gtk4::Box {
         rec.set_reveal_child(r.with(|v| *v));
     });
 
-    // Leftover observers after an output unplug paint unmapped widgets —
-    // same leak-tolerant story as board.rs.
-    CAFFEINE.with(|c| {
+    AWAKE.with(|c| {
         c.connect_change({
-            let caffeine = caffeine.clone();
-            move || CAFFEINE.with(|c| caffeine.set_reveal_child(c.with(|v| *v)))
+            let awake = awake.clone();
+            move || AWAKE.with(|c| awake.set_reveal_child(c.with(|v| *v)))
         });
-        caffeine.set_reveal_child(c.with(|v| *v));
+        awake.set_reveal_child(c.with(|v| *v));
+    });
+
+    STAY_LIT.with(|c| {
+        c.connect_change({
+            let stay_lit = stay_lit.clone();
+            move || STAY_LIT.with(|c| stay_lit.set_reveal_child(c.with(|v| *v)))
+        });
+        stay_lit.set_reveal_child(c.with(|v| *v));
+    });
+
+    CLAMSHELL.with(|c| {
+        c.connect_change({
+            let clamshell = clamshell.clone();
+            move || CLAMSHELL.with(|c| clamshell.set_reveal_child(c.with(|v| *v)))
+        });
+        clamshell.set_reveal_child(c.with(|v| *v));
     });
 
     let apply_mic = {
