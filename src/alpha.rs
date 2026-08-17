@@ -24,10 +24,13 @@
 //! widget-side fade.
 
 use std::cell::Cell;
+use std::rc::Rc;
 
 use gdk4_wayland::prelude::*;
+use gtk4::glib;
 use gtk4::prelude::*;
 use wayland_client::protocol::wl_registry;
+use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, delegate_noop};
 use wayland_protocols::wp::alpha_modifier::v1::client::{
     wp_alpha_modifier_surface_v1::WpAlphaModifierSurfaceV1, wp_alpha_modifier_v1::WpAlphaModifierV1,
@@ -37,11 +40,44 @@ use wayland_protocols::wp::alpha_modifier::v1::client::{
 const OPAQUE: u32 = u32::MAX;
 
 /// One surface's alpha, owned for as long as the caller keeps this.
+///
+/// # Why this tracks the window and not just the surface
+///
+/// `wl_surface` here is GDK's object, borrowed by pointer. wayland-rs did not
+/// create it, so it has no liveness cell for it
+/// (`wayland-backend`'s `ObjectId::from_ptr` stores `alive: None` for a proxy
+/// it does not manage, and `is_alive()` answers `true` for those
+/// unconditionally). Once GDK unrealizes the window, libwayland frees the
+/// proxy and every handle here still reports it healthy — so a `commit()`
+/// walks freed memory. That is not theoretical: it read a recycled
+/// `wl_proxy`, took `interface->methods` as NULL and faulted at 0x98 inside
+/// `wl_proxy_marshal_array_flags`, taking the panel down with SIGSEGV.
+///
+/// So the window is the authority on whether this handle may still speak.
+/// [`SurfaceAlpha::is_valid`] asks it twice over: an `unrealize` hook fires
+/// the moment GDK takes the surface down, and the id is compared against the
+/// window's current one, which catches a surface swapped out while nobody was
+/// listening.
 pub struct SurfaceAlpha {
     surface: WpAlphaModifierSurfaceV1,
-    wl_surface: wayland_client::protocol::wl_surface::WlSurface,
+    wl_surface: WlSurface,
+    /// Weak: the window owns the `Reveal` that owns this.
+    window: glib::WeakRef<gtk4::Window>,
+    /// Set by the `unrealize` hook below, and never cleared — a re-realized
+    /// window needs a fresh handle bound to its fresh surface, not this one.
+    dead: Rc<Cell<bool>>,
+    hook: Cell<Option<glib::SignalHandlerId>>,
     conn: Connection,
     last: Cell<u32>,
+}
+
+/// The window's Wayland surface as GDK holds it *right now*.
+fn current_wl_surface(window: &gtk4::Window) -> Option<WlSurface> {
+    window
+        .surface()?
+        .downcast::<gdk4_wayland::WaylandSurface>()
+        .ok()?
+        .wl_surface()
 }
 
 impl SurfaceAlpha {
@@ -49,11 +85,7 @@ impl SurfaceAlpha {
     /// the surface is not realized yet, or the compositor does not offer the
     /// protocol.
     pub fn attach(window: &gtk4::Window) -> Option<Self> {
-        let surface = window.surface()?;
-        let wl_surface = surface
-            .downcast::<gdk4_wayland::WaylandSurface>()
-            .ok()?
-            .wl_surface()?;
+        let wl_surface = current_wl_surface(window)?;
         let conn = Connection::from_backend(wl_surface.backend().upgrade()?);
         let manager = manager(&conn)?;
 
@@ -63,12 +95,36 @@ impl SurfaceAlpha {
         let qh = queue.handle();
         let alpha = manager.get_surface(&wl_surface, &qh, ());
         let _ = queue.flush();
+
+        // GDK frees the surface during unrealize, so this has to land before
+        // it happens rather than be noticed after.
+        let dead = Rc::new(Cell::new(false));
+        let hook = window.connect_unrealize({
+            let dead = dead.clone();
+            move |_| dead.set(true)
+        });
+
         Some(SurfaceAlpha {
             surface: alpha,
             wl_surface,
+            window: window.downgrade(),
+            dead,
+            hook: Cell::new(Some(hook)),
             conn,
             last: Cell::new(OPAQUE),
         })
+    }
+
+    /// Whether the surface this handle was bound to is still the window's
+    /// own. `false` means every request on it — the destructor included —
+    /// would touch a freed proxy, so the handle stays silent for good.
+    pub fn is_valid(&self) -> bool {
+        !self.dead.get()
+            && self
+                .window
+                .upgrade()
+                .and_then(|w| current_wl_surface(&w))
+                .is_some_and(|live| live.id() == self.wl_surface.id())
     }
 
     /// The multiplier currently in effect.
@@ -89,6 +145,11 @@ impl SurfaceAlpha {
     /// it, atomically and at the right size. Callers ask for that commit with
     /// `queue_draw`.
     pub fn set_pending(&self, alpha: f64) {
+        // The one gate. `set` reaches the socket only through here, so a
+        // stale handle cannot marshal on either object.
+        if !self.is_valid() {
+            return;
+        }
         let v = (alpha.clamp(0.0, 1.0) * f64::from(OPAQUE)).round() as u32;
         if v == self.last.get() {
             return;
@@ -127,7 +188,16 @@ impl Drop for SurfaceAlpha {
         //
         // Owners are expected to drop this first (GlassSurface does); the
         // check is what keeps a path that forgets from killing the process.
-        if !self.wl_surface.is_alive() {
+        //
+        // `wl_surface.is_alive()` used to be that check and never fired: the
+        // surface is GDK's, so wayland-rs has no liveness cell for it and
+        // answers `true` forever. See the type's docs.
+        if let Some(window) = self.window.upgrade()
+            && let Some(hook) = self.hook.take()
+        {
+            window.disconnect(hook);
+        }
+        if !self.is_valid() {
             return;
         }
         // destroy() is "equivalent to set_multiplier with a value of

@@ -345,7 +345,17 @@ impl Reveal {
         // lands a frame or two into the fade — inside the GLASS_MS tint
         // lead (see set_layer_blur).
         inner.window.set_visible(true);
-        if inner.alpha.borrow().is_none() {
+        // Rebind when the handle has nothing left to speak to. GDK builds a
+        // new `wl_surface` for a window it re-realizes, and an alpha handle
+        // is bound to the surface it was made for, not to the window — so a
+        // surface that came back needs a new one or the material never fades
+        // again (and, before `is_valid`, took the process down instead).
+        let rebind = inner
+            .alpha
+            .borrow()
+            .as_ref()
+            .is_none_or(|alpha| !alpha.is_valid());
+        if rebind {
             *inner.alpha.borrow_mut() = crate::alpha::SurfaceAlpha::attach(&inner.window);
         }
         if inner.window.is_layer_window() {
