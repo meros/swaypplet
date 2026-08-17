@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use gio::prelude::*;
 use gtk4::Application;
+use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
@@ -20,6 +21,9 @@ use crate::switcher::Switcher;
 use crate::theme;
 
 const APP_ID: &str = "dev.swaypplet.panel";
+
+/// The unit that owns the panel process. Nothing else may start one.
+const PANEL_UNIT: &str = "swaypplet.service";
 
 /// Pid file lives in the per-user runtime dir (mode 0700), so no other user
 /// can forge or clobber it. The /tmp fallback matches the wrapper scripts'
@@ -59,7 +63,75 @@ struct AppState {
     _bar: Option<Rc<BarManager>>,
 }
 
+/// Does something already own [`APP_ID`] on the session bus?
+///
+/// Asked over the bus rather than by registering our own `GApplication`,
+/// because registering is not a question: the first process to ask *becomes*
+/// the owner, which is the whole problem below. On any error this answers
+/// "yes" — a client that cannot reach the bus should fail the way it always
+/// did, not start a second panel.
+fn panel_listening() -> bool {
+    let Ok(bus) = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE) else {
+        return true;
+    };
+    let reply = bus.call_sync(
+        Some("org.freedesktop.DBus"),
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameHasOwner",
+        Some(&(APP_ID,).to_variant()),
+        Some(glib::VariantTy::new("(b)").unwrap()),
+        gio::DBusCallFlags::NONE,
+        1000,
+        gio::Cancellable::NONE,
+    );
+    match reply {
+        Ok(reply) => reply.child_value(0).get::<bool>().unwrap_or(true),
+        Err(e) => {
+            log::warn!("NameHasOwner({APP_ID}) failed: {e}");
+            true
+        }
+    }
+}
+
+/// A subcommand is a request to the running shell, never a way to start one.
+///
+/// `GApplication`'s default is the opposite: the first process to register
+/// becomes the primary instance, so `swaypplet keybinds show` with no panel
+/// up quietly *became* the panel. Everything downstream of that went wrong at
+/// once — the shell ran outside `swaypplet.service` with its logs sent to the
+/// caller's /dev/null; the unit's own restart found the bus name taken,
+/// dispatched as a remote instance and exited 0, so systemd reported
+/// `inactive` while a panel was on screen; and the Super-hold watcher that
+/// had run the client waits for it to return, so it never read another key
+/// and the sheet stayed up until the process was killed.
+///
+/// So a client that finds nobody home asks systemd for the panel and leaves.
+/// The keypress that prompted it is dropped — the next one lands on a real
+/// panel, which is the cheap half of the trade.
+fn defer_to_service() -> bool {
+    if panel_listening() {
+        return false;
+    }
+    log::warn!("no panel owns {APP_ID}; starting {PANEL_UNIT} rather than becoming one");
+    // --no-block: nothing here waits on the unit, and the caller may be a
+    // watcher loop that must get its thread back.
+    let started = std::process::Command::new("systemctl")
+        .args(["--user", "start", "--no-block", PANEL_UNIT])
+        .status();
+    if let Err(e) = started {
+        log::warn!("could not start {PANEL_UNIT}: {e}");
+    }
+    true
+}
+
 pub fn run() {
+    // Only the bare `swaypplet` invocation — the unit's own ExecStart — is
+    // allowed to be the panel.
+    if std::env::args().nth(1).is_some() && defer_to_service() {
+        return;
+    }
+
     let app = Application::builder()
         .application_id(APP_ID)
         .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE)
