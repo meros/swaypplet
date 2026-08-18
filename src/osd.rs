@@ -417,7 +417,7 @@ impl Osd {
         pending.level = Some(target);
 
         if let Some(id) = pending.settle.take() {
-            id.remove();
+            crate::spawn::remove_source(id);
         }
         let slot = self.pending.clone();
         let osd = self.clone();
@@ -563,7 +563,7 @@ impl Osd {
 
         // Cancel previous timeout
         if let Some(id) = self.timeout_id.borrow_mut().take() {
-            id.remove();
+            crate::spawn::remove_source(id);
         }
 
         // Auto-hide after timeout: fade out, then unmap (Reveal hides the

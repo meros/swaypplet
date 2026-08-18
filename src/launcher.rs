@@ -208,7 +208,7 @@ impl LauncherView {
             let query = entry.text().to_string();
 
             if let Some(id) = debounce_id.borrow_mut().take() {
-                id.remove();
+                crate::spawn::remove_source(id);
             }
 
             let results_box_c = results_box.clone();

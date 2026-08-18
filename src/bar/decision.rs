@@ -380,7 +380,7 @@ impl DecisionSlot {
         }
         inner.revealer.set_reveal_child(true);
         if let Some(id) = inner.decay.borrow_mut().take() {
-            id.remove();
+            crate::spawn::remove_source(id);
         }
         let slot = self.clone();
         let id = glib::timeout_add_local_once(Duration::from_millis(OSD_DECAY_MS), move || {

@@ -662,7 +662,7 @@ impl Keybinds {
         self.pending_show.set(false);
         self.held.set(false);
         if let Some(id) = self.hold_timer.replace(None) {
-            id.remove();
+            crate::spawn::remove_source(id);
         }
         self.reveal.hide();
     }

@@ -63,7 +63,7 @@ type SourceHandle = Rc<Cell<Option<glib::SourceId>>>;
 
 fn cancel_fd_source(handle: &SourceHandle) {
     if let Some(id) = handle.take() {
-        id.remove();
+        crate::spawn::remove_source(id);
     }
 }
 
