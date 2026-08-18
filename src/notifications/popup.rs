@@ -442,7 +442,7 @@ fn sync_keyboard_mode(st: &Rc<RefCell<State>>) {
 
 fn cancel_timer(timer: &mut Timer) {
     if let Timer::Running { source, .. } = std::mem::replace(timer, Timer::None) {
-        source.remove();
+        crate::spawn::remove_source(source);
     }
 }
 
@@ -499,7 +499,7 @@ fn pause_timers(st: &Rc<RefCell<State>>) {
             if let Timer::Running { source, deadline } =
                 std::mem::replace(&mut card.timer, Timer::None)
             {
-                source.remove();
+                crate::spawn::remove_source(source);
                 card.timer = Timer::Paused {
                     remaining: deadline.saturating_duration_since(now),
                 };

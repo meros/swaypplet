@@ -56,3 +56,17 @@ pub fn poll_channel<T: 'static>(rx: Receiver<T>, on_done: impl FnOnce(T) + 'stat
         Err(_) => {} // sender dropped
     }
 }
+
+/// Remove a glib source, tolerating one that has already ended itself.
+///
+/// `glib::SourceId::remove` unwraps the `g_source_remove` result, so removing a
+/// source that already returned `ControlFlow::Break` panics. Such removals run
+/// inside a glib trampoline, where a panic cannot unwind: glib turns it into
+/// "panic in a function that cannot unwind" and the process aborts. A source
+/// that ended on its own is a normal race, so look it up first and destroy it
+/// only if it is still attached.
+pub fn remove_source(id: glib::SourceId) {
+    if let Some(source) = glib::MainContext::default().find_source_by_id(&id) {
+        source.destroy();
+    }
+}

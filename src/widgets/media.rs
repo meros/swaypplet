@@ -124,11 +124,20 @@ struct Widgets {
     time_label: gtk4::Label,
 }
 
+/// Cancel flag for the running progress timer.
+///
+/// Only the flag is kept, never the timer's `SourceId`. The timer can end
+/// itself (it returns `Break` once the flag is set, or once a position read
+/// fails), which would leave a stored id dangling; removing that id later
+/// panics inside a glib trampoline and aborts the process. Setting the flag
+/// instead lets the timer retire itself on its next tick.
+type ProgressTimer = Rc<RefCell<Option<Rc<std::cell::Cell<bool>>>>>;
+
 pub struct MediaSection {
     root: gtk4::Box,
     widgets: Rc<Widgets>,
     state: Rc<RefCell<Option<MediaState>>>,
-    progress_timer: Rc<RefCell<Option<(glib::SourceId, Rc<std::cell::Cell<bool>>)>>>,
+    progress_timer: ProgressTimer,
 }
 
 impl MediaSection {
@@ -287,8 +296,7 @@ impl MediaSection {
         });
 
         let state: Rc<RefCell<Option<MediaState>>> = Rc::new(RefCell::new(None));
-        let progress_timer: Rc<RefCell<Option<(glib::SourceId, Rc<std::cell::Cell<bool>>)>>> =
-            Rc::new(RefCell::new(None));
+        let progress_timer: ProgressTimer = Rc::new(RefCell::new(None));
 
         // ── Button signals ────────────────────────────────────────────────
         {
@@ -353,7 +361,7 @@ impl MediaSection {
         root: gtk4::Box,
         w: Rc<Widgets>,
         state: Rc<RefCell<Option<MediaState>>>,
-        progress_timer: Rc<RefCell<Option<(glib::SourceId, Rc<std::cell::Cell<bool>>)>>>,
+        progress_timer: ProgressTimer,
     ) {
         spawn_work(read_state, move |new_state| {
             Self::apply_state(&root, &w, &new_state, &progress_timer);
@@ -367,7 +375,7 @@ impl MediaSection {
         root: gtk4::Box,
         w: Rc<Widgets>,
         state: Rc<RefCell<Option<MediaState>>>,
-        progress_timer: Rc<RefCell<Option<(glib::SourceId, Rc<std::cell::Cell<bool>>)>>>,
+        progress_timer: ProgressTimer,
     ) {
         spawn_work(
             move || {
@@ -385,15 +393,14 @@ impl MediaSection {
         root: &gtk4::Box,
         w: &Rc<Widgets>,
         state: &Option<MediaState>,
-        progress_timer: &Rc<RefCell<Option<(glib::SourceId, Rc<std::cell::Cell<bool>>)>>>,
+        progress_timer: &ProgressTimer,
     ) {
-        // Cancel existing progress timer. Mark it cancelled first so any
-        // in-flight spawn_work callback from the old timer (already
-        // dispatched to the background thread) drops its stale result
+        // Cancel the existing progress timer. The flag both retires the timer
+        // on its next tick and makes any in-flight spawn_work callback from it
+        // (already dispatched to the background thread) drop its stale result
         // instead of overwriting the new track's just-applied state.
-        if let Some((id, cancelled)) = progress_timer.borrow_mut().take() {
+        if let Some(cancelled) = progress_timer.borrow_mut().take() {
             cancelled.set(true);
-            id.remove();
         }
 
         match state {
@@ -456,40 +463,37 @@ impl MediaSection {
                         let len_c = len;
                         let cancelled = Rc::new(std::cell::Cell::new(false));
                         let cancelled_c = cancelled.clone();
-                        let id = glib::timeout_add_local(
-                            std::time::Duration::from_millis(500),
-                            move || {
-                                if cancelled_c.get() {
-                                    return glib::ControlFlow::Break;
-                                }
-                                let w_inner = w_c.clone();
-                                let cancelled_inner = cancelled_c.clone();
-                                spawn_work(
-                                    || playerctl(&["position"]).and_then(|s| s.parse::<f64>().ok()),
-                                    move |pos| {
-                                        // A track change since this was dispatched marks
-                                        // `cancelled`; drop the stale result rather than
-                                        // applying it over the new track's state.
-                                        if cancelled_inner.get() {
-                                            return;
-                                        }
-                                        if let Some(pos) = pos {
-                                            let frac = (pos / len_c).clamp(0.0, 1.0);
-                                            w_inner.progress_bar.set_fraction(frac);
-                                            w_inner.time_label.set_label(&format!(
-                                                "{} / {}",
-                                                format_time(pos),
-                                                format_time(len_c)
-                                            ));
-                                        } else {
-                                            cancelled_inner.set(true);
-                                        }
-                                    },
-                                );
-                                glib::ControlFlow::Continue
-                            },
-                        );
-                        *progress_timer.borrow_mut() = Some((id, cancelled));
+                        glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+                            if cancelled_c.get() {
+                                return glib::ControlFlow::Break;
+                            }
+                            let w_inner = w_c.clone();
+                            let cancelled_inner = cancelled_c.clone();
+                            spawn_work(
+                                || playerctl(&["position"]).and_then(|s| s.parse::<f64>().ok()),
+                                move |pos| {
+                                    // A track change since this was dispatched marks
+                                    // `cancelled`; drop the stale result rather than
+                                    // applying it over the new track's state.
+                                    if cancelled_inner.get() {
+                                        return;
+                                    }
+                                    if let Some(pos) = pos {
+                                        let frac = (pos / len_c).clamp(0.0, 1.0);
+                                        w_inner.progress_bar.set_fraction(frac);
+                                        w_inner.time_label.set_label(&format!(
+                                            "{} / {}",
+                                            format_time(pos),
+                                            format_time(len_c)
+                                        ));
+                                    } else {
+                                        cancelled_inner.set(true);
+                                    }
+                                },
+                            );
+                            glib::ControlFlow::Continue
+                        });
+                        *progress_timer.borrow_mut() = Some(cancelled);
                     }
                 } else {
                     w.progress_bar.set_visible(false);

@@ -246,7 +246,7 @@ impl TaskStateService {
 
     fn reconcile_age_timer(self: &Rc<Self>) {
         if let Some(id) = self.age_timer.borrow_mut().take() {
-            id.remove();
+            crate::spawn::remove_source(id);
         }
         let now = SystemTime::now();
         let Some(delay) = self.state.with(|s| next_age_delay(s, now)) else {

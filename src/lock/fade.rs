@@ -297,7 +297,7 @@ impl LockFade {
 
     fn cancel(&self) {
         if let Some(id) = self.ramp.borrow_mut().take() {
-            id.remove();
+            crate::spawn::remove_source(id);
         }
     }
 
