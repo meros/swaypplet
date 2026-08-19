@@ -35,7 +35,27 @@ pub fn create_layer_window_on(
     }
 
     let window = builder.build();
+    make_layer_window(&window, config, monitor);
+    window
+}
 
+/// Turn an already-built window into a layer surface.
+///
+/// Split out of [`create_layer_window_on`] for the greeter, which has no
+/// `GApplication` to build against (`greet::run` is a bare `gtk4::init()` plus
+/// its own main loop, like the locker) and whose window comes out of
+/// `lock::ui::SurfaceSet::build_surface` with its content already in it. Same
+/// calls in the same order either way, so there is one description of what a
+/// swaypplet layer surface is.
+///
+/// Must run before the window is presented: `gtk_layer_init_for_window` swaps
+/// the surface type, and GTK has already asked the compositor for an xdg
+/// toplevel by the time a presented window could be converted.
+pub fn make_layer_window(
+    window: &gtk4::Window,
+    config: &LayerShellConfig,
+    monitor: Option<&gdk::Monitor>,
+) {
     // Near-unity opacity forces compositor alpha blending so the
     // transparent window background composites correctly (Sway #8904).
     window.set_opacity(0.999);
@@ -59,8 +79,6 @@ pub fn create_layer_window_on(
     if config.exclusive {
         window.auto_exclusive_zone_enable();
     }
-
-    window
 }
 
 /// The output with the camera above it.

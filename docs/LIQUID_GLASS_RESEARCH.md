@@ -1,4 +1,8 @@
-<!-- Research note, 2026-08-14. Demo and lock-screen port, 2026-08-18. -->
+<!-- Research note, 2026-08-14. Demo and lock-screen port, 2026-08-18.
+     Client-side lock glass removed, 2026-08-19: see §"The lock screen was
+     done by that route, and then undone" before acting on anything here
+     about `GlassPane` or `glass_gl`. Those live in git history now; the
+     compositor renders the lock's material. -->
 
 # Liquid glass on swayfx + GTK4: findings
 
@@ -186,11 +190,17 @@ What the demo demonstrates, all live at native resolution and all measured:
 path builds a plain toplevel. The probe takes its lock inside a nested headless
 sway, never the host session.
 
-**The lock screen is done**, by that route: `GlassPane` now has two backends.
-`src/lock/glass_gl.rs` runs the refraction in a `GtkGLArea`, and the GSK blur
-this note describes stays as the fallback, chosen per pane rather than per
-process, because what fails is a GL context and each pane asks for its own.
-`SWAYPPLET_LOCK_GLASS=gsk` forces the old path without a rebuild.
+**The lock screen was done by that route, and then undone.** `GlassPane`, its
+GL backend (`src/lock/glass_gl.rs`), the shaders and the harnesses around them
+are all gone from the tree; everything below about them is history, kept for
+the measurements. The compositor renders the lock's glass now: sway draws the
+wallpaper into the lock's own scene tree from the background layer's committed
+buffer and puts the ordinary `layer_effects` material on it, read from the
+reserved namespace `session-lock` (patches/swayfx-liquid-glass.patch in the
+nixos repo). That is what a client could not do — a client's first frame has to
+be presented before its GL context exists, so there was always a frame of card
+without glass — and the locker now draws a transparent surface carrying the
+scrim, the clock and a translucent card, nothing else.
 
 Four things learned in the port that the research did not predict:
 

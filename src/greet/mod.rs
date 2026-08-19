@@ -31,8 +31,12 @@
 //! (whitespace-separated KEY=VALUE pairs put into the session's PAM
 //! environment via greetd — e.g. XDG_SESSION_TYPE=wayland so logind
 //! registers a graphical session, which GNOME requires; values cannot
-//! contain whitespace), SWAYPPLET_LOCK_WALLPAPER (shared with the lock UI),
-//! SWAYPPLET_FP_SOCK (fp-agent socket override).
+//! contain whitespace), SWAYPPLET_FP_SOCK (fp-agent socket override).
+//!
+//! No wallpaper variable: the greeter's own sway draws it (`output * bg`),
+//! the same way the compositor draws the lock's, and this process paints a
+//! transparent surface over it. It used to read SWAYPPLET_LOCK_WALLPAPER and
+//! blit the image itself, which is what forced its card to fake its glass.
 //!
 //! The richer chip data (avatars, presence, fingerprint enrollment) and the
 //! jump-to-a-running-session path both come from [`crate::switch_user`],
@@ -242,7 +246,40 @@ pub fn run() -> ! {
     // matter to it; it is the lock screen's indicator that has to sit under
     // the camera.
     let window = surfaces.build_surface(on_submit, None);
-    window.fullscreen();
+
+    // A layer surface, not a fullscreened toplevel, and the namespace is the
+    // whole point: `layer_effects` keys on layer-shell namespaces, so this is
+    // what lets the greeter's card be the same liquid glass as the bar and as
+    // the lock card. It is also the only way the wallpaper reaches the screen
+    // at all now that the greeter's compositor draws it rather than this
+    // process: sway disables the background layer whenever a workspace holds a
+    // fullscreen container (`shell_background` in sway/desktop/transaction.c)
+    // and paints an opaque black rect behind it instead, so a fullscreened
+    // toplevel would sit on black no matter what `output * bg` was set to.
+    //
+    // Anchored to all four edges rather than sized: that is what makes a layer
+    // surface fill the output, and it keeps working across a mode change with
+    // nothing to recompute. Exclusive keyboard because this is a login prompt
+    // and it must own the keyboard from the moment it maps, with no pointer
+    // anywhere near it.
+    static CONFIG: crate::layer_shell::LayerShellConfig = crate::layer_shell::LayerShellConfig {
+        namespace: "swaypplet-greeter",
+        layer: gtk4_layer_shell::Layer::Overlay,
+        default_width: None,
+        default_height: None,
+        anchors: &[
+            (gtk4_layer_shell::Edge::Top, true),
+            (gtk4_layer_shell::Edge::Bottom, true),
+            (gtk4_layer_shell::Edge::Left, true),
+            (gtk4_layer_shell::Edge::Right, true),
+        ],
+        margins: &[],
+        keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
+        // Nothing else is on this compositor to reserve space from.
+        exclusive: false,
+    };
+    // Before `present`, which is where GTK asks for the surface.
+    crate::layer_shell::make_layer_window(&window, &CONFIG, None);
     window.present();
 
     glib::timeout_add_seconds_local(1, {
