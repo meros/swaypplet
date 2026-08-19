@@ -570,7 +570,7 @@ pub(crate) fn matches(window: &Window, query: &str) -> bool {
 /// keep a history of its own. The focused output rides along because it is
 /// needed before the surface maps, and one connection can answer both.
 fn read_session() -> Result<(Vec<Window>, Option<String>), String> {
-    let mut conn = swayipc::Connection::new().map_err(|e| format!("sway ipc: {e}"))?;
+    let mut conn = crate::sway_ipc::connect().map_err(|e| format!("sway ipc: {e}"))?;
     let tree = conn.get_tree().map_err(|e| format!("sway ipc: {e}"))?;
     let focused = conn
         .get_outputs()

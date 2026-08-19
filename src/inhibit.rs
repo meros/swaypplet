@@ -48,7 +48,7 @@
 use std::cell::Cell;
 use std::process::Command;
 
-use swayipc::{Connection, Node};
+use swayipc::Node;
 
 use crate::service::Observed;
 
@@ -280,7 +280,7 @@ fn user_inhibitor(node: &Node) -> bool {
 
 /// Run `f` over a fresh tree snapshot. `None` if sway could not be reached.
 fn tree<R>(f: impl FnOnce(&Node) -> R) -> Option<R> {
-    match Connection::new().and_then(|mut c| c.get_tree()) {
+    match crate::sway_ipc::connect().and_then(|mut c| c.get_tree()) {
         Ok(root) => Some(f(&root)),
         Err(e) => {
             log::warn!("inhibit: sway get_tree failed: {e}");
