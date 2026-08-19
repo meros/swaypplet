@@ -2057,9 +2057,12 @@ revealer {
 .lock-card {
     /* Lighter than the @surface every other glass card uses, because this one
        is not the only thing between the eye and the material: .lock-scrim is
-       under it. 0.25 scrim then 0.49 card composites to the same 0.62 alpha
-       @surface gives, so the lock card transmits exactly what the bar and the
-       panels do. Change the scrim and this has to move with it. */
+       under it. 0.25 scrim then 0.49 card composites to 0.6175, which is the
+       0.62 @surface gives, so the lock card transmits exactly what the bar and
+       the panels do and clears the compositor's seeding line by the same
+       margin. Change the scrim and this has to move with it, and check the
+       result against the table in users/modules/theme/glass.nix rather than
+       against either number alone. */
     background-color: alpha(#32302f, 0.49);
     /* Bottom lighter than top on purpose: the caption's reserved second line
        sits directly above this edge, so the optical margin down there is the
@@ -2916,10 +2919,13 @@ scale.night-scale highlight {
 }
 
 /* Dims whatever is behind, so the clock and card stay legible on any image.
-   Under the compositor's mask threshold (0.48, users/modules/theme/glass.nix):
-   the scrim has to read as backdrop so that only the card and the face pill
-   stencil the glass. Raise it past the threshold and the whole screen becomes
-   card.
+
+   Must stay below the compositor's discard line, which is its mask threshold
+   less 0.12 - so 0.36, not 0.48. The full rule and why it has two lines is in
+   users/modules/theme/glass.nix; the short version is that a scrim between
+   those two numbers is drawn as material but seeds no bevel, so the whole
+   screen becomes a flat slab. Below the discard line it is backdrop, which is
+   what lets the card and the face pill be the only things that stencil glass.
 
    0.25, not the 0.45 this carried while the locker painted its own wallpaper.
    The compositor's glass samples whatever is below it, and the scrim is below
