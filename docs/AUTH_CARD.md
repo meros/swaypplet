@@ -296,11 +296,18 @@ real widget behaviour, and each would have shipped a bug.
 7. Six of eleven type sizes and one of four weights.
 
 Kept: `auth-shake` on the card, `auth-card-enter`, the handoff choreography,
-the glass pane and its blur ramp, the face ring animations, the chip row, the
-identity picker, the details revealer, and the constant-geometry rule itself.
-The rule is not
+the glass pane, the face ring animations, the chip row, the identity picker,
+the details revealer, and the constant-geometry rule itself. The rule is not
 weakened — it is made cheap enough that obeying it stops costing 42% of the
 card.
+
+The pane's own blur ramp is not kept; it is gone. The compositor draws the
+material through the reserved `session-lock` namespace, so the card decodes no
+wallpaper and runs no shader of its own — it is a translucent fill, and that
+fill's alpha is what shapes the material. That is the one constraint the CSS
+here must respect: `.lock-scrim` at 0.25 under `.lock-card` at 0.49 composites
+to 0.6175, which sits clear of both lines the mask threshold draws. See
+`users/modules/theme/glass.nix` in the nixos repo before changing either.
 
 `auth-shake` animates margins, which is a layout pass per frame, and a
 reviewer argued for replacing it with a paint-only reject. Deferred

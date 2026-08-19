@@ -2,8 +2,15 @@
 
 > Two research passes from the bar-integration project (2026-08-02): a survey of
 > prior art worth stealing, then concrete specs sized for implementation.
-> Grounded in swaypplet's constraints: swayfx binary frost, anim.rs motion
-> system, one process owning bar + panel + OSD + notifications.
+> Grounded in swaypplet's constraints: the compositor's material, anim.rs
+> motion system, one process owning bar + panel + OSD + notifications.
+>
+> Written when the effect was swayfx's binary frost. It is liquid glass now
+> (nixos `docs/liquid-glass.md`), and two of the constraints below softened:
+> the material's weight rides `wp_alpha_modifier_v1`, and a surface's alpha is
+> measured against a threshold rather than against exactly 0. The specs are
+> unaffected; the reasoning in them is annotated where it was written against
+> the old rules.
 
 ## Survey: what others do
 
@@ -21,9 +28,9 @@
 
 ## Ideas worth stealing
 
-**1. Popups anchored to bar segments (Ironbar/HyprPanel pattern).** Clock → calendar card, battery → power detail, media → art + seek. Each popup is its own bottom-anchored layer surface styled `.glass-card` (data/style.css:63), entering via `anim::Reveal` + `SlideBin` exactly like the panel — the binary-frost rule is already solved there (pane tint lands in `GLASS_MS`, content fades over `ENTER_MS`, anim.rs:40–53). The building blocks all exist: `layer_shell::create_layer_window_on` with per-output margins (bar/mod.rs:139), and `MediaSection` already resolves album art, position, and length (widgets/media.rs:60–84). Feasibility: high; the one design constraint is no drop shadows on the popup (alpha>0 pixels frost, style.css:71–77), so depth must come from the hairline border, which the panel already demonstrates.
+**1. Popups anchored to bar segments (Ironbar/HyprPanel pattern).** Clock → calendar card, battery → power detail, media → art + seek. Each popup is its own bottom-anchored layer surface styled `.glass-card` (data/style.css:63), entering via `anim::Reveal` + `SlideBin` exactly like the panel — `Reveal` already solves the transition either way it has to be solved (`anim::Reveal::animate`). The building blocks all exist: `layer_shell::create_layer_window_on` with per-output margins (bar/mod.rs:139), and `MediaSection` already resolves album art, position, and length (widgets/media.rs:60–84). Feasibility: high; the one design constraint is that a drop shadow on the popup must peak below `mask_threshold - 0.12`, or it stops reading as backdrop and gets a glass edge of its own — so depth still comes from the hairline border, which the panel already demonstrates.
 
-**2. Progressive-disclosure media pill.** Collapsed: icon + ellipsized title (current bar/media.rs). On hover, a `GtkRevealer` (200 ms structural scale, per anim.rs module header) slides in prev/play/next buttons and a thin progress hairline; on click, the full popup from idea 1. Crucially the morph happens *inside* the always-mapped bar card, where alpha stays 1 everywhere, so swayfx's binary frost never enters the picture — width changes are pure GTK layout. The `CenterBox` (bar/mod.rs:154) guarantees the pill grows symmetrically without shoving the clock. Follow Apple's coherence rule: icon and title keep their relative placement between collapsed and expanded states.
+**2. Progressive-disclosure media pill.** Collapsed: icon + ellipsized title (current bar/media.rs). On hover, a `GtkRevealer` (200 ms structural scale, per anim.rs module header) slides in prev/play/next buttons and a thin progress hairline; on click, the full popup from idea 1. Crucially the morph happens *inside* the always-mapped bar card, where alpha stays 1 everywhere, so no transition rule enters the picture at all — width changes are pure GTK layout. The `CenterBox` (bar/mod.rs:154) guarantees the pill grows symmetrically without shoving the clock. Follow Apple's coherence rule: icon and title keep their relative placement between collapsed and expanded states.
 
 **3. Live-Activity discipline for the task pill.** The task pill (bar/task.rs) is a homegrown Live Activity: persistent, glanceable, state-bearing. Steal the animation policy: animate only meaningful transitions — a session flipping to `Waiting` (needs the user) gets a single accent pulse in the "deliberate attention loops" bucket the CSS header already carves out (style.css:11–13), while `Working` stays perfectly still. The `PillView` equality cache (task.rs:122–128) already identifies exactly the frames where a real transition happened, so triggering a one-shot CSS animation on change is nearly free. GNOME's urgency discipline applies: only `Waiting` and battery-critical earn motion; everything else just changes.
 
@@ -42,15 +49,17 @@
 Sources: [Ironbar](https://github.com/JakeStanger/ironbar) · [Ironbar custom modules](https://ironb.ar/modules/custom/custom/) · [SketchyBar](https://felixkratz.github.io/SketchyBar/) · [SketchyBar repo](https://github.com/FelixKratz/SketchyBar) · [eww widgets](https://elkowar.github.io/eww/widgets.html) · [eww-bar example](https://github.com/owenrumney/eww-bar) · [HyprPanel](https://github.com/Jas-SinghFSU/HyprPanel) · [HyprPanel panel config](https://hyprpanel.com/configuration/panel.html) · [HyprPanel OSD](https://hyprpanel.com/configuration/osd.html) · [WWDC23: Design dynamic Live Activities](https://developer.apple.com/videos/play/wwdc2023/10194/) · [Apple: Explore Live Activities](https://developer.apple.com/news/?id=bkm73839) · [Atoll (Dynamic Island for macOS)](https://github.com/Ebullioscopic/Atoll) · [GNOME Shell: Notifications in 46 and beyond](https://blogs.gnome.org/shell-dev/2024/04/23/notifications-46-and-beyond/) · [polybar-timer](https://github.com/jbirnick/polybar-timer) · [polypomo](https://github.com/unode/polypomo)
 ## Near-term specs
 
-All paths relative to `/home/meros/git/personal/swaypplet`. Shared constraints that shape every spec: layer surfaces never resize after map (panel.rs:103-107), so all motion is render-node motion (opacity, `SlideBin` translation, clipped drawing); pane tint always rides `glass_channel` within `GLASS_MS` (90 ms) while content fades over `ENTER_MS`/`EXIT_MS` (300/200 ms, `ease_out_cubic`); every entry point checks `anim::animations_enabled()`.
+All paths relative to `/home/meros/git/personal/swaypplet`. Shared constraints that shape every spec: layer surfaces never resize after map (panel.rs:103-107), so all motion is render-node motion (opacity, `SlideBin` translation, clipped drawing); a surface's show/hide runs over `ENTER_MS`/`EXIT_MS` (300/200 ms, decelerate in, accelerate out) and `anim::Reveal` owns it; every entry point checks `anim::animations_enabled()`.
+
+`Reveal` has two branches and a spec only ever sees the first. With `wp_alpha_modifier_v1` the compositor owns one alpha for the whole surface, so the material and the content are one eased ramp and the pane widget stays fully opaque. Without it, the old split is the fallback: the pane's tint steps across 0 in a single frame (`glass_channel`) because a partly-alpha surface is fully materialised and only partly tinted, and the content fades on top over the full duration.
 
 ### 1. Bar-to-panel morph
 
-**Look.** Pressing the start button (bar/start.rs), the panel card appears to grow out of it: a small rounded seed rectangle at the button's screen position (bottom-left, ~36×30 px inside the 38 px bar) expands to the full 780×700 card while the frost tint lands in the first 90 ms. Exit reverses: content gone first, card shrinks back into the button.
+**Look.** Pressing the start button (bar/start.rs), the panel card appears to grow out of it: a small rounded seed rectangle at the button's screen position (bottom-left, ~36×30 px inside the 38 px bar) expands to the full 780×700 card while the material comes up under it. Exit reverses: content gone first, card shrinks back into the button.
 
 **Mechanism.** The panel window already covers the work area (its backdrop is hexpand/vexpand, panel.rs:82-88), so the whole morph happens inside one fixed-size surface. New primitive `MorphBin`, a sibling of `SlideBin` (anim.rs:238-336): `snapshot()` pushes a rounded-rect clip plus translate+scale interpolated between a `seed: graphene::Rect` and the child's resting bounds. Seed coordinates come from the start button via `compute_bounds` against the bar window plus the bar's 4 px margins (bar/mod.rs:50), passed through the existing `toggle_panel: Rc<dyn Fn()>` hook (bar/mod.rs:67-68), widened to carry an origin rect.
 
-**States.** closed → morph-in (ENTER_MS: clip/scale eased, pane tint in first GLASS_MS, content opacity held 0 for the first ~40 % then fading) → open → morph-out (EXIT_MS mirrored; pane drops to exactly 0.0 in the last GLASS_MS per the swayfx stencil rule). Retrigger mid-flight retargets from current progress, same pattern as `Reveal::animate`. Reduced motion: jump, exactly like `Reveal`. The start button holds a `.morph-origin` class (dimmed) while open.
+**States.** closed → morph-in (ENTER_MS: clip/scale eased, material and content on the one ramp `Reveal` drives) → open → morph-out (EXIT_MS mirrored). On a compositor without `wp_alpha_modifier_v1` this falls back to the split — tint stepped across 0, content held at 0 for the first ~40 % then fading. Retrigger mid-flight retargets from current progress, same pattern as `Reveal::animate`. Reduced motion: jump, exactly like `Reveal`. The start button holds a `.morph-origin` class (dimmed) while open.
 
 **Size.** ~130 LoC `MorphBin` in anim.rs, ~50 LoC panel/bar wiring, ~15 lines CSS. Replaces the current `SlideBin` settle path in `Panel::new` (panel.rs:317-328) behind a fallback: no origin rect → today's fade+settle.
 

@@ -3308,6 +3308,9 @@ scale.night-scale highlight {
     animation: face-pill-arrive 400ms cubic-bezier(0, 0, 0, 1);
 }
 
+/* The ring spins under its own transform. Keeping this one off the ring
+   matters: two transform animations on nested nodes compose fine, but only if
+   neither is a layout property. */
 @keyframes face-pill-arrive {
     from { opacity: 0; transform: translateY(18px); }
     to   { opacity: 1; transform: translateY(0); }
@@ -3317,25 +3320,16 @@ scale.night-scale highlight {
     animation: face-pill-attention 1.6s ease-in-out 2;
 }
 
-/* The ring spins under its own transform. Keeping the pill's transform
-   animation off the ring matters: two transform animations on nested nodes
-   compose fine, but only if neither is a layout property. */
-
-/* Blur radius and spread are constant; only the alpha moves. Growing them
-   from 0 meant a differently sized gaussian on every frame, re-rasterised
-   from scratch each time. Fixed geometry lets the renderer keep one blurred
-   node and vary its colour, which is the difference between a pulse and a
-   stutter. */
 /* Breathe the border, not a glow around it.
-   This used to be a 26px box-shadow at 5px spread, and that shadow is the
-   single reason the cue surface could not be frosted: scenefx's
-   blur_ignore_transparent discards only pixels at alpha exactly 0, so every
-   translucent pixel of a drop shadow frosts into a flat halo the size of the
-   surface. The choice was a glow or a blur, and the blur is worth more — an
-   unfrosted pill over a terminal reads as a sticker rather than as part of
-   the desktop.
-   The border carries the same job with the same vocabulary the armed auth
-   field uses, and does it in pixels the pill already owns. */
+   This used to be a 26px box-shadow at 5px spread, and under blur that shadow
+   was the reason the cue surface could not be frosted at all: scenefx's
+   blur_ignore_transparent discarded only pixels at alpha exactly 0, so every
+   translucent pixel of a drop shadow frosted into a flat halo the size of the
+   surface. Liquid glass replaced that with a threshold and the ban with a
+   ceiling (see .face-pill-dark below), but the border stays: it says the same
+   thing in the same vocabulary the armed auth field uses, in pixels the pill
+   already owns, and an animated border-color is one property on one node
+   where an animated shadow re-rasterises a gaussian every frame. */
 @keyframes face-pill-attention {
     0%, 100% { border-color: @border_strong; }
     50%      { border-color: alpha(@accent_tertiary, 0.85); }
@@ -3343,7 +3337,17 @@ scale.night-scale highlight {
 
 /* Too dark is the one state worth a steadier, warmer pull: the user cannot
    fix it by holding still, and the thing they should do is check the light
-   rather than keep staring. */
+   rather than keep staring.
+
+   The one surviving box-shadow on this surface, and it survives on purpose.
+   The compositor's material discards every pixel under mask_threshold - 0.12
+   (0.36 as shipped), so a shadow whose peak alpha stays below that line is
+   backdrop and never becomes glass: 0.28 clears it with room to spare. Raising
+   it past 0.36 puts the halo back. Removing it instead leaves .face-pill-dark
+   with no declarations at all, which makes "too dark" pixel-identical to
+   neutral -- in the one state you can only reproduce by putting a camera in
+   bad light. See users/modules/theme/glass.nix in the nixos repo for the three
+   bands. */
 .face-pill-dark {
     box-shadow: 0 0 22px 3px alpha(@accent_secondary, 0.28);
 }
@@ -3354,9 +3358,9 @@ scale.night-scale highlight {
     animation: face-pill-ok 500ms cubic-bezier(0, 0, 0, 1);
 }
 
-/* Same reason as the attention breathe above: no shadow, so the surface can
-   be frosted. The match lands on the border and the fill, which are the
-   pill's own pixels. */
+/* Same shape as the attention breathe above: the match lands on the border
+   and the fill, which are the pill's own pixels and cost one property each,
+   where a glow that grew from 0 re-rasterised its gaussian every frame. */
 @keyframes face-pill-ok {
     0%   { border-color: @accent; background-color: alpha(@accent, 0.22); }
     100% { border-color: @border_strong; background-color: @surface; }

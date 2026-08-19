@@ -30,10 +30,16 @@ pub fn apply(ring: &gtk4::Box, pill: Option<&gtk4::Box>, state: &str) {
         return;
     }
     ring.add_css_class(&format!("face-ring-{state}"));
-    // The pill carries the state as well as the ring, so the attention glow
-    // can live on the whole pill. It is deliberately not on the ring, which is
-    // also used on the polkit card -- and that layer is compositor-blurred,
-    // where a glow frosts into a flat halo.
+    // The pill carries the state as well as the ring, because three of the
+    // five states say something the ring cannot: `dark` and `ok` recolour the
+    // pill's border and fill, and `looking` breathes its border. An 18px ring
+    // has nowhere to put any of that. The ring keeps what is its own -- the
+    // spin, the pulse, the two verdict keyframes -- so the two classes never
+    // animate the same property on nested nodes.
+    //
+    // `pill` stays optional because the ring is the indicator; the pill is the
+    // surface it happens to sit in, and a caller that has only a ring still
+    // gets a correct one.
     if let Some(pill) = pill {
         pill.add_css_class(&format!("face-pill-{state}"));
     }

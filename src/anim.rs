@@ -412,10 +412,13 @@ impl Reveal {
         let inner = &self.inner;
         inner.shown.set(true);
         let was_visible = inner.window.is_visible();
-        // Map first, frost second: the surface maps effect-less (nothing
-        // for swayfx to initialize, so no black frame), and the enable
-        // lands a frame or two into the fade — inside the GLASS_MS tint
-        // lead (see set_layer_blur).
+        // Map first, enable the material second. The surface maps with no
+        // effect on it, so the compositor has no effect state to initialise
+        // and there is no black transition frame. The enable then goes out
+        // over async IPC and lands a frame or two into the fade, which costs
+        // nothing: the material's weight rides the same alpha modifier the
+        // fade drives (see set_material_alpha), so a surface at 0.1 gets a
+        // material at 0.1 whether the enable has arrived yet or not.
         inner.window.set_visible(true);
         // Rebind when the handle has nothing left to speak to. GDK builds a
         // new `wl_surface` for a window it re-realizes, and an alpha handle

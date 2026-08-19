@@ -92,18 +92,24 @@ not against a transition ladder, and snapping them to it would make them worse.
 | CSS keyframe entrance | the shared curve at the shared duration | lock and greeter card |
 
 Two keyframes also stopped being made of shadow. `face-pill-attention` and
-`face-pill-ok` were box-shadow glows, and that shadow was the sole reason the
-look-at-the-camera cue could not be frosted: scenefx's
-`blur_ignore_transparent` discards only pixels at alpha exactly 0, so every
-translucent shadow pixel frosts into a flat halo the size of the surface. The
-cue is the one surface that appears over arbitrary content with no card behind
-it, and unfrosted it reads as a sticker on the screen. Both now breathe the
-border and the fill — pixels the pill already owns — which is the same
-vocabulary the armed auth field uses, and `swaypplet-face-cue` joins the
-`layer_effects` list in the sway config. The lock screen's own copy of the
-pill cannot use compositor blur at all (a session-lock surface is not a layer
-surface), so it borrows the card's client-side glass and the wallpaper texture
-that is already decoded.
+`face-pill-ok` were box-shadow glows, and under blur that shadow was the
+reason the look-at-the-camera cue could not be frosted: `blur_ignore_transparent`
+discarded only pixels at alpha exactly 0, so every translucent shadow pixel
+frosted into a flat halo the size of the surface. The cue is the one surface
+that appears over arbitrary content with no card behind it, and unfrosted it
+reads as a sticker on the screen.
+
+Liquid glass lifted that ban — a mask threshold replaces "alpha exactly 0", so
+a shadow under `threshold - 0.12` is backdrop and is discarded, which is why
+`.face-pill-dark` keeps its 0.28 glow. The two keyframes stayed on the border
+and the fill anyway, on motion grounds: they are one property on one node,
+where a shadow that grows from 0 re-rasterises a differently sized gaussian
+every frame, and the border says the same thing in the vocabulary the armed
+auth field already uses.
+
+The lock screen's pill is no longer the exception either. Its glass comes from
+the compositor too, through the reserved `session-lock` namespace, so it
+decodes no wallpaper and runs no shader of its own.
 
 The handoff's stagger survives. Its delays are the choreography — chips step
 back before the card dissolves — so they are rescaled onto the ladder rather
