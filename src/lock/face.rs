@@ -32,8 +32,8 @@
 //! A lid *opening* arms an attempt too, and for once that is not the same
 //! argument again. Two cases close the lid without a suspend behind it, and
 //! in both the resume edge above never comes: logind's 30 s holdoff after a
-//! resume, and Clamshell mode (`crate::inhibit`), where inhibiting the lid
-//! switch is the whole point. sway's `bindswitch lid:on` still locks and
+//! resume, and No Sleep mode (`crate::inhibit`), where inhibiting the lid
+//! switch is half the point. sway's `bindswitch lid:on` still locks and
 //! blanks in both, so without this the machine sits locked with the lid open
 //! and the one signal that should unlock it never fires. The lid edge is the
 //! arrival neither the sensor nor logind reports.

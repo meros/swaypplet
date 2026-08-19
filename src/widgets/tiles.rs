@@ -7,10 +7,9 @@
 //!
 //! A spec is presentation plus two function pointers, and that is the whole
 //! contract: this module knows how to *draw* a toggle and nothing about what
-//! any of them switch. The inhibitor tiles (Awake / Stay Lit / Clamshell) are
-//! generated from [`crate::inhibit`], which owns their wording, their actions
-//! and their state; Wi-Fi and Bluetooth delegate the same way to their own
-//! modules.
+//! any of them switch. The inhibitor tiles (No Sleep / No Lock) are generated
+//! from [`crate::inhibit`], which owns their wording, their actions and their
+//! state; Wi-Fi and Bluetooth delegate the same way to their own modules.
 
 use std::cell::RefCell;
 use std::process::Command;
@@ -68,8 +67,8 @@ pub struct TileSpec {
 }
 
 /// Every tile the quick strip can show: Wi-Fi, Bluetooth, Night Light and
-/// the three session inhibitors. DND is store-backed and handled specially
-/// by the panel; the rest drive something outside this process.
+/// the two session inhibitors. DND is store-backed and handled specially by
+/// the panel; the rest drive something outside this process.
 pub fn tile_specs() -> Vec<TileSpec> {
     let mut specs = vec![wifi_spec(), bluetooth_spec(), night_light_spec()];
     specs.extend(Inhibitor::ALL.map(inhibitor_spec));
@@ -135,8 +134,8 @@ fn night_light_spec() -> TileSpec {
 
 /// One tile per session inhibitor, all of it delegated: wording, action and
 /// reading come from [`crate::inhibit`], and the established state goes back
-/// there for the bar's hazard lane to observe. Adding a fourth inhibitor is
-/// a change in that module alone.
+/// there for the bar's hazard lane to observe. Adding a third inhibitor is a
+/// change in that module alone.
 fn inhibitor_spec(which: Inhibitor) -> TileSpec {
     TileSpec {
         icon: which.icon(),
