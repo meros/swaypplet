@@ -39,6 +39,7 @@
 //! that instead.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use gtk4::{glib, graphene, prelude::*, subclass::prelude::*};
@@ -229,12 +230,55 @@ pub fn set_layer_blur(namespace: Option<glib::GString>, on: bool, then: impl FnO
         then();
         return;
     };
+    // Counted, because `layer_effects` addresses a namespace and this call
+    // addresses a surface. A notification stack is several cards, each with
+    // its own surface, all named `swaypplet-notification`; the bar is one
+    // surface per output under `swaypplet-bar`. Sending the disable when one
+    // of them goes away turned the effect off for every other one still on
+    // screen, and for every surface that mapped afterwards - a card that had
+    // simply followed another arrived as flat alpha with no glass at all,
+    // which is a race with a stale look and no error anywhere.
+    //
+    // So the command follows the namespace's population rather than any one
+    // surface: enable when the first arrives, disable when the last leaves.
+    let boundary = SURFACES.with(|surfaces| {
+        let mut surfaces = surfaces.borrow_mut();
+        let count = surfaces.entry(ns.to_string()).or_insert(0);
+        if on {
+            let first = *count == 0;
+            *count += 1;
+            first
+        } else if *count == 0 {
+            // A hide with no show behind it. Surfaces are torn down on paths
+            // that never mapped - a card dismissed before it was presented, a
+            // window dropped at shutdown - and treating that as the last one
+            // leaving sent a disable that turned the effect off for every
+            // surface still on screen. Nothing on the surface says it was
+            // never counted, so the count has to say it.
+            false
+        } else {
+            *count -= 1;
+            *count == 0
+        }
+    });
+    if !boundary {
+        then();
+        return;
+    }
     let effects = if on {
         "blur enable; liquid_glass enable"
     } else {
         "blur disable; liquid_glass disable"
     };
     crate::sway_ipc::run_command_then(&format!("layer_effects \"{ns}\" \"{effects}\""), then);
+}
+
+thread_local! {
+    /// How many surfaces of each namespace are currently asking for the
+    /// compositor's material. GTK is single-threaded and every show and hide
+    /// runs on its main loop, so a thread-local is the whole synchronisation
+    /// story.
+    static SURFACES: RefCell<HashMap<String, usize>> = RefCell::new(HashMap::new());
 }
 
 /// The glass-pane opacity channel for a fade between `from` and `to` at
