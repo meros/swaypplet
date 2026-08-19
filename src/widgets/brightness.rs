@@ -109,6 +109,16 @@ impl BrightnessSection {
         let scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 1.0, 100.0, 1.0);
         scale.set_hexpand(true);
         scale.set_draw_value(false);
+        // Same rail furniture as the volume scale (widgets/audio.rs): quarter
+        // ticks plus one labelled reference. Both scales are hoisted into the
+        // start menu's telemetry ribbon side by side, and one rail with ticks
+        // beside one without read as two different kinds of control.
+        // The label sits at the midpoint rather than the end, where a wide
+        // glyph would hang off the rail in a narrow pill.
+        for at in [1.0, 25.0, 75.0, 100.0] {
+            scale.add_mark(at, gtk4::PositionType::Bottom, None);
+        }
+        scale.add_mark(50.0, gtk4::PositionType::Bottom, Some("50%"));
 
         let pct_label = gtk4::Label::new(Some("0%"));
         pct_label.add_css_class("volume-pct");
