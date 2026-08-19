@@ -34,9 +34,9 @@
 //! a darkened square, because every intermediate alpha is fully frosted and
 //! only partly tinted; [`glass_channel`] carries the argument. [`Reveal`]
 //! packages this; surfaces with a directional entrance add a short
-//! [`SLIDE_PX`] settle on top. The lock screen's client-side glass
-//! (lock/glass.rs) is the one place a true sigma ramp is possible, and does
-//! that instead.
+//! [`SLIDE_PX`] settle on top. This is now every surface: the lock screen
+//! used to ramp a real GSK sigma on a client-side pane, and the compositor
+//! draws its glass too since it gained a session-lock material.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;

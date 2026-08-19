@@ -48,9 +48,11 @@
 //! the switcher script). The sleep path keeps its immediate blank, because
 //! that is the machine powering down rather than an idle policy.
 //!
-//! The locker child inherits this process's env (SWAYPPLET_LOCK_WALLPAPER,
-//! SWAYPPLET_LOCK_WAKE_CMD set by the service unit) plus
-//! SWAYPPLET_LOCK_REASON=idle|manual|sleep for future locker-side use.
+//! The locker child inherits this process's env (SWAYPPLET_LOCK_WAKE_CMD set
+//! by the service unit) plus SWAYPPLET_LOCK_REASON=idle|manual|sleep for
+//! future locker-side use. It used to inherit SWAYPPLET_LOCK_WALLPAPER and a
+//! set of SWAYPPLET_GLASS_* material numbers as well; the compositor draws the
+//! lock's wallpaper and glass now, and the locker reads neither.
 //!
 //! Inhibitors (panel tiles, `crate::inhibit`) reach this three ways, none of
 //! them a special case in here. **Awake** stops the whole service, so nothing

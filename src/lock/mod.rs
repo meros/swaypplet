@@ -15,14 +15,21 @@
 //! Auth: PAM password (worker thread, service `swaypplet-lock`) concurrent
 //! with fprintd fingerprint (see `fprint.rs`). Unlock only ever follows a
 //! PAM success or a fingerprint match.
+//!
+//! What this process draws is a transparent surface: the scrim, the clock and
+//! a translucent card. The wallpaper under it and the glass behind the card
+//! are the compositor's, drawn into the lock's own scene tree from the
+//! `layer_effects "session-lock"` block (sway.nix, patches/swayfx-liquid-
+//! glass.patch). The locker used to carry both — a wallpaper decode and a GL
+//! refraction pass per output — and the frame where its GL context was not up
+//! yet was visible as a card without glass. A client cannot fix that: its
+//! first frame has to be presented before its context exists. Do not bring
+//! either back here.
 
 pub(crate) mod auth;
 pub(crate) mod face;
 pub(crate) mod fade;
 pub(crate) mod fprint;
-pub mod glass;
-pub mod glass_gl;
-pub mod livebg;
 pub mod ui;
 
 use std::cell::{Cell, RefCell};
@@ -268,11 +275,12 @@ pub fn run() -> ! {
         std::process::exit(EXIT_ERROR);
     };
 
+    // The stylesheet is the last thing this path loads before the surfaces.
+    // A wallpaper decode used to sit here too, pulled out of the per-monitor
+    // burst because that burst is exactly the interval the compositor holds
+    // the live desktop on screen for; the compositor draws the wallpaper now,
+    // so there is nothing left to decode.
     crate::theme::load_css();
-    // Decoded here rather than per monitor inside the lock: that burst is
-    // exactly the interval the compositor holds the live desktop on screen
-    // for, and it is bounded by the fade's first-frame deadline.
-    ui::preload_wallpaper();
     stage("css");
 
     // Pre-warmed mode: absorb the first-window cost and park until told to
@@ -455,10 +463,9 @@ pub fn run() -> ! {
         let first_frame_hooked = std::cell::Cell::new(false);
         let fade_cb = fade.clone();
         instance.connect_monitor(move |instance, monitor| {
-            // Named, sized and scaled, because everything downstream that can
-            // go wrong on one output and not on another — the glass's GL
-            // context above all — reports itself into this log and has to be
-            // pinned to an output before it can be read.
+            // Named, sized and scaled, because anything that goes wrong on one
+            // output and not on another reports itself into this log and has
+            // to be pinned to an output before it can be read.
             let geometry = monitor.geometry();
             log::info!(
                 "lock: building surface for {} {}x{} scale {}",

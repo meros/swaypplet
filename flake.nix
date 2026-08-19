@@ -189,13 +189,9 @@
               dbus
             ];
 
-            # dev/glass-demo resolves GL through libepoxy, the same dispatch
-            # layer GTK itself uses, so it has to be loadable by name at
-            # runtime. It is not a swaypplet dependency and stays out of the
-            # package's closure.
-            buildInputs = runtimeDeps ++ [ pkgs.libepoxy ];
+            buildInputs = runtimeDeps;
 
-            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (runtimeDeps ++ [ pkgs.libepoxy ]);
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeDeps;
             RUSTFLAGS = "-C linker=clang -C link-arg=-fuse-ld=mold";
             RUSTC_WRAPPER = "sccache";
           };

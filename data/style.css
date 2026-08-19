@@ -2055,6 +2055,12 @@ revealer {
 
 .polkit-container,
 .lock-card {
+    /* Lighter than the @surface every other glass card uses, because this one
+       is not the only thing between the eye and the material: .lock-scrim is
+       under it. 0.25 scrim then 0.49 card composites to the same 0.62 alpha
+       @surface gives, so the lock card transmits exactly what the bar and the
+       panels do. Change the scrim and this has to move with it. */
+    background-color: alpha(#32302f, 0.49);
     /* Bottom lighter than top on purpose: the caption's reserved second line
        sits directly above this edge, so the optical margin down there is the
        padding plus whatever the caption did not use. 20 against 24 makes the
@@ -2280,7 +2286,8 @@ revealer {
    into the input, 6 back out to its caption (declared on .auth-caption, which
    the lock card shares), then 14 and 16 for the two rows that are about the
    card rather than about the question. The 6:20 ratio either side of the
-   field is what does the grouping work; the rest is rhythm. */
+   field is what does the grouping work; the rest is rhythm.
+
    Every gap below is declared on the element that owns it, in that element's
    own rule, rather than gathered here: a margin sitting apart from the box it
    moves is a margin nobody finds when they change the box. This block holds
@@ -2891,23 +2898,40 @@ scale.night-scale highlight {
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   Lock screen (`swaypplet lock`) — shares the auth-surface language
-   above (card, entry, pill, caps, status, motion). Only the full-screen
-   chrome is local: backdrop, wallpaper scrim, clock and date. One
-   session-lock surface per monitor, all mirroring the same state.
+   Lock screen (`swaypplet lock`) and greeter (`swaypplet greet`, same
+   widgets) — both share the auth-surface language above (card, entry,
+   pill, caps, status, motion). Only the full-screen chrome is local:
+   scrim, clock and date. One session-lock surface per monitor on the
+   lock, one layer surface on the greeter, all mirroring the same state.
    ════════════════════════════════════════════════════════════════════ */
 
+/* Transparent, like every other swaypplet window, on the lock and on the
+   greeter alike. The compositor draws the wallpaper and puts the glass on it —
+   into the lock's own scene tree for `layer_effects "session-lock"`, behind the
+   layer surface for `layer_effects "swaypplet-greeter"` — so an opaque fill
+   here would hide both. This carried @bg0_h while these surfaces painted their
+   own wallpaper; neither gets one back. */
 .lock {
-    background-color: @bg0_h;
+    background: none;
 }
 
-.lock-backdrop {
-    background-color: @bg0_h;
-}
+/* Dims whatever is behind, so the clock and card stay legible on any image.
+   Under the compositor's mask threshold (0.48, users/modules/theme/glass.nix):
+   the scrim has to read as backdrop so that only the card and the face pill
+   stencil the glass. Raise it past the threshold and the whole screen becomes
+   card.
 
-/* Dims the wallpaper so the clock/card stay legible on any image. */
+   0.25, not the 0.45 this carried while the locker painted its own wallpaper.
+   The compositor's glass samples whatever is below it, and the scrim is below
+   it, so every point of scrim is also taken off the card's backdrop: at 0.45
+   the card transmitted 21% of the wallpaper against the 38% every other glass
+   card gets, and it sat on a field dimmed by the same amount. Flat, and with
+   nothing to be flat against. The client-side pane this replaces hid the
+   problem by painting its own bright copy of the wallpaper over the scrim.
+   The dimming budget is now split with .lock-card below, which takes back
+   exactly what the lighter scrim gives up. */
 .lock-scrim {
-    background-color: alpha(black, 0.45);
+    background-color: alpha(black, 0.25);
 }
 
 .lock-clock {

@@ -58,7 +58,7 @@ pub const HANDOFF: Duration = Duration::from_millis(180);
 /// card back. Both surfaces that play the handoff outlive it: the greeter is
 /// the machine's one idle greeter, handed back to whoever returns to that VT,
 /// and the locker keeps running behind the session it just locked. Neither can
-/// be left as a blurred pane with no card in it. Generous enough that a slow
+/// be left as a bare wallpaper with no card on it. Generous enough that a slow
 /// `loginctl activate` still cuts away first.
 const HANDOFF_RECOVER: Duration = Duration::from_secs(2);
 
@@ -125,9 +125,6 @@ struct Surface {
     face_wrap: gtk4::Box,
     window: gtk4::Window,
     card: gtk4::Box,
-    /// The client-side glass behind the card; its sigma is animatable
-    /// (materialize on enter, dissolve on handoff — see glass.rs).
-    pane: super::glass::GlassPane,
     user_entry: Option<gtk4::Entry>,
     /// Chip row container, kept so `set_user_chips` can refill it once the
     /// async session/enrollment query resolves. In lock mode it starts
@@ -195,8 +192,7 @@ impl SurfaceSet {
     /// Call before any `build_surface`. With the compositor fading the whole
     /// surface, the card's own `auth-card-enter` would multiply into it (the
     /// card's opacity becomes css x surface, quadratic) and the card would
-    /// visibly lag the wallpaper it sits on. Same for the blur ramp: one
-    /// motion, not three.
+    /// visibly lag the wallpaper it sits on. One motion, not two.
     pub fn set_crossfade(&self, on: bool) {
         self.crossfade.set(on);
     }
@@ -230,41 +226,22 @@ impl SurfaceSet {
     ) -> gtk4::Widget {
         let overlay = gtk4::Overlay::new();
 
-        // Wallpaper (optional, crisp) + scrim for contrast; solid palette bg
-        // otherwise. Only the card region reads frosted — the GlassPane
-        // around the card re-draws this texture blurred behind it (swayfx
-        // blur covers neither ext-session-lock surfaces nor own content).
+        // The scrim, and nothing else full-screen. On both surfaces this
+        // builds, the wallpaper under it and the glass behind the card are the
+        // compositor's: the lock reads `layer_effects "session-lock"` and draws
+        // the wallpaper into the lock's own scene tree, and the greeter gets
+        // the same material keyed on its layer-shell namespace,
+        // `swaypplet-greeter`, over its compositor's `output * bg`. Either way
+        // a picture here would cover the very pixels the material refracts,
+        // which is why the wallpaper decode this used to do is gone rather than
+        // made conditional.
+        //
+        // The scrim's alpha is deliberately below the compositor's mask
+        // threshold (users/modules/theme/glass.nix, 0.48) so it reads as
+        // backdrop and only the card and the face pill stencil the glass.
         let backdrop = gtk4::Box::builder().hexpand(true).vexpand(true).build();
-        backdrop.add_css_class("lock-backdrop");
-        super::stage("wallpaper decode start");
-        let wallpaper = wallpaper_texture();
-        super::stage("wallpaper decode done");
-        // One source for the full-screen picture and for every pane's glass.
-        // A decoded texture is itself a paintable, so the still case costs
-        // nothing extra; when the source moves, the picture and the
-        // refraction are looking at the same frame by construction rather
-        // than by two code paths agreeing.
-        let backdrop_source: Option<gdk4::Paintable> = video_path()
-            .and_then(|p| super::livebg::video(&p))
-            .or_else(|| {
-                if super::livebg::wanted() {
-                    Some(super::livebg::LiveBackdrop::new(wallpaper.clone()).upcast())
-                } else {
-                    None
-                }
-            })
-            .or_else(|| wallpaper.clone().map(|t| t.upcast()));
-        if let Some(ref source) = backdrop_source {
-            let picture = gtk4::Picture::for_paintable(source);
-            picture.set_content_fit(gtk4::ContentFit::Cover);
-            picture.set_hexpand(true);
-            picture.set_vexpand(true);
-            overlay.set_child(Some(&picture));
-            overlay.add_overlay(&backdrop);
-            backdrop.add_css_class("lock-scrim");
-        } else {
-            overlay.set_child(Some(&backdrop));
-        }
+        backdrop.add_css_class("lock-scrim");
+        overlay.set_child(Some(&backdrop));
 
         // One pixel that changes on demand, so the surface has something to
         // commit. See `pulse` for why a lock screen needs that.
@@ -307,25 +284,18 @@ impl SurfaceSet {
             .spacing(0)
             .width_request(360)
             .build();
+        // `.glass-card` is what makes the card glass: its `@surface` fill is
+        // above the compositor's mask threshold, so the material is stencilled
+        // to exactly this box. The card used to be hosted in a GlassPane that
+        // drew a blurred copy of the wallpaper behind it and ramped its sigma
+        // in; the compositor owns that now, and it has the material up before
+        // this surface's first frame rather than a few frames after it.
         card.add_css_class("glass-card");
         card.add_css_class("lock-card");
+        card.set_margin_top(48);
 
-        // Frosted pane hugging the card exactly (margin lives on the pane so
-        // the glass doesn't extend into the gap below the clock).
-        let pane = super::glass::GlassPane::new();
-        pane.set_margin_top(48);
-        pane.set_child(&card);
-        pane.set_backdrop(backdrop_source.clone());
-        // Materialize: sigma ramps 0 → full with the card's enter fade
-        // (auth-card-enter, 300 ms = anim::ENTER_MS). This is client-side
-        // GSK blur, the one glass in swaypplet with a real radius to
-        // animate; ramp_blur_to jumps under reduced motion.
         if self.crossfade.get() {
             window.add_css_class("lock-crossfade");
-            pane.set_blur_radius(super::glass::BLUR_RADIUS);
-        } else {
-            pane.set_blur_radius(0.0);
-            pane.ramp_blur_to(super::glass::BLUR_RADIUS, crate::anim::ENTER_MS);
         }
 
         let greet_mode = self.user_field.borrow().is_some();
@@ -408,7 +378,7 @@ impl SurfaceSet {
 
         column.append(&clock);
         column.append(&date);
-        column.append(&pane);
+        column.append(&card);
         // Outside the card, deliberately. Inside it, the button bounded the
         // caption's reserved second line on both sides and turned it back
         // into the hole this design exists to remove; below the glass it
@@ -461,24 +431,18 @@ impl SurfaceSet {
         // by every state class -- and every looking -> face edge would replay
         // the arrival, dropping the pill mid-check. Two nodes, two independent
         // animations.
-        // Frosted like everything else. On a layer surface the compositor
-        // does this (layer_effects, users/modules/sway.nix); a session-lock
-        // surface gets none of that, so the pill borrows the card's
-        // client-side glass and the wallpaper texture that is already
-        // decoded. Without it the pill is the one opaque sticker on an
-        // otherwise frosted screen.
-        let face_glass = super::glass::GlassPane::new();
-        face_glass.set_child(&face_pill);
-        face_glass.set_backdrop(backdrop_source.clone());
-        face_glass.set_blur_radius(super::glass::BLUR_RADIUS);
-
+        //
+        // Frosted like everything else, and by the same route as the card: the
+        // pill's `@surface` fill is above the compositor's mask threshold, so
+        // the session-lock material is stencilled to it. It used to carry a
+        // client-side glass pane of its own for want of that.
         let face_wrap = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .halign(gtk4::Align::Center)
             .valign(gtk4::Align::Start)
             .build();
         face_wrap.set_margin_top(56);
-        face_wrap.append(&face_glass);
+        face_wrap.append(&face_pill);
 
         overlay.add_overlay(&column);
         overlay.add_overlay(&face_wrap);
@@ -527,7 +491,6 @@ impl SurfaceSet {
             face_wrap,
             window: window.clone(),
             card,
-            pane,
             user_entry,
             chip_row,
             user_chips,
@@ -758,11 +721,12 @@ impl SurfaceSet {
             return Duration::ZERO;
         }
         for s in self.inner.borrow().iter() {
+            // The card's fade also dissolves the glass, with no second ramp to
+            // keep in step: the material is stencilled to the card's alpha, so
+            // as `.lock-handoff` fades the fill past the compositor's mask
+            // threshold the material goes with it, and the wallpaper is bare
+            // when the VT cut lands.
             s.card.add_css_class("lock-handoff");
-            // The glass dissolves with the card (matches the 240ms+120ms
-            // card fade in style.css), so the wallpaper is bare when the
-            // VT cut lands.
-            s.pane.ramp_blur_to(0.0, 360.0);
             for (name, chip) in &s.user_chips {
                 chip.add_css_class(if name == user { "picked" } else { "dropped" });
             }
@@ -786,8 +750,6 @@ impl SurfaceSet {
     pub fn end_handoff(&self) {
         for s in self.inner.borrow().iter() {
             s.card.remove_css_class("lock-handoff");
-            s.pane
-                .ramp_blur_to(super::glass::BLUR_RADIUS, crate::anim::ENTER_MS);
             for (_, chip) in &s.user_chips {
                 chip.remove_css_class("picked");
                 chip.remove_css_class("dropped");
@@ -962,47 +924,6 @@ fn build_switch_button() -> gtk4::Button {
     btn.set_halign(gtk4::Align::Center);
     btn.connect_clicked(|_| switch_user::to_greeter());
     btn
-}
-
-/// Decode the wallpaper once, ahead of the lock request.
-///
-/// It used to be decoded inside `build_content`, i.e. once per monitor,
-/// inside the `connect_monitor` burst, inside `instance.lock()` — precisely
-/// the interval the compositor holds the live desktop on screen for.
-pub fn preload_wallpaper() {
-    let _ = wallpaper_texture();
-}
-
-/// Decoded once per process and shared by every surface.
-fn wallpaper_texture() -> Option<gdk4::Texture> {
-    thread_local! {
-        static TEXTURE: std::cell::OnceCell<Option<gdk4::Texture>> =
-            const { std::cell::OnceCell::new() };
-    }
-    TEXTURE.with(|cell| {
-        cell.get_or_init(|| wallpaper_path().and_then(|p| gdk4::Texture::from_filename(p).ok()))
-            .clone()
-    })
-}
-
-/// A video to use as the lock backdrop instead of the still wallpaper.
-/// Falls back to the wallpaper if unset, missing, or undecodable.
-fn video_path() -> Option<String> {
-    let path = std::env::var("SWAYPPLET_LOCK_VIDEO").ok()?;
-    if !path.is_empty() && std::path::Path::new(&path).is_file() {
-        Some(path)
-    } else {
-        None
-    }
-}
-
-fn wallpaper_path() -> Option<String> {
-    let path = std::env::var("SWAYPPLET_LOCK_WALLPAPER").ok()?;
-    if !path.is_empty() && std::path::Path::new(&path).is_file() {
-        Some(path)
-    } else {
-        None
-    }
 }
 
 fn caps_lock_state() -> bool {

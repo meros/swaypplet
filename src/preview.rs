@@ -54,6 +54,11 @@ pub fn run(component: &str) {
         // Lock screen: full-window content in a plain toplevel — no session
         // lock is taken, so it's safe to iterate on styling while unlocked.
         // Submitting "ok" flashes success; anything else shakes.
+        //
+        // What it shows is what the locker draws and no more: scrim, clock,
+        // card. The wallpaper under a real lock surface and the glass behind
+        // its card are the compositor's, from `layer_effects "session-lock"`,
+        // and no plain toplevel gets either.
         if component == "lock" {
             let window: gtk4::Window = ApplicationWindow::builder()
                 .application(app)

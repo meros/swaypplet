@@ -2,9 +2,9 @@
 //! host resolves one, a deterministic per-user monogram otherwise) with an
 //! optional green presence dot for a logged-in user.
 //!
-//! Rendering mirrors `lock::glass`: a subclassed widget snapshots the texture
-//! into a `RoundedRect` clip (cover-fit, like `ContentFit::Cover`), so the
-//! image crops to a circle without a Cairo round-trip. The dummy monogram is
+//! A subclassed widget snapshots the texture into a `RoundedRect` clip
+//! (cover-fit, like `ContentFit::Cover`), so the image crops to a circle
+//! without a Cairo round-trip. The dummy monogram is
 //! a filled hue circle plus the uppercase initial. The returned widget is an
 //! `Overlay` carrying `.user-avatar`; callers mark the current user with an
 //! `.active` CSS class (accent ring) and the dot is a `.user-dot` overlay.

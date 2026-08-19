@@ -60,9 +60,9 @@ const WAKE_HOLD_MAX_MS: f64 = 134.0;
 /// The entrance parks at 0 for this long before it starts moving.
 ///
 /// The first frame a lock surface paints is the most expensive one this
-/// process ever renders — GSK uploads the wallpaper, rasterises the clock's
-/// glyphs and builds the blur pipeline — and the compositor takes on a new
-/// full-screen surface on the same beat. So the frames right after it are the
+/// process ever renders — GSK rasterises the clock's glyphs and builds the
+/// pipeline for the card — and the compositor takes on a new full-screen
+/// surface on the same beat. So the frames right after it are the
 /// ones most likely to arrive late, and stepping the multiplier across them
 /// spends the curve's largest deltas exactly where the cadence is worst,
 /// which is what the eye reads as stutter. The hold is invisible (the surface
