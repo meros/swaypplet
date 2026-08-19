@@ -12,11 +12,19 @@
 //! learned it once, and it means the same thing whether they are unlocking
 //! the session or authorising `sudo`.
 //!
-//! Its own layer surface, and deliberately not part of the polkit window.
-//! `swaypplet-polkit` has a `layer_effects` entry, and `blur_ignore_transparent`
-//! frosts a partially transparent box-shadow into a flat halo — which is
-//! exactly what the attention glow is made of. An unblurred namespace renders
-//! it as the shadow it is.
+//! Its own layer surface, and deliberately not part of the polkit window, for
+//! two reasons that have nothing to do with the material — `swaypplet-face-cue`
+//! has carried the same thin glass geometry as every other surface for a while
+//! now.
+//!
+//! The offset is the first. The pill sits at a fixed distance from the top of
+//! the output, under the lens, and the card is centred; a widget inside the
+//! card would follow the card's own height and stop pointing at the camera.
+//!
+//! The keyboard is the second. This surface takes `KeyboardMode::None`, so it
+//! can span the output and still never compete for a key. Inside the polkit
+//! window it would sit under that window's grab, and the strip above the card
+//! would be one more thing between Enter and the Allow button.
 
 use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer};
@@ -37,8 +45,9 @@ static CUE_CONFIG: LayerShellConfig = LayerShellConfig {
     // lens.
     // Left and right anchored too, so the surface spans the output and its
     // geometry never depends on the pill inside it. A surface that resized
-    // with its content renegotiated size mid-animation, and clipped the glow
-    // -- a 26px blur with 5px spread reaches well past the pill's own box.
+    // with its content renegotiated size mid-animation, and clipped
+    // `.face-pill-dark`'s glow -- 22px of blur at 3px spread, which reaches
+    // well past the pill's own box.
     anchors: &[(Edge::Top, true), (Edge::Left, true), (Edge::Right, true)],
     margins: &[],
     // Never takes the keyboard. The card owns every key that matters, and a
