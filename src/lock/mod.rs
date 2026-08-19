@@ -455,6 +455,18 @@ pub fn run() -> ! {
         let first_frame_hooked = std::cell::Cell::new(false);
         let fade_cb = fade.clone();
         instance.connect_monitor(move |instance, monitor| {
+            // Named, sized and scaled, because everything downstream that can
+            // go wrong on one output and not on another — the glass's GL
+            // context above all — reports itself into this log and has to be
+            // pinned to an output before it can be read.
+            let geometry = monitor.geometry();
+            log::info!(
+                "lock: building surface for {} {}x{} scale {}",
+                monitor.connector().unwrap_or_else(|| "unknown".into()),
+                geometry.width(),
+                geometry.height(),
+                monitor.scale_factor(),
+            );
             stage("monitor: build start");
             let window = surfaces.build_surface(on_submit.clone(), Some(monitor));
             stage("monitor: built");

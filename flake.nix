@@ -51,6 +51,10 @@
           protoOrCargo = path: type:
             (builtins.match ".*proto$" path != null) ||
             (builtins.match ".*css$" path != null) ||
+            # data/swaypplet-{toggle,launcher}.sh: installed verbatim by the
+            # postInstall below. Matched by name rather than by extension so a
+            # dev/*.sh edit does not churn this derivation's source hash.
+            (builtins.match ".*/data/swaypplet-(toggle|launcher).sh$" path != null) ||
             # src/lock/shaders/*: include_str! wants them at compile time, and
             # filterCargoSources keeps only Rust and Cargo files.
             (builtins.match ".*(frag|vert)$" path != null) ||
@@ -87,28 +91,13 @@
             inherit cargoArtifacts;
             doCheck = false;
             postInstall = ''
-              cat > $out/bin/swaypplet-toggle <<'SCRIPT'
-              #!/bin/sh
-              PID=$(cat "''${XDG_RUNTIME_DIR:-/tmp}/swaypplet.pid" 2>/dev/null)
-              if [ -n "$PID" ] && [ "$(cat /proc/$PID/comm 2>/dev/null)" = "swaypplet" ]; then
-                kill -USR1 "$PID"
-              else
-                swaypplet &
-              fi
-              SCRIPT
-              chmod +x $out/bin/swaypplet-toggle
-
-              # Launcher toggle
-              cat > $out/bin/swaypplet-launcher <<'SCRIPT'
-              #!/bin/sh
-              PID=$(cat "''${XDG_RUNTIME_DIR:-/tmp}/swaypplet.pid" 2>/dev/null)
-              if [ -n "$PID" ] && [ "$(cat /proc/$PID/comm 2>/dev/null)" = "swaypplet" ]; then
-                kill -USR2 "$PID"
-              else
-                swaypplet launcher &
-              fi
-              SCRIPT
-              chmod +x $out/bin/swaypplet-launcher
+              # Installed from data/, not written here. This postInstall and
+              # package.nix's used to carry a copy each, only this one ships
+              # (overlays.default resolves to this package; package.nix feeds
+              # `checks.build`), and the copies drifted: a fix to the comm test
+              # went into the one nobody installs and the bug stayed live.
+              install -Dm755 data/swaypplet-toggle.sh $out/bin/swaypplet-toggle
+              install -Dm755 data/swaypplet-launcher.sh $out/bin/swaypplet-launcher
 
               # OSD client — drop-in replacement for swayosd-client
               cat > $out/bin/swaypplet-osd <<SCRIPT

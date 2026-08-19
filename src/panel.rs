@@ -25,6 +25,29 @@ use crate::widgets::{
     users::UserSection,
 };
 
+/// What the Helm card asks for on a screen with room for it. No height: the
+/// sections decide how tall the card is, and the deck stack has no sensible
+/// fixed height to fall back on.
+///
+/// The width is a floor rather than the width the card renders at. Laid out
+/// with room to spare it takes 1033 logical px, the width its widest row
+/// wants; squeezed onto a laptop panel that row wraps and the card comes down
+/// to around 620. This number only sets how far `install_monitor_fit` is
+/// allowed to clamp it before the rows start giving up space.
+const HELM_CARD_SIZE: crate::launcher::CardSize = crate::launcher::CardSize {
+    width: 740,
+    height: None,
+};
+
+/// How tall a sub-sheet's body stands on a screen with room for it.
+const SUBSHEET_HEIGHT: i32 = 340;
+
+/// What the card's lists shrink to on an output too short for the card at
+/// full density. They still scroll, so this costs visible rows and nothing
+/// else. Everything below them in the card, the action deck above all, stays
+/// on screen instead of being pushed off the bottom edge.
+const COMPACT_LIST_HEIGHT: i32 = 80;
+
 // ── Sections bundle ───────────────────────────────────────────────────────────
 
 struct Sections {
@@ -95,16 +118,16 @@ impl Panel {
         backdrop.add_css_class("helm-backdrop");
 
         // ── Top spacer (positions Helm at the optical foveal sweet spot ~25-28%) ──
-        let top_offset = crate::launcher::monitor_top_offset();
+        // Height and the card's width both come from
+        // crate::launcher::install_monitor_fit below, against the output the
+        // window lands on.
         let top_spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-        top_spacer.set_height_request(top_offset);
 
         // ── Root container (the floating glass Helm card) ─────────────────────
         let root = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .halign(gtk4::Align::Center)
             .valign(gtk4::Align::Start)
-            .width_request(740)
             .build();
         root.add_css_class("glass-card");
         root.add_css_class("startmenu-root");
@@ -248,6 +271,26 @@ impl Panel {
         backdrop.append(&slide);
         window.set_child(Some(&backdrop));
 
+        // `root`, not the slide bin around it, is what carries the size
+        // request: the bin lays its child out with a BinLayout, so a request
+        // on the bin would be overridden by the child's own.
+        //
+        // The lists are what the card gives up when the output is short, and
+        // the only thing it gives up: every control keeps its place and its
+        // size, the lists just show fewer rows before scrolling.
+        let lists = elastic_lists(&launcher, &deck_stack);
+        crate::launcher::install_monitor_fit(
+            &window,
+            &top_spacer,
+            &root,
+            HELM_CARD_SIZE,
+            Some(Rc::new(move |compact| {
+                for (list, full) in &lists {
+                    list.set_min_content_height(if compact { COMPACT_LIST_HEIGHT } else { *full });
+                }
+            })),
+        );
+
         // Enter/exit transition for the glass menu
         let reveal = anim::Reveal::new(&window, &root)
             .content(&content)
@@ -377,6 +420,39 @@ impl Panel {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/// Every list in the card whose height may be given up on a short output: the
+/// launcher's results, and the body of each sub-sheet.
+///
+/// Collected by walking the built pages rather than threaded through
+/// `build_subsheet`, which nine call sites would have had to pass along. Each
+/// sub-sheet keeps its scroller as a direct child, so one level is enough.
+/// Each list is paired with the height it was built with, so full density is
+/// whatever the widget already asked for and no number is written twice.
+fn elastic_lists(
+    launcher: &LauncherView,
+    deck_stack: &gtk4::Stack,
+) -> Vec<(gtk4::ScrolledWindow, i32)> {
+    let mut lists = vec![launcher.scroller().clone()];
+    let mut page = deck_stack.first_child();
+    while let Some(current) = page {
+        let mut child = current.first_child();
+        while let Some(widget) = child {
+            if let Ok(list) = widget.clone().downcast::<gtk4::ScrolledWindow>() {
+                lists.push(list);
+            }
+            child = widget.next_sibling();
+        }
+        page = current.next_sibling();
+    }
+    lists
+        .into_iter()
+        .map(|list| {
+            let full = list.min_content_height();
+            (list, full)
+        })
+        .collect()
+}
+
 fn build_subsheet(
     title: &str,
     icon: &str,
@@ -412,11 +488,14 @@ fn build_subsheet(
 
     container.append(&header);
 
+    // The floor is a property rather than a CSS `min-height`, because GTK
+    // takes the larger of the two and a rule would then outrank the fit when
+    // it has to shrink this list to keep the card on a short screen.
     let scroller = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .vscrollbar_policy(gtk4::PolicyType::Automatic)
         .vexpand(true)
-        .min_content_height(340)
+        .min_content_height(SUBSHEET_HEIGHT)
         .max_content_height(420)
         .child(content)
         .build();
@@ -505,7 +584,11 @@ fn build_telemetry_ribbon(
     let scale = audio.output_volume_scale();
     scale.set_draw_value(false);
     scale.set_hexpand(true);
-    scale.set_width_request(80);
+    // A floor, not a size: the scale expands to fill the ribbon wherever
+    // there is room, so lowering it only decides how much the ribbon can give
+    // up on a narrow output. A slider is the right thing to squeeze first,
+    // because it stays usable at any width while a label has to be cut.
+    scale.set_width_request(44);
     if scale.parent().is_some() {
         scale.unparent();
     }
@@ -540,7 +623,8 @@ fn build_telemetry_ribbon(
     let b_scale = brightness.brightness_scale();
     b_scale.set_draw_value(false);
     b_scale.set_hexpand(true);
-    b_scale.set_width_request(70);
+    // Same floor as the volume scale above, and for the same reason.
+    b_scale.set_width_request(44);
     if b_scale.parent().is_some() {
         b_scale.unparent();
     }
@@ -667,11 +751,28 @@ fn build_flight_deck(
         .build();
     deck.add_css_class("helm-action-deck");
 
-    // Flight switches (Left group)
-    let left_group = gtk4::Box::builder()
+    // Flight switches (Left group).
+    //
+    // A FlowBox rather than a Box because this strip is what made the card
+    // 1033 logical px wide at minimum: nine switches in a row that could not
+    // break. A FlowBox's minimum is its widest single child, so the strip can
+    // fold onto a second row on a laptop panel with every switch still there
+    // and still clickable.
+    //
+    // `max_children_per_line` is set from the switch count once they are all
+    // in, further down. It has to be exactly that count: it is how many slots
+    // wide the flow box asks to be, so leaving it at the default of 7 wraps
+    // the row on a screen that has room for it, and setting it higher makes
+    // the strip claim width for slots that do not exist and widens the card.
+    let left_group = gtk4::FlowBox::builder()
         .orientation(gtk4::Orientation::Horizontal)
-        .spacing(6)
+        .selection_mode(gtk4::SelectionMode::None)
+        .min_children_per_line(1)
+        .row_spacing(6)
+        .column_spacing(6)
+        .halign(gtk4::Align::Start)
         .build();
+    left_group.add_css_class("deck-switches");
 
     // Night Light + the session inhibitors, in the order tiles.rs gives them.
     for spec in tiles::deck_specs() {
@@ -726,14 +827,23 @@ fn build_flight_deck(
     }
     left_group.append(&clip_btn);
 
+    // One slot per switch, counted rather than written down, so adding a
+    // switch here does not silently start wrapping the row on every screen.
+    let switches = std::iter::successors(left_group.first_child(), |child| child.next_sibling());
+    left_group.set_max_children_per_line(switches.count() as u32);
+
     deck.append(&left_group);
 
     // Spacer
     let spacer = gtk4::Box::builder().hexpand(true).build();
     deck.append(&spacer);
 
-    // Session cluster (Right group)
-    deck.append(&power::build_session_row());
+    // Session cluster (Right group). Centred rather than filling, because
+    // once the switches beside it wrap to a second row the deck is twice as
+    // tall and these buttons would stretch to match it.
+    let session = power::build_session_row();
+    session.set_valign(gtk4::Align::Center);
+    deck.append(&session);
 
     deck
 }

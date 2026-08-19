@@ -71,30 +71,11 @@ rustPlatform.buildRustPackage {
   };
 
   postInstall = ''
-    cat > $out/bin/swaypplet-toggle <<'SCRIPT'
-    #!/bin/sh
-    PID=$(cat "''${XDG_RUNTIME_DIR:-/tmp}/swaypplet.pid" 2>/dev/null)
-    # comm check: a recycled pid must not get a (default-fatal) USR1
-    if [ -n "$PID" ] && [ "$(cat /proc/$PID/comm 2>/dev/null)" = "swaypplet" ]; then
-      kill -USR1 "$PID"
-    else
-      swaypplet &
-    fi
-    SCRIPT
-    chmod +x $out/bin/swaypplet-toggle
-
-    # Launcher toggle
-    cat > $out/bin/swaypplet-launcher <<'SCRIPT'
-    #!/bin/sh
-    PID=$(cat "''${XDG_RUNTIME_DIR:-/tmp}/swaypplet.pid" 2>/dev/null)
-    # comm check: a recycled pid must not get a (default-fatal) USR2
-    if [ -n "$PID" ] && [ "$(cat /proc/$PID/comm 2>/dev/null)" = "swaypplet" ]; then
-      kill -USR2 "$PID"
-    else
-      swaypplet launcher &
-    fi
-    SCRIPT
-    chmod +x $out/bin/swaypplet-launcher
+    # Installed from data/, so this build and the flake's cannot drift apart
+    # again. They each used to write their own copy, only the flake's shipped,
+    # and a fix to the comm test landed in this one and changed nothing.
+    install -Dm755 data/swaypplet-toggle.sh $out/bin/swaypplet-toggle
+    install -Dm755 data/swaypplet-launcher.sh $out/bin/swaypplet-launcher
 
     # OSD client — drop-in replacement for swayosd-client
     cat > $out/bin/swaypplet-osd <<SCRIPT

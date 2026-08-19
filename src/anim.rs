@@ -182,31 +182,59 @@ pub fn animations_enabled() -> bool {
 /// skips the node entirely, no stencil, nothing drawn. So blur is show/hide
 /// state: enabled right after map, disabled before unmap.
 ///
+/// Glass has to be named alongside blur. The two effects share one scene
+/// node, which swayfx keeps live while `blur_enabled ||
+/// liquid_glass_enabled` (`arrange_surface` and
+/// `configure_layer_shell_surface` in the nixos repo's
+/// patches/swayfx-liquid-glass.patch), and the sway config gives every
+/// swaypplet namespace `liquid_glass enable` and no `blur enable` at all.
+/// `blur disable` on its own therefore turns nothing off, the node survives
+/// the unmap, and the black transition frame is back.
+///
 /// Leaving the surface mapped instead is not an alternative, and the reason
 /// is not the frost. A mapped surface with nothing left to draw stops
 /// committing, so the compositor goes on showing the last buffer it was
-/// sent — the content mid-fade. `blur disable` does not touch that, because
-/// it is the client's own pixels. Hiding means unmapping.
+/// sent — the content mid-fade. Disabling the effects does not touch that,
+/// because it is the client's own pixels. Hiding means unmapping.
 ///
-/// Only ever `blur enable|disable`, NEVER `reset`. sway merges a runtime
-/// `layer_effects` into the namespace's existing criteria (layer_criteria.c
-/// `layer_criteria_add` clones the old effects first), so this keeps the
-/// blur_ignore_transparent and corner_radius the sway config set — and, more
-/// importantly, `reset` clears blur_ignore_transparent, which sends sway
-/// into `wlr_scene_blur_set_transparency_mask_source(node, NULL)`; that
-/// dereferences the NULL source at scenefx wlr_scene.c:1153 and takes the
-/// whole compositor down (scenefx 0.4.1-git/37ccd72, swayfx 0.5.3-git).
+/// One command carries both effects. `layer_criteria_parse` splits the
+/// effects string on `;` and `,`, and sway's own command splitter is
+/// quote-aware (`argsep` tracks `"`), so the semicolon stays inside the
+/// quoted argument: one IPC round trip and one acknowledgment for `then` to
+/// sequence on. It is also the safer shape on a compositor without the
+/// patch, where `liquid_glass` is not a known effect. `layer_criteria_add`
+/// deletes the namespace's existing criteria before parsing the new cmdlist
+/// and a parse failure destroys the replacement, so the namespace is left
+/// with no effects at all; sending the two separately would instead land
+/// `blur enable` and then strip the blur_ignore_transparent it needs, which
+/// is the screen-sized slab and the crash below. sway answers CMD_SUCCESS
+/// either way (`cmd_layer_effects` ignores a NULL criteria), so the failure
+/// shows up in its log rather than in the reply.
+///
+/// Only ever `blur`/`liquid_glass` `enable|disable`, NEVER `reset`. sway
+/// merges a runtime `layer_effects` into the namespace's existing criteria
+/// (layer_criteria.c `layer_criteria_add` clones the old effects first), so
+/// this keeps the blur_ignore_transparent, corner_radius and `liquid_glass_*`
+/// numbers the sway config set. `reset` clears blur_ignore_transparent, which
+/// sends sway into `wlr_scene_blur_set_transparency_mask_source(node, NULL)`;
+/// that dereferences the NULL source at scenefx wlr_scene.c:1153 and takes
+/// the whole compositor down (scenefx 0.4.1-git/37ccd72, swayfx 0.5.3-git).
 ///
 /// `then` runs on the GTK thread once sway has acknowledged the change,
 /// which hide uses to sequence the unmap after the frost is gone — and on
 /// failure too, so a wedged socket can't strand a surface mapped forever.
+/// One command means one reply and one `then`, on either path.
 pub fn set_layer_blur(namespace: Option<glib::GString>, on: bool, then: impl FnOnce() + 'static) {
     let Some(ns) = namespace else {
         then();
         return;
     };
-    let effect = if on { "blur enable" } else { "blur disable" };
-    crate::sway_ipc::run_command_then(&format!("layer_effects \"{ns}\" \"{effect}\""), then);
+    let effects = if on {
+        "blur enable; liquid_glass enable"
+    } else {
+        "blur disable; liquid_glass disable"
+    };
+    crate::sway_ipc::run_command_then(&format!("layer_effects \"{ns}\" \"{effects}\""), then);
 }
 
 /// The glass-pane opacity channel for a fade between `from` and `to` at
@@ -448,7 +476,7 @@ impl Reveal {
     /// interaction with whatever is behind resumes unconditionally. The
     /// frost is dropped first and the unmap waits for sway's acknowledgment
     /// — unmapping a blurred surface flashes a black frame, and a mapped
-    /// alpha-0 one keeps a stale frost, so blur-off-then-unmap is the only
+    /// alpha-0 one keeps a stale frost, so effects-off-then-unmap is the only
     /// clean exit (see [`set_layer_blur`]). A show() racing the
     /// acknowledgment wins: the unmap is skipped.
     fn finish_hide(&self) {
@@ -468,8 +496,8 @@ impl Reveal {
             let this = self.clone();
             set_layer_blur(inner.window.namespace(), false, move || {
                 if this.inner.shown.get() {
-                    // A show() beat the reply here; its own `blur enable` may
-                    // have reached sway before this disable, so restate it.
+                    // A show() beat the reply here; its own enable may have
+                    // reached sway before this disable, so restate it.
                     set_layer_blur(this.inner.window.namespace(), true, || {});
                 } else {
                     this.inner.window.set_visible(false);
