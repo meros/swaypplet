@@ -329,6 +329,12 @@ struct Shared {
     /// frame of the animation.
     drawn: Cell<bool>,
     on_ready: RefCell<Option<Box<dyn Fn()>>>,
+    /// Which output this pane's window is on, resolved once at realize.
+    ///
+    /// A multi-monitor lock builds one of these per output and they come up
+    /// independently, so a line saying the glass failed but not saying where
+    /// is a line nobody can act on.
+    output: RefCell<String>,
 }
 
 impl GlGlass {
@@ -353,6 +359,41 @@ impl GlGlass {
             tuning: Tuning::from_env(),
             drawn: Cell::new(false),
             on_ready: RefCell::new(None),
+            output: RefCell::new("unrealized".to_string()),
+        });
+
+        // A context that never came up has to be noticed here, because the
+        // check inside ::render below cannot see it: GtkGLArea sets its error
+        // in ::realize and its snapshot then draws an error screen *instead of*
+        // emitting ::render, so the one failure most likely to happen — no GL
+        // context for this surface — is the one failure ::render is never told
+        // about. Without this the pane keeps believing GL is live, draws a
+        // transparent child, and never falls back, which on a second monitor
+        // whose context failed is a card with no glass behind it at all.
+        //
+        // ::realize is G_SIGNAL_RUN_FIRST and GtkGLArea's own handler is the
+        // class closure, so it has already tried and recorded the outcome by
+        // the time this runs.
+        area.connect_realize({
+            let shared = shared.clone();
+            move |area| {
+                // The surface exists from here on, so this is the first moment
+                // the output is knowable and every line below can name it.
+                *shared.output.borrow_mut() = output_name(area);
+                let out = shared.output.borrow().clone();
+                match area.error() {
+                    Some(err) => {
+                        log::warn!("lock glass: no GL context on {out} ({err}); using GSK blur");
+                        shared.fail(area);
+                    }
+                    None => log::info!(
+                        "lock glass: GL context up on {out}, {}x{} at scale {}",
+                        area.width(),
+                        area.height(),
+                        area.scale_factor()
+                    ),
+                }
+            }
         });
 
         area.connect_render({
@@ -375,8 +416,9 @@ impl GlGlass {
 
                 let mut slot = shared.renderer.borrow_mut();
                 if slot.is_none() {
+                    let out = shared.output.borrow().clone();
                     if let Some(err) = area.error() {
-                        log::warn!("lock glass: no GL context ({err}); using GSK blur");
+                        log::warn!("lock glass: no GL context on {out} ({err}); using GSK blur");
                         shared.fail(area);
                         return glib::Propagation::Stop;
                     }
@@ -384,13 +426,16 @@ impl GlGlass {
                     let gl = unsafe { glow::Context::from_loader_function(|s| loader(s)) };
                     match Renderer::new(gl) {
                         Ok(mut r) => {
+                            log::info!("lock glass: renderer up on {out} at {w}x{h}, {}", unsafe {
+                                gl_id(&r.gl)
+                            });
                             if let Some(t) = shared.texture.borrow().as_ref() {
                                 r.set_wallpaper(t);
                             }
                             *slot = Some(r);
                         }
                         Err(e) => {
-                            log::warn!("lock glass: {e}; using GSK blur");
+                            log::warn!("lock glass: {e} on {out}; using GSK blur");
                             drop(slot);
                             shared.fail(area);
                             return glib::Propagation::Stop;
@@ -486,6 +531,45 @@ impl Shared {
         if let Some(parent) = area.parent() {
             parent.queue_draw();
         }
+        // Anything parked behind the first frame of glass has to be let go,
+        // because there will not be one. The pane arms its materialize ramp
+        // before the window is presented and therefore before this widget is
+        // realized, so a failure discovered at realize would otherwise leave
+        // that ramp waiting forever and the GSK glass sitting at sigma 0.
+        let waiting = self.on_ready.borrow_mut().take();
+        if let Some(cb) = waiting {
+            cb();
+        }
+    }
+}
+
+/// Which output this pane's window is on.
+///
+/// A multi-monitor lock builds one of these per output and they come up
+/// independently, so a line saying the glass failed but not where it failed
+/// is a line nobody can act on.
+fn output_name(area: &gtk4::GLArea) -> String {
+    area.native()
+        .and_then(|n| n.surface())
+        .and_then(|s| s.display().monitor_at_surface(&s))
+        .and_then(|m| m.connector())
+        .map_or_else(|| "unknown output".to_string(), |c| c.to_string())
+}
+
+/// Who is answering GL calls on the context that just came up. Worth a line
+/// once per area: two outputs on two GPUs is a thing that happens, and it is
+/// invisible from anywhere else in the log.
+///
+/// # Safety
+///
+/// A context must be current, which is true throughout `::render`.
+unsafe fn gl_id(gl: &glow::Context) -> String {
+    unsafe {
+        format!(
+            "{} / {}",
+            gl.get_parameter_string(glow::RENDERER),
+            gl.get_parameter_string(glow::VERSION)
+        )
     }
 }
 
@@ -778,7 +862,8 @@ impl Renderer {
         if !ready {
             if stats() {
                 log::info!(
-                    "lock glass: skip frame, cover={:?} texture={}",
+                    "lock glass: {} skip frame, cover={:?} texture={}",
+                    shared.output.borrow(),
                     cover,
                     shared.texture.borrow().is_some()
                 );
@@ -941,8 +1026,9 @@ impl Renderer {
             // would report nothing at all for the common case.
             if stats() && (self.frames <= 3 || self.frames.is_multiple_of(20)) {
                 log::info!(
-                    "lock glass: {w}x{h}, glass pass {:.3} ms GPU, \
+                    "lock glass: {} {w}x{h}, glass pass {:.3} ms GPU, \
                      {} backdrop draws in {} frames, uT={:.3}",
+                    shared.output.borrow(),
                     self.glass_ms,
                     self.backdrop_draws,
                     self.frames,

@@ -49,5 +49,12 @@ fn read_panel_pid() -> Option<i32> {
         .parse::<i32>()
         .ok()?;
     let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
-    (comm.trim() == "swaypplet").then_some(pid)
+    // The installed binary is wrapped by makeBinaryWrapper, so the running
+    // panel's executable is .swaypplet-wrapped and comm, which is the
+    // executable filename cut to 15 characters, reads ".swaypplet-wrap".
+    // Requiring the bare name rejected every real panel. Accepting the
+    // wrapper prefix as well stays narrow enough that an unrelated process
+    // holding a recycled pid still fails the check and is spared the signal.
+    let comm = comm.trim();
+    (comm == "swaypplet" || comm.starts_with(".swaypplet")).then_some(pid)
 }

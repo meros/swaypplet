@@ -43,7 +43,7 @@
    Spacing scale (use these literals consistently): 4 / 8 / 12 / 16 / 20.
    Radius scale: 8 (buttons) / 10 (controls, entries) / 14 (cards, tiles)
    / 18 (floating surfaces: panel, OSD, launcher, popups, dialogs). */
-@define-color surface        alpha(#32302f, 0.72);  /* panel base — waybar card fill; swayfx layer_effects blurs behind it */
+@define-color surface        alpha(#32302f, 0.62);  /* panel base; the compositor refracts the desktop behind it */
 @define-color surface_raised #32302f;               /* cards, tiles          */
 @define-color surface_hover  #3c3836;               /* hover / inactive fill */
 @define-color surface_track  #45403d;               /* slider trough, wells  */
@@ -155,22 +155,26 @@ window.panel {
 
 button.bar-ws {
     margin: 0;
-    /* 2px shaved off each vertical padding for the two reserved lanes —
-       total height unchanged, neither lane moves geometry. */
-    padding: 2px 12px 2px;
+    /* 2px shaved off the bottom padding for the ribbon lane; the top 4px
+       is the 2px the retired selection cap used to hold, handed back so
+       the label stays centred and the pill keeps the height it always had. */
+    padding: 4px 12px 2px;
     min-width: 0;
     min-height: 0;
     background-color: alpha(@bg1, 0.85);
     color: @fg_dim;
     border-radius: 0;
-    /* Two lanes, two vocabularies, never sharing an edge or a hue: the
-       TOP lane is the selection cap (where am I — src/bar/workspaces.rs
-       WsState), the BOTTOM lane the task ribbon (which task — vision
-       increment 10). Both transparent until their state lands. */
-    border-top: 2px solid transparent;
+    /* One lane left: the BOTTOM edge is the task ribbon (which task —
+       vision increment 10), transparent until its state lands. The top
+       edge used to cap the selected workspace with a bright rim, and a
+       rim on an 8px-radius pill wraps its own corners, so the selected
+       pill wore a lit outline. The bar card is bevelled glass that the
+       compositor lights itself, so that outline stacked a second height
+       cue inside the first and both read as fake. Selection is a step on
+       the fill ladder now, which claims no height at all. */
     border-bottom: 2px solid transparent;
     transition: background-color 150ms ease, color 150ms ease,
-        border-top-color 150ms ease, border-bottom-color 150ms ease;
+        border-bottom-color 150ms ease;
 }
 
 button.bar-ws:not(:first-child) {
@@ -192,23 +196,27 @@ button.bar-ws:hover {
     color: @fg;
 }
 
-/* Selection tiers — one mark, two intensities, all achromatic. Hue is
-   spoken for: the dot and the ribbon carry task identity, so the cursor
-   cannot also be a hue without the two colliding (and the vision puts
-   position and numeral first, hue as reinforcement only). .current is
-   what its screen shows; .focused is that same mark stepped up on the
-   screen holding input, which only ever happens inside .active-screen. */
+/* Selection tiers — three rungs of one neutral fill ladder, all
+   achromatic. Hue is spoken for: the dot and the ribbon carry task
+   identity, so the cursor cannot also be a hue without the two colliding
+   (and the vision puts position and numeral first, hue as reinforcement
+   only). Idle is the dark rung, .current — what its screen shows — the
+   middle one, and .current.focused, the screen holding input, the bright
+   one; the rungs sit far enough apart to survive grayscale, which is the
+   job the retired cap used to do. The top rung goes bold as well, so the
+   screen holding input is legible on weight and on luminance. 0.30 is the
+   ceiling on that rung: a cream tint over the glass lifts the fill toward
+   the @fg label sitting on it, and past 0.30 the numeral falls below the
+   3:1 it reads at today. Brightness that costs legibility is not a tier. */
 button.bar-ws.current {
     background-color: alpha(@fg, 0.14);
     color: @fg;
-    border-top-color: alpha(@fg, 0.55);
 }
 
 button.bar-ws.current.focused {
-    background-color: alpha(@fg, 0.28);
+    background-color: alpha(@fg, 0.30);
     color: @fg;
     font-weight: bold;
-    border-top-color: @fg;
 }
 
 /* Static red tier, no keyframe loop: a looping "calm" animation is
@@ -218,7 +226,6 @@ button.bar-ws.current.focused {
 button.bar-ws.urgent {
     background-color: @accent_quinary;
     color: @bg0;
-    border-top-color: @accent_quinary;
 }
 
 /* Task ribbons: 2px lane under each task group — off = no session, dim
@@ -468,7 +475,7 @@ button.bar-tray-item.needs-attention {
 /* ── The board: four-bay cross-task instrument (src/bar/board.rs) ──
    Replaces the per-output task pill. Position + numeral carry identity,
    hue reinforces (vision P3): every state stays distinct in grayscale —
-   socket = hollow ring, working = mid fill, waiting = bright fill,
+   socket = darkest empty step, working = mid fill, waiting = bright fill,
    stopped = near-off dot glyph, stale = amber hollow OFF-flag glyph.
    All states static (P2); escalation is a luminance tier step (owner
    decision 1), the ack drop is the one 150ms sub-threshold crossfade. */
@@ -483,16 +490,32 @@ button.bar-bay {
     min-width: 24px;
     min-height: 0;
     background: none;
+    /* Flat on purpose: the bar card is the only thing on this window that
+       has height, and the compositor draws that height itself (bevelled
+       rim + specular highlight on the glass). A bay that carried its own
+       rim or press bevel would stack a second height cue inside the first
+       and both would read as fake, so background-image and box-shadow are
+       pinned off here — that also stops the generic `button:active` inset
+       further down from denting a bay when it is clicked. State speaks
+       through fill and hue, never through depth. */
+    background-image: none;
+    box-shadow: none;
+    /* Reserved, transparent until .stale claims it, so the OFF-flag never
+       shifts the bay's geometry. */
     border: 1px solid transparent;
-    border-radius: 5px;
+    /* Concentric with the board segment: 8 − the segment's 2px padding. */
+    border-radius: 6px;
     color: @fg_dim;
     transition: background-color 150ms ease, color 150ms ease,
         border-color 150ms ease, box-shadow 150ms ease;
 }
 
-/* No session: hollow socket. */
+/* No session: the bottom step of the fill ladder, one shade under the
+   segment it sits in. This was a hollow ring until the bar grew a real
+   bevel; a rim on an empty bay then read as a raised edge floating on the
+   glass, so the empty slot is spoken as fill like every other pill. */
 button.bar-bay.socket {
-    border-color: alpha(@fg, 0.15);
+    background-color: alpha(@bg0, 0.45);
     color: alpha(@fg, 0.20);
 }
 
@@ -541,14 +564,21 @@ button.bar-bay.blocked .bar-bay-marker {
 }
 
 /* Unacked >=10 min: one static luminance tier step — nothing on the bar
-   ever loops (owner decision 1). */
-button.bar-bay.t1.waiting.unacked.overdue { background-color: shade(@accent, 1.25); box-shadow: 0 0 8px alpha(@accent, 0.45); }
-button.bar-bay.t2.waiting.unacked.overdue { background-color: shade(@accent_secondary, 1.25); box-shadow: 0 0 8px alpha(@accent_secondary, 0.45); }
-button.bar-bay.t3.waiting.unacked.overdue { background-color: shade(@accent_tertiary, 1.25); box-shadow: 0 0 8px alpha(@accent_tertiary, 0.45); }
-button.bar-bay.t4.waiting.unacked.overdue { background-color: shade(@accent_quaternary, 1.25); box-shadow: 0 0 8px alpha(@accent_quaternary, 0.45); }
+   ever loops (owner decision 1). The tier step is the whole signal; the
+   halo that used to sit under it is gone, because a blurred glow on the
+   glass card is a height claim and the card's own bevel already makes
+   that claim for everything inside it. */
+button.bar-bay.t1.waiting.unacked.overdue { background-color: shade(@accent, 1.25); }
+button.bar-bay.t2.waiting.unacked.overdue { background-color: shade(@accent_secondary, 1.25); }
+button.bar-bay.t3.waiting.unacked.overdue { background-color: shade(@accent_tertiary, 1.25); }
+button.bar-bay.t4.waiting.unacked.overdue { background-color: shade(@accent_quaternary, 1.25); }
 
 /* Local bay (this output's visible task): hue ring + static width step —
-   workspace hopping is the highest-frequency event, so no animation. */
+   workspace hopping is the highest-frequency event, so no animation. The
+   ring is the one box-shadow left inside the bar: zero blur, zero offset,
+   full task hue, so it draws an outline and never a bevel. It is the only
+   hue a socket or stopped bay can carry, which is why it survives the
+   flattening. */
 button.bar-bay.local {
     min-width: 30px;
 }
@@ -2588,10 +2618,12 @@ revealer {
     color: @fg;
 }
 
-.subsheet-scroller {
-    min-height: 340px;
-    max-height: 420px;
-}
+/* Sub-sheet body height lives on the widget (src/panel.rs, SUBSHEET_HEIGHT),
+   not here: GTK takes the larger of a CSS min-height and min-content-height,
+   so a rule here would outrank the fit when it shrinks the list for a short
+   output. `max-height` is not a GTK CSS property at all and was doing nothing
+   but printing a parser warning; the cap is max-content-height on the
+   widget. */
 
 .network-adv-btn {
     background-color: alpha(@bg1, 0.55);
@@ -2621,6 +2653,22 @@ revealer {
     border-top: 1px solid @border_subtle;
 }
 
+/* The switches sit in a flow box so they can wrap onto a second row on a
+   narrow output (src/panel.rs). GTK wraps each one in a flowboxchild node
+   that carries the theme's own padding and minimum size; left alone that adds
+   about 190px to the row's natural width, which widens the whole card on a
+   screen where nothing needs to wrap at all. The switches keep their own
+   spacing through the flow box's row and column spacing. */
+.deck-switches,
+.deck-switches > flowboxchild {
+    padding: 0;
+    margin: 0;
+    border: none;
+    min-width: 0;
+    min-height: 0;
+    outline: none;
+}
+
 .deck-tile-btn {
     min-height: 38px;
     padding: 0 10px;
@@ -2644,8 +2692,46 @@ revealer {
     margin-bottom: 10px;
 }
 
-.launcher-scroller {
-    min-height: 360px;
+/* Results list height lives on the widget (src/launcher.rs, RESULTS_HEIGHT),
+   for the same reason as the sub-sheet body above: a CSS min-height would
+   outrank the fit when it shrinks the list for a short output. `.dmenu
+   .launcher-scroller` above still applies, to dmenu's own scroller. */
+
+/* ── Narrow-output fallback ──
+   src/launcher.rs adds .card-compact to a card whose minimum height does not
+   fit the output it opened on. The lists that make it too tall, 360px of
+   results plus 340px of sub-sheet against a laptop panel that has less than
+   that left once the bar is taken, are shrunk from panel.rs instead: the fit
+   measures the card the instant it asks for less, and a class added here does
+   not reach that measurement until a later frame.
+
+   What is left is density. Each rule is small, and together they buy back
+   roughly the height the action deck spends when it wraps to a second row. */
+.card-compact.helm-card,
+.card-compact.startmenu-root {
+    padding: 8px 10px;
+}
+
+.card-compact .helm-telemetry-ribbon {
+    padding: 2px 2px 6px;
+    margin-bottom: 2px;
+}
+
+.card-compact .helm-deck-stack {
+    margin-bottom: 2px;
+}
+
+.card-compact .subsheet-header {
+    padding: 2px 8px 6px;
+    margin-bottom: 2px;
+}
+
+.card-compact .helm-action-deck {
+    padding: 6px 2px 0;
+}
+
+.card-compact .launcher-view .launcher-entry {
+    margin-bottom: 6px;
 }
 
 /* ── Right column: quick settings ── */
