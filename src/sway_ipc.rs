@@ -13,8 +13,11 @@
 //! skeleton in `crate::service`).
 
 use std::collections::HashMap;
+use std::fs;
+use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use swayipc::{Connection, EventType, Node, NodeType};
 
@@ -59,6 +62,77 @@ pub struct SwayState {
     /// Current binding mode ("default" at rest; "" only before the first
     /// snapshot). The hazard lane shows non-default modes (increment 7).
     pub binding_mode: String,
+}
+
+// ── Connecting ──────────────────────────────────────────────────────────
+
+/// Open an IPC connection, surviving a sway that restarted under us.
+///
+/// swayipc resolves the socket from `I3SOCK`/`SWAYSOCK`, and a process keeps
+/// the environment it was started with. When systemd restarts swaypplet
+/// during a session handover, that variable can still name the *previous*
+/// sway's socket: the file is gone, every reconnect fails the same way, and
+/// the bar sits there with an empty workspace strip (seen 2026-08-19).
+///
+/// So the environment is a hint rather than the answer. Try it first — it is
+/// right in the normal case and costs one connect — then any
+/// `sway-ipc.*.sock` actually lying in `$XDG_RUNTIME_DIR`, newest first. A
+/// live socket accepts and a stale one refuses, which is the whole test.
+pub fn connect() -> Result<Connection, swayipc::Error> {
+    let mut failure = None;
+    for path in socket_candidates() {
+        match UnixStream::connect(&path) {
+            Ok(stream) => return Ok(Connection::from(stream)),
+            Err(e) => failure = Some(e),
+        }
+    }
+    Err(failure.map_or(swayipc::Error::SocketNotFound, swayipc::Error::Io))
+}
+
+/// The environment's socket paths, then the runtime directory's.
+fn socket_candidates() -> Vec<PathBuf> {
+    let env = ["I3SOCK", "SWAYSOCK"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .collect();
+    order_candidates(env, runtime_dir_sockets())
+}
+
+/// Every `sway-ipc.<uid>.<pid>.sock` in `$XDG_RUNTIME_DIR`, with the mtime
+/// that orders them. Unreadable directory or entry: skip it, the caller
+/// still has the environment's path to try.
+fn runtime_dir_sockets() -> Vec<(SystemTime, PathBuf)> {
+    let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") else {
+        return Vec::new();
+    };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter(|e| {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with("sway-ipc.") && name.ends_with(".sock")
+        })
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect()
+}
+
+/// Order to try paths in: the environment's first, then the discovered ones
+/// newest-mtime first — the newest socket belongs to the sway still running.
+/// A discovered path equal to an environment one drops out, so the failing
+/// path is not retried under a second name.
+fn order_candidates(env: Vec<PathBuf>, mut found: Vec<(SystemTime, PathBuf)>) -> Vec<PathBuf> {
+    found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    let mut paths = env;
+    for (_, path) in found {
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    paths
 }
 
 // ── GTK-side service ────────────────────────────────────────────────────
@@ -119,7 +193,7 @@ pub fn run_command_then(cmd: &str, then: impl FnOnce() + 'static) {
     let cmd = cmd.to_string();
     crate::spawn::spawn_work(
         move || {
-            Connection::new()
+            connect()
                 .and_then(|mut c| c.run_command(&cmd))
                 .and_then(|outcomes| outcomes.into_iter().find(Result::is_err).unwrap_or(Ok(())))
                 .map_err(|e| format!("sway ipc: command `{cmd}` failed: {e}"))
@@ -139,7 +213,7 @@ pub fn run_command_then(cmd: &str, then: impl FnOnce() + 'static) {
 /// the whole config in one string and arrives in a few milliseconds. Only the
 /// keybinding sheet wants it, and only when it is first opened.
 pub fn config_text() -> Result<String, String> {
-    Connection::new()
+    connect()
         .and_then(|mut c| c.get_config())
         .map(|config| config.config)
         .map_err(|e| format!("sway ipc: get_config failed: {e}"))
@@ -165,14 +239,14 @@ fn run(tx: async_channel::Sender<SwayState>) {
 /// One connection lifetime. `Ok(())` means the GTK side hung up; `Err`
 /// means the socket dropped and the caller should reconnect.
 fn session(tx: &async_channel::Sender<SwayState>) -> Result<(), swayipc::Error> {
-    let mut query = Connection::new()?;
+    let mut query = connect()?;
     if tx.send_blocking(snapshot(&mut query)?).is_err() {
         return Ok(());
     }
 
     // Mode rides the existing subscription — a few events per day, no
     // poll (vision cadence budget).
-    let events = Connection::new()?.subscribe([
+    let events = connect()?.subscribe([
         EventType::Workspace,
         EventType::Window,
         EventType::Output,
@@ -433,6 +507,36 @@ mod tests {
                     urgent: true,
                     visible: false,
                 },
+            ]
+        );
+    }
+
+    #[test]
+    fn candidates_try_the_environment_then_the_newest_socket() {
+        let t = |secs| SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs);
+        let env = vec![PathBuf::from("/run/user/1000/sway-ipc.1000.100.sock")];
+        let found = vec![
+            (
+                t(10),
+                PathBuf::from("/run/user/1000/sway-ipc.1000.100.sock"),
+            ),
+            (
+                t(20),
+                PathBuf::from("/run/user/1000/sway-ipc.1000.300.sock"),
+            ),
+            (
+                t(15),
+                PathBuf::from("/run/user/1000/sway-ipc.1000.200.sock"),
+            ),
+        ];
+        assert_eq!(
+            order_candidates(env, found),
+            vec![
+                // The stale environment path goes first and only once...
+                PathBuf::from("/run/user/1000/sway-ipc.1000.100.sock"),
+                // ...then the live sockets, newest sway first.
+                PathBuf::from("/run/user/1000/sway-ipc.1000.300.sock"),
+                PathBuf::from("/run/user/1000/sway-ipc.1000.200.sock"),
             ]
         );
     }
