@@ -8,10 +8,10 @@
 //! structural reveal (P2).
 //!
 //! Hazards shipping now; failed-units is deferred (severable):
-//! - **Session inhibitors** (Awake, Stay Lit, Clamshell): one glyph each,
-//!   driven off `crate::inhibit`'s observed state. That module owns the
+//! - **Session inhibitors** (No Sleep, No Lock): one glyph each, driven
+//!   off `crate::inhibit`'s observed state. That module owns the
 //!   readings and the wording; this lane only decides where the glyph
-//!   sits, so a fourth inhibitor arrives here for free. It is a push
+//!   sits, so a third inhibitor arrives here for free. It is a push
 //!   path rather than a poll: whoever establishes a state publishes it
 //!   (the panel's tiles on toggle, `inhibit::prime` at startup), which
 //!   is also what fixed the standalone `swaypplet bar` process being

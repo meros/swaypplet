@@ -54,15 +54,21 @@
 //! set of SWAYPPLET_GLASS_* material numbers as well; the compositor draws the
 //! lock's wallpaper and glass now, and the locker reads neither.
 //!
-//! Inhibitors (panel tiles, `crate::inhibit`) reach this three ways, none of
-//! them a special case in here. **Awake** stops the whole service, so nothing
-//! below runs at all — including the before-sleep lock, which is why its
-//! tooltip says so. **Stay Lit** sets a compositor idle inhibitor, which
-//! `get_idle_notification` honours, so the timeout tiers simply never fire;
-//! the absence path is the one tier that has to ask (`idle_inhibited`).
-//! **Clamshell** holds a logind lid-switch inhibitor and never touches this
-//! process: logind stops suspending, and sway's `bindswitch lid:on` still
-//! locks and blanks.
+//! Inhibitors (panel tiles, `crate::inhibit`) are two standing switches, and
+//! both are read at fire time rather than being cached here. **No Sleep**
+//! holds a logind lid-switch inhibitor, which stops logind suspending on a
+//! lid close; the suspend tier below reads it too, because "don't sleep with
+//! the lid shut" has to mean both paths or it means neither. **No Lock**
+//! suppresses the dim tier, the lock tier and the walk-away lock — every way
+//! this process locks a session nobody asked it to lock. Neither one touches
+//! the paths a user asked for: the before-sleep lock, the Lock signal, the
+//! VT-switch lock and an explicit `systemctl suspend` all still run, so
+//! neither switch can leave the machine asleep and unlocked.
+//!
+//! A compositor idle inhibitor (a video player's idle-inhibit-v1, or sway's
+//! `inhibit_idle` by hand) suppresses the timeout tiers for free, since
+//! `get_idle_notification` honours it (wayland.rs). The absence path is the
+//! one tier that has to ask (`idle_inhibited`).
 
 mod locker;
 mod logind;
@@ -168,6 +174,9 @@ pub fn run() -> ! {
     let mut lock_reason: &'static str = "manual";
     // Mirrors the logind session Active property.
     let mut session_active = true;
+    // True only while the dim tier's 10% is on the screen, so the resume
+    // restores brightness it actually took away.
+    let mut dimmed = false;
 
     // This process owns the sensor for the whole session and publishes it on
     // the session bus; the bar and the lock screen's face engine listen there
@@ -239,6 +248,8 @@ pub fn run() -> ! {
                     blank_at = Some(Instant::now() + BLANK_AFTER_LOCK_IDLE);
                 }
                 outputs.power("presence.back", Power::On);
+            } else if crate::inhibit::NoLock.armed() {
+                log::info!("presence: user gone — No Lock armed, not locking");
             } else if crate::inhibit::idle_inhibited() {
                 // Absence is the one tier the compositor cannot suppress for
                 // us. The timeout tiers ride ext-idle-notify, which honours
@@ -300,10 +311,24 @@ pub fn run() -> ! {
 
         match ev {
             Ev::Idled(Timeout::Dim) => {
-                outputs.brightness("idle.dim-240s", 10);
+                // Dimming is the first step toward the lock, so No Lock owns
+                // it: a screen that fades while you read it is the same
+                // complaint as one that locks while you read it.
+                if crate::inhibit::NoLock.armed() {
+                    log::info!("idle.dim-240s: skip (No Lock)");
+                } else {
+                    dimmed = true;
+                    outputs.brightness("idle.dim-240s", 10);
+                }
             }
+            // Restore only what this tier faded. The resume fires whether or
+            // not the dim did, and an unconditional 100% would undo a
+            // deliberate brightness setting every time input resumed under
+            // No Lock.
             Ev::Resumed(Timeout::Dim) => {
-                outputs.brightness("idle.dim-240s.resume", 100);
+                if std::mem::take(&mut dimmed) {
+                    outputs.brightness("idle.dim-240s.resume", 100);
+                }
             }
 
             Ev::Idled(Timeout::Lock) => {
@@ -311,7 +336,9 @@ pub fn run() -> ! {
                 // someone the 300 s tier is suppressed and the absence path
                 // owns locking instead; nothing re-arms this tier until input
                 // resumes, which is the intent.
-                if present == Some(true) {
+                if crate::inhibit::NoLock.armed() {
+                    log::info!("idle.lock-300s: skip (No Lock)");
+                } else if present == Some(true) {
                     log::info!("idle.lock-300s: skip (present)");
                 } else {
                     log::info!("idle.lock-300s: fire");
@@ -354,14 +381,13 @@ pub fn run() -> ! {
                     log::info!("idle.suspend-1200s: session inactive — skip");
                 } else if on_ac() {
                     log::info!("idle.suspend-1200s: on AC — skip");
-                } else if crate::inhibit::Clamshell.read() == Some(true) {
-                    // Clamshell inhibits logind's *lid* handling, and this
-                    // tier is not logind's. Without this the second path
-                    // wins anyway: shut the lid on battery, and twenty
+                } else if crate::inhibit::NoSleep.armed() {
+                    // No Sleep's inhibitor covers logind's *lid* handling,
+                    // and this tier is not logind's. Without this the second
+                    // path wins anyway: shut the lid on battery, and twenty
                     // minutes later the machine this switch exists to keep
-                    // awake suspends itself. "Don't sleep with the lid
-                    // closed" has to mean both, or it means neither.
-                    log::info!("idle.suspend-1200s: clamshell armed — skip");
+                    // awake suspends itself.
+                    log::info!("idle.suspend-1200s: No Sleep armed — skip");
                 } else {
                     run_cmd("idle.suspend-1200s", "systemctl", &["suspend"]);
                 }
