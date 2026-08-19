@@ -1,4 +1,4 @@
-<!-- Research note, 2026-08-14. Nothing here is implemented. -->
+<!-- Research note, 2026-08-14. Demo and lock-screen port, 2026-08-18. -->
 
 # Liquid glass on swayfx + GTK4: findings
 
@@ -153,8 +153,98 @@ Two independent tracks, neither blocking the other.
 
 ## Status
 
-Research only, August 2026. Nothing in this document is implemented and no
-decision has been taken. Recorded so the next person (or the next session)
+Research, August 2026, plus one runnable demo. No decision has been taken on
+shipping anything.
+
+**`dev/glass-demo` closes the client-side question, by a different route than
+§2 proposed.** Rather than betting on CSS `backdrop-filter` with an inline
+`data:` SVG `feDisplacementMap`, it uses `GtkGLArea`, which is public,
+supported, and hands a client a raw GL context. `GskGLShader` being dead does
+not mean GTK4 clients cannot run custom shaders; it means they cannot run them
+*inside the GSK node tree*. A `GtkGLArea` sidesteps that entirely.
+
+What the demo demonstrates, all live at native resolution and all measured:
+
+- Real Snell refraction of an offscreen backdrop that changes every frame, so
+  it is screen-space rather than a warp of one baked image.
+- Spectral dispersion over up to 24 wavelengths (Cauchy plus a CIE 1931 fit),
+  which is a strict generalisation of the three-tap chromatic aberration both
+  scenefx-enhanced and kube.io stop at.
+- Smooth-union merging, so separate shapes fuse and refract as one body. None
+  of the prior art in §4 does this.
+- Light concentration from the Laplacian of the height field, free from the
+  taps the normal already costs.
+- Cost, from `GL_TIME_ELAPSED` queries: 1.12 ms for the glass pass at
+  1600×1000 on the Arc 140V, 1.92 ms with a 78 px bezel and 16 spectral taps.
+  That sits between this note's §5 estimates for glass and for kawase, and it
+  is measured rather than derived. Spectral tap count barely matters, because
+  everything outside the shape early-outs after one SDF evaluation.
+
+`dev/glass-demo/lockprobe.sh` closes the follow-up question too: a
+`GtkGLArea` does render on a real `ext-session-lock-v1` surface, at the same
+1.07 ms, which `swaypplet --preview lock` could not have shown because that
+path builds a plain toplevel. The probe takes its lock inside a nested headless
+sway, never the host session.
+
+**The lock screen is done**, by that route: `GlassPane` now has two backends.
+`src/lock/glass_gl.rs` runs the refraction in a `GtkGLArea`, and the GSK blur
+this note describes stays as the fallback, chosen per pane rather than per
+process, because what fails is a GL context and each pane asks for its own.
+`SWAYPPLET_LOCK_GLASS=gsk` forces the old path without a rebuild.
+
+Four things learned in the port that the research did not predict:
+
+- **A margin has to be captured.** §3 records scenefx doing
+  `dst_box - margin` before its glass pass and it reads like an
+  implementation detail; it is not. Reflection off the steep part of a rim
+  lands *outside* the shape, so without wallpaper from beyond its own edge
+  every one of those samples clamps to the edge texel and smears. The
+  backdrop pass covers the pane plus `bezel * 1.4 + 20` px on every side.
+- **The bezel may not exceed the corner radius.** A rounded rect's distance
+  field has a cone singularity at the centre of each corner arc, exactly
+  `radius` inside the corner. A sloped band that reaches it makes the
+  Laplacian diverge and leaves a dark dot in every corner. This is what
+  scenefx's two separate sharpness factors are working around.
+- **The scrim must be applied after the optics, not before.** Dimming the
+  wallpaper and then refracting it crushes exactly the contrast the lens
+  exists to bend. Pass 1 hands over the raw wallpaper and the glass pass
+  applies the scrim twice at different strengths: in full where the rounded
+  corners have to match the picture behind, and partly in the body.
+- **The material is absorption, not tint.** Beer-Lambert through the slab
+  (`exp(-absorb * path)`) gives smoked glass one parameter that darkens and
+  tints together and stays physical; a flat tint over the top does neither.
+- **Reflection has to be mixed in last.** Absorption, forward scattering and
+  the lens-gain term all belong to light that went *through* the slab. The
+  reflected component bounced off the top surface and entered nothing, so
+  applying any of them to it is wrong — and it hides itself, because the
+  under-bright reflection that results just makes you raise the Fresnel
+  weight until it looks right again. Two errors of this kind cancelled here
+  (the reflection was also being sampled off unscrimmed wallpaper, making it
+  too bright) and between them they had `uFresnel` tuned to 0.80. With both
+  fixed the physical value, 1.0, is correct: Schlick's F *is* the
+  reflectance, and it only passes 0.2 beyond about 72 degrees, so it confines
+  itself to the outer rim with no help.
+
+  A consequence worth knowing before choosing a corner radius: the width of
+  the band that reflects anything is set by how much of the bevel is steeper
+  than 45 degrees, and the bevel can be no wider than the radius. An 18 px
+  card corner therefore gives a reflection a few pixels wide. Wanting a more
+  visible one is a request for a bigger radius, not a bigger coefficient.
+
+Cost, from `GL_TIME_ELAPSED` on the Arc 140V: 0.095 ms for the glass pass on a
+360x146 card. The backdrop pass is cached against its inputs, so a still
+wallpaper renders **one frame for the entire life of the lock screen** and a
+live one — any `GdkPaintable`, a video through `GtkMediaFile` included — tracks
+it at 60 fps, re-rendering only the pane-sized crop it needs.
+
+The layer-shell half is unchanged and still needs compositor-side work.
+
+The first of the two re-verify items below is therefore moot for the lock
+screen: the CSS route was never exercised, and no longer needs to be for that
+surface. It would still matter if the same effect were ever wanted inside a
+GSK node tree.
+
+Original note follows. Recorded so the next person (or the next session)
 does not have to rediscover that `GskGLShader` is dead, that GTK 4.22 quietly
 gained a usable replacement, or that the compositor-side work already exists
 for swayfx specifically.

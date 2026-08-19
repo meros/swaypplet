@@ -239,8 +239,23 @@ impl SurfaceSet {
         super::stage("wallpaper decode start");
         let wallpaper = wallpaper_texture();
         super::stage("wallpaper decode done");
-        if let Some(ref texture) = wallpaper {
-            let picture = gtk4::Picture::for_paintable(texture);
+        // One source for the full-screen picture and for every pane's glass.
+        // A decoded texture is itself a paintable, so the still case costs
+        // nothing extra; when the source moves, the picture and the
+        // refraction are looking at the same frame by construction rather
+        // than by two code paths agreeing.
+        let backdrop_source: Option<gdk4::Paintable> = video_path()
+            .and_then(|p| super::livebg::video(&p))
+            .or_else(|| {
+                if super::livebg::wanted() {
+                    Some(super::livebg::LiveBackdrop::new(wallpaper.clone()).upcast())
+                } else {
+                    None
+                }
+            })
+            .or_else(|| wallpaper.clone().map(|t| t.upcast()));
+        if let Some(ref source) = backdrop_source {
+            let picture = gtk4::Picture::for_paintable(source);
             picture.set_content_fit(gtk4::ContentFit::Cover);
             picture.set_hexpand(true);
             picture.set_vexpand(true);
@@ -300,7 +315,7 @@ impl SurfaceSet {
         let pane = super::glass::GlassPane::new();
         pane.set_margin_top(48);
         pane.set_child(&card);
-        pane.set_texture(wallpaper.clone());
+        pane.set_backdrop(backdrop_source.clone());
         // Materialize: sigma ramps 0 → full with the card's enter fade
         // (auth-card-enter, 300 ms = anim::ENTER_MS). This is client-side
         // GSK blur, the one glass in swaypplet with a real radius to
@@ -454,7 +469,7 @@ impl SurfaceSet {
         // otherwise frosted screen.
         let face_glass = super::glass::GlassPane::new();
         face_glass.set_child(&face_pill);
-        face_glass.set_texture(wallpaper.clone());
+        face_glass.set_backdrop(backdrop_source.clone());
         face_glass.set_blur_radius(super::glass::BLUR_RADIUS);
 
         let face_wrap = gtk4::Box::builder()
@@ -968,6 +983,17 @@ fn wallpaper_texture() -> Option<gdk4::Texture> {
         cell.get_or_init(|| wallpaper_path().and_then(|p| gdk4::Texture::from_filename(p).ok()))
             .clone()
     })
+}
+
+/// A video to use as the lock backdrop instead of the still wallpaper.
+/// Falls back to the wallpaper if unset, missing, or undecodable.
+fn video_path() -> Option<String> {
+    let path = std::env::var("SWAYPPLET_LOCK_VIDEO").ok()?;
+    if !path.is_empty() && std::path::Path::new(&path).is_file() {
+        Some(path)
+    } else {
+        None
+    }
 }
 
 fn wallpaper_path() -> Option<String> {

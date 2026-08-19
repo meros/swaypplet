@@ -21,6 +21,8 @@ pub(crate) mod face;
 pub(crate) mod fade;
 pub(crate) mod fprint;
 pub mod glass;
+pub mod glass_gl;
+pub mod livebg;
 pub mod ui;
 
 use std::cell::{Cell, RefCell};

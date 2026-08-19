@@ -51,6 +51,9 @@
           protoOrCargo = path: type:
             (builtins.match ".*proto$" path != null) ||
             (builtins.match ".*css$" path != null) ||
+            # src/lock/shaders/*: include_str! wants them at compile time, and
+            # filterCargoSources keeps only Rust and Cargo files.
+            (builtins.match ".*(frag|vert)$" path != null) ||
             (craneLib.filterCargoSources path type);
 
           src = pkgs.lib.cleanSourceWith {
@@ -197,9 +200,13 @@
               dbus
             ];
 
-            buildInputs = runtimeDeps;
+            # dev/glass-demo resolves GL through libepoxy, the same dispatch
+            # layer GTK itself uses, so it has to be loadable by name at
+            # runtime. It is not a swaypplet dependency and stays out of the
+            # package's closure.
+            buildInputs = runtimeDeps ++ [ pkgs.libepoxy ];
 
-            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeDeps;
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (runtimeDeps ++ [ pkgs.libepoxy ]);
             RUSTFLAGS = "-C linker=clang -C link-arg=-fuse-ld=mold";
             RUSTC_WRAPPER = "sccache";
           };

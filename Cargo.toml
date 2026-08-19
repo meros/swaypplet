@@ -15,6 +15,11 @@ pam = "0.8"
 glib = "0.22"
 gio = "0.22"
 gdk4 = "0.11"
+# Real refraction on the lock card (src/lock/glass_gl.rs). GL is reached
+# through libepoxy, which is already loaded as a DT_NEEDED of libgtk-4, so
+# neither of these adds anything to the runtime closure.
+glow = "0.16"
+libloading = "0.8"
 cairo-rs = "0.22"
 zbus = { version = "4", default-features = false, features = ["tokio"] }
 tokio = { version = "1", features = ["rt", "net", "time", "macros", "io-util", "sync"] }
