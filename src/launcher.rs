@@ -20,6 +20,11 @@ const DEBOUNCE_MS: u64 = 100;
 /// How tall the results list stands on a screen with room for it.
 const RESULTS_HEIGHT: i32 = 360;
 
+/// Slack left above and below the selected row when the list scrolls to it,
+/// so the neighbour in the direction of travel peeks into view and the
+/// selection never sits flush against the edge of the viewport.
+const SCROLL_MARGIN: f64 = 8.0;
+
 /// What the standalone launcher card asks for on a screen with room for it.
 const LAUNCHER_CARD_SIZE: CardSize = CardSize {
     width: 560,
@@ -161,6 +166,7 @@ impl LauncherView {
             bump_generation(&self.state),
             self.state.clone(),
             self.results_box.clone(),
+            self.scroller.clone(),
             self.on_activate.clone(),
         );
     }
@@ -182,6 +188,7 @@ impl LauncherView {
 
         let view_state = self.state.clone();
         let results_box = self.results_box.clone();
+        let scroller = self.scroller.clone();
         let entry = self.entry.clone();
         let on_activate = self.on_activate.clone();
 
@@ -191,11 +198,11 @@ impl LauncherView {
                 glib::Propagation::Stop
             }
             gtk4::gdk::Key::Down => {
-                move_selection_state(&view_state, &results_box, 1);
+                move_selection_state(&view_state, &results_box, &scroller, 1);
                 glib::Propagation::Stop
             }
             gtk4::gdk::Key::Up => {
-                move_selection_state(&view_state, &results_box, -1);
+                move_selection_state(&view_state, &results_box, &scroller, -1);
                 glib::Propagation::Stop
             }
             gtk4::gdk::Key::Return | gtk4::gdk::Key::KP_Enter => {
@@ -220,6 +227,7 @@ impl LauncherView {
 
     fn wire_search(&self) {
         let results_box = self.results_box.clone();
+        let scroller = self.scroller.clone();
         let state = self.state.clone();
         let entry = self.entry.clone();
         let on_activate = self.on_activate.clone();
@@ -234,6 +242,7 @@ impl LauncherView {
             }
 
             let results_box_c = results_box.clone();
+            let scroller_c = scroller.clone();
             let state_c = state.clone();
             let on_activate_c = on_activate.clone();
 
@@ -244,7 +253,14 @@ impl LauncherView {
                 std::time::Duration::from_millis(DEBOUNCE_MS),
                 move || {
                     *debounce_id_c.borrow_mut() = None;
-                    run_search(query, generation, state_c, results_box_c, on_activate_c);
+                    run_search(
+                        query,
+                        generation,
+                        state_c,
+                        results_box_c,
+                        scroller_c,
+                        on_activate_c,
+                    );
                 },
             );
             *debounce_id.borrow_mut() = Some(id);
@@ -353,7 +369,12 @@ fn bump_generation(state: &Rc<RefCell<LauncherState>>) -> u64 {
     s.query_generation
 }
 
-fn move_selection_state(state: &Rc<RefCell<LauncherState>>, results_box: &gtk4::Box, delta: i32) {
+fn move_selection_state(
+    state: &Rc<RefCell<LauncherState>>,
+    results_box: &gtk4::Box,
+    scroller: &gtk4::ScrolledWindow,
+    delta: i32,
+) {
     let mut s = state.borrow_mut();
     if s.results.is_empty() {
         return;
@@ -368,7 +389,9 @@ fn move_selection_state(state: &Rc<RefCell<LauncherState>>, results_box: &gtk4::
     if new != old {
         s.selected = new;
         drop(s);
-        update_selection(results_box, old, new);
+        if let Some(row) = update_selection(results_box, old, new) {
+            scroll_row_into_view(scroller, results_box, &row);
+        }
     }
 }
 
@@ -391,6 +414,7 @@ fn run_search(
     generation: u64,
     state: Rc<RefCell<LauncherState>>,
     results_box: gtk4::Box,
+    scroller: gtk4::ScrolledWindow,
     on_activate: Rc<RefCell<Option<Box<dyn Fn()>>>>,
 ) {
     // Empty query → default desktop-application list only.
@@ -420,6 +444,10 @@ fn run_search(
                 s.selected = 0;
             }
             rebuild_results_ui(&results_box, &state, &query, &on_activate);
+            // A fresh result set selects its first row, so the list has to go
+            // back to the top with it — otherwise a search run from halfway
+            // down the previous results opens scrolled past the best match.
+            scroller.vadjustment().set_value(0.0);
         },
     );
 }
@@ -545,7 +573,10 @@ fn build_result_row(
     row
 }
 
-fn update_selection(results_box: &gtk4::Box, old: usize, new: usize) {
+/// Move the `selected` class from row `old` to row `new`, returning the row
+/// that now carries it so the caller can scroll it into view.
+fn update_selection(results_box: &gtk4::Box, old: usize, new: usize) -> Option<gtk4::Widget> {
+    let mut selected = None;
     let mut child = results_box.first_child();
     let mut i = 0;
     while let Some(widget) = child {
@@ -554,10 +585,40 @@ fn update_selection(results_box: &gtk4::Box, old: usize, new: usize) {
         }
         if i == new {
             widget.add_css_class("selected");
+            selected = Some(widget.clone());
         }
         child = widget.next_sibling();
         i += 1;
     }
+    selected
+}
+
+/// Scroll the results list the least amount that puts `row` on screen.
+///
+/// The rows are plain boxes rather than focusable list rows, and the
+/// selection is a CSS class rather than keyboard focus — focus stays in the
+/// search entry so typing keeps working while the arrows move through the
+/// results. That is the design, but it means GTK's own scroll-to-focus never
+/// fires and the viewport used to sit still while the selection walked off
+/// the bottom of it.
+///
+/// `clamp_page` is the same adjustment call GTK's focus handling makes: it
+/// scrolls only far enough to bring the range into the page, and does nothing
+/// at all when the row is already visible.
+fn scroll_row_into_view(
+    scroller: &gtk4::ScrolledWindow,
+    results_box: &gtk4::Box,
+    row: &gtk4::Widget,
+) {
+    // Bounds in the coordinate space of the scroller's child, which is the
+    // space the vertical adjustment measures in.
+    let Some(bounds) = row.compute_bounds(results_box) else {
+        return;
+    };
+    let vadj = scroller.vadjustment();
+    let top = f64::from(bounds.y()) - SCROLL_MARGIN;
+    let bottom = f64::from(bounds.y() + bounds.height()) + SCROLL_MARGIN;
+    vadj.clamp_page(top.max(vadj.lower()), bottom.min(vadj.upper()));
 }
 
 /// Default action for a result — the first elephant action, or "start".
