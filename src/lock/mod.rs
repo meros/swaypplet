@@ -70,18 +70,6 @@ pub(super) fn stage(what: &str) {
     });
 }
 
-/// The chip row's contents, fetched during the warm-up.
-///
-/// Asked for at lock time this answers mid-entrance — it is two D-Bus round
-/// trips, logind and fprintd — and applying it there grows the card while the
-/// surface is still half transparent, which is a jump no cross-fade can hide.
-/// The warm-up has nothing to wait for, so it asks there instead and the
-/// chips are in the first painted frame. What can go stale between warm-up
-/// and lock is the `logged_in` dot; the refresh below corrects it once the
-/// entrance is over.
-static WARM_USERS: std::sync::OnceLock<Vec<crate::switch_user::SwitchUser>> =
-    std::sync::OnceLock::new();
-
 /// Whether this user has enrolled fingerprints, asked during the warm-up.
 ///
 /// The card needs the answer before it is built, because it decides whether
@@ -173,13 +161,6 @@ fn warm_and_wait() {
     }
     stage("warm: done");
 
-    if crate::switch_user::available()
-        && let Some(list) = crate::switch_user::list()
-    {
-        let _ = WARM_USERS.set(list);
-    }
-    stage("warm: users");
-
     // Read-only: it neither claims the reader nor disturbs whoever holds it.
     // Off-thread, though, and deliberately not joined: at boot fprintd can be
     // cold, and this is two three-second deadlines standing in front of the
@@ -232,26 +213,6 @@ fn warm_and_wait() {
     stage("lock commanded");
 }
 
-/// The warm-up's answer, in the shape the surfaces want. Empty when the
-/// warm-up never ran (a cold `swaypplet lock`) or found nobody to switch to,
-/// which leaves the old behaviour: no row, generic button, async refill.
-fn warm_chips() -> Vec<ui::UserChip> {
-    match WARM_USERS.get() {
-        Some(list) if list.len() > 1 => chips_from(list),
-        _ => Vec::new(),
-    }
-}
-
-fn chips_from(list: &[crate::switch_user::SwitchUser]) -> Vec<ui::UserChip> {
-    list.iter()
-        .map(|u| ui::UserChip {
-            user: u.user.clone(),
-            logged_in: u.logged_in,
-            icon: u.icon.clone(),
-        })
-        .collect()
-}
-
 const EXIT_UNLOCKED: i32 = 0;
 const EXIT_ERROR: i32 = 1;
 const EXIT_UNAVAILABLE: i32 = 2;
@@ -302,48 +263,15 @@ pub fn run() -> ! {
         let surfaces = surfaces.clone();
         Rc::new(move || surfaces.pulse())
     });
-    surfaces.set_current_user(&user);
     let gate = Rc::new(RefCell::new(auth::AttemptGate::default()));
 
-    // The same user picker the greeter shows. Your own chip is inert (the
-    // password field below it is already aimed at you); anyone else's hands
-    // off to the host switcher, which locks this session and either jumps to
-    // theirs or opens a greeter. So a lock screen and a greeter answer the
-    // same gesture the same way, which is the whole point of the pair.
-    if crate::switch_user::available() {
-        let surfaces_cb = surfaces.clone();
-        surfaces.enable_user_chips(
-            &warm_chips(),
-            Rc::new(move |target: String| {
-                if Some(&target) == auth::current_username().as_ref() {
-                    surfaces_cb.focus_entry();
-                    return;
-                }
-                surfaces_cb.set_status("Switching…", StatusKind::Info);
-                // Let the handoff play, then switch. The D-Bus round trips
-                // and the VT change add their own latency on top, so the
-                // beat is never cut short by being early.
-                let delay = surfaces_cb.begin_handoff(&target);
-                glib::timeout_add_local_once(delay, move || {
-                    crate::switch_user::switch_to(&target);
-                });
-            }),
-        );
-        // Off-thread: logind + fprintd round trips must never delay the
-        // lock surface. Usually this only confirms what the warm-up already
-        // put on screen, in which case `set_user_chips` does nothing at all.
-        let surfaces = surfaces.clone();
-        let fade_for_chips = fade.clone();
-        spawn_work(crate::switch_user::list, move |list| {
-            let Some(list) = list.filter(|l| l.len() > 1) else {
-                return;
-            };
-            let chips = chips_from(&list);
-            // Never mid-entrance: a row appearing under a half-transparent
-            // surface is the one layout change the fade cannot absorb.
-            fade_for_chips.on_settled(move || surfaces.set_user_chips(&chips));
-        });
-    }
+    // No user picker is wired here. It used to be: the same chip row the
+    // greeter draws, which on this surface asked a question it could not
+    // answer — a locked session authenticates one user, so every chip but one
+    // had to hand the seat away and the one that didn't was inert. The card
+    // says both of those with one "Switch user" button now (lock/ui.rs), and
+    // the warm-up's `switch_user::list()` plus its off-thread refresh went with
+    // the row: two D-Bus round trips per lock whose only consumer it was.
 
     // One unlock, whoever gets there first. `unlock()` consumes the
     // session-lock object, so calling it twice is a protocol error that takes

@@ -158,6 +158,14 @@ the chips are in the first painted frame; the lock-time query stays as a
 refresh, is held until the entrance ends (`LockFade::on_settled`), and no-ops
 when it agrees with what is already on screen.
 
+*Since superseded.* The lock screen has no chip row at all now — a locked
+session authenticates one user, so the picker belongs to the greeter, the
+surface that asks who you are, and the lock kept the "Switch user" button that
+reaches it. Both queries went with the row, warm-up and refresh, and with them
+this whole class of fault: nothing arriving from a worker can change the card's
+height any more. `LockFade::on_settled` survives, with no caller, for the next
+thing that can.
+
 ### Two smaller things, same pass
 
 - The entrance used `ease_out_cubic`, which spends its biggest step on the

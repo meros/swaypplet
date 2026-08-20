@@ -141,9 +141,9 @@ impl State {
             return false;
         }
         self.surfaces.set_status("Switching…", StatusKind::Info);
-        // Same handoff beat as the lock screen's picker — this is a jump
+        // Same handoff beat as the lock screen's Switch user — this is a jump
         // between sessions either way, so it should look like one.
-        let delay = self.surfaces.begin_handoff(user);
+        let delay = self.surfaces.begin_handoff(Some(user));
         let user = user.to_string();
         glib::timeout_add_local_once(delay, move || switch_user::switch_to(&user));
         true
