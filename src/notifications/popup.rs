@@ -18,9 +18,9 @@ use std::time::{Duration, Instant};
 
 use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
+use swayipc::{Node, NodeType};
 
 use crate::anim;
-use crate::icons;
 use crate::layer_shell::LayerShellConfig;
 use crate::notifications::ImageSource;
 use crate::surface::GlassSurface;
@@ -689,20 +689,6 @@ fn populate_card(
         .spacing(10)
         .build();
 
-    // Leading rail. Identity as position and shape, with hue only
-    // reinforcing it (P3), so the card still says whose it is in grayscale.
-    let rail = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .build();
-    rail.add_css_class("notification-rail");
-    if let Some(task) = notif.task {
-        rail.add_css_class(&format!("t{task}"));
-    }
-    if notif.urgency == Urgency::Critical {
-        rail.add_css_class("critical");
-    }
-    hbox.append(&rail);
-
     // A picture wide enough to be a screenshot or a banner goes under the
     // text at full width; anything else is a thumbnail in the leading slot,
     // which is what a chat avatar or an app icon wants to be.
@@ -739,20 +725,18 @@ fn populate_card(
     // becomes the natural width and can push the card past the window (see
     // reflow). Fill + xalign(0) makes the label span that allocation and
     // ellipsize/wrap there instead of shrinking to the collapsed natural.
-    // Header row: task attribution (vision O2 — hue dot + "T<N>" says
-    // whose background session this is) ahead of the app name, with the
-    // card's age closing it out on the right.
+    // Header row: task attribution (vision O2 — "T<N>" says whose background
+    // session this is) ahead of the app name, with the card's age closing it
+    // out on the right. One label carries both channels: the number is the
+    // shape, its accent the hue (P3), so a separate dot would only repeat it.
     let header = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(4)
         .build();
     if let Some(task) = notif.task {
-        let dot = gtk4::Label::new(Some("●"));
-        dot.add_css_class("notification-task-dot");
-        dot.add_css_class(&format!("t{task}"));
-        header.append(&dot);
         let num = gtk4::Label::new(Some(&format!("T{task}")));
         num.add_css_class("notification-task-num");
+        num.add_css_class(&format!("t{task}"));
         header.append(&num);
     }
     if !notif.app_name.is_empty() {
@@ -977,30 +961,15 @@ fn populate_card(
 
     hbox.append(&vbox);
 
-    // Trailing controls, stacked so the card keeps one gutter rather than
-    // sprouting buttons along its edge.
-    let controls = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(2)
-        .valign(gtk4::Align::Start)
-        .build();
-
-    let close_btn = gtk4::Button::builder().label(icons::CLOSE).build();
-    close_btn.add_css_class("flat");
-    close_btn.add_css_class("notification-close-btn");
-    let id = notif.id;
-    let store_c = store.clone();
-    close_btn.connect_clicked(move |_| {
-        store::store_close(&store_c, id, CloseReason::Dismissed);
-    });
-    controls.append(&close_btn);
-
     // Snooze and mute live behind one visible button rather than only behind
-    // a right-click, so they exist for someone who never dwells (P8).
+    // a right-click, so they exist for someone who never dwells (P8). It is
+    // the card's only trailing control: closing has three ways in already
+    // (right-click, middle-click, drag) and none of them costs a widget.
     if !compact {
         let more_btn = gtk4::Button::builder().label("⋯").build();
         more_btn.add_css_class("flat");
         more_btn.add_css_class("notification-menu-btn");
+        more_btn.set_valign(gtk4::Align::Start);
         let menu = card_menu(notif, store, st);
         menu.set_parent(&more_btn);
         // GTK4 hands a popover's parent no ownership, so one that outlives
@@ -1010,10 +979,8 @@ fn populate_card(
         let menu_c = menu.clone();
         more_btn.connect_destroy(move |_| menu_c.unparent());
         more_btn.connect_clicked(move |_| menu.popup());
-        controls.append(&more_btn);
+        hbox.append(&more_btn);
     }
-
-    hbox.append(&controls);
 
     // Drag the card aside to dismiss it. Once the pointer has clearly
     // committed, the drag claims the event sequence so the click gesture
@@ -1062,19 +1029,35 @@ fn populate_card(
     }
     hbox.add_controller(drag);
 
-    // Click on body = focus the app's window, then dismiss. Middle-click
-    // dismisses without firing the default action, which is the difference
-    // between "I dealt with this" and "I read this".
+    // Left click goes where the notification came from; right click makes it
+    // go away. Middle click keeps doing what right click now does, because
+    // the muscle memory costs nothing to honour.
     let gesture = gtk4::GestureClick::new();
     gesture.set_button(0);
     let id = notif.id;
-    let app_name = notif.app_name.clone();
     let store_c = store.clone();
+    let names = Rc::new(window_names(notif));
+    let has_default = notif.actions.iter().any(|(key, _)| key == "default");
+    let resident = notif.resident;
     gesture.connect_released(move |g, _, _, _| match g.current_button() {
-        gtk4::gdk::BUTTON_MIDDLE => store::store_close(&store_c, id, CloseReason::Dismissed),
-        gtk4::gdk::BUTTON_PRIMARY => {
-            focus_app_window(&app_name);
+        gtk4::gdk::BUTTON_MIDDLE | gtk4::gdk::BUTTON_SECONDARY => {
             store::store_close(&store_c, id, CloseReason::Dismissed);
+        }
+        gtk4::gdk::BUTTON_PRIMARY => {
+            let store_c = store_c.clone();
+            jump_to_source(names.clone(), move |focused| {
+                // Nowhere to jump: the sender's own default action is the
+                // next best answer to "take me to this", and dismissing is
+                // the answer when it offered none.
+                if !focused && has_default {
+                    log::info!("Action invoked: notification {id}, action default");
+                    store::store_action_invoked(&store_c, id, "default");
+                    if resident {
+                        return;
+                    }
+                }
+                store::store_close(&store_c, id, CloseReason::Dismissed);
+            });
         }
         _ => {}
     });
@@ -1193,100 +1176,181 @@ fn dismiss_all(st: &Rc<RefCell<State>>) {
     }
 }
 
-/// Try to focus a Sway window matching the notification's app name.
-/// Uses `swaymsg -t get_tree` to find the window, then `[con_id=N] focus`.
-fn focus_app_window(app_name: &str) {
-    if app_name.is_empty() {
+// ── Jumping to the source ──
+
+/// One view in the tree, and where it lives.
+struct Target {
+    con_id: i64,
+    /// The enclosing workspace, when it has a name worth switching to.
+    workspace: Option<String>,
+}
+
+/// What the notification says about itself that a window could be named
+/// after, best evidence first.
+///
+/// The `desktop-entry` hint is the sender naming its own `.desktop` file,
+/// which for a Wayland client is the same string sway reports as `app_id`.
+/// `app_name` is free text but usually the program. A themed icon name is
+/// what is left when a sender sets neither.
+fn window_names(notif: &Notification) -> Vec<String> {
+    let icon = match &notif.icon {
+        Some(ImageSource::Named(name)) => Some(name.clone()),
+        _ => None,
+    };
+    let mut names: Vec<String> = Vec::new();
+    for name in [
+        notif.desktop_entry.clone(),
+        Some(notif.app_name.clone()),
+        icon,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let name = name.trim().trim_end_matches(".desktop").to_lowercase();
+        if !name.is_empty() && !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
+}
+
+/// Focus the window the notification came from, and say whether there was
+/// one. `done` runs on the GTK thread either way.
+///
+/// The tree query is an IPC round trip, so it happens on a worker thread
+/// (`spawn::spawn_work`) rather than under the pointer. A sway that is not
+/// answering, or a name nothing in the tree matches, is a plain `false`: the
+/// caller has somewhere else to go and the card must never be left waiting.
+fn jump_to_source(names: Rc<Vec<String>>, done: impl FnOnce(bool) + 'static) {
+    if names.is_empty() {
+        done(false);
         return;
     }
-
-    let output = match std::process::Command::new("swaymsg")
-        .args(["-t", "get_tree", "--raw"])
-        .output()
-    {
-        Ok(o) => o,
-        Err(e) => {
-            log::warn!("swaymsg get_tree failed: {}", e);
-            return;
-        }
-    };
-
-    let text = String::from_utf8_lossy(&output.stdout);
-    let app_lower = app_name.to_lowercase();
-
-    // Parse the JSON tree to find a matching window con_id and its workspace.
-    // We look for "app_id" or "class" matching the app_name (case-insensitive).
-    if let Some((con_id, workspace)) = find_con_id_in_tree(&text, &app_lower) {
-        // Switch to the workspace first, then focus the container.
-        // Just `[con_id=N] focus` alone only highlights the workspace without switching.
-        // The name is quoted so a renamed workspace can't inject extra sway
-        // commands (`;` splits, quotes group). Names containing quote chars
-        // themselves fall back to the bare focus rather than trusting sway's
-        // escape handling.
-        let cmd = match workspace {
-            Some(ws) if !ws.contains(['"', '\\']) => {
-                format!("workspace \"{}\"; [con_id={}] focus", ws, con_id)
+    let names = names.to_vec();
+    crate::spawn::spawn_work(
+        move || {
+            let tree = crate::sway_ipc::connect()
+                .and_then(|mut c| c.get_tree())
+                .map_err(|e| log::warn!("sway ipc: get_tree failed: {e}"))
+                .ok()?;
+            find_window(&tree, &names)
+        },
+        move |found| match found {
+            Some(target) => {
+                let cmd = focus_command(&target);
+                log::debug!("notification click: {cmd}");
+                crate::sway_ipc::run_command(&cmd);
+                done(true);
             }
-            _ => format!("[con_id={}] focus", con_id),
-        };
-        log::debug!("Focusing app '{}': swaymsg {}", app_name, cmd);
-        let _ = std::process::Command::new("swaymsg")
-            .arg(&cmd)
-            .spawn()
-            .map_err(|e| log::warn!("swaymsg focus failed: {}", e));
+            None => done(false),
+        },
+    );
+}
+
+/// The command that brings a view to the front.
+///
+/// The workspace switch comes first: `[con_id=N] focus` alone moves focus
+/// without bringing that workspace onto the output, so the window you asked
+/// for can stay out of sight. The name is quoted so a workspace someone
+/// renamed cannot smuggle in further sway commands (`;` splits, quotes
+/// group); a name carrying quote characters itself falls back to the bare
+/// focus rather than trusting sway's escape handling.
+fn focus_command(target: &Target) -> String {
+    let con_id = target.con_id;
+    match &target.workspace {
+        Some(ws) if !ws.contains(['"', '\\']) => {
+            format!("workspace \"{ws}\"; [con_id={con_id}] focus")
+        }
+        _ => format!("[con_id={con_id}] focus"),
     }
 }
 
-/// Find a container in the swaymsg JSON tree whose `app_id` or
-/// `window_properties.class` matches `app_lower` (case-insensitive substring
-/// match in either direction). A `focused` match beats the first match found.
-/// Returns `(con_id, Option<workspace_name>)` where the workspace is the
-/// nearest enclosing workspace node.
-fn find_con_id_in_tree(json: &str, app_lower: &str) -> Option<(u64, Option<String>)> {
-    let tree: serde_json::Value = serde_json::from_str(json).ok()?;
-    let mut best: Option<(u64, Option<String>, bool)> = None;
-    walk_tree(&tree, app_lower, None, &mut best);
-    best.map(|(id, ws, _)| (id, ws))
+/// How well one of the notification's names matches one identity a view
+/// carries. Higher is better; `None` is no match.
+///
+/// Exact beats the reverse-DNS tail (`org.mozilla.firefox` is `firefox`),
+/// which beats a substring — and a substring counts only from three
+/// characters up, because a two-letter token matches half the tree.
+fn name_score(name: &str, id: &str) -> Option<u8> {
+    let id = id.to_lowercase();
+    if id == name {
+        return Some(3);
+    }
+    let tail = |s: &str| s.rsplit('.').next().unwrap_or(s).to_string();
+    if tail(&id) == tail(name) {
+        return Some(2);
+    }
+    if name.len() >= 3 && id.len() >= 3 && (id.contains(name) || name.contains(&id)) {
+        return Some(1);
+    }
+    None
 }
 
-/// Recursive walk over `nodes`/`floating_nodes`, carrying the name of the
-/// nearest enclosing workspace. `best` holds `(con_id, workspace, focused)`.
-fn walk_tree<'a>(
-    node: &'a serde_json::Value,
-    app_lower: &str,
-    workspace: Option<&'a str>,
-    best: &mut Option<(u64, Option<String>, bool)>,
+/// The view this notification came from, or `None` when nothing in the tree
+/// answers to any of its names.
+fn find_window(root: &Node, names: &[String]) -> Option<Target> {
+    let mut best: Option<((u8, usize, bool), Target)> = None;
+    walk_views(root, names, None, &mut best);
+    best.map(|(_, target)| target)
+}
+
+/// How strong a claim a view has on the notification: match quality first,
+/// then which name matched (the `desktop-entry` hint outranks free text),
+/// then whether the seat is already on it — among equally good windows of
+/// one app, the one last focused is the one meant.
+fn view_rank(node: &Node, names: &[String]) -> Option<(u8, usize, bool)> {
+    let props = node.window_properties.as_ref();
+    let ids = [
+        node.app_id.as_deref(),
+        props.and_then(|p| p.class.as_deref()),
+        props.and_then(|p| p.instance.as_deref()),
+    ];
+    names
+        .iter()
+        .enumerate()
+        .filter_map(|(i, name)| {
+            let score = ids
+                .iter()
+                .flatten()
+                .filter_map(|id| name_score(name, id))
+                .max()?;
+            Some((score, names.len() - i, node.focused))
+        })
+        .max()
+}
+
+/// Recursive walk over `nodes`/`floating_nodes`, carrying the nearest
+/// enclosing workspace. Sway's own `__i3_scratch` is not a workspace anyone
+/// can switch to, so a scratchpad view is focused by id alone.
+fn walk_views(
+    node: &Node,
+    names: &[String],
+    workspace: Option<&str>,
+    best: &mut Option<((u8, usize, bool), Target)>,
 ) {
-    let workspace = if node["type"].as_str() == Some("workspace") {
-        node["name"].as_str().or(workspace)
+    let workspace = if node.node_type == NodeType::Workspace {
+        node.name
+            .as_deref()
+            .filter(|name| !name.starts_with("__"))
+            .or(workspace)
     } else {
         workspace
     };
 
-    let matched = [
-        node["app_id"].as_str(),
-        node["window_properties"]["class"].as_str(),
-    ]
-    .into_iter()
-    .flatten()
-    .any(|value| {
-        let value_lower = value.to_lowercase();
-        value_lower.contains(app_lower) || app_lower.contains(&value_lower)
-    });
-
-    if matched && let Some(id) = node["id"].as_u64() {
-        let focused = node["focused"].as_bool().unwrap_or(false);
-        if best.is_none() || (focused && !best.as_ref().is_some_and(|b| b.2)) {
-            *best = Some((id, workspace.map(str::to_string), focused));
-        }
+    if let Some(rank) = view_rank(node, names)
+        && best.as_ref().is_none_or(|(seen, _)| rank > *seen)
+    {
+        *best = Some((
+            rank,
+            Target {
+                con_id: node.id,
+                workspace: workspace.map(str::to_string),
+            },
+        ));
     }
 
-    for key in ["nodes", "floating_nodes"] {
-        if let Some(children) = node[key].as_array() {
-            for child in children {
-                walk_tree(child, app_lower, workspace, best);
-            }
-        }
+    for child in node.nodes.iter().chain(&node.floating_nodes) {
+        walk_views(child, names, workspace, best);
     }
 }
 
@@ -1362,5 +1426,139 @@ mod tests {
             category: Some("devicemanager.thing".into()),
             ..toast
         }));
+    }
+
+    // ── Jumping to the source ──
+
+    /// Minimal valid node JSON with `extra` merged over it — swayipc's `Node`
+    /// is `#[non_exhaustive]`, so fixtures go through serde like the real
+    /// replies do.
+    fn node(extra: serde_json::Value) -> serde_json::Value {
+        let rect = serde_json::json!({"x": 0, "y": 0, "width": 0, "height": 0});
+        let mut base = serde_json::json!({
+            "id": 1,
+            "type": "con",
+            "border": "none",
+            "current_border_width": 0,
+            "layout": "splith",
+            "orientation": "none",
+            "rect": rect,
+            "window_rect": rect,
+            "deco_rect": rect,
+            "geometry": rect,
+            "urgent": false,
+            "focused": false,
+            "focus": [],
+            "floating_nodes": [],
+            "sticky": false,
+        });
+        let serde_json::Value::Object(extra) = extra else {
+            panic!("extra must be an object")
+        };
+        base.as_object_mut().unwrap().extend(extra);
+        base
+    }
+
+    /// One output, two workspaces: "1" holds two firefox windows (the second
+    /// focused) and an XWayland Slack, "2" holds a kitty.
+    fn tree() -> Node {
+        serde_json::from_value(node(serde_json::json!({
+            "type": "root",
+            "nodes": [node(serde_json::json!({
+                "type": "output",
+                "name": "eDP-1",
+                "nodes": [
+                    node(serde_json::json!({
+                        "type": "workspace",
+                        "name": "1",
+                        "num": 1,
+                        "nodes": [
+                            node(serde_json::json!({"id": 10, "app_id": "firefox"})),
+                            node(serde_json::json!({
+                                "id": 11, "app_id": "firefox", "focused": true,
+                            })),
+                            node(serde_json::json!({
+                                "id": 12,
+                                "window": 4242,
+                                "window_properties": {
+                                    "class": "Slack", "instance": "slack",
+                                },
+                            })),
+                        ],
+                    })),
+                    node(serde_json::json!({
+                        "type": "workspace",
+                        "name": "2",
+                        "num": 2,
+                        "nodes": [node(serde_json::json!({"id": 13, "app_id": "kitty"}))],
+                    })),
+                ],
+            }))],
+        })))
+        .expect("valid node fixture")
+    }
+
+    fn found(names: &[&str]) -> Option<(i64, Option<String>)> {
+        let names: Vec<String> = names.iter().map(|s| (*s).to_string()).collect();
+        find_window(&tree(), &names).map(|t| (t.con_id, t.workspace))
+    }
+
+    #[test]
+    fn the_window_a_notification_came_from_is_the_one_it_names() {
+        // XWayland identity lives in window_properties, Wayland's in app_id.
+        assert_eq!(found(&["slack"]), Some((12, Some("1".into()))));
+        assert_eq!(found(&["kitty"]), Some((13, Some("2".into()))));
+        // A sender naming its desktop entry in reverse-DNS still finds it.
+        assert_eq!(
+            found(&["org.mozilla.firefox"]),
+            Some((11, Some("1".into())))
+        );
+        // Two windows of one app: the one the seat was last on.
+        assert_eq!(found(&["firefox"]), Some((11, Some("1".into()))));
+        // Nothing to jump to is not a crash, it is a fallback.
+        assert_eq!(found(&["gimp"]), None);
+        assert_eq!(found(&[]), None);
+    }
+
+    #[test]
+    fn better_evidence_wins_over_a_loose_match() {
+        // "kitty" is exact, so it beats the free-text app name that only
+        // shares letters with another view.
+        assert_eq!(found(&["kitty", "fire"]), Some((13, Some("2".into()))));
+        // A short token must not match on being a substring of everything.
+        assert_eq!(name_score("ki", "kitty"), None);
+        assert_eq!(name_score("kitty", "kitty"), Some(3));
+        assert_eq!(name_score("org.kde.konsole", "konsole"), Some(2));
+        assert_eq!(name_score("firefox", "firefox-esr"), Some(1));
+    }
+
+    #[test]
+    fn the_names_a_card_offers_are_ordered_by_how_much_they_are_worth() {
+        let notif = Notification {
+            app_name: "Fractal".into(),
+            desktop_entry: Some("org.gnome.Fractal.desktop".into()),
+            icon: Some(ImageSource::Named("fractal".into())),
+            ..Default::default()
+        };
+        // The hint first, lowercased and stripped of its suffix; the icon
+        // name is already the entry's tail, so it is not repeated.
+        assert_eq!(window_names(&notif), ["org.gnome.fractal", "fractal"]);
+        // A sender that says nothing about itself gets no lookup at all.
+        assert!(window_names(&Notification::default()).is_empty());
+    }
+
+    #[test]
+    fn a_renamed_workspace_cannot_smuggle_in_a_sway_command() {
+        let cmd = |ws: Option<&str>| {
+            focus_command(&Target {
+                con_id: 7,
+                workspace: ws.map(str::to_string),
+            })
+        };
+        assert_eq!(cmd(Some("mail")), "workspace \"mail\"; [con_id=7] focus");
+        // Focus alone would leave the window on an off-screen workspace, so
+        // this is the fallback rather than the rule.
+        assert_eq!(cmd(None), "[con_id=7] focus");
+        assert_eq!(cmd(Some("a\"; exec rm -rf ~")), "[con_id=7] focus");
     }
 }

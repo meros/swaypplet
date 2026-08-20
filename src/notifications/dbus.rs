@@ -294,6 +294,7 @@ impl NotificationServer {
             icon,
             image,
             category,
+            desktop_entry,
             sync_tag,
             resident,
             action_icons,
