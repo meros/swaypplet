@@ -51,6 +51,19 @@ Two curves stay outside the set, and both earn it:
 - Progress spinners keep `linear`. A spinner that eases is a spinner that
   looks broken.
 
+A surface that both fades and slides uses **one** curve for both, on one clock.
+`anim::Reveal` drives its `SlideBin` from the same tick callback, off the same
+start stamp and the same duration as the alpha, so the card is exactly as far
+along its travel as it is along its fade in every frame. The settle used to run
+on `standard` while the fade ran on `decelerate`/`accelerate`, which on the way
+out is a decelerating motion against an accelerating fade: measured on a
+40x-stretched exit, the panel finished 89 % of its 24 px by 61 % of the
+duration, with the alpha still at 0.51, then stood still for the rest while the
+alpha collapsed. That is what "leaves abruptly" looks like from the inside.
+`standard` stays what the table says it is — the curve between two *on-screen*
+states — and `SlideBin::slide_to`'s remaining callers (a card changing slots, a
+drag springing back, `nudge`) are all of those.
+
 ## The durations
 
 Five tiers. Every one is a Material 3 duration token, and the first three are

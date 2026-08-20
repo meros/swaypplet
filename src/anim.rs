@@ -327,6 +327,20 @@ struct RevealInner {
 /// fades eased over the full duration, an optional [`SlideBin`] adds the
 /// directional settle, and the window unmaps only once the exit finishes.
 /// Respects reduced motion ([`animations_enabled`]) by jumping.
+///
+/// Fade and settle are one timeline, not two. [`animate`](Reveal::animate)
+/// drives the [`SlideBin`] from its own tick, off the same start stamp, the
+/// same duration and the same curve as the alpha — so the two cannot disagree
+/// about when the transition is over or about where it is in the middle. They
+/// used to: the settle ran on [`standard`] while the fade ran on
+/// [`decelerate`]/[`accelerate`], which on the way out is a decelerating
+/// motion against an accelerating fade. The card did 90 % of its travel in the
+/// first 60 % of the exit, then sat still for the rest while the alpha, which
+/// had barely moved, collapsed — a jerk, a pause, and a card that blinked out
+/// of a standstill. Both directions now use the fade's own curve, which is
+/// also what `docs/MOTION.md` prescribes for a thing arriving or leaving;
+/// [`standard`] stays what it is documented to be, the curve between two
+/// *on-screen* states, and [`SlideBin::slide_to`]'s callers are all of those.
 #[derive(Clone)]
 pub struct Reveal {
     inner: Rc<RevealInner>,
@@ -391,7 +405,8 @@ impl Reveal {
     }
 
     /// Pair the fade with a settle: `bin` translates from `px` below its
-    /// resting spot to 0 on show and back on hide.
+    /// resting spot to 0 on show and back on hide, on the fade's own tick and
+    /// curve (see the type's docs).
     pub fn slide(self, bin: &SlideBin, px: f64) -> Self {
         *self.inner.slide.borrow_mut() = Some((bin.clone(), px));
         self
@@ -466,9 +481,6 @@ impl Reveal {
                 bin.jump_to(*px);
             }
         }
-        if let Some((bin, _)) = &*inner.slide.borrow() {
-            bin.slide_to(0.0, duration(ENTER_MS));
-        }
         self.animate(true);
     }
 
@@ -479,9 +491,6 @@ impl Reveal {
             self.cancel_tick();
             self.finish_hide();
             return;
-        }
-        if let Some((bin, px)) = &*inner.slide.borrow() {
-            bin.slide_to(*px, duration(EXIT_MS));
         }
         self.animate(false);
     }
@@ -566,7 +575,7 @@ impl Reveal {
         }
     }
 
-    /// Drive pane + content from their *current* opacities toward the
+    /// Drive pane, content and settle from their *current* values toward the
     /// target, so retriggers mid-transition reverse smoothly.
     fn animate(&self, entering: bool) {
         self.cancel_tick();
@@ -574,6 +583,14 @@ impl Reveal {
         let compositor_owns = inner.alpha.borrow().is_some();
         let pane_from = self.material_alpha();
         let content_from = inner.content.borrow().as_ref().map(|c| c.opacity());
+        // Where the settle starts and ends, resolved once: a hide that
+        // interrupts a show has to carry on from the offset the show reached,
+        // exactly as the alpha does.
+        let slide = inner.slide.borrow().as_ref().and_then(|(bin, px)| {
+            let from = bin.offset();
+            let to = if entering { 0.0 } else { *px };
+            (from != to).then(|| (bin.clone(), from, to))
+        });
         let target = if entering { 1.0 } else { 0.0 };
         let total = duration(if entering { ENTER_MS } else { EXIT_MS });
         // Arriving decelerates into place; leaving gathers speed and goes.
@@ -584,14 +601,20 @@ impl Reveal {
         let this = self.clone();
         let id = inner.pane.add_tick_callback(move |_, _| {
             let t = (((glib::monotonic_time() - start) as f64 / 1000.0) / total).clamp(0.0, 1.0);
+            let e = ease(t);
+            // One `e` for both channels, so the card is exactly as far along
+            // its travel as it is along its fade, in every frame.
+            if let Some((bin, from, to)) = &slide {
+                bin.jump_to(from + (to - from) * e);
+            }
             if compositor_owns {
                 // Material and content are one object now, eased together.
-                this.set_material_alpha(pane_from + (target - pane_from) * ease(t));
+                this.set_material_alpha(pane_from + (target - pane_from) * e);
             } else {
                 this.set_material_alpha(glass_channel(pane_from, target, t));
                 if let (Some(from), Some(c)) = (content_from, this.inner.content.borrow().as_ref())
                 {
-                    c.set_opacity(from + (target - from) * ease(t));
+                    c.set_opacity(from + (target - from) * e);
                 }
             }
             if t >= 1.0 {
@@ -709,7 +732,14 @@ impl SlideBin {
         child.set_parent(self);
     }
 
-    /// Set the offset immediately, cancelling any running settle.
+    /// The offset the child is drawn at right now.
+    pub fn offset(&self) -> f64 {
+        self.imp().d.get()
+    }
+
+    /// Set the offset immediately, cancelling any running settle. Also how a
+    /// caller that owns the clock — [`Reveal`], which drives this off the
+    /// fade's tick — puts down one frame's offset.
     pub fn jump_to(&self, dy: f64) {
         if let Some(id) = self.imp().tick.take() {
             id.remove();
@@ -728,9 +758,12 @@ impl SlideBin {
         self.queue_draw();
     }
 
-    /// Animate the offset to `target` over `ms`, eased like every other
-    /// surface motion. Retargeting mid-flight continues from the current
-    /// offset.
+    /// Animate the offset to `target` over `ms` on [`standard`], the curve
+    /// between two on-screen states — a card changing slots, a drag springing
+    /// back, a nudge. An entrance or an exit is not one of those and does not
+    /// come through here: [`Reveal`] drives the settle from the fade's own
+    /// tick so the two share a clock and a curve. Retargeting mid-flight
+    /// continues from the current offset.
     pub fn slide_to(&self, target: f64, ms: f64) {
         let imp = self.imp();
         if let Some(id) = imp.tick.take() {
