@@ -78,7 +78,7 @@ pub struct Notification {
     /// (stop-notification policy, vision O2). Absent → normal rules.
     pub claude_pid: Option<i32>,
     /// Task 1–4 the session belongs to, resolved once at add time; the
-    /// popup renders it as hue dot + "T<N>" attribution.
+    /// popup renders it as a hue-carrying "T<N>" attribution.
     pub task: Option<u8>,
     /// The session's workspace was visible when the notification arrived —
     /// the popup is suppressed (history keeps it; Critical overrides).
@@ -93,6 +93,10 @@ pub struct Notification {
     /// `category` hint (e.g. `device.added`, `im.received`), which is what
     /// routes a notification to a card template.
     pub category: Option<String>,
+    /// `desktop-entry` hint: the sender naming its own `.desktop` file. The
+    /// most reliable thing a notification says about which window it came
+    /// from, since sway's `app_id` is the same string for Wayland clients.
+    pub desktop_entry: Option<String>,
     /// `x-canonical-private-synchronous`: a tag whose notifications replace
     /// each other in place rather than stacking. Volume and brightness OSDs
     /// use it, and so do this machine's own scripts.
@@ -127,6 +131,7 @@ impl Default for Notification {
             icon: None,
             image: None,
             category: None,
+            desktop_entry: None,
             sync_tag: None,
             resident: false,
             action_icons: false,

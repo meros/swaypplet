@@ -1674,14 +1674,13 @@ revealer {
     animation: critical-border-pulse 0.7s steps(12) infinite alternate;
 }
 
-/* Critical must not depend on red alone: a squarer corner and a wider rail
-   are the shape channel (P3), and both survive a grayscale filter. */
+/* Critical must not depend on red alone: a squarer corner and a heavier
+   border are the shape channel (P3), and both survive a grayscale filter.
+   The border carries it since the leading rail went — one card edge saying
+   "urgent" beats a stripe inside the card saying it again. */
 .notification-popup-content.critical {
     border-radius: 6px;
-}
-
-.notification-popup-content.critical .notification-rail {
-    min-width: 5px;
+    border-width: 2px;
 }
 
 /* One-line template for OSD-style toasts (transient, no body, no actions):
@@ -1689,21 +1688,6 @@ revealer {
 .notification-popup-content.compact {
     padding: 8px 12px;
 }
-
-/* Leading rail. Identity as position and shape first, hue only reinforcing
-   it (P3): the rail is present and sized the same in grayscale, and only
-   its colour says whose it is. */
-.notification-rail {
-    min-width: 3px;
-    border-radius: 2px;
-    background-color: alpha(@fg_dim, 0.35);
-}
-
-.notification-rail.t1 { background-color: @accent; }
-.notification-rail.t2 { background-color: @accent_secondary; }
-.notification-rail.t3 { background-color: @accent_tertiary; }
-.notification-rail.t4 { background-color: @accent_quaternary; }
-.notification-rail.critical { background-color: @red; }
 
 .notification-icon {
     margin-top: 1px;
@@ -1789,20 +1773,20 @@ revealer {
 }
 
 /* Task attribution on background-session stop notifications (vision O2):
-   hue dot + "T<N>" ahead of the app name, same four accents as the
-   bar-decision dot. */
-.notification-task-dot { font-size: 9px; }
-.notification-task-dot.t1 { color: @accent; }
-.notification-task-dot.t2 { color: @accent_secondary; }
-.notification-task-dot.t3 { color: @accent_tertiary; }
-.notification-task-dot.t4 { color: @accent_quaternary; }
-
+   "T<N>" ahead of the app name, in the same four accents as the
+   bar-decision dot. The number is the shape channel and its accent the hue
+   (P3), so one label carries both and a separate dot would only repeat it. */
 .notification-task-num {
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 1px;
     color: @fg;
 }
+
+.notification-task-num.t1 { color: @accent; }
+.notification-task-num.t2 { color: @accent_secondary; }
+.notification-task-num.t3 { color: @accent_tertiary; }
+.notification-task-num.t4 { color: @accent_quaternary; }
 
 .notification-summary {
     font-size: 15px;
@@ -1848,7 +1832,8 @@ revealer {
     min-height: 24px;
 }
 
-.notification-close-btn,
+/* The centre's per-row dismiss. Popup cards have no such button: right
+   click, middle click and a drag all close one, and none costs a widget. */
 .notification-dismiss-btn {
     font-size: 12px;
     padding: 2px;
@@ -1857,7 +1842,6 @@ revealer {
     color: @fg_dim;
 }
 
-.notification-close-btn:hover,
 .notification-dismiss-btn:hover {
     color: @red;
 }
