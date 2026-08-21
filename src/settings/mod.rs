@@ -184,7 +184,11 @@ static GROUPS: &[Group] = &[
                 label: "Photochromic",
                 hint: "Ceiling on transmitted luminance, so a bright desktop saturates instead of scaling every mid-tone down with it. Zero is off.",
                 min: 0.0,
-                max: 0.5,
+                // To 1.0 rather than 0.5. The ceiling only has to reach far
+                // when `absorb` is low, and a material at absorb 0.7 leans on
+                // it almost alone — which is how the shipped 0.5 came to be a
+                // value pushed against this rail rather than found inside it.
+                max: 1.0,
                 step: 0.01,
                 decimals: 2,
                 get: |t| t.material.photochromic,
