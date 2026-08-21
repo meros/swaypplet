@@ -11,7 +11,7 @@
 //!
 //! An edit goes two places. It goes at the compositor immediately, over IPC,
 //! because a material you cannot see while you drag the slider is not being
-//! tuned; and it goes to `~/.config/swaypplet/glass.json`, which `apply_saved`
+//! tuned; and it goes to `~/.config/swaypplet/glass.json` as a [`Tuning`], which `apply_saved`
 //! replays when the panel starts so a session restart does not silently undo
 //! it. Nothing here writes to the Nix side — `Material::as_nix` renders the
 //! attrset for a keeper to be promoted into `glass.nix` by hand.
@@ -162,6 +162,59 @@ pub struct Material {
     pub energy_comp: f64,
 }
 
+/// The material plus what the pane is allowed to do to a surface's geometry.
+///
+/// Geometry is not material — `glass.nix` gives each class of surface its own
+/// bezel and thickness, and the pane has no business inventing a fifth class.
+/// What it can do is scale the four it was given, which is the one geometry
+/// move that measurably shows: thickness alone is nearly invisible (the shader
+/// normalises every depth-driven term by it, and on a flat top the normal is
+/// vertical so no amount of thickness bends a ray), and bezel alone only
+/// changes how wide the band that shows any of this is. Together they change
+/// the bevel's *slope*, which is what decides how the light bends and is why
+/// `glass.nix` ties the two at a fixed ratio in the first place.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Tuning {
+    pub material: Material,
+    /// Multiplies both bezel and thickness, every class, so the classes keep
+    /// their relationship to each other and each keeps its own ratio. 1 is
+    /// what the system config ships.
+    #[serde(default = "unit")]
+    pub bezel_scale: f64,
+    /// Thickness as a multiple of the scaled bezel. Zero keeps each class's
+    /// own shipped ratio, which is the only value that leaves a bar and a lock
+    /// card reading as one material rather than two thicknesses of it — so
+    /// this is the knob for deliberately breaking that, not for setting it.
+    #[serde(default)]
+    pub thickness_ratio: f64,
+}
+
+fn unit() -> f64 {
+    1.0
+}
+
+impl Tuning {
+    /// The system material, untouched.
+    pub fn system(system: &System) -> Tuning {
+        Tuning {
+            material: system.material.clone(),
+            bezel_scale: 1.0,
+            thickness_ratio: 0.0,
+        }
+    }
+
+    /// What this tuning makes of one class's shipped geometry.
+    pub fn geometry(&self, shipped: Geometry) -> Geometry {
+        let bezel = shipped.bezel * self.bezel_scale;
+        let thickness = if self.thickness_ratio > 0.0 {
+            bezel * self.thickness_ratio
+        } else {
+            shipped.thickness * self.bezel_scale
+        };
+        Geometry { bezel, thickness }
+    }
+}
+
 // ── The system's copy ───────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -208,14 +261,15 @@ impl System {
     /// skipped rather than sent without a bezel: sway would take the block
     /// and draw a slab with no bevel, which looks like a rendering bug rather
     /// than like a malformed config.
-    fn effects(&self, namespace: &str, material: &Material) -> Option<String> {
+    fn effects(&self, namespace: &str, tuning: &Tuning) -> Option<String> {
         let class = self.surfaces.get(namespace)?;
-        let geometry = self.geometries.get(class).or_else(|| {
+        let shipped = self.geometries.get(class).copied().or_else(|| {
             log::warn!("glass: {namespace} wants geometry `{class}`, which the system config does not define");
             None
         })?;
+        let geometry = tuning.geometry(shipped);
 
-        let m = material;
+        let m = &tuning.material;
         let mut out = String::with_capacity(512);
         // Named rather than looped over a serialised map: the order is stable,
         // the two enums are spelled by hand anyway, and a field added to
@@ -267,11 +321,11 @@ impl System {
     /// per command, because a parse failure destroys the whole replacement
     /// criteria and leaves the surface with no material — so the smaller the
     /// number of commands that can fail independently, the better.
-    pub fn command(&self, material: &Material) -> String {
+    pub fn command(&self, tuning: &Tuning) -> String {
         self.surfaces
             .keys()
             .filter_map(|ns| {
-                let effects = self.effects(ns, material)?;
+                let effects = self.effects(ns, tuning)?;
                 Some(format!("layer_effects \"{ns}\" \"{effects}\""))
             })
             .collect::<Vec<_>>()
@@ -282,8 +336,8 @@ impl System {
     /// answers `CMD_SUCCESS` even when a criteria failed to parse
     /// (`cmd_layer_effects` ignores a NULL result), so there is no reply worth
     /// waiting on.
-    pub fn apply(&self, material: &Material) {
-        let cmd = self.command(material);
+    pub fn apply(&self, tuning: &Tuning) {
+        let cmd = self.command(tuning);
         if !cmd.is_empty() {
             crate::sway_ipc::run_command(&cmd);
         }
@@ -304,11 +358,11 @@ pub fn override_path() -> PathBuf {
 /// The saved override, or `None` when there is none (or it no longer parses,
 /// which is treated the same way — the system material is always a safe
 /// answer and a stale file is not worth failing the panel over).
-pub fn load_override() -> Option<Material> {
+pub fn load_override() -> Option<Tuning> {
     let path = override_path();
     let raw = std::fs::read(&path).ok()?;
-    match serde_json::from_slice::<Material>(&raw) {
-        Ok(material) => Some(material),
+    match serde_json::from_slice::<Tuning>(&raw) {
+        Ok(tuning) => Some(tuning),
         Err(e) => {
             log::warn!(
                 "glass: ignoring unreadable override at {}: {e}",
@@ -319,7 +373,7 @@ pub fn load_override() -> Option<Material> {
     }
 }
 
-pub fn save_override(material: &Material) {
+pub fn save_override(tuning: &Tuning) {
     let path = override_path();
     if let Some(parent) = path.parent()
         && let Err(e) = std::fs::create_dir_all(parent)
@@ -327,13 +381,13 @@ pub fn save_override(material: &Material) {
         log::warn!("glass: cannot create {}: {e}", parent.display());
         return;
     }
-    match serde_json::to_vec_pretty(material) {
+    match serde_json::to_vec_pretty(tuning) {
         Ok(json) => {
             if let Err(e) = std::fs::write(&path, json) {
                 log::warn!("glass: cannot write {}: {e}", path.display());
             }
         }
-        Err(e) => log::warn!("glass: cannot serialise material: {e}"),
+        Err(e) => log::warn!("glass: cannot serialise tuning: {e}"),
     }
 }
 
@@ -354,14 +408,14 @@ pub fn clear_override() {
 /// been tuned — which is why it is a plain call in `app::run` rather than
 /// something the panel has to remember to do.
 pub fn apply_saved() {
-    let (Some(system), Some(material)) = (System::load(), load_override()) else {
+    let (Some(system), Some(tuning)) = (System::load(), load_override()) else {
         return;
     };
     log::info!(
         "glass: replaying override from {}",
         override_path().display()
     );
-    system.apply(&material);
+    system.apply(&tuning);
 }
 
 // ── Export ──────────────────────────────────────────────────────────────
@@ -375,7 +429,9 @@ impl Material {
     /// This is what goes *inside* `material = { … }`, comments and all left
     /// where they are.
     pub fn as_nix(&self) -> String {
-        let mut out = String::from("# swaypplet settings pane, live values\n");
+        let mut out = String::from(
+            "# swaypplet settings pane, live values.\n# Into material = { \u{2026} }:\n",
+        );
         for (name, value) in self.numbers() {
             let _ = writeln!(out, "{name} = {};", trim_float(value));
         }
@@ -408,6 +464,41 @@ impl Material {
             ("grain_strength", self.grain_strength),
             ("energy_comp", self.energy_comp),
         ]
+    }
+}
+
+impl Tuning {
+    /// The whole tuning as `glass.nix` would hold it: the material body, and —
+    /// only when the geometry was actually scaled — the four class attrsets
+    /// that sit beside it at the file's top level rather than inside
+    /// `material`. Untouched geometry prints nothing, so the usual export
+    /// stays one pasteable block.
+    pub fn as_nix(&self, system: &System) -> String {
+        let mut out = self.material.as_nix();
+        if self.bezel_scale == 1.0 && self.thickness_ratio == 0.0 {
+            return out;
+        }
+        let ratio = if self.thickness_ratio > 0.0 {
+            format!("ratio {}", trim_float(self.thickness_ratio))
+        } else {
+            "each class's own ratio kept".to_string()
+        };
+        let _ = write!(
+            out,
+            "\n# Geometry, at bezel scale {} ({ratio}). Top level, beside `material`:\n",
+            trim_float(self.bezel_scale)
+        );
+        // Sorted, so two exports of the same tuning are the same text.
+        for (class, shipped) in &system.geometries {
+            let g = self.geometry(*shipped);
+            let _ = writeln!(
+                out,
+                "{class} = {{ bezel = {}; thickness = {}; }};",
+                trim_float(g.bezel),
+                trim_float(g.thickness)
+            );
+        }
+        out
     }
 }
 
@@ -460,7 +551,7 @@ mod tests {
     #[test]
     fn every_effect_list_is_quoted_as_one_argument() {
         let sys = system();
-        let cmd = sys.command(&sys.material);
+        let cmd = sys.command(&Tuning::system(&sys));
         // Two commands, joined outside the quotes.
         assert_eq!(cmd.matches("layer_effects").count(), 2);
         // Every `;` that separates effects has to sit inside a quoted run,
@@ -471,8 +562,8 @@ mod tests {
     #[test]
     fn geometry_reaches_the_namespace_that_asked_for_it() {
         let sys = system();
-        let bar = sys.effects("swaypplet-bar", &sys.material).unwrap();
-        let panel = sys.effects("swaypplet", &sys.material).unwrap();
+        let bar = sys.effects("swaypplet-bar", &Tuning::system(&sys)).unwrap();
+        let panel = sys.effects("swaypplet", &Tuning::system(&sys)).unwrap();
         assert!(bar.contains("liquid_glass_bezel 10.000000;"));
         assert!(bar.contains("liquid_glass_thickness 39.000000;"));
         assert!(panel.contains("liquid_glass_bezel 18.000000;"));
@@ -482,7 +573,7 @@ mod tests {
     #[test]
     fn the_pane_never_writes_what_anim_and_the_config_own() {
         let sys = system();
-        let cmd = sys.command(&sys.material);
+        let cmd = sys.command(&Tuning::system(&sys));
         for owned in [
             "liquid_glass enable",
             "liquid_glass disable",
@@ -499,7 +590,7 @@ mod tests {
         let mut sys = system();
         sys.surfaces
             .insert("swaypplet-osd".into(), "nonexistent".into());
-        let cmd = sys.command(&sys.material);
+        let cmd = sys.command(&Tuning::system(&sys));
         assert!(!cmd.contains("swaypplet-osd"));
         assert!(cmd.contains("swaypplet-bar"));
     }
@@ -515,14 +606,77 @@ mod tests {
     }
 
     #[test]
+    fn scaling_the_bevel_moves_both_numbers_together() {
+        // The whole reason this is one knob and not two: it is the slope the
+        // light bends on, so a scale that changed only one of them would be
+        // the "same material, two thicknesses" glass.nix ties the ratio to
+        // prevent.
+        let shipped = Geometry {
+            bezel: 10.0,
+            thickness: 39.0,
+        };
+        let t = Tuning {
+            bezel_scale: 2.0,
+            ..Tuning {
+                material: preset::clear(),
+                bezel_scale: 1.0,
+                thickness_ratio: 0.0,
+            }
+        };
+        let g = t.geometry(shipped);
+        assert_eq!(g.bezel, 20.0);
+        assert_eq!(g.thickness, 78.0);
+        assert_eq!(g.thickness / g.bezel, shipped.thickness / shipped.bezel);
+    }
+
+    #[test]
+    fn a_thickness_ratio_overrides_the_class_ratio_but_not_the_scale() {
+        let shipped = Geometry {
+            bezel: 10.0,
+            thickness: 39.0,
+        };
+        let t = Tuning {
+            material: preset::clear(),
+            bezel_scale: 1.5,
+            thickness_ratio: 2.0,
+        };
+        let g = t.geometry(shipped);
+        assert_eq!(g.bezel, 15.0);
+        assert_eq!(g.thickness, 30.0, "thickness follows the scaled bezel");
+    }
+
+    #[test]
+    fn the_export_only_prints_geometry_that_moved() {
+        let sys = system();
+        let untouched = Tuning::system(&sys);
+        assert!(!untouched.as_nix(&sys).contains("Geometry"));
+
+        let scaled = Tuning {
+            bezel_scale: 1.5,
+            ..Tuning::system(&sys)
+        };
+        let nix = scaled.as_nix(&sys);
+        assert!(nix.contains("Geometry, at bezel scale 1.5"), "{nix}");
+        // thin ships 10/39, so 1.5x is 15/58.5 and the ratio is untouched.
+        assert!(
+            nix.contains("thin = { bezel = 15; thickness = 58.5; };"),
+            "{nix}"
+        );
+    }
+
+    #[test]
     fn the_override_file_round_trips() {
         // What `save_override` writes is what `load_override` reads back, and
         // `apply_saved` replays at startup. A field that serialises but does
         // not deserialise would be a material that silently reverts one knob
         // per session restart.
-        let before = preset::ALL[3].material();
+        let before = Tuning {
+            material: preset::ALL[3].material(),
+            bezel_scale: 1.35,
+            thickness_ratio: 4.2,
+        };
         let json = serde_json::to_vec_pretty(&before).unwrap();
-        let after: Material = serde_json::from_slice(&json).unwrap();
+        let after: Tuning = serde_json::from_slice(&json).unwrap();
         assert_eq!(before, after);
     }
 
