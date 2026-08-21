@@ -267,10 +267,22 @@ pub fn run() {
                     }));
             }
             let bar = BarManager::new(app, sway.clone(), audio.clone(), toggle);
-            // OSD interjection (BAR_VISION increment 5): volume/brightness
-            // render in the bar's decision slot unless the focused window
-            // is fullscreen — then the center-screen card stays.
-            {
+            // OSD interjection (BAR_VISION increment 5): volume and brightness
+            // render in the bar's decision slot rather than as the
+            // center-screen card.
+            //
+            // Off by default now. The interjection was the better trade while
+            // the card was a frosted slab that covered the middle of the
+            // screen to say one number; it is a worse one against a material
+            // you can read through, where the card costs a glance and the bar
+            // costs a saccade to the bottom edge and back. The card is also
+            // the only one of the two that can show a level while the bar is
+            // busy with something else.
+            //
+            // SWAYPPLET_OSD_IN_BAR=1 puts it back. Not a compile-time choice,
+            // because which one reads better depends on the material, and the
+            // material is now editable from the settings pane.
+            if std::env::var_os("SWAYPPLET_OSD_IN_BAR").is_some_and(|v| v == "1") {
                 let bar = bar.clone();
                 osd.set_bar_route(move |icon, fraction, text| {
                     if sway.snapshot().focused_fullscreen {
