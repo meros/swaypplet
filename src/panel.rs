@@ -11,6 +11,7 @@ use crate::anim;
 use crate::icons;
 use crate::launcher::LauncherView;
 use crate::notifications::store::NotificationStore;
+use crate::settings::SettingsSection;
 use crate::widgets::{
     audio::AudioSection,
     bluetooth::BluetoothSection,
@@ -61,6 +62,7 @@ struct Sections {
     clipboard: ClipboardSection,
     power: PowerSection,
     users: UserSection,
+    settings: SettingsSection,
     /// Quick-strip toggle tiles (Night Light, Caffeine, etc.)
     tiles: RefCell<Vec<(gtk4::ToggleButton, tiles::TileSpec)>>,
 }
@@ -77,6 +79,7 @@ impl Sections {
         self.clipboard.refresh();
         self.power.refresh();
         self.users.refresh();
+        self.settings.refresh();
         for (btn, spec) in self.tiles.borrow().iter() {
             tiles::init_tile_state(btn, spec);
         }
@@ -144,6 +147,7 @@ impl Panel {
         let clipboard = ClipboardSection::new();
         let power = PowerSection::new();
         let users = UserSection::new();
+        let settings = SettingsSection::new();
 
         audio.expand_for_page();
         network.expand_for_page();
@@ -245,6 +249,16 @@ impl Panel {
             deck_stack.add_named(&audio_sheet, Some("audio"));
         }
 
+        // Page 10: Settings. Glass first — and the reason it is a page in this
+        // card rather than a window of its own is that the card is the
+        // material: every slider changes the surface it is drawn on, live.
+        {
+            let ret = return_to_search.clone();
+            let settings_sheet =
+                build_subsheet("Settings", "󰒓", settings.widget(), move || ret());
+            deck_stack.add_named(&settings_sheet, Some("settings"));
+        }
+
         // ── Top Telemetry Ribbon ─────────────────────────────────────────────
         let telemetry_ribbon = build_telemetry_ribbon(&deck_stack, &audio, &brightness, &store);
 
@@ -323,6 +337,8 @@ impl Panel {
                     deck_stack_c.set_visible_child_name("notifications");
                 } else if prefix.starts_with(":media") || prefix.starts_with(":music") {
                     deck_stack_c.set_visible_child_name("media");
+                } else if prefix.starts_with(":set") || prefix.starts_with(":glass") || prefix.starts_with(":pref") {
+                    deck_stack_c.set_visible_child_name("settings");
                 } else if prefix.starts_with(":audio") || prefix.starts_with(":vol") || prefix.starts_with(":sound") || prefix.starts_with(":sink") || prefix.starts_with(":mic") {
                     deck_stack_c.set_visible_child_name("audio");
                 } else if !prefix.starts_with(':') && deck_stack_c.visible_child_name().as_deref() != Some("launcher") {
@@ -381,6 +397,7 @@ impl Panel {
             clipboard,
             power,
             users,
+            settings,
             tiles: RefCell::new(tile_pairs),
         });
 
@@ -826,6 +843,24 @@ fn build_flight_deck(
         });
     }
     left_group.append(&clip_btn);
+
+    // Settings
+    let settings_btn = gtk4::Button::builder()
+        .child(&gtk4::Label::new(Some("󰒓")))
+        .build();
+    settings_btn.add_css_class("rail-btn");
+    settings_btn.set_tooltip_text(Some("Settings"));
+    {
+        let stack_c = deck_stack.clone();
+        settings_btn.connect_clicked(move |_| {
+            if stack_c.visible_child_name().as_deref() == Some("settings") {
+                stack_c.set_visible_child_name("launcher");
+            } else {
+                stack_c.set_visible_child_name("settings");
+            }
+        });
+    }
+    left_group.append(&settings_btn);
 
     // One slot per switch, counted rather than written down, so adding a
     // switch here does not silently start wrapping the row on every screen.

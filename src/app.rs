@@ -154,6 +154,13 @@ pub fn run() {
     app.connect_startup(move |app| {
         theme::load_css();
 
+        // Put the saved glass override back on the compositor. The sway config
+        // has already applied the system material by now, so this is a no-op
+        // on a session that has never been tuned — which is why it is a plain
+        // call rather than something the settings pane has to remember to do
+        // the first time it is opened.
+        crate::settings::glass::apply_saved();
+
         // Start D-Bus notification server
         dbus::start_server(store_startup.clone());
 
