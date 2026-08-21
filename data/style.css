@@ -43,7 +43,7 @@
    Spacing scale (use these literals consistently): 4 / 8 / 12 / 16 / 20.
    Radius scale: 8 (buttons) / 10 (controls, entries) / 14 (cards, tiles)
    / 18 (floating surfaces: panel, OSD, launcher, popups, dialogs). */
-@define-color surface        alpha(#32302f, 0.62);  /* panel base; the compositor refracts the desktop behind it */
+@define-color surface        alpha(#32302f, 0.50);  /* panel base; half of the card is the compositor's material, and this is also its mask */
 @define-color surface_raised #32302f;               /* cards, tiles          */
 @define-color surface_hover  #3c3836;               /* hover / inactive fill */
 @define-color surface_track  #45403d;               /* slider trough, wells  */
@@ -2041,13 +2041,13 @@ revealer {
 .lock-card {
     /* Lighter than the @surface every other glass card uses, because this one
        is not the only thing between the eye and the material: .lock-scrim is
-       under it. 0.25 scrim then 0.49 card composites to 0.6175, which is the
-       0.62 @surface gives, so the lock card transmits exactly what the bar and
-       the panels do and clears the compositor's seeding line by the same
-       margin. Change the scrim and this has to move with it, and check the
-       result against the table in users/modules/theme/glass.nix rather than
-       against either number alone. */
-    background-color: alpha(#32302f, 0.49);
+       under it. 0.20 scrim then 0.375 card composites to 0.500, which is what
+       @surface gives, so the lock card transmits exactly what the bar and the
+       panels do and clears the compositor's seeding line by the same margin.
+       Change the scrim and this has to move with it, and check the result
+       against the table in users/modules/theme/glass.nix rather than against
+       either number alone. */
+    background-color: alpha(#32302f, 0.375);
     /* Bottom lighter than top on purpose: the caption's reserved second line
        sits directly above this edge, so the optical margin down there is the
        padding plus whatever the caption did not use. 20 against 24 makes the
@@ -2930,7 +2930,7 @@ scale.night-scale highlight {
    The dimming budget is now split with .lock-card below, which takes back
    exactly what the lighter scrim gives up. */
 .lock-scrim {
-    background-color: alpha(black, 0.25);
+    background-color: alpha(black, 0.20);
 }
 
 .lock-clock {
