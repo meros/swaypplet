@@ -1661,9 +1661,17 @@ revealer {
 /* Cards past the fully-visible band sit behind the stack, dimmer as they go.
    A tint change rather than widget opacity: each card owns its surface now,
    and that surface's alpha is the material fade, which this must not fight.
-   The frost stays — a collapsed card is still glass, just further back. */
+   The frost stays — a collapsed card is still glass, just further back.
+
+   Which is what this says and, until now, not what it did: alpha(@surface,
+   0.82) scaled @surface's *alpha*, landing the card on 0.41 — one hundredth
+   above the 0.40 seeding line, with the flat-slab band from theme/glass.nix
+   immediately below it. A collapsed card was one rounding away from losing its
+   bevel entirely. The dimming is in the colour now and the alpha stays at
+   0.500, so a collapsed card clears the line by the same 0.10 as every other
+   one. #292727 is @surface's colour at the same 0.82. */
 .notification-popup-content.collapsed {
-    background-color: alpha(@surface, 0.82);
+    background-color: alpha(#292727, 0.50);
     border-color: alpha(@border_strong, 0.7);
 }
 
@@ -2037,17 +2045,40 @@ revealer {
    them honest is dev/motion-census.sh. Run it after touching a duration.
    ════════════════════════════════════════════════════════════════════ */
 
-.polkit-container,
+/* The polkit card takes @surface from .glass-card like every other floating
+   surface; only its padding is shared with the lock card below, because the
+   two carry the same kind of content — a title, a field, a reserved caption
+   line — and should breathe the same way. */
+.polkit-container {
+    padding: 24px 26px 20px 26px;
+}
+
+/* The polkit dialog is NOT in the rule below, and the reason is the whole point of
+   it. 0.375 is only correct with .lock-scrim underneath; .polkit-backdrop is
+   transparent, so a polkit card painted at 0.375 has a surface alpha of 0.375
+   and sits inside the band theme/glass.nix reserves for nothing at all — the
+   material draws at close to full strength but the flood seeds nothing, so the
+   card gets a flat slab with no bevel and no rim. That is what made the pkexec
+   modal look like a different material from everything around it. */
 .lock-card {
     /* Lighter than the @surface every other glass card uses, because this one
        is not the only thing between the eye and the material: .lock-scrim is
        under it. 0.20 scrim then 0.375 card composites to 0.500, which is what
-       @surface gives, so the lock card transmits exactly what the bar and the
-       panels do and clears the compositor's seeding line by the same margin.
-       Change the scrim and this has to move with it, and check the result
-       against the table in users/modules/theme/glass.nix rather than against
-       either number alone. */
-    background-color: alpha(#32302f, 0.375);
+       @surface gives, so the lock card clears the compositor's seeding line by
+       the same margin as every other card. Change the scrim and this has to
+       move with it, and check the result against the table in
+       users/modules/theme/glass.nix rather than against either number alone.
+
+       The colour is pre-compensated for the black underneath, which the alpha
+       arithmetic above does not do on its own. Composited, the scrim
+       contributes 0.20 x (1 - 0.375) = 0.125 of black to a 0.500 result, so a
+       card painted #32302f here lands on 0.75 x #32302f = #262423 — a quarter
+       darker than the @surface every other card carries, which is not what
+       "the same material" means. #43403f is #32302f x 0.5/0.375, so the
+       premultiplied sum comes back to #32302f at alpha 0.500 exactly. This
+       went unnoticed while `absorb` was 2.0 and every card was dark; it does
+       not survive a clear material. */
+    background-color: alpha(#43403f, 0.375);
     /* Bottom lighter than top on purpose: the caption's reserved second line
        sits directly above this edge, so the optical margin down there is the
        padding plus whatever the caption did not use. 20 against 24 makes the
@@ -2509,7 +2540,11 @@ revealer {
 .helm-card {
     box-shadow: none;
     padding: 12px 14px;
-    border-radius: 20px;
+    /* 18, with .glass-card, rather than the 20 this carried alone. The material
+       is shaped by the card's own alpha, so a radius that disagrees with every
+       other glass surface is a bevel curving differently on one of them for no
+       reason anybody chose. */
+    border-radius: 18px;
 }
 
 /* ── Top Telemetry Ribbon ── */
