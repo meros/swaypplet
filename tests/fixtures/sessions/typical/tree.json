@@ -1,0 +1,1467 @@
+{
+ "id": 1,
+ "type": "root",
+ "orientation": "horizontal",
+ "percent": null,
+ "urgent": false,
+ "marks": [],
+ "focused": false,
+ "layout": "splith",
+ "border": "none",
+ "current_border_width": 0,
+ "rect": {
+  "x": 0,
+  "y": 0,
+  "width": 1440,
+  "height": 900
+ },
+ "deco_rect": {
+  "x": 0,
+  "y": 0,
+  "width": 0,
+  "height": 0
+ },
+ "window_rect": {
+  "x": 0,
+  "y": 0,
+  "width": 0,
+  "height": 0
+ },
+ "geometry": {
+  "x": 0,
+  "y": 0,
+  "width": 0,
+  "height": 0
+ },
+ "name": "root",
+ "window": null,
+ "nodes": [
+  {
+   "id": 2147483647,
+   "type": "output",
+   "orientation": "horizontal",
+   "percent": null,
+   "urgent": false,
+   "marks": [],
+   "focused": false,
+   "layout": "output",
+   "border": "none",
+   "current_border_width": 0,
+   "rect": {
+    "x": 0,
+    "y": 0,
+    "width": 1440,
+    "height": 900
+   },
+   "deco_rect": {
+    "x": 0,
+    "y": 0,
+    "width": 0,
+    "height": 0
+   },
+   "window_rect": {
+    "x": 0,
+    "y": 0,
+    "width": 0,
+    "height": 0
+   },
+   "geometry": {
+    "x": 0,
+    "y": 0,
+    "width": 0,
+    "height": 0
+   },
+   "name": "__i3",
+   "window": null,
+   "nodes": [
+    {
+     "id": 2147483646,
+     "type": "workspace",
+     "orientation": "horizontal",
+     "percent": null,
+     "urgent": false,
+     "marks": [],
+     "focused": false,
+     "layout": "splith",
+     "border": "none",
+     "current_border_width": 0,
+     "rect": {
+      "x": 0,
+      "y": 0,
+      "width": 1440,
+      "height": 900
+     },
+     "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "name": "__i3_scratch",
+     "window": null,
+     "nodes": [],
+     "floating_nodes": [],
+     "focus": [],
+     "fullscreen_mode": 1,
+     "sticky": false,
+     "floating": null,
+     "scratchpad_state": null
+    }
+   ],
+   "floating_nodes": [],
+   "focus": [
+    2147483646
+   ],
+   "fullscreen_mode": 0,
+   "sticky": false,
+   "floating": null,
+   "scratchpad_state": null
+  },
+  {
+   "id": 3,
+   "type": "output",
+   "orientation": "none",
+   "percent": 1.0,
+   "urgent": false,
+   "marks": [],
+   "focused": false,
+   "layout": "output",
+   "border": "none",
+   "current_border_width": 0,
+   "rect": {
+    "x": 0,
+    "y": 0,
+    "width": 1440,
+    "height": 900
+   },
+   "deco_rect": {
+    "x": 0,
+    "y": 0,
+    "width": 0,
+    "height": 0
+   },
+   "window_rect": {
+    "x": 0,
+    "y": 0,
+    "width": 0,
+    "height": 0
+   },
+   "geometry": {
+    "x": 0,
+    "y": 0,
+    "width": 0,
+    "height": 0
+   },
+   "name": "eDP-1",
+   "window": null,
+   "nodes": [
+    {
+     "id": 49,
+     "type": "workspace",
+     "orientation": "horizontal",
+     "percent": null,
+     "urgent": false,
+     "marks": [],
+     "focused": false,
+     "layout": "splith",
+     "border": "none",
+     "current_border_width": 0,
+     "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+     },
+     "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "name": "1:t1a",
+     "window": null,
+     "nodes": [
+      {
+       "id": 20,
+       "type": "con",
+       "orientation": "none",
+       "percent": 1.0,
+       "urgent": false,
+       "marks": [],
+       "focused": false,
+       "layout": "none",
+       "border": "pixel",
+       "current_border_width": 1,
+       "rect": {
+        "x": 4,
+        "y": 4,
+        "width": 1432,
+        "height": 850
+       },
+       "deco_rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+       },
+       "window_rect": {
+        "x": 1,
+        "y": 1,
+        "width": 1430,
+        "height": 848
+       },
+       "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 800,
+        "height": 600
+       },
+       "name": "Alacritty-1",
+       "window": null,
+       "nodes": [],
+       "floating_nodes": [],
+       "focus": [],
+       "fullscreen_mode": 0,
+       "sticky": false,
+       "floating": "auto_off",
+       "scratchpad_state": "none",
+       "pid": 150594,
+       "app_id": "Alacritty",
+       "foreign_toplevel_identifier": "99437a256b9b8eed44cdcbaff8aeffb9",
+       "visible": false,
+       "max_render_time": 0,
+       "allow_tearing": false,
+       "shell": "xdg_shell",
+       "inhibit_idle": false,
+       "sandbox_engine": null,
+       "sandbox_app_id": null,
+       "sandbox_instance_id": null,
+       "tag": null,
+       "idle_inhibitors": {
+        "user": "none",
+        "application": "none"
+       }
+      }
+     ],
+     "floating_nodes": [],
+     "focus": [
+      20
+     ],
+     "fullscreen_mode": 1,
+     "sticky": false,
+     "floating": null,
+     "scratchpad_state": null,
+     "num": 1,
+     "output": "eDP-1",
+     "representation": "H[Alacritty]"
+    },
+    {
+     "id": 8,
+     "type": "workspace",
+     "orientation": "horizontal",
+     "percent": null,
+     "urgent": false,
+     "marks": [],
+     "focused": false,
+     "layout": "splith",
+     "border": "none",
+     "current_border_width": 0,
+     "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+     },
+     "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "name": "6:t2b",
+     "window": null,
+     "nodes": [
+      {
+       "id": 9,
+       "type": "con",
+       "orientation": "none",
+       "percent": 0.49860335195530725,
+       "urgent": false,
+       "marks": [],
+       "focused": true,
+       "layout": "none",
+       "border": "pixel",
+       "current_border_width": 1,
+       "rect": {
+        "x": 4,
+        "y": 4,
+        "width": 714,
+        "height": 850
+       },
+       "deco_rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+       },
+       "window_rect": {
+        "x": 1,
+        "y": 1,
+        "width": 712,
+        "height": 848
+       },
+       "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 800,
+        "height": 600
+       },
+       "name": "Alacritty-2",
+       "window": null,
+       "nodes": [],
+       "floating_nodes": [],
+       "focus": [],
+       "fullscreen_mode": 0,
+       "sticky": false,
+       "floating": "auto_off",
+       "scratchpad_state": "none",
+       "pid": 37504,
+       "app_id": "Alacritty",
+       "foreign_toplevel_identifier": "b34618c8c7e8f0e704b2da76ed31069f",
+       "visible": true,
+       "max_render_time": 0,
+       "allow_tearing": false,
+       "shell": "xdg_shell",
+       "inhibit_idle": false,
+       "sandbox_engine": null,
+       "sandbox_app_id": null,
+       "sandbox_instance_id": null,
+       "tag": null,
+       "idle_inhibitors": {
+        "user": "none",
+        "application": "none"
+       }
+      },
+      {
+       "id": 43,
+       "type": "con",
+       "orientation": "none",
+       "percent": 0.49860335195530725,
+       "urgent": false,
+       "marks": [],
+       "focused": false,
+       "layout": "none",
+       "border": "pixel",
+       "current_border_width": 1,
+       "rect": {
+        "x": 722,
+        "y": 4,
+        "width": 714,
+        "height": 850
+       },
+       "deco_rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+       },
+       "window_rect": {
+        "x": 1,
+        "y": 1,
+        "width": 712,
+        "height": 848
+       },
+       "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 1418,
+        "height": 826
+       },
+       "name": "google-chrome-3",
+       "window": null,
+       "nodes": [],
+       "floating_nodes": [],
+       "focus": [],
+       "fullscreen_mode": 0,
+       "sticky": false,
+       "floating": "auto_off",
+       "scratchpad_state": "none",
+       "pid": 41411,
+       "app_id": "google-chrome",
+       "foreign_toplevel_identifier": "4031c8b713b534771c62a395ba7e41dc",
+       "visible": true,
+       "max_render_time": 0,
+       "allow_tearing": false,
+       "shell": "xdg_shell",
+       "inhibit_idle": false,
+       "sandbox_engine": null,
+       "sandbox_app_id": null,
+       "sandbox_instance_id": null,
+       "tag": null,
+       "idle_inhibitors": {
+        "user": "none",
+        "application": "none"
+       }
+      }
+     ],
+     "floating_nodes": [],
+     "focus": [
+      9,
+      43
+     ],
+     "fullscreen_mode": 1,
+     "sticky": false,
+     "floating": null,
+     "scratchpad_state": null,
+     "num": 6,
+     "output": "eDP-1",
+     "representation": "H[Alacritty google-chrome]"
+    },
+    {
+     "id": 16,
+     "type": "workspace",
+     "orientation": "horizontal",
+     "percent": null,
+     "urgent": false,
+     "marks": [],
+     "focused": false,
+     "layout": "splith",
+     "border": "none",
+     "current_border_width": 0,
+     "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+     },
+     "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "name": "24:wg",
+     "window": null,
+     "nodes": [
+      {
+       "id": 14,
+       "type": "con",
+       "orientation": "none",
+       "percent": 1.0,
+       "urgent": false,
+       "marks": [],
+       "focused": false,
+       "layout": "none",
+       "border": "pixel",
+       "current_border_width": 1,
+       "rect": {
+        "x": 4,
+        "y": 4,
+        "width": 1432,
+        "height": 850
+       },
+       "deco_rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+       },
+       "window_rect": {
+        "x": 1,
+        "y": 1,
+        "width": 1430,
+        "height": 848
+       },
+       "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 1408,
+        "height": 826
+       },
+       "name": "google-chrome-4",
+       "window": null,
+       "nodes": [],
+       "floating_nodes": [],
+       "focus": [],
+       "fullscreen_mode": 0,
+       "sticky": false,
+       "floating": "auto_off",
+       "scratchpad_state": "none",
+       "pid": 41411,
+       "app_id": "google-chrome",
+       "foreign_toplevel_identifier": "2c88db1f7e6f54712276b0dee7c97704",
+       "visible": false,
+       "max_render_time": 0,
+       "allow_tearing": false,
+       "shell": "xdg_shell",
+       "inhibit_idle": false,
+       "sandbox_engine": null,
+       "sandbox_app_id": null,
+       "sandbox_instance_id": null,
+       "tag": null,
+       "idle_inhibitors": {
+        "user": "none",
+        "application": "none"
+       }
+      }
+     ],
+     "floating_nodes": [],
+     "focus": [
+      14
+     ],
+     "fullscreen_mode": 1,
+     "sticky": false,
+     "floating": null,
+     "scratchpad_state": null,
+     "num": 24,
+     "output": "eDP-1",
+     "representation": "H[google-chrome]"
+    },
+    {
+     "id": 31,
+     "type": "workspace",
+     "orientation": "horizontal",
+     "percent": null,
+     "urgent": false,
+     "marks": [],
+     "focused": false,
+     "layout": "splith",
+     "border": "none",
+     "current_border_width": 0,
+     "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+     },
+     "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "name": "25:wh",
+     "window": null,
+     "nodes": [],
+     "floating_nodes": [
+      {
+       "id": 32,
+       "type": "floating_con",
+       "orientation": "none",
+       "percent": 0.962264212947749,
+       "urgent": false,
+       "marks": [],
+       "focused": false,
+       "layout": "none",
+       "border": "csd",
+       "current_border_width": 1,
+       "rect": {
+        "x": 22,
+        "y": 27,
+        "width": 1418,
+        "height": 826
+       },
+       "deco_rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+       },
+       "window_rect": {
+        "x": 0,
+        "y": 0,
+        "width": 1418,
+        "height": 826
+       },
+       "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 1418,
+        "height": 826
+       },
+       "name": "google-chrome-5",
+       "window": null,
+       "nodes": [],
+       "floating_nodes": [],
+       "focus": [],
+       "fullscreen_mode": 0,
+       "sticky": false,
+       "floating": "user_on",
+       "scratchpad_state": "none",
+       "pid": 41411,
+       "app_id": "google-chrome",
+       "foreign_toplevel_identifier": "cf9cde1eb77e3223d0716ee01806e344",
+       "visible": false,
+       "max_render_time": 0,
+       "allow_tearing": false,
+       "shell": "xdg_shell",
+       "inhibit_idle": false,
+       "sandbox_engine": null,
+       "sandbox_app_id": null,
+       "sandbox_instance_id": null,
+       "tag": null,
+       "idle_inhibitors": {
+        "user": "none",
+        "application": "none"
+       }
+      }
+     ],
+     "focus": [
+      32
+     ],
+     "fullscreen_mode": 1,
+     "sticky": false,
+     "floating": null,
+     "scratchpad_state": null,
+     "num": 25,
+     "output": "eDP-1",
+     "representation": "H[]"
+    },
+    {
+     "id": 13,
+     "type": "workspace",
+     "orientation": "horizontal",
+     "percent": null,
+     "urgent": false,
+     "marks": [],
+     "focused": false,
+     "layout": "splith",
+     "border": "none",
+     "current_border_width": 0,
+     "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+     },
+     "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "name": "30:wm",
+     "window": null,
+     "nodes": [
+      {
+       "id": 15,
+       "type": "con",
+       "orientation": "none",
+       "percent": 0.49860335195530725,
+       "urgent": false,
+       "marks": [],
+       "focused": false,
+       "layout": "none",
+       "border": "pixel",
+       "current_border_width": 1,
+       "rect": {
+        "x": 4,
+        "y": 4,
+        "width": 714,
+        "height": 850
+       },
+       "deco_rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+       },
+       "window_rect": {
+        "x": 1,
+        "y": 1,
+        "width": 712,
+        "height": 848
+       },
+       "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 1408,
+        "height": 826
+       },
+       "name": "chrome-cifhbcnohmdccbgoicgdjpfamggdegmo-Profile_1-6",
+       "window": null,
+       "nodes": [],
+       "floating_nodes": [],
+       "focus": [],
+       "fullscreen_mode": 0,
+       "sticky": false,
+       "floating": "auto_off",
+       "scratchpad_state": "none",
+       "pid": 41411,
+       "app_id": "chrome-cifhbcnohmdccbgoicgdjpfamggdegmo-Profile_1",
+       "foreign_toplevel_identifier": "fc80009badc85ea995759f157691019b",
+       "visible": false,
+       "max_render_time": 0,
+       "allow_tearing": false,
+       "shell": "xdg_shell",
+       "inhibit_idle": false,
+       "sandbox_engine": null,
+       "sandbox_app_id": null,
+       "sandbox_instance_id": null,
+       "tag": null,
+       "idle_inhibitors": {
+        "user": "none",
+        "application": "none"
+       }
+      },
+      {
+       "id": 38,
+       "type": "con",
+       "orientation": "none",
+       "percent": 0.49860335195530725,
+       "urgent": false,
+       "marks": [],
+       "focused": false,
+       "layout": "none",
+       "border": "pixel",
+       "current_border_width": 1,
+       "rect": {
+        "x": 722,
+        "y": 4,
+        "width": 714,
+        "height": 850
+       },
+       "deco_rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+       },
+       "window_rect": {
+        "x": 1,
+        "y": 1,
+        "width": 712,
+        "height": 848
+       },
+       "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 712,
+        "height": 848
+       },
+       "name": "slack-7",
+       "window": null,
+       "nodes": [],
+       "floating_nodes": [],
+       "focus": [],
+       "fullscreen_mode": 0,
+       "sticky": false,
+       "floating": "auto_off",
+       "scratchpad_state": "none",
+       "pid": 806632,
+       "app_id": "slack",
+       "foreign_toplevel_identifier": "e32ffde247aaa96fe12cf9567d5cc41a",
+       "visible": false,
+       "max_render_time": 0,
+       "allow_tearing": false,
+       "shell": "xdg_shell",
+       "inhibit_idle": false,
+       "sandbox_engine": null,
+       "sandbox_app_id": null,
+       "sandbox_instance_id": null,
+       "tag": null,
+       "idle_inhibitors": {
+        "user": "none",
+        "application": "none"
+       }
+      }
+     ],
+     "floating_nodes": [],
+     "focus": [
+      38,
+      15
+     ],
+     "fullscreen_mode": 1,
+     "sticky": false,
+     "floating": null,
+     "scratchpad_state": null,
+     "num": 30,
+     "output": "eDP-1",
+     "representation": "H[chrome-cifhbcnohmdccbgoicgdjpfamggdegmo-Profile_1 slack]"
+    },
+    {
+     "id": 26,
+     "type": "workspace",
+     "orientation": "horizontal",
+     "percent": null,
+     "urgent": false,
+     "marks": [],
+     "focused": false,
+     "layout": "splith",
+     "border": "none",
+     "current_border_width": 0,
+     "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+     },
+     "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "name": "31:wn",
+     "window": null,
+     "nodes": [
+      {
+       "id": 27,
+       "type": "con",
+       "orientation": "none",
+       "percent": 0.49860335195530725,
+       "urgent": false,
+       "marks": [],
+       "focused": false,
+       "layout": "none",
+       "border": "pixel",
+       "current_border_width": 1,
+       "rect": {
+        "x": 4,
+        "y": 4,
+        "width": 714,
+        "height": 850
+       },
+       "deco_rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+       },
+       "window_rect": {
+        "x": 1,
+        "y": 1,
+        "width": 712,
+        "height": 848
+       },
+       "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 800,
+        "height": 600
+       },
+       "name": "Alacritty-8",
+       "window": null,
+       "nodes": [],
+       "floating_nodes": [],
+       "focus": [],
+       "fullscreen_mode": 0,
+       "sticky": false,
+       "floating": "auto_off",
+       "scratchpad_state": "none",
+       "pid": 406389,
+       "app_id": "Alacritty",
+       "foreign_toplevel_identifier": "5543b1e873db92b440efc91cc525df6d",
+       "visible": false,
+       "max_render_time": 0,
+       "allow_tearing": false,
+       "shell": "xdg_shell",
+       "inhibit_idle": false,
+       "sandbox_engine": null,
+       "sandbox_app_id": null,
+       "sandbox_instance_id": null,
+       "tag": null,
+       "idle_inhibitors": {
+        "user": "none",
+        "application": "none"
+       }
+      },
+      {
+       "id": 29,
+       "type": "con",
+       "orientation": "none",
+       "percent": 0.49860335195530725,
+       "urgent": false,
+       "marks": [],
+       "focused": false,
+       "layout": "none",
+       "border": "pixel",
+       "current_border_width": 1,
+       "rect": {
+        "x": 722,
+        "y": 4,
+        "width": 714,
+        "height": 850
+       },
+       "deco_rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+       },
+       "window_rect": {
+        "x": 1,
+        "y": 1,
+        "width": 712,
+        "height": 848
+       },
+       "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 800,
+        "height": 600
+       },
+       "name": "Alacritty-9",
+       "window": null,
+       "nodes": [],
+       "floating_nodes": [],
+       "focus": [],
+       "fullscreen_mode": 0,
+       "sticky": false,
+       "floating": "auto_off",
+       "scratchpad_state": "none",
+       "pid": 1090982,
+       "app_id": "Alacritty",
+       "foreign_toplevel_identifier": "13421aa252cf75c2a089f663061823f2",
+       "visible": false,
+       "max_render_time": 0,
+       "allow_tearing": false,
+       "shell": "xdg_shell",
+       "inhibit_idle": false,
+       "sandbox_engine": null,
+       "sandbox_app_id": null,
+       "sandbox_instance_id": null,
+       "tag": null,
+       "idle_inhibitors": {
+        "user": "none",
+        "application": "none"
+       }
+      }
+     ],
+     "floating_nodes": [],
+     "focus": [
+      27,
+      29
+     ],
+     "fullscreen_mode": 1,
+     "sticky": false,
+     "floating": null,
+     "scratchpad_state": null,
+     "num": 31,
+     "output": "eDP-1",
+     "representation": "H[Alacritty Alacritty]"
+    },
+    {
+     "id": 40,
+     "type": "workspace",
+     "orientation": "horizontal",
+     "percent": null,
+     "urgent": false,
+     "marks": [],
+     "focused": false,
+     "layout": "splith",
+     "border": "none",
+     "current_border_width": 0,
+     "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+     },
+     "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "name": "33:wp",
+     "window": null,
+     "nodes": [
+      {
+       "id": 41,
+       "type": "con",
+       "orientation": "none",
+       "percent": 1.0,
+       "urgent": false,
+       "marks": [],
+       "focused": false,
+       "layout": "none",
+       "border": "pixel",
+       "current_border_width": 1,
+       "rect": {
+        "x": 4,
+        "y": 4,
+        "width": 1432,
+        "height": 850
+       },
+       "deco_rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+       },
+       "window_rect": {
+        "x": 1,
+        "y": 1,
+        "width": 1430,
+        "height": 848
+       },
+       "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 1430,
+        "height": 848
+       },
+       "name": "spotify-10",
+       "window": null,
+       "nodes": [],
+       "floating_nodes": [],
+       "focus": [],
+       "fullscreen_mode": 0,
+       "sticky": false,
+       "floating": "auto_off",
+       "scratchpad_state": "none",
+       "pid": 3819171,
+       "app_id": "spotify",
+       "foreign_toplevel_identifier": "dc7f17ce791bdc30fc2aa4e8f4a03cb9",
+       "visible": false,
+       "max_render_time": 0,
+       "allow_tearing": false,
+       "shell": "xdg_shell",
+       "inhibit_idle": false,
+       "sandbox_engine": null,
+       "sandbox_app_id": null,
+       "sandbox_instance_id": null,
+       "tag": null,
+       "idle_inhibitors": {
+        "user": "none",
+        "application": "none"
+       }
+      }
+     ],
+     "floating_nodes": [],
+     "focus": [
+      41
+     ],
+     "fullscreen_mode": 1,
+     "sticky": false,
+     "floating": null,
+     "scratchpad_state": null,
+     "num": 33,
+     "output": "eDP-1",
+     "representation": "H[spotify]"
+    },
+    {
+     "id": 36,
+     "type": "workspace",
+     "orientation": "horizontal",
+     "percent": null,
+     "urgent": false,
+     "marks": [],
+     "focused": false,
+     "layout": "splith",
+     "border": "none",
+     "current_border_width": 0,
+     "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+     },
+     "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "name": "34:wr",
+     "window": null,
+     "nodes": [
+      {
+       "id": 37,
+       "type": "con",
+       "orientation": "none",
+       "percent": 1.0,
+       "urgent": false,
+       "marks": [],
+       "focused": false,
+       "layout": "none",
+       "border": "pixel",
+       "current_border_width": 1,
+       "rect": {
+        "x": 4,
+        "y": 4,
+        "width": 1432,
+        "height": 850
+       },
+       "deco_rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+       },
+       "window_rect": {
+        "x": 1,
+        "y": 1,
+        "width": 1430,
+        "height": 848
+       },
+       "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 800,
+        "height": 600
+       },
+       "name": "Alacritty-11",
+       "window": null,
+       "nodes": [],
+       "floating_nodes": [],
+       "focus": [],
+       "fullscreen_mode": 0,
+       "sticky": false,
+       "floating": "auto_off",
+       "scratchpad_state": "none",
+       "pid": 2088341,
+       "app_id": "Alacritty",
+       "foreign_toplevel_identifier": "3762cacc3e0b4787a29abb040de9aa96",
+       "visible": false,
+       "max_render_time": 0,
+       "allow_tearing": false,
+       "shell": "xdg_shell",
+       "inhibit_idle": false,
+       "sandbox_engine": null,
+       "sandbox_app_id": null,
+       "sandbox_instance_id": null,
+       "tag": null,
+       "idle_inhibitors": {
+        "user": "none",
+        "application": "none"
+       }
+      }
+     ],
+     "floating_nodes": [],
+     "focus": [
+      37
+     ],
+     "fullscreen_mode": 1,
+     "sticky": false,
+     "floating": null,
+     "scratchpad_state": null,
+     "num": 34,
+     "output": "eDP-1",
+     "representation": "H[Alacritty]"
+    },
+    {
+     "id": 52,
+     "type": "workspace",
+     "orientation": "horizontal",
+     "percent": null,
+     "urgent": false,
+     "marks": [],
+     "focused": false,
+     "layout": "splith",
+     "border": "none",
+     "current_border_width": 0,
+     "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+     },
+     "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+     },
+     "name": "38:wy",
+     "window": null,
+     "nodes": [
+      {
+       "id": 53,
+       "type": "con",
+       "orientation": "none",
+       "percent": 1.0,
+       "urgent": false,
+       "marks": [],
+       "focused": false,
+       "layout": "none",
+       "border": "pixel",
+       "current_border_width": 1,
+       "rect": {
+        "x": 4,
+        "y": 4,
+        "width": 1432,
+        "height": 850
+       },
+       "deco_rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+       },
+       "window_rect": {
+        "x": 1,
+        "y": 1,
+        "width": 1430,
+        "height": 848
+       },
+       "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 1418,
+        "height": 826
+       },
+       "name": "google-chrome-12",
+       "window": null,
+       "nodes": [],
+       "floating_nodes": [],
+       "focus": [],
+       "fullscreen_mode": 0,
+       "sticky": false,
+       "floating": "auto_off",
+       "scratchpad_state": "none",
+       "pid": 41411,
+       "app_id": "google-chrome",
+       "foreign_toplevel_identifier": "3804db9d1596155847de2a1e02c8f87b",
+       "visible": false,
+       "max_render_time": 0,
+       "allow_tearing": false,
+       "shell": "xdg_shell",
+       "inhibit_idle": false,
+       "sandbox_engine": null,
+       "sandbox_app_id": null,
+       "sandbox_instance_id": null,
+       "tag": null,
+       "idle_inhibitors": {
+        "user": "none",
+        "application": "enabled"
+       }
+      }
+     ],
+     "floating_nodes": [],
+     "focus": [
+      53
+     ],
+     "fullscreen_mode": 1,
+     "sticky": false,
+     "floating": null,
+     "scratchpad_state": null,
+     "num": 38,
+     "output": "eDP-1",
+     "representation": "H[google-chrome]"
+    }
+   ],
+   "floating_nodes": [],
+   "focus": [
+    8,
+    49,
+    52,
+    16,
+    26,
+    31,
+    13,
+    40,
+    36
+   ],
+   "fullscreen_mode": 0,
+   "sticky": false,
+   "floating": null,
+   "scratchpad_state": null,
+   "primary": false,
+   "make": "Samsung Display Corp.",
+   "model": "ATNA40HQ02-0 ",
+   "serial": "Unknown",
+   "modes": [
+    {
+     "width": 2880,
+     "height": 1800,
+     "refresh": 60000,
+     "picture_aspect_ratio": "none"
+    },
+    {
+     "width": 2880,
+     "height": 1800,
+     "refresh": 120000,
+     "picture_aspect_ratio": "none"
+    }
+   ],
+   "features": {
+    "adaptive_sync": true,
+    "hdr": false
+   },
+   "non_desktop": false,
+   "active": true,
+   "dpms": true,
+   "power": true,
+   "scale": 2.0,
+   "scale_filter": "nearest",
+   "transform": "normal",
+   "adaptive_sync_status": "disabled",
+   "layer_shell_surfaces": [
+    {
+     "namespace": "wallpaper",
+     "layer": "background",
+     "extent": {
+      "width": 1440,
+      "height": 900,
+      "x": 0,
+      "y": 0
+     },
+     "effects": {
+      "blur": false,
+      "blur_xray": false,
+      "blur_ignore_transparent": false,
+      "shadows": false,
+      "corner_radius": 0
+     }
+    },
+    {
+     "namespace": "swaypplet-bar",
+     "layer": "top",
+     "extent": {
+      "width": 1432,
+      "height": 38,
+      "x": 4,
+      "y": 858
+     },
+     "effects": {
+      "blur": true,
+      "blur_xray": false,
+      "blur_ignore_transparent": true,
+      "shadows": false,
+      "corner_radius": 14
+     }
+    }
+   ],
+   "current_workspace": "6:t2b",
+   "current_mode": {
+    "width": 2880,
+    "height": 1800,
+    "refresh": 60000,
+    "picture_aspect_ratio": "none"
+   },
+   "max_render_time": 0,
+   "allow_tearing": false,
+   "hdr": false
+  }
+ ],
+ "floating_nodes": [],
+ "focus": [
+  3
+ ],
+ "fullscreen_mode": 0,
+ "sticky": false,
+ "floating": null,
+ "scratchpad_state": null
+}

@@ -1,0 +1,526 @@
+[
+  {
+    "id": 49,
+    "type": "workspace",
+    "orientation": "horizontal",
+    "percent": null,
+    "urgent": false,
+    "marks": [],
+    "layout": "splith",
+    "border": "none",
+    "current_border_width": 0,
+    "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+    },
+    "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "name": "1:t1a",
+    "window": null,
+    "nodes": [],
+    "floating_nodes": [],
+    "focus": [
+      20
+    ],
+    "fullscreen_mode": 1,
+    "sticky": false,
+    "floating": null,
+    "scratchpad_state": null,
+    "num": 1,
+    "output": "eDP-1",
+    "representation": "H[Alacritty]",
+    "focused": false,
+    "visible": false
+  },
+  {
+    "id": 8,
+    "type": "workspace",
+    "orientation": "horizontal",
+    "percent": null,
+    "urgent": false,
+    "marks": [],
+    "layout": "splith",
+    "border": "none",
+    "current_border_width": 0,
+    "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+    },
+    "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "name": "6:t2b",
+    "window": null,
+    "nodes": [],
+    "floating_nodes": [],
+    "focus": [
+      9,
+      43
+    ],
+    "fullscreen_mode": 1,
+    "sticky": false,
+    "floating": null,
+    "scratchpad_state": null,
+    "num": 6,
+    "output": "eDP-1",
+    "representation": "H[Alacritty google-chrome]",
+    "focused": true,
+    "visible": true
+  },
+  {
+    "id": 16,
+    "type": "workspace",
+    "orientation": "horizontal",
+    "percent": null,
+    "urgent": false,
+    "marks": [],
+    "layout": "splith",
+    "border": "none",
+    "current_border_width": 0,
+    "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+    },
+    "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "name": "24:wg",
+    "window": null,
+    "nodes": [],
+    "floating_nodes": [],
+    "focus": [
+      14
+    ],
+    "fullscreen_mode": 1,
+    "sticky": false,
+    "floating": null,
+    "scratchpad_state": null,
+    "num": 24,
+    "output": "eDP-1",
+    "representation": "H[google-chrome]",
+    "focused": false,
+    "visible": false
+  },
+  {
+    "id": 31,
+    "type": "workspace",
+    "orientation": "horizontal",
+    "percent": null,
+    "urgent": false,
+    "marks": [],
+    "layout": "splith",
+    "border": "none",
+    "current_border_width": 0,
+    "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+    },
+    "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "name": "25:wh",
+    "window": null,
+    "nodes": [],
+    "floating_nodes": [
+      {
+        "id": 32,
+        "type": "floating_con",
+        "orientation": "none",
+        "percent": 0.962264212947749,
+        "urgent": false,
+        "marks": [],
+        "focused": false,
+        "layout": "none",
+        "border": "csd",
+        "current_border_width": 1,
+        "rect": {
+          "x": 22,
+          "y": 27,
+          "width": 1418,
+          "height": 826
+        },
+        "deco_rect": {
+          "x": 0,
+          "y": 0,
+          "width": 0,
+          "height": 0
+        },
+        "window_rect": {
+          "x": 0,
+          "y": 0,
+          "width": 1418,
+          "height": 826
+        },
+        "geometry": {
+          "x": 0,
+          "y": 0,
+          "width": 1418,
+          "height": 826
+        },
+        "name": "New Tab - Google Chrome",
+        "window": null,
+        "nodes": [],
+        "floating_nodes": [],
+        "focus": [],
+        "fullscreen_mode": 0,
+        "sticky": false,
+        "floating": "user_on",
+        "scratchpad_state": "none",
+        "pid": 41411,
+        "app_id": "google-chrome",
+        "foreign_toplevel_identifier": "cf9cde1eb77e3223d0716ee01806e344",
+        "visible": false,
+        "max_render_time": 0,
+        "allow_tearing": false,
+        "shell": "xdg_shell",
+        "inhibit_idle": false,
+        "sandbox_engine": null,
+        "sandbox_app_id": null,
+        "sandbox_instance_id": null,
+        "tag": null,
+        "idle_inhibitors": {
+          "user": "none",
+          "application": "none"
+        }
+      }
+    ],
+    "focus": [
+      32
+    ],
+    "fullscreen_mode": 1,
+    "sticky": false,
+    "floating": null,
+    "scratchpad_state": null,
+    "num": 25,
+    "output": "eDP-1",
+    "representation": "H[]",
+    "focused": false,
+    "visible": false
+  },
+  {
+    "id": 13,
+    "type": "workspace",
+    "orientation": "horizontal",
+    "percent": null,
+    "urgent": false,
+    "marks": [],
+    "layout": "splith",
+    "border": "none",
+    "current_border_width": 0,
+    "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+    },
+    "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "name": "30:wm",
+    "window": null,
+    "nodes": [],
+    "floating_nodes": [],
+    "focus": [
+      38,
+      15
+    ],
+    "fullscreen_mode": 1,
+    "sticky": false,
+    "floating": null,
+    "scratchpad_state": null,
+    "num": 30,
+    "output": "eDP-1",
+    "representation": "H[chrome-cifhbcnohmdccbgoicgdjpfamggdegmo-Profile_1 slack]",
+    "focused": false,
+    "visible": false
+  },
+  {
+    "id": 26,
+    "type": "workspace",
+    "orientation": "horizontal",
+    "percent": null,
+    "urgent": false,
+    "marks": [],
+    "layout": "splith",
+    "border": "none",
+    "current_border_width": 0,
+    "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+    },
+    "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "name": "31:wn",
+    "window": null,
+    "nodes": [],
+    "floating_nodes": [],
+    "focus": [
+      27,
+      29
+    ],
+    "fullscreen_mode": 1,
+    "sticky": false,
+    "floating": null,
+    "scratchpad_state": null,
+    "num": 31,
+    "output": "eDP-1",
+    "representation": "H[Alacritty Alacritty]",
+    "focused": false,
+    "visible": false
+  },
+  {
+    "id": 40,
+    "type": "workspace",
+    "orientation": "horizontal",
+    "percent": null,
+    "urgent": false,
+    "marks": [],
+    "layout": "splith",
+    "border": "none",
+    "current_border_width": 0,
+    "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+    },
+    "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "name": "33:wp",
+    "window": null,
+    "nodes": [],
+    "floating_nodes": [],
+    "focus": [
+      41
+    ],
+    "fullscreen_mode": 1,
+    "sticky": false,
+    "floating": null,
+    "scratchpad_state": null,
+    "num": 33,
+    "output": "eDP-1",
+    "representation": "H[spotify]",
+    "focused": false,
+    "visible": false
+  },
+  {
+    "id": 36,
+    "type": "workspace",
+    "orientation": "horizontal",
+    "percent": null,
+    "urgent": false,
+    "marks": [],
+    "layout": "splith",
+    "border": "none",
+    "current_border_width": 0,
+    "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+    },
+    "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "name": "34:wr",
+    "window": null,
+    "nodes": [],
+    "floating_nodes": [],
+    "focus": [
+      37
+    ],
+    "fullscreen_mode": 1,
+    "sticky": false,
+    "floating": null,
+    "scratchpad_state": null,
+    "num": 34,
+    "output": "eDP-1",
+    "representation": "H[Alacritty]",
+    "focused": false,
+    "visible": false
+  },
+  {
+    "id": 52,
+    "type": "workspace",
+    "orientation": "horizontal",
+    "percent": null,
+    "urgent": false,
+    "marks": [],
+    "layout": "splith",
+    "border": "none",
+    "current_border_width": 0,
+    "rect": {
+      "x": 4,
+      "y": 4,
+      "width": 1432,
+      "height": 850
+    },
+    "deco_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "window_rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "geometry": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    },
+    "name": "38:wy",
+    "window": null,
+    "nodes": [],
+    "floating_nodes": [],
+    "focus": [
+      53
+    ],
+    "fullscreen_mode": 1,
+    "sticky": false,
+    "floating": null,
+    "scratchpad_state": null,
+    "num": 38,
+    "output": "eDP-1",
+    "representation": "H[google-chrome]",
+    "focused": false,
+    "visible": false
+  }
+]
