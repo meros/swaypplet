@@ -23,7 +23,7 @@ use std::rc::Rc;
 use gtk4::glib;
 use gtk4::prelude::*;
 
-use glass::{GrainKind, Material, SurfaceKind, System};
+use glass::{GrainKind, SurfaceKind, System, Tuning};
 
 /// How long after the last slider motion the compositor is told.
 ///
@@ -47,14 +47,14 @@ struct Knob {
     max: f64,
     step: f64,
     decimals: usize,
-    get: fn(&Material) -> f64,
-    set: fn(&mut Material, f64),
+    get: fn(&Tuning) -> f64,
+    set: fn(&mut Tuning, f64),
 }
 
-/// Re-reads one control from the material. One per widget, so a preset click
+/// Re-reads one control from the tuning. One per widget, so a preset click
 /// is a loop over these rather than a list of widget clones `State` would
 /// otherwise have to hold by name.
-type Sync = Box<dyn Fn(&Material)>;
+type Sync = Box<dyn Fn(&Tuning)>;
 
 /// A titled run of knobs.
 struct Group {
@@ -69,6 +69,32 @@ struct Group {
 /// `glass` module header for why `mask_threshold` has no knob at all.
 static GROUPS: &[Group] = &[
     Group {
+        title: "Geometry",
+        hint: "How big the bevel is, on every class of surface at once. Measured on the bar, the pair moved together is about twice the effect of either alone \u{2014} thickness by itself is nearly invisible, because the shader normalises every depth-driven term by it and a flat top bends no ray at all.",
+        knobs: &[
+            Knob {
+                label: "Bevel scale",
+                hint: "Multiplies bezel and thickness for all four classes, so they keep their relationship to each other. 1.00 is what the sway config ships.",
+                min: 0.25,
+                max: 3.0,
+                step: 0.05,
+                decimals: 2,
+                get: |t| t.bezel_scale,
+                set: |t, v| t.bezel_scale = v,
+            },
+            Knob {
+                label: "Thickness ratio",
+                hint: "Thickness as a multiple of the scaled bezel. 0 keeps each class's shipped ratio \u{2014} the only value that leaves a bar and a lock card reading as one material rather than two thicknesses of it. This is the knob for breaking that on purpose.",
+                min: 0.0,
+                max: 8.0,
+                step: 0.1,
+                decimals: 1,
+                get: |t| t.thickness_ratio,
+                set: |t, v| t.thickness_ratio = v,
+            },
+        ],
+    },
+    Group {
         title: "Surface",
         hint: "Roughness is the one knob the physics has: it widens the specular lobe, scatters transmission and blurs the reflection together.",
         knobs: &[
@@ -79,8 +105,8 @@ static GROUPS: &[Group] = &[
                 max: 1.0,
                 step: 0.01,
                 decimals: 2,
-                get: |m| m.roughness,
-                set: |m, v| m.roughness = v,
+                get: |t| t.material.roughness,
+                set: |t, v| t.material.roughness = v,
             },
             Knob {
                 label: "Refraction",
@@ -89,8 +115,8 @@ static GROUPS: &[Group] = &[
                 max: 2.0,
                 step: 0.01,
                 decimals: 2,
-                get: |m| m.refraction,
-                set: |m, v| m.refraction = v,
+                get: |t| t.material.refraction,
+                set: |t, v| t.material.refraction = v,
             },
             Knob {
                 label: "Lensing",
@@ -99,18 +125,24 @@ static GROUPS: &[Group] = &[
                 max: 1.0,
                 step: 0.01,
                 decimals: 2,
-                get: |m| m.lensing,
-                set: |m, v| m.lensing = v,
+                get: |t| t.material.lensing,
+                set: |t, v| t.material.lensing = v,
             },
             Knob {
                 label: "Reflection",
-                hint: "Fresnel strength. 1.0 is physical — Schlick's F confines it to the rim unaided.",
+                hint: "Weight on the Fresnel term. 1.0 is physical, and it is mostly a rim control whatever you set: on a flat top the normal is vertical, so Schlick collapses to f0 = 0.04 and no value here changes that. Past 1.0 it only widens the band near the edge where F was already climbing.",
                 min: 0.0,
-                max: 2.0,
+                // To 4 rather than to 2. Measured on the bar against the
+                // shipped material, 0 -> 1 moves the rim 5.8/255 and the core
+                // 2.6; 0 -> 4 moves them 16.8 and 10.1. The physical value is
+                // 1.0 and the extra range is deliberately non-physical, but a
+                // knob whose whole complaint is "I cannot see it do anything"
+                // should at least be able to.
+                max: 4.0,
                 step: 0.01,
                 decimals: 2,
-                get: |m| m.reflection,
-                set: |m, v| m.reflection = v,
+                get: |t| t.material.reflection,
+                set: |t, v| t.material.reflection = v,
             },
             Knob {
                 label: "Dispersion",
@@ -119,8 +151,8 @@ static GROUPS: &[Group] = &[
                 max: 0.05,
                 step: 0.001,
                 decimals: 3,
-                get: |m| m.dispersion,
-                set: |m, v| m.dispersion = v,
+                get: |t| t.material.dispersion,
+                set: |t, v| t.material.dispersion = v,
             },
         ],
     },
@@ -135,8 +167,8 @@ static GROUPS: &[Group] = &[
                 max: 4.0,
                 step: 0.05,
                 decimals: 2,
-                get: |m| m.absorb,
-                set: |m, v| m.absorb = v,
+                get: |t| t.material.absorb,
+                set: |t, v| t.material.absorb = v,
             },
             Knob {
                 label: "Absorb floor",
@@ -145,8 +177,8 @@ static GROUPS: &[Group] = &[
                 max: 0.5,
                 step: 0.01,
                 decimals: 2,
-                get: |m| m.absorb_floor,
-                set: |m, v| m.absorb_floor = v,
+                get: |t| t.material.absorb_floor,
+                set: |t, v| t.material.absorb_floor = v,
             },
             Knob {
                 label: "Photochromic",
@@ -155,8 +187,8 @@ static GROUPS: &[Group] = &[
                 max: 0.5,
                 step: 0.01,
                 decimals: 2,
-                get: |m| m.photochromic,
-                set: |m, v| m.photochromic = v,
+                get: |t| t.material.photochromic,
+                set: |t, v| t.material.photochromic = v,
             },
             Knob {
                 label: "Haze",
@@ -165,8 +197,8 @@ static GROUPS: &[Group] = &[
                 max: 0.5,
                 step: 0.01,
                 decimals: 2,
-                get: |m| m.haze,
-                set: |m, v| m.haze = v,
+                get: |t| t.material.haze,
+                set: |t, v| t.material.haze = v,
             },
         ],
     },
@@ -181,8 +213,8 @@ static GROUPS: &[Group] = &[
                 max: 64.0,
                 step: 1.0,
                 decimals: 0,
-                get: |m| m.frost_radius,
-                set: |m, v| m.frost_radius = v,
+                get: |t| t.material.frost_radius,
+                set: |t, v| t.material.frost_radius = v,
             },
             Knob {
                 label: "Frost",
@@ -191,8 +223,8 @@ static GROUPS: &[Group] = &[
                 max: 1.0,
                 step: 0.01,
                 decimals: 2,
-                get: |m| m.frost,
-                set: |m, v| m.frost = v,
+                get: |t| t.material.frost,
+                set: |t, v| t.material.frost = v,
             },
             Knob {
                 label: "Reflect blur",
@@ -201,8 +233,8 @@ static GROUPS: &[Group] = &[
                 max: 1.0,
                 step: 0.01,
                 decimals: 2,
-                get: |m| m.reflect_blur,
-                set: |m, v| m.reflect_blur = v,
+                get: |t| t.material.reflect_blur,
+                set: |t, v| t.material.reflect_blur = v,
             },
         ],
     },
@@ -217,8 +249,8 @@ static GROUPS: &[Group] = &[
                 max: 1.0,
                 step: 0.01,
                 decimals: 2,
-                get: |m| m.specular,
-                set: |m, v| m.specular = v,
+                get: |t| t.material.specular,
+                set: |t, v| t.material.specular = v,
             },
             Knob {
                 label: "Edge light",
@@ -227,8 +259,8 @@ static GROUPS: &[Group] = &[
                 max: 0.5,
                 step: 0.01,
                 decimals: 2,
-                get: |m| m.edge_light,
-                set: |m, v| m.edge_light = v,
+                get: |t| t.material.edge_light,
+                set: |t, v| t.material.edge_light = v,
             },
             Knob {
                 label: "Shine",
@@ -237,8 +269,8 @@ static GROUPS: &[Group] = &[
                 max: 256.0,
                 step: 1.0,
                 decimals: 0,
-                get: |m| m.shine,
-                set: |m, v| m.shine = v,
+                get: |t| t.material.shine,
+                set: |t, v| t.material.shine = v,
             },
             Knob {
                 label: "Noise",
@@ -247,8 +279,8 @@ static GROUPS: &[Group] = &[
                 max: 0.05,
                 step: 0.001,
                 decimals: 3,
-                get: |m| m.noise,
-                set: |m, v| m.noise = v,
+                get: |t| t.material.noise,
+                set: |t, v| t.material.noise = v,
             },
         ],
     },
@@ -263,8 +295,8 @@ static GROUPS: &[Group] = &[
                 max: 96.0,
                 step: 1.0,
                 decimals: 0,
-                get: |m| m.grain_scale,
-                set: |m, v| m.grain_scale = v,
+                get: |t| t.material.grain_scale,
+                set: |t, v| t.material.grain_scale = v,
             },
             Knob {
                 label: "Grain strength",
@@ -273,8 +305,8 @@ static GROUPS: &[Group] = &[
                 max: 8.0,
                 step: 0.1,
                 decimals: 1,
-                get: |m| m.grain_strength,
-                set: |m, v| m.grain_strength = v,
+                get: |t| t.material.grain_strength,
+                set: |t, v| t.material.grain_strength = v,
             },
         ],
     },
@@ -289,8 +321,8 @@ static GROUPS: &[Group] = &[
                 max: 8.0,
                 step: 1.0,
                 decimals: 0,
-                get: |m| m.samples,
-                set: |m, v| m.samples = v,
+                get: |t| t.material.samples,
+                set: |t, v| t.material.samples = v,
             },
             Knob {
                 label: "Energy comp",
@@ -299,8 +331,8 @@ static GROUPS: &[Group] = &[
                 max: 1.0,
                 step: 0.01,
                 decimals: 2,
-                get: |m| m.energy_comp,
-                set: |m, v| m.energy_comp = v,
+                get: |t| t.material.energy_comp,
+                set: |t, v| t.material.energy_comp = v,
             },
         ],
     },
@@ -312,7 +344,7 @@ struct State {
     /// The shipped material and the namespace table. Loaded once: a host
     /// without one never builds a `State` at all, it gets the note instead.
     system: System,
-    material: RefCell<Material>,
+    tuning: RefCell<Tuning>,
     /// Filled in as the controls are built; see [`Sync`].
     sync: RefCell<Vec<Sync>>,
     /// True while `sync` is driving the widgets, so their change handlers do
@@ -336,9 +368,9 @@ impl State {
         self.set_status(true);
     }
 
-    /// Replace the whole material — a preset, or Reset.
-    fn replace(self: &Rc<Self>, material: Material, modified: bool) {
-        *self.material.borrow_mut() = material;
+    /// Replace the whole tuning — a preset, or Reset.
+    fn replace(self: &Rc<Self>, tuning: Tuning, modified: bool) {
+        *self.tuning.borrow_mut() = tuning;
         self.sync_controls();
         self.schedule_apply();
         if modified {
@@ -357,9 +389,9 @@ impl State {
 
     fn sync_controls(&self) {
         self.updating.set(true);
-        let material = self.material.borrow();
+        let tuning = self.tuning.borrow();
         for sync in self.sync.borrow().iter() {
-            sync(&material);
+            sync(&tuning);
         }
         self.updating.set(false);
     }
@@ -373,7 +405,7 @@ impl State {
             std::time::Duration::from_millis(APPLY_DEBOUNCE_MS),
             move || {
                 this.apply_timer.replace(None);
-                this.system.apply(&this.material.borrow());
+                this.system.apply(&this.tuning.borrow());
             },
         );
         self.apply_timer.replace(Some(id));
@@ -388,7 +420,7 @@ impl State {
             std::time::Duration::from_millis(SAVE_DEBOUNCE_MS),
             move || {
                 this.save_timer.replace(None);
-                glass::save_override(&this.material.borrow());
+                glass::save_override(&this.tuning.borrow());
             },
         );
         self.save_timer.replace(Some(id));
@@ -443,14 +475,14 @@ impl SettingsSection {
         // instead would put the sliders somewhere the screen is not.
         let saved = glass::load_override();
         let modified = saved.is_some();
-        let material = saved.unwrap_or_else(|| system.material.clone());
+        let tuning = saved.unwrap_or_else(|| Tuning::system(&system));
 
         let status = gtk4::Label::builder().xalign(0.0).wrap(true).build();
         status.add_css_class("settings-status");
 
         let state = Rc::new(State {
             system,
-            material: RefCell::new(material),
+            tuning: RefCell::new(tuning),
             sync: RefCell::new(Vec::new()),
             updating: Cell::new(false),
             apply_timer: RefCell::new(None),
@@ -546,8 +578,8 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
     {
         let state = state.clone();
         system_btn.connect_clicked(move |_| {
-            let material = state.system.material.clone();
-            state.replace(material, true);
+            let tuning = Tuning::system(&state.system);
+            state.replace(tuning, true);
         });
     }
     row.append(&system_btn);
@@ -557,7 +589,18 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
         btn.add_css_class("settings-preset-btn");
         btn.set_tooltip_text(Some(p.hint));
         let state = state.clone();
-        btn.connect_clicked(move |_| state.replace(p.material(), true));
+        // A preset is a material, and it resets the geometry with it: keeping
+        // a bevel scale from whatever was being tried before would make the
+        // same preset land differently depending on what preceded it.
+        btn.connect_clicked(move |_| {
+            state.replace(
+                Tuning {
+                    material: p.material(),
+                    ..Tuning::system(&state.system)
+                },
+                true,
+            )
+        });
         row.append(&btn);
     }
 
@@ -588,14 +631,16 @@ fn build_kinds(state: &Rc<State>) -> gtk4::Box {
             let Some(kind) = SurfaceKind::ALL.get(d.selected() as usize).copied() else {
                 return;
             };
-            state.material.borrow_mut().surface = kind;
+            state.tuning.borrow_mut().material.surface = kind;
             state.edited();
         });
     }
     {
         let surface = surface.clone();
-        state.sync.borrow_mut().push(Box::new(move |m| {
-            let index = SurfaceKind::ALL.iter().position(|k| *k == m.surface);
+        state.sync.borrow_mut().push(Box::new(move |t| {
+            let index = SurfaceKind::ALL
+                .iter()
+                .position(|k| *k == t.material.surface);
             surface.set_selected(index.unwrap_or(0) as u32);
         }));
     }
@@ -613,14 +658,14 @@ fn build_kinds(state: &Rc<State>) -> gtk4::Box {
             let Some(kind) = GrainKind::ALL.get(d.selected() as usize).copied() else {
                 return;
             };
-            state.material.borrow_mut().grain = kind;
+            state.tuning.borrow_mut().material.grain = kind;
             state.edited();
         });
     }
     {
         let grain = grain.clone();
-        state.sync.borrow_mut().push(Box::new(move |m| {
-            let index = GrainKind::ALL.iter().position(|k| *k == m.grain);
+        state.sync.borrow_mut().push(Box::new(move |t| {
+            let index = GrainKind::ALL.iter().position(|k| *k == t.material.grain);
             grain.set_selected(index.unwrap_or(0) as u32);
         }));
     }
@@ -692,15 +737,15 @@ fn build_knob(state: &Rc<State>, knob: &'static Knob) -> gtk4::Box {
             if state.updating.get() {
                 return;
             }
-            (knob.set)(&mut state.material.borrow_mut(), raw);
+            (knob.set)(&mut state.tuning.borrow_mut(), raw);
             state.edited();
         });
     }
     {
         let scale = scale.clone();
         let value = value.clone();
-        state.sync.borrow_mut().push(Box::new(move |m| {
-            let v = (knob.get)(m);
+        state.sync.borrow_mut().push(Box::new(move |t| {
+            let v = (knob.get)(t);
             scale.set_value(v);
             // Written here as well as in the handler above, because
             // `set_value` only emits `value-changed` when the value actually
@@ -737,8 +782,8 @@ fn build_footer(state: &Rc<State>, status: &gtk4::Label) -> gtk4::Box {
     {
         let state = state.clone();
         reset.connect_clicked(move |_| {
-            let material = state.system.material.clone();
-            state.replace(material, false);
+            let tuning = Tuning::system(&state.system);
+            state.replace(tuning, false);
         });
     }
     buttons.append(&reset);
@@ -752,7 +797,7 @@ fn build_footer(state: &Rc<State>, status: &gtk4::Label) -> gtk4::Box {
         let state = state.clone();
         let status = status.clone();
         copy.connect_clicked(move |_| {
-            let nix = state.material.borrow().as_nix();
+            let nix = state.tuning.borrow().as_nix(&state.system);
             match gtk4::gdk::Display::default() {
                 Some(display) => {
                     display.clipboard().set_text(&nix);
@@ -795,57 +840,82 @@ fn section_box(title: &str, hint: &str) -> gtk4::Box {
 mod tests {
     use super::*;
 
+    /// A tuning built on one preset, with the geometry left where the system
+    /// config would have put it.
+    fn probe() -> Tuning {
+        Tuning {
+            material: preset::clear(),
+            bezel_scale: 1.0,
+            thickness_ratio: 0.0,
+        }
+    }
+
+    /// Every knob, flattened out of the groups.
+    fn knobs() -> impl Iterator<Item = &'static Knob> {
+        GROUPS.iter().flat_map(|g| g.knobs)
+    }
+
     #[test]
     fn every_knob_range_contains_what_the_presets_ask_for() {
         // A preset outside a knob's range is a preset the slider silently
         // clamps, so the pane would show a different material than the one it
         // just pushed at the compositor.
         for p in &preset::ALL {
-            let m = p.material();
-            for group in GROUPS {
-                for knob in group.knobs {
-                    let v = (knob.get)(&m);
-                    assert!(
-                        v >= knob.min && v <= knob.max,
-                        "{}: {} = {v} outside {}..{}",
-                        p.name,
-                        knob.label,
-                        knob.min,
-                        knob.max
-                    );
-                }
+            let t = Tuning {
+                material: p.material(),
+                ..probe()
+            };
+            for knob in knobs() {
+                let v = (knob.get)(&t);
+                assert!(
+                    v >= knob.min && v <= knob.max,
+                    "{}: {} = {v} outside {}..{}",
+                    p.name,
+                    knob.label,
+                    knob.min,
+                    knob.max
+                );
             }
         }
     }
 
     #[test]
     fn every_numeric_field_has_exactly_one_knob() {
-        // The knob table and `Material` are edited in different places; a
-        // field with no knob is invisible in the pane and a field with two is
-        // two sliders fighting over one number.
-        let probe = preset::clear();
+        // The knob table and `Tuning` are edited in different places; a field
+        // with no knob is invisible in the pane and a field with two is two
+        // sliders fighting over one number. Identify a knob by what its setter
+        // moves — the twenty material numbers, plus the two geometry ones that
+        // are not in `Material` at all.
+        let base = probe();
         let mut seen = Vec::new();
-        for group in GROUPS {
-            for knob in group.knobs {
-                // Identify a knob by which field its setter moves.
-                let mut m = probe.clone();
-                let bumped = (knob.get)(&probe) + knob.step;
-                (knob.set)(&mut m, bumped);
-                let changed: Vec<&str> = probe
-                    .numbers()
-                    .iter()
-                    .zip(m.numbers().iter())
-                    .filter(|((_, a), (_, b))| a != b)
-                    .map(|((name, _), _)| *name)
-                    .collect();
-                assert_eq!(changed.len(), 1, "{} moved {changed:?}", knob.label);
-                seen.push(changed[0]);
+        for knob in knobs() {
+            let mut t = base.clone();
+            (knob.set)(&mut t, (knob.get)(&base) + knob.step);
+
+            let mut changed: Vec<&str> = base
+                .material
+                .numbers()
+                .iter()
+                .zip(t.material.numbers().iter())
+                .filter(|((_, a), (_, b))| a != b)
+                .map(|((name, _), _)| *name)
+                .collect();
+            if t.bezel_scale != base.bezel_scale {
+                changed.push("bezel_scale");
             }
+            if t.thickness_ratio != base.thickness_ratio {
+                changed.push("thickness_ratio");
+            }
+            assert_eq!(changed.len(), 1, "{} moved {changed:?}", knob.label);
+            seen.push(changed[0]);
         }
+
         seen.sort_unstable();
-        let mut all: Vec<&str> = probe.numbers().iter().map(|(n, _)| *n).collect();
+        let mut all: Vec<&str> = base.material.numbers().iter().map(|(n, _)| *n).collect();
+        all.push("bezel_scale");
+        all.push("thickness_ratio");
         all.sort_unstable();
-        assert_eq!(seen, all, "knob table and Material disagree");
+        assert_eq!(seen, all, "knob table and Tuning disagree");
     }
 
     #[test]
@@ -853,18 +923,30 @@ mod tests {
         // Otherwise the rail's top end is unreachable: the snap in
         // `build_knob` rounds to a multiple of `step`, and a max that is not
         // one can never be selected.
-        for group in GROUPS {
-            for knob in group.knobs {
-                let steps = (knob.max - knob.min) / knob.step;
-                assert!(
-                    (steps - steps.round()).abs() < 1e-6,
-                    "{}: {}..{} is not a whole number of {} steps",
-                    knob.label,
-                    knob.min,
-                    knob.max,
-                    knob.step
-                );
-            }
+        for knob in knobs() {
+            let steps = (knob.max - knob.min) / knob.step;
+            assert!(
+                (steps - steps.round()).abs() < 1e-6,
+                "{}: {}..{} is not a whole number of {} steps",
+                knob.label,
+                knob.min,
+                knob.max,
+                knob.step
+            );
         }
+    }
+
+    #[test]
+    fn the_geometry_knobs_start_where_the_system_config_does() {
+        // Both defaults have to be the identity, or opening the pane would
+        // move the geometry before anything was touched.
+        let t = probe();
+        let shipped = glass::Geometry {
+            bezel: 10.0,
+            thickness: 39.0,
+        };
+        let got = t.geometry(shipped);
+        assert_eq!(got.bezel, 10.0);
+        assert_eq!(got.thickness, 39.0);
     }
 }
