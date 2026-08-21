@@ -287,6 +287,15 @@ pub fn run(component: &str) {
                 let s = Box::leak(Box::new(BrightnessSection::new()));
                 host.append(s.widget());
             }
+            // The settings pane. `SWAYPPLET_GLASS_CONFIG` points it at a
+            // system config, so the glass group can be rendered without
+            // /etc/swaypplet/glass.json existing on the build host; without
+            // one it draws the "no glass configuration" note, which is the
+            // other state worth a screenshot.
+            "settings" => {
+                let s = Box::leak(Box::new(crate::settings::SettingsSection::new()));
+                host.append(s.widget());
+            }
             "network" => {
                 let s = Box::leak(Box::new(NetworkSection::new()));
                 host.append(s.widget());

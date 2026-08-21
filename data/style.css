@@ -3377,3 +3377,165 @@ scale.night-scale highlight {
     0%   { border-color: @accent; background-color: alpha(@accent, 0.22); }
     100% { border-color: @border_strong; background-color: @surface; }
 }
+
+/* ── Settings pane (src/settings/) ──
+   A deck page in the Helm card, one group per thing that can be configured.
+   Dense on purpose: the glass group alone is twenty knobs, and a settings
+   list that scrolls twice as far as it needs to is a list nobody reads to the
+   bottom of. Hints live in tooltips per row; only the group carries a visible
+   one. ── */
+.settings-pane {
+    padding: 2px 4px 6px;
+}
+
+.settings-group {
+    background-color: alpha(@bg1, 0.30);
+    border: 1px solid @border_subtle;
+    border-radius: 14px;
+    padding: 10px 12px 12px;
+}
+
+.settings-group-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: @fg_dim;
+}
+
+.settings-group-hint {
+    font-size: 11px;
+    color: @text_faint;
+    margin-bottom: 4px;
+}
+
+/* One knob: a fixed label gutter so every rail in the pane starts at the same
+   x, the rail taking whatever is left, and a fixed value column so the number
+   does not shove the rail as it grows a digit. */
+.settings-row {
+    min-height: 26px;
+}
+
+.settings-row-label {
+    font-size: 12px;
+    color: @fg;
+    min-width: 104px;
+}
+
+.settings-row-value {
+    font-size: 11px;
+    font-family: monospace;
+    color: @fg_dim;
+}
+
+/* Slimmer than the volume rail: that one is a single control at the top of the
+   card and this is twenty in a column. The knob keeps its negative margin, so
+   the horizontal padding still has to absorb the overhang. */
+.settings-scale {
+    padding: 4px 8px;
+    min-height: 8px;
+}
+
+.settings-scale trough,
+.settings-scale highlight {
+    min-height: 6px;
+}
+
+.settings-scale slider {
+    min-width: 14px;
+    min-height: 14px;
+    margin: -5px;
+}
+
+.settings-scale slider:hover {
+    min-width: 16px;
+    min-height: 16px;
+    margin: -6px;
+}
+
+.settings-dropdown {
+    min-height: 28px;
+}
+
+/* ── Presets ── */
+.settings-presets > flowboxchild {
+    padding: 0;
+    margin: 0;
+    border: none;
+    min-width: 0;
+    min-height: 0;
+    outline: none;
+}
+
+.settings-preset-btn {
+    background-color: alpha(@bg2, 0.7);
+    background-image: none;
+    color: @fg;
+    border: 1px solid @border_subtle;
+    border-radius: 8px;
+    padding: 4px 14px;
+    min-height: 28px;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+.settings-preset-btn:hover {
+    background-color: @accent_tint;
+    border-color: alpha(@accent, 0.40);
+}
+
+/* ── Footer ── */
+.settings-footer {
+    padding-top: 4px;
+    border-top: 1px solid @border_subtle;
+}
+
+.settings-action {
+    background-color: alpha(@bg1, 0.55);
+    background-image: none;
+    color: @fg;
+    border: 1px solid @border_strong;
+    border-radius: 8px;
+    padding: 4px 14px;
+    min-height: 28px;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+.settings-action:hover {
+    background-color: @accent_tint;
+    border-color: @accent;
+}
+
+/* Where the material currently comes from. Faint at the system default, plain
+   once there is an override file — the pane's one piece of state that is not
+   visible on the screen behind it. */
+.settings-status {
+    font-size: 11px;
+    color: @fg_dim;
+}
+
+.settings-status-system {
+    color: @text_faint;
+}
+
+/* ── No glass configuration on this host ── */
+.settings-empty {
+    background-color: alpha(@bg1, 0.30);
+    border: 1px dashed @border_strong;
+    border-radius: 14px;
+    padding: 16px;
+}
+
+.settings-empty-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: @fg;
+}
+
+.settings-empty-body {
+    font-size: 11px;
+    color: @fg_dim;
+}
