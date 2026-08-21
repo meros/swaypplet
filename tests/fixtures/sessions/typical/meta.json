@@ -1,0 +1,29 @@
+{
+ "note": "typical, recorded from a live session",
+ "scrubbed": true,
+ "outputs": [
+  {
+   "name": "eDP-1",
+   "rect": {
+    "x": 0,
+    "y": 0,
+    "width": 1440,
+    "height": 900
+   },
+   "scale": 2.0,
+   "focus": [
+    8,
+    49,
+    52,
+    16,
+    26,
+    31,
+    13,
+    40,
+    36
+   ]
+  }
+ ],
+ "workspaces": 9,
+ "windows": 12
+}

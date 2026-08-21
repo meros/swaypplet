@@ -72,52 +72,6 @@ impl Image {
         }
     }
 
-    /// Box-average down to fit `max_w` × `max_h`, keeping the aspect ratio.
-    ///
-    /// Averaging rather than dropping pixels: a switcher thumbnail of a
-    /// terminal is mostly one-pixel-wide glyph strokes, and nearest-neighbour
-    /// turns those into noise that reads as a different window every time it
-    /// is drawn.
-    pub fn boxed_down(&self, max_w: u32, max_h: u32) -> Image {
-        if self.width == 0 || self.height == 0 {
-            return self.clone();
-        }
-        let factor = (self.width.div_ceil(max_w))
-            .max(self.height.div_ceil(max_h))
-            .max(1);
-        if factor == 1 {
-            return self.clone();
-        }
-
-        let width = (self.width / factor).max(1);
-        let height = (self.height / factor).max(1);
-        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
-
-        for y in 0..height {
-            for x in 0..width {
-                let (mut acc, mut n) = ([0u32; 4], 0u32);
-                for sy in y * factor..((y + 1) * factor).min(self.height) {
-                    for sx in x * factor..((x + 1) * factor).min(self.width) {
-                        let i = ((sy * self.width + sx) * 4) as usize;
-                        for c in 0..4 {
-                            acc[c] += u32::from(self.pixels[i + c]);
-                        }
-                        n += 1;
-                    }
-                }
-                let n = n.max(1);
-                for c in acc {
-                    pixels.push((c / n) as u8);
-                }
-            }
-        }
-
-        Image {
-            width,
-            height,
-            pixels,
-        }
-    }
 
     /// The pixel at `(x, y)` as `(r, g, b)`, for the colour picker.
     pub fn pixel(&self, x: u32, y: u32) -> Option<(u8, u8, u8)> {
@@ -149,27 +103,6 @@ pub fn output(name: &str) -> Result<Image, String> {
     })
 }
 
-/// Capture one window, by the identifier sway also puts in its tree
-/// (`foreign_toplevel_identifier`), which is what joins a switcher entry to
-/// its pixels without matching on titles.
-///
-/// Blocking, and a window that is not currently rendered anywhere may never
-/// produce a frame — see [`with_source`] on why that is bounded.
-pub fn toplevel(identifier: &str) -> Result<Image, String> {
-    with_source(|state, qh| {
-        let sources = state
-            .toplevels_manager
-            .clone()
-            .ok_or("compositor does not advertise per-toplevel capture sources")?;
-        let handle = state
-            .toplevels
-            .iter()
-            .find(|(_, id)| id.as_deref() == Some(identifier))
-            .map(|(h, _)| h.clone())
-            .ok_or_else(|| format!("no toplevel {identifier}"))?;
-        Ok(sources.create_source(&handle, qh, ()))
-    })
-}
 
 /// The whole dance, once, on a connection of its own.
 ///
@@ -676,34 +609,7 @@ mod tests {
         assert!(cropped.pixels.is_empty());
     }
 
-    #[test]
-    fn boxing_down_averages_rather_than_samples() {
-        // 4x2 of alternating black and white columns; halving must produce
-        // mid-grey, which a nearest-neighbour resize never would.
-        let mut pixels = Vec::new();
-        for _ in 0..2 {
-            for x in 0..4u8 {
-                let v = if x % 2 == 0 { 0 } else { 255 };
-                pixels.extend_from_slice(&[v, v, v, 255]);
-            }
-        }
-        let small = Image {
-            width: 4,
-            height: 2,
-            pixels,
-        }
-        .boxed_down(2, 1);
 
-        assert_eq!((small.width, small.height), (2, 1));
-        assert_eq!(small.pixel(0, 0), Some((127, 127, 127)));
-    }
-
-    #[test]
-    fn an_image_already_small_enough_is_returned_as_is() {
-        let img = solid(10, 10, [1, 2, 3, 255]);
-        let same = img.boxed_down(100, 100);
-        assert_eq!((same.width, same.height), (10, 10));
-    }
 
     #[test]
     fn xrgb_arrives_byte_reversed_and_opaque() {
@@ -724,20 +630,6 @@ mod tests {
 #[cfg(test)]
 mod live {
     /// Grabs the real session's output. Ignored: needs a compositor.
-    /// Grabs one window by identifier. Ignored: needs a compositor.
-    ///
-    ///   TOPLEVEL=$(swaymsg -t get_tree -r | jq -r '..|objects
-    ///     |select(.foreign_toplevel_identifier!=null).foreign_toplevel_identifier' | head -1)
-    #[test]
-    #[ignore]
-    fn capture_a_toplevel() {
-        let id = std::env::var("TOPLEVEL").expect("TOPLEVEL=<identifier>");
-        let img = super::toplevel(&id).expect("capture");
-        let mut ppm = format!("P6\n{} {}\n255\n", img.width, img.height).into_bytes();
-        ppm.extend(img.pixels.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]));
-        std::fs::write("/tmp/toplevel.ppm", ppm).unwrap();
-        println!("captured {}x{}", img.width, img.height);
-    }
 
     #[test]
     #[ignore]

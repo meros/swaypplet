@@ -3574,3 +3574,46 @@ scale.night-scale highlight {
     font-size: 11px;
     color: @fg_dim;
 }
+
+/* ── Jump (src/jump/) ──
+   Super+Tab: back through the workspaces you came from. Four columns, every
+   width fixed on every row, because the card's size is a function of the row
+   count alone — see rows.rs for why that is the whole point rather than a
+   detail. Nothing here may set a height. ── */
+.jump-card {
+    padding: 12px 0;
+}
+
+.jump-row {
+    padding: 0 16px;
+    border-radius: 8px;
+}
+
+.jump-row.selected {
+    background-color: @accent_tint;
+}
+
+/* The key that reaches this place without this surface. Accent, because it is
+   the part of the row worth learning. */
+.jump-chord {
+    font-family: monospace;
+    font-size: 15px;
+    font-weight: 700;
+    color: @accent;
+    margin-right: 14px;
+}
+
+.jump-label {
+    font-size: 15px;
+    color: @fg;
+}
+
+.jump-detail {
+    font-size: 13px;
+    color: @fg_dim;
+}
+
+.jump-output {
+    font-size: 13px;
+    color: @text_faint;
+}

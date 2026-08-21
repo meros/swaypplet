@@ -98,12 +98,14 @@ rustPlatform.buildRustPackage {
     SCRIPT
     chmod +x $out/bin/swaypplet-screenshot
 
-    # Window switcher — thumbnails of every window, one keypress away
-    cat > $out/bin/swaypplet-switcher <<SCRIPT
+    # Jump — Super+Tab, back through the workspaces you came from.
+    # Two verbs on one binary because sway binds them separately;
+    # each press is its own short-lived client (src/jump/).
+    cat > $out/bin/swaypplet-jump <<SCRIPT
     #!/bin/sh
-    exec $out/bin/swaypplet switcher "\$@"
+    exec $out/bin/swaypplet jump "\$@"
     SCRIPT
-    chmod +x $out/bin/swaypplet-switcher
+    chmod +x $out/bin/swaypplet-jump
 
     # Keybinding sheet — `show` / `hide` edges from the Super-hold watcher
     cat > $out/bin/swaypplet-keybinds <<SCRIPT

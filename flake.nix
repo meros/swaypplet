@@ -117,12 +117,14 @@
               SCRIPT
               chmod +x $out/bin/swaypplet-screenshot
 
-              # Window switcher — thumbnails of every window, one keypress away
-              cat > $out/bin/swaypplet-switcher <<SCRIPT
+              # Jump — Super+Tab, back through the workspaces you came from.
+              # Two verbs on one binary because sway binds them separately;
+              # each press is its own short-lived client (src/jump/).
+              cat > $out/bin/swaypplet-jump <<SCRIPT
               #!/bin/sh
-              exec $out/bin/swaypplet switcher "\$@"
+              exec $out/bin/swaypplet jump "\$@"
               SCRIPT
-              chmod +x $out/bin/swaypplet-switcher
+              chmod +x $out/bin/swaypplet-jump
 
               # Keybinding sheet — show / hide edges from the Super-hold watcher
               cat > $out/bin/swaypplet-keybinds <<SCRIPT
@@ -202,6 +204,24 @@
         in
         {
           build = pkgs.callPackage ./package.nix { };
+
+          # The gate. Until this existed every `#[test]` in the tree ran only
+          # when somebody typed `cargo test` by hand: `package.nix` and the
+          # crane build above both set `doCheck = false`, and the comment on
+          # the crane one claiming "tests run in checks output" was describing
+          # `checks.build`, which is `package.nix`, which does not run them
+          # either. Two places said the tests were covered and neither ran one.
+          #
+          # An override of `checks.build` rather than a second crane pipeline:
+          # it reuses the same derivation and the same vendored deps, so the
+          # gate costs a check phase rather than a second dependency tree.
+          #
+          # The ten `#[ignore]`d tests stay ignored — they want a live sway
+          # socket or a sound server, which a build sandbox has neither of.
+          tests = (pkgs.callPackage ./package.nix { }).overrideAttrs (old: {
+            pname = "${old.pname or "swaypplet"}-tests";
+            doCheck = true;
+          });
         }
       );
     };
