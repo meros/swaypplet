@@ -61,14 +61,16 @@ pub enum SurfaceKind {
     ConvexSquircle,
     Concave,
     Lip,
+    Droplet,
 }
 
 impl SurfaceKind {
-    pub const ALL: [SurfaceKind; 4] = [
+    pub const ALL: [SurfaceKind; 5] = [
         SurfaceKind::ConvexCircle,
         SurfaceKind::ConvexSquircle,
         SurfaceKind::Concave,
         SurfaceKind::Lip,
+        SurfaceKind::Droplet,
     ];
 
     /// The spelling sway parses.
@@ -78,6 +80,7 @@ impl SurfaceKind {
             SurfaceKind::ConvexSquircle => "convex_squircle",
             SurfaceKind::Concave => "concave",
             SurfaceKind::Lip => "lip",
+            SurfaceKind::Droplet => "droplet",
         }
     }
 
@@ -87,6 +90,7 @@ impl SurfaceKind {
             SurfaceKind::ConvexSquircle => "Convex squircle",
             SurfaceKind::Concave => "Concave",
             SurfaceKind::Lip => "Lip",
+            SurfaceKind::Droplet => "Droplet \u{2014} surface tension",
         }
     }
 }
