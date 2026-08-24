@@ -66,6 +66,14 @@
     border: 1px solid @border_strong;
 }
 
+/* ── Graceful Fallback: when running without compositor liquid glass ── */
+.no-glass .glass-card,
+.no-glass .bar-root,
+.no-glass .panel-window {
+    background-color: alpha(#32302f, 0.94);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
 /* ── Window: transparent so compositor alpha-blends ──
    No outer drop shadows on floating cards: swayfx blur_ignore_transparent
    only skips pixels with alpha exactly 0, so a shadow overhanging the

@@ -28,6 +28,8 @@ use std::rc::Rc;
 use gtk4::glib;
 use gtk4::prelude::*;
 
+use gtk4_layer_shell::LayerShell as _;
+
 use crate::layer_shell::{self, LayerShellConfig};
 use gesture::{Action, Ev, Gesture};
 use rows::Row;
@@ -110,6 +112,16 @@ impl Jump {
             }),
         });
         this.wire();
+        // Presented once here, then shown and hidden with `set_visible`.
+        // That is the pattern every other surface in this process follows
+        // (panel.rs, and anim::Reveal for the rest), and it is not a style
+        // choice: gtk4-layer-shell configures the surface as it is realized,
+        // so a window first presented later comes up without ever having been
+        // laid out - it maps, the compositor gives it a surface, and nothing
+        // is drawn on it. That failure is silent and looks exactly like the
+        // gesture not firing.
+        this.window.present();
+        this.window.set_visible(false);
         this
     }
 
@@ -158,12 +170,17 @@ impl Jump {
     /// user has already released the key.
     fn begin(self: &Rc<Self>) {
         let Some(session) = read_session() else {
+            log::warn!("jump: could not read the session; nothing to show");
             return;
         };
         let (places, bindings, focused_output, tree) = session;
         let apps = |ws: &str| apps_on(&tree, ws);
         let built = rows::rows(&places, &bindings, &apps, &focused_output);
 
+        log::info!(
+            "jump: {} places, {} rows, focused output {:?}",
+            places.len(), built.len(), focused_output
+        );
         self.rebuild(&built);
         {
             let mut st = self.state.borrow_mut();
@@ -186,12 +203,19 @@ impl Jump {
     fn apply(self: &Rc<Self>, action: Action) {
         match action {
             Action::Map => {
-                self.window.present();
+                self.window.set_visible(true);
+                // Turn the compositor's material on for this namespace, and
+                // let anim.rs keep the count: it tracks how many surfaces of
+                // a namespace are live and only sends the enable and disable
+                // at the boundaries, which is what stops one card's hide from
+                // stripping the glass off another surface sharing the name.
+                crate::anim::set_layer_blur(self.window.namespace(), true, || {});
                 self.arm_watchdog();
             }
             Action::Select(i) => self.select(i),
             Action::Unmap => {
                 self.disarm_watchdog();
+                crate::anim::set_layer_blur(self.window.namespace(), false, || {});
                 self.window.set_visible(false);
             }
             Action::Run(command) => {
@@ -262,7 +286,7 @@ impl Jump {
 }
 
 /// One row: four columns, every width fixed, on every row.
-fn row_widget(row: &Row) -> gtk4::Box {
+pub(crate) fn row_widget(row: &Row) -> gtk4::Box {
     let b = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(0)
@@ -338,7 +362,7 @@ fn focused_workspace() -> Option<String> {
 }
 
 /// The app ids of every window on a workspace, in tree order.
-fn apps_on(tree: &swayipc::Node, workspace: &str) -> Vec<String> {
+pub(crate) fn apps_on(tree: &swayipc::Node, workspace: &str) -> Vec<String> {
     fn collect(node: &swayipc::Node, out: &mut Vec<String>) {
         if let Some(app) = node.app_id.as_deref() {
             out.push(app.to_string());

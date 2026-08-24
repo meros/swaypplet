@@ -292,6 +292,40 @@ pub fn run(component: &str) {
             // /etc/swaypplet/glass.json existing on the build host; without
             // one it draws the "no glass configuration" note, which is the
             // other state worth a screenshot.
+            // The jump list, built from a recorded session rather than the
+            // live one, so it renders the same rows every time and needs no
+            // compositor to have been anywhere.
+            "jump" => {
+                let raw = std::fs::read_to_string("tests/fixtures/sessions/typical/tree.json")
+                    .expect("run from the repo root; needs tests/fixtures/");
+                let tree: swayipc::Node = serde_json::from_str(&raw).unwrap();
+                let places = crate::jump::place::mru(&tree);
+                let config = std::fs::read_to_string("tests/fixtures/sessions/typical/config.json")
+                    .ok()
+                    .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                    .and_then(|v| v["config"].as_str().map(str::to_string))
+                    .unwrap_or_default();
+                let bindings = crate::keybinds::parse(&config);
+                let focused = places.first().map(|p| p.output.clone()).unwrap_or_default();
+                let apps = |ws: &str| crate::jump::apps_on(&tree, ws);
+                let built = crate::jump::rows::rows(&places, &bindings, &apps, &focused);
+
+                let card = gtk4::Box::builder()
+                    .orientation(gtk4::Orientation::Vertical)
+                    .build();
+                card.add_css_class("glass-card");
+                card.add_css_class("jump-card");
+                let (w, h) = crate::jump::rows::card_size(built.len());
+                card.set_size_request(w, h);
+                for (i, row) in built.iter().enumerate() {
+                    let widget = crate::jump::row_widget(row);
+                    if i == 0 {
+                        widget.add_css_class("selected");
+                    }
+                    card.append(&widget);
+                }
+                host.append(&card);
+            }
             "settings" => {
                 let s = Box::leak(Box::new(crate::settings::SettingsSection::new()));
                 host.append(s.widget());
