@@ -57,14 +57,17 @@ SOCK="$RUNTIME/sway-render-$$.sock"
   # sway's parser wants the block across lines: a one-liner is read as an
   # unmatched '}' and the whole rule is dropped, which renders every surface
   # here unfrosted while looking like it worked.
-  for ns in swaypplet swaypplet-launcher swaypplet-osd swaypplet-notification swaypplet-polkit swaypplet-keybinds; do
+  for ns in swaypplet swaypplet-launcher swaypplet-osd swaypplet-notification swaypplet-polkit swaypplet-keybinds swaypplet-jump; do
     printf 'layer_effects "%s" {\n    blur enable\n    blur_ignore_transparent enable\n}\n' "$ns"
   done
   # The keybinding sheet reads the config sway loaded, so a nested session
   # with no bindings renders an empty sheet. Borrow the outer session's
   # bindsym lines (harmless here — nothing presses them) so the harness
   # exercises the real IPC path against a realistic config.
-  if [ "$MODE" = "keybinds" ]; then
+  # Same for the jump list: its chord column is looked up from the config
+  # sway loaded, so a nested session with no bindings renders a column of
+  # dashes and the screenshot misrepresents the feature.
+  if [ "$MODE" = "keybinds" ] || [ "$MODE" = "jump" ]; then
     grep '^bindsym' "${SWPP_KEYBINDS_FROM:-$HOME/.config/sway/config}" 2>/dev/null || true
   fi
 } > "$CFG"
@@ -99,15 +102,20 @@ case "$MODE" in
       [ -e "$RUNTIME/swaypplet.pid" ] && break; sleep 0.1
     done
     sleep 1.5
-    # Somewhere to have been. The list is the workspaces you came from, so the
-    # harness has to visit a few before there is anything to draw — one
-    # workspace is a deliberate no-op (src/jump/gesture.rs).
-    for ws in 2 3 4 5; do
+    # Somewhere to have been, with something on it. A workspace sway leaves
+    # empty is destroyed on the way out, so visiting bare workspace numbers
+    # leaves a recency stack one entry long — which the jump list correctly
+    # refuses to draw anything for (src/jump/gesture.rs). Each stop gets a
+    # window so the workspace survives being left, which is also what makes
+    # the detail column show something.
+    for ws in 5 24 30 1; do
       swaymsg "workspace number $ws" >/dev/null 2>&1 || true
-      sleep 0.3
+      swaymsg exec "${SWPP_JUMP_APP:-foot}" >/dev/null 2>&1 || true
+      sleep 1.2
     done
+    sleep 0.8
     "$BIN" jump >>/tmp/swpp-app.log 2>&1 || true
-    sleep 2
+    sleep 0.6
     ;;
   screenshot)
     "$BIN" >/tmp/swpp-app.log 2>&1 &

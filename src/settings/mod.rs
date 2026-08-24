@@ -349,6 +349,7 @@ struct State {
     /// without one never builds a `State` at all, it gets the note instead.
     system: System,
     tuning: RefCell<Tuning>,
+    history: RefCell<Vec<Tuning>>,
     /// Filled in as the controls are built; see [`Sync`].
     sync: RefCell<Vec<Sync>>,
     /// True while `sync` is driving the widgets, so their change handlers do
@@ -357,9 +358,30 @@ struct State {
     apply_timer: RefCell<Option<glib::SourceId>>,
     save_timer: RefCell<Option<glib::SourceId>>,
     status: gtk4::Label,
+    undo_btn: gtk4::Button,
 }
 
 impl State {
+    fn push_history(&self, t: Tuning) {
+        let mut hist = self.history.borrow_mut();
+        if hist.last() != Some(&t) {
+            hist.push(t);
+            if hist.len() > 50 {
+                hist.remove(0);
+            }
+        }
+        self.undo_btn.set_sensitive(!hist.is_empty());
+    }
+
+    fn undo(self: &Rc<Self>) {
+        let prev = self.history.borrow_mut().pop();
+        if let Some(tuning) = prev {
+            self.replace_internal(tuning, true, true);
+        }
+        self.undo_btn
+            .set_sensitive(!self.history.borrow().is_empty());
+    }
+
     /// Take an edit: update the widgets that did not make it, and start both
     /// clocks.
     fn edited(self: &Rc<Self>) {
@@ -374,12 +396,17 @@ impl State {
 
     /// Replace the whole tuning — a preset, or Reset.
     fn replace(self: &Rc<Self>, tuning: Tuning, modified: bool) {
+        self.push_history(self.tuning.borrow().clone());
+        self.replace_internal(tuning, modified, true);
+    }
+
+    fn replace_internal(self: &Rc<Self>, tuning: Tuning, modified: bool, save: bool) {
         *self.tuning.borrow_mut() = tuning;
         self.sync_controls();
         self.schedule_apply();
-        if modified {
+        if modified && save {
             self.schedule_save();
-        } else {
+        } else if !modified {
             // Reset is the one path that removes the file rather than writing
             // one. A pending save from the edits being discarded would put it
             // straight back, so it has to be cancelled, not just skipped.
@@ -484,22 +511,36 @@ impl SettingsSection {
         let status = gtk4::Label::builder().xalign(0.0).wrap(true).build();
         status.add_css_class("settings-status");
 
+        let undo_btn = gtk4::Button::with_label("Undo");
+        undo_btn.add_css_class("settings-action");
+        undo_btn.set_sensitive(false);
+        undo_btn.set_tooltip_text(Some("Revert the last tuning or preset change."));
+
         let state = Rc::new(State {
             system,
             tuning: RefCell::new(tuning),
+            history: RefCell::new(Vec::new()),
             sync: RefCell::new(Vec::new()),
             updating: Cell::new(false),
             apply_timer: RefCell::new(None),
             save_timer: RefCell::new(None),
             status: status.clone(),
+            undo_btn: undo_btn.clone(),
         });
+
+        {
+            let state = state.clone();
+            undo_btn.connect_clicked(move |_| {
+                state.undo();
+            });
+        }
 
         root.append(&build_presets(&state));
         root.append(&build_kinds(&state));
         for group in GROUPS {
             root.append(&build_group(&state, group));
         }
-        root.append(&build_footer(&state, &status));
+        root.append(&build_footer(&state, &status, &undo_btn));
 
         state.sync_controls();
         state.set_status(modified);
@@ -561,7 +602,7 @@ fn unconfigured_note() -> gtk4::Box {
 fn build_presets(state: &Rc<State>) -> gtk4::Box {
     let group = section_box(
         "Presets",
-        "The shipped material, and four other coherent points in the same model.",
+        "The shipped material, and other coherent physical glass presets (click any to preview).",
     );
 
     let row = gtk4::FlowBox::builder()
@@ -766,7 +807,7 @@ fn build_knob(state: &Rc<State>, knob: &'static Knob) -> gtk4::Box {
     row
 }
 
-fn build_footer(state: &Rc<State>, status: &gtk4::Label) -> gtk4::Box {
+fn build_footer(state: &Rc<State>, status: &gtk4::Label, undo_btn: &gtk4::Button) -> gtk4::Box {
     let footer = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
         .spacing(8)
@@ -777,6 +818,8 @@ fn build_footer(state: &Rc<State>, status: &gtk4::Label) -> gtk4::Box {
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(8)
         .build();
+
+    buttons.append(undo_btn);
 
     let reset = gtk4::Button::with_label("Reset to system");
     reset.add_css_class("settings-action");

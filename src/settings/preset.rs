@@ -55,7 +55,7 @@ fn base() -> Material {
     }
 }
 
-pub static ALL: [Preset; 4] = [
+pub static ALL: [Preset; 7] = [
     Preset {
         name: "Clear",
         hint: "A wet lens. Tight highlight, and the desktop still readable through it.",
@@ -127,6 +127,68 @@ pub static ALL: [Preset; 4] = [
             grain: GrainKind::Seeded,
             grain_scale: 26.0,
             grain_strength: 2.0,
+            ..base()
+        },
+    },
+    Preset {
+        name: "Molten",
+        hint: "Young-Laplace droplet curvature. Liquid meniscus edge with organic bubbles.",
+        build: || Material {
+            roughness: 0.05,
+            surface: SurfaceKind::Droplet,
+            refraction: 1.45,
+            dispersion: 0.006,
+            lensing: 0.30,
+            frost_radius: 10.0,
+            absorb: 1.1,
+            photochromic: 0.22,
+            haze: 0.01,
+            specular: 0.24,
+            edge_light: 0.15,
+            grain: GrainKind::Seeded,
+            grain_scale: 20.0,
+            grain_strength: 1.5,
+            ..base()
+        },
+    },
+    Preset {
+        name: "Fluted",
+        hint: "Art-deco reeded flutes: parallel ribbed cylindrical lenses.",
+        build: || Material {
+            roughness: 0.22,
+            refraction: 1.52,
+            dispersion: 0.005,
+            lensing: 0.28,
+            frost_radius: 18.0,
+            absorb: 1.7,
+            photochromic: 0.14,
+            haze: 0.04,
+            specular: 0.18,
+            edge_light: 0.11,
+            grain: GrainKind::Reeded,
+            grain_scale: 14.0,
+            grain_strength: 3.0,
+            ..base()
+        },
+    },
+    Preset {
+        name: "Minimal",
+        hint: "Gentle daily driver. Soft edge definition, maximum contrast under text.",
+        build: || Material {
+            roughness: 0.04,
+            refraction: 1.12,
+            dispersion: 0.002,
+            lensing: 0.12,
+            frost_radius: 8.0,
+            absorb: 0.9,
+            absorb_floor: 0.05,
+            photochromic: 0.26,
+            haze: 0.0,
+            specular: 0.12,
+            edge_light: 0.07,
+            grain: GrainKind::None,
+            grain_scale: 18.0,
+            grain_strength: 0.0,
             ..base()
         },
     },
