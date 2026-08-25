@@ -197,8 +197,7 @@ impl GlassSurface {
         let Some(surface) = self.inner.window.surface() else {
             return;
         };
-        let (_, height, _, _) = self.inner.pane.measure(gtk4::Orientation::Vertical, -1);
-        let (_, width, _, _) = self.inner.pane.measure(gtk4::Orientation::Horizontal, -1);
+        let (width, height) = self.natural_size();
         let scale = self.inner.scale.get();
         let w = (width as f64 * scale).ceil() as i32;
         let h = (height as f64 * scale).ceil() as i32;
@@ -226,7 +225,25 @@ impl GlassSurface {
 
     /// The card's natural height, for stacking the ones below it.
     pub fn height(&self) -> f64 {
-        let (_, nat, _, _) = self.inner.pane.measure(gtk4::Orientation::Vertical, -1);
-        f64::from(nat)
+        f64::from(self.natural_size().1)
+    }
+
+    /// The card's natural size, width first and the height *for that width*.
+    ///
+    /// The order is the whole point. Asking for the height at `-1` asks every
+    /// label inside for its height at its own natural width, and the cards
+    /// deliberately collapse those to one character (`max_width_chars(1)` in
+    /// notifications/popup.rs) so the pane's size request is what drives
+    /// allocation. A wrapped, line-capped body answers that question with its
+    /// full line cap whatever it actually holds: a one-line body measured
+    /// 76 px where it renders 40, so the stack slotted every card as if its
+    /// body ran the full three lines and left a hole under the short ones.
+    /// Measure the width, then the height at that width — which is what GTK
+    /// itself does when it allocates, and the only way a height-for-width
+    /// widget answers truthfully.
+    fn natural_size(&self) -> (i32, i32) {
+        let (_, width, _, _) = self.inner.pane.measure(gtk4::Orientation::Horizontal, -1);
+        let (_, height, _, _) = self.inner.pane.measure(gtk4::Orientation::Vertical, width);
+        (width, height)
     }
 }

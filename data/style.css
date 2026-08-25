@@ -719,12 +719,6 @@ button.bar-popover-action {
     to   { box-shadow: 0 0 10px alpha(@accent, 0.40); }
 }
 
-/* For bordered cards with a drop shadow (e.g. critical notifications). */
-@keyframes critical-border-pulse {
-    from { border-color: alpha(@accent_quinary, 0.35); }
-    to   { border-color: alpha(@accent_quinary, 0.85); }
-}
-
 /* ── Section cards ── */
 .section {
     background-color: @surface_raised;
@@ -1683,20 +1677,45 @@ revealer {
     border-color: alpha(@border_strong, 0.7);
 }
 
-/* Border pulse, not box-shadow: a glow would overhang into the
-   transparent canvas and get frosted (see the window comment). */
+/* Critical, in the material instead of around it. What this replaced was a
+   2 px red border pulsing at 0.7 s over squared-off corners: an error
+   dialog's language, drawn on top of the glass rather than in it, and the
+   one thing on screen shouting while the rest of the panel stays calm. The
+   urgency is three quiet channels now — the glass itself runs warm, its
+   hairline picks up the same red at the weight every other card's edge has,
+   and the header carries the word (.notification-urgent). 0.35 on that
+   hairline was chosen against 0.55 and against leaving it neutral, on the
+   render harness: higher reads as an outline again, neutral disconnects the
+   chip from the card it belongs to. The 18 px radius stays, because a corner
+   only reads as "squarer" beside a card that isn't, and P3's shape channel
+   is the chip, which needs nothing to compare itself against.
+
+   The tint holds @surface's 0.50 alpha for the reason .collapsed does: the
+   0.40 seeding line from theme/glass.nix sits right below, and scaling the
+   alpha rather than the colour drops the card into the flat-slab band.
+   #3a2a28 is @surface's #32302f warmed toward @red at the same alpha. */
 .notification-popup-content.critical {
-    border-color: alpha(@red, 0.6);
-    animation: critical-border-pulse 0.7s steps(12) infinite alternate;
+    background-color: alpha(#3a2a28, 0.50);
+    border-color: alpha(@red, 0.35);
 }
 
-/* Critical must not depend on red alone: a squarer corner and a heavier
-   border are the shape channel (P3), and both survive a grayscale filter.
-   The border carries it since the leading rail went — one card edge saying
-   "urgent" beats a stripe inside the card saying it again. */
-.notification-popup-content.critical {
-    border-radius: 6px;
-    border-width: 2px;
+/* The word, where the eye already goes for attribution. Still, not pulsing:
+   the old ring pulsed because a border is all a card edge has to animate,
+   and a chip that says "URGENT" in the header does not need motion to be
+   found. It also costs nothing to leave on screen for as long as a card that
+   never expires stays there, which an infinite animation does (P7).
+
+   Dark type on gruvbox's bright red, not light type on @red: #1d2021 on
+   #fb4934 is 4.8:1 where @fg on @red is 4.0, and this is the smallest type
+   on the card. #fb4934 is the same bright red @danger_tint is mixed from. */
+.notification-urgent {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: @bg0_h;
+    background-color: #fb4934;
+    border-radius: 5px;
+    padding: 0 5px;
 }
 
 /* One-line template for OSD-style toasts (transient, no body, no actions):

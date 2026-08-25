@@ -733,6 +733,18 @@ fn populate_card(
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(4)
         .build();
+    // Urgency leads the header, because a critical card is the one card that
+    // never expires (timeout_for) and the word is what says so. It used to be
+    // a red ring around the whole card instead, which is an error dialog's
+    // language rather than this panel's and sat on top of the material rather
+    // than in it. The chip carries both channels on one label the way the
+    // task number does: the fill is the shape, its red the hue (P3), and the
+    // word survives a grayscale filter on its own.
+    if notif.urgency == Urgency::Critical {
+        let urgent = gtk4::Label::new(Some("URGENT"));
+        urgent.add_css_class("notification-urgent");
+        header.append(&urgent);
+    }
     if let Some(task) = notif.task {
         let num = gtk4::Label::new(Some(&format!("T{task}")));
         num.add_css_class("notification-task-num");
@@ -816,7 +828,19 @@ fn populate_card(
             let st_c = st.clone();
             more.connect_clicked(move |btn| {
                 let expanded = body_c.lines() < 0;
-                body_c.set_lines(if expanded { 3 } else { -1 });
+                // Both properties, together, or the button does the opposite
+                // of what it says. The line cap only holds while the label
+                // can ellipsize, and an ellipsizing label with no cap does
+                // not wrap at all: `lines(-1)` on its own left the whole body
+                // on one ellipsized line, so "more" showed *less* than the
+                // three lines it replaced (55 px of body down to 19).
+                let (lines, ellipsize) = if expanded {
+                    (3, gtk4::pango::EllipsizeMode::End)
+                } else {
+                    (-1, gtk4::pango::EllipsizeMode::None)
+                };
+                body_c.set_lines(lines);
+                body_c.set_ellipsize(ellipsize);
                 btn.set_label(if expanded { "more" } else { "less" });
                 // The card's height changed, so the stack has to re-measure
                 // and re-stack around it.
