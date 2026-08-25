@@ -13,6 +13,7 @@
 #   dev/render.sh --mode keybinds --res 1600x1000                  # the held-Super sheet
 #   dev/render.sh --mode jump --res 1400x900                       # the Super+Tab list
 #   dev/render.sh --mode screenshot --res 1200x800                 # the region selector
+#   dev/render.sh --mode notifications --res 700x900                # the popup stack
 #   SWPP_SELECT_RECT=120,90,540,330 dev/render.sh --mode screenshot # with a selection drawn
 #
 # --mode keybinds copies the live session's bindsym lines into the nested
@@ -116,6 +117,32 @@ case "$MODE" in
     sleep 0.8
     "$BIN" jump >>/tmp/swpp-app.log 2>&1 || true
     sleep 0.6
+    ;;
+  notifications)
+    "$BIN" >/tmp/swpp-app.log 2>&1 &
+    for _ in $(seq 1 200); do
+      [ -e "$RUNTIME/swaypplet.pid" ] && break; sleep 0.1
+    done
+    sleep 1.5
+    # The stack's own bugs are stacking bugs, so the set has to mix body
+    # lengths: a one-line card next to a three-line one is what showed the
+    # slot heights being wrong. Different -a per card because MAX_PER_APP
+    # caps one sender at three, and oldest first so the newest ends up on top
+    # where the critical card is easiest to read.
+    # -t 60000 on the ones that would otherwise expire: the server's own
+    # timeout scales with body length (timeout_for), so the shortest card —
+    # the one that shows a slot height being wrong — is also the first to go,
+    # and the capture retries below can outlast it.
+    notify-send -t 60000 -a "Chat" "Ada Lovelace" "Short one." || true
+    sleep 0.4
+    notify-send -t 60000 -a "Backup" "Snapshot complete" \
+      "Wrote 12 GB to /mnt/backup in 4 m 12 s, verified checksums, pruned three older snapshots to stay under the quota." || true
+    sleep 0.4
+    notify-send -t 60000 -a "Kalender" "Möte nu — Åsa, Öresund" "Startade 10:45." || true
+    sleep 0.4
+    notify-send -u critical -a "Disk" "Root filesystem 96% full" \
+      "Only 3.1 GB left on /. Clear the nix store or the next rebuild fails." || true
+    sleep 1.2
     ;;
   screenshot)
     "$BIN" >/tmp/swpp-app.log 2>&1 &
