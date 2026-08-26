@@ -77,52 +77,12 @@ struct Group {
 /// `glass` module header for why `mask_threshold` has no knob at all.
 static GROUPS: &[Group] = &[
     Group {
-        title: "Geometry",
-        hint: "How big the bevel is, on every class of surface at once. Measured on the bar, the pair moved together is about twice the effect of either alone \u{2014} thickness by itself is nearly invisible, because the shader normalises every depth-driven term by it and a flat top bends no ray at all.",
-        knobs: &[
-            Knob {
-                label: "Bevel scale",
-                hint: "Multiplies bezel and thickness for all four classes, so they keep their relationship to each other. 1.00 is what the sway config ships.",
-                min: 0.25,
-                max: 3.0,
-                step: 0.05,
-                decimals: 2,
-                get: |t| t.bezel_scale,
-                set: |t, v| t.bezel_scale = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Thickness ratio",
-                hint: "Thickness as a multiple of the scaled bezel. 0 keeps each class's shipped ratio \u{2014} the only value that leaves a bar and a lock card reading as one material rather than two thicknesses of it. This is the knob for breaking that on purpose.",
-                min: 0.0,
-                max: 8.0,
-                step: 0.1,
-                decimals: 1,
-                get: |t| t.thickness_ratio,
-                set: |t, v| t.thickness_ratio = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Crest radius",
-                hint: "Scales how wide the crest rounds where the card's edges compete \u{2014} the ridge behind the rim, not the rim itself. The sway config pins each class at its card's own corner radius, so 1.00 is the value that makes the crest turn where the card turns; above it the diagonal across a corner widens into a feature of its own.",
-                min: 0.25,
-                max: 3.0,
-                step: 0.05,
-                decimals: 2,
-                get: |t| t.crest_scale,
-                set: |t, v| t.crest_scale = v,
-                live_when: None,
-            },
-        ],
-        extra: None,
-    },
-    Group {
-        title: "Surface",
-        hint: "Roughness is the one knob the physics has: it widens the specular lobe, scatters transmission and blurs the reflection together.",
+        title: "Optics & Surface",
+        hint: "Microfacet refraction, dispersion and scattering. Roughness controls transmission frost, specular lobe and reflection blur together.",
         knobs: &[
             Knob {
                 label: "Roughness",
-                hint: "Near zero is the wet look. Toward 1 is frosted; nothing else needs to change.",
+                hint: "Primary microfacet roughness. 0 is mirror-wet, 1 is fully frosted.",
                 min: 0.0,
                 max: 1.0,
                 step: 0.01,
@@ -143,6 +103,17 @@ static GROUPS: &[Group] = &[
                 live_when: None,
             },
             Knob {
+                label: "Dispersion",
+                hint: "Channel split through the bevel. Small on purpose: text sits on these surfaces.",
+                min: 0.0,
+                max: 0.05,
+                step: 0.001,
+                decimals: 3,
+                get: |t| t.material.dispersion,
+                set: |t, v| t.material.dispersion = v,
+                live_when: None,
+            },
+            Knob {
                 label: "Lensing",
                 hint: "How far the bevel displaces what is behind it.",
                 min: 0.0,
@@ -155,14 +126,8 @@ static GROUPS: &[Group] = &[
             },
             Knob {
                 label: "Reflection",
-                hint: "Weight on the Fresnel term. 1.0 is physical, and it is mostly a rim control whatever you set: on a flat top the normal is vertical, so Schlick collapses to f0 = 0.04 and no value here changes that. Past 1.0 it only widens the band near the edge where F was already climbing.",
+                hint: "Weight on the Fresnel term. 1.0 is physical.",
                 min: 0.0,
-                // To 4 rather than to 2. Measured on the bar against the
-                // shipped material, 0 -> 1 moves the rim 5.8/255 and the core
-                // 2.6; 0 -> 4 moves them 16.8 and 10.1. The physical value is
-                // 1.0 and the extra range is deliberately non-physical, but a
-                // knob whose whole complaint is "I cannot see it do anything"
-                // should at least be able to.
                 max: 4.0,
                 step: 0.01,
                 decimals: 2,
@@ -171,26 +136,70 @@ static GROUPS: &[Group] = &[
                 live_when: None,
             },
             Knob {
-                label: "Dispersion",
-                hint: "Channel split through the bevel. Small on purpose: text sits on these surfaces.",
+                label: "Frost",
+                hint: "Override the scatter Roughness would have derived. Zero lets the physics decide.",
                 min: 0.0,
-                max: 0.05,
-                step: 0.001,
-                decimals: 3,
-                get: |t| t.material.dispersion,
-                set: |t, v| t.material.dispersion = v,
+                max: 1.0,
+                step: 0.01,
+                decimals: 2,
+                get: |t| t.material.frost,
+                set: |t, v| t.material.frost = v,
+                live_when: None,
+            },
+            Knob {
+                label: "Frost radius",
+                hint: "How far scattering spreads at full roughness, in pixels.",
+                min: 0.0,
+                max: 64.0,
+                step: 1.0,
+                decimals: 0,
+                get: |t| t.material.frost_radius,
+                set: |t, v| t.material.frost_radius = v,
+                live_when: None,
+            },
+            Knob {
+                label: "Reflect blur",
+                hint: "Override the reflection blur Roughness would have derived. Zero lets the physics decide.",
+                min: 0.0,
+                max: 1.0,
+                step: 0.01,
+                decimals: 2,
+                get: |t| t.material.reflect_blur,
+                set: |t, v| t.material.reflect_blur = v,
+                live_when: None,
+            },
+            Knob {
+                label: "Samples",
+                hint: "Spectral dispersion taps per fragment (1..8). More is smoother.",
+                min: 1.0,
+                max: 8.0,
+                step: 1.0,
+                decimals: 0,
+                get: |t| t.material.samples,
+                set: |t, v| t.material.samples = v,
+                live_when: None,
+            },
+            Knob {
+                label: "Energy comp",
+                hint: "Multi-scatter energy preservation. 1 preserves brightness; 0 is single-scatter.",
+                min: 0.0,
+                max: 1.0,
+                step: 0.01,
+                decimals: 2,
+                get: |t| t.material.energy_comp,
+                set: |t, v| t.material.energy_comp = v,
                 live_when: None,
             },
         ],
         extra: None,
     },
     Group {
-        title: "Depth",
-        hint: "Clear to smoke is three independent knobs: absorb is dark-but-clear, haze is turbid, and frost (below) is scattered-but-bright.",
+        title: "Tone & Density",
+        hint: "Absorption and tinting: Beer-Lambert volume attenuation, photochromic glare compression, and card body fill.",
         knobs: &[
             Knob {
                 label: "Absorb",
-                hint: "Beer-Lambert through the thickness, neutral. This is the tone under text.",
+                hint: "Beer-Lambert volumetric darkening through the thickness.",
                 min: 0.0,
                 max: 4.0,
                 step: 0.05,
@@ -201,7 +210,7 @@ static GROUPS: &[Group] = &[
             },
             Knob {
                 label: "Absorb floor",
-                hint: "How much always gets through, however long the path.",
+                hint: "Minimum transmission through thin rim boundaries.",
                 min: 0.0,
                 max: 0.5,
                 step: 0.01,
@@ -212,12 +221,8 @@ static GROUPS: &[Group] = &[
             },
             Knob {
                 label: "Photochromic",
-                hint: "Ceiling on transmitted luminance, so a bright desktop saturates instead of scaling every mid-tone down with it. Zero is off.",
+                hint: "Adaptive tone ceiling so bright backdrops compress smoothly.",
                 min: 0.0,
-                // To 1.0 rather than 0.5. The ceiling only has to reach far
-                // when `absorb` is low, and a material at absorb 0.7 leans on
-                // it almost alone — which is how the shipped 0.5 came to be a
-                // value pushed against this rail rather than found inside it.
                 max: 1.0,
                 step: 0.01,
                 decimals: 2,
@@ -236,56 +241,27 @@ static GROUPS: &[Group] = &[
                 set: |t, v| t.material.haze = v,
                 live_when: None,
             },
-        ],
-        extra: None,
-    },
-    Group {
-        title: "Scatter",
-        hint: "Blur removes texture, not colour. A card that looks busy with colour wants Absorb, not these.",
-        knobs: &[
             Knob {
-                label: "Frost radius",
-                hint: "How far scattering spreads at full roughness, in pixels. The blur actually run is this times Frost.",
-                min: 0.0,
-                max: 64.0,
-                step: 1.0,
-                decimals: 0,
-                get: |t| t.material.frost_radius,
-                set: |t, v| t.material.frost_radius = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Frost",
-                hint: "Override the scatter Roughness would have derived. Zero lets the physics decide.",
+                label: "Fill alpha",
+                hint: "Body tint opacity. 0 is clear glass, 1 is solid tint.",
                 min: 0.0,
                 max: 1.0,
                 step: 0.01,
                 decimals: 2,
-                get: |t| t.material.frost,
-                set: |t, v| t.material.frost = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Reflect blur",
-                hint: "Override the reflection blur Roughness would have derived. Zero lets the physics decide.",
-                min: 0.0,
-                max: 1.0,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.reflect_blur,
-                set: |t, v| t.material.reflect_blur = v,
+                get: |t| t.material.fill_alpha.max(0.0),
+                set: |t, v| t.material.fill_alpha = v,
                 live_when: None,
             },
         ],
-        extra: None,
+        extra: Some(build_fill_controls),
     },
     Group {
-        title: "Highlights",
-        hint: "The two additive terms. Neither is sampled from anything, so these are the ones that can look invented.",
+        title: "Highlights & Artsy Effects",
+        hint: "Additive highlights, thin-film iridescence, neon rim glow, fluidic surface waves, and dithering.",
         knobs: &[
             Knob {
                 label: "Specular",
-                hint: "A Blinn-Phong lobe around a fixed light. Broad at high roughness, so a large value is a large bright patch.",
+                hint: "Blinn-Phong directional highlight intensity.",
                 min: 0.0,
                 max: 1.0,
                 step: 0.01,
@@ -295,19 +271,8 @@ static GROUPS: &[Group] = &[
                 live_when: None,
             },
             Knob {
-                label: "Edge light",
-                hint: "Rim glow just inside the boundary. This is what draws the card's outline.",
-                min: 0.0,
-                max: 0.5,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.edge_light,
-                set: |t, v| t.material.edge_light = v,
-                live_when: None,
-            },
-            Knob {
                 label: "Shine",
-                hint: "Override the specular exponent Roughness would have derived (2/a² − 2). Zero lets the physics decide.",
+                hint: "Override specular exponent (2/a² − 2). Zero lets Roughness decide.",
                 min: 0.0,
                 max: 256.0,
                 step: 1.0,
@@ -317,8 +282,52 @@ static GROUPS: &[Group] = &[
                 live_when: None,
             },
             Knob {
+                label: "Edge light",
+                hint: "Rim glow just inside the boundary.",
+                min: 0.0,
+                max: 0.5,
+                step: 0.01,
+                decimals: 2,
+                get: |t| t.material.edge_light,
+                set: |t, v| t.material.edge_light = v,
+                live_when: None,
+            },
+            Knob {
+                label: "Iridescence",
+                hint: "Thin-film interference: soap bubble / pearl / oil-slick sheen on bevels.",
+                min: 0.0,
+                max: 1.0,
+                step: 0.01,
+                decimals: 2,
+                get: |t| t.material.iridescence,
+                set: |t, v| t.material.iridescence = v,
+                live_when: None,
+            },
+            Knob {
+                label: "Edge glow",
+                hint: "Bioluminescent / neon rim emission trapped along the bevel.",
+                min: 0.0,
+                max: 2.0,
+                step: 0.01,
+                decimals: 2,
+                get: |t| t.material.edge_glow,
+                set: |t, v| t.material.edge_glow = v,
+                live_when: None,
+            },
+            Knob {
+                label: "Wave amplitude",
+                hint: "Fluidic wave ripples and caustic surface displacement.",
+                min: 0.0,
+                max: 2.0,
+                step: 0.01,
+                decimals: 2,
+                get: |t| t.material.wave_amplitude,
+                set: |t, v| t.material.wave_amplitude = v,
+                live_when: None,
+            },
+            Knob {
                 label: "Noise",
-                hint: "Dither over the result, against banding in the gradients.",
+                hint: "Spatial dither to eliminate gradient banding.",
                 min: 0.0,
                 max: 0.05,
                 step: 0.001,
@@ -331,12 +340,52 @@ static GROUPS: &[Group] = &[
         extra: None,
     },
     Group {
-        title: "Grain",
-        hint: "The same surface as Roughness, at a scale you can resolve: above a pixel the facets refract individually instead of integrating into a lobe.",
+        title: "Geometry",
+        hint: "Slab bevel width, thickness, and crest rounding across all surfaces.",
+        knobs: &[
+            Knob {
+                label: "Bevel scale",
+                hint: "Multiplies bezel and thickness for all four classes.",
+                min: 0.25,
+                max: 3.0,
+                step: 0.05,
+                decimals: 2,
+                get: |t| t.bezel_scale,
+                set: |t, v| t.bezel_scale = v,
+                live_when: None,
+            },
+            Knob {
+                label: "Thickness ratio",
+                hint: "Thickness as a multiple of the scaled bezel (0 keeps class ratio).",
+                min: 0.0,
+                max: 8.0,
+                step: 0.1,
+                decimals: 1,
+                get: |t| t.thickness_ratio,
+                set: |t, v| t.thickness_ratio = v,
+                live_when: None,
+            },
+            Knob {
+                label: "Crest radius",
+                hint: "Scales how wide the crest rounds where edges compete.",
+                min: 0.25,
+                max: 3.0,
+                step: 0.05,
+                decimals: 2,
+                get: |t| t.crest_scale,
+                set: |t, v| t.crest_scale = v,
+                live_when: None,
+            },
+        ],
+        extra: None,
+    },
+    Group {
+        title: "Surface Grain",
+        hint: "Resolvable surface relief structures (fluting, peened dimples, hammered, cathedral).",
         knobs: &[
             Knob {
                 label: "Grain scale",
-                hint: "Pitch in pixels. Much below the panel's own text size it stops reading as an uneven surface and becomes noise.",
+                hint: "Cell, flute or wave pitch in pixels.",
                 min: 4.0,
                 max: 96.0,
                 step: 1.0,
@@ -347,7 +396,7 @@ static GROUPS: &[Group] = &[
             },
             Knob {
                 label: "Grain strength",
-                hint: "Peak lateral displacement in pixels, and it means the same pixels whichever pattern is selected — each is normalised to a peak slope of 1. It is strength/scale — the slope — that the highlight terms react to, so move the two together.",
+                hint: "Peak lateral displacement in pixels.",
                 min: 0.0,
                 max: 8.0,
                 step: 0.1,
@@ -358,7 +407,7 @@ static GROUPS: &[Group] = &[
             },
             Knob {
                 label: "Grain angle",
-                hint: "Degrees clockwise. Only the directional patterns have an orientation to turn: reeded at 90 runs the flutes down a bar instead of along it, and cross-reed at 45 is a lattice rather than a grid.",
+                hint: "Rotation in degrees clockwise for directional flutes.",
                 min: 0.0,
                 max: 180.0,
                 step: 1.0,
@@ -369,7 +418,7 @@ static GROUPS: &[Group] = &[
             },
             Knob {
                 label: "Grain aspect",
-                hint: "Stretch along the pattern's own x. Shape rather than amount: the shader divides the stretched slope by the larger scale, so the strength above keeps meaning pixels.",
+                hint: "Anisotropic stretch factor along the pattern's axis.",
                 min: 0.25,
                 max: 4.0,
                 step: 0.05,
@@ -380,55 +429,6 @@ static GROUPS: &[Group] = &[
             },
         ],
         extra: None,
-    },
-    Group {
-        title: "Cost",
-        hint: "What the pass spends, and the term that keeps frosting from dimming for a reason unrelated to Absorb.",
-        knobs: &[
-            Knob {
-                label: "Samples",
-                hint: "Taps per fragment. More is smoother dispersion and a slower pass.",
-                min: 1.0,
-                max: 8.0,
-                step: 1.0,
-                decimals: 0,
-                get: |t| t.material.samples,
-                set: |t, v| t.material.samples = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Energy comp",
-                hint: "How much of the energy single scattering drops to put back. 1 preserves energy; 0 is what the material did before the term existed.",
-                min: 0.0,
-                max: 1.0,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.energy_comp,
-                set: |t, v| t.material.energy_comp = v,
-                live_when: None,
-            },
-        ],
-        extra: None,
-    },
-    Group {
-        title: "Fill",
-        hint: "The slab's own body tint: the colour it carries between the refracted backdrop and whatever swaypplet draws on top. Unset, the card decides, which is what it always did \u{2014} but the card's alpha is also the mask, the only thing telling the compositor a card is there at all, so turning the fill down in the stylesheet would take the material with it. The compositor drops the card's fill before it reaches the screen instead, which leaves this free to be anything: at alpha 0 the glass is clear, on any backdrop, under a card still being painted at 0.50.",
-        knobs: &[Knob {
-            label: "Fill alpha",
-            hint: "How much of the card is body tint rather than clear material. 0 is clear glass, exactly and on any backdrop \u{2014} the card's own fill is keyed out rather than cancelled, so there is no range to run out of. Moving this at all takes the fill over from the card; the checkbox above hands it back.",
-            min: 0.0,
-            max: 1.0,
-            step: 0.01,
-            decimals: 2,
-            // The unset sentinel is negative and the rail starts at zero,
-            // so an unset fill shows a slider at the clear end. That is
-            // the honest place for it: unset and clear are different
-            // states, and the checkbox above is what tells them apart.
-            get: |t| t.material.fill_alpha.max(0.0),
-            set: |t, v| t.material.fill_alpha = v,
-            live_when: None,
-        }],
-        extra: Some(build_fill_controls),
     },
 ];
 
@@ -849,22 +849,213 @@ fn build_group(state: &Rc<State>, group: &'static Group) -> gtk4::Box {
 /// the colour button or the alpha slider takes that half over on its own, and
 /// the check follows - so what they are really for is the way back.
 fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
-    let dialog = gtk4::ColorDialog::builder().with_alpha(false).build();
-    let button = gtk4::ColorDialogButton::builder().dialog(&dialog).build();
-    button.add_css_class("settings-color");
+    let button = gtk4::Button::builder()
+        .has_frame(false)
+        .css_classes(["settings-preset-btn"])
+        .build();
+
+    let swatch_box = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+
+    let swatch = gtk4::DrawingArea::builder()
+        .content_width(28)
+        .content_height(16)
+        .build();
+
+    let current_rgb = Rc::new(Cell::new((0.196, 0.188, 0.184)));
+    {
+        let current_rgb = current_rgb.clone();
+        swatch.set_draw_func(move |_, cr, _w, _h| {
+            let (r, g, b) = current_rgb.get();
+            cr.set_source_rgb(r, g, b);
+            let _ = cr.paint();
+        });
+    }
+
+    let hex_label = gtk4::Label::builder()
+        .label("card default")
+        .css_classes(["settings-row-value"])
+        .build();
+
+    swatch_box.append(&swatch);
+    swatch_box.append(&hex_label);
+    button.set_child(Some(&swatch_box));
+
+    let popover = gtk4::Popover::builder()
+        .position(gtk4::PositionType::Bottom)
+        .has_arrow(true)
+        .build();
+    popover.set_parent(&button);
+
+    let pop_body = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .spacing(8)
+        .margin_start(10)
+        .margin_end(10)
+        .margin_top(10)
+        .margin_bottom(10)
+        .build();
+
+    let pal_label = gtk4::Label::builder()
+        .label("PALETTE SWATCHES")
+        .xalign(0.0)
+        .css_classes(["settings-group-title"])
+        .build();
+    pop_body.append(&pal_label);
+
+    let pal_grid = gtk4::FlowBox::builder()
+        .max_children_per_line(6)
+        .selection_mode(gtk4::SelectionMode::None)
+        .css_classes(["settings-presets"])
+        .build();
+
+    let swatches = [
+        ("#32302f", "Gruvbox Soft"),
+        ("#1d2021", "Gruvbox Dark"),
+        ("#282828", "Dark Neutral"),
+        ("#689d6a", "Aqua / Teal"),
+        ("#458588", "Blue"),
+        ("#b8bb26", "Green"),
+        ("#fabd2f", "Yellow"),
+        ("#fe8019", "Orange"),
+        ("#fb4934", "Red"),
+        ("#d3869b", "Purple"),
+        ("#70c0ba", "Ice Cyan"),
+        ("#ebdbb2", "Light Cream"),
+    ];
+
+    let hex_entry = gtk4::Entry::builder()
+        .text("#32302f")
+        .max_length(7)
+        .width_chars(8)
+        .css_classes(["settings-row-value"])
+        .build();
+
+    let r_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 255.0, 1.0);
+    r_scale.set_hexpand(true);
+    r_scale.add_css_class("settings-scale");
+    let g_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 255.0, 1.0);
+    g_scale.set_hexpand(true);
+    g_scale.add_css_class("settings-scale");
+    let b_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 255.0, 1.0);
+    b_scale.set_hexpand(true);
+    b_scale.add_css_class("settings-scale");
+
+    for (hex, name) in swatches {
+        let btn = gtk4::Button::builder()
+            .tooltip_text(name)
+            .css_classes(["settings-preset-btn"])
+            .build();
+        let swatch_da = gtk4::DrawingArea::builder()
+            .content_width(20)
+            .content_height(14)
+            .build();
+        let v = u32::from_str_radix(&hex[1..], 16).unwrap_or(0);
+        let (sr, sg, sb) = (
+            ((v >> 16) & 0xff) as f64 / 255.0,
+            ((v >> 8) & 0xff) as f64 / 255.0,
+            (v & 0xff) as f64 / 255.0,
+        );
+        swatch_da.set_draw_func(move |_, cr, _, _| {
+            cr.set_source_rgb(sr, sg, sb);
+            let _ = cr.paint();
+        });
+        btn.set_child(Some(&swatch_da));
+
+        {
+            let state = state.clone();
+            btn.connect_clicked(move |_| {
+                state.tuning.borrow_mut().material.set_fill_rgb(Some((sr, sg, sb)));
+                state.edited();
+            });
+        }
+        pal_grid.append(&btn);
+    }
+    pop_body.append(&pal_grid);
+
+    let rgb_box = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .spacing(4)
+        .build();
+
+    let make_channel_row = |name: &str, scale: &gtk4::Scale| -> gtk4::Box {
+        let row = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(8)
+            .build();
+        let lbl = gtk4::Label::builder()
+            .label(name)
+            .width_chars(2)
+            .css_classes(["settings-row-label"])
+            .build();
+        row.append(&lbl);
+        row.append(scale);
+        row
+    };
+
+    rgb_box.append(&make_channel_row("R", &r_scale));
+    rgb_box.append(&make_channel_row("G", &g_scale));
+    rgb_box.append(&make_channel_row("B", &b_scale));
+    pop_body.append(&rgb_box);
+
+    let hex_row = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    let hex_lbl = gtk4::Label::builder()
+        .label("Hex:")
+        .css_classes(["settings-row-label"])
+        .build();
+    hex_row.append(&hex_lbl);
+    hex_row.append(&hex_entry);
+    pop_body.append(&hex_row);
+
+    popover.set_child(Some(&pop_body));
+
+    {
+        let popover = popover.clone();
+        button.connect_clicked(move |_| {
+            popover.popup();
+        });
+    }
+
     {
         let state = state.clone();
-        button.connect_rgba_notify(move |b| {
-            if state.updating.get() {
-                return;
-            }
-            let rgba = b.rgba();
-            state.tuning.borrow_mut().material.set_fill_rgb(Some((
-                rgba.red() as f64,
-                rgba.green() as f64,
-                rgba.blue() as f64,
-            )));
+        let rs = r_scale.clone();
+        let gs = g_scale.clone();
+        let bs = b_scale.clone();
+        let update_from_scales = move || {
+            if state.updating.get() { return; }
+            let r = rs.value() / 255.0;
+            let g = gs.value() / 255.0;
+            let b = bs.value() / 255.0;
+            state.tuning.borrow_mut().material.set_fill_rgb(Some((r, g, b)));
             state.edited();
+        };
+
+        let u1 = update_from_scales.clone();
+        r_scale.connect_value_changed(move |_| u1());
+        let u2 = update_from_scales.clone();
+        g_scale.connect_value_changed(move |_| u2());
+        let u3 = update_from_scales.clone();
+        b_scale.connect_value_changed(move |_| u3());
+    }
+
+    {
+        let state = state.clone();
+        hex_entry.connect_text_notify(move |e| {
+            if state.updating.get() { return; }
+            let text = e.text();
+            let hex = text.strip_prefix('#').unwrap_or(&text);
+            if hex.len() == 6 && let Ok(v) = u32::from_str_radix(hex, 16) {
+                let r = ((v >> 16) & 0xff) as f64 / 255.0;
+                let g = ((v >> 8) & 0xff) as f64 / 255.0;
+                let b = (v & 0xff) as f64 / 255.0;
+                state.tuning.borrow_mut().material.set_fill_rgb(Some((r, g, b)));
+                state.edited();
+            }
         });
     }
 
@@ -906,17 +1097,33 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
     }
 
     {
-        let button = button.clone();
+        let swatch = swatch.clone();
+        let hex_label = hex_label.clone();
+        let hex_entry = hex_entry.clone();
+        let r_scale = r_scale.clone();
+        let g_scale = g_scale.clone();
+        let b_scale = b_scale.clone();
         let own_color = own_color.clone();
         let own_alpha = own_alpha.clone();
+        let current_rgb = current_rgb.clone();
+
         state.sync.borrow_mut().push(Box::new(move |t| {
             let rgb = t.material.fill_rgb();
             own_color.set_active(rgb.is_none());
             own_alpha.set_active(t.material.fill_alpha < 0.0);
-            // The button keeps showing the last colour picked even while the
-            // card decides, so unchecking has something to fall back to.
             if let Some((r, g, b)) = rgb {
-                button.set_rgba(&gdk4::RGBA::new(r as f32, g as f32, b as f32, 1.0));
+                current_rgb.set((r, g, b));
+                swatch.queue_draw();
+                let hex = format!("#{:02x}{:02x}{:02x}", (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8);
+                hex_label.set_text(&hex);
+                hex_entry.set_text(&hex);
+                r_scale.set_value(r * 255.0);
+                g_scale.set_value(g * 255.0);
+                b_scale.set_value(b * 255.0);
+            } else {
+                current_rgb.set((0.196, 0.188, 0.184)); // default @surface (#32302f)
+                swatch.queue_draw();
+                hex_label.set_text("card default");
             }
         }));
     }
