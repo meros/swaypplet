@@ -33,6 +33,7 @@ pub(crate) mod fprint;
 pub mod ui;
 
 use std::cell::{Cell, RefCell};
+use std::os::fd::AsRawFd;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -131,9 +132,17 @@ pub fn reason() -> String {
 /// 1x1 transparent layer surface absorbs it, and doing that while nothing is
 /// waiting makes it free.
 ///
-/// The process then blocks on stdin until the supervisor sends `LOCK
-/// <reason>`. Blocking is correct here: there is no main loop yet, nothing to
-/// service, and the supervisor may take hours to ask.
+/// The process then waits on stdin until the supervisor sends `LOCK
+/// <reason>`, and it waits by running a main loop rather than by blocking in
+/// `read(2)`. That is not a style choice. GDK learns which outputs exist by
+/// dispatching Wayland events, dispatching happens on the main context, and
+/// this process may sit here for hours: parked in a blocking read it keeps
+/// the monitor list it had at warm-up, so a dock or an undock in between
+/// leaves `gtk_session_lock_instance_lock()` enumerating outputs that are no
+/// longer the ones on the desk. Measured: a hotplug during the park is
+/// invisible to `gdk_display_get_monitors()` until the main context is
+/// pumped. Nothing else pumps it either — `alpha::preload()` roundtrips on a
+/// queue of its own precisely so it does not touch GDK's.
 fn warm_and_wait() {
     stage("warm: start");
     {
@@ -184,21 +193,41 @@ fn warm_and_wait() {
         let _ = out.flush();
     }
 
-    let mut line = String::new();
-    match std::io::BufRead::read_line(&mut std::io::stdin().lock(), &mut line) {
-        // EOF: the supervisor is gone, and a lock screen nobody is supervising
-        // is worse than none. Exiting here is the same outcome as never having
-        // been spawned.
-        Ok(0) => {
-            log::info!("lock: supervisor closed stdin before asking to lock");
-            std::process::exit(EXIT_UNLOCKED);
-        }
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("swaypplet lock: reading lock command failed: {e}");
-            std::process::exit(EXIT_ERROR);
-        }
+    // The wait itself. One line is all this ever reads, so the source breaks
+    // on the first readable event and the loop quits with it.
+    let line: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
+    let waiting = glib::MainLoop::new(None, false);
+    {
+        let line = line.clone();
+        let waiting = waiting.clone();
+        crate::glib_unix::fd_add_local(
+            std::io::stdin().as_raw_fd(),
+            glib::IOCondition::IN | glib::IOCondition::HUP | glib::IOCondition::ERR,
+            move |_fd, _cond| {
+                let mut buf = String::new();
+                match std::io::BufRead::read_line(&mut std::io::stdin().lock(), &mut buf) {
+                    // EOF: the supervisor is gone, and a lock screen nobody is
+                    // supervising is worse than none. Exiting here is the same
+                    // outcome as never having been spawned.
+                    Ok(0) => {
+                        log::info!("lock: supervisor closed stdin before asking to lock");
+                        std::process::exit(EXIT_UNLOCKED);
+                    }
+                    Ok(_) => {
+                        *line.borrow_mut() = buf;
+                        waiting.quit();
+                        glib::ControlFlow::Break
+                    }
+                    Err(e) => {
+                        eprintln!("swaypplet lock: reading lock command failed: {e}");
+                        std::process::exit(EXIT_ERROR);
+                    }
+                }
+            },
+        );
     }
+    waiting.run();
+    let line = line.borrow().clone();
     let mut words = line.split_whitespace();
     let _ = words.next(); // "LOCK"
     let reason = words.next().unwrap_or("").to_string();
@@ -391,6 +420,19 @@ pub fn run() -> ! {
         let first_frame_hooked = std::cell::Cell::new(false);
         let fade_cb = fade.clone();
         instance.connect_monitor(move |instance, monitor| {
+            // A monitor GDK has already invalidated is one the compositor has
+            // dropped: its `wl_output` is a proxy for an object the server no
+            // longer has, and `get_lock_surface` against it is a protocol
+            // error rather than a surface. Only the enumeration `lock()` does
+            // can hand one over, since that reads the list as it stands; the
+            // hotplug path only ever delivers additions.
+            if !monitor.is_valid() {
+                log::warn!(
+                    "lock: skipping {}, GDK has invalidated it",
+                    monitor.connector().unwrap_or_else(|| "unknown".into()),
+                );
+                return;
+            }
             // Named, sized and scaled, because anything that goes wrong on one
             // output and not on another reports itself into this log and has
             // to be pinned to an output before it can be read.
@@ -575,6 +617,14 @@ pub fn run() -> ! {
             });
         });
     }
+
+    // Everything queued between the LOCK line and here — the sway IPC round
+    // trip `LockFade::new()` makes is milliseconds, and a dock can land in
+    // them. `lock()` enumerates GDK's monitor list synchronously and gets one
+    // shot at it, so drain the context first and enumerate the outputs that
+    // exist now rather than the ones that existed when the command arrived.
+    let pending = glib::MainContext::default();
+    while pending.iteration(false) {}
 
     stage("before lock()");
     if !instance.lock() {
