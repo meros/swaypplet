@@ -46,9 +46,7 @@ pub fn rebuild_vpn_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
             name_lbl.add_css_class("network-active");
         }
 
-        let badge_lbl = Label::builder()
-            .label(&vpn.vpn_type)
-            .build();
+        let badge_lbl = Label::builder().label(&vpn.vpn_type).build();
         badge_lbl.add_css_class("vpn-type-badge");
 
         let spinner = Spinner::new();

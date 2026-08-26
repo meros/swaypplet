@@ -72,7 +72,6 @@ impl Image {
         }
     }
 
-
     /// The pixel at `(x, y)` as `(r, g, b)`, for the colour picker.
     pub fn pixel(&self, x: u32, y: u32) -> Option<(u8, u8, u8)> {
         if x >= self.width || y >= self.height {
@@ -102,7 +101,6 @@ pub fn output(name: &str) -> Result<Image, String> {
         Ok(sources.create_source(&output, qh, ()))
     })
 }
-
 
 /// The whole dance, once, on a connection of its own.
 ///
@@ -608,8 +606,6 @@ mod tests {
         assert_eq!((cropped.width, cropped.height), (0, 0));
         assert!(cropped.pixels.is_empty());
     }
-
-
 
     #[test]
     fn xrgb_arrives_byte_reversed_and_opaque() {

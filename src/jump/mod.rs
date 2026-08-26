@@ -179,7 +179,9 @@ impl Jump {
 
         log::info!(
             "jump: {} places, {} rows, focused output {:?}",
-            places.len(), built.len(), focused_output
+            places.len(),
+            built.len(),
+            focused_output
         );
         self.rebuild(&built);
         {

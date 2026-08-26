@@ -279,12 +279,29 @@ impl Editor {
                 }
             }
             match key {
-                gdk::Key::b | gdk::Key::B => { this.tool.set(Tool::Box_); this.area.queue_draw(); }
-                gdk::Key::a | gdk::Key::A => { this.tool.set(Tool::Arrow); this.area.queue_draw(); }
-                gdk::Key::p | gdk::Key::P => { this.tool.set(Tool::Pen); this.area.queue_draw(); }
-                gdk::Key::h | gdk::Key::H => { this.tool.set(Tool::Highlight); this.area.queue_draw(); }
-                gdk::Key::x | gdk::Key::X => { this.tool.set(Tool::Pixelate); this.area.queue_draw(); }
-                gdk::Key::u | gdk::Key::U => { this.undo(); }
+                gdk::Key::b | gdk::Key::B => {
+                    this.tool.set(Tool::Box_);
+                    this.area.queue_draw();
+                }
+                gdk::Key::a | gdk::Key::A => {
+                    this.tool.set(Tool::Arrow);
+                    this.area.queue_draw();
+                }
+                gdk::Key::p | gdk::Key::P => {
+                    this.tool.set(Tool::Pen);
+                    this.area.queue_draw();
+                }
+                gdk::Key::h | gdk::Key::H => {
+                    this.tool.set(Tool::Highlight);
+                    this.area.queue_draw();
+                }
+                gdk::Key::x | gdk::Key::X => {
+                    this.tool.set(Tool::Pixelate);
+                    this.area.queue_draw();
+                }
+                gdk::Key::u | gdk::Key::U => {
+                    this.undo();
+                }
                 gdk::Key::Escape => this.window.close(),
                 _ => return glib::Propagation::Proceed,
             }

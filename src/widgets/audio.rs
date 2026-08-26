@@ -403,10 +403,7 @@ impl AudioSection {
         adv_btn.connect_clicked(|_| {
             let _ = std::process::Command::new("pavucontrol")
                 .spawn()
-                .or_else(|_| {
-                    std::process::Command::new("helvum")
-                        .spawn()
-                })
+                .or_else(|_| std::process::Command::new("helvum").spawn())
                 .or_else(|_| {
                     std::process::Command::new("ghostty")
                         .args(["-e", "pulsemixer"])
