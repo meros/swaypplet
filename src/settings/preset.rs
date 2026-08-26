@@ -70,6 +70,10 @@ fn base() -> Material {
         // guise of picking a material.
         fill_color: "none".to_string(),
         fill_alpha: -1.0,
+        iridescence: 0.0,
+        edge_glow: 0.0,
+        edge_glow_color: "none".to_string(),
+        wave_amplitude: 0.0,
     }
 }
 

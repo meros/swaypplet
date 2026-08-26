@@ -219,6 +219,15 @@ pub struct Material {
     /// a card swaypplet is still painting at 0.50. See `glass.nix`.
     #[serde(default = "unset")]
     pub fill_alpha: f64,
+    /// Artsy reality-bending controls
+    #[serde(default)]
+    pub iridescence: f64,
+    #[serde(default)]
+    pub edge_glow: f64,
+    #[serde(default = "unset_color")]
+    pub edge_glow_color: String,
+    #[serde(default)]
+    pub wave_amplitude: f64,
 }
 
 /// The sentinels. Both are also the `#[serde(default)]`s, so an override
@@ -432,6 +441,9 @@ impl System {
             ("grain_aspect", m.grain_aspect),
             ("energy_comp", m.energy_comp),
             ("fill_alpha", m.fill_alpha),
+            ("iridescence", m.iridescence),
+            ("edge_glow", m.edge_glow),
+            ("wave_amplitude", m.wave_amplitude),
             ("bezel", geometry.bezel),
             ("thickness", geometry.thickness),
             ("crest_radius", geometry.crest_radius),
@@ -439,15 +451,14 @@ impl System {
         ] {
             let _ = write!(out, "liquid_glass_{name} {value:.6}; ");
         }
-        // The three that are words rather than numbers. `fill_color` is sent
-        // on every push, `none` included, for the reason its doc comment
-        // gives: a key left out is a key left alone.
+        // The ones that are words rather than numbers.
         let _ = write!(
             out,
-            "liquid_glass_surface {}; liquid_glass_grain {}; liquid_glass_fill_color {}",
+            "liquid_glass_surface {}; liquid_glass_grain {}; liquid_glass_fill_color {}; liquid_glass_edge_glow_color {}",
             m.surface.as_str(),
             m.grain.as_str(),
-            m.fill_color
+            m.fill_color,
+            m.edge_glow_color
         );
         Some(out)
     }
@@ -579,11 +590,12 @@ impl Material {
         let _ = writeln!(out, "surface = \"{}\";", self.surface.as_str());
         let _ = writeln!(out, "grain = \"{}\";", self.grain.as_str());
         let _ = writeln!(out, "fill_color = \"{}\";", self.fill_color);
+        let _ = writeln!(out, "edge_glow_color = \"{}\";", self.edge_glow_color);
         out
     }
 
     /// Every numeric field, in the order the export prints them.
-    pub(super) fn numbers(&self) -> [(&'static str, f64); 23] {
+    pub(super) fn numbers(&self) -> [(&'static str, f64); 26] {
         [
             ("roughness", self.roughness),
             ("refraction", self.refraction),
@@ -608,6 +620,9 @@ impl Material {
             ("grain_aspect", self.grain_aspect),
             ("energy_comp", self.energy_comp),
             ("fill_alpha", self.fill_alpha),
+            ("iridescence", self.iridescence),
+            ("edge_glow", self.edge_glow),
+            ("wave_amplitude", self.wave_amplitude),
         ]
     }
 }
