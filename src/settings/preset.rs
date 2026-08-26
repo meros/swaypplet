@@ -51,7 +51,17 @@ fn base() -> Material {
         grain: GrainKind::None,
         grain_scale: 18.0,
         grain_strength: 0.0,
+        // Unrotated and unstretched. A preset that turned the pattern would
+        // be picking an orientation for a card whose long axis it does not
+        // know: the bar runs one way and a notification the other.
+        grain_angle: 0.0,
+        grain_aspect: 1.0,
         energy_comp: 1.0,
+        // Unset, in every preset: the fill is the card's, and a preset that
+        // took it over would be changing swaypplet's own colours under the
+        // guise of picking a material.
+        fill_color: "none".to_string(),
+        fill_alpha: -1.0,
     }
 }
 

@@ -105,15 +105,21 @@ pub enum GrainKind {
     Hammered,
     Rippled,
     Reeded,
+    CrossReed,
+    Prismatic,
+    Cathedral,
 }
 
 impl GrainKind {
-    pub const ALL: [GrainKind; 5] = [
+    pub const ALL: [GrainKind; 8] = [
         GrainKind::None,
         GrainKind::Seeded,
         GrainKind::Hammered,
         GrainKind::Rippled,
         GrainKind::Reeded,
+        GrainKind::CrossReed,
+        GrainKind::Prismatic,
+        GrainKind::Cathedral,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -123,6 +129,9 @@ impl GrainKind {
             GrainKind::Hammered => "hammered",
             GrainKind::Rippled => "rippled",
             GrainKind::Reeded => "reeded",
+            GrainKind::CrossReed => "cross_reed",
+            GrainKind::Prismatic => "prismatic",
+            GrainKind::Cathedral => "cathedral",
         }
     }
 
@@ -133,7 +142,22 @@ impl GrainKind {
             GrainKind::Hammered => "Hammered — dimples",
             GrainKind::Rippled => "Rippled — rolled glass",
             GrainKind::Reeded => "Reeded — flutes",
+            GrainKind::CrossReed => "Cross-reed — flutes both ways",
+            GrainKind::Prismatic => "Prismatic — cut facets",
+            GrainKind::Cathedral => "Cathedral — hand-rolled",
         }
+    }
+
+    /// Whether the pattern has an orientation worth turning.
+    ///
+    /// The three directional ones do; the rest are isotropic by construction,
+    /// so a rotation control over them is a slider that changes nothing. The
+    /// pane hides it rather than offering it and hoping nobody tries.
+    pub fn is_directional(self) -> bool {
+        matches!(
+            self,
+            GrainKind::Reeded | GrainKind::CrossReed | GrainKind::Prismatic
+        )
     }
 }
 
@@ -163,7 +187,88 @@ pub struct Material {
     pub grain: GrainKind,
     pub grain_scale: f64,
     pub grain_strength: f64,
+    /// The pattern's own frame: degrees clockwise, and a stretch along the
+    /// pattern's own x. Neither changes what `grain_strength` means — the
+    /// shader divides the stretched slope by the larger scale — so they are
+    /// shape and not amount.
+    ///
+    /// Defaulted, like the fill pair below, so an override written before the
+    /// grain rebuild loads as the unrotated, unstretched pattern it described.
+    #[serde(default)]
+    pub grain_angle: f64,
+    #[serde(default = "isotropic")]
+    pub grain_aspect: f64,
     pub energy_comp: f64,
+    /// The fill the compositor paints under swaypplet's own content, as
+    /// `#rrggbb`, or the literal `none` for the card's own colour.
+    ///
+    /// A `String` rather than an `Option`, because the sway config's spelling
+    /// is `none` and the whole point of this struct is that the writer below
+    /// is a formatting loop rather than a translation table. `none` also has
+    /// to survive the wire: a namespace's effects are parsed on top of what
+    /// it already has, so *omitting* the key means "keep the override", which
+    /// is the opposite of what clearing one means.
+    #[serde(default = "unset_color")]
+    pub fill_color: String,
+    /// The alpha that fill is painted at. Negative is the card's own.
+    ///
+    /// Set, it is authoritative in both directions, and that is why it exists
+    /// at all: the card's alpha is also the mask, so the stylesheet cannot
+    /// turn the fill down without the compositor losing the card. This turns
+    /// it down on the far side of the mask instead, so 0 is clear glass under
+    /// a card swaypplet is still painting at 0.50. See `glass.nix`.
+    #[serde(default = "unset")]
+    pub fill_alpha: f64,
+}
+
+/// The sentinels. Both are also the `#[serde(default)]`s, so an override
+/// written before these fields existed loads as "the card decides", which is
+/// what it meant.
+fn unset() -> f64 {
+    -1.0
+}
+
+fn unset_color() -> String {
+    "none".to_string()
+}
+
+fn isotropic() -> f64 {
+    1.0
+}
+
+impl Material {
+    /// The fill colour as the compositor wants it, or `None` when the card
+    /// decides. Anything unparseable is treated as unset rather than as an
+    /// error: this value reaches here from a file a human may have edited,
+    /// and the card's own colour is always a safe answer.
+    pub fn fill_rgb(&self) -> Option<(f64, f64, f64)> {
+        let hex = self
+            .fill_color
+            .strip_prefix('#')
+            .unwrap_or(&self.fill_color);
+        if hex.len() != 6 {
+            return None;
+        }
+        let v = u32::from_str_radix(hex, 16).ok()?;
+        Some((
+            ((v >> 16) & 0xff) as f64 / 255.0,
+            ((v >> 8) & 0xff) as f64 / 255.0,
+            (v & 0xff) as f64 / 255.0,
+        ))
+    }
+
+    /// Set it from a colour, or clear it back to the card's own.
+    pub fn set_fill_rgb(&mut self, rgb: Option<(f64, f64, f64)>) {
+        self.fill_color = match rgb {
+            Some((r, g, b)) => format!(
+                "#{:02x}{:02x}{:02x}",
+                (r.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (g.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (b.clamp(0.0, 1.0) * 255.0).round() as u8
+            ),
+            None => unset_color(),
+        };
+    }
 }
 
 /// The material plus what the pane is allowed to do to a surface's geometry.
@@ -191,6 +296,12 @@ pub struct Tuning {
     /// this is the knob for deliberately breaking that, not for setting it.
     #[serde(default)]
     pub thickness_ratio: f64,
+    /// Multiplies each class's shipped crest radius. Deliberately not folded
+    /// into `bezel_scale`: the crest radius is pinned to the card's own corner
+    /// radius, which does not change when the bevel gets wider. 1 is what the
+    /// system config ships.
+    #[serde(default = "unit")]
+    pub crest_scale: f64,
 }
 
 fn unit() -> f64 {
@@ -204,6 +315,7 @@ impl Tuning {
             material: system.material.clone(),
             bezel_scale: 1.0,
             thickness_ratio: 0.0,
+            crest_scale: 1.0,
         }
     }
 
@@ -215,7 +327,19 @@ impl Tuning {
         } else {
             shipped.thickness * self.bezel_scale
         };
-        Geometry { bezel, thickness }
+        // The sentinel survives scaling: negative means the shader derives it
+        // from the bezel, and a scaled negative is still negative but no
+        // longer says so at any particular strength.
+        let crest_radius = if shipped.crest_radius >= 0.0 {
+            shipped.crest_radius * self.crest_scale
+        } else {
+            shipped.crest_radius
+        };
+        Geometry {
+            bezel,
+            thickness,
+            crest_radius,
+        }
     }
 }
 
@@ -225,6 +349,11 @@ impl Tuning {
 pub struct Geometry {
     pub bezel: f64,
     pub thickness: f64,
+    /// How wide the crest rounds where the card's edges compete. Negative
+    /// derives it from the bezel, which is what the shader did before the
+    /// field existed, so a system config without it still works.
+    #[serde(default = "unset")]
+    pub crest_radius: f64,
 }
 
 /// `/etc/swaypplet/glass.json`, whole.
@@ -299,18 +428,26 @@ impl System {
             ("reflect_blur", m.reflect_blur),
             ("grain_scale", m.grain_scale),
             ("grain_strength", m.grain_strength),
+            ("grain_angle", m.grain_angle),
+            ("grain_aspect", m.grain_aspect),
             ("energy_comp", m.energy_comp),
+            ("fill_alpha", m.fill_alpha),
             ("bezel", geometry.bezel),
             ("thickness", geometry.thickness),
+            ("crest_radius", geometry.crest_radius),
             ("mask_threshold", self.mask_threshold),
         ] {
             let _ = write!(out, "liquid_glass_{name} {value:.6}; ");
         }
+        // The three that are words rather than numbers. `fill_color` is sent
+        // on every push, `none` included, for the reason its doc comment
+        // gives: a key left out is a key left alone.
         let _ = write!(
             out,
-            "liquid_glass_surface {}; liquid_glass_grain {}",
+            "liquid_glass_surface {}; liquid_glass_grain {}; liquid_glass_fill_color {}",
             m.surface.as_str(),
-            m.grain.as_str()
+            m.grain.as_str(),
+            m.fill_color
         );
         Some(out)
     }
@@ -441,11 +578,12 @@ impl Material {
         }
         let _ = writeln!(out, "surface = \"{}\";", self.surface.as_str());
         let _ = writeln!(out, "grain = \"{}\";", self.grain.as_str());
+        let _ = writeln!(out, "fill_color = \"{}\";", self.fill_color);
         out
     }
 
     /// Every numeric field, in the order the export prints them.
-    pub(super) fn numbers(&self) -> [(&'static str, f64); 20] {
+    pub(super) fn numbers(&self) -> [(&'static str, f64); 23] {
         [
             ("roughness", self.roughness),
             ("refraction", self.refraction),
@@ -466,7 +604,10 @@ impl Material {
             ("reflect_blur", self.reflect_blur),
             ("grain_scale", self.grain_scale),
             ("grain_strength", self.grain_strength),
+            ("grain_angle", self.grain_angle),
+            ("grain_aspect", self.grain_aspect),
             ("energy_comp", self.energy_comp),
+            ("fill_alpha", self.fill_alpha),
         ]
     }
 }
@@ -479,7 +620,7 @@ impl Tuning {
     /// stays one pasteable block.
     pub fn as_nix(&self, system: &System) -> String {
         let mut out = self.material.as_nix();
-        if self.bezel_scale == 1.0 && self.thickness_ratio == 0.0 {
+        if self.bezel_scale == 1.0 && self.thickness_ratio == 0.0 && self.crest_scale == 1.0 {
             return out;
         }
         let ratio = if self.thickness_ratio > 0.0 {
@@ -497,9 +638,10 @@ impl Tuning {
             let g = self.geometry(*shipped);
             let _ = writeln!(
                 out,
-                "{class} = {{ bezel = {}; thickness = {}; }};",
+                "{class} = {{ bezel = {}; thickness = {}; crest_radius = {}; }};",
                 trim_float(g.bezel),
-                trim_float(g.thickness)
+                trim_float(g.thickness),
+                trim_float(g.crest_radius)
             );
         }
         out
@@ -535,6 +677,7 @@ mod tests {
                     Geometry {
                         bezel: 10.0,
                         thickness: 39.0,
+                        crest_radius: 14.0,
                     },
                 ),
                 (
@@ -542,6 +685,7 @@ mod tests {
                     Geometry {
                         bezel: 18.0,
                         thickness: 70.0,
+                        crest_radius: 14.0,
                     },
                 ),
             ]),
@@ -607,6 +751,43 @@ mod tests {
             serde_json::from_str::<GrainKind>("\"rippled\"").unwrap(),
             GrainKind::Rippled
         );
+        // The multi-word one is where serde's rename and `as_str` could
+        // disagree without anything noticing: sway rejects a name it does not
+        // know by discarding the whole layer_effects block, so a surface with
+        // this grain selected would lose its material entirely.
+        assert_eq!(
+            serde_json::to_string(&GrainKind::CrossReed).unwrap(),
+            "\"cross_reed\""
+        );
+    }
+
+    #[test]
+    fn every_grain_spells_itself_the_same_way_both_directions() {
+        for kind in GrainKind::ALL {
+            let json = serde_json::to_string(&kind).unwrap();
+            assert_eq!(
+                json,
+                format!("\"{}\"", kind.as_str()),
+                "serde and as_str disagree about {kind:?}"
+            );
+            assert_eq!(serde_json::from_str::<GrainKind>(&json).unwrap(), kind);
+            assert!(!kind.label().is_empty());
+        }
+    }
+
+    #[test]
+    fn only_the_patterns_with_an_orientation_are_directional() {
+        // The angle knob is greyed out for the rest. An isotropic pattern
+        // gaining a rotation control is a slider that changes nothing, which
+        // reads as a broken knob rather than as an inapplicable one.
+        assert!(GrainKind::Reeded.is_directional());
+        assert!(GrainKind::CrossReed.is_directional());
+        assert!(GrainKind::Prismatic.is_directional());
+        assert!(!GrainKind::None.is_directional());
+        assert!(!GrainKind::Seeded.is_directional());
+        assert!(!GrainKind::Hammered.is_directional());
+        assert!(!GrainKind::Rippled.is_directional());
+        assert!(!GrainKind::Cathedral.is_directional());
     }
 
     #[test]
@@ -618,6 +799,7 @@ mod tests {
         let shipped = Geometry {
             bezel: 10.0,
             thickness: 39.0,
+            crest_radius: 14.0,
         };
         let t = Tuning {
             bezel_scale: 2.0,
@@ -625,6 +807,7 @@ mod tests {
                 material: preset::clear(),
                 bezel_scale: 1.0,
                 thickness_ratio: 0.0,
+                crest_scale: 1.0,
             }
         };
         let g = t.geometry(shipped);
@@ -638,11 +821,13 @@ mod tests {
         let shipped = Geometry {
             bezel: 10.0,
             thickness: 39.0,
+            crest_radius: 14.0,
         };
         let t = Tuning {
             material: preset::clear(),
             bezel_scale: 1.5,
             thickness_ratio: 2.0,
+            crest_scale: 1.0,
         };
         let g = t.geometry(shipped);
         assert_eq!(g.bezel, 15.0);
@@ -663,7 +848,7 @@ mod tests {
         assert!(nix.contains("Geometry, at bezel scale 1.5"), "{nix}");
         // thin ships 10/39, so 1.5x is 15/58.5 and the ratio is untouched.
         assert!(
-            nix.contains("thin = { bezel = 15; thickness = 58.5; };"),
+            nix.contains("thin = { bezel = 15; thickness = 58.5; crest_radius = 14; };"),
             "{nix}"
         );
     }
@@ -678,6 +863,7 @@ mod tests {
             material: preset::ALL[3].material(),
             bezel_scale: 1.35,
             thickness_ratio: 4.2,
+            crest_scale: 1.0,
         };
         let json = serde_json::to_vec_pretty(&before).unwrap();
         let after: Tuning = serde_json::from_slice(&json).unwrap();
@@ -705,5 +891,11 @@ mod tests {
         assert_eq!(m.samples, 4.0);
         assert_eq!(m.frost_radius, 22.0);
         assert_eq!(m.grain, GrainKind::Rippled);
+        // The same JSON is an override written before the grain frame
+        // existed. It has to load as the pattern it described, which is the
+        // unrotated, unstretched one — an aspect defaulting to serde's 0
+        // would divide the pitch by zero.
+        assert_eq!(m.grain_angle, 0.0);
+        assert_eq!(m.grain_aspect, 1.0);
     }
 }

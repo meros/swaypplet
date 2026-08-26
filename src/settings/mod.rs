@@ -49,6 +49,11 @@ struct Knob {
     decimals: usize,
     get: fn(&Tuning) -> f64,
     set: fn(&mut Tuning, f64),
+    /// When this knob has anything to say. `None` is always, which is every
+    /// knob but the two that describe the grain's frame: an isotropic pattern
+    /// has no orientation to turn, and a slider that silently does nothing is
+    /// worse than one that says so by going grey.
+    live_when: Option<fn(&Tuning) -> bool>,
 }
 
 /// Re-reads one control from the tuning. One per widget, so a preset click
@@ -56,11 +61,14 @@ struct Knob {
 /// otherwise have to hold by name.
 type Sync = Box<dyn Fn(&Tuning)>;
 
-/// A titled run of knobs.
+/// A titled run of knobs, and anything in the section that is not one.
 struct Group {
     title: &'static str,
     hint: &'static str,
     knobs: &'static [Knob],
+    /// Rows appended above the knobs, for a property a slider cannot carry.
+    /// Only the fill has one, and only because a colour is not a number.
+    extra: Option<fn(&Rc<State>, &gtk4::Box)>,
 }
 
 /// Ranges are what the shader will accept and still draw something, not what
@@ -81,6 +89,7 @@ static GROUPS: &[Group] = &[
                 decimals: 2,
                 get: |t| t.bezel_scale,
                 set: |t, v| t.bezel_scale = v,
+                live_when: None,
             },
             Knob {
                 label: "Thickness ratio",
@@ -91,8 +100,21 @@ static GROUPS: &[Group] = &[
                 decimals: 1,
                 get: |t| t.thickness_ratio,
                 set: |t, v| t.thickness_ratio = v,
+                live_when: None,
+            },
+            Knob {
+                label: "Crest radius",
+                hint: "Scales how wide the crest rounds where the card's edges compete \u{2014} the ridge behind the rim, not the rim itself. The sway config pins each class at its card's own corner radius, so 1.00 is the value that makes the crest turn where the card turns; above it the diagonal across a corner widens into a feature of its own.",
+                min: 0.25,
+                max: 3.0,
+                step: 0.05,
+                decimals: 2,
+                get: |t| t.crest_scale,
+                set: |t, v| t.crest_scale = v,
+                live_when: None,
             },
         ],
+        extra: None,
     },
     Group {
         title: "Surface",
@@ -107,6 +129,7 @@ static GROUPS: &[Group] = &[
                 decimals: 2,
                 get: |t| t.material.roughness,
                 set: |t, v| t.material.roughness = v,
+                live_when: None,
             },
             Knob {
                 label: "Refraction",
@@ -117,6 +140,7 @@ static GROUPS: &[Group] = &[
                 decimals: 2,
                 get: |t| t.material.refraction,
                 set: |t, v| t.material.refraction = v,
+                live_when: None,
             },
             Knob {
                 label: "Lensing",
@@ -127,6 +151,7 @@ static GROUPS: &[Group] = &[
                 decimals: 2,
                 get: |t| t.material.lensing,
                 set: |t, v| t.material.lensing = v,
+                live_when: None,
             },
             Knob {
                 label: "Reflection",
@@ -143,6 +168,7 @@ static GROUPS: &[Group] = &[
                 decimals: 2,
                 get: |t| t.material.reflection,
                 set: |t, v| t.material.reflection = v,
+                live_when: None,
             },
             Knob {
                 label: "Dispersion",
@@ -153,8 +179,10 @@ static GROUPS: &[Group] = &[
                 decimals: 3,
                 get: |t| t.material.dispersion,
                 set: |t, v| t.material.dispersion = v,
+                live_when: None,
             },
         ],
+        extra: None,
     },
     Group {
         title: "Depth",
@@ -169,6 +197,7 @@ static GROUPS: &[Group] = &[
                 decimals: 2,
                 get: |t| t.material.absorb,
                 set: |t, v| t.material.absorb = v,
+                live_when: None,
             },
             Knob {
                 label: "Absorb floor",
@@ -179,6 +208,7 @@ static GROUPS: &[Group] = &[
                 decimals: 2,
                 get: |t| t.material.absorb_floor,
                 set: |t, v| t.material.absorb_floor = v,
+                live_when: None,
             },
             Knob {
                 label: "Photochromic",
@@ -193,6 +223,7 @@ static GROUPS: &[Group] = &[
                 decimals: 2,
                 get: |t| t.material.photochromic,
                 set: |t, v| t.material.photochromic = v,
+                live_when: None,
             },
             Knob {
                 label: "Haze",
@@ -203,8 +234,10 @@ static GROUPS: &[Group] = &[
                 decimals: 2,
                 get: |t| t.material.haze,
                 set: |t, v| t.material.haze = v,
+                live_when: None,
             },
         ],
+        extra: None,
     },
     Group {
         title: "Scatter",
@@ -219,6 +252,7 @@ static GROUPS: &[Group] = &[
                 decimals: 0,
                 get: |t| t.material.frost_radius,
                 set: |t, v| t.material.frost_radius = v,
+                live_when: None,
             },
             Knob {
                 label: "Frost",
@@ -229,6 +263,7 @@ static GROUPS: &[Group] = &[
                 decimals: 2,
                 get: |t| t.material.frost,
                 set: |t, v| t.material.frost = v,
+                live_when: None,
             },
             Knob {
                 label: "Reflect blur",
@@ -239,8 +274,10 @@ static GROUPS: &[Group] = &[
                 decimals: 2,
                 get: |t| t.material.reflect_blur,
                 set: |t, v| t.material.reflect_blur = v,
+                live_when: None,
             },
         ],
+        extra: None,
     },
     Group {
         title: "Highlights",
@@ -255,6 +292,7 @@ static GROUPS: &[Group] = &[
                 decimals: 2,
                 get: |t| t.material.specular,
                 set: |t, v| t.material.specular = v,
+                live_when: None,
             },
             Knob {
                 label: "Edge light",
@@ -265,6 +303,7 @@ static GROUPS: &[Group] = &[
                 decimals: 2,
                 get: |t| t.material.edge_light,
                 set: |t, v| t.material.edge_light = v,
+                live_when: None,
             },
             Knob {
                 label: "Shine",
@@ -275,6 +314,7 @@ static GROUPS: &[Group] = &[
                 decimals: 0,
                 get: |t| t.material.shine,
                 set: |t, v| t.material.shine = v,
+                live_when: None,
             },
             Knob {
                 label: "Noise",
@@ -285,8 +325,10 @@ static GROUPS: &[Group] = &[
                 decimals: 3,
                 get: |t| t.material.noise,
                 set: |t, v| t.material.noise = v,
+                live_when: None,
             },
         ],
+        extra: None,
     },
     Group {
         title: "Grain",
@@ -301,18 +343,43 @@ static GROUPS: &[Group] = &[
                 decimals: 0,
                 get: |t| t.material.grain_scale,
                 set: |t, v| t.material.grain_scale = v,
+                live_when: None,
             },
             Knob {
                 label: "Grain strength",
-                hint: "Peak lateral displacement in pixels. It is strength/scale — the slope — that the highlight terms react to, so move the two together.",
+                hint: "Peak lateral displacement in pixels, and it means the same pixels whichever pattern is selected — each is normalised to a peak slope of 1. It is strength/scale — the slope — that the highlight terms react to, so move the two together.",
                 min: 0.0,
                 max: 8.0,
                 step: 0.1,
                 decimals: 1,
                 get: |t| t.material.grain_strength,
                 set: |t, v| t.material.grain_strength = v,
+                live_when: None,
+            },
+            Knob {
+                label: "Grain angle",
+                hint: "Degrees clockwise. Only the directional patterns have an orientation to turn: reeded at 90 runs the flutes down a bar instead of along it, and cross-reed at 45 is a lattice rather than a grid.",
+                min: 0.0,
+                max: 180.0,
+                step: 1.0,
+                decimals: 0,
+                get: |t| t.material.grain_angle,
+                set: |t, v| t.material.grain_angle = v,
+                live_when: Some(|t| t.material.grain.is_directional()),
+            },
+            Knob {
+                label: "Grain aspect",
+                hint: "Stretch along the pattern's own x. Shape rather than amount: the shader divides the stretched slope by the larger scale, so the strength above keeps meaning pixels.",
+                min: 0.25,
+                max: 4.0,
+                step: 0.05,
+                decimals: 2,
+                get: |t| t.material.grain_aspect,
+                set: |t, v| t.material.grain_aspect = v,
+                live_when: None,
             },
         ],
+        extra: None,
     },
     Group {
         title: "Cost",
@@ -327,6 +394,7 @@ static GROUPS: &[Group] = &[
                 decimals: 0,
                 get: |t| t.material.samples,
                 set: |t, v| t.material.samples = v,
+                live_when: None,
             },
             Knob {
                 label: "Energy comp",
@@ -337,8 +405,30 @@ static GROUPS: &[Group] = &[
                 decimals: 2,
                 get: |t| t.material.energy_comp,
                 set: |t, v| t.material.energy_comp = v,
+                live_when: None,
             },
         ],
+        extra: None,
+    },
+    Group {
+        title: "Fill",
+        hint: "The slab's own body tint: the colour it carries between the refracted backdrop and whatever swaypplet draws on top. Unset, the card decides, which is what it always did \u{2014} but the card's alpha is also the mask, the only thing telling the compositor a card is there at all, so turning the fill down in the stylesheet would take the material with it. The compositor drops the card's fill before it reaches the screen instead, which leaves this free to be anything: at alpha 0 the glass is clear, on any backdrop, under a card still being painted at 0.50.",
+        knobs: &[Knob {
+            label: "Fill alpha",
+            hint: "How much of the card is body tint rather than clear material. 0 is clear glass, exactly and on any backdrop \u{2014} the card's own fill is keyed out rather than cancelled, so there is no range to run out of. Moving this at all takes the fill over from the card; the checkbox above hands it back.",
+            min: 0.0,
+            max: 1.0,
+            step: 0.01,
+            decimals: 2,
+            // The unset sentinel is negative and the rail starts at zero,
+            // so an unset fill shows a slider at the clear end. That is
+            // the honest place for it: unset and clear are different
+            // states, and the checkbox above is what tells them apart.
+            get: |t| t.material.fill_alpha.max(0.0),
+            set: |t, v| t.material.fill_alpha = v,
+            live_when: None,
+        }],
+        extra: Some(build_fill_controls),
     },
 ];
 
@@ -738,10 +828,102 @@ fn kind_row(label: &str, control: &impl IsA<gtk4::Widget>) -> gtk4::Box {
 
 fn build_group(state: &Rc<State>, group: &'static Group) -> gtk4::Box {
     let container = section_box(group.title, group.hint);
+    // Above the knobs, because the fill's colour is the question its alpha is
+    // an answer about: reading "card's own / #32302f / 0.50" downward is the
+    // sentence, and the reverse order is not.
+    if let Some(extra) = group.extra {
+        extra(state, &container);
+    }
     for knob in group.knobs {
         container.append(&build_knob(state, knob));
     }
     container
+}
+
+/// The fill's colour, and the two checks that hand either half of the fill
+/// back to the card.
+///
+/// Two rather than one, because the halves are independent: a tint over the
+/// card's own alpha and the card's own colour at an alpha of your choosing are
+/// both things to want. Neither check is the only way to set its half - moving
+/// the colour button or the alpha slider takes that half over on its own, and
+/// the check follows - so what they are really for is the way back.
+fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
+    let dialog = gtk4::ColorDialog::builder().with_alpha(false).build();
+    let button = gtk4::ColorDialogButton::builder().dialog(&dialog).build();
+    button.add_css_class("settings-color");
+    {
+        let state = state.clone();
+        button.connect_rgba_notify(move |b| {
+            if state.updating.get() {
+                return;
+            }
+            let rgba = b.rgba();
+            state.tuning.borrow_mut().material.set_fill_rgb(Some((
+                rgba.red() as f64,
+                rgba.green() as f64,
+                rgba.blue() as f64,
+            )));
+            state.edited();
+        });
+    }
+
+    let own_color = gtk4::CheckButton::with_label("Card's own colour");
+    own_color.set_tooltip_text(Some(
+        "Take the fill's colour from swaypplet's stylesheet, as the material did before this knob existed.",
+    ));
+    {
+        let state = state.clone();
+        own_color.connect_toggled(move |c| {
+            if state.updating.get() {
+                return;
+            }
+            if c.is_active() {
+                state.tuning.borrow_mut().material.set_fill_rgb(None);
+                state.edited();
+            }
+            // Unchecking on its own says nothing about which colour is wanted,
+            // and the button beside it is already showing one. Picking from it
+            // is what turns the override on, and that clears this.
+        });
+    }
+
+    let own_alpha = gtk4::CheckButton::with_label("Card's own alpha");
+    own_alpha.set_tooltip_text(Some(
+        "Take the fill's alpha from swaypplet's stylesheet. Unchecked, the slider below is authoritative and 0 is clear glass.",
+    ));
+    {
+        let state = state.clone();
+        own_alpha.connect_toggled(move |c| {
+            if state.updating.get() {
+                return;
+            }
+            if c.is_active() {
+                state.tuning.borrow_mut().material.fill_alpha = -1.0;
+                state.edited();
+            }
+        });
+    }
+
+    {
+        let button = button.clone();
+        let own_color = own_color.clone();
+        let own_alpha = own_alpha.clone();
+        state.sync.borrow_mut().push(Box::new(move |t| {
+            let rgb = t.material.fill_rgb();
+            own_color.set_active(rgb.is_none());
+            own_alpha.set_active(t.material.fill_alpha < 0.0);
+            // The button keeps showing the last colour picked even while the
+            // card decides, so unchecking has something to fall back to.
+            if let Some((r, g, b)) = rgb {
+                button.set_rgba(&gdk4::RGBA::new(r as f32, g as f32, b as f32, 1.0));
+            }
+        }));
+    }
+
+    container.append(&kind_row("Fill colour", &button));
+    container.append(&own_color);
+    container.append(&own_alpha);
 }
 
 fn build_knob(state: &Rc<State>, knob: &'static Knob) -> gtk4::Box {
@@ -751,6 +933,13 @@ fn build_knob(state: &Rc<State>, knob: &'static Knob) -> gtk4::Box {
         .build();
     row.add_css_class("settings-row");
     row.set_tooltip_text(Some(knob.hint));
+    if let Some(live_when) = knob.live_when {
+        let row = row.clone();
+        state
+            .sync
+            .borrow_mut()
+            .push(Box::new(move |t| row.set_sensitive(live_when(t))));
+    }
 
     let name = gtk4::Label::builder().label(knob.label).xalign(0.0).build();
     name.add_css_class("settings-row-label");
@@ -894,6 +1083,7 @@ mod tests {
             material: preset::clear(),
             bezel_scale: 1.0,
             thickness_ratio: 0.0,
+            crest_scale: 1.0,
         }
     }
 
@@ -953,6 +1143,9 @@ mod tests {
             if t.thickness_ratio != base.thickness_ratio {
                 changed.push("thickness_ratio");
             }
+            if t.crest_scale != base.crest_scale {
+                changed.push("crest_scale");
+            }
             assert_eq!(changed.len(), 1, "{} moved {changed:?}", knob.label);
             seen.push(changed[0]);
         }
@@ -961,6 +1154,7 @@ mod tests {
         let mut all: Vec<&str> = base.material.numbers().iter().map(|(n, _)| *n).collect();
         all.push("bezel_scale");
         all.push("thickness_ratio");
+        all.push("crest_scale");
         all.sort_unstable();
         assert_eq!(seen, all, "knob table and Tuning disagree");
     }
@@ -991,9 +1185,11 @@ mod tests {
         let shipped = glass::Geometry {
             bezel: 10.0,
             thickness: 39.0,
+            crest_radius: 14.0,
         };
         let got = t.geometry(shipped);
         assert_eq!(got.bezel, 10.0);
         assert_eq!(got.thickness, 39.0);
+        assert_eq!(got.crest_radius, 14.0);
     }
 }
