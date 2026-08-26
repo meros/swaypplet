@@ -197,21 +197,30 @@ impl Panel {
         // Page 3: Bluetooth Devices
         {
             let ret = return_to_search.clone();
-            let bt_sheet = build_subsheet("Bluetooth Devices", "󰂯", bluetooth.widget(), move || ret());
+            let bt_sheet =
+                build_subsheet("Bluetooth Devices", "󰂯", bluetooth.widget(), move || {
+                    ret()
+                });
             deck_stack.add_named(&bt_sheet, Some("bluetooth"));
         }
 
         // Page 4: Displays & Output configuration
         {
             let ret = return_to_search.clone();
-            let disp_sheet = build_subsheet("Display & Monitors", "󰍹", display.widget(), move || ret());
+            let disp_sheet =
+                build_subsheet("Display & Monitors", "󰍹", display.widget(), move || {
+                    ret()
+                });
             deck_stack.add_named(&disp_sheet, Some("displays"));
         }
 
         // Page 5: Clipboard History
         {
             let ret = return_to_search.clone();
-            let clip_sheet = build_subsheet("Clipboard History", "󰅍", clipboard.widget(), move || ret());
+            let clip_sheet =
+                build_subsheet("Clipboard History", "󰅍", clipboard.widget(), move || {
+                    ret()
+                });
             deck_stack.add_named(&clip_sheet, Some("clipboard"));
         }
 
@@ -224,14 +233,20 @@ impl Panel {
                 .build();
             power_container.append(power.widget());
             power_container.append(users.widget());
-            let power_sheet = build_subsheet("System State & Power", "󰁹", &power_container, move || ret());
+            let power_sheet =
+                build_subsheet("System State & Power", "󰁹", &power_container, move || ret());
             deck_stack.add_named(&power_sheet, Some("power"));
         }
 
         // Page 7: Notifications Center
         {
             let ret = return_to_search.clone();
-            let notif_sheet = build_subsheet("Notifications Center", "󰂚", notifications.widget(), move || ret());
+            let notif_sheet = build_subsheet(
+                "Notifications Center",
+                "󰂚",
+                notifications.widget(),
+                move || ret(),
+            );
             deck_stack.add_named(&notif_sheet, Some("notifications"));
         }
 
@@ -245,7 +260,10 @@ impl Panel {
         // Page 9: Audio & Sound Devices
         {
             let ret = return_to_search.clone();
-            let audio_sheet = build_subsheet("Audio & Sound Devices", "󰕾", audio.widget(), move || ret());
+            let audio_sheet =
+                build_subsheet("Audio & Sound Devices", "󰕾", audio.widget(), move || {
+                    ret()
+                });
             deck_stack.add_named(&audio_sheet, Some("audio"));
         }
 
@@ -323,7 +341,14 @@ impl Panel {
                 let text = entry.text().to_string();
                 let lower = text.to_lowercase();
                 let prefix = lower.trim();
-                if prefix.starts_with(":wifi") || prefix.starts_with(":net") || prefix.starts_with(":vpn") || prefix.starts_with(":ovpn") || prefix.starts_with(":openvpn") || prefix.starts_with(":wg") || prefix.starts_with(":wireguard") {
+                if prefix.starts_with(":wifi")
+                    || prefix.starts_with(":net")
+                    || prefix.starts_with(":vpn")
+                    || prefix.starts_with(":ovpn")
+                    || prefix.starts_with(":openvpn")
+                    || prefix.starts_with(":wg")
+                    || prefix.starts_with(":wireguard")
+                {
                     deck_stack_c.set_visible_child_name("wifi");
                 } else if prefix.starts_with(":bt") || prefix.starts_with(":blue") {
                     deck_stack_c.set_visible_child_name("bluetooth");
@@ -337,11 +362,21 @@ impl Panel {
                     deck_stack_c.set_visible_child_name("notifications");
                 } else if prefix.starts_with(":media") || prefix.starts_with(":music") {
                     deck_stack_c.set_visible_child_name("media");
-                } else if prefix.starts_with(":set") || prefix.starts_with(":glass") || prefix.starts_with(":pref") {
+                } else if prefix.starts_with(":set")
+                    || prefix.starts_with(":glass")
+                    || prefix.starts_with(":pref")
+                {
                     deck_stack_c.set_visible_child_name("settings");
-                } else if prefix.starts_with(":audio") || prefix.starts_with(":vol") || prefix.starts_with(":sound") || prefix.starts_with(":sink") || prefix.starts_with(":mic") {
+                } else if prefix.starts_with(":audio")
+                    || prefix.starts_with(":vol")
+                    || prefix.starts_with(":sound")
+                    || prefix.starts_with(":sink")
+                    || prefix.starts_with(":mic")
+                {
                     deck_stack_c.set_visible_child_name("audio");
-                } else if !prefix.starts_with(':') && deck_stack_c.visible_child_name().as_deref() != Some("launcher") {
+                } else if !prefix.starts_with(':')
+                    && deck_stack_c.visible_child_name().as_deref() != Some("launcher")
+                {
                     deck_stack_c.set_visible_child_name("launcher");
                 }
             });
@@ -488,9 +523,7 @@ fn build_subsheet(
         .build();
     header.add_css_class("subsheet-header");
 
-    let back_btn = gtk4::Button::builder()
-        .label("← Back (Esc)")
-        .build();
+    let back_btn = gtk4::Button::builder().label("← Back (Esc)").build();
     back_btn.add_css_class("subsheet-back-btn");
     back_btn.connect_clicked(move |_| on_back());
     header.append(&back_btn);
@@ -542,7 +575,7 @@ fn build_telemetry_ribbon(
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(6)
         .build();
-    
+
     let (icon_str, label_str) = if let Some(path) = power::find_battery_path() {
         if let Some(bat) = power::read_battery(&path) {
             let icon = power::battery_icon(bat.capacity, bat.charging);
@@ -580,7 +613,7 @@ fn build_telemetry_ribbon(
         .build();
     pill_audio.add_css_class("telemetry-pill");
     pill_audio.add_css_class("telemetry-pill-interactive");
-    
+
     let audio_btn = gtk4::Button::builder()
         .child(&gtk4::Label::new(Some(icons::SPEAKER_HIGH)))
         .tooltip_text("Open Audio Devices & Mixer (:audio)")
@@ -619,7 +652,7 @@ fn build_telemetry_ribbon(
         .build();
     pill_bright.add_css_class("telemetry-pill");
     pill_bright.add_css_class("telemetry-pill-interactive");
-    
+
     let bright_btn = gtk4::Button::builder()
         .child(&gtk4::Label::new(Some(icons::BRIGHTNESS)))
         .tooltip_text("Open Display & Monitors (:disp)")
@@ -733,10 +766,12 @@ fn build_telemetry_ribbon(
     let notif_icon = gtk4::Label::builder().label("󰂚").build();
     notif_icon.add_css_class("pill-icon-red");
     let notif_count = store.borrow().all().len();
-    let notif_count_str = if notif_count > 0 { format!("{notif_count}") } else { "0".to_string() };
-    let notif_lbl = gtk4::Label::builder()
-        .label(&notif_count_str)
-        .build();
+    let notif_count_str = if notif_count > 0 {
+        format!("{notif_count}")
+    } else {
+        "0".to_string()
+    };
+    let notif_lbl = gtk4::Label::builder().label(&notif_count_str).build();
     notif_box.append(&notif_icon);
     notif_box.append(&notif_lbl);
     pill_notif.set_child(Some(&notif_box));

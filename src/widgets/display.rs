@@ -243,17 +243,16 @@ impl DisplaySection {
             .hexpand(true)
             .build();
         night_lbl.add_css_class("display-night-label");
-        let night_val_lbl = Label::builder()
-            .label("3500K")
-            .xalign(1.0)
-            .build();
+        let night_val_lbl = Label::builder().label("3500K").xalign(1.0).build();
         night_val_lbl.add_css_class("display-night-val");
         night_hdr.append(&night_lbl);
         night_hdr.append(&night_val_lbl);
 
         let night_scale = gtk4::Scale::builder()
             .orientation(Orientation::Horizontal)
-            .adjustment(&gtk4::Adjustment::new(3500.0, 2000.0, 6500.0, 100.0, 500.0, 0.0))
+            .adjustment(&gtk4::Adjustment::new(
+                3500.0, 2000.0, 6500.0, 100.0, 500.0, 0.0,
+            ))
             .draw_value(false)
             .hexpand(true)
             .build();

@@ -382,8 +382,16 @@ fn draw_color_loupe(
 
     let radius = 64.0;
     // Offset the loupe so it doesn't hide the cursor target
-    let offset_x = if px + radius + 40.0 > max_w { -(radius + 32.0) } else { radius + 32.0 };
-    let offset_y = if py - radius - 30.0 < 0.0 { radius + 32.0 } else { -(radius + 32.0) };
+    let offset_x = if px + radius + 40.0 > max_w {
+        -(radius + 32.0)
+    } else {
+        radius + 32.0
+    };
+    let offset_y = if py - radius - 30.0 < 0.0 {
+        radius + 32.0
+    } else {
+        -(radius + 32.0)
+    };
     let lx = (px + offset_x).clamp(radius + 10.0, max_w - radius - 10.0);
     let ly = (py + offset_y).clamp(radius + 10.0, max_h - radius - 40.0);
 
@@ -399,8 +407,10 @@ fn draw_color_loupe(
 
     for gy in 0..grid_dim {
         for gx in 0..grid_dim {
-            let sample_x = (bx as i32 + (gx - half_grid)).clamp(0, image.width.saturating_sub(1) as i32) as u32;
-            let sample_y = (by as i32 + (gy - half_grid)).clamp(0, image.height.saturating_sub(1) as i32) as u32;
+            let sample_x = (bx as i32 + (gx - half_grid))
+                .clamp(0, image.width.saturating_sub(1) as i32) as u32;
+            let sample_y = (by as i32 + (gy - half_grid))
+                .clamp(0, image.height.saturating_sub(1) as i32) as u32;
             let (r, g, b) = image.pixel(sample_x, sample_y).unwrap_or((0, 0, 0));
 
             cr.set_source_rgb(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0);
@@ -443,10 +453,21 @@ fn draw_color_loupe(
     let _ = cr.stroke();
 
     // 5. Hex badge beneath loupe
-    let hex_text = format!("#{r:02x}{g:02x}{b:02x}", r = center_color.0, g = center_color.1, b = center_color.2);
-    cr.select_font_face("monospace", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+    let hex_text = format!(
+        "#{r:02x}{g:02x}{b:02x}",
+        r = center_color.0,
+        g = center_color.1,
+        b = center_color.2
+    );
+    cr.select_font_face(
+        "monospace",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Bold,
+    );
     cr.set_font_size(12.0);
-    let Ok(extents) = cr.text_extents(&hex_text) else { return; };
+    let Ok(extents) = cr.text_extents(&hex_text) else {
+        return;
+    };
 
     let bw = extents.width() + 16.0;
     let bh = 22.0;

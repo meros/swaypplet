@@ -205,7 +205,9 @@ pub fn stored_connections(conn: &Connection) -> Vec<(String, String, String)> {
 }
 
 /// Stored connections with refined VPN subtype (OpenVPN, WireGuard, Cisco, etc.)
-pub fn stored_connections_with_vpn_type(conn: &Connection) -> Vec<(String, String, String, String)> {
+pub fn stored_connections_with_vpn_type(
+    conn: &Connection,
+) -> Vec<(String, String, String, String)> {
     let list: Vec<OwnedObjectPath> = proxy(conn, SETTINGS_PATH, IFACE_SETTINGS)
         .and_then(|p| p.call("ListConnections", &()).map_err(|e| e.to_string()))
         .unwrap_or_default();
@@ -225,7 +227,10 @@ pub fn stored_connections_with_vpn_type(conn: &Connection) -> Vec<(String, Strin
             let vpn_sub = if kind == "wireguard" {
                 "WireGuard".to_string()
             } else if let Some(vpn_sec) = settings.get("vpn") {
-                let st = vpn_sec.get("service-type").and_then(as_string).unwrap_or_default();
+                let st = vpn_sec
+                    .get("service-type")
+                    .and_then(as_string)
+                    .unwrap_or_default();
                 if st.contains("openvpn") {
                     "OpenVPN".to_string()
                 } else if st.contains("wireguard") {
