@@ -860,7 +860,7 @@ mod tests {
         // not deserialise would be a material that silently reverts one knob
         // per session restart.
         let before = Tuning {
-            material: preset::ALL[3].material(),
+            material: preset::textured(),
             bezel_scale: 1.35,
             thickness_ratio: 4.2,
             crest_scale: 1.0,
