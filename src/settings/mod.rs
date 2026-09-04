@@ -967,7 +967,11 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
         {
             let state = state.clone();
             btn.connect_clicked(move |_| {
-                state.tuning.borrow_mut().material.set_fill_rgb(Some((sr, sg, sb)));
+                state
+                    .tuning
+                    .borrow_mut()
+                    .material
+                    .set_fill_rgb(Some((sr, sg, sb)));
                 state.edited();
             });
         }
@@ -1027,11 +1031,17 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
         let gs = g_scale.clone();
         let bs = b_scale.clone();
         let update_from_scales = move || {
-            if state.updating.get() { return; }
+            if state.updating.get() {
+                return;
+            }
             let r = rs.value() / 255.0;
             let g = gs.value() / 255.0;
             let b = bs.value() / 255.0;
-            state.tuning.borrow_mut().material.set_fill_rgb(Some((r, g, b)));
+            state
+                .tuning
+                .borrow_mut()
+                .material
+                .set_fill_rgb(Some((r, g, b)));
             state.edited();
         };
 
@@ -1046,14 +1056,22 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
     {
         let state = state.clone();
         hex_entry.connect_text_notify(move |e| {
-            if state.updating.get() { return; }
+            if state.updating.get() {
+                return;
+            }
             let text = e.text();
             let hex = text.strip_prefix('#').unwrap_or(&text);
-            if hex.len() == 6 && let Ok(v) = u32::from_str_radix(hex, 16) {
+            if hex.len() == 6
+                && let Ok(v) = u32::from_str_radix(hex, 16)
+            {
                 let r = ((v >> 16) & 0xff) as f64 / 255.0;
                 let g = ((v >> 8) & 0xff) as f64 / 255.0;
                 let b = (v & 0xff) as f64 / 255.0;
-                state.tuning.borrow_mut().material.set_fill_rgb(Some((r, g, b)));
+                state
+                    .tuning
+                    .borrow_mut()
+                    .material
+                    .set_fill_rgb(Some((r, g, b)));
                 state.edited();
             }
         });
@@ -1114,7 +1132,12 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
             if let Some((r, g, b)) = rgb {
                 current_rgb.set((r, g, b));
                 swatch.queue_draw();
-                let hex = format!("#{:02x}{:02x}{:02x}", (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8);
+                let hex = format!(
+                    "#{:02x}{:02x}{:02x}",
+                    (r * 255.0).round() as u8,
+                    (g * 255.0).round() as u8,
+                    (b * 255.0).round() as u8
+                );
                 hex_label.set_text(&hex);
                 hex_entry.set_text(&hex);
                 r_scale.set_value(r * 255.0);

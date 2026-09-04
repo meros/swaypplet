@@ -550,6 +550,46 @@ impl Session {
         };
         for sheet in &self.sheets {
             sheet.window.set_visible(false);
+            // Closing the window is not enough to free the pixels, and there
+            // are three full copies of every output per selector: the `Image`
+            // in the sheet, the clone captured by the draw closure, and the
+            // `MemoryTexture` inside the `Picture`. On a 3840x2160 plus a
+            // 2880x1800 that is ~152 MB, and it stayed for the life of the
+            // process: the controllers wired in `wire` hold strong
+            // `Rc<Session>` clones, so Session -> Sheet -> area -> controller
+            // -> closure -> Session is a cycle that `window.close()` cannot
+            // break. Measured before this teardown: 152 MB retained per
+            // screenshot, 5.99 GiB of swap after 49 h of ordinary use.
+            //
+            // Order matters. Replace the draw func first (it owns the Image
+            // clone), then drop the controllers (they own the Rc<Session>),
+            // then unparent the child tree (it owns the texture).
+            sheet.area.set_draw_func(|_, _, _, _| {});
+            // Both widgets carry controllers that captured `Rc<Session>`:
+            // the drag and motion controllers on the area, and the key
+            // controller on the window (Escape / Enter). Missing either one
+            // leaves the cycle intact and one full copy of every output
+            // behind, which measured 50 MB on this display pair.
+            for (widget, controllers) in [
+                (
+                    sheet.area.upcast_ref::<gtk4::Widget>(),
+                    sheet.area.observe_controllers(),
+                ),
+                (
+                    sheet.window.upcast_ref::<gtk4::Widget>(),
+                    sheet.window.observe_controllers(),
+                ),
+            ] {
+                for i in (0..controllers.n_items()).rev() {
+                    if let Some(controller) = controllers
+                        .item(i)
+                        .and_then(|o| o.downcast::<gtk4::EventController>().ok())
+                    {
+                        widget.remove_controller(&controller);
+                    }
+                }
+            }
+            sheet.window.set_child(gtk4::Widget::NONE);
             sheet.window.close();
         }
         done(selection);
