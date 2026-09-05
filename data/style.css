@@ -1211,6 +1211,50 @@ entry:focus {
     box-shadow: 0 0 0 2px alpha(@accent, 0.2);
 }
 
+/* ── Switch ──
+   GTK's default is Adwaita blue, which is the one hue this palette does not
+   have. The track takes the well colour and the accent when on, the knob is
+   the text colour, so a row of switches reads with the toggle tiles beside
+   them. Sized to the settings rows (30px) and the network rows (32px). */
+switch {
+    background-color: @surface_track;
+    background-image: none;
+    border: 1px solid @border_subtle;
+    border-radius: 12px;
+    min-width: 40px;
+    min-height: 22px;
+    box-shadow: none;
+    transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+switch:hover {
+    border-color: @border_strong;
+}
+
+switch:checked {
+    background-color: @accent;
+    border-color: alpha(@accent, 0.6);
+}
+
+switch slider {
+    background-color: @fg;
+    background-image: none;
+    border: none;
+    border-radius: 50%;
+    min-width: 18px;
+    min-height: 18px;
+    margin: 1px;
+    box-shadow: 0 1px 2px alpha(black, 0.35);
+}
+
+switch:checked slider {
+    background-color: @bg0_h;
+}
+
+switch:disabled {
+    opacity: 0.38;
+}
+
 /* ── Dropdown ── */
 dropdown button {
     background-color: @bg2;
@@ -3441,11 +3485,11 @@ scale.night-scale highlight {
 }
 
 /* ── Settings pane (src/settings/) ──
-   A deck page in the Helm card, one group per thing that can be configured.
-   Dense on purpose: the glass group alone is twenty knobs, and a settings
-   list that scrolls twice as far as it needs to is a list nobody reads to the
-   bottom of. Hints live in tooltips per row; only the group carries a visible
-   one. ── */
+   A deck page in the Helm card, one tab per thing that can be configured and
+   one group per run of rows. Dense on purpose: the glass tab alone is twenty
+   knobs, and a settings list that scrolls twice as far as it needs to is a
+   list nobody reads to the bottom of. Hints live in tooltips per row; only
+   the group carries a visible one. ── */
 .settings-pane {
     padding: 2px 4px 6px;
 }
@@ -3581,6 +3625,100 @@ scale.night-scale highlight {
 
 .settings-status-system {
     color: @text_faint;
+}
+
+/* ── Tabs ──
+   One toggle per tab in a group, styled as the preset chips are so the strip
+   reads as part of the pane rather than as the theme's tab bar. The checked
+   one takes the accent tint the way an active deck tile does. */
+.settings-tabs {
+    padding: 0 2px 2px;
+}
+
+.settings-tab {
+    background-color: alpha(@bg2, 0.5);
+    background-image: none;
+    color: @fg_dim;
+    border: 1px solid @border_subtle;
+    border-radius: 8px;
+    padding: 4px 14px;
+    min-height: 28px;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+.settings-tab:hover {
+    background-color: @accent_tint;
+    color: @fg;
+    border-color: alpha(@accent, 0.40);
+}
+
+.settings-tab:checked {
+    background-color: @accent_tint;
+    color: @accent;
+    border-color: alpha(@accent, 0.45);
+}
+
+/* A switch row keeps the label gutter but lets the label take the width, so
+   the switch sits at the far end of every row and the column lines up. */
+.settings-switch-row {
+    min-height: 30px;
+}
+
+/* ── Wallpaper thumbnails ──
+   Four to a row at 132x74. The frame is the whole selection cue: no tick,
+   no overlay, because the image under it is the thing being chosen and
+   anything drawn over it hides part of that. */
+.settings-wallpaper-thumb {
+    padding: 0;
+    min-width: 0;
+    min-height: 0;
+    background-color: alpha(@bg2, 0.5);
+    background-image: none;
+    border: 2px solid @border_subtle;
+    border-radius: 10px;
+    box-shadow: none;
+}
+
+.settings-wallpaper-thumb picture {
+    border-radius: 8px;
+}
+
+.settings-wallpaper-thumb:hover {
+    border-color: alpha(@accent, 0.55);
+}
+
+.settings-wallpaper-thumb.selected {
+    border-color: @accent;
+}
+
+/* ── Prefixes (a bare `:` in the omnibox) ──
+   The router's table as a list: the prefixes in the mono the value column
+   uses, the page name beside them. */
+.prefix-list {
+    padding: 2px 8px 6px;
+}
+
+.prefix-row {
+    min-height: 26px;
+    padding: 2px 4px;
+    border-radius: 6px;
+}
+
+.prefix-row:hover {
+    background-color: alpha(white, 0.03);
+}
+
+.prefix-keys {
+    font-size: 11px;
+    font-family: monospace;
+    color: @accent;
+}
+
+.prefix-page {
+    font-size: 12px;
+    color: @fg;
 }
 
 /* ── No glass configuration on this host ── */

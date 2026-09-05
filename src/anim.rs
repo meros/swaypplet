@@ -150,7 +150,14 @@ pub fn duration(ms: f64) -> f64 {
     if !animations_enabled() {
         return 1.0;
     }
-    ms * debug_scale()
+    // The Look tab's Motion row: full, half, or the single frame GTK's own
+    // switch collapses to. Read per call, so a change lands on the next
+    // animation rather than the next start.
+    let motion = crate::settings::store::with(|s| s.look().motion.scale());
+    if motion <= 0.0 {
+        return 1.0;
+    }
+    ms * motion * debug_scale()
 }
 
 /// `SWAYPPLET_ANIM_SCALE` stretches every animation by this factor. A fade

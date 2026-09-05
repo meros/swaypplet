@@ -1,6 +1,7 @@
 pub mod dbus;
 pub mod markup;
 pub mod popup;
+pub mod quiet;
 pub mod store;
 
 /// Urgency levels per the Desktop Notifications spec.

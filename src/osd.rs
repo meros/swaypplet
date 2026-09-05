@@ -10,12 +10,13 @@ use crate::layer_shell::{self, LayerShellConfig};
 use crate::spawn::spawn_work;
 
 const OSD_TIMEOUT_MS: u32 = 1500;
-/// One press of a volume key. The ceiling is the over-amplification limit
-/// the panel's slider also stops at.
-const VOLUME_STEP: f64 = 0.05;
-use crate::audio::VOLUME_CEILING;
-const BRIGHTNESS_STEP_UP: &str = "5%+";
-const BRIGHTNESS_STEP_DOWN: &str = "5%-";
+
+/// One press of a volume or brightness key, from the Bar tab's Keys group.
+/// The ceiling is the over-amplification limit the panel's slider also
+/// stops at (`widgets/audio.rs`).
+fn keys() -> crate::settings::store::Keys {
+    crate::settings::store::with(|s| s.keys())
+}
 
 use crate::icons;
 
@@ -99,13 +100,13 @@ fn execute_command(cmd: &OsdCommand) -> OsdDisplay {
     match cmd {
         OsdCommand::BrightnessRaise => {
             let _ = Command::new("brightnessctl")
-                .args(["set", BRIGHTNESS_STEP_UP])
+                .args(["set", &format!("{}%+", keys().brightness_step)])
                 .output();
             read_brightness_display()
         }
         OsdCommand::BrightnessLower => {
             let _ = Command::new("brightnessctl")
-                .args(["set", BRIGHTNESS_STEP_DOWN])
+                .args(["set", &format!("{}%-", keys().brightness_step)])
                 .output();
             read_brightness_display()
         }
@@ -413,7 +414,7 @@ impl Osd {
     /// once the presses stop.
     fn advance(&self, from: f64, delta: f64) -> f64 {
         let mut pending = self.pending.borrow_mut();
-        let target = (pending.level.unwrap_or(from) + delta).clamp(0.0, VOLUME_CEILING);
+        let target = (pending.level.unwrap_or(from) + delta).clamp(0.0, keys().volume_ceiling());
         pending.level = Some(target);
 
         if let Some(id) = pending.settle.take() {
@@ -480,21 +481,20 @@ impl Osd {
         let (level, muted, is_mic) = match cmd {
             OsdCommand::OutputVolumeRaise => {
                 self.showing.set(Showing::OutputVolume);
-                audio.send(AudioCommand::AdjustSinkVolume(VOLUME_STEP));
-                (
-                    self.advance(current.volume, VOLUME_STEP),
-                    current.muted,
-                    false,
-                )
+                let step = f64::from(keys().volume_step) / 100.0;
+                // The server clamps at its own 150 %; the setting's ceiling
+                // is applied to what is asked for, so a press at the ceiling
+                // asks for nothing rather than for a step the card must
+                // then take back.
+                let room = (keys().volume_ceiling() - current.volume).max(0.0);
+                audio.send(AudioCommand::AdjustSinkVolume(step.min(room)));
+                (self.advance(current.volume, step), current.muted, false)
             }
             OsdCommand::OutputVolumeLower => {
                 self.showing.set(Showing::OutputVolume);
-                audio.send(AudioCommand::AdjustSinkVolume(-VOLUME_STEP));
-                (
-                    self.advance(current.volume, -VOLUME_STEP),
-                    current.muted,
-                    false,
-                )
+                let step = f64::from(keys().volume_step) / 100.0;
+                audio.send(AudioCommand::AdjustSinkVolume(-step));
+                (self.advance(current.volume, -step), current.muted, false)
             }
             OsdCommand::OutputVolumeMuteToggle => {
                 self.showing.set(Showing::OutputVolume);

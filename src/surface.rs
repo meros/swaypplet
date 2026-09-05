@@ -201,7 +201,12 @@ impl GlassSurface {
         let scale = self.inner.scale.get();
         let w = (width as f64 * scale).ceil() as i32;
         let h = (height as f64 * scale).ceil() as i32;
-        let x = self.inner.window.width() - w;
+        // A card hugs one side of its column; the region hugs the same one.
+        let x = if self.inner.pane.halign() == gtk4::Align::Start {
+            self.inner.pane.margin_start()
+        } else {
+            self.inner.window.width() - w
+        };
         let region = cairo::Region::create_rectangle(&cairo::RectangleInt::new(
             x.max(0),
             self.inner.offset.get().floor() as i32,

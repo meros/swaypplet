@@ -326,8 +326,12 @@ pub fn run(component: &str) {
                 }
                 host.append(&card);
             }
-            "settings" => {
+            // `settings` or `settings.<tab>` (look, idle, bar, alerts, glass).
+            c if c == "settings" || c.starts_with("settings.") => {
                 let s = Box::leak(Box::new(crate::settings::SettingsSection::new()));
+                if let Some(tab) = c.strip_prefix("settings.") {
+                    s.show(tab);
+                }
                 host.append(s.widget());
             }
             "network" => {

@@ -1,0 +1,42 @@
+{
+  "look": {
+    "motion": "full"
+  },
+  "idle": {
+    "dim_after_s": 240,
+    "dim_level": 10,
+    "lock_after_s": 300,
+    "blank_after_s": 900,
+    "suspend_after_s": 1200,
+    "walk_away_lock": true,
+    "face_unlock": true
+  },
+  "bar": {
+    "clock_24h": true,
+    "clock_date": false,
+    "osd_in_bar": false,
+    "board": false,
+    "media": true,
+    "tray": true,
+    "battery": true,
+    "presence": true
+  },
+  "keys": {
+    "volume_step": 5,
+    "brightness_step": 5,
+    "volume_boost": true
+  },
+  "alerts": {
+    "linger": "normal",
+    "corner": "top_right",
+    "stack": 3,
+    "quiet": false,
+    "quiet_from_h": 22,
+    "quiet_to_h": 7
+  },
+  "capture": {
+    "folder": "",
+    "after": "both",
+    "annotate": false
+  }
+}

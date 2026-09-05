@@ -154,12 +154,20 @@ pub fn run() {
     app.connect_startup(move |app| {
         theme::load_css();
 
-        // Put the saved glass override back on the compositor. The sway config
-        // has already applied the system material by now, so this is a no-op
-        // on a session that has never been tuned — which is why it is a plain
-        // call rather than something the settings pane has to remember to do
-        // the first time it is opened.
+        // The settings file into its live copy, before anything that observes
+        // it (the bar's clock, the OSD route) is built; then followed, so a
+        // `swaypplet settings set` from a keybind lands here too.
+        crate::settings::store::init();
+        crate::settings::store::watch();
+
+        // Put the saved glass override and the saved wallpaper back on the
+        // compositor. The sway config has already applied the system material
+        // and its own wallpaper by now, so both are no-ops on a session that
+        // has never been tuned — which is why they are plain calls rather
+        // than something the settings pane has to remember to do the first
+        // time it is opened.
         crate::settings::glass::apply_saved();
+        crate::settings::wallpaper::apply_saved();
 
         // Start D-Bus notification server
         dbus::start_server(store_startup.clone());
@@ -216,6 +224,7 @@ pub fn run() {
 
         // ── Popup manager ────────────────────────────────────────────────────
         PopupManager::register(app, store_activate.clone());
+        crate::notifications::quiet::install(store_activate.clone());
 
         // ── OSD overlay ──────────────────────────────────────────────────────
         let osd = Osd::new(app);
@@ -271,7 +280,7 @@ pub fn run() {
             // render in the bar's decision slot rather than as the
             // center-screen card.
             //
-            // Off by default now. The interjection was the better trade while
+            // Off by default. The interjection was the better trade while
             // the card was a frosted slab that covered the middle of the
             // screen to say one number; it is a worse one against a material
             // you can read through, where the card costs a glance and the bar
@@ -279,12 +288,16 @@ pub fn run() {
             // the only one of the two that can show a level while the bar is
             // busy with something else.
             //
-            // SWAYPPLET_OSD_IN_BAR=1 puts it back. Not a compile-time choice,
-            // because which one reads better depends on the material, and the
-            // material is now editable from the settings pane.
-            if std::env::var_os("SWAYPPLET_OSD_IN_BAR").is_some_and(|v| v == "1") {
+            // The Bar tab of the settings pane turns it on, and the route
+            // reads the setting per press rather than being installed
+            // conditionally: which one reads better depends on the material,
+            // and the material is editable from the same pane.
+            {
                 let bar = bar.clone();
                 osd.set_bar_route(move |icon, fraction, text| {
+                    if !crate::settings::store::with(|s| s.bar().osd_in_bar) {
+                        return false;
+                    }
                     if sway.snapshot().focused_fullscreen {
                         return false;
                     }

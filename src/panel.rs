@@ -43,6 +43,56 @@ const HELM_CARD_SIZE: crate::launcher::CardSize = crate::launcher::CardSize {
 /// How tall a sub-sheet's body stands on a screen with room for it.
 const SUBSHEET_HEIGHT: i32 = 340;
 
+/// Omnibox prefixes and the deck page each one opens. The settings tabs
+/// carry their own (`settings::TABS`); `:set` alone opens the pane on
+/// whatever tab it was last on. A bare `:` lists all of them on the
+/// `prefixes` page, which is built from this table so the list cannot go
+/// stale.
+const ROUTES: &[(&[&str], &str, &str)] = &[
+    (
+        &[
+            ":wifi",
+            ":net",
+            ":vpn",
+            ":ovpn",
+            ":openvpn",
+            ":wg",
+            ":wireguard",
+        ],
+        "wifi",
+        "Wi-Fi Networks",
+    ),
+    (&[":bt", ":blue"], "bluetooth", "Bluetooth Devices"),
+    (&[":disp", ":screen"], "displays", "Display & Monitors"),
+    (&[":clip", ":cb"], "clipboard", "Clipboard History"),
+    (&[":power", ":sys"], "power", "System State & Power"),
+    (&[":notif"], "notifications", "Notifications Center"),
+    (&[":media", ":music"], "media", "Media Player"),
+    (
+        &[":audio", ":vol", ":sound", ":sink", ":mic"],
+        "audio",
+        "Audio & Sound Devices",
+    ),
+];
+
+/// The page a typed prefix opens, and the settings tab when it names one.
+/// The settings tabs are tried before `:set`, so `:sleep` is not `:set`.
+fn route(prefix: &str) -> Option<(&'static str, Option<&'static str>)> {
+    if let Some((_, page, _)) = ROUTES
+        .iter()
+        .find(|(prefixes, _, _)| prefixes.iter().any(|p| prefix.starts_with(p)))
+    {
+        return Some((page, None));
+    }
+    if let Some(tab) = crate::settings::tab_for_prefix(prefix) {
+        return Some(("settings", Some(tab)));
+    }
+    if prefix.starts_with(":set") || prefix.starts_with(":pref") {
+        return Some(("settings", None));
+    }
+    None
+}
+
 /// What the card's lists shrink to on an output too short for the card at
 /// full density. They still scroll, so this costs visible rows and nothing
 /// else. Everything below them in the card, the action deck above all, stays
@@ -62,7 +112,7 @@ struct Sections {
     clipboard: ClipboardSection,
     power: PowerSection,
     users: UserSection,
-    settings: SettingsSection,
+    settings: Rc<SettingsSection>,
     /// Quick-strip toggle tiles (Night Light, Caffeine, etc.)
     tiles: RefCell<Vec<(gtk4::ToggleButton, tiles::TileSpec)>>,
 }
@@ -147,7 +197,8 @@ impl Panel {
         let clipboard = ClipboardSection::new();
         let power = PowerSection::new();
         let users = UserSection::new();
-        let settings = SettingsSection::new();
+        // Shared with the omnibox router below, which picks a tab by prefix.
+        let settings = Rc::new(SettingsSection::new());
 
         audio.expand_for_page();
         network.expand_for_page();
@@ -267,14 +318,22 @@ impl Panel {
             deck_stack.add_named(&audio_sheet, Some("audio"));
         }
 
-        // Page 10: Settings. Glass first — and the reason it is a page in this
-        // card rather than a window of its own is that the card is the
-        // material: every slider changes the surface it is drawn on, live.
+        // Page 10: Settings. Five tabs (src/settings/), and the reason it is
+        // a page in this card rather than a window of its own is the Glass
+        // one: the card is the material, so every slider changes the surface
+        // it is drawn on, live.
         {
             let ret = return_to_search.clone();
             let settings_sheet =
                 build_subsheet("Settings", "󰒓", settings.widget(), move || ret());
             deck_stack.add_named(&settings_sheet, Some("settings"));
+        }
+
+        // Page 11: the prefixes, for a bare `:`.
+        {
+            let ret = return_to_search.clone();
+            let sheet = build_subsheet("Prefixes", "󰘳", &build_prefix_list(), move || ret());
+            deck_stack.add_named(&sheet, Some("prefixes"));
         }
 
         // ── Top Telemetry Ribbon ─────────────────────────────────────────────
@@ -337,43 +396,18 @@ impl Panel {
         // ── Prefix routing from Omnibox ──────────────────────────────────────
         {
             let deck_stack_c = deck_stack.clone();
+            let settings_c = settings.clone();
             launcher.entry().connect_search_changed(move |entry| {
                 let text = entry.text().to_string();
                 let lower = text.to_lowercase();
                 let prefix = lower.trim();
-                if prefix.starts_with(":wifi")
-                    || prefix.starts_with(":net")
-                    || prefix.starts_with(":vpn")
-                    || prefix.starts_with(":ovpn")
-                    || prefix.starts_with(":openvpn")
-                    || prefix.starts_with(":wg")
-                    || prefix.starts_with(":wireguard")
-                {
-                    deck_stack_c.set_visible_child_name("wifi");
-                } else if prefix.starts_with(":bt") || prefix.starts_with(":blue") {
-                    deck_stack_c.set_visible_child_name("bluetooth");
-                } else if prefix.starts_with(":disp") || prefix.starts_with(":screen") {
-                    deck_stack_c.set_visible_child_name("displays");
-                } else if prefix.starts_with(":clip") || prefix.starts_with(":cb") {
-                    deck_stack_c.set_visible_child_name("clipboard");
-                } else if prefix.starts_with(":power") || prefix.starts_with(":sys") {
-                    deck_stack_c.set_visible_child_name("power");
-                } else if prefix.starts_with(":notif") {
-                    deck_stack_c.set_visible_child_name("notifications");
-                } else if prefix.starts_with(":media") || prefix.starts_with(":music") {
-                    deck_stack_c.set_visible_child_name("media");
-                } else if prefix.starts_with(":set")
-                    || prefix.starts_with(":glass")
-                    || prefix.starts_with(":pref")
-                {
-                    deck_stack_c.set_visible_child_name("settings");
-                } else if prefix.starts_with(":audio")
-                    || prefix.starts_with(":vol")
-                    || prefix.starts_with(":sound")
-                    || prefix.starts_with(":sink")
-                    || prefix.starts_with(":mic")
-                {
-                    deck_stack_c.set_visible_child_name("audio");
+                if prefix == ":" {
+                    deck_stack_c.set_visible_child_name("prefixes");
+                } else if let Some((page, tab)) = route(prefix) {
+                    if let Some(tab) = tab {
+                        settings_c.show(tab);
+                    }
+                    deck_stack_c.set_visible_child_name(page);
                 } else if !prefix.starts_with(':')
                     && deck_stack_c.visible_child_name().as_deref() != Some("launcher")
                 {
@@ -503,6 +537,58 @@ fn elastic_lists(
             (list, full)
         })
         .collect()
+}
+
+/// Every prefix the omnibox knows, one row per page, from the same tables
+/// the router reads.
+fn build_prefix_list() -> gtk4::Box {
+    let list = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .spacing(2)
+        .build();
+    list.add_css_class("prefix-list");
+
+    let hint = gtk4::Label::builder()
+        .label("Type one of these after the colon to open its page. Anything else searches.")
+        .xalign(0.0)
+        .wrap(true)
+        .build();
+    hint.add_css_class("settings-group-hint");
+    list.append(&hint);
+
+    let rows: Vec<(String, String)> = ROUTES
+        .iter()
+        .map(|(prefixes, _, title)| (prefixes.join("  "), title.to_string()))
+        .chain(crate::settings::prefixes().map(|(prefixes, title)| (prefixes.join("  "), title)))
+        .chain(std::iter::once((
+            ":set  :pref".to_string(),
+            "Settings · last tab".to_string(),
+        )))
+        .collect();
+    for (prefixes, title) in rows {
+        let row = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(12)
+            .build();
+        row.add_css_class("prefix-row");
+        let keys = gtk4::Label::builder()
+            .label(&prefixes)
+            .xalign(0.0)
+            .width_chars(26)
+            .wrap(true)
+            .build();
+        keys.add_css_class("prefix-keys");
+        let page = gtk4::Label::builder()
+            .label(&title)
+            .xalign(0.0)
+            .hexpand(true)
+            .build();
+        page.add_css_class("prefix-page");
+        row.append(&keys);
+        row.append(&page);
+        list.append(&row);
+    }
+    list
 }
 
 fn build_subsheet(
@@ -941,6 +1027,41 @@ fn rail_action(
 }
 
 // ── Footer action implementations ─────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefixes_route_to_their_page_and_the_settings_tabs_before_set() {
+        assert_eq!(route(":wifi"), Some(("wifi", None)));
+        assert_eq!(route(":vpn"), Some(("wifi", None)));
+        assert_eq!(route(":mic"), Some(("audio", None)));
+        assert_eq!(route(":notif"), Some(("notifications", None)));
+        // A settings tab, and one whose prefix starts with `:s` like `:set`.
+        assert_eq!(route(":glass"), Some(("settings", Some("glass"))));
+        assert_eq!(route(":sleep"), Some(("settings", Some("idle"))));
+        assert_eq!(route(":settings"), Some(("settings", None)));
+        assert_eq!(route(":pref"), Some(("settings", None)));
+        assert_eq!(route(":nothing"), None);
+        assert_eq!(route("firefox"), None);
+    }
+
+    #[test]
+    fn no_prefix_is_claimed_by_two_pages() {
+        let mut seen = std::collections::HashSet::new();
+        for (prefixes, _, _) in ROUTES {
+            for p in *prefixes {
+                assert!(seen.insert(*p), "{p} is claimed twice");
+            }
+        }
+        for (prefixes, _) in crate::settings::prefixes() {
+            for p in prefixes {
+                assert!(seen.insert(*p), "{p} is claimed by a page and a tab");
+            }
+        }
+    }
+}
 
 /// Hand a shot to `screenshot`, which owns the whole flow.
 ///

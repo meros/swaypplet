@@ -56,6 +56,9 @@ fn main() {
         Some("greet") => greet::run(),
         // idle manager (swayidle replacement) — standalone process, no GTK.
         Some("idle") => idle::run(),
+        // The settings file from a keybind or a script — standalone, no GTK,
+        // never a request to the panel (src/settings/cli.rs).
+        Some("settings") => settings::cli::run(args),
         // Root fingerprint agent for the greeter (see src/fp/agent.rs) and
         // its pam_exec token-check counterpart in greetd's PAM stack.
         Some("fp-agent") => fp::agent::run_agent(),

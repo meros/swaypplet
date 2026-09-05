@@ -11,9 +11,6 @@
 //! a live panel, and `SWAYPPLET_NO_BAR=1` keeps the hosted bar off while
 //! an external bar owns the strip (see app.rs).
 
-/// The four-bay task board (bar/board.rs) is built but not shown.
-const SHOW_BOARD: bool = false;
-
 mod battery;
 mod board;
 mod clock;
@@ -238,9 +235,10 @@ fn build_bar_window(
         .orientation(gtk4::Orientation::Horizontal)
         .build();
     // Right cluster order per the vision: media mark, tray, hazard lane,
-    // then the instrument track.
-    right.append(&media::build(sway));
-    right.append(&tray::build(tray));
+    // then the instrument track. The Bar tab's Segments group hides the
+    // ones it names; the hazard lane and the clock are not optional.
+    right.append(&follow_setting(media::build(sway), |bar| bar.media));
+    right.append(&follow_setting(tray::build(tray), |bar| bar.tray));
     right.append(&hazards::build(sway, audio));
     // Battery + board + clock fuse into one segmented track (waybar's
     // group/right-track); a batteryless machine skips the segment so the
@@ -255,7 +253,7 @@ fn build_bar_window(
         let slot = decision.clone();
         move |bat| slot.set_battery(bat)
     }) {
-        track.append(&bat);
+        track.append(&follow_setting(bat, |bar| bar.battery));
     }
     // gdk connector names match sway output names under wlroots.
     let board = board::build(
@@ -264,14 +262,13 @@ fn build_bar_window(
         monitor.connector().map(|c| c.to_string()),
         &root,
     );
-    // Hidden rather than removed: the bays were not earning their width, but
-    // the instrument may come back, and an invisible child costs one layout
-    // skip. GTK gives no clicks to a hidden widget, so the bay popovers are
-    // unreachable too. One flip restores the whole thing.
-    board.set_visible(SHOW_BOARD);
-    track.append(&board);
+    // Hidden by default rather than removed: the bays were not earning their
+    // width, but the instrument may come back, and an invisible child costs
+    // one layout skip. GTK gives no clicks to a hidden widget, so the bay
+    // popovers are unreachable too.
+    track.append(&follow_setting(board, |bar| bar.board));
     if let Some(presence) = presence::build() {
-        track.append(&presence);
+        track.append(&follow_setting(presence, |bar| bar.presence));
     }
     track.append(&clock::build());
     right.append(&track);
@@ -317,6 +314,24 @@ fn build_bar_window(
     (window, decision)
 }
 
+/// Show `widget` while `wanted` says so, now and on every settings change.
+/// A weak ref, so a bar whose output was unplugged does not keep its
+/// segments alive through the observer list.
+fn follow_setting<W: IsA<gtk4::Widget>>(
+    widget: W,
+    wanted: fn(&crate::settings::store::Bar) -> bool,
+) -> W {
+    let shown = move || crate::settings::store::with(|s| wanted(&s.bar()));
+    widget.set_visible(shown());
+    let weak = widget.downgrade();
+    crate::settings::store::observe(move || {
+        if let Some(widget) = weak.upgrade() {
+            widget.set_visible(shown());
+        }
+    });
+    widget
+}
+
 pub fn run() {
     let app = gtk4::Application::builder()
         .application_id(APP_ID)
@@ -333,6 +348,7 @@ pub fn run() {
             return;
         }
         theme::load_css();
+        crate::settings::store::init();
         // Keeps itself alive through its main-context event loop.
         let sway = SwayService::start();
         // The standalone bar starts its own sound-server connection: the
