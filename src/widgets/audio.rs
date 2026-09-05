@@ -685,6 +685,12 @@ impl AudioSection {
     /// something (the OSD's volume keys). It no longer reads anything: the
     /// snapshot is already correct by the time anyone asks.
     pub fn refresh(&self) {
+        // The Keys group's boost switch: the rail ends where the keys do.
+        let ceiling = crate::settings::store::current().keys().volume_ceiling() * 100.0;
+        let scale = self.output_volume_scale();
+        if scale.adjustment().upper() != ceiling {
+            scale.set_range(0.0, ceiling);
+        }
         Self::apply_snapshot(
             &self.widgets,
             &self.updating,

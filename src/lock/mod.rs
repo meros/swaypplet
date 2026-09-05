@@ -271,6 +271,8 @@ pub fn run() -> ! {
     // the live desktop on screen for; the compositor draws the wallpaper now,
     // so there is nothing left to decode.
     crate::theme::load_css();
+    // The motion setting, for the fade and the ring (`anim::duration`).
+    crate::settings::store::init();
     stage("css");
 
     // Pre-warmed mode: absorb the first-window cost and park until told to
@@ -525,7 +527,15 @@ pub fn run() -> ! {
             // Face attempts share the fingerprint worker's event type but not
             // its pill: the UI has one biometric indicator and the finger owns
             // it, so a face match unlocks and everything else only logs.
-            {
+            //
+            // Gated on the Idle & Lock tab's switch, read from the file at
+            // lock time: this is its own process, and a lock is the moment
+            // the answer matters. Off only removes a way in.
+            let face_unlock = crate::settings::store::Settings::load().idle().face_unlock;
+            if !face_unlock {
+                log::info!("lock: face unlock off (setting)");
+            }
+            if face_unlock {
                 let face_rx = face::start(user_for_face.clone());
                 let surfaces = surfaces.clone();
                 let end_lock = end_lock.clone();

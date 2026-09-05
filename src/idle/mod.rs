@@ -10,13 +10,19 @@
 //!
 //! Behavior ported 1:1 from the old swayidle config (users/modules/swayidle.nix
 //! in the nixos repo — see its comments for the incident history behind each
-//! rule):
+//! rule). The durations are the defaults; the settings pane's Idle & Lock tab
+//! overrides them (`settings::store::Idle`):
 //!
 //!   240 s  dim to 10% brightness, restore on resume
 //!   300 s  lock the session (the screen stays LIT; locking does not blank)
 //!    15 m  power outputs off after this much idle time *while locked*;
 //!          any input disarms it and re-powers
 //!  1200 s  suspend, only on battery
+//!
+//! The pane is another process, so an edit reaches here as a file: this loop
+//! stats `~/.config/swaypplet/settings.json` once a second (`SETTINGS_POLL`)
+//! and, when its mtime moves, reloads and hands the wayland thread new
+//! timeouts to re-arm with. Zero on any tier is "never".
 //!
 //! Locking and blanking are deliberately unrelated. They used to be welded
 //! together in three places, so any lock put the panel out within a second
@@ -82,6 +88,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crate::presence::{self, Event as PresenceEvent};
+use crate::settings::store::{self, Idle, Settings};
 
 pub use wayland::Timeout;
 
@@ -126,20 +133,30 @@ pub enum Ev {
 /// trip.
 const SLEEP_RELEASE_MAX: Duration = Duration::from_secs(4);
 
-/// How long the lock screen may sit idle before the outputs are powered off.
+/// How often the settings file is stat'd for a change. One `stat` a second
+/// is nothing; the latency it sets is how long an edit in the pane takes to
+/// reach the timers.
+const SETTINGS_POLL: Duration = Duration::from_secs(1);
+
+/// When the locked, idle session's outputs should go off, counted from now.
 ///
-/// This is the ONLY thing that blanks the screen. Blanking used to be tangled
-/// into three separate paths: a 600 ms deferred blank after any idle or
-/// presence lock, a 30 s re-blank tier after input while locked, and the
-/// pre-suspend blank. Two of those meant that locking for any reason, or
+/// The blank deadline is the ONLY thing that blanks the screen. Blanking used
+/// to be tangled into three separate paths: a 600 ms deferred blank after any
+/// idle or presence lock, a 30 s re-blank tier after input while locked, and
+/// the pre-suspend blank. Two of those meant that locking for any reason, or
 /// glancing at the machine and looking away, put the panel out within a
 /// second, and the lock screen was effectively never visible.
 ///
 /// Now: lock and blank are unrelated. Locking leaves the screen lit. The
-/// outputs go off only after this much continuous idle time *while locked*,
-/// and any input resets it. The suspend path still blanks, because that is
-/// the machine powering down rather than an idle policy.
-const BLANK_AFTER_LOCK_IDLE: Duration = Duration::from_secs(15 * 60);
+/// outputs go off only after `blank_after_s` of continuous idle time *while
+/// locked*, and any input resets it. The suspend path still blanks, because
+/// that is the machine powering down rather than an idle policy. `None` is
+/// the setting's "never": the lock screen stays lit until something else
+/// turns it off.
+fn blank_deadline(cfg: &Idle) -> Option<Instant> {
+    (cfg.blank_after_s > 0)
+        .then(|| Instant::now() + Duration::from_secs(u64::from(cfg.blank_after_s)))
+}
 
 pub fn run() -> ! {
     let (tx, rx) = mpsc::channel::<Ev>();
@@ -148,7 +165,11 @@ pub fn run() -> ! {
     // across exactly that window: the presence edge that lights the screen is
     // the same edge that starts a face attempt.
     let outputs = Outputs::start();
-    wayland::start(tx.clone());
+    // The timers, from the settings file, and the handle to re-arm them.
+    let mut cfg = Settings::load().idle();
+    let mut settings_file = store::Watch::new();
+    let mut next_settings_check = Instant::now() + SETTINGS_POLL;
+    let timeouts = wayland::start(tx.clone(), wayland::Timeouts::from(&cfg));
     let logind = logind::start(tx.clone());
 
     // Warm the next locker now. The first GTK window a process presents costs
@@ -167,7 +188,7 @@ pub fn run() -> ! {
     // the inhibitor.
     let mut sleep_release: Option<Instant> = None;
     // When the locked, idle session's outputs should go off. Some(_) only
-    // while locked AND idle; any input clears it. See BLANK_AFTER_LOCK_IDLE.
+    // while locked AND idle; any input clears it. See `blank_deadline`.
     let mut blank_at: Option<Instant> = None;
     // Why the current locker was started ("idle" | "manual" | "sleep" |
     // "switch"); decides whether LockerUp blanks the outputs.
@@ -245,16 +266,18 @@ pub fn run() -> ! {
                 // to turn it off again, and the lock screen would sit lit
                 // until someone touched a key.
                 if locker_confirmed {
-                    blank_at = Some(Instant::now() + BLANK_AFTER_LOCK_IDLE);
+                    blank_at = blank_deadline(&cfg);
                 }
                 outputs.power("presence.back", Power::On);
+            } else if !cfg.walk_away_lock {
+                log::info!("presence: user gone — walk-away lock off (setting), not locking");
             } else if crate::inhibit::NoLock.armed() {
                 log::info!("presence: user gone — No Lock armed, not locking");
             } else if crate::inhibit::idle_inhibited() {
                 // Absence is the one tier the compositor cannot suppress for
                 // us. The timeout tiers ride ext-idle-notify, which honours
-                // idle inhibitors on its own (wayland.rs), so Stay Lit or a
-                // video player already holds them off; walking away is not
+                // idle inhibitors on its own (wayland.rs), so a video player
+                // or a hand-set `inhibit_idle` already holds them off; walking away is not
                 // idle, so this path has to ask. One IPC round trip, on an
                 // edge rather than on the tick.
                 log::info!("presence: user gone — idle inhibited, not locking");
@@ -267,6 +290,31 @@ pub fn run() -> ! {
                     &mut lock_reason,
                     "presence",
                 );
+            }
+        }
+
+        // The settings file, once a second. A moved mtime is reloaded whole;
+        // only a change in the idle section is worth a log line and a
+        // re-arm. The blank duration and the dim level are read from `cfg`
+        // at fire time, so they need no re-arm at all.
+        if Instant::now() >= next_settings_check {
+            next_settings_check = Instant::now() + SETTINGS_POLL;
+            if settings_file.changed() {
+                let fresh = Settings::load().idle();
+                if fresh != cfg {
+                    log::info!(
+                        "idle: settings changed — dim {}s to {}%, lock {}s, blank {}s, suspend {}s (0 is never)",
+                        fresh.dim_after_s,
+                        fresh.dim_level,
+                        fresh.lock_after_s,
+                        fresh.blank_after_s,
+                        fresh.suspend_after_s
+                    );
+                    cfg = fresh;
+                    if timeouts.send(wayland::Timeouts::from(&cfg)).is_err() {
+                        log::error!("idle: wayland thread gone; timers not re-armed");
+                    }
+                }
             }
         }
 
@@ -293,7 +341,7 @@ pub fn run() -> ! {
             // must still be on the seat, since a switch-away lock leaves our
             // idle timers running on a VT we no longer own.
             if locker_confirmed && session_active {
-                log::info!("lock.blank: {BLANK_AFTER_LOCK_IDLE:?} idle while locked");
+                log::info!("lock.blank: {}s idle while locked", cfg.blank_after_s);
                 outputs.power("lock.blank", Power::Off);
             } else {
                 log::info!("lock.blank: skipped (session inactive or locker gone)");
@@ -315,10 +363,11 @@ pub fn run() -> ! {
                 // it: a screen that fades while you read it is the same
                 // complaint as one that locks while you read it.
                 if crate::inhibit::NoLock.armed() {
-                    log::info!("idle.dim-240s: skip (No Lock)");
+                    log::info!("idle.dim: skip (No Lock)");
                 } else {
                     dimmed = true;
-                    outputs.brightness("idle.dim-240s", 10);
+                    log::info!("idle.dim: {}s idle — {}%", cfg.dim_after_s, cfg.dim_level);
+                    outputs.brightness("idle.dim", cfg.dim_level);
                 }
             }
             // Restore only what this tier faded. The resume fires whether or
@@ -327,7 +376,7 @@ pub fn run() -> ! {
             // No Lock.
             Ev::Resumed(Timeout::Dim) => {
                 if std::mem::take(&mut dimmed) {
-                    outputs.brightness("idle.dim-240s.resume", 100);
+                    outputs.brightness("idle.dim.resume", 100);
                 }
             }
 
@@ -337,11 +386,11 @@ pub fn run() -> ! {
                 // owns locking instead; nothing re-arms this tier until input
                 // resumes, which is the intent.
                 if crate::inhibit::NoLock.armed() {
-                    log::info!("idle.lock-300s: skip (No Lock)");
+                    log::info!("idle.lock: skip (No Lock)");
                 } else if present == Some(true) {
-                    log::info!("idle.lock-300s: skip (present)");
+                    log::info!("idle.lock: skip (present)");
                 } else {
-                    log::info!("idle.lock-300s: fire");
+                    log::info!("idle.lock: {}s idle — fire", cfg.lock_after_s);
                     ensure_locked(
                         &tx,
                         &mut locker_active,
@@ -357,8 +406,11 @@ pub fn run() -> ! {
             // This no longer blanks anything by itself.
             Ev::Idled(Timeout::LockIdle) => {
                 if locker_confirmed {
-                    blank_at = Some(Instant::now() + BLANK_AFTER_LOCK_IDLE);
-                    log::info!("lock.blank: armed for {BLANK_AFTER_LOCK_IDLE:?}");
+                    blank_at = blank_deadline(&cfg);
+                    match blank_at {
+                        Some(_) => log::info!("lock.blank: armed for {}s", cfg.blank_after_s),
+                        None => log::info!("lock.blank: never (setting)"),
+                    }
                 }
             }
             // Input while locked: the user is here, so cancel the pending
@@ -378,18 +430,19 @@ pub fn run() -> ! {
                 // sleep the whole machine out from under the user who is
                 // actively on another VT.
                 if !session_active {
-                    log::info!("idle.suspend-1200s: session inactive — skip");
+                    log::info!("idle.suspend: session inactive — skip");
                 } else if on_ac() {
-                    log::info!("idle.suspend-1200s: on AC — skip");
+                    log::info!("idle.suspend: on AC — skip");
                 } else if crate::inhibit::NoSleep.armed() {
                     // No Sleep's inhibitor covers logind's *lid* handling,
                     // and this tier is not logind's. Without this the second
                     // path wins anyway: shut the lid on battery, and twenty
                     // minutes later the machine this switch exists to keep
                     // awake suspends itself.
-                    log::info!("idle.suspend-1200s: No Sleep armed — skip");
+                    log::info!("idle.suspend: No Sleep armed — skip");
                 } else {
-                    run_cmd("idle.suspend-1200s", "systemctl", &["suspend"]);
+                    log::info!("idle.suspend: {}s idle on battery", cfg.suspend_after_s);
+                    run_cmd("idle.suspend", "systemctl", &["suspend"]);
                 }
             }
             Ev::Resumed(Timeout::Suspend) => {}
@@ -465,10 +518,13 @@ pub fn run() -> ! {
                     // where face unlock reports what it is doing, and a panel
                     // that goes dark a second after locking made that
                     // invisible. Blanking waits for real idle time.
-                    blank_at = Some(Instant::now() + BLANK_AFTER_LOCK_IDLE);
+                    blank_at = blank_deadline(&cfg);
                     log::info!(
-                        "lock: locker up ({lock_reason}) — screen stays lit, \
-                         blank in {BLANK_AFTER_LOCK_IDLE:?}"
+                        "lock: locker up ({lock_reason}) — screen stays lit, blank in {}",
+                        match blank_at {
+                            Some(_) => format!("{}s", cfg.blank_after_s),
+                            None => "never (setting)".to_string(),
+                        }
                     );
                 }
                 // Record the lock in logind so a service restart can recover

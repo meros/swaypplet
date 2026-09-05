@@ -4,12 +4,19 @@
 //! a free-running 60 s interval: every fire re-aims, so timer drift can
 //! never let the readout lag the wall clock. Click toggles waybar's alt
 //! format (date instead of time).
+//!
+//! The format comes from the Bar tab of the settings pane
+//! (`settings::store::Bar`): 24-hour or 12-hour, and whether the date rides
+//! beside the time. Both are read at every tick, so a change lands on the
+//! next minute at the latest and, through the observer, at once.
 
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
 use gtk4::prelude::*;
+
+use crate::settings::store::{self, Bar};
 
 // Waybar's clock formats: "󰥔 {:%H:%M}" with alt "󰃮 {:%Y-%m-%d}".
 const ICON_TIME: &str = "󰥔";
@@ -34,7 +41,8 @@ pub fn build() -> gtk4::Button {
                 return false;
             };
             if let Ok(now) = glib::DateTime::now_local() {
-                label.set_label(&clock_text(&now, show_date.get()));
+                let bar = store::with(|s| s.bar());
+                label.set_label(&clock_text(&now, show_date.get(), &bar));
             }
             true
         })
@@ -45,6 +53,12 @@ pub fn build() -> gtk4::Button {
         let update = update.clone();
         btn.connect_clicked(move |_| {
             show_date.set(!show_date.get());
+            update();
+        });
+    }
+    {
+        let update = update.clone();
+        store::observe(move || {
             update();
         });
     }
@@ -74,15 +88,25 @@ fn millis_to_next_minute() -> Duration {
 }
 
 /// Label text for `now` in the active format (unit-tested).
-fn clock_text(now: &glib::DateTime, show_date: bool) -> String {
-    let (icon, pattern) = if show_date {
-        (ICON_DATE, "%Y-%m-%d")
+///
+/// The alt view is always the ISO date, whatever the settings say: it is
+/// the one you click for, and it is there to be copied.
+fn clock_text(now: &glib::DateTime, show_date: bool, bar: &Bar) -> String {
+    if show_date {
+        return match now.format("%Y-%m-%d") {
+            Ok(s) => format!("{ICON_DATE} {s}"),
+            Err(_) => ICON_DATE.to_string(),
+        };
+    }
+    let time = if bar.clock_24h { "%H:%M" } else { "%-I:%M %p" };
+    let pattern = if bar.clock_date {
+        format!("{time}  %a %-d %b")
     } else {
-        (ICON_TIME, "%H:%M")
+        time.to_string()
     };
-    match now.format(pattern) {
-        Ok(s) => format!("{icon} {s}"),
-        Err(_) => icon.to_string(),
+    match now.format(&pattern) {
+        Ok(s) => format!("{ICON_TIME} {s}"),
+        Err(_) => ICON_TIME.to_string(),
     }
 }
 
@@ -97,16 +121,42 @@ mod tests {
     #[test]
     fn time_format_is_hours_minutes() {
         assert_eq!(
-            clock_text(&at("2026-08-02T14:05:09+02:00"), false),
+            clock_text(&at("2026-08-02T14:05:09+02:00"), false, &Bar::default()),
             "󰥔 14:05"
         );
     }
 
     #[test]
-    fn alt_format_is_iso_date() {
+    fn alt_format_is_iso_date_whatever_the_settings() {
+        let bar = Bar {
+            clock_24h: false,
+            clock_date: true,
+            ..Bar::default()
+        };
         assert_eq!(
-            clock_text(&at("2026-08-02T14:05:09+02:00"), true),
+            clock_text(&at("2026-08-02T14:05:09+02:00"), true, &bar),
             "󰃮 2026-08-02"
+        );
+    }
+
+    #[test]
+    fn twelve_hour_and_the_date_beside_the_time() {
+        let bar = Bar {
+            clock_24h: false,
+            clock_date: true,
+            ..Bar::default()
+        };
+        assert_eq!(
+            clock_text(&at("2026-08-02T14:05:09+02:00"), false, &bar),
+            "󰥔 2:05 PM  Sun 2 Aug"
+        );
+        let bar = Bar {
+            clock_date: true,
+            ..Bar::default()
+        };
+        assert_eq!(
+            clock_text(&at("2026-08-02T09:05:09+02:00"), false, &bar),
+            "󰥔 09:05  Sun 2 Aug"
         );
     }
 }

@@ -23,6 +23,7 @@ use swayipc::{Node, NodeType};
 use crate::anim;
 use crate::layer_shell::LayerShellConfig;
 use crate::notifications::ImageSource;
+use crate::settings::store::{Alerts, Corner};
 use crate::surface::GlassSurface;
 
 use super::store::{self, NotificationStore};
@@ -37,24 +38,19 @@ const EDGE_MARGIN: i32 = 12;
 // slot by moving the surface would be a configure round trip per frame.
 const WINDOW_WIDTH: i32 = CARD_WIDTH + 2 * EDGE_MARGIN;
 const WINDOW_HEIGHT: i32 = 720;
-// Cards shown at full size before older ones collapse behind the stack
-const FULL_VISIBLE: usize = 3;
+// Cards shown at full size before older ones collapse behind the stack is
+// the Alerts tab's `stack`; behind them this many more peek out before the
+// oldest is evicted.
+const COLLAPSED_TAIL: usize = 2;
 // Vertical gap between fully visible cards
 const GAP: f64 = 8.0;
 // Collapsed cards peek out below the last full card by this much per level
 const PEEK: f64 = 12.0;
 const PEEK_SCALE_STEP: f64 = 0.05;
-const MAX_POPUPS: usize = 5;
-// How many cards one app may hold at once. Without this a chatty app fills
-// the stack and evicts everything you had not read yet; past the cap its
-// oldest card gives way to its newest and the overflow is counted on the
-// survivor instead.
-//
-// Set to the fully-visible band rather than lower: one app may fill the
-// cards shown at full size and no more, which still leaves the collapsed
-// tail for everyone else. Tighter than this and three ordinary notifications
-// in a row from one app drop one immediately, which reads as a bug.
-const MAX_PER_APP: usize = FULL_VISIBLE;
+// How many cards one app may hold at once is the stack depth: one app may
+// fill the cards shown at full size and no more, which still leaves the
+// collapsed tail for everyone else. Past the cap its oldest card gives way
+// to its newest and the overflow is counted on the survivor instead.
 
 /// The action key a sender uses to ask for a reply field (KDE's convention,
 /// which is what the `inline-reply` capability promises).
@@ -65,19 +61,43 @@ const INLINE_REPLY_KEY: &str = "inline-reply";
 const DRAG_CLAIM_PX: f64 = 8.0;
 const DRAG_DISMISS_PX: f64 = 72.0;
 
-const BASE_TIMEOUT_MS: u64 = 5000;
-const PER_CHAR_MS: u64 = 40;
+/// The Alerts tab, read once per card: a card keeps the corner and the
+/// stack depth it was born with, so a change lands on the next card rather
+/// than moving the ones on screen.
+fn alerts() -> Alerts {
+    crate::settings::store::with(|s| s.alerts())
+}
 
-static POPUP_CONFIG: LayerShellConfig = LayerShellConfig {
-    namespace: "swaypplet-notification",
-    layer: gtk4_layer_shell::Layer::Overlay,
-    exclusive: false,
-    default_width: Some(WINDOW_WIDTH),
-    default_height: Some(WINDOW_HEIGHT),
-    anchors: &[(Edge::Top, true), (Edge::Right, true)],
-    margins: &[],
-    keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
-};
+/// One column per corner. Anchors are protocol state on the surface, so a
+/// corner is a config rather than a number.
+const fn popup_config(anchors: &'static [(Edge, bool)]) -> LayerShellConfig {
+    LayerShellConfig {
+        namespace: "swaypplet-notification",
+        layer: gtk4_layer_shell::Layer::Overlay,
+        exclusive: false,
+        default_width: Some(WINDOW_WIDTH),
+        default_height: Some(WINDOW_HEIGHT),
+        anchors,
+        margins: &[],
+        keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
+    }
+}
+
+static POPUP_TOP_RIGHT: LayerShellConfig = popup_config(&[(Edge::Top, true), (Edge::Right, true)]);
+static POPUP_TOP_LEFT: LayerShellConfig = popup_config(&[(Edge::Top, true), (Edge::Left, true)]);
+static POPUP_BOTTOM_RIGHT: LayerShellConfig =
+    popup_config(&[(Edge::Bottom, true), (Edge::Right, true)]);
+static POPUP_BOTTOM_LEFT: LayerShellConfig =
+    popup_config(&[(Edge::Bottom, true), (Edge::Left, true)]);
+
+fn config_for(corner: Corner) -> &'static LayerShellConfig {
+    match corner {
+        Corner::TopRight => &POPUP_TOP_RIGHT,
+        Corner::TopLeft => &POPUP_TOP_LEFT,
+        Corner::BottomRight => &POPUP_BOTTOM_RIGHT,
+        Corner::BottomLeft => &POPUP_BOTTOM_LEFT,
+    }
+}
 
 enum Timer {
     None,
@@ -106,6 +126,8 @@ struct Card {
     age: Option<gtk4::Label>,
     /// On its way out: still on screen, but no longer part of the stack.
     exiting: bool,
+    /// Which column the surface was anchored to, for the reflow.
+    corner: Corner,
 }
 
 struct State {
@@ -131,7 +153,7 @@ impl State {
 }
 
 /// Manages the popup notification stack at the top-right: newest on top,
-/// up to FULL_VISIBLE cards fully expanded, older ones collapsed behind
+/// up to the Alerts tab's `stack` cards fully expanded, older ones collapsed behind
 /// the last full card with peeking edges.
 pub struct PopupManager;
 
@@ -216,7 +238,7 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
             .filter(|c| c.app == notif.app_name)
             .map(|c| c.id)
             .collect();
-        (mine.len() >= MAX_PER_APP).then(|| mine[0])
+        (mine.len() >= usize::from(alerts().stack)).then(|| mine[0])
     };
     if let Some(old_id) = crowded {
         start_exit(st, old_id);
@@ -230,7 +252,8 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     // stays open in the store/history)
     let evict = {
         let s = st.borrow();
-        (s.active().count() >= MAX_POPUPS).then(|| s.active().map(|c| c.id).next())
+        (s.active().count() >= usize::from(alerts().stack) + COLLAPSED_TAIL)
+            .then(|| s.active().map(|c| c.id).next())
     };
     if let Some(Some(old_id)) = evict {
         start_exit(st, old_id);
@@ -240,7 +263,8 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
         let s = st.borrow();
         (s.app.clone(), s.hovered)
     };
-    let surface = GlassSurface::new(&app, &POPUP_CONFIG, anim::SLIDE_PX);
+    let corner = alerts().corner;
+    let surface = GlassSurface::new(&app, config_for(corner), anim::SLIDE_PX);
     surface.pane().add_css_class("notification-popup-content");
     surface.pane().set_size_request(CARD_WIDTH, -1);
     // The surface spans the whole column so the card can be placed inside it
@@ -248,8 +272,13 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     // content. A pane left to fill would put `.glass-card` over the entire
     // column, and the compositor would frost every bit of it.
     surface.pane().set_valign(gtk4::Align::Start);
-    surface.pane().set_halign(gtk4::Align::End);
-    surface.pane().set_margin_end(EDGE_MARGIN);
+    if corner.is_left() {
+        surface.pane().set_halign(gtk4::Align::Start);
+        surface.pane().set_margin_start(EDGE_MARGIN);
+    } else {
+        surface.pane().set_halign(gtk4::Align::End);
+        surface.pane().set_margin_end(EDGE_MARGIN);
+    }
     surface.window().add_css_class("notification-popup");
     set_critical_class(surface.pane(), notif);
 
@@ -284,6 +313,7 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
             stamp: notif.timestamp,
             age,
             exiting: false,
+            corner,
         });
     }
 
@@ -378,9 +408,15 @@ fn retire(st: &Rc<RefCell<State>>, id: u32) {
     reflow(st);
 }
 
-/// Give every card its slot: newest at the top, cards past FULL_VISIBLE
-/// collapsed behind the last full one with their bottom edges peeking out.
+/// Give every card its slot: newest nearest the anchored edge, cards past
+/// the stack depth collapsed behind the last full one with their far edges
+/// peeking out.
+///
+/// Computed with the anchored edge at y = 0 and mirrored for a card whose
+/// column hangs from the bottom, so the two layouts are one piece of
+/// arithmetic rather than two.
 fn reflow(st: &Rc<RefCell<State>>) {
+    let full = usize::from(alerts().stack);
     let plan: Vec<(GlassSurface, f64, f64, bool)> = {
         let s = st.borrow();
         let mut y = f64::from(EDGE_MARGIN);
@@ -389,21 +425,27 @@ fn reflow(st: &Rc<RefCell<State>>) {
         let mut plan = Vec::new();
         for (rank, card) in s.cards.iter().rev().filter(|c| !c.exiting).enumerate() {
             let height = card.surface.height();
-            let (slot, scale) = if rank < FULL_VISIBLE {
+            let (slot, scale) = if rank < full {
                 let slot = y;
                 full_top = y;
                 full_bottom = y + height;
                 y += height + GAP;
                 (slot, 1.0)
             } else {
-                let k = (rank - FULL_VISIBLE + 1) as f64;
+                let k = (rank - full + 1) as f64;
                 let scale = 1.0 - PEEK_SCALE_STEP * k;
-                // Bottom edge peeks PEEK px per level below the last full
-                // card; clamp so a tall collapsed card can't poke out above.
+                // Far edge peeks PEEK px per level beyond the last full
+                // card; clamp so a tall collapsed card can't poke out past
+                // the anchored edge.
                 let slot = (full_bottom + PEEK * k - height * scale).max(full_top + 2.0 * k);
                 (slot, scale)
             };
-            plan.push((card.surface.clone(), slot, scale, rank >= FULL_VISIBLE));
+            let slot = if card.corner.is_bottom() {
+                f64::from(WINDOW_HEIGHT) - slot - height
+            } else {
+                slot
+            };
+            plan.push((card.surface.clone(), slot, scale, rank >= full));
         }
         plan
     };
@@ -458,9 +500,11 @@ fn timeout_for(notif: &Notification) -> Option<u64> {
     if notif.expire_timeout > 0 {
         Some(notif.expire_timeout as u64)
     } else {
-        // -1 means server decides: scale with content length
+        // -1 means server decides: scale with content length, from the
+        // Alerts tab's linger.
+        let (base, per_char) = alerts().linger.ms();
         let char_count = notif.summary.len() + notif.body.len();
-        Some(BASE_TIMEOUT_MS + (char_count as u64) * PER_CHAR_MS)
+        Some(base + (char_count as u64) * per_char)
     }
 }
 

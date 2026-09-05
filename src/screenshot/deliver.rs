@@ -22,11 +22,19 @@ use crate::notifications::{ImageSource, Notification, Urgency};
 
 use super::capture::Image;
 
-/// Where shots land. Matches what the panel button wrote before, so an
-/// existing folder of screenshots keeps growing rather than being orphaned.
+/// Where shots land: the Alerts tab's Capture folder, or
+/// `~/Pictures/Screenshots`, which matches what the panel button wrote
+/// before, so an existing folder keeps growing rather than being orphaned.
 fn directory() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    Path::new(&home).join("Pictures/Screenshots")
+    let folder = crate::settings::store::current().capture().folder;
+    if folder.is_empty() {
+        return Path::new(&home).join("Pictures/Screenshots");
+    }
+    match folder.strip_prefix("~/") {
+        Some(rest) => Path::new(&home).join(rest),
+        None => PathBuf::from(folder),
+    }
 }
 
 /// `screenshot-20260811-140632.png` — sortable, and readable as a time.
@@ -98,18 +106,25 @@ pub fn copy(image: &Image) {
 /// Returns the card's id and where the file went, so the caller can tie the
 /// card's buttons back to it.
 ///
-/// One gesture producing both a file and a clipboard entry is the point: the
-/// two are never in tension, and offering them as a choice would only make
-/// the owner pick before knowing which they wanted.
+/// One gesture producing both a file and a clipboard entry is the default:
+/// the two are never in tension. The Capture group can drop either half
+/// for the owner who knows which they want.
 pub fn finish(store: &StoreRef, image: &Image) -> (u32, Option<PathBuf>) {
-    copy(image);
+    let after = crate::settings::store::current().capture().after;
+    if after.copies() {
+        copy(image);
+    }
 
-    let saved = match save(image) {
-        Ok(path) => Some(path),
-        Err(e) => {
-            log::error!("screenshot: {e}");
-            None
+    let saved = if after.saves() {
+        match save(image) {
+            Ok(path) => Some(path),
+            Err(e) => {
+                log::error!("screenshot: {e}");
+                None
+            }
         }
+    } else {
+        None
     };
 
     let (body, actions, picture) = match &saved {
@@ -128,11 +143,12 @@ pub fn finish(store: &StoreRef, image: &Image) -> (u32, Option<PathBuf>) {
         ),
         // Copied but not saved: the clipboard still has it, and offering
         // Open or Delete on a file that does not exist would be a lie.
-        None => (
+        None if after.saves() => (
             "Copied — could not write to disk".to_string(),
             Vec::new(),
             None,
         ),
+        None => ("Copied".to_string(), Vec::new(), None),
     };
 
     let id = store_add(

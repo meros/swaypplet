@@ -122,6 +122,7 @@ pub fn take(app: &gtk4::Application, store: &StoreRef, shot: Shot) {
     }
 
     let store = store.clone();
+    let app_for_editor = app.clone();
     let mode = match shot {
         Shot::Pick => select::Mode::Pick,
         _ => select::Mode::Region,
@@ -138,6 +139,15 @@ pub fn take(app: &gtk4::Application, store: &StoreRef, shot: Shot) {
             Shot::Pick => pick(&store, &selection),
             _ => {
                 keep(&store, &selection.image);
+                // The Capture group's "annotate every shot": the editor
+                // opens on the shot just kept, and what it produces is a
+                // second shot. Kept first, so a closed editor loses nothing.
+                if crate::settings::store::current().capture().annotate {
+                    let store = store.clone();
+                    annotate::open(&app_for_editor, selection.image.clone(), move |edited| {
+                        keep(&store, &edited);
+                    });
+                }
             }
         }
     });
