@@ -3357,9 +3357,9 @@ scale.night-scale highlight {
     animation: face-glance 2.6s ease-in-out infinite;
 }
 .face-ring-looking .face-mouth {
-    /* Neutral: a flat line while nothing is known. */
+    /* Neutral: a flat line while nothing is known. Full thickness -- at the
+       ring's real 22 px a half-height line is a smudge, not a mouth. */
     border-radius: 0;
-    transform: scaleY(0.5);
 }
 
 /* Dark: no motion at all. Nothing is being searched, because no usable frame
@@ -3370,7 +3370,7 @@ scale.night-scale highlight {
     border-top-color: @accent_secondary;
 }
 .face-ring-dark .face-eye { transform: scaleY(0.25); opacity: 0.6; }
-.face-ring-dark .face-mouth { border-radius: 0; transform: scaleY(0.5); opacity: 0.6; }
+.face-ring-dark .face-mouth { border-radius: 0; opacity: 0.6; }
 
 /* Found: the glance stops and the eyes meet yours. The stop is the signal --
    it tells the user to hold still without a word of instruction. */
@@ -3388,7 +3388,9 @@ scale.night-scale highlight {
 /* Recognised: it smiles. The eyes crease, the mouth curves, the ring fills. */
 .face-ring-ok {
     border-color: @accent;
-    background-color: alpha(@accent, 0.25);
+    /* A tint, not a fill: the smile is drawn in the same accent and needs
+       the dark behind it to read. */
+    background-color: alpha(@accent, 0.14);
     animation: face-ring-ok 500ms cubic-bezier(0, 0, 0, 1);
 }
 .face-ring-ok .face-eye {
@@ -3414,8 +3416,11 @@ scale.night-scale highlight {
 .face-ring-fail .face-eye { background-color: @accent_quinary; opacity: 1; }
 .face-ring-fail .face-mouth {
     border-color: @accent_quinary;
-    /* Turned over: the same arc, the other way up. */
-    transform: rotate(180deg) translateY(2px);
+    /* Turned over: the same arc, the other way up, and dropped a little so
+       the turned arc sits under the eyes rather than between them. Order
+       matters: translate first moves along the parent's axis; after the
+       rotation it would move the mouth up instead. */
+    transform: translateY(3px) rotate(180deg);
 }
 
 @keyframes face-glance {
