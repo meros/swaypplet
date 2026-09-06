@@ -1,10 +1,14 @@
-//! GTK4 modal for polkit authentication.
+//! The elevation card: one GTK4 modal for `pkexec` and `sudo`.
 //!
 //! Visual language matches `osd.rs` and `launcher.rs`: full-screen
-//! transparent layer-shell window with a centred dark card. The card
-//! shows an action icon, title, polkit's `message`, a prominent
-//! fingerprint pill (when the helper is asking for one), and a password
-//! entry as the fallback. Cancel via button, Esc, or backdrop click.
+//! transparent layer-shell window with a centred card. What is on it is
+//! described once, by a [`Card`], and which methods are accepting input at
+//! this instant by a [`Methods`]; the orchestrator (`mod.rs`) computes both
+//! and this file only paints them. There is no elevate mode and no polkit
+//! mode, only a card with or without a command well, with or without a
+//! password field, and a caption that names what works right now.
+//!
+//! Cancel via button, Esc, or backdrop click.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -15,7 +19,7 @@ use gtk4_layer_shell::Edge;
 use crate::auth_field::{AuthField, Caption, Tone};
 use crate::layer_shell::{self, LayerShellConfig};
 
-use super::agent::AuthRequest;
+use super::agent::ResolvedIdentity;
 
 static POLKIT_CONFIG: LayerShellConfig = LayerShellConfig {
     namespace: "swaypplet-polkit",
@@ -36,13 +40,64 @@ static POLKIT_CONFIG: LayerShellConfig = LayerShellConfig {
 /// Nerd Font check, for the approved state.
 const ICON_OK: &str = "\u{f012c}";
 
-/// Visual treatment of the status line below the fingerprint pill.
+/// Visual treatment of the status line.
 #[derive(Clone, Copy, Default)]
 pub enum StatusKind {
     #[default]
     Info,
     Error,
     Success,
+}
+
+/// Everything the card says about the request. Decided before the card is
+/// presented and never changed while it is up: a card that resizes under a
+/// pointer already moving toward a button is the bug docs/AUTH_CARD.md was
+/// written to kill.
+pub struct Card<'a> {
+    pub title: &'a str,
+    pub message: &'a str,
+    /// polkit's icon, and the action id its glyph falls back on. Empty for
+    /// a request polkit never saw.
+    pub icon_name: &'a str,
+    pub action_id: &'a str,
+    /// The command line, in a well of its own, for a request that has no
+    /// vendor message to describe it: `sudo` reaches this card through
+    /// pam_race, and the command is the only thing that distinguishes a
+    /// request the user made from one they did not.
+    pub command: Option<&'a str>,
+    /// The accounts polkit will accept. One or none hides the picker.
+    pub identities: &'a [ResolvedIdentity],
+    pub details: String,
+    /// Whether a password typed here reaches the conversation. False only
+    /// for a face check with no pam_race link behind it, where the terminal
+    /// alone owns the prompt.
+    pub password: bool,
+}
+
+/// Which methods are accepting input at this instant. The caption's resting
+/// sentence is computed from this and nothing else — the honesty rule.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct Methods {
+    pub face: bool,
+    pub fp: bool,
+    pub password: bool,
+}
+
+impl Methods {
+    /// What the user may do right now, as one sentence. Every combination
+    /// has words, so the line is never empty.
+    pub fn resting(self) -> &'static str {
+        match (self.face, self.fp, self.password) {
+            (true, true, true) => "Look at the camera, touch the reader or enter your password",
+            (true, false, true) => "Look at the camera or enter your password to allow this",
+            (false, true, true) => "Touch the reader or enter your password to allow this",
+            (false, false, true) => "Enter your password to allow this",
+            (true, true, false) => "Look at the camera or touch the reader to allow this",
+            (true, false, false) => "Look at the camera to allow this",
+            (false, true, false) => "Touch the reader to allow this",
+            (false, false, false) => "Enter your password in the terminal to allow this",
+        }
+    }
 }
 
 /// Callbacks the controller installs each time it presents the dialog.
@@ -55,20 +110,22 @@ pub enum StatusKind {
 /// `borrow`. GTK signal trampolines cannot unwind, so that panic aborted the
 /// process rather than raising: the agent died, its faced registration went
 /// with it, and elevation quietly stopped working until systemd restarted it.
-struct Callbacks {
-    on_password: Rc<dyn Fn(String)>,
-    on_cancel: Rc<dyn Fn()>,
-    on_identity: Rc<dyn Fn(u32)>,
+pub struct Callbacks {
+    /// Enter or the button. The text is the password; empty is the Allow
+    /// press, which only means something once a face has matched.
+    pub on_submit: Rc<dyn Fn(String)>,
+    pub on_cancel: Rc<dyn Fn()>,
+    pub on_identity: Rc<dyn Fn(u32)>,
     /// Fired on the first keystroke in the password entry. The controller
     /// uses it to abandon a face check that is still running, so the user
     /// who has decided to type does not have to wait out the camera.
-    on_typing: Rc<dyn Fn()>,
+    pub on_typing: Rc<dyn Fn()>,
 }
 
 impl Default for Callbacks {
     fn default() -> Self {
         Self {
-            on_password: Rc::new(|_| {}),
+            on_submit: Rc::new(|_| {}),
             on_cancel: Rc::new(|| {}),
             on_identity: Rc::new(|_| {}),
             on_typing: Rc::new(|| {}),
@@ -102,18 +159,8 @@ pub struct PolkitDialog {
     callbacks: Rc<RefCell<Callbacks>>,
     /// Caps Lock, so a rejection composes the warning onto its own line.
     caps: Cell<bool>,
-    /// Is the reader armed right now? The caption's resting sentence is
-    /// computed from this and nothing else — the honesty rule.
-    fp_armed: Cell<bool>,
-    /// The elevate path has no password to type, so its resting sentence
-    /// names the camera instead.
-    elevate: Cell<bool>,
-    /// Does the calling user have enrolled fingerprints? Answered off-thread
-    /// once, at agent start, so `present` knows whether to lay out a
-    /// fingerprint row long before PAM offers one. `None` until it lands (and
-    /// when fprintd would not say), which reads as yes: a slot held open for
-    /// a reader that never arms is quieter than one that appears late.
-    fp_expected: Cell<Option<bool>>,
+    /// What is accepting input right now. See [`Methods`].
+    methods: Cell<Methods>,
 }
 
 impl PolkitDialog {
@@ -343,47 +390,26 @@ impl PolkitDialog {
             identities: identities.clone(),
             callbacks: callbacks.clone(),
             caps: Cell::new(false),
-            fp_armed: Cell::new(false),
-            elevate: Cell::new(false),
-            fp_expected: Cell::new(None),
+            methods: Cell::new(Methods::default()),
         });
-
-        // Ask fprintd now, while the agent is starting and nobody is waiting
-        // on a dialog. The answer decides whether the card carries a
-        // fingerprint row, and that has to be settled before a card is shown,
-        // not when PAM gets round to offering the reader.
-        {
-            let dialog = dialog.clone();
-            crate::spawn::spawn_work(crate::fp::self_enrolled_blocking, move |enrolled| {
-                dialog.fp_expected.set(enrolled);
-            });
-        }
 
         // Wire interactions — handlers fire the closures from `callbacks`
         // so the controller can swap them per session.
 
-        // Password submit (Enter on entry)
+        // Submit: Enter on the entry, or the button. Same closure, because
+        // they are the same act.
         {
             let cbs = callbacks.clone();
             let entry = password_entry.clone();
-            password_entry.connect_activate(move |_| {
+            let submit = Rc::new(move || {
                 let text = entry.text().to_string();
                 entry.set_text("");
-                let cb = cbs.borrow().on_password.clone();
+                let cb = cbs.borrow().on_submit.clone();
                 cb(text);
             });
-        }
-
-        // Authenticate button → submit current password text
-        {
-            let cbs = callbacks.clone();
-            let entry = password_entry.clone();
-            auth_btn.connect_clicked(move |_| {
-                let text = entry.text().to_string();
-                entry.set_text("");
-                let cb = cbs.borrow().on_password.clone();
-                cb(text);
-            });
+            let s = submit.clone();
+            password_entry.connect_activate(move |_| s());
+            auth_btn.connect_clicked(move |_| submit());
         }
 
         // First keystroke means the user has chosen the password. Tell the
@@ -488,66 +514,60 @@ impl PolkitDialog {
 
     // ─── Lifecycle ────────────────────────────────────────────────────
 
-    pub fn present(
-        &self,
-        request: &AuthRequest,
-        on_password: Box<dyn Fn(String)>,
-        on_cancel: Box<dyn Fn()>,
-        on_identity: Box<dyn Fn(u32)>,
-        on_typing: Box<dyn Fn()>,
-    ) {
-        // Reset state
+    /// Show the card. Every control it can ever show is laid out now, before
+    /// it is presented, and nothing is added afterwards. Affordances arrive
+    /// on PAM's schedule — the reader arms, the camera opens, the prompt
+    /// lands — and each of them is a paint change on a slot held from the
+    /// first frame. Text typed before PAM asks for it is buffered by the
+    /// orchestrator rather than dropped, so an entry that is ready early
+    /// costs nothing and answers the question every user of this dialog
+    /// asks first: can I just type it?
+    pub fn present(&self, card: &Card, callbacks: Callbacks) {
         self.password_entry.set_text("");
-        self.password_entry.set_sensitive(true);
-        self.auth_btn.set_sensitive(true);
-        self.set_status("", StatusKind::Info);
-        // Every control this card can ever show is laid out now, before it is
-        // presented, and nothing is added to it afterwards. The affordances
-        // arrive on PAM's schedule — the fingerprint prompt first, the
-        // password prompt after it times out — and revealing each as it
-        // landed grew the card twice while the user was reading it, the
-        // second time under a pointer already moving toward a button.
-        //
-        // So the pill's space is held from the start (blank until the reader
-        // is armed), and the password row is simply present: text typed
-        // before PAM asks for it is buffered rather than dropped, so an entry
-        // that is ready early costs nothing and answers the question every
-        // user of this dialog asks first — can I just type it?
-        self.elevate.set(false);
-        self.field.widget().set_visible(true);
-        self.field.set_fp_armed(false);
-        self.fp_armed.set(false);
-        self.password_entry.set_visible(true);
         self.password_entry.set_placeholder_text(Some("Password"));
-        self.auth_btn.set_visible(true);
-        self.auth_btn.set_sensitive(true);
-        self.auth_btn.set_label("Authenticate");
-        self.face_well.set_visible(false);
-        self.face_consequence.set_visible(false);
+        self.set_status("", StatusKind::Info);
         self.card.remove_css_class("polkit-shake");
         self.card.remove_css_class("polkit-success");
         self.card.remove_css_class("polkit-verifying");
+        self.field.set_busy(false);
+        self.field.set_fp_armed(false);
         self.caps.set(caps_lock_on());
-        self.refresh_resting();
 
-        // Title + message
-        self.title_label.set_label("Authentication Required");
-        self.message_label.set_label(if request.message.is_empty() {
-            "An action requires authorization."
-        } else {
-            request.message.as_str()
+        // The field is the one thing decided per card rather than per
+        // instant: a face check with no conversation behind it has nothing
+        // to type into, and holding an entry open that leads nowhere would
+        // be the card lying about what it can do.
+        self.field.widget().set_visible(card.password);
+        self.password_entry.set_visible(card.password);
+        self.password_entry.set_sensitive(card.password);
+        self.methods.set(Methods {
+            password: card.password,
+            ..Methods::default()
         });
+        self.caption.set_resting(self.methods.get().resting());
 
-        // Icon
-        self.set_icon(&request.icon_name, &request.action_id);
+        self.title_label.set_label(card.title);
+        self.message_label.set_label(card.message);
+        self.set_icon(card.icon_name, card.action_id);
 
-        // Identities
-        *self.identities.borrow_mut() = request.identities.iter().map(|i| i.uid).collect();
-        if request.identities.len() <= 1 {
+        match card.command {
+            Some(command) => {
+                self.face_command.set_label(command);
+                self.face_well.set_visible(true);
+                self.face_consequence.set_visible(true);
+            }
+            None => {
+                self.face_well.set_visible(false);
+                self.face_consequence.set_visible(false);
+            }
+        }
+
+        *self.identities.borrow_mut() = card.identities.iter().map(|i| i.uid).collect();
+        if card.identities.len() <= 1 {
             self.identity_row.set_visible(false);
         } else {
             let model = gtk4::StringList::new(&[]);
-            for ident in &request.identities {
+            for ident in card.identities {
                 model.append(&ident.username);
             }
             self.identity_combo.set_model(Some(&model));
@@ -555,89 +575,31 @@ impl PolkitDialog {
             self.identity_row.set_visible(true);
         }
 
-        // Details
-        self.details_label.set_label(&format_details(request));
+        self.details_label.set_label(&card.details);
         self.details_revealer.set_reveal_child(false);
 
-        // Install fresh callbacks
-        *self.callbacks.borrow_mut() = Callbacks {
-            on_password: on_password.into(),
-            on_cancel: on_cancel.into(),
-            on_identity: on_identity.into(),
-            on_typing: on_typing.into(),
-        };
+        // The button submits a password when there is one to submit. With
+        // no field it is the Allow press and nothing else, and it waits,
+        // disabled rather than absent, for a face to match: a button that
+        // appeared only then would move the layout under the user's hands at
+        // exactly the moment a press becomes consequential.
+        self.auth_btn.set_visible(true);
+        self.auth_btn.set_label(if card.password {
+            "Authenticate"
+        } else {
+            "Allow"
+        });
+        self.auth_btn.set_sensitive(card.password);
+
+        *self.callbacks.borrow_mut() = callbacks;
 
         // The entry is on the card from the first frame, so the caret belongs
         // in it from the first frame too — `set_password_prompt` grabs it
         // again when PAM actually asks, which is late enough to lose the
         // first keystrokes of someone who started typing immediately.
-        self.password_entry.grab_focus();
-        self.reveal.show();
-    }
-
-    /// Present the card for an elevation that polkit knows nothing about.
-    ///
-    /// `sudo` reaches face authentication through pam_race directly, so there
-    /// is no polkit action, no vendor message and no identity list — only the
-    /// process that asked. The card is otherwise the same card, because from
-    /// the user's side it is the same decision: something wants to run as
-    /// root, and they are being asked whether it may.
-    ///
-    /// There is no password entry here. pam_race does prompt for a password,
-    /// but it prompts on the terminal that ran `sudo`, through that terminal's
-    /// own conversation — this card never sees it. What it can never prompt
-    /// for is the confirm, because a prompt is answerable by a pipe, which is
-    /// the whole reason the confirm lives in the session. So the card carries
-    /// the press and the terminal carries the password, and they race.
-    pub fn present_elevate(
-        &self,
-        command: &str,
-        on_allow: Box<dyn Fn(String)>,
-        on_cancel: Box<dyn Fn()>,
-    ) {
-        self.set_status("", StatusKind::Info);
-        // No password here (see above) and no fingerprint: the terminal owns
-        // one and pam_race's own child process owns the other. The field goes
-        // with them, and the face reports through the caption, which the card
-        // has anyway.
-        self.elevate.set(true);
-        self.field.widget().set_visible(false);
-        self.password_entry.set_text("");
-        self.caps.set(false);
-        self.refresh_resting();
-        self.identity_row.set_visible(false);
-        self.card.remove_css_class("polkit-shake");
-        self.card.remove_css_class("polkit-success");
-        self.card.remove_css_class("polkit-verifying");
-
-        // Name the consequence, not the ceremony. "Authenticate as meros"
-        // describes the mechanism; "Administrator access" describes what the
-        // user is about to hand out, which is the thing worth reading.
-        self.title_label.set_label("Administrator access");
-        self.message_label
-            .set_label("A program is asking to run as root.");
-        self.set_icon("", "");
-
-        self.face_command.set_label(command);
-        self.face_well.set_visible(true);
-        self.face_consequence.set_visible(true);
-        self.details_label.set_label(&format!("Command: {command}"));
-        self.details_revealer.set_reveal_child(false);
-
-        // Disabled, not absent. A button that appeared only once the face
-        // matched would move the layout under the user's hands at exactly the
-        // moment a press becomes consequential.
-        self.auth_btn.set_label("Allow");
-        self.auth_btn.set_visible(true);
-        self.auth_btn.set_sensitive(false);
-
-        *self.callbacks.borrow_mut() = Callbacks {
-            on_password: on_allow.into(),
-            on_cancel: on_cancel.into(),
-            on_identity: Rc::new(|_| {}),
-            on_typing: Rc::new(|| {}),
-        };
-
+        if card.password {
+            self.password_entry.grab_focus();
+        }
         self.reveal.show();
     }
 
@@ -667,39 +629,35 @@ impl PolkitDialog {
         self.caption.status(text, tone, self.caps.get());
     }
 
-    /// The sentence under everything else: what the user may do right now.
-    ///
-    /// The honesty rule. It names the reader only while the reader is armed,
-    /// and never on the elevate path, where there is nothing to type and the
-    /// camera is the only thing being asked.
-    fn refresh_resting(&self) {
-        self.caption.set_resting(if self.elevate.get() {
-            "Look at the camera to allow this"
-        } else if self.fp_armed.get() {
-            "Touch the reader or enter your password to allow this"
-        } else {
-            "Enter your password to allow this"
-        });
+    /// What is accepting input right now. Repaints the resting sentence and
+    /// the field's arm pulse; never touches an allocation. The password
+    /// half is the card's and cannot be turned on here.
+    pub fn set_methods(&self, methods: Methods) {
+        let methods = Methods {
+            password: self.methods.get().password,
+            ..methods
+        };
+        if self.methods.replace(methods) == methods {
+            return;
+        }
+        self.field.set_fp_armed(methods.fp);
+        self.caption.set_resting(methods.resting());
     }
 
-    /// The reader armed, or stood down. A mark and a sentence, not a row.
-    pub fn show_fingerprint(&self, active: bool, label: &str) {
-        // fprintd's own words when it has some; otherwise the resting
-        // sentence already says what to do and repeating it is noise.
-        if active && !label.is_empty() && label != "Touch fingerprint reader" {
-            self.caption.fp_hint(label);
-        }
-        if self.fp_armed.replace(active) != active {
-            self.field.set_fp_armed(active);
-            self.refresh_resting();
+    /// A word from a method still running — a reader hint, what the camera
+    /// saw. Holds a moment, then the resting sentence returns.
+    pub fn hint(&self, text: &str) {
+        if !text.is_empty() {
+            self.caption.hint(text);
         }
     }
 
-    /// Show or hide the face check status on the dialog caption.
-    pub fn show_face(&self, active: bool, _state: &str, label: &str) {
-        if active && !label.is_empty() {
-            self.caption.status(label, Tone::Info, self.caps.get());
-        }
+    /// Rejected: the words, the shake, and the inputs back.
+    pub fn reject(&self, text: &str) {
+        self.set_verifying(false);
+        self.set_status(text, StatusKind::Error);
+        self.field.flash_reject();
+        self.shake();
     }
 
     /// Arm the confirm press once the face has matched.
@@ -717,14 +675,16 @@ impl PolkitDialog {
 
     pub fn set_password_prompt(&self, prompt: &str) {
         // PAM gives prompts like "Password: " — strip trailing colon/space
-        // for the placeholder.
-        let cleaned = prompt.trim_end_matches([' ', ':']).to_string();
-        let placeholder = if cleaned.is_empty() {
-            "Password".to_string()
-        } else {
-            cleaned
+        // for the placeholder. pam_race's own prompt names the user and the
+        // other methods ("Password, finger or face for meros"); the caption
+        // already says all of that, so the placeholder keeps the one word.
+        let cleaned = prompt.trim_end_matches([' ', ':']);
+        let placeholder = match cleaned.split_once(" for ") {
+            Some((head, _)) if head.starts_with("Password") => "Password",
+            _ if cleaned.is_empty() => "Password",
+            _ => cleaned,
         };
-        self.password_entry.set_placeholder_text(Some(&placeholder));
+        self.password_entry.set_placeholder_text(Some(placeholder));
         // PAM is requesting a password. The row has been there since the card
         // was presented — all this does is name the prompt and take the
         // caret. The button goes back to submitting a password, in case a
@@ -767,15 +727,19 @@ impl PolkitDialog {
         self.auth_btn.set_sensitive(false);
     }
 
-    /// Grey out input while the helper verifies a response; re-enable after.
+    /// The stack is checking a password; hold the inputs until it answers.
+    /// A border and a word on the field rather than a card-wide dimming:
+    /// greying the whole card for a field-scale event reads as a fault.
     pub fn set_verifying(&self, verifying: bool) {
-        self.password_entry.set_sensitive(!verifying);
-        self.auth_btn.set_sensitive(!verifying);
+        let password = self.methods.get().password;
+        self.password_entry.set_sensitive(password && !verifying);
+        self.auth_btn.set_sensitive(password && !verifying);
+        self.field.set_busy(verifying);
         if verifying {
-            self.card.add_css_class("polkit-verifying");
+            self.set_status("Checking\u{2026}", StatusKind::Info);
         } else {
-            self.card.remove_css_class("polkit-verifying");
-            if self.password_entry.is_visible() {
+            self.caption.clear_status();
+            if password && self.password_entry.is_visible() {
                 self.password_entry.grab_focus();
             }
         }
@@ -841,7 +805,8 @@ fn glyph_for_action(action_id: &str) -> &'static str {
     }
 }
 
-fn format_details(request: &AuthRequest) -> String {
+/// polkit's details, as the card's Details drawer shows them.
+pub fn format_details(request: &super::agent::AuthRequest) -> String {
     let mut lines = Vec::new();
     lines.push(format!("Action: {}", request.action_id));
     if let Some(vendor) = request.details.get("polkit.message") {

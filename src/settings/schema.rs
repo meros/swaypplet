@@ -471,6 +471,46 @@ pub struct Capture {
     pub annotate: bool,
 }
 
+/// Administrator access: what `sudo` and `pkexec` may ask for besides the
+/// password, and where they may ask it.
+///
+/// Read by the polkit agent, which is the process that draws the card for
+/// both and answers pam_race's `begin` (`polkit/race.rs`). Every switch here
+/// removes a way in or a surface; none can make elevation easier than the
+/// password alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Elevate {
+    /// Ask the camera. Off, `sudo` and `pkexec` never open the shutter; the
+    /// reader and the password remain.
+    #[serde(default = "yes")]
+    pub face: bool,
+    /// Draw the card for a `sudo` typed in a terminal. Off, the terminal
+    /// keeps the prompt to itself, and the camera is not asked for it: the
+    /// Allow press lives on the card.
+    #[serde(default = "yes")]
+    pub terminal_card: bool,
+    /// The pill under the lens while the camera runs. Off, the card's
+    /// caption reports the check instead.
+    #[serde(default = "yes")]
+    pub cue: bool,
+    /// The first keystroke in the password field ends a face check that is
+    /// still looking. Off, the camera runs out its window alongside the
+    /// typing.
+    #[serde(default = "yes")]
+    pub typing_abandons_face: bool,
+}
+
+impl Default for Elevate {
+    fn default() -> Self {
+        Elevate {
+            face: true,
+            terminal_card: true,
+            cue: true,
+            typing_abandons_face: true,
+        }
+    }
+}
+
 // ── The file ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -489,11 +529,13 @@ pub struct Settings {
     pub alerts: Option<Alerts>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture: Option<Capture>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elevate: Option<Elevate>,
 }
 
 impl Settings {
     /// The section names, in the order the file and the pane list them.
-    pub const SECTIONS: [&'static str; 7] = [
+    pub const SECTIONS: [&'static str; 8] = [
         "wallpaper",
         "look",
         "idle",
@@ -501,12 +543,14 @@ impl Settings {
         "keys",
         "alerts",
         "capture",
+        "elevate",
     ];
 
     /// The sections with a system layer, which is every one but the
     /// wallpaper: its system default is the sway config's `bg` line.
-    pub const NIX_SECTIONS: [&'static str; 6] =
-        ["look", "idle", "bar", "keys", "alerts", "capture"];
+    pub const NIX_SECTIONS: [&'static str; 7] = [
+        "look", "idle", "bar", "keys", "alerts", "capture", "elevate",
+    ];
 
     /// The section in force: the user's, else the system's, else the
     /// binary's. One per section, so a reader names what it wants.
@@ -531,6 +575,9 @@ impl Settings {
             .or_else(|| system().capture.clone())
             .unwrap_or_default()
     }
+    pub fn elevate(&self) -> Elevate {
+        self.elevate.or(system().elevate).unwrap_or_default()
+    }
 
     /// True when nothing is overridden, which is when the file should not
     /// exist.
@@ -548,6 +595,7 @@ impl Settings {
             keys: Some(self.keys()),
             alerts: Some(self.alerts()),
             capture: Some(self.capture()),
+            elevate: Some(self.elevate()),
         }
     }
 
@@ -571,6 +619,7 @@ impl Settings {
             keys: Some(Keys::default()),
             alerts: Some(Alerts::default()),
             capture: Some(Capture::default()),
+            elevate: Some(Elevate::default()),
         }
     }
 
@@ -716,6 +765,7 @@ section!(Bar, bar, bar);
 section!(Keys, keys, keys);
 section!(Alerts, alerts, alerts);
 section!(Capture, capture, capture);
+section!(Elevate, elevate, elevate);
 
 /// Every `section` or `section.field` in `value` that the structs do not
 /// have.
@@ -756,6 +806,7 @@ mod tests {
         assert_eq!(s.alerts(), Alerts::default());
         assert_eq!(s.capture(), Capture::default());
         assert_eq!(s.look(), Look::default());
+        assert_eq!(s.elevate(), Elevate::default());
     }
 
     #[test]

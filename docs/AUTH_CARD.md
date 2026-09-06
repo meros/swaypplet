@@ -408,3 +408,39 @@ like. The caption reserves two lines and usually says one, and on the lock card
 that leftover falls against the bottom padding and reads as margin. On this
 card there are three rows underneath it, so it reads as a hole, and the
 declared gap has to be the remainder rather than the whole thing.
+
+
+## One card for `sudo` and `pkexec` (2026-09-06)
+
+The card is now the session's, not the face's. Before this, `pkexec` had
+the polkit card with a password field, and `sudo` had the terminal plus a
+face-only card that vanished the instant the camera gave up, so a `sudo`
+whose face check missed lost its GUI three seconds in. pam_race now reports
+every transaction to the polkit agent over `$XDG_RUNTIME_DIR/pam-race.sock`
+(`src/polkit/race.rs`), and a terminal `sudo` gets the same card: password
+field, reader, camera, all racing, and a password typed on the card goes
+back down the socket to pam_race exactly as one typed at the terminal.
+
+The three sources — polkit, pam_race and faced — are joined on the pid of
+the process running pam_race (`sudo` itself, or the polkit helper we spawn),
+so a `begin` or an `announce` naming a card already on screen attaches to
+it rather than drawing a second one. `src/polkit/mod.rs` holds the session;
+`face.rs` attaches the camera to it and, when the camera gives up, drops it
+from the caption's resting sentence and says why (`Didn't see you`,
+`Didn't recognise you`, `No infrared light`) without taking the card down.
+
+The caption's resting sentence is computed from a `Methods` triple —
+face, fingerprint, password — and nothing else (`dialog::Methods::resting`).
+Every combination has words, so the line is never empty and the honesty
+rule holds by construction: the reader is named only after pam_race's
+fingerprint helper reports `R` (armed), and the camera only between faced's
+`announce` and its `cancel`.
+
+What is offered is a setting (`elevate` in `docs/SETTINGS.md`): the camera,
+the terminal card, the pill under the lens, and whether typing ends the
+face check. The camera setting travels to pam_race as the answer to its
+`begin`, so an off switch means the shutter never opens.
+
+The face indicator is a face now (`src/face_ring.rs`): eyes that glance
+while looking, still when found, crease into a smile on a match and a frown
+on a miss. Same five states, same pill, same fixed 22 px box.

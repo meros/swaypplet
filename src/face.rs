@@ -47,8 +47,16 @@ pub struct Request {
     /// the behaviour an attacker wants.
     pub peer_exe: String,
     pub peer_cmdline: String,
+    /// The pid of the process asking — `sudo`, or polkit's helper. It is what
+    /// the elevation agent joins this to a card already on screen with.
+    pub peer_pid: u32,
     /// The engine state, on `Progress` only: `looking`, `dark` or `face`.
     pub state: String,
+    /// How the attempt ended, on `Cancel` only: an Outcome (`no_face`,
+    /// `no_match`, `too_dark`, `deadline`, `preempted`, `declined`, `match`)
+    /// or `error`. A card that stays up after the camera gives up needs to
+    /// say which, and must not guess.
+    pub outcome: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -174,7 +182,9 @@ fn run(tx: &Sender<Request>) -> std::io::Result<()> {
             stage,
             peer_exe: field(text, "exe").unwrap_or("").to_string(),
             peer_cmdline: field(text, "cmdline").unwrap_or("").to_string(),
+            peer_pid: number(text, "pid").unwrap_or(0) as u32,
             state: field(text, "state").unwrap_or("").to_string(),
+            outcome: field(text, "outcome").unwrap_or("").to_string(),
         };
         if tx.send_blocking(request).is_err() {
             return Ok(());
@@ -216,6 +226,7 @@ mod tests {
         assert_eq!(field(SAMPLE, "stage"), Some("confirm"));
         assert_eq!(field(SAMPLE, "target_user"), Some("meros"));
         assert_eq!(field(SAMPLE, "exe"), Some("/run/wrappers/bin/sudo"));
+        assert_eq!(number(SAMPLE, "pid"), Some(31844));
         assert_eq!(number(SAMPLE, "expires_ms"), Some(6000));
     }
 

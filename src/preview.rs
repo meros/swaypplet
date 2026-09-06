@@ -157,7 +157,7 @@ pub fn run(component: &str) {
         // shown so one screenshot covers fingerprint pill + password entry.
         // Password "ok" flashes success; anything else shakes.
         if component == "polkit" {
-            use crate::polkit::dialog::PolkitDialog;
+            use crate::polkit::dialog::{Callbacks, Card, Methods, PolkitDialog, StatusKind};
             let dialog = PolkitDialog::new(app);
             let request = crate::polkit::agent::AuthRequest {
                 action_id: "org.freedesktop.policykit.exec".into(),
@@ -171,43 +171,52 @@ pub fn run(component: &str) {
                 identities: Vec::new(),
             };
             let d = dialog.clone();
+            let card = Card {
+                title: "Authentication Required",
+                message: request.message.as_str(),
+                icon_name: "",
+                action_id: request.action_id.as_str(),
+                command: None,
+                identities: &request.identities,
+                details: crate::polkit::dialog::format_details(&request),
+                password: true,
+            };
             dialog.present(
-                &request,
-                Box::new(move |password: String| {
-                    if password == "ok" {
-                        d.set_status("Authenticated", crate::polkit::dialog::StatusKind::Success);
-                        d.flash_success();
-                    } else {
-                        d.set_status(
-                            "Authentication failed",
-                            crate::polkit::dialog::StatusKind::Error,
-                        );
-                        d.shake();
-                        d.set_verifying(false);
-                    }
-                }),
-                Box::new(|| std::process::exit(0)),
-                Box::new(|_uid| {}),
-                Box::new(|| {}),
+                &card,
+                Callbacks {
+                    on_submit: std::rc::Rc::new(move |password: String| {
+                        if password == "ok" {
+                            d.set_status("Authenticated", StatusKind::Success);
+                            d.flash_success();
+                        } else {
+                            d.reject("Authentication failed");
+                        }
+                    }),
+                    on_cancel: std::rc::Rc::new(|| std::process::exit(0)),
+                    ..Callbacks::default()
+                },
             );
             // SWAYPPLET_PREVIEW_POLKIT_STATE picks which of the late
             // arrivals to draw. The card's geometry must be the same in every
             // one of them: that is the property the shots are taken to check.
+            let mut methods = Methods {
+                password: true,
+                ..Methods::default()
+            };
             for state in std::env::var("SWAYPPLET_PREVIEW_POLKIT_STATE")
                 .unwrap_or_else(|_| "fp,prompt".into())
                 .split(',')
                 .map(str::trim)
             {
                 match state {
-                    "fp" => dialog.show_fingerprint(true, "Touch fingerprint reader"),
+                    "fp" => methods.fp = true,
+                    "face" => methods.face = true,
                     "prompt" => dialog.set_password_prompt("Password"),
-                    "error" => dialog.set_status(
-                        "Authentication failed",
-                        crate::polkit::dialog::StatusKind::Error,
-                    ),
+                    "error" => dialog.set_status("Authentication failed", StatusKind::Error),
                     _ => {}
                 }
             }
+            dialog.set_methods(methods);
             std::mem::forget(dialog);
             return;
         }

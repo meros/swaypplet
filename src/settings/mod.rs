@@ -2,7 +2,7 @@
 //! thing that can be configured.
 //!
 //! Five tabs. Look, Idle & Lock, Bar and Alerts edit `store::Settings`, one
-//! file with one or two sections each; Glass edits the compositor material
+//! file with one to three sections each; Glass edits the compositor material
 //! and keeps its own file (`glass.rs`, for why). Every tab applies live and
 //! saves after the fact, and every tab has one Reset that puts the defaults
 //! back and removes its sections from the file, so there is always a way
@@ -45,7 +45,9 @@ const TABS: [Tab; 5] = [
     Tab {
         name: "idle",
         title: "Idle & Lock",
-        prefixes: &[":idle", ":lock", ":timeout", ":sleep"],
+        prefixes: &[
+            ":idle", ":lock", ":timeout", ":sleep", ":sudo", ":elevate", ":admin",
+        ],
     },
     Tab {
         name: "bar",

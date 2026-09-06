@@ -38,5 +38,11 @@
     "folder": "",
     "after": "both",
     "annotate": false
+  },
+  "elevate": {
+    "face": true,
+    "terminal_card": true,
+    "cue": true,
+    "typing_abandons_face": true
   }
 }

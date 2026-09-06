@@ -51,7 +51,7 @@ const CAPS_TEXT: &str = "Caps Lock is on";
 
 /// What the caption is currently saying, in priority order. The order is
 /// total and static: an error outranks the Caps Lock edge, which outranks a
-/// fingerprint hint, which outranks the resting sentence.
+/// biometric hint, which outranks the resting sentence.
 ///
 /// No queue and no dwell arithmetic. Two of the four have timers, both
 /// [`DWELL`], and neither can preempt an error; an error holds until the next
@@ -60,7 +60,7 @@ const CAPS_TEXT: &str = "Caps Lock is on";
 enum Rank {
     #[default]
     Resting = 0,
-    FpHint = 1,
+    Hint = 1,
     Caps = 2,
     Status = 3,
 }
@@ -225,10 +225,14 @@ impl Caption {
         }
     }
 
-    /// A fingerprint hint. Holds for [`DWELL`], then the resting sentence
-    /// returns — unless something louder has taken the line meanwhile.
-    pub fn fp_hint(&self, text: &str) {
-        self.transient(Rank::FpHint, text, Tone::Info, "auth-caption-fp");
+    /// A hint from a method that is still running — fprintd's "centre your
+    /// finger", the camera's "didn't see you". Holds for [`DWELL`], then the
+    /// resting sentence returns — unless something louder has taken the
+    /// line meanwhile. One rank for every biometric: a finger hint and a
+    /// face hint are the same kind of thing and never need to outrank each
+    /// other.
+    pub fn hint(&self, text: &str) {
+        self.transient(Rank::Hint, text, Tone::Info, "auth-caption-fp");
     }
 
     /// Caps Lock just changed. The words hold for [`DWELL`] and then give the

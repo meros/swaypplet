@@ -1,18 +1,19 @@
 //! Face authentication, on the card that was already asking.
 //!
 //! `sudo` and `pkexec` are two spellings of one question — may this run as
-//! root? — so they get one answer surface. Before this, face elevation drew a
-//! card of its own, which meant `pkexec` stacked two prompts with two Cancel
-//! buttons and no indication which one the user was answering. The confirm
-//! agent now lives in the polkit agent process and drives the polkit card.
+//! root? — so they get one answer surface. faced opens the camera inside
+//! pam_race's conversation and asks this process, the confirm agent, to
+//! collect the press. This module attaches that check to the session already
+//! on the card (`mod.rs` keys sessions by the pid of the process running
+//! pam_race, which faced names as the peer), reports the camera through the
+//! cue and the caption, arms the Allow button on a match, and answers faced.
 //!
-//! Two shapes, one card:
-//!
-//!   * **pkexec** — polkit is already showing the card, because pam_race runs
-//!     inside the PAM conversation polkit-agent-helper-1 is having. The face
-//!     pill and the camera cue attach to the card that is up.
-//!   * **sudo** — nothing else is asking, so the card is synthesised from the
-//!     peer fields faced supplies. Same card, same wording, same cue.
+//! The card is the session's, not the face's. When the camera gives up the
+//! caption says so and the resting sentence drops the camera from the list
+//! of live methods; the reader and the password are still racing and the
+//! card stays up for them. The old face-only card that vanished the moment
+//! the burst ended is now the fallback for a face check that names no
+//! session at all.
 //!
 //! Why the press stays explicit
 //! ----------------------------
@@ -24,44 +25,41 @@
 //!
 //! Why typing abandons the check
 //! -----------------------------
-//! This used to be about unblocking the stack: PAM is serial, and while
-//! pam_face waited nothing else in it could run, so a user who had decided to
-//! type sat watching a camera they were not looking at hold up their prompt.
-//! pam_race removed that reason — the password prompt and the reader are live
-//! the whole time the camera is, and typing no longer has anything to unblock.
-//!
-//! The rule stays anyway, for the reason that outlived it. A keystroke says
-//! which method this person chose, and a camera that keeps looking after the
-//! answer is elsewhere is a camera running for nothing. So the first keystroke
-//! still answers `deny`, pam_race's face channel closes, and the emitter goes
-//! dark a few seconds early. Refusing your own face check costs nothing: the
-//! password was always going to be accepted.
+//! A keystroke says which method this person chose, and a camera that keeps
+//! looking after the answer is elsewhere is a camera running for nothing. So
+//! the first keystroke answers `deny`, faced cancels the burst, and the
+//! emitter goes dark. Refusing your own face check costs nothing: the
+//! password was always going to be accepted. It is a setting
+//! (`elevate.typing_abandons_face`) because some people type while they wait.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::face::{self, Request, Stage};
+use crate::face::{self, Progress, Request, Stage};
 
 use super::dialog::StatusKind;
-use super::{PolkitState, pop_queue};
+use super::{Backing, PolkitState, Session, elevate_settings, end_session, pop_queue};
 
 /// A face confirm currently on screen.
 pub(super) struct FaceSession {
+    /// faced's id for the attempt.
     pub(super) id: String,
     /// The face has matched and a press now authorises. Until then a press
     /// means nothing, so it cannot be armed by anything but the daemon.
     pub(super) armed: bool,
-    /// We drew the card ourselves (`sudo`), rather than attaching to a polkit
-    /// session already showing one (`pkexec`).
-    pub(super) standalone: bool,
+}
+
+impl FaceSession {
+    fn announced(&self) -> bool {
+        !self.id.is_empty()
+    }
 }
 
 /// Strip the store path off a word without hiding what it is.
 ///
 /// `/nix/store/<hash>-sudo-1.9.17p2/bin/sudo` is true and useless: sixty
 /// characters of hash in a prompt whose whole job is letting someone
-/// recognise, at a glance, the thing they just asked for. Everything on this
-/// system is a store path, so showing them distinguishes nothing.
+/// recognise, at a glance, the thing they just asked for.
 fn prettify(word: &str) -> String {
     match word.rsplit_once('/') {
         Some((head, tail)) if head.starts_with("/nix/store/") && !tail.is_empty() => {
@@ -72,9 +70,6 @@ fn prettify(word: &str) -> String {
 }
 
 /// Shorten a command line for display, keeping both ends.
-///
-/// The tail is what matters (`systemctl restart foo`) and so is the leading
-/// binary, so the middle is what gets elided.
 pub(super) fn summarise(cmdline: &str, exe: &str) -> String {
     let raw = if cmdline.trim().is_empty() {
         exe
@@ -113,110 +108,184 @@ fn on_request(state: &Rc<RefCell<PolkitState>>, req: Request) {
         Stage::Announce => announce(state, req),
         Stage::Progress => progress(state, req),
         Stage::Confirm => confirm(state, req),
-        Stage::Cancel => {
-            // The daemon gave up. Drop the request without answering: it is
-            // already gone on the other side, and a late reply would apply to
-            // nothing. Guarded by id so a cancel for a superseded request
-            // cannot tear down the one currently on screen.
-            let matches = matches!(
-                state.borrow().face.as_ref(),
-                Some(f) if f.id == req.id
-            );
-            if matches {
-                clear(state);
-            }
-        }
+        Stage::Cancel => cancel(state, req),
     }
+}
+
+/// Does the card on screen belong to the process faced names?
+fn matches_active(state: &Rc<RefCell<PolkitState>>, pid: u32) -> bool {
+    state
+        .borrow()
+        .active
+        .as_ref()
+        .and_then(|a| a.race_pid)
+        .is_some_and(|p| p != 0 && p == pid)
 }
 
 fn announce(state: &Rc<RefCell<PolkitState>>, req: Request) {
-    // A face confirm already up means faced started a second attempt without
-    // the first being answered. Refuse the old one rather than leaving it to
-    // time out; the user is about to be shown the new one and must not be
-    // answering a question that has scrolled away.
-    if let Some(old) = state.borrow_mut().face.take() {
-        face::reply(&old.id, false);
+    // A confirm already announced means faced started a second attempt with
+    // the first unanswered. Refuse the old one rather than let it time out.
+    {
+        let mut s = state.borrow_mut();
+        if let Some(active) = s.active.as_mut()
+            && let Some(old) = active.face.as_ref()
+            && old.announced()
+        {
+            face::reply(&old.id, false);
+            active.face = None;
+        }
     }
 
-    let attached = state.borrow().active.is_some();
     let dialog = state.borrow().dialog.clone();
     let command = summarise(&req.peer_cmdline, &req.peer_exe);
 
-    if !attached {
-        let s_allow = state.clone();
-        let s_cancel = state.clone();
-        dialog.present_elevate(
-            &command,
-            Box::new(move |_| {
-                answer(&s_allow, true);
-            }),
-            Box::new(move || {
-                answer(&s_cancel, false);
-            }),
+    if matches_active(state, req.peer_pid) {
+        // Rides the card already up, whichever backing drew it.
+        let mut s = state.borrow_mut();
+        if let Some(active) = s.active.as_mut() {
+            active.face = Some(FaceSession {
+                id: req.id.clone(),
+                armed: false,
+            });
+            active.methods.face = true;
+        }
+    } else if state.borrow().active.is_some() {
+        // Some other card is up; there is nowhere to put this press. Decline
+        // now, which also stops the burst, rather than answer a question the
+        // user was never shown.
+        log::info!(
+            "face: declining a confirm for pid {} while another card is up",
+            req.peer_pid
         );
+        face::reply(&req.id, false);
+        return;
+    } else {
+        // Nothing asked through pam_race: a direct caller. The old
+        // face-only card, ours to draw and drop.
+        let mut s = state.borrow_mut();
+        s.active = Some(Session {
+            backing: Backing::FaceOnly,
+            link: None,
+            race_pid: Some(req.peer_pid),
+            methods: super::dialog::Methods {
+                face: true,
+                fp: false,
+                password: false,
+            },
+            buffered_password: None,
+            waiting_password: false,
+            face: Some(FaceSession {
+                id: req.id.clone(),
+                armed: false,
+            }),
+            settled: false,
+        });
+        drop(s);
+        let card = super::dialog::Card {
+            title: "Administrator access",
+            message: "A program is asking to run as root.",
+            icon_name: "",
+            action_id: "",
+            command: Some(command.as_str()),
+            identities: &[],
+            details: format!("Command: {command}"),
+            password: false,
+        };
+        dialog.present(&card, super::callbacks(state, false));
     }
 
-    dialog.show_face(true, "looking", "Looking for you");
-    dialog.set_status("", StatusKind::Info);
-    // The cue says what to do; the card says what is happening. The cue is
-    // read peripherally, on the way to the lens, and "looking for you" is not
-    // an instruction.
-    state
-        .borrow()
-        .cue
-        .set(true, "looking", "Look at the camera");
-
-    state.borrow_mut().face = Some(FaceSession {
-        id: req.id,
-        armed: false,
-        standalone: !attached,
-    });
+    let methods = state.borrow().active.as_ref().map(|a| a.methods);
+    if let Some(m) = methods {
+        dialog.set_methods(m);
+    }
+    report(state, "looking", "Looking for you", "Look at the camera");
 }
 
-/// Report what the camera is doing, in the lock screen's vocabulary.
-///
-/// Same three states, same wording, same ring. Someone who has learned to read
-/// the pill while unlocking should not have to learn a second dialect to read
-/// it while authorising `sudo`.
+/// Say what the camera is doing: on the cue by the lens when it is on, else
+/// on the card's caption. The cue's wording is the instruction, the card's
+/// is the report, so a user reading peripherally is told what to do.
+fn report(state: &Rc<RefCell<PolkitState>>, ring: &str, card_text: &str, cue_text: &str) {
+    let dialog = state.borrow().dialog.clone();
+    if elevate_settings().cue {
+        state.borrow().cue.set(true, ring, cue_text);
+    } else {
+        dialog.hint(card_text);
+    }
+}
+
 fn progress(state: &Rc<RefCell<PolkitState>>, req: Request) {
-    // Only for the request currently on screen, and never after it has armed:
-    // a late frame state must not overwrite "Recognised you" and un-explain a
-    // button that is already asking to be pressed.
     let live = matches!(
-        state.borrow().face.as_ref(),
+        state.borrow().active.as_ref().and_then(|a| a.face.as_ref()),
         Some(f) if f.id == req.id && !f.armed
     );
     if !live {
         return;
     }
-    // Same vocabulary as the lock screen, from the same source, so the ring
-    // cannot come to mean two things.
-    let Some(progress) = crate::face::Progress::parse(&req.state) else {
+    let Some(progress) = Progress::parse(&req.state) else {
         return;
     };
-    let dialog = state.borrow().dialog.clone();
-    dialog.show_face(true, progress.ring(), progress.text());
-    state
-        .borrow()
-        .cue
-        .set(true, progress.ring(), progress.text());
+    report(state, progress.ring(), progress.text(), progress.text());
 }
 
 fn confirm(state: &Rc<RefCell<PolkitState>>, req: Request) {
     {
         let mut s = state.borrow_mut();
-        match s.face.as_mut() {
-            // Only the request we announced may arm. Anything else is a reply
-            // to a question the user was never shown.
+        match s.active.as_mut().and_then(|a| a.face.as_mut()) {
             Some(f) if f.id == req.id => f.armed = true,
             _ => return,
         }
     }
     let dialog = state.borrow().dialog.clone();
-    dialog.show_face(true, "ok", "Recognised you");
-    dialog.set_status("Press Allow to authorise", StatusKind::Info);
+    dialog.set_status(
+        "Recognised you — press Allow to authorise",
+        StatusKind::Info,
+    );
     dialog.arm_allow();
     state.borrow().cue.set(true, "ok", "Recognised you");
+}
+
+/// The attempt ended on faced's side, by any route. Drop the camera from the
+/// card's live methods and say why, without taking the card down: the reader
+/// and the password are still racing. Only a card that existed for the face
+/// alone goes with it.
+fn cancel(state: &Rc<RefCell<PolkitState>>, req: Request) {
+    let mine = matches!(
+        state.borrow().active.as_ref().and_then(|a| a.face.as_ref()),
+        Some(f) if f.id == req.id
+    );
+    if !mine {
+        return;
+    }
+    let (face_only, methods) = {
+        let mut s = state.borrow_mut();
+        let Some(active) = s.active.as_mut() else {
+            return;
+        };
+        active.face = None;
+        active.methods.face = false;
+        (matches!(active.backing, Backing::FaceOnly), active.methods)
+    };
+    let dialog = state.borrow().dialog.clone();
+    state.borrow().cue.set(false, "", "");
+    dialog.set_methods(methods);
+
+    // Name what happened, in the lock screen's words, for the outcomes the
+    // user can act on. A match, a preemption (they typed) and a decline
+    // (they cancelled) need no words: the user already knows.
+    let hint = match req.outcome.as_str() {
+        "no_face" | "deadline" => "Didn't see you",
+        "no_match" => "Didn't recognise you",
+        "too_dark" => "No infrared light",
+        _ => "",
+    };
+    if !hint.is_empty() {
+        dialog.hint(hint);
+    }
+
+    if face_only {
+        end_session(state, super::AuthOutcome::Cancelled);
+        pop_queue(state);
+    }
 }
 
 /// Answer the pending confirm, if there is one and it is answerable.
@@ -224,54 +293,37 @@ fn confirm(state: &Rc<RefCell<PolkitState>>, req: Request) {
 /// Returns true when it consumed the action, so the caller knows not to also
 /// treat the press as a password submit.
 pub(super) fn answer(state: &Rc<RefCell<PolkitState>>, allow: bool) -> bool {
-    let Some(session) = state.borrow_mut().face.take() else {
-        return false;
+    let (id, armed) = {
+        let s = state.borrow();
+        match s.active.as_ref().and_then(|a| a.face.as_ref()) {
+            Some(f) if f.announced() => (f.id.clone(), f.armed),
+            _ => return false,
+        }
     };
-    if allow && !session.armed {
-        // Pressed before the face matched. Put it back and keep waiting: the
-        // user agreed to something that has not happened yet.
-        state.borrow_mut().face = Some(session);
+    if allow && !armed {
+        // Pressed before the face matched. Keep waiting: the user agreed to
+        // something that has not happened yet.
         return false;
     }
-    face::reply(&session.id, allow);
-    finish(state, session.standalone);
+    face::reply(&id, allow);
+    // faced's cancel follows and clears the card's face state; nothing more
+    // to do here, and for an allow the win arrives through pam_race.
     true
 }
 
-/// Give up on a face check the user has stopped waiting for.
-///
-/// Only ever a deny, and only while unarmed — once the face has matched, the
-/// press is the user's to make and nothing here may make it for them.
+/// Give up on a face check the user has stopped waiting for. Only ever a
+/// deny, only while unarmed, and only when the setting says typing means
+/// that — once the face has matched, the press is the user's to make.
 pub(super) fn abandon(state: &Rc<RefCell<PolkitState>>) {
-    let unarmed = matches!(state.borrow().face.as_ref(), Some(f) if !f.armed);
-    if !unarmed {
+    if !elevate_settings().typing_abandons_face {
         return;
     }
-    let Some(session) = state.borrow_mut().face.take() else {
-        return;
-    };
-    face::reply(&session.id, false);
-    finish(state, session.standalone);
-}
-
-/// Drop the surface without answering. Only for a request the daemon has
-/// already withdrawn.
-fn clear(state: &Rc<RefCell<PolkitState>>) {
-    let Some(session) = state.borrow_mut().face.take() else {
-        return;
-    };
-    finish(state, session.standalone);
-}
-
-fn finish(state: &Rc<RefCell<PolkitState>>, standalone: bool) {
-    let dialog = state.borrow().dialog.clone();
-    dialog.show_face(false, "", "");
-    state.borrow().cue.set(false, "", "");
-    if standalone {
-        // Our card, so ours to take down — and a polkit request may have been
-        // queued behind it while it was up.
-        dialog.hide();
-        pop_queue(state);
+    let unarmed = matches!(
+        state.borrow().active.as_ref().and_then(|a| a.face.as_ref()),
+        Some(f) if f.announced() && !f.armed
+    );
+    if unarmed {
+        answer(state, false);
     }
 }
 
