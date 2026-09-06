@@ -130,6 +130,13 @@ impl Helper {
         self.stdout_fd
     }
 
+    /// The helper's pid. It is the process pam_race runs in for `pkexec`, so
+    /// it is what a `begin` on the agent socket and a faced announce carry,
+    /// and the key the orchestrator joins them to this session on.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     /// Drain stdout into the line buffer and emit complete-line events.
     /// The boolean is `true` when the helper has closed stdout (EOF).
     pub fn read_events(&mut self) -> (Vec<HelperEvent>, bool) {
@@ -224,7 +231,12 @@ fn parse_line(line: &str) -> Option<HelperEvent> {
     }
 }
 
-/// Heuristic: does this PAM info/prompt line refer to the fingerprint reader?
+/// Heuristic: does this PAM info line refer to the fingerprint reader?
+///
+/// Info lines only. It used to be applied to prompts as well, and pam_race's
+/// own prompt ("Password, finger or face for meros: ") matched it, so the one
+/// line that asks for the password was being read as a reader hint. A prompt
+/// is a prompt; only pam_fprintd's `PAM_TEXT_INFO` chatter needs classifying.
 pub fn is_fingerprint_hint(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     lower.contains("finger")

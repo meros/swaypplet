@@ -412,14 +412,11 @@ impl SurfaceSet {
             .visible(false)
             .build();
         face_pill.add_css_class("face-pill");
-        // The ring is drawn in CSS, not set as a glyph: it has to sweep while
-        // looking, lock when a face is found, complete on a match and break
-        // on a failure, and a font glyph can do none of that.
-        let face_ring = gtk4::Box::builder()
-            .width_request(22)
-            .height_request(22)
-            .build();
-        face_ring.add_css_class("face-ring");
+        // A face in a ring, drawn in CSS and shared with the elevate cue
+        // (`face_ring::build`): it glances while looking, stills when found,
+        // smiles on a match and frowns on a miss. A font glyph can do none
+        // of that.
+        let face_ring = crate::face_ring::build(22);
         let face_label = gtk4::Label::builder()
             .label("")
             .ellipsize(gtk4::pango::EllipsizeMode::End)
@@ -842,7 +839,7 @@ impl SurfaceSet {
     /// a beat, then the resting sentence comes back on its own.
     pub fn fp_hint(&self, text: &str) {
         for s in self.inner.borrow().iter() {
-            s.caption.fp_hint(text);
+            s.caption.hint(text);
         }
     }
 

@@ -93,12 +93,7 @@ impl Cue {
             .build();
         strip.append(&pill);
 
-        let ring = gtk4::Box::builder()
-            .width_request(18)
-            .height_request(18)
-            .valign(gtk4::Align::Center)
-            .build();
-        ring.add_css_class("face-ring");
+        let ring = crate::face_ring::build(18);
         let label = gtk4::Label::builder().label("").build();
         label.add_css_class("face-pill-label");
         pill.append(&ring);

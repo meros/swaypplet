@@ -17,6 +17,13 @@
 //!     machine's Synaptics sensor reports verify-no-match often enough that
 //!     giving up on one would be giving up on the feature, so the loop runs
 //!     until it matches or until pam_race kills it.
+//!   * one byte, `R`, may go up the pipe pam_race names in `PAM_RACE_FP_FD`
+//!     once the reader has armed. pam_race forwards it to the elevation card
+//!     as "the reader is live", which is the card's cue to name the reader
+//!     at all — it promises to name only methods accepting input, and a
+//!     reader that is still being claimed is not one. Optional both ways: a
+//!     pam_race that sets no fd gets no byte, and the verdict is still the
+//!     exit status alone.
 //!
 //! Runs as root, out of the PAM stack, which is what lets it verify a user
 //! other than the caller — the same privilege pam_fprintd used to need.
@@ -26,6 +33,8 @@
 //! standing at the machine; there is no backgrounded claim to release on a VT
 //! switch, because the process does not outlive the prompt that started it.
 
+use std::io::Write;
+use std::os::fd::FromRawFd;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -75,12 +84,32 @@ async fn verify(user: String) -> i32 {
     let (_target_tx, target_rx) = watch::channel(Some(user));
     let (_active_tx, active_rx) = watch::channel(true);
 
+    // The pipe pam_race watches for this process's exit, when it told us
+    // which fd it is. Owned here so it closes with the process, as it would
+    // have anyway.
+    let mut ready_pipe = std::env::var("PAM_RACE_FP_FD")
+        .ok()
+        .and_then(|v| v.parse::<i32>().ok())
+        .filter(|fd| *fd > 2)
+        .map(|fd| unsafe { std::fs::File::from_raw_fd(fd) });
+
     let matched = Arc::new(AtomicBool::new(false));
     let seen = matched.clone();
     let sink = move |ev: EngineEvent| match ev {
         EngineEvent::Match(_) => {
             seen.store(true, Ordering::SeqCst);
             Flow::Stop
+        }
+        // The reader armed: the one thing worth saying before the verdict.
+        // Said once; a re-arm after a transient claim failure is still the
+        // same reader.
+        EngineEvent::Ready => {
+            if let Some(mut pipe) = ready_pipe.take()
+                && let Err(e) = pipe.write_all(b"R")
+            {
+                log::debug!("fp-verify: ready byte not delivered: {e}");
+            }
+            Flow::Continue
         }
         // The reader is gone, busy past recovery, or this user has no prints.
         // The engine would keep retrying, which is right for a lock screen
@@ -91,9 +120,9 @@ async fn verify(user: String) -> i32 {
             log::info!("fp-verify: {why}");
             Flow::Stop
         }
-        // Hints and readiness have nowhere to go — the prompt is drawn by
-        // pam_race, which reads exit statuses and not a progress stream.
-        EngineEvent::Ready | EngineEvent::Hint(_) | EngineEvent::Progress(_) => Flow::Continue,
+        // Hints have nowhere to go — the prompt is drawn by pam_race, which
+        // reads exit statuses and not a progress stream.
+        EngineEvent::Hint(_) | EngineEvent::Progress(_) => Flow::Continue,
     };
 
     verify_engine(conn, target_rx, active_rx, sleep_rx, sink).await;

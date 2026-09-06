@@ -7,7 +7,7 @@ gear in the flight deck; a bare `:` lists every prefix). Five tabs,
 | tab | edits | sections of `~/.config/swaypplet/settings.json` |
 |---|---|---|
 | Look | `output * bg` on the compositor; how much the shell animates | `wallpaper`, `look` |
-| Idle & Lock | the idle manager's timers; walk-away lock; face unlock | `idle` |
+| Idle & Lock | the idle manager's timers; walk-away lock; face unlock; what sudo and pkexec may ask for | `idle`, `elevate` |
 | Bar | clock format, segments, OSD placement, key steps, volume boost | `bar`, `keys` |
 | Alerts | popup linger, corner and depth; quiet hours; what a screenshot becomes | `alerts`, `capture` |
 | Glass | the liquid-glass material | `~/.config/swaypplet/glass.json` |
@@ -90,6 +90,13 @@ and Bar tabs is `nix <section>` into the clipboard.
   `wallpaper::apply_saved` replays it at panel start, and
   `swaypplet settings apply` from the config's `exec_always` replays it on
   reload.
+- **Elevate** is read by the polkit agent (`swaypplet polkit-agent`, a
+  third process) per request: `polkit/mod.rs` calls `store::current()` on
+  every `sudo` or `pkexec`, and `store::watch` keeps its live copy following
+  the file. `face` is handed to pam_race as the answer to its `begin`, so
+  the camera never opens when it is off; `terminal_card` declines the card
+  for a terminal `sudo` (pam_race keeps the prompt); `cue` and
+  `typing_abandons_face` are read when the camera reports.
 - **Idle** is another process (`swaypplet idle`) with no channel to the
   panel. It stats the user file once a second (`idle/mod.rs`,
   `SETTINGS_POLL`) and, when the mtime moves, reloads and hands the wayland

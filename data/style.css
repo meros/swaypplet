@@ -3325,42 +3325,114 @@ scale.night-scale highlight {
     min-height: 18px;
 }
 
-/* Looking: one arc lit, spinning. Reads as searching rather than progress,
-   because there is no progress to report — the daemon does not know how long
-   finding a face will take, and a determinate bar would be a lie. */
+/* ── The face inside the ring ──
+   Three boxes placed by hand (face_ring::build): two eyes and a mouth. They
+   move as transforms, never as allocation, so the pill's geometry is the same
+   in every state and the motion costs no layout. The colour is the ring's
+   accent for the state, so the face and the ring always agree. */
+.face-glyph { background-color: transparent; }
+
+.face-eye {
+    background-color: @fg;
+    border-radius: 50%;
+    opacity: 0.85;
+}
+
+.face-mouth {
+    border-bottom: 2px solid @fg;
+    border-radius: 0 0 6px 6px;
+    opacity: 0.85;
+}
+
+/* Looking: the eyes glance left and right, unhurried, and blink now and then.
+   Reads as searching rather than progress, because there is no progress to
+   report -- the daemon does not know how long finding a face will take, and a
+   determinate bar would be a lie. The old lit arc spun for the same reason;
+   a face that looks around says it in the language people already read. */
 .face-ring-looking {
     border-color: @bg3;
     border-top-color: @accent_tertiary;
-    animation: face-ring-spin 1.1s linear infinite;
+}
+.face-ring-looking .face-eye {
+    animation: face-glance 2.6s ease-in-out infinite;
+}
+.face-ring-looking .face-mouth {
+    /* Neutral: a flat line while nothing is known. */
+    border-radius: 0;
+    transform: scaleY(0.5);
 }
 
 /* Dark: no motion at all. Nothing is being searched, because no usable frame
-   is arriving, and a spinner would imply the system is making progress. */
+   is arriving, and a moving face would imply the system is making progress.
+   The eyes close: it cannot see. */
 .face-ring-dark {
     border-color: @bg2;
     border-top-color: @accent_secondary;
 }
+.face-ring-dark .face-eye { transform: scaleY(0.25); opacity: 0.6; }
+.face-ring-dark .face-mouth { border-radius: 0; transform: scaleY(0.5); opacity: 0.6; }
 
-/* Found: the sweep stops and the whole ring lights. The stop is the signal —
+/* Found: the glance stops and the eyes meet yours. The stop is the signal --
    it tells the user to hold still without a word of instruction. */
 .face-ring-found {
     border-color: @accent_tertiary;
     animation: face-ring-pulse 0.9s ease-in-out infinite;
 }
+.face-ring-found .face-eye {
+    background-color: @accent_tertiary;
+    opacity: 1;
+    animation: face-blink 3.2s ease-in-out infinite;
+}
+.face-ring-found .face-mouth { border-color: @accent_tertiary; border-radius: 0 0 4px 4px; }
 
+/* Recognised: it smiles. The eyes crease, the mouth curves, the ring fills. */
 .face-ring-ok {
     border-color: @accent;
-    background-color: @accent;
+    background-color: alpha(@accent, 0.25);
     animation: face-ring-ok 500ms cubic-bezier(0, 0, 0, 1);
 }
+.face-ring-ok .face-eye {
+    background-color: @accent;
+    opacity: 1;
+    transform: scaleY(0.45);
+}
+.face-ring-ok .face-mouth {
+    border-color: @accent;
+    border-bottom-width: 2px;
+    border-radius: 0 0 8px 8px;
+    transform: scaleY(1.35);
+    animation: face-smile 400ms cubic-bezier(0.2, 0, 0, 1);
+}
 
+/* Not recognised: a frown and a shake, not a cross. The attempt will retry on
+   its own, so the failure should read as "that didn't work" rather than as a
+   verdict. */
 .face-ring-fail {
     border-color: @accent_quinary;
     animation: face-ring-fail 300ms cubic-bezier(0.2, 0, 0, 1);
 }
+.face-ring-fail .face-eye { background-color: @accent_quinary; opacity: 1; }
+.face-ring-fail .face-mouth {
+    border-color: @accent_quinary;
+    /* Turned over: the same arc, the other way up. */
+    transform: rotate(180deg) translateY(2px);
+}
 
-@keyframes face-ring-spin {
-    to { transform: rotate(360deg); }
+@keyframes face-glance {
+    0%, 18%   { transform: translateX(0); }
+    30%, 45%  { transform: translateX(-2px); }
+    58%, 73%  { transform: translateX(2px); }
+    85%, 100% { transform: translateX(0); }
+}
+
+@keyframes face-blink {
+    0%, 92%, 100% { transform: scaleY(1); }
+    96%           { transform: scaleY(0.15); }
+}
+
+@keyframes face-smile {
+    from { transform: scaleY(0.5); }
+    to   { transform: scaleY(1.35); }
 }
 
 @keyframes face-ring-pulse {
@@ -3377,8 +3449,7 @@ scale.night-scale highlight {
     100% { transform: scale(1.0); opacity: 1; box-shadow: 0 0 0px transparent; }
 }
 
-/* A shake, not a cross. The attempt will retry on its own, so the failure
-   should read as "that didn't work" rather than as a verdict. */
+/* A shake, not a cross. */
 @keyframes face-ring-fail {
     0%, 100% { transform: translateX(0); }
     25%      { transform: translateX(-4px); }

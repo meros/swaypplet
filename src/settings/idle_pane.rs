@@ -1,4 +1,5 @@
-//! The Idle & Lock tab: the idle manager's timers.
+//! The Idle & Lock tab: the idle manager's timers, what locks and unlocks,
+//! and what `sudo` and `pkexec` may ask for.
 //!
 //! The manager is another process (`swaypplet idle`, `idle/mod.rs`) with no
 //! channel to this one, so an edit here is a file write and nothing else;
@@ -13,7 +14,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use super::store::{self, Idle};
+use super::store::{self, Elevate, Idle};
 use super::ui::{self, Durations, dropdown_row, scale_row, section_box, switch_row};
 
 /// The rungs each dropdown offers. The saved value is added if it is not
@@ -83,12 +84,57 @@ struct State {
     dim_level: gtk4::Scale,
     walk_away: gtk4::Switch,
     face: gtk4::Switch,
+    /// One per [`ELEVATE`] entry, in order.
+    elevate: Vec<gtk4::Switch>,
     status: gtk4::Label,
     updating: Cell<bool>,
 }
 
+/// One switch on the Administrator access group: which field it edits.
+struct Toggle {
+    label: &'static str,
+    hint: &'static str,
+    get: fn(&Elevate) -> bool,
+    set: fn(&mut Elevate, bool),
+}
+
+const ELEVATE: [Toggle; 4] = [
+    Toggle {
+        label: "Face for administrator access",
+        hint: "Ask the camera when sudo or pkexec asks for you. Off, the reader and the password remain; nothing here can make it easier than the password.",
+        get: |e| e.face,
+        set: |e, v| e.face = v,
+    },
+    Toggle {
+        label: "Card for terminal sudo",
+        hint: "Draw the same card pkexec gets when sudo asks in a terminal: type the password there or in the terminal, whichever is nearer. Off, the terminal keeps the prompt to itself and the camera is not asked for it.",
+        get: |e| e.terminal_card,
+        set: |e, v| e.terminal_card = v,
+    },
+    Toggle {
+        label: "Pill under the lens",
+        hint: "While the camera runs, a pill by the lens says what it sees. Off, the card's caption reports instead.",
+        get: |e| e.cue,
+        set: |e, v| e.cue = v,
+    },
+    Toggle {
+        label: "Typing ends the face check",
+        hint: "The first keystroke in the password field stops the camera. Off, it runs out its window alongside the typing.",
+        get: |e| e.typing_abandons_face,
+        set: |e, v| e.typing_abandons_face = v,
+    },
+];
+
 impl State {
     fn edit(&self, f: impl FnOnce(&mut Idle)) {
+        if self.updating.get() {
+            return;
+        }
+        store::edit(f);
+        self.sync();
+    }
+
+    fn edit_elevate(&self, f: impl FnOnce(&mut Elevate)) {
         if self.updating.get() {
             return;
         }
@@ -113,7 +159,15 @@ impl State {
         self.dim_level.set_value(f64::from(idle.dim_level));
         self.walk_away.set_active(idle.walk_away_lock);
         self.face.set_active(idle.face_unlock);
-        ui::set_source(&self.status, settings.idle.is_some(), &describe(&idle));
+        let elevate = settings.elevate();
+        for (toggle, switch) in ELEVATE.iter().zip(&self.elevate) {
+            switch.set_active((toggle.get)(&elevate));
+        }
+        ui::set_source(
+            &self.status,
+            settings.idle.is_some() || settings.elevate.is_some(),
+            &describe(&idle),
+        );
         self.updating.set(false);
     }
 }
@@ -171,9 +225,24 @@ impl IdlePane {
         );
         lock.append(&face_row);
 
+        // Administrator access. Read by the polkit agent, which draws the
+        // card for both `sudo` and `pkexec` and tells pam_race whether the
+        // camera may be asked; every switch removes a way in or a surface.
+        let admin = section_box(
+            "Administrator access",
+            "What sudo and pkexec may ask for besides the password, and where. The password itself is always there.",
+        );
+        let elevate_now = store::current().elevate();
+        let mut elevate = Vec::new();
+        for toggle in &ELEVATE {
+            let (row, switch) = switch_row(toggle.label, toggle.hint, (toggle.get)(&elevate_now));
+            admin.append(&row);
+            elevate.push(switch);
+        }
+
         let reset = ui::action_button(
             "Reset to system",
-            "Put the system's timers back and drop the section from the settings file.",
+            "Put the system's timers and access switches back and drop both sections from the settings file.",
         );
         let (footer, status) = ui::footer(&[&reset]);
         let copy = ui::copy_nix_button(
@@ -191,9 +260,18 @@ impl IdlePane {
             dim_level: dim_level.clone(),
             walk_away: walk_away.clone(),
             face: face.clone(),
+            elevate,
             status,
             updating: Cell::new(false),
         });
+
+        for (index, switch) in state.elevate.iter().enumerate() {
+            let state = state.clone();
+            switch.connect_active_notify(move |s| {
+                let on = s.is_active();
+                state.edit_elevate(|e| (ELEVATE[index].set)(e, on));
+            });
+        }
 
         for (index, (dropdown, _)) in state.dropdowns.iter().enumerate() {
             let state = state.clone();
@@ -233,12 +311,14 @@ impl IdlePane {
                     return;
                 }
                 store::reset::<Idle>();
+                store::reset::<Elevate>();
                 state.sync();
             });
         }
 
         root.append(&group);
         root.append(&lock);
+        root.append(&admin);
         root.append(&footer);
         state.sync();
 
@@ -282,6 +362,34 @@ mod tests {
             );
         }
         assert_eq!(idle.dim_level % 5, 0);
+    }
+
+    #[test]
+    fn every_access_switch_moves_exactly_one_field() {
+        let base = Elevate::default();
+        let mut seen = Vec::new();
+        for toggle in &ELEVATE {
+            let mut e = base;
+            (toggle.set)(&mut e, false);
+            assert!(!(toggle.get)(&e), "{}", toggle.label);
+            let fields = [
+                ("face", e.face != base.face),
+                ("terminal_card", e.terminal_card != base.terminal_card),
+                ("cue", e.cue != base.cue),
+                (
+                    "typing_abandons_face",
+                    e.typing_abandons_face != base.typing_abandons_face,
+                ),
+            ];
+            let changed: Vec<&str> = fields.iter().filter(|(_, c)| *c).map(|(n, _)| *n).collect();
+            assert_eq!(changed.len(), 1, "{} moved {changed:?}", toggle.label);
+            seen.push(changed[0]);
+        }
+        seen.sort_unstable();
+        assert_eq!(
+            seen,
+            ["cue", "face", "terminal_card", "typing_abandons_face"]
+        );
     }
 
     #[test]
