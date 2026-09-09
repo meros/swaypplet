@@ -80,6 +80,11 @@ pub struct Wallpaper {
 /// The defaults are the numbers the old swayidle config carried and
 /// `idle/mod.rs` documents the incident history behind; a field missing
 /// from a hand-edited file lands on them too.
+///
+/// The `night_*` fields are a second, shorter set of three tiers for a
+/// time window. They are inert until `night` is on, and [`Idle::resolve`]
+/// is the only thing that reads them: it hands back the tiers in force at
+/// a given minute, so nothing downstream knows the window exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Idle {
     /// Fade the backlight after this much idle time.
@@ -106,6 +111,40 @@ pub struct Idle {
     /// the fingerprint remain; nothing here can make unlocking easier.
     #[serde(default = "yes")]
     pub face_unlock: bool,
+    /// Run the night window below. Off, the timers above hold all day and
+    /// every `night_*` field is inert.
+    #[serde(default)]
+    pub night: bool,
+    /// When the window opens, local time. The window is half-open,
+    /// `[from, to)`, and wraps past midnight when the end is at or before
+    /// the start.
+    #[serde(default = "Idle::default_night_from_h")]
+    pub night_from_h: u8,
+    #[serde(default)]
+    pub night_from_m: u8,
+    /// When the window closes.
+    #[serde(default = "Idle::default_night_to_h")]
+    pub night_to_h: u8,
+    #[serde(default)]
+    pub night_to_m: u8,
+    /// What `dim_after_s` becomes inside the window.
+    #[serde(default = "Idle::default_night_dim_after")]
+    pub night_dim_after_s: u32,
+    /// What `lock_after_s` becomes inside the window.
+    #[serde(default = "Idle::default_night_lock_after")]
+    pub night_lock_after_s: u32,
+    /// What `blank_after_s` becomes inside the window.
+    #[serde(default = "Idle::default_night_blank_after")]
+    pub night_blank_after_s: u32,
+}
+
+/// Minutes since local midnight, 0–1439. Noon on a clock the platform
+/// cannot read, which is outside the shipped window and so is the tier set
+/// a user is least surprised by.
+pub fn local_minute_of_day() -> u16 {
+    glib::DateTime::now_local()
+        .map(|t| (t.hour() as u16) * 60 + t.minute() as u16)
+        .unwrap_or(12 * 60)
 }
 
 impl Idle {
@@ -124,6 +163,21 @@ impl Idle {
     fn default_suspend_after() -> u32 {
         1200
     }
+    fn default_night_from_h() -> u8 {
+        21
+    }
+    fn default_night_to_h() -> u8 {
+        7
+    }
+    fn default_night_dim_after() -> u32 {
+        60
+    }
+    fn default_night_lock_after() -> u32 {
+        300
+    }
+    fn default_night_blank_after() -> u32 {
+        120
+    }
 }
 
 impl Idle {
@@ -131,10 +185,68 @@ impl Idle {
     /// goes black on the first idle tick and stays that way for anyone who
     /// does not know why. Bound it; `blank_after_s` and the timers already
     /// mean "never" at zero, which is a valid ask.
+    ///
+    /// The window bounds are clamped rather than rejected, for the same
+    /// reason `Alerts` clamps its quiet hours: an hour of 40 is a typo, and
+    /// a typo should cost the user a wrong window, not the whole section.
     fn sanitized(self) -> Idle {
         Idle {
             dim_level: self.dim_level.clamp(1, 100),
+            night_from_h: self.night_from_h.min(23),
+            night_from_m: self.night_from_m.min(59),
+            night_to_h: self.night_to_h.min(23),
+            night_to_m: self.night_to_m.min(59),
             ..self
+        }
+    }
+
+    /// The window's bounds as minutes since midnight.
+    fn night_bounds(&self) -> (u16, u16) {
+        (
+            u16::from(self.night_from_h) * 60 + u16::from(self.night_from_m),
+            u16::from(self.night_to_h) * 60 + u16::from(self.night_to_m),
+        )
+    }
+
+    /// Whether `minute_of_day` (0–1439, local) is inside the night window.
+    /// False whenever the window is off, so no caller has to check both.
+    ///
+    /// Half-open, `[from, to)`, wrapping past midnight when `to <= from`.
+    /// `from == to` is the whole day, which follows `in_quiet_hours`: a
+    /// switch that is on and does nothing is worse than one that does what
+    /// it says.
+    pub fn in_night(&self, minute_of_day: u16) -> bool {
+        if !self.night {
+            return false;
+        }
+        let (from, to) = self.night_bounds();
+        if from < to {
+            (from..to).contains(&minute_of_day)
+        } else {
+            minute_of_day >= from || minute_of_day < to
+        }
+    }
+
+    /// The timers in force at `minute_of_day`: this set outside the window,
+    /// and this set with the three night tiers substituted inside it.
+    ///
+    /// Returning an `Idle` rather than three numbers is what keeps the
+    /// night window out of every consumer — `wayland::Timeouts::from`, the
+    /// blank deadline and the log line all take the resolved struct and
+    /// never learn that a window exists. Suspend is deliberately not
+    /// substituted: it is battery-only, and a shorter night suspend would
+    /// stop an overnight job on a machine the user left running on purpose.
+    ///
+    /// Idempotent, so a resolved struct may be resolved again.
+    pub fn resolve(&self, minute_of_day: u16) -> Idle {
+        if !self.in_night(minute_of_day) {
+            return *self;
+        }
+        Idle {
+            dim_after_s: self.night_dim_after_s,
+            lock_after_s: self.night_lock_after_s,
+            blank_after_s: self.night_blank_after_s,
+            ..*self
         }
     }
 }
@@ -149,6 +261,14 @@ impl Default for Idle {
             suspend_after_s: Self::default_suspend_after(),
             walk_away_lock: true,
             face_unlock: true,
+            night: false,
+            night_from_h: Self::default_night_from_h(),
+            night_from_m: 0,
+            night_to_h: Self::default_night_to_h(),
+            night_to_m: 0,
+            night_dim_after_s: Self::default_night_dim_after(),
+            night_lock_after_s: Self::default_night_lock_after(),
+            night_blank_after_s: Self::default_night_blank_after(),
         }
     }
 }
@@ -903,6 +1023,104 @@ mod tests {
         assert!(nix.contains("  dim_after_s = 240;\n"), "{nix}");
         assert!(s.section_as_nix("wallpaper").is_none());
         assert_eq!(nix_literal(&serde_json::json!("a\"b")), "\"a\\\"b\"");
+    }
+
+    /// 21:30–07:00, the shape the window is for: it wraps midnight, it is
+    /// half-open at both ends, and the minute is part of the bound.
+    #[test]
+    fn the_night_window_wraps_past_midnight_and_is_half_open() {
+        let at = |h: u16, m: u16| h * 60 + m;
+        let night = Idle {
+            night: true,
+            night_from_h: 21,
+            night_from_m: 30,
+            night_to_h: 7,
+            night_to_m: 0,
+            ..Idle::default()
+        };
+        assert!(night.in_night(at(21, 30)) && night.in_night(at(23, 59)));
+        assert!(night.in_night(at(0, 0)) && night.in_night(at(6, 59)));
+        assert!(!night.in_night(at(21, 29)) && !night.in_night(at(7, 0)));
+        assert!(!night.in_night(at(12, 0)));
+
+        // A window inside one day, and the whole-day case.
+        let day = Idle {
+            night_from_h: 9,
+            night_from_m: 0,
+            night_to_h: 17,
+            night_to_m: 15,
+            ..night
+        };
+        assert!(day.in_night(at(9, 0)) && day.in_night(at(17, 14)));
+        assert!(!day.in_night(at(17, 15)) && !day.in_night(at(2, 0)));
+        let whole = Idle {
+            night_from_h: 5,
+            night_from_m: 0,
+            night_to_h: 5,
+            night_to_m: 0,
+            ..night
+        };
+        assert!(whole.in_night(at(4, 59)) && whole.in_night(at(5, 0)));
+
+        // The switch is the gate: the same bounds with `night` off are never
+        // inside, so no caller has to test both.
+        let off = Idle {
+            night: false,
+            ..night
+        };
+        assert!(!off.in_night(at(22, 0)));
+    }
+
+    #[test]
+    fn resolve_swaps_three_tiers_inside_the_window_and_none_outside() {
+        let cfg = Idle {
+            night: true,
+            night_from_h: 21,
+            night_from_m: 0,
+            night_to_h: 7,
+            night_to_m: 0,
+            night_dim_after_s: 60,
+            night_lock_after_s: 300,
+            night_blank_after_s: 120,
+            dim_after_s: 240,
+            lock_after_s: 1800,
+            blank_after_s: 900,
+            suspend_after_s: 1200,
+            ..Idle::default()
+        };
+        assert_eq!(cfg.resolve(12 * 60), cfg);
+
+        let night = cfg.resolve(22 * 60);
+        assert_eq!(
+            (night.dim_after_s, night.lock_after_s, night.blank_after_s),
+            (60, 300, 120)
+        );
+        // Suspend is battery-only and never substituted; an overnight job on
+        // a machine left running must not be cut short by the window.
+        assert_eq!(night.suspend_after_s, cfg.suspend_after_s);
+        // The window's own fields survive, so resolving again is a no-op.
+        assert_eq!(night.resolve(22 * 60), night);
+    }
+
+    #[test]
+    fn a_typed_window_bound_is_clamped_not_rejected() {
+        let bad = Idle {
+            night_from_h: 40,
+            night_from_m: 99,
+            night_to_h: 25,
+            night_to_m: 60,
+            ..Idle::default()
+        }
+        .sanitized();
+        assert_eq!(
+            (
+                bad.night_from_h,
+                bad.night_from_m,
+                bad.night_to_h,
+                bad.night_to_m
+            ),
+            (23, 59, 23, 59)
+        );
     }
 
     #[test]

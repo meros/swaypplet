@@ -24,6 +24,16 @@
 //! and, when its mtime moves, reloads and hands the wayland thread new
 //! timeouts to re-arm with. Zero on any tier is "never".
 //!
+//! The night window (Idle & Lock tab, `Idle::resolve`) is a second, shorter
+//! set of dim / lock / screen-off tiers for a time range, typically the
+//! evening. The same once-a-second check resolves it, so the window opening
+//! and an edit in the pane arrive by one path and re-arm by one comparison.
+//! Suspend is not part of the window: it is battery-only, and cutting an
+//! overnight job short is worse than a late suspend. Crossing INTO the
+//! window while already idle past its shorter lock tier locks at once, which
+//! is `ext-idle-notify` behaving correctly — the seat has been idle longer
+//! than the timeout being armed.
+//!
 //! Locking and blanking are deliberately unrelated. They used to be welded
 //! together in three places, so any lock put the panel out within a second
 //! and the lock screen was effectively never visible — including while face
@@ -166,7 +176,11 @@ pub fn run() -> ! {
     // the same edge that starts a face attempt.
     let outputs = Outputs::start();
     // The timers, from the settings file, and the handle to re-arm them.
-    let mut cfg = Settings::load().idle();
+    // `saved` is the file; `cfg` is what is in force this minute, which is a
+    // different set inside the night window (`Idle::resolve`). Everything
+    // below reads `cfg` and never learns that a window exists.
+    let mut saved = Settings::load().idle();
+    let mut cfg = saved.resolve(store::local_minute_of_day());
     let mut settings_file = store::Watch::new();
     let mut next_settings_check = Instant::now() + SETTINGS_POLL;
     let timeouts = wayland::start(tx.clone(), wayland::Timeouts::from(&cfg));
@@ -293,27 +307,49 @@ pub fn run() -> ! {
             }
         }
 
-        // The settings file, once a second. A moved mtime is reloaded whole;
-        // only a change in the idle section is worth a log line and a
-        // re-arm. The blank duration and the dim level are read from `cfg`
-        // at fire time, so they need no re-arm at all.
+        // The settings file and the clock, once a second. A moved mtime is
+        // reloaded whole, and the night window is resolved on every check, so
+        // one comparison covers both causes: an edit in the pane, and the
+        // window opening or closing. A boundary is therefore up to
+        // SETTINGS_POLL late, which is the same latency an edit already had.
+        // The blank duration and the dim level are read from `cfg` at fire
+        // time, so they need no re-arm at all.
         if Instant::now() >= next_settings_check {
             next_settings_check = Instant::now() + SETTINGS_POLL;
-            if settings_file.changed() {
-                let fresh = Settings::load().idle();
-                if fresh != cfg {
-                    log::info!(
-                        "idle: settings changed — dim {}s to {}%, lock {}s, blank {}s, suspend {}s (0 is never)",
-                        fresh.dim_after_s,
-                        fresh.dim_level,
-                        fresh.lock_after_s,
-                        fresh.blank_after_s,
-                        fresh.suspend_after_s
-                    );
-                    cfg = fresh;
-                    if timeouts.send(wayland::Timeouts::from(&cfg)).is_err() {
-                        log::error!("idle: wayland thread gone; timers not re-armed");
-                    }
+            let reloaded = settings_file.changed();
+            if reloaded {
+                saved = Settings::load().idle();
+            }
+            let minute = store::local_minute_of_day();
+            let fresh = saved.resolve(minute);
+            if fresh != cfg {
+                log::info!(
+                    "idle: {} — dim {}s to {}%, lock {}s, blank {}s, suspend {}s (0 is never)",
+                    if reloaded {
+                        "settings changed"
+                    } else if saved.in_night(minute) {
+                        "night window open"
+                    } else {
+                        "night window closed"
+                    },
+                    fresh.dim_after_s,
+                    fresh.dim_level,
+                    fresh.lock_after_s,
+                    fresh.blank_after_s,
+                    fresh.suspend_after_s
+                );
+                cfg = fresh;
+                if timeouts.send(wayland::Timeouts::from(&cfg)).is_err() {
+                    log::error!("idle: wayland thread gone; timers not re-armed");
+                }
+                // A blank already counting down was armed against the old
+                // tier. Shorten it to the new one, never extend it: the
+                // window's job is to put the screen out sooner, and a locked
+                // screen that stays lit past the new deadline because the
+                // window opened one second too late is the bug this avoids.
+                // `None` from the new tier is "never", which disarms.
+                if let Some(at) = blank_at {
+                    blank_at = blank_deadline(&cfg).map(|fresh_at| at.min(fresh_at));
                 }
             }
         }

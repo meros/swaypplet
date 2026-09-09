@@ -7,7 +7,7 @@ gear in the flight deck; a bare `:` lists every prefix). Five tabs,
 | tab | edits | sections of `~/.config/swaypplet/settings.json` |
 |---|---|---|
 | Look | `output * bg` on the compositor; how much the shell animates | `wallpaper`, `look` |
-| Idle & Lock | the idle manager's timers; walk-away lock; face unlock; what sudo and pkexec may ask for | `idle`, `elevate` |
+| Idle & Lock | the idle manager's timers; the night window; walk-away lock; face unlock; what sudo and pkexec may ask for | `idle`, `elevate` |
 | Bar | clock format, segments, OSD placement, key steps, volume boost | `bar`, `keys` |
 | Alerts | popup linger, corner and depth; quiet hours; what a screenshot becomes | `alerts`, `capture` |
 | Glass | the liquid-glass material | `~/.config/swaypplet/glass.json` |
@@ -104,6 +104,15 @@ and Bar tabs is `nix <section>` into the clipboard.
   and creates them again (`idle/wayland.rs`). Zero on a timer is "never":
   no notification is created. The blank duration and the dim level are read
   at fire time and need no re-arm.
+- **The night window** is a second, shorter set of the dim, lock and
+  screen-off tiers for a time range (`Idle::resolve`). The same once-a-second
+  check resolves it against the local clock, so an edit in the pane and the
+  window opening arrive by one path and re-arm by one comparison; a boundary
+  is at most `SETTINGS_POLL` late. Suspend is not in the window: it is
+  battery-only, and cutting an overnight job short is worse than a late
+  suspend. Crossing INTO the window while already idle past its shorter lock
+  tier locks at once, which is `ext-idle-notify` being correct — the seat has
+  been idle longer than the timeout being armed.
 
 ## Adding a setting
 
@@ -137,3 +146,5 @@ switches only ever remove a way in or add a lock.
   layer somewhere else, as `SWAYPPLET_GLASS_CONFIG` does for glass.
 - `journalctl -t swaypplet-idle -f` shows the re-arm as
   `idle: settings changed — …` followed by `idle: watching N timeouts …`.
+  A night-window boundary logs the same line with `night window open` or
+  `night window closed` in place of `settings changed`.
