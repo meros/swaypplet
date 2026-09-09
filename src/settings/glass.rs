@@ -684,7 +684,7 @@ mod tests {
 
     fn system() -> System {
         System {
-            material: preset::clear(),
+            material: preset::plain(),
             mask_threshold: 0.40,
             geometries: BTreeMap::from([
                 (
@@ -819,7 +819,7 @@ mod tests {
         let t = Tuning {
             bezel_scale: 2.0,
             ..Tuning {
-                material: preset::clear(),
+                material: preset::plain(),
                 bezel_scale: 1.0,
                 thickness_ratio: 0.0,
                 crest_scale: 1.0,
@@ -839,7 +839,7 @@ mod tests {
             crest_radius: 14.0,
         };
         let t = Tuning {
-            material: preset::clear(),
+            material: preset::plain(),
             bezel_scale: 1.5,
             thickness_ratio: 2.0,
             crest_scale: 1.0,
@@ -887,10 +887,14 @@ mod tests {
 
     #[test]
     fn the_nix_export_does_not_print_integers_as_floats() {
-        let nix = preset::clear().as_nix();
+        let nix = preset::plain().as_nix();
         assert!(nix.contains("samples = 4;"), "{nix}");
         assert!(nix.contains("surface = \"convex_squircle\";"));
-        assert!(nix.contains("grain = \"none\";"));
+        // The shipped material carries a seeded grain, so the grainless
+        // spelling needs a preset that has none to be checked at all.
+        assert!(nix.contains("grain = \"seeded\";"), "{nix}");
+        let bare = preset::grainless().as_nix();
+        assert!(bare.contains("grain = \"none\";"), "{bare}");
     }
 
     #[test]

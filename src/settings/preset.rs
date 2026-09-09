@@ -1,20 +1,32 @@
 //! Materials to start from.
 //!
-//! These are not copies of the shipped one — that lives in Nix and arrives as
-//! `System::material`, which is what the pane calls "System" and what Reset
-//! goes back to. These are other coherent points in the same model, each
-//! moved as a whole rather than one knob at a time: `glass.nix`'s argument is
-//! that a mirror-sharp reflection on a milky surface is a combination nothing
-//! physical produces, and a preset that changed only `roughness` would keep
-//! walking into exactly that.
+//! [`ALL`] is the row of buttons on the Glass tab, after the "System" one the
+//! pane draws first. System is the shipped material read back from
+//! `/etc/swaypplet/glass.json`, which is what Reset returns to; these are
+//! points you can go to and come back from.
 //!
-//! The list is ordered by family rather than by when each was written —
-//! clear, then frosted, then smoked, then the ones whose whole point is a
-//! grain you can resolve — because it is rendered as a row of buttons and a
-//! row of buttons is read left to right. Between them the set reaches every
-//! `SurfaceKind` and every `GrainKind` the shader has, which the tests at the
-//! bottom hold to: the row is the tour of the model, and a profile no preset
-//! visits is one nobody finds without reading the dropdown.
+//! Each is moved as a whole rather than one knob at a time: `glass.nix`'s
+//! argument is that a mirror-sharp reflection on a milky surface is a
+//! combination nothing physical produces, and a preset that changed only
+//! `roughness` would keep walking into exactly that.
+//!
+//! [`base`] is the shipped material, so every preset here is a departure from
+//! what actually ships. It was not, until 2026-09-09: the base sat at
+//! `roughness 0.30`, `refraction 1.50`, `frost_radius 20` while the shipped
+//! material had been retuned to a wet lens at `roughness 0.01`,
+//! `refraction 1.07`, `frost_radius 3`. Sixteen presets were departures from
+//! a middle that no longer existed, so the row read as sixteen ways to not
+//! look like the desktop you have.
+//!
+//! Six, not sixteen, and that is also a reversal. The old row was written as
+//! a tour: one preset per `SurfaceKind` and per `GrainKind`, on the argument
+//! that a profile no preset visits is one nobody finds without reading the
+//! dropdown. What a tour actually produced was four presets in the reeded
+//! family whose difference is the pitch of a pattern, three ways to be dark,
+//! and a row three deep that nobody reads to the end of. The dropdowns below
+//! still reach every profile and every grain; the row is now the places worth
+//! stopping, and `every_preset_is_visibly_a_different_material` is what keeps
+//! them apart.
 
 use super::glass::{GrainKind, Material, SurfaceKind};
 
@@ -31,34 +43,43 @@ impl Preset {
     }
 }
 
-/// The point every preset below is written as a departure from. Never offered
-/// on its own: it is a middle, not a look.
+/// The shipped material, field for field: `theme/glass.nix`'s `material` in
+/// the nixos repo, which the compositor is running right now.
+///
+/// Kept in the binary as well as in Nix on purpose. `System` reads the file
+/// and is therefore whatever the last rebuild put there and nothing at all on
+/// a host with no file; this is a fixed point that a session can always get
+/// back to, and the middle the presets below are written as departures from.
+///
+/// It carries the two overrides `glass.nix` documents at length: `frost` and
+/// `reflect_blur` sit a few multiples above what `roughness 0.01` would
+/// derive, so the surface is mirror-smooth and its transmission is not quite.
+/// That is the one deliberate exception to the rule the rest of this file
+/// keeps, and `only_the_shipped_material_splits_the_distribution` is where it
+/// is written down.
 fn base() -> Material {
     Material {
-        roughness: 0.30,
+        roughness: 0.01,
         surface: SurfaceKind::ConvexSquircle,
-        refraction: 1.50,
-        dispersion: 0.004,
+        refraction: 1.07,
+        dispersion: 0.003,
         samples: 4.0,
         reflection: 1.0,
-        lensing: 0.22,
-        frost_radius: 20.0,
-        absorb: 1.8,
-        absorb_floor: 0.14,
-        photochromic: 0.14,
-        haze: 0.05,
-        specular: 0.12,
-        edge_light: 0.08,
-        noise: 0.012,
-        // Zero lets `roughness` decide all three. Every preset leaves them
-        // there; overriding one is what splits the microfacet distribution
-        // into three unrelated numbers.
-        frost: 0.0,
+        lensing: 0.15,
+        frost_radius: 3.0,
+        absorb: 1.0,
+        absorb_floor: 0.07,
+        photochromic: 0.28,
+        haze: 0.0,
+        specular: 0.10,
+        edge_light: 0.09,
+        noise: 0.007,
+        frost: 0.05,
         shine: 0.0,
-        reflect_blur: 0.0,
-        grain: GrainKind::None,
-        grain_scale: 18.0,
-        grain_strength: 0.0,
+        reflect_blur: 0.10,
+        grain: GrainKind::Seeded,
+        grain_scale: 10.0,
+        grain_strength: 1.0,
         // Unrotated and unstretched. A preset that turned the pattern would
         // be picking an orientation for a card whose long axis it does not
         // know: the bar runs one way and a notification the other.
@@ -77,26 +98,26 @@ fn base() -> Material {
     }
 }
 
-pub static ALL: [Preset; 16] = [
-    // ── Clear ────────────────────────────────────────────────────────
+/// Everything a departure has to say to stop deriving the wet lens's
+/// transmission. [`base`] carries `frost` and `reflect_blur` by hand because
+/// the shipped material wants a smooth surface with a slightly soft image;
+/// any preset that moves `roughness` wants all three to follow it, and zero
+/// is what tells the shader to derive them.
+fn derived() -> Material {
+    Material {
+        frost: 0.0,
+        shine: 0.0,
+        reflect_blur: 0.0,
+        ..base()
+    }
+}
+
+pub static ALL: [Preset; 6] = [
+    // ── The shipped material, and the two nearest ways off it ────────
     Preset {
-        name: "Clear",
-        hint: "A wet lens. Tight highlight, and the desktop still readable through it.",
-        build: || Material {
-            roughness: 0.08,
-            frost_radius: 12.0,
-            absorb: 1.2,
-            absorb_floor: 0.10,
-            // Carried on purpose by a preset this transparent: with `absorb`
-            // this low the ceiling is the only thing holding a white desktop
-            // down, and without it the card disappears over one.
-            photochromic: 0.18,
-            haze: 0.02,
-            specular: 0.20,
-            edge_light: 0.12,
-            lensing: 0.26,
-            ..base()
-        },
+        name: "Bubble",
+        hint: "The material this desktop ships: a wet lens, tight highlight, the wallpaper still readable through it.",
+        build: base,
     },
     Preset {
         name: "Sheet",
@@ -106,185 +127,75 @@ pub static ALL: [Preset; 16] = [
             // The only profile that leaves the bevel flat-tangent at both
             // ends, so there is no crease anywhere and no dome in the middle.
             // That is the whole material: a pane, and an edge that was rolled
-            // rather than cut.
+            // rather than cut — which is the one structural departure in this
+            // row, everything else here being domed like the shipped card.
             surface: SurfaceKind::Lip,
-            // Soda-lime, as shipped in a window. `Clear` reads as a lens
+            // Soda-lime, as shipped in a window. `Bubble` reads as a lens
             // because it bends; this reads as glass because it does not.
             refraction: 1.52,
-            dispersion: 0.003,
             lensing: 0.10,
             frost_radius: 6.0,
             absorb: 0.8,
             absorb_floor: 0.06,
             photochromic: 0.24,
-            haze: 0.0,
             specular: 0.22,
             edge_light: 0.16,
-            ..base()
-        },
-    },
-    Preset {
-        name: "Aqua",
-        hint: "A bead of water: low index, deep bend, no colour of its own.",
-        build: || Material {
-            roughness: 0.06,
-            // The circle leaves the contact line with a vertical tangent,
-            // which the shader notes is a droplet only in the instant before
-            // it beads up. That is exactly this material: water on something
-            // it does not wet, standing on its own surface tension rather
-            // than spreading — which is what `Molten`'s droplet profile is.
-            surface: SurfaceKind::ConvexCircle,
-            refraction: 1.33,
-            // Water disperses about a third as much as crown glass, and the
-            // bend here is large enough that any more would fringe the text.
-            dispersion: 0.002,
-            lensing: 0.44,
-            frost_radius: 10.0,
-            absorb: 1.2,
-            absorb_floor: 0.09,
-            photochromic: 0.20,
-            haze: 0.02,
-            specular: 0.20,
-            edge_light: 0.14,
-            ..base()
-        },
-    },
-    Preset {
-        name: "Minimal",
-        hint: "Gentle daily driver. Soft edge definition, maximum contrast under text.",
-        build: || Material {
-            roughness: 0.04,
-            refraction: 1.12,
-            dispersion: 0.002,
-            lensing: 0.12,
-            frost_radius: 8.0,
-            absorb: 0.9,
-            absorb_floor: 0.05,
-            photochromic: 0.26,
-            haze: 0.0,
-            specular: 0.12,
-            edge_light: 0.07,
             grain: GrainKind::None,
-            grain_scale: 18.0,
             grain_strength: 0.0,
-            ..base()
+            ..derived()
         },
     },
     // ── Scattered ────────────────────────────────────────────────────
     Preset {
         name: "Frosted",
-        hint: "Further into the frost. Fine texture goes, the backdrop's colour stays.",
+        hint: "The wet lens taken all the way into the frost. Fine texture goes, the backdrop's colour stays.",
         build: || Material {
             roughness: 0.80,
+            // A real index, unlike the shipped 1.07. That number buys a card
+            // you can read a wallpaper through, and at this roughness there
+            // is no image left to protect.
+            refraction: 1.50,
+            dispersion: 0.004,
+            lensing: 0.22,
             frost_radius: 30.0,
             absorb: 2.0,
+            absorb_floor: 0.14,
             haze: 0.06,
-            // The lobe is broad at this roughness, so a third of the clear
-            // preset's brightness is still a lit top rather than a patch.
+            // The lobe is broad at this roughness, so most of the shipped
+            // highlight is still a lit top rather than a patch.
             specular: 0.08,
             edge_light: 0.08,
             grain: GrainKind::Rippled,
             grain_scale: 18.0,
             grain_strength: 1.0,
-            ..base()
-        },
-    },
-    Preset {
-        name: "Mist",
-        hint: "Pale fog. Scattered forward rather than absorbed, so it lightens instead of tinting.",
-        build: || Material {
-            roughness: 0.50,
-            // Dished, which is the one profile that turns the interior into
-            // the wall and the rim into the flat. Fog in a cast blank rather
-            // than fog in the same slab `Frosted` is, and the difference is
-            // where the light piles up.
-            surface: SurfaceKind::Concave,
-            refraction: 1.46,
-            dispersion: 0.003,
-            lensing: 0.16,
-            frost_radius: 30.0,
-            // The pair that makes this the light end of the smoke family:
-            // haze is light arriving from everywhere, absorb is light not
-            // arriving at all, and only the second one darkens.
-            absorb: 1.4,
-            absorb_floor: 0.18,
-            photochromic: 0.28,
-            haze: 0.30,
-            specular: 0.08,
-            edge_light: 0.07,
-            grain: GrainKind::Rippled,
-            grain_scale: 26.0,
-            grain_strength: 0.8,
-            ..base()
+            ..derived()
         },
     },
     Preset {
         name: "Smoked",
-        hint: "Deep and turbid: mostly scattered light rather than an image.",
+        hint: "Deep and turbid: mostly scattered light rather than an image. The dark end of the frost.",
         build: || Material {
             roughness: 0.62,
+            refraction: 1.50,
+            dispersion: 0.004,
+            lensing: 0.20,
             frost_radius: 26.0,
             absorb: 2.9,
             absorb_floor: 0.09,
+            // Near the floor, unlike everything else here. The ceiling exists
+            // to stop a white desktop coming through too bright, and at this
+            // absorption there is no white desktop coming through.
             photochromic: 0.10,
             haze: 0.16,
             specular: 0.07,
             edge_light: 0.06,
             grain: GrainKind::Rippled,
+            // Coarser than `Frosted` at a lower roughness, which is what
+            // separates them by more than darkness: this one you can resolve
+            // the scattering of, and that one you cannot.
             grain_scale: 22.0,
-            grain_strength: 1.0,
-            ..base()
-        },
-    },
-    Preset {
-        name: "Ash",
-        hint: "Smoke you can set text on: even, dark, and with the turbidity taken out.",
-        build: || Material {
-            roughness: 0.30,
-            refraction: 1.50,
-            dispersion: 0.003,
-            lensing: 0.20,
-            frost_radius: 20.0,
-            // `Smoked` buys its depth with haze, and haze is light arriving
-            // from every direction at once, which is exactly what eats the
-            // contrast under a caption. This buys the same darkness with
-            // `absorb_floor` instead: the optical path no longer depends on
-            // where in the bevel you are, so the tint is flat across the card
-            // and the glyph edges keep their contrast against it.
-            absorb: 2.5,
-            absorb_floor: 0.20,
-            photochromic: 0.18,
-            haze: 0.06,
-            specular: 0.11,
-            edge_light: 0.09,
-            ..base()
-        },
-    },
-    Preset {
-        name: "Obsidian",
-        hint: "A dark mirror. Little comes through; most of what you see is reflected.",
-        build: || Material {
-            roughness: 0.18,
-            refraction: 1.58,
-            dispersion: 0.004,
-            // The one preset that takes `reflection` off physical, and it has
-            // to: at this absorption the transmitted term is nearly gone, and
-            // a Fresnel weight of 1.0 would leave a card that is merely dark.
-            // Pushing it is what makes the light that remains read as a
-            // surface rather than as a hole in the desktop.
-            reflection: 2.6,
-            lensing: 0.20,
-            frost_radius: 14.0,
-            absorb: 3.5,
-            absorb_floor: 0.30,
-            // Near zero, unlike every other preset here. The ceiling exists
-            // to stop a white desktop coming through too bright, and at this
-            // absorption there is no white desktop coming through.
-            photochromic: 0.06,
-            haze: 0.05,
-            specular: 0.30,
-            edge_light: 0.18,
-            ..base()
+            grain_strength: 1.6,
+            ..derived()
         },
     },
     // ── Resolved grain ───────────────────────────────────────────────
@@ -298,64 +209,23 @@ pub static ALL: [Preset; 16] = [
             lensing: 0.36,
             frost_radius: 16.0,
             absorb: 1.5,
+            absorb_floor: 0.14,
             photochromic: 0.16,
             haze: 0.03,
             specular: 0.26,
             edge_light: 0.18,
+            // The same seeded pattern the shipped material carries, four
+            // times the depth and two and a half times the pitch: this is
+            // what `Bubble`'s grain looks like when you are meant to see it.
             grain: GrainKind::Seeded,
             grain_scale: 26.0,
             grain_strength: 2.0,
-            ..base()
+            ..derived()
         },
     },
     Preset {
-        name: "Prism",
-        hint: "Cut crystal. Square facets, each shifting its own rigid copy of the backdrop.",
-        build: || Material {
-            // Low, and it has to be: the facets are the texture here, and a
-            // scattering lobe wide enough to see would blur the arris between
-            // them, which is the feature.
-            roughness: 0.12,
-            refraction: 1.66,
-            dispersion: 0.016,
-            lensing: 0.32,
-            frost_radius: 12.0,
-            absorb: 1.4,
-            absorb_floor: 0.10,
-            photochromic: 0.16,
-            haze: 0.02,
-            specular: 0.30,
-            edge_light: 0.20,
-            grain: GrainKind::Prismatic,
-            grain_scale: 18.0,
-            grain_strength: 3.0,
-            ..base()
-        },
-    },
-    Preset {
-        name: "Molten",
-        hint: "Young-Laplace droplet curvature. Liquid meniscus edge with organic bubbles.",
-        build: || Material {
-            roughness: 0.05,
-            surface: SurfaceKind::Droplet,
-            refraction: 1.45,
-            dispersion: 0.006,
-            lensing: 0.30,
-            frost_radius: 10.0,
-            absorb: 1.1,
-            photochromic: 0.22,
-            haze: 0.01,
-            specular: 0.24,
-            edge_light: 0.15,
-            grain: GrainKind::Seeded,
-            grain_scale: 20.0,
-            grain_strength: 1.5,
-            ..base()
-        },
-    },
-    Preset {
-        name: "Fluted",
-        hint: "Art-deco reeded flutes: parallel ribbed cylindrical lenses.",
+        name: "Reeded",
+        hint: "Art-deco flutes: parallel cylindrical lenses, each carrying its own strip of the backdrop.",
         build: || Material {
             roughness: 0.22,
             refraction: 1.52,
@@ -363,109 +233,54 @@ pub static ALL: [Preset; 16] = [
             lensing: 0.28,
             frost_radius: 18.0,
             absorb: 1.7,
+            absorb_floor: 0.14,
             photochromic: 0.14,
             haze: 0.04,
             specular: 0.18,
             edge_light: 0.11,
+            // One of the four patterned presets this row used to carry. The
+            // other three — cross-reed, hammered, cathedral — differ from
+            // this one in the pitch and the axis count of the same idea, and
+            // all three are a `grain` dropdown away for anyone who wants
+            // them. A button row is for choosing between materials, not
+            // between pitches.
             grain: GrainKind::Reeded,
             grain_scale: 14.0,
             grain_strength: 3.0,
-            ..base()
-        },
-    },
-    Preset {
-        name: "Cross-reed",
-        hint: "Flutes running both ways: a grid of pillow lenses, each its own little window.",
-        build: || Material {
-            roughness: 0.20,
-            refraction: 1.52,
-            dispersion: 0.005,
-            lensing: 0.26,
-            frost_radius: 16.0,
-            absorb: 1.7,
-            absorb_floor: 0.13,
-            photochromic: 0.14,
-            haze: 0.04,
-            specular: 0.17,
-            edge_light: 0.11,
-            grain: GrainKind::CrossReed,
-            // Finer than `Fluted`, because the pattern's peak sits on the
-            // diagonal where both flutes are at full slope: at one pitch the
-            // pillows read as coarse squares rather than as reeding.
-            grain_scale: 12.0,
-            grain_strength: 2.4,
-            ..base()
-        },
-    },
-    Preset {
-        name: "Hammered",
-        hint: "Peened dents tiling the plane. Every dimple is a lens with a bottom.",
-        build: || Material {
-            roughness: 0.26,
-            refraction: 1.52,
-            dispersion: 0.005,
-            lensing: 0.24,
-            frost_radius: 16.0,
-            absorb: 1.8,
-            absorb_floor: 0.14,
-            photochromic: 0.14,
-            haze: 0.04,
-            specular: 0.16,
-            edge_light: 0.10,
-            // The dents tile the plane with no flat glass between them, so
-            // the strength is the highest here of anything that is not a
-            // straight facet: there is no untextured ground for it to stand
-            // out against, and an amount that reads on `Crystal`'s sparse
-            // bubbles disappears into a surface that is all rim.
-            grain: GrainKind::Hammered,
-            grain_scale: 13.0,
-            grain_strength: 3.4,
-            ..base()
-        },
-    },
-    Preset {
-        name: "Cathedral",
-        hint: "Hand-rolled sheet: coarse, poured, and never repeating.",
-        build: || Material {
-            roughness: 0.34,
-            refraction: 1.50,
-            dispersion: 0.004,
-            lensing: 0.22,
-            frost_radius: 22.0,
-            absorb: 1.9,
-            absorb_floor: 0.15,
-            photochromic: 0.16,
-            haze: 0.06,
-            specular: 0.13,
-            edge_light: 0.09,
-            grain: GrainKind::Cathedral,
-            // Coarse on purpose. The pattern is five waves at incommensurate
-            // angles, so what makes it read as poured rather than as noise is
-            // the beat between them, and a beat needs a card wide enough to
-            // hold more than one of it.
-            grain_scale: 34.0,
-            grain_strength: 2.8,
-            ..base()
+            ..derived()
         },
     },
 ];
 
-/// The one the tests reach for; also the gentlest thing to land on.
+/// The shipped material, for tests that want a plain one. Was `clear()`, back
+/// when the row opened with a preset called Clear.
 #[cfg(test)]
-pub fn clear() -> Material {
+pub fn plain() -> Material {
     ALL[0].material()
 }
 
-/// A preset that moves the fields `clear()` leaves at their defaults — a
-/// grain, a strength, a scale. By predicate rather than by index: the list is
-/// ordered for the button row and gets reordered when a preset is added, and
-/// a test pinned to a position quietly stops testing what it was written for.
+/// A preset whose grain is not the shipped seeded one — the fields `plain()`
+/// leaves where the shipped material has them. By predicate rather than by
+/// index: the list is ordered for the button row and gets reordered when a
+/// preset is added, and a test pinned to a position quietly stops testing
+/// what it was written for.
+/// A preset with no grain at all, for the export test that checks how the
+/// grainless spelling comes out. Predicate rather than index, for the reason
+/// `textured` gives.
+#[cfg(test)]
+pub fn grainless() -> Material {
+    ALL.iter()
+        .map(Preset::material)
+        .find(|m| m.grain == GrainKind::None)
+        .expect("no preset is grainless")
+}
+
 #[cfg(test)]
 pub fn textured() -> Material {
     ALL.iter()
         .map(Preset::material)
-        .find(|m| m.grain != GrainKind::None)
-        .expect("no preset carries a grain")
+        .find(|m| !matches!(m.grain, GrainKind::None | GrainKind::Seeded))
+        .expect("no preset carries a grain of its own")
 }
 
 #[cfg(test)]
@@ -473,48 +288,107 @@ mod tests {
     use super::*;
 
     #[test]
-    fn no_preset_splits_the_distribution_by_hand() {
+    fn only_the_shipped_material_splits_the_distribution() {
         // `frost`, `shine` and `reflect_blur` at zero mean "derive from
-        // roughness". A preset that set one of them would be describing a
-        // material whose transmission, specular lobe and reflection blur
-        // disagree about how rough the surface is.
+        // roughness". A preset that sets one is describing a material whose
+        // transmission, specular lobe and reflection blur disagree about how
+        // rough the surface is.
+        //
+        // `Bubble` is the exception because the shipped material is: it holds
+        // `frost` and `reflect_blur` a few multiples above what `roughness
+        // 0.01` derives, so the surface is mirror-smooth and its transmission
+        // is not quite (theme/glass.nix in the nixos repo says why, at
+        // length). This preset exists to be that material, so it has to carry
+        // the exception with it — and nothing else here may.
         for p in &ALL {
             let m = p.material();
-            assert_eq!(m.frost, 0.0, "{} sets frost", p.name);
             assert_eq!(m.shine, 0.0, "{} sets shine", p.name);
-            assert_eq!(m.reflect_blur, 0.0, "{} sets reflect_blur", p.name);
-        }
-    }
-
-    #[test]
-    fn every_preset_is_a_distinct_material() {
-        for (i, a) in ALL.iter().enumerate() {
-            for b in &ALL[i + 1..] {
-                assert_ne!(a.material(), b.material(), "{} == {}", a.name, b.name);
+            if p.name == "Bubble" {
+                assert_eq!(m.frost, 0.05, "Bubble no longer matches theme/glass.nix");
+                assert_eq!(
+                    m.reflect_blur, 0.10,
+                    "Bubble no longer matches theme/glass.nix"
+                );
+            } else {
+                assert_eq!(m.frost, 0.0, "{} sets frost", p.name);
+                assert_eq!(m.reflect_blur, 0.0, "{} sets reflect_blur", p.name);
             }
         }
     }
 
     #[test]
-    fn the_row_visits_every_profile_and_every_grain() {
-        // Both sets are closed and both are offered as dropdowns, which is
-        // the worst place to discover a look: a name in a list says nothing
-        // about what it does to a card. A preset per entry means every one of
-        // them is one click away from being seen, and it means a profile
-        // added to the shader without a preset fails here rather than
-        // shipping as a name nobody tries.
-        for kind in SurfaceKind::ALL {
-            assert!(
-                ALL.iter().any(|p| p.material().surface == kind),
-                "no preset uses {kind:?}"
-            );
+    fn the_row_opens_with_the_shipped_material() {
+        // Not merely present: first. It is the one every other preset here is
+        // written as a departure from, and the one a session comes back to
+        // after trying the rest.
+        assert_eq!(ALL[0].name, "Bubble");
+        assert_eq!(ALL[0].material(), base());
+    }
+
+    /// The look-defining fields, in the sense that moving one changes what a
+    /// card looks like rather than how it is arrived at. `samples`,
+    /// `energy_comp`, the grain frame and the fill pair are all absent: they
+    /// are cost, normalisation, orientation and colour, and two presets that
+    /// differed only there would be the same material twice.
+    fn differences(a: &Material, b: &Material) -> Vec<&'static str> {
+        let mut moved = Vec::new();
+        let mut f = |name, x: f64, y: f64| {
+            if (x - y).abs() > 1e-9 {
+                moved.push(name);
+            }
+        };
+        f("roughness", a.roughness, b.roughness);
+        f("refraction", a.refraction, b.refraction);
+        f("dispersion", a.dispersion, b.dispersion);
+        f("lensing", a.lensing, b.lensing);
+        f("frost_radius", a.frost_radius, b.frost_radius);
+        f("absorb", a.absorb, b.absorb);
+        f("absorb_floor", a.absorb_floor, b.absorb_floor);
+        f("photochromic", a.photochromic, b.photochromic);
+        f("haze", a.haze, b.haze);
+        f("specular", a.specular, b.specular);
+        f("edge_light", a.edge_light, b.edge_light);
+        f("grain_scale", a.grain_scale, b.grain_scale);
+        f("grain_strength", a.grain_strength, b.grain_strength);
+        if a.surface != b.surface {
+            moved.push("surface");
         }
-        for grain in GrainKind::ALL {
-            assert!(
-                ALL.iter().any(|p| p.material().grain == grain),
-                "no preset uses {grain:?}"
-            );
+        if a.grain != b.grain {
+            moved.push("grain");
         }
+        moved
+    }
+
+    #[test]
+    fn every_preset_is_visibly_a_different_material() {
+        // What replaced the coverage test the old sixteen-preset row carried.
+        // That one asked whether the row reached every profile and every
+        // grain, which is a question about the shader; this asks whether two
+        // buttons are worth pressing separately, which is the question a row
+        // of six is for.
+        //
+        // Three fields is the bar because two is reachable by a pitch change:
+        // the reeded family used to fill four buttons on `grain_scale` and
+        // `grain_strength` alone.
+        for (i, a) in ALL.iter().enumerate() {
+            for b in &ALL[i + 1..] {
+                let moved = differences(&a.material(), &b.material());
+                assert!(
+                    moved.len() >= 3,
+                    "{} and {} differ only in {moved:?} — same material, two buttons",
+                    a.name,
+                    b.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_row_stays_a_row() {
+        // The pane draws System and then these, in one wrapping flow. Past
+        // about eight the row becomes a grid nobody reads to the end of,
+        // which is the thing the sixteen-preset version got wrong.
+        assert!(ALL.len() <= 7, "{} presets is a grid, not a row", ALL.len());
     }
 
     #[test]
@@ -525,6 +399,56 @@ mod tests {
             for b in &ALL[i + 1..] {
                 assert_ne!(a.name, b.name, "two presets named {}", a.name);
             }
+        }
+    }
+
+    /// `Bubble` as JSON, which `cross-repo-guard.nix` in the nixos repo
+    /// checks `theme/glass.nix`'s `material` against.
+    fn shipped_json() -> String {
+        let mut json = serde_json::to_string_pretty(&ALL[0].material()).unwrap();
+        json.push('\n');
+        json
+    }
+
+    #[test]
+    fn the_shipped_material_file_matches_the_bubble_preset() {
+        assert_eq!(
+            include_str!("../../data/shipped-material.json"),
+            shipped_json(),
+            "data/shipped-material.json is stale: \
+             cargo test -- --ignored write_shipped_material"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn write_shipped_material() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/data/shipped-material.json");
+        std::fs::write(path, shipped_json()).unwrap();
+    }
+
+    /// One `Tuning` override file per preset, for `dev/preset-sheet.sh` to
+    /// point a nested session at. Not a shipped artifact and not checked by
+    /// anything: the row is judged by looking at it, and this is what makes
+    /// looking at it one command.
+    ///
+    ///   SWPP_PRESET_OUT=/tmp/p cargo test -- --ignored write_preset_tunings
+    #[test]
+    #[ignore]
+    fn write_preset_tunings() {
+        let dir = std::env::var("SWPP_PRESET_OUT")
+            .expect("set SWPP_PRESET_OUT to the directory to write into");
+        for p in &ALL {
+            let tuning = super::super::glass::Tuning {
+                material: p.material(),
+                bezel_scale: 1.0,
+                thickness_ratio: 0.0,
+                crest_scale: 1.0,
+            };
+            let path = std::path::Path::new(&dir).join(format!("{}.json", p.name.to_lowercase()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(&path, serde_json::to_string_pretty(&tuning).unwrap()).unwrap();
+            println!("wrote {}", path.display());
         }
     }
 
