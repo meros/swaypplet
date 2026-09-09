@@ -1237,7 +1237,7 @@ mod tests {
     /// config would have put it.
     fn probe() -> Tuning {
         Tuning {
-            material: preset::clear(),
+            material: preset::plain(),
             bezel_scale: 1.0,
             thickness_ratio: 0.0,
             crest_scale: 1.0,
