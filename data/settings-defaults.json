@@ -9,7 +9,15 @@
     "blank_after_s": 900,
     "suspend_after_s": 1200,
     "walk_away_lock": true,
-    "face_unlock": true
+    "face_unlock": true,
+    "night": false,
+    "night_from_h": 21,
+    "night_from_m": 0,
+    "night_to_h": 7,
+    "night_to_m": 0,
+    "night_dim_after_s": 60,
+    "night_lock_after_s": 300,
+    "night_blank_after_s": 120
   },
   "bar": {
     "clock_24h": true,
