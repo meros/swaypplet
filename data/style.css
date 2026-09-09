@@ -28,6 +28,30 @@
 @define-color accent_quaternary #b16286; /* accentQuaternary (magenta) */
 @define-color accent_quinary   #cc241d;  /* accentQuinary (red) */
 
+/* The bright gruvbox pair of each accent, for small type and thin marks on a
+   card ground. Measured on the notification card at its closed-down 0.72
+   tint over black: the base accents land at 3.7 (blue, magenta) to 5.0
+   (green), which carries a 3 px rail and falls short of 4.5 for 11 px text.
+   These are 5.8 to 9.3, so the ink uses them — and the rail follows, so one
+   card carries exactly one hue rather than two shades of it.
+
+   Not in theme/colors.nix, unlike the base accents: nothing on the Nix side
+   reads them, cross-repo-guard.nix checks only the names its paletteMap
+   lists, and a palette entry with one consumer belongs where its consumer
+   is. Promote them when a second surface wants them.
+
+   Six rather than four: the sender's hue is a hash, and with four buckets
+   two of the three cards on the render harness landed on the same one, which
+   is the one thing the channel is for. Gruvbox's bright row has exactly six
+   usable here — bright red is spoken for by the URGENT chip. Measured on the
+   same ground, the lowest of the six is 5.8:1. */
+@define-color accent_bright   #8ec07c;  /* aqua — bright pair of @accent */
+@define-color accent_bright_2 #fabd2f;  /* yellow */
+@define-color accent_bright_3 #83a598;  /* blue */
+@define-color accent_bright_4 #d3869b;  /* magenta */
+@define-color accent_bright_5 #b8bb26;  /* green */
+@define-color accent_bright_6 #fe8019;  /* orange */
+
 /* Legacy aliases — keep so existing class references keep working */
 @define-color red     #cc241d;   /* matches waybar accentQuinary */
 @define-color green   #b8bb26;
@@ -1699,10 +1723,45 @@ revealer {
    transforms in popup.rs); everything outside the cards must stay
    fully alpha-0 so compositor blur clips to the cards
    (see the window comment). */
+/* The ground is closed down from @surface's 0.50 to 0.72, which is the one
+   change every other line here depends on. At 0.50 the wallpaper sets the
+   card's contrast: the app name and the body measured 4.48:1 over a BLACK
+   desktop (dev/render.sh --mode notifications), which is the best case, and
+   a bright wallpaper lifts the ground and takes them under it. At 0.72 the
+   ground barely moves with what is behind it and the body clears 7:1.
+
+   Still a material, not a slab: the frost, the bevel and the hairline are
+   untouched, the wallpaper still reads through, and 0.72 is far above the
+   0.40 seeding line theme/glass.nix draws (see .collapsed below for what
+   happens near it). Raising the alpha also masks more of the card in, so
+   there is more frost rather than less. */
 .notification-popup-content {
+    background-color: alpha(#32302f, 0.72);
     box-shadow: none;
     padding: 12px 14px;
 }
+
+/* The sender's hue, as a 3 px pill down the leading edge of the content.
+   Inset rather than bled to the card edge: the card's 18 px radius would
+   clip a full-bleed rail into a crescent, and GTK does not clip children to
+   the border radius, so a straight stripe would overhang the corner instead.
+
+   Which of the six accents is a hash of the app name (`accent_for`), so senders look
+   different and one sender looks the same every time. Urgency does not touch
+   the rail — that channel is the warm glass and the URGENT chip, and a rail
+   that meant severity on some cards and sender on others would mean neither. */
+.notification-rail {
+    min-width: 3px;
+    border-radius: 2px;
+    background-color: @fg_dim;
+}
+
+.notification-rail.a1 { background-color: @accent_bright; }
+.notification-rail.a2 { background-color: @accent_bright_2; }
+.notification-rail.a3 { background-color: @accent_bright_3; }
+.notification-rail.a4 { background-color: @accent_bright_4; }
+.notification-rail.a5 { background-color: @accent_bright_5; }
+.notification-rail.a6 { background-color: @accent_bright_6; }
 
 /* Cards past the fully-visible band sit behind the stack, dimmer as they go.
    A tint change rather than widget opacity: each card owns its surface now,
@@ -1717,7 +1776,7 @@ revealer {
    0.500, so a collapsed card clears the line by the same 0.10 as every other
    one. #292727 is @surface's colour at the same 0.82. */
 .notification-popup-content.collapsed {
-    background-color: alpha(#292727, 0.50);
+    background-color: alpha(#292727, 0.72);
     border-color: alpha(@border_strong, 0.7);
 }
 
@@ -1739,7 +1798,7 @@ revealer {
    alpha rather than the colour drops the card into the flat-slab band.
    #3a2a28 is @surface's #32302f warmed toward @red at the same alpha. */
 .notification-popup-content.critical {
-    background-color: alpha(#3a2a28, 0.50);
+    background-color: alpha(#3a2a28, 0.72);
     border-color: alpha(@red, 0.35);
 }
 
@@ -1790,7 +1849,7 @@ revealer {
 .notification-age {
     font-size: 11px;
     color: @fg_dim;
-    opacity: 0.7;
+    opacity: 0.85;
 }
 
 /* "+N more from this app" — a count, deliberately not a stack of cards. */
@@ -1844,12 +1903,22 @@ revealer {
     min-height: 24px;
 }
 
+/* The app name carries the rail's hue, so the header says who sent it in the
+   same channel the edge does. @fg_dim stays the fallback for a card with no
+   accent class, which is what an empty app name gets. */
 .notification-app-name {
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 1px;
     color: @fg_dim;
 }
+
+.notification-app-name.a1 { color: @accent_bright; }
+.notification-app-name.a2 { color: @accent_bright_2; }
+.notification-app-name.a3 { color: @accent_bright_3; }
+.notification-app-name.a4 { color: @accent_bright_4; }
+.notification-app-name.a5 { color: @accent_bright_5; }
+.notification-app-name.a6 { color: @accent_bright_6; }
 
 /* Task attribution on background-session stop notifications (vision O2):
    "T<N>" ahead of the app name, in the same four accents as the
@@ -1873,9 +1942,12 @@ revealer {
     color: @fg;
 }
 
+/* The body is what the card is for, so it reads at full ink. @fg_dim put it
+   at 4.48:1 on the old ground over a black desktop and lower over anything
+   brighter, which is a card you skip rather than read. */
 .notification-body {
     font-size: 13px;
-    color: @fg_dim;
+    color: @fg;
 }
 
 .notification-time {

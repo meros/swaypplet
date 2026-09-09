@@ -53,6 +53,8 @@ const WINDOW_HEIGHT: i32 = 720;
 const COLLAPSED_TAIL: usize = 2;
 // Vertical gap between fully visible cards
 const GAP: f64 = 8.0;
+// Width of the sender's accent rail down the leading edge of a card's content.
+const RAIL_PX: i32 = 3;
 // Collapsed cards peek out below the last full card by this much per level
 const PEEK: f64 = 12.0;
 const PEEK_SCALE_STEP: f64 = 0.05;
@@ -69,6 +71,28 @@ const INLINE_REPLY_KEY: &str = "inline-reply";
 // the click handler, and how far before releasing means "gone".
 const DRAG_CLAIM_PX: f64 = 8.0;
 const DRAG_DISMISS_PX: f64 = 72.0;
+
+/// How many card accents there are: gruvbox's bright row, less the red the
+/// URGENT chip owns (`data/style.css`, `.notification-rail`).
+pub const ACCENTS: u64 = 6;
+
+/// Which accent a sender gets, 1 to [`ACCENTS`], from its name.
+///
+/// The point is that two senders look different and one sender looks the
+/// same every time, including across restarts — so this is a written-out
+/// FNV-1a rather than `DefaultHasher`, whose value is a std implementation
+/// detail and not something a colour should depend on.
+///
+/// Case-folded, because "Backup" and "BACKUP" are one sender wearing two
+/// hats, and the header prints the name uppercased anyway.
+fn accent_for(app: &str) -> u8 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in app.to_lowercase().bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    (hash % ACCENTS) as u8 + 1
+}
 
 /// The Alerts tab, read once per card: a card keeps the corner and the
 /// stack depth it was born with, so a change lands on the next card rather
@@ -883,6 +907,7 @@ fn populate_card(
             .max_width_chars(1)
             .build();
         app_label.add_css_class("notification-app-name");
+        app_label.add_css_class(&format!("a{}", accent_for(&notif.app_name)));
         header.append(&app_label);
     }
 
@@ -1207,9 +1232,27 @@ fn populate_card(
         }
         _ => {}
     });
-    hbox.add_controller(gesture);
+    // The rail and the content, side by side. The gesture rides the row
+    // rather than the content, so a click on the rail is a click on the card
+    // like any other.
+    let row = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(10)
+        .build();
+    let rail = gtk4::Box::builder()
+        .width_request(RAIL_PX)
+        .valign(gtk4::Align::Fill)
+        .build();
+    rail.add_css_class("notification-rail");
+    if !notif.app_name.is_empty() {
+        rail.add_css_class(&format!("a{}", accent_for(&notif.app_name)));
+    }
+    hbox.set_hexpand(true);
+    row.append(&rail);
+    row.append(&hbox);
+    row.add_controller(gesture);
 
-    card.append(&hbox);
+    card.append(&row);
     age_label_handle
 }
 
@@ -1504,6 +1547,27 @@ fn walk_views(
 mod tests {
     use super::*;
     use crate::notifications::Notification;
+
+    #[test]
+    fn a_sender_keeps_one_accent_and_senders_spread_across_them() {
+        // Stable: the same name is the same colour every run, which is the
+        // whole reason this is not DefaultHasher.
+        assert_eq!(accent_for("Backup"), accent_for("Backup"));
+        // Case is not a second sender, and the header uppercases anyway.
+        assert_eq!(accent_for("Backup"), accent_for("BACKUP"));
+        assert_eq!(accent_for("Möte"), accent_for("möte"));
+
+        for app in ["", "Chat", "Backup", "Kalender", "Disk", "Firefox"] {
+            let a = accent_for(app);
+            assert!((1..=ACCENTS as u8).contains(&a), "{app} got {a}");
+        }
+
+        // Every accent is reachable, so none of the six is dead CSS.
+        let mut seen: Vec<u8> = (0..400).map(|i| accent_for(&format!("app{i}"))).collect();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen, (1..=ACCENTS as u8).collect::<Vec<u8>>());
+    }
 
     /// The bug this replaced: one rank counter for every card meant a card
     /// arriving on the second screen took rank 0 and pushed the first
