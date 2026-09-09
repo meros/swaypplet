@@ -12,6 +12,7 @@
 //! GTK side is an [`Observed`] snapshot behind an `Rc` service (shared
 //! skeleton in `crate::service`).
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix::net::UnixStream;
@@ -205,6 +206,49 @@ pub fn run_command_then(cmd: &str, then: impl FnOnce() + 'static) {
             then();
         },
     );
+}
+
+/// The focused output's connector name, or `None` when sway cannot say.
+///
+/// Blocking, unlike everything else here that runs from the GTK thread: the
+/// popup stack has to pin a card's surface to an output *before* the surface
+/// exists, so the answer cannot arrive later on a worker thread's callback.
+/// One `get_outputs` round trip on a local socket, with the connection kept
+/// between calls so a burst of notifications is not a burst of connects.
+///
+/// A dropped socket (sway restarted under us) costs one reconnect and then
+/// gives up for this call. The caller's fallback is to let the compositor
+/// place the surface, which is what it did before this existed.
+pub fn focused_output() -> Option<String> {
+    thread_local! {
+        static CONN: RefCell<Option<Connection>> = const { RefCell::new(None) };
+    }
+    CONN.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        for attempt in 0..2 {
+            if slot.is_none() {
+                match connect() {
+                    Ok(c) => *slot = Some(c),
+                    Err(e) => {
+                        log::warn!("sway ipc: get_outputs cannot connect: {e}");
+                        return None;
+                    }
+                }
+            }
+            match slot.as_mut()?.get_outputs() {
+                Ok(outputs) => return outputs.into_iter().find(|o| o.focused).map(|o| o.name),
+                Err(e) => {
+                    // The kept connection is the likely casualty, so drop it
+                    // and let the second pass reconnect.
+                    *slot = None;
+                    if attempt == 1 {
+                        log::warn!("sway ipc: get_outputs failed: {e}");
+                    }
+                }
+            }
+        }
+        None
+    })
 }
 
 /// The config sway actually loaded, as text.

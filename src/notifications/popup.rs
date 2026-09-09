@@ -11,6 +11,15 @@
 //! gives way when the stack is full, and when each one expires. The
 //! transitions themselves belong to `anim::Reveal`, and the surface to
 //! `surface::GlassSurface`.
+//!
+//! One column per output, not one column. A card is pinned to the focused
+//! output when it is created (`sway_ipc::focused_output`), and both the
+//! layout and the depth cap are per pinned output. They used to be global
+//! while the surfaces were placed by the compositor: a notification arriving
+//! on the screen you were using pushed the OTHER screen's cards down a slot,
+//! and could evict one of them, on a display it was not even on. A card that
+//! cannot be pinned (no sway, or an output GDK does not have) keeps the old
+//! behaviour, sharing one column with every other unpinned card.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -128,6 +137,11 @@ struct Card {
     exiting: bool,
     /// Which column the surface was anchored to, for the reflow.
     corner: Corner,
+    /// The output the surface is pinned to, by connector name, or `None`
+    /// when sway could not say and the compositor placed it. Cards sharing a
+    /// value share a column: a card stacks under the cards on ITS screen and
+    /// is never moved by one that arrived on the other screen.
+    output: Option<String>,
 }
 
 struct State {
@@ -229,8 +243,34 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
         return;
     }
 
+    // Which screen this card belongs to, decided before anything counts the
+    // stack: the depth cap below is per column, and a column is one output.
+    //
+    // Left unpinned the compositor still puts the surface on the focused
+    // output — but nothing then knows WHICH output that was, so the stack
+    // laid every card out in one column regardless of screen and a
+    // notification arriving on one display pushed the other display's cards
+    // down. Ask sway, pin the surface, and keep the name for `reflow`.
+    let output = crate::sway_ipc::focused_output();
+    let monitor = output
+        .as_deref()
+        .and_then(crate::layer_shell::monitor_by_connector);
+    if output.is_some() && monitor.is_none() {
+        // Sway named an output GDK does not have. Letting the compositor
+        // place the surface is still correct, so this is a note rather than
+        // a failure.
+        log::warn!(
+            "notifications: no monitor for output {output:?}; leaving the card to the compositor"
+        );
+    }
+    // The name is kept only when the surface really was pinned to it, so the
+    // grouping below can never disagree with where a card is.
+    let output = monitor.as_ref().and(output);
+
     // The app's own oldest card gives way before anyone else's: a burst from
-    // one sender should cost that sender its slots, not the stack.
+    // one sender should cost that sender its slots, not the stack. Counted
+    // across every screen, because this cap is about the sender rather than
+    // about the column.
     let crowded = {
         let s = st.borrow();
         let mine: Vec<u32> = s
@@ -248,14 +288,20 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
             .or_insert(0) += 1;
     }
 
-    // Evict the oldest popup when full (popup only — the notification
-    // stays open in the store/history)
+    // Evict the oldest popup when this screen's column is full (popup only —
+    // the notification stays open in the store/history). Per column, for the
+    // same reason the layout is: a busy second screen must not cost the
+    // screen you are looking at the card you were reading.
     let evict = {
         let s = st.borrow();
-        (s.active().count() >= usize::from(alerts().stack) + COLLAPSED_TAIL)
-            .then(|| s.active().map(|c| c.id).next())
+        let column: Vec<u32> = s
+            .active()
+            .filter(|c| c.output.as_deref() == output.as_deref())
+            .map(|c| c.id)
+            .collect();
+        (column.len() >= usize::from(alerts().stack) + COLLAPSED_TAIL).then(|| column[0])
     };
-    if let Some(Some(old_id)) = evict {
+    if let Some(old_id) = evict {
         start_exit(st, old_id);
     }
 
@@ -264,7 +310,7 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
         (s.app.clone(), s.hovered)
     };
     let corner = alerts().corner;
-    let surface = GlassSurface::new(&app, config_for(corner), anim::SLIDE_PX);
+    let surface = GlassSurface::new(&app, config_for(corner), anim::SLIDE_PX, monitor.as_ref());
     surface.pane().add_css_class("notification-popup-content");
     surface.pane().set_size_request(CARD_WIDTH, -1);
     // The surface spans the whole column so the card can be placed inside it
@@ -314,6 +360,7 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
             age,
             exiting: false,
             corner,
+            output,
         });
     }
 
@@ -408,9 +455,31 @@ fn retire(st: &Rc<RefCell<State>>, id: u32) {
     reflow(st);
 }
 
+/// Each card's rank in its OWN output's column, given the cards in the order
+/// `reflow` walks them (newest first, the exiting ones already dropped).
+///
+/// One column per screen is the whole point: a card is stacked under the
+/// cards on its own output, and a card that arrives on another screen must
+/// not move it. Cards with no output share the one column the compositor
+/// placed them in, which is what the stack did for every card before it knew
+/// about outputs.
+fn ranks_per_output(outputs: &[Option<&str>]) -> Vec<usize> {
+    let mut counts: std::collections::HashMap<Option<&str>, usize> =
+        std::collections::HashMap::new();
+    outputs
+        .iter()
+        .map(|output| {
+            let rank = counts.entry(*output).or_insert(0);
+            let this = *rank;
+            *rank += 1;
+            this
+        })
+        .collect()
+}
+
 /// Give every card its slot: newest nearest the anchored edge, cards past
 /// the stack depth collapsed behind the last full one with their far edges
-/// peeking out.
+/// peeking out. One column per output ([`ranks_per_output`]).
 ///
 /// Computed with the anchored edge at y = 0 and mirrored for a card whose
 /// column hangs from the bottom, so the two layouts are one piece of
@@ -419,17 +488,26 @@ fn reflow(st: &Rc<RefCell<State>>) {
     let full = usize::from(alerts().stack);
     let plan: Vec<(GlassSurface, f64, f64, bool)> = {
         let s = st.borrow();
-        let mut y = f64::from(EDGE_MARGIN);
-        let mut full_top = f64::from(EDGE_MARGIN);
-        let mut full_bottom = f64::from(EDGE_MARGIN);
+        let showing: Vec<&Card> = s.cards.iter().rev().filter(|c| !c.exiting).collect();
+        let outputs: Vec<Option<&str>> = showing.iter().map(|c| c.output.as_deref()).collect();
+        let ranks = ranks_per_output(&outputs);
+        // The running geometry is per column, so a card on one screen never
+        // reads a `y` another screen's card left behind.
+        let mut columns: std::collections::HashMap<Option<&str>, (f64, f64, f64)> =
+            std::collections::HashMap::new();
         let mut plan = Vec::new();
-        for (rank, card) in s.cards.iter().rev().filter(|c| !c.exiting).enumerate() {
+        let margin = f64::from(EDGE_MARGIN);
+        for (card, rank) in showing.iter().zip(ranks) {
+            let column = columns
+                .entry(card.output.as_deref())
+                .or_insert((margin, margin, margin));
+            let (y, full_top, full_bottom) = column;
             let height = card.surface.height();
             let (slot, scale) = if rank < full {
-                let slot = y;
-                full_top = y;
-                full_bottom = y + height;
-                y += height + GAP;
+                let slot = *y;
+                *full_top = *y;
+                *full_bottom = *y + height;
+                *y += height + GAP;
                 (slot, 1.0)
             } else {
                 let k = (rank - full + 1) as f64;
@@ -437,7 +515,7 @@ fn reflow(st: &Rc<RefCell<State>>) {
                 // Far edge peeks PEEK px per level beyond the last full
                 // card; clamp so a tall collapsed card can't poke out past
                 // the anchored edge.
-                let slot = (full_bottom + PEEK * k - height * scale).max(full_top + 2.0 * k);
+                let slot = (*full_bottom + PEEK * k - height * scale).max(*full_top + 2.0 * k);
                 (slot, scale)
             };
             let slot = if card.corner.is_bottom() {
@@ -1426,6 +1504,23 @@ fn walk_views(
 mod tests {
     use super::*;
     use crate::notifications::Notification;
+
+    /// The bug this replaced: one rank counter for every card meant a card
+    /// arriving on the second screen took rank 0 and pushed the first
+    /// screen's cards down a slot, on a display the new card was not even on.
+    #[test]
+    fn each_output_ranks_its_own_column() {
+        let a = Some("DP-1");
+        let b = Some("eDP-1");
+        // Newest first, as reflow walks them: a, b, a, a, b.
+        assert_eq!(ranks_per_output(&[a, b, a, a, b]), vec![0, 0, 1, 2, 1]);
+        // One screen alone is unchanged: 0, 1, 2 …
+        assert_eq!(ranks_per_output(&[a, a, a]), vec![0, 1, 2]);
+        // A card that could not be pinned falls back to one shared column,
+        // which is what every card did before outputs were known.
+        assert_eq!(ranks_per_output(&[None, a, None]), vec![0, 0, 1]);
+        assert_eq!(ranks_per_output(&[]), Vec::<usize>::new());
+    }
 
     #[test]
     fn age_reads_as_metadata_not_a_countdown() {

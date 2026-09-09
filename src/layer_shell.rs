@@ -107,11 +107,31 @@ pub fn is_internal(monitor: &gdk::Monitor) -> bool {
 /// Looked up per call rather than cached: monitors come and go, and a stale
 /// `gdk::Monitor` pins a surface to an output the compositor has forgotten.
 pub fn internal_monitor() -> Option<gdk::Monitor> {
-    let display = gdk::Display::default()?;
-    display
-        .monitors()
+    monitors().find(is_internal)
+}
+
+/// The monitor sway calls `name`, or `None` when it is not connected.
+///
+/// Sway's output names are DRM connector names, which is the same string
+/// `gdk::Monitor::connector` reports, so the two sides need no table. Looked
+/// up per call, for the reason [`internal_monitor`] gives.
+pub fn monitor_by_connector(name: &str) -> Option<gdk::Monitor> {
+    monitors().find(|m| m.connector().is_some_and(|c| c == name))
+}
+
+fn monitors() -> impl Iterator<Item = gdk::Monitor> {
+    // `ListModel::into_iter` borrows the model, so the list has to outlive
+    // the iterator: collect it here rather than chaining off a temporary.
+    let list: Vec<gdk::Monitor> = gdk::Display::default()
         .into_iter()
-        .flatten()
-        .filter_map(|obj| obj.downcast::<gdk::Monitor>().ok())
-        .find(is_internal)
+        .flat_map(|display| {
+            display
+                .monitors()
+                .into_iter()
+                .flatten()
+                .filter_map(|obj| obj.downcast::<gdk::Monitor>().ok())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    list.into_iter()
 }
