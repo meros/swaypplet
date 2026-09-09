@@ -89,10 +89,22 @@ impl GlassSurface {
     /// `settle_px` is the horizontal distance the card travels as it fades,
     /// giving the entrance a direction; 0 for a card that simply appears.
     ///
+    /// `monitor` names the output to put the surface on. `None` leaves the
+    /// choice to the compositor, which uses the output that has focus when
+    /// the surface maps — the right screen for a notification, and an
+    /// unknowable one afterwards. Naming it makes the output the caller's
+    /// fact, which is what lets the popup stack lay out one column per
+    /// screen (`notifications/popup.rs`).
+    ///
     /// [`pane`]: Self::pane
     /// [`set_content`]: Self::set_content
-    pub fn new(app: &gtk4::Application, config: &LayerShellConfig, settle_px: f64) -> Self {
-        let window = layer_shell::create_layer_window(app, config);
+    pub fn new(
+        app: &gtk4::Application,
+        config: &LayerShellConfig,
+        settle_px: f64,
+        monitor: Option<&gtk4::gdk::Monitor>,
+    ) -> Self {
+        let window = layer_shell::create_layer_window_on(app, config, monitor);
         window.set_resizable(false);
         window.set_decorated(false);
 
