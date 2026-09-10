@@ -17,6 +17,8 @@ pub struct DisplayWidgets {
     pub ip_label: Label,
     pub gateway_label: Label,
     pub dns_label: Label,
+    pub current_disconnect_btn: gtk4::Button,
+    pub current_spinner: gtk4::Spinner,
 }
 
 /// Widget handles needed by the periodic poller beyond DisplayWidgets.
@@ -226,6 +228,9 @@ fn update_active_labels<'a>(active: &'a ActiveConnection, w: &DisplayWidgets) ->
                 None => ssid.clone(),
             };
             w.summary_text.set_label(&summary_label);
+            w.current_disconnect_btn.set_visible(true);
+            w.current_disconnect_btn.set_sensitive(true);
+            w.current_spinner.set_visible(false);
             Some(device.as_str())
         }
         ActiveConnection::Ethernet { device } => {
@@ -234,6 +239,8 @@ fn update_active_labels<'a>(active: &'a ActiveConnection, w: &DisplayWidgets) ->
             w.current_signal.set_label("");
             w.summary_icon.set_label(ICON_ETHERNET);
             w.summary_text.set_label("Wired");
+            w.current_disconnect_btn.set_visible(false);
+            w.current_spinner.set_visible(false);
             Some(device.as_str())
         }
         ActiveConnection::Disconnected => {
@@ -242,6 +249,8 @@ fn update_active_labels<'a>(active: &'a ActiveConnection, w: &DisplayWidgets) ->
             w.current_signal.set_label("");
             w.summary_icon.set_label(ICON_DISCONNECTED);
             w.summary_text.set_label("Disconnected");
+            w.current_disconnect_btn.set_visible(false);
+            w.current_spinner.set_visible(false);
             None
         }
     }

@@ -278,13 +278,30 @@ pub fn activate_by_id(conn: &Connection, id: &str) -> Result<(), String> {
         .map(|(path, _, _)| path)
         .ok_or_else(|| format!("no connection named {id}"))?;
 
-    let root = ObjectPath::try_from("/").map_err(|e| e.to_string())?;
-    let target = ObjectPath::try_from(path.as_str()).map_err(|e| e.to_string())?;
+    let wifi_dev = devices(conn)
+        .into_iter()
+        .find(|d| d.device_type == DEVICE_TYPE_WIFI)
+        .map(|d| d.path);
 
-    proxy(conn, MANAGER_PATH, IFACE_MANAGER)?
-        .call::<_, _, OwnedObjectPath>("ActivateConnection", &(&target, &root, &root))
-        .map(|_| ())
-        .map_err(|e| dbus_message(&e))
+    let target = ObjectPath::try_from(path.as_str()).map_err(|e| e.to_string())?;
+    let root = ObjectPath::try_from("/").map_err(|e| e.to_string())?;
+    let dev = match &wifi_dev {
+        Some(p) => ObjectPath::try_from(p.as_str()).map_err(|e| e.to_string())?,
+        None => root.clone(),
+    };
+
+    let active_path: OwnedObjectPath = proxy(conn, MANAGER_PATH, IFACE_MANAGER)?
+        .call("ActivateConnection", &(&target, &dev, &root))
+        .map_err(|e| dbus_message(&e))?;
+
+    let dev_str = wifi_dev.as_deref().unwrap_or("/");
+    wait_for_active_connection(
+        conn,
+        active_path.as_str(),
+        dev_str,
+        None,
+        std::time::Duration::from_secs(12),
+    )
 }
 
 /// Deactivate whichever active connection carries this id.
@@ -300,6 +317,32 @@ pub fn deactivate_by_id(conn: &Connection, id: &str) -> Result<(), String> {
         .map_err(|e| dbus_message(&e))
 }
 
+/// Deactivate whichever active connection is a Wi-Fi connection.
+pub fn deactivate_active_wifi(conn: &Connection) -> Result<(), String> {
+    let active = paths(conn, MANAGER_PATH, IFACE_MANAGER, "ActiveConnections");
+    for path in active {
+        let kind = prop::<String>(conn, &path, IFACE_ACTIVE, "Type");
+        if kind.as_deref() == Some("802-11-wireless") {
+            let target = ObjectPath::try_from(path.as_str()).map_err(|e| e.to_string())?;
+            proxy(conn, MANAGER_PATH, IFACE_MANAGER)?
+                .call::<_, _, ()>("DeactivateConnection", &(&target,))
+                .map_err(|e| dbus_message(&e))?;
+            return Ok(());
+        }
+    }
+
+    // Fallback: disconnect any active Wi-Fi device directly.
+    for d in devices(conn) {
+        if d.device_type == DEVICE_TYPE_WIFI && d.state > DEVICE_STATE_DISCONNECTED {
+            proxy(conn, &d.path, IFACE_DEVICE)?
+                .call::<_, _, ()>("Disconnect", &())
+                .map_err(|e| dbus_message(&e))?;
+            return Ok(());
+        }
+    }
+    Err("No active Wi-Fi connection".to_string())
+}
+
 /// Join a network that has no stored connection yet.
 ///
 /// The settings dictionary is the minimum NetworkManager needs to build one:
@@ -311,6 +354,7 @@ pub fn add_and_activate(
     device_path: &str,
     ssid: &str,
     password: &str,
+    security: &str,
     hidden: bool,
 ) -> Result<(), String> {
     let mut wireless: HashMap<&str, Value> = HashMap::new();
@@ -328,12 +372,26 @@ pub fn add_and_activate(
     settings.insert("802-11-wireless", wireless);
 
     if !password.is_empty() {
-        let mut security: HashMap<&str, Value> = HashMap::new();
-        // WPA-PSK covers WPA2 and, for a router that offers both, WPA3's
-        // transition mode; NetworkManager negotiates SAE from there.
-        security.insert("key-mgmt", Value::from("wpa-psk"));
-        security.insert("psk", Value::from(password));
-        settings.insert("802-11-wireless-security", security);
+        let mut sec: HashMap<&str, Value> = HashMap::new();
+        if security.contains("WPA3") && !security.contains("WPA2") {
+            sec.insert("key-mgmt", Value::from("sae"));
+        } else if security.contains("WEP") {
+            sec.insert("key-mgmt", Value::from("none"));
+            sec.insert("wep-key0", Value::from(password));
+            sec.insert("wep-key-type", Value::from(1u32));
+        } else {
+            sec.insert("key-mgmt", Value::from("wpa-psk"));
+            sec.insert("psk", Value::from(password));
+        }
+        settings.insert("802-11-wireless-security", sec);
+        settings
+            .get_mut("802-11-wireless")
+            .expect("just inserted")
+            .insert("security", Value::from("802-11-wireless-security"));
+    } else if security.contains("OWE") {
+        let mut sec: HashMap<&str, Value> = HashMap::new();
+        sec.insert("key-mgmt", Value::from("owe"));
+        settings.insert("802-11-wireless-security", sec);
         settings
             .get_mut("802-11-wireless")
             .expect("just inserted")
@@ -343,13 +401,77 @@ pub fn add_and_activate(
     let device = ObjectPath::try_from(device_path).map_err(|e| e.to_string())?;
     let root = ObjectPath::try_from("/").map_err(|e| e.to_string())?;
 
-    proxy(conn, MANAGER_PATH, IFACE_MANAGER)?
-        .call::<_, _, (OwnedObjectPath, OwnedObjectPath)>(
-            "AddAndActivateConnection",
-            &(&settings, &device, &root),
-        )
-        .map(|_| ())
-        .map_err(|e| dbus_message(&e))
+    let (new_conn_path, active_path): (OwnedObjectPath, OwnedObjectPath) =
+        proxy(conn, MANAGER_PATH, IFACE_MANAGER)?
+            .call(
+                "AddAndActivateConnection",
+                &(&settings, &device, &root),
+            )
+            .map_err(|e| dbus_message(&e))?;
+
+    wait_for_active_connection(
+        conn,
+        active_path.as_str(),
+        device_path,
+        Some(new_conn_path.as_str()),
+        std::time::Duration::from_secs(15),
+    )
+}
+
+/// Wait for an active connection to settle into `Activated` (state 2) or fail.
+pub fn wait_for_active_connection(
+    conn: &Connection,
+    active_path: &str,
+    device_path: &str,
+    new_conn_path: Option<&str>,
+    timeout: std::time::Duration,
+) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + timeout;
+
+    while std::time::Instant::now() < deadline {
+        let state = prop::<u32>(conn, active_path, IFACE_ACTIVE, "State");
+        match state {
+            Some(2) => {
+                // NM_ACTIVE_CONNECTION_STATE_ACTIVATED
+                return Ok(());
+            }
+            Some(3) | Some(4) | None => {
+                // NM_ACTIVE_CONNECTION_STATE_DEACTIVATING / DEACTIVATED or connection disappeared
+                let reason_msg = read_device_failure_reason(conn, device_path)
+                    .unwrap_or_else(|| "Connection failed".to_string());
+
+                if let Some(cp) = new_conn_path {
+                    let _ = proxy(conn, cp, IFACE_CONNECTION)
+                        .and_then(|p| p.call::<_, _, ()>("Delete", &()).map_err(|e| e.to_string()));
+                }
+                return Err(reason_msg);
+            }
+            _ => {
+                // State 1 (ACTIVATING) or unknown - continue polling
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
+    if let Some(cp) = new_conn_path {
+        let _ = proxy(conn, cp, IFACE_CONNECTION)
+            .and_then(|p| p.call::<_, _, ()>("Delete", &()).map_err(|e| e.to_string()));
+    }
+    Err("Connection timed out".to_string())
+}
+
+pub fn read_device_failure_reason(conn: &Connection, device_path: &str) -> Option<String> {
+    let (_, reason) = prop::<(u32, u32)>(conn, device_path, IFACE_DEVICE, "StateReason")?;
+    match reason {
+        7 => Some("Password required".to_string()),
+        8 => Some("Incorrect password / authentication failed".to_string()),
+        11 => Some("Configuration failed".to_string()),
+        12 => Some("IP configuration failed".to_string()),
+        53 => Some("Connection timed out".to_string()),
+        54 => Some("Authentication failed".to_string()),
+        55 => Some("Supplicant failed".to_string()),
+        _ => None,
+    }
 }
 
 /// A `OwnedValue` holding a string, as a `String`.

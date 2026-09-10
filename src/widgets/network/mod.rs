@@ -19,7 +19,7 @@ use backend::*;
 // The quick-toggle tile drives the radio without going through this section
 // (widgets/tiles.rs), so the two calls it needs are re-exported here rather
 // than reaching into `backend` from outside the module.
-pub use backend::{NmResult, network_manager_available, set_wifi_radio, wifi_radio_enabled};
+pub use backend::{network_manager_available, set_wifi_radio, wifi_radio_enabled, NmResult};
 
 // ── Async result types ───────────────────────────────────────────────────────
 
@@ -61,10 +61,12 @@ pub(crate) struct NetworkState {
     pub list_visible: bool,
     pub show_all: bool,
     pub scanning: bool,
+    pub search_query: String,
 }
 
 // ── NetworkSection ────────────────────────────────────────────────────────────
 
+#[derive(Clone)]
 pub struct NetworkSection {
     root: Box,
     state: Rc<RefCell<NetworkState>>,
@@ -77,6 +79,8 @@ pub struct NetworkSection {
     current_icon_label: Label,
     current_ssid_label: Label,
     current_signal_label: Label,
+    current_disconnect_btn: Button,
+    current_spinner: Spinner,
     ip_label: Label,
     gateway_label: Label,
     dns_label: Label,
@@ -86,9 +90,11 @@ pub struct NetworkSection {
     wifi_controls_box: Box,
     revealer: Revealer,
     power_save_row: Box,
-    // Scan status
+    // Scan status & search
     scan_spinner: Spinner,
     scan_status_label: Label,
+    scan_btn: Button,
+    search_entry: gtk4::SearchEntry,
     // Toggle / lists
     network_list_box: ListBox,
     vpn_list_box: ListBox,
@@ -203,9 +209,18 @@ impl NetworkSection {
         let current_signal_label = Label::builder().label("").build();
         current_signal_label.add_css_class("network-signal");
 
+        let current_spinner = Spinner::new();
+        current_spinner.set_visible(false);
+
+        let current_disconnect_btn = Button::builder().label("Disconnect").build();
+        current_disconnect_btn.add_css_class("network-disconnect-btn");
+        current_disconnect_btn.set_visible(false);
+
         current_row.append(&current_icon_label);
         current_row.append(&current_ssid_label);
         current_row.append(&current_signal_label);
+        current_row.append(&current_spinner);
+        current_row.append(&current_disconnect_btn);
         detail_box.append(&current_row);
 
         // ── Connectivity state ────────────────────────────────────────────────
@@ -320,24 +335,6 @@ impl NetworkSection {
         iface_list_box.add_css_class("network-list");
         detail_box.append(&iface_list_box);
 
-        // ── Scan status row ───────────────────────────────────────────────────
-        let scan_row = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(8)
-            .halign(gtk4::Align::Center)
-            .build();
-
-        let scan_spinner = Spinner::new();
-        scan_spinner.set_visible(false);
-
-        let scan_status_label = Label::builder().label("").build();
-        scan_status_label.add_css_class("network-scan-status");
-        scan_status_label.set_visible(false);
-
-        scan_row.append(&scan_spinner);
-        scan_row.append(&scan_status_label);
-        detail_box.append(&scan_row);
-
         // ── WiFi controls box (hidden by default) ─────────────────────────────
         let wifi_controls_box = Box::builder()
             .orientation(Orientation::Vertical)
@@ -366,6 +363,41 @@ impl NetworkSection {
             .orientation(Orientation::Vertical)
             .spacing(4)
             .build();
+
+        // Search & Scan bar
+        let search_bar = Box::builder()
+            .orientation(Orientation::Horizontal)
+            .spacing(8)
+            .margin_start(4)
+            .margin_end(4)
+            .margin_bottom(4)
+            .build();
+
+        let search_entry = gtk4::SearchEntry::builder()
+            .placeholder_text("Search networks…")
+            .hexpand(true)
+            .build();
+        search_entry.add_css_class("network-search-entry");
+
+        let scan_spinner = Spinner::new();
+        scan_spinner.set_visible(false);
+
+        let scan_status_label = Label::builder().label("").build();
+        scan_status_label.add_css_class("network-scan-status");
+        scan_status_label.set_visible(false);
+
+        let scan_btn = Button::builder()
+            .label("󰑐 Scan")
+            .tooltip_text("Scan for available networks")
+            .build();
+        scan_btn.add_css_class("network-scan-btn");
+
+        search_bar.append(&search_entry);
+        search_bar.append(&scan_spinner);
+        search_bar.append(&scan_status_label);
+        search_bar.append(&scan_btn);
+
+        revealer_box.append(&search_bar);
 
         let network_list_box = ListBox::builder()
             .selection_mode(gtk4::SelectionMode::None)
@@ -442,6 +474,7 @@ impl NetworkSection {
                 list_visible: false,
                 show_all: false,
                 scanning: false,
+                search_query: String::new(),
             }));
 
             let state_toggle = state_ref.clone();
@@ -468,6 +501,8 @@ impl NetworkSection {
                 current_icon_label,
                 current_ssid_label,
                 current_signal_label,
+                current_disconnect_btn,
+                current_spinner,
                 ip_label,
                 gateway_label,
                 dns_label,
@@ -479,10 +514,55 @@ impl NetworkSection {
                 power_save_row,
                 scan_spinner,
                 scan_status_label,
+                scan_btn,
+                search_entry,
                 network_list_box,
                 vpn_list_box,
                 iface_list_box,
             };
+
+            // Wire current connection disconnect button
+            {
+                let sec_c = section.clone();
+                let btn_c = section.current_disconnect_btn.clone();
+                let spin_c = section.current_spinner.clone();
+                section.current_disconnect_btn.connect_clicked(move |_| {
+                    btn_c.set_sensitive(false);
+                    spin_c.set_visible(true);
+                    spin_c.start();
+                    let sec_poll = sec_c.clone();
+                    let btn_poll = btn_c.clone();
+                    let spin_poll = spin_c.clone();
+                    spawn_work(
+                        disconnect_active_wifi,
+                        move |_| {
+                            spin_poll.stop();
+                            spin_poll.set_visible(false);
+                            btn_poll.set_sensitive(true);
+                            sec_poll.refresh();
+                        },
+                    );
+                });
+            }
+
+            // Wire search entry
+            {
+                let state_search = section.state.clone();
+                let list_search = section.network_list_box.clone();
+                let on_change_search = section.on_change();
+                section.search_entry.connect_search_changed(move |entry| {
+                    state_search.borrow_mut().search_query = entry.text().to_string();
+                    wifi::rebuild_wifi_list(&list_search, &state_search, &on_change_search);
+                });
+            }
+
+            // Wire scan button
+            {
+                let sec_scan = section.clone();
+                section.scan_btn.connect_clicked(move |_| {
+                    sec_scan.trigger_scan();
+                });
+            }
 
             // ── Async init: probe nmcli/adapter/radio on background thread ────
             let radio_row_c = radio_row;
@@ -584,16 +664,7 @@ impl NetworkSection {
             monitor::start_periodic_poller(
                 section.state.clone(),
                 monitor::PollerWidgets {
-                    display: monitor::DisplayWidgets {
-                        summary_icon: section.summary_icon.clone(),
-                        summary_text: section.summary_text.clone(),
-                        current_icon: section.current_icon_label.clone(),
-                        current_ssid: section.current_ssid_label.clone(),
-                        current_signal: section.current_signal_label.clone(),
-                        ip_label: section.ip_label.clone(),
-                        gateway_label: section.gateway_label.clone(),
-                        dns_label: section.dns_label.clone(),
-                    },
+                    display: section.display_widgets(),
                     connectivity_label: section.connectivity_label.clone(),
                     portal_btn: section.portal_btn.clone(),
                     wifi_switch: section.wifi_switch.clone(),
@@ -618,7 +689,31 @@ impl NetworkSection {
             ip_label: self.ip_label.clone(),
             gateway_label: self.gateway_label.clone(),
             dns_label: self.dns_label.clone(),
+            current_disconnect_btn: self.current_disconnect_btn.clone(),
+            current_spinner: self.current_spinner.clone(),
         }
+    }
+
+    pub fn on_change(&self) -> Rc<dyn Fn()> {
+        let section = self.clone();
+        Rc::new(move || {
+            section.refresh();
+        })
+    }
+
+    pub fn trigger_scan(&self) {
+        if !self.state.borrow().wifi_radio_enabled {
+            return;
+        }
+        let on_change = self.on_change();
+        Self::start_wifi_scan_static(
+            &self.state,
+            &self.scan_spinner,
+            &self.scan_status_label,
+            &self.scan_btn,
+            &self.network_list_box,
+            &on_change,
+        );
     }
 
     /// Run all blocking network queries on a background thread, then apply
@@ -635,7 +730,9 @@ impl NetworkSection {
         let power_save_row = self.power_save_row.clone();
         let scan_spinner = self.scan_spinner.clone();
         let scan_status_label = self.scan_status_label.clone();
+        let scan_btn = self.scan_btn.clone();
         let network_list_box = self.network_list_box.clone();
+        let on_change = self.on_change();
 
         spawn_work(
             || {
@@ -702,7 +799,9 @@ impl NetworkSection {
                         &state_c,
                         &scan_spinner,
                         &scan_status_label,
+                        &scan_btn,
                         &network_list_box,
+                        &on_change,
                     );
                 }
 
@@ -720,13 +819,16 @@ impl NetworkSection {
         state: &Rc<RefCell<NetworkState>>,
         scan_spinner: &Spinner,
         scan_status_label: &Label,
+        scan_btn: &Button,
         network_list_box: &ListBox,
+        on_change: &Rc<dyn Fn()>,
     ) {
         if state.borrow().scanning {
             return;
         }
         state.borrow_mut().scanning = true;
 
+        scan_btn.set_sensitive(false);
         scan_spinner.set_visible(true);
         scan_spinner.start();
         scan_status_label.set_label("Scanning…");
@@ -734,14 +836,17 @@ impl NetworkSection {
 
         let scan_spinner_c = scan_spinner.clone();
         let scan_status_c = scan_status_label.clone();
+        let scan_btn_c = scan_btn.clone();
         let network_list_box_c = network_list_box.clone();
         let state_c = state.clone();
+        let on_change_c = on_change.clone();
 
         spawn_work(
             scan_wifi,
             move |result: Result<Vec<WifiNetwork>, String>| {
                 scan_spinner_c.stop();
                 scan_spinner_c.set_visible(false);
+                scan_btn_c.set_sensitive(true);
                 state_c.borrow_mut().scanning = false;
 
                 match result {
@@ -750,9 +855,8 @@ impl NetworkSection {
                         {
                             let mut s = state_c.borrow_mut();
                             s.networks = networks;
-                            s.show_all = false;
                         }
-                        wifi::rebuild_wifi_list(&network_list_box_c, &state_c);
+                        wifi::rebuild_wifi_list(&network_list_box_c, &state_c, &on_change_c);
                     }
                     Err(msg) => {
                         scan_status_c.set_label(&msg);
@@ -768,6 +872,7 @@ impl NetworkSection {
         self.detail_revealer.set_reveal_child(true);
         self.revealer.set_reveal_child(true);
         self.state.borrow_mut().list_visible = true;
+        self.trigger_scan();
     }
 
     pub fn widget(&self) -> &gtk4::Box {

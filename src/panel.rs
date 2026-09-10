@@ -337,7 +337,8 @@ impl Panel {
         }
 
         // ── Top Telemetry Ribbon ─────────────────────────────────────────────
-        let telemetry_ribbon = build_telemetry_ribbon(&deck_stack, &audio, &brightness, &store);
+        let telemetry_ribbon =
+            build_telemetry_ribbon(&deck_stack, &audio, &brightness, &store, &network);
 
         // ── Bottom Action Flight Deck ─────────────────────────────────────────
         // Each deck tile is kept beside its spec so `refresh` can re-read it
@@ -397,6 +398,7 @@ impl Panel {
         {
             let deck_stack_c = deck_stack.clone();
             let settings_c = settings.clone();
+            let network_c = network.clone();
             launcher.entry().connect_search_changed(move |entry| {
                 let text = entry.text().to_string();
                 let lower = text.to_lowercase();
@@ -406,6 +408,9 @@ impl Panel {
                 } else if let Some((page, tab)) = route(prefix) {
                     if let Some(tab) = tab {
                         settings_c.show(tab);
+                    }
+                    if page == "wifi" {
+                        network_c.trigger_scan();
                     }
                     deck_stack_c.set_visible_child_name(page);
                 } else if !prefix.starts_with(':')
@@ -646,6 +651,7 @@ fn build_telemetry_ribbon(
     audio: &AudioSection,
     brightness: &BrightnessSection,
     store: &Rc<RefCell<NotificationStore>>,
+    network: &NetworkSection,
 ) -> gtk4::Box {
     let ribbon = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
@@ -782,11 +788,13 @@ fn build_telemetry_ribbon(
     pill_wifi.set_child(Some(&wifi_box));
     {
         let stack_c = deck_stack.clone();
+        let net_c = network.clone();
         pill_wifi.connect_clicked(move |_| {
             if stack_c.visible_child_name().as_deref() == Some("wifi") {
                 stack_c.set_visible_child_name("launcher");
             } else {
                 stack_c.set_visible_child_name("wifi");
+                net_c.trigger_scan();
             }
         });
     }
