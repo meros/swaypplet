@@ -1523,6 +1523,44 @@ revealer {
     min-height: 28px;
 }
 
+.network-disconnect-btn {
+    font-size: 11px;
+    padding: 4px 10px;
+    min-height: 28px;
+    color: @fg_dim;
+    background-color: alpha(white, 0.05);
+    border-radius: 6px;
+}
+
+.network-disconnect-btn:hover {
+    color: @red;
+    background-color: alpha(@red, 0.12);
+}
+
+.network-search-entry {
+    font-size: 12px;
+    min-height: 32px;
+    border-radius: 8px;
+}
+
+.network-scan-btn {
+    font-size: 11px;
+    padding: 4px 10px;
+    min-height: 32px;
+    border-radius: 6px;
+    background-color: alpha(white, 0.05);
+    color: @fg;
+}
+
+.network-scan-btn:hover {
+    background-color: alpha(white, 0.10);
+}
+
+.network-row-active {
+    background-color: alpha(@accent, 0.08);
+    border-radius: 6px;
+}
+
 .network-forget-btn {
     font-size: 11px;
     padding: 4px 8px;

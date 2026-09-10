@@ -13,62 +13,106 @@ use crate::spawn::spawn_work;
 
 // ── WiFi list builder ─────────────────────────────────────────────────────────
 
-pub fn rebuild_wifi_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
+pub fn rebuild_wifi_list(
+    list: &ListBox,
+    state: &Rc<RefCell<NetworkState>>,
+    on_change: &Rc<dyn Fn()>,
+) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
 
-    let (networks, show_all) = {
+    let (networks, show_all, query) = {
         let s = state.borrow();
-        (s.networks.clone(), s.show_all)
+        (
+            s.networks.clone(),
+            s.show_all,
+            s.search_query.trim().to_lowercase(),
+        )
     };
 
-    let total = networks.len();
-    let visible_count = if show_all {
-        total
+    let filtered: Vec<WifiNetwork> = if query.is_empty() {
+        networks
     } else {
-        total.min(MAX_VISIBLE_NETWORKS)
+        networks
+            .into_iter()
+            .filter(|n| n.ssid.to_lowercase().contains(&query))
+            .collect()
     };
 
-    for network in networks.iter().take(visible_count) {
-        let list_row = build_wifi_row(network);
-        list.append(&list_row);
-    }
-
-    // "Show all" / "Show fewer" button when more networks exist.
-    if total > MAX_VISIBLE_NETWORKS {
-        let btn_label = if show_all {
-            "Show fewer".to_string()
+    if filtered.is_empty() {
+        let msg = if !query.is_empty() {
+            format!("No networks matching \"{}\"", state.borrow().search_query.trim())
+        } else if state.borrow().scanning {
+            "Scanning for networks…".to_string()
         } else {
-            format!("Show all ({})", total)
+            "No networks found".to_string()
         };
-        let more_btn = Button::builder()
-            .label(&btn_label)
+
+        let empty_lbl = Label::builder()
+            .label(&msg)
             .halign(gtk4::Align::Center)
+            .margin_top(8)
+            .margin_bottom(8)
             .build();
-        more_btn.add_css_class("network-show-all-btn");
-
-        let state_c = state.clone();
-        let list_c = list.clone();
-        more_btn.connect_clicked(move |_| {
-            {
-                let mut s = state_c.borrow_mut();
-                s.show_all = !s.show_all;
-            }
-            rebuild_wifi_list(&list_c, &state_c);
-        });
-
+        empty_lbl.add_css_class("network-placeholder");
         let row = ListBoxRow::builder().build();
-        row.set_child(Some(&more_btn));
+        row.set_child(Some(&empty_lbl));
         row.add_css_class("network-row");
         list.append(&row);
+    } else {
+        let total = filtered.len();
+        let visible_count = if !query.is_empty() || show_all {
+            total
+        } else {
+            total.min(MAX_VISIBLE_NETWORKS)
+        };
+
+        for network in filtered.iter().take(visible_count) {
+            let list_row = build_wifi_row(network, state, on_change);
+            list.append(&list_row);
+        }
+
+        // "Show all" / "Show fewer" button when more networks exist and we're not searching.
+        if query.is_empty() && total > MAX_VISIBLE_NETWORKS {
+            let btn_label = if show_all {
+                "Show fewer".to_string()
+            } else {
+                format!("Show all ({})", total)
+            };
+            let more_btn = Button::builder()
+                .label(&btn_label)
+                .halign(gtk4::Align::Center)
+                .build();
+            more_btn.add_css_class("network-show-all-btn");
+
+            let state_c = state.clone();
+            let list_c = list.clone();
+            let on_change_c = on_change.clone();
+            more_btn.connect_clicked(move |_| {
+                {
+                    let mut s = state_c.borrow_mut();
+                    s.show_all = !s.show_all;
+                }
+                rebuild_wifi_list(&list_c, &state_c, &on_change_c);
+            });
+
+            let row = ListBoxRow::builder().build();
+            row.set_child(Some(&more_btn));
+            row.add_css_class("network-row");
+            list.append(&row);
+        }
     }
 
     // "Connect to hidden network" button at the bottom.
-    build_hidden_network_row(list, state);
+    build_hidden_network_row(list, state, on_change);
 }
 
-fn build_wifi_row(network: &WifiNetwork) -> ListBoxRow {
+fn build_wifi_row(
+    network: &WifiNetwork,
+    _state: &Rc<RefCell<NetworkState>>,
+    on_change: &Rc<dyn Fn()>,
+) -> ListBoxRow {
     let connect_area = Box::builder()
         .orientation(Orientation::Vertical)
         .spacing(4)
@@ -83,12 +127,19 @@ fn build_wifi_row(network: &WifiNetwork) -> ListBoxRow {
         .margin_end(4)
         .build();
 
+    if network.in_use {
+        let dot = Label::builder().label("●").build();
+        dot.add_css_class("network-active-dot");
+        row_box.append(&dot);
+    }
+
     let signal_lbl = Label::builder()
         .label(signal_icon(network.signal))
         .tooltip_text(format!("{}%", network.signal))
         .build();
     signal_lbl.add_css_class("network-icon");
     signal_lbl.add_css_class(signal_css_class(network.signal));
+    row_box.append(&signal_lbl);
 
     let ssid_lbl = Label::builder()
         .label(&network.ssid)
@@ -100,221 +151,247 @@ fn build_wifi_row(network: &WifiNetwork) -> ListBoxRow {
     if network.in_use {
         ssid_lbl.add_css_class("network-active");
     }
-
-    let lock_lbl = Label::builder()
-        .label(if network.security.is_empty() || network.security == "--" {
-            ""
-        } else {
-            ICON_LOCK
-        })
-        .build();
-    lock_lbl.add_css_class("network-security");
-
-    row_box.append(&signal_lbl);
     row_box.append(&ssid_lbl);
+
     if let Some(freq) = network.freq_mhz {
         let band_lbl = Label::builder().label(freq_band_short(freq)).build();
         band_lbl.add_css_class("network-band");
         row_box.append(&band_lbl);
     }
-    row_box.append(&lock_lbl);
 
-    if network.in_use {
-        let dot = Label::builder().label("●").build();
-        dot.add_css_class("network-active-dot");
-        row_box.prepend(&dot);
+    if !network.security.is_empty() && network.security != "--" {
+        let lock_lbl = Label::builder().label(ICON_LOCK).build();
+        lock_lbl.add_css_class("network-security");
+        row_box.append(&lock_lbl);
     }
 
-    connect_area.append(&row_box);
+    let needs_password =
+        !network.security.is_empty() && network.security != "--" && !network.is_known;
 
-    if !network.in_use {
-        let needs_password =
-            !network.security.is_empty() && network.security != "--" && !network.is_known;
+    if network.in_use {
+        // Connected network: provide Disconnect button
+        let btn_row = Box::builder()
+            .orientation(Orientation::Horizontal)
+            .halign(gtk4::Align::End)
+            .spacing(6)
+            .build();
 
-        if network.is_known {
-            let btn_row = Box::builder()
-                .orientation(Orientation::Horizontal)
-                .halign(gtk4::Align::End)
-                .spacing(6)
-                .build();
+        let spinner = Spinner::new();
+        spinner.set_visible(false);
 
-            let spinner = Spinner::new();
-            spinner.set_visible(false);
+        let status_lbl = Label::builder().label("").build();
+        status_lbl.add_css_class("network-conn-status");
+        status_lbl.set_visible(false);
 
-            let status_lbl = Label::builder().label("").build();
-            status_lbl.add_css_class("network-conn-status");
-            status_lbl.set_visible(false);
+        let disconnect_btn = Button::builder().label("Disconnect").build();
+        disconnect_btn.add_css_class("network-disconnect-btn");
 
-            let forget_btn = Button::builder().label("Forget").build();
-            forget_btn.add_css_class("network-forget-btn");
-            {
-                let ssid = network.ssid.clone();
-                let confirmed = Rc::new(Cell::new(false));
-                let confirmed_c = confirmed.clone();
-                let btn_c = forget_btn.clone();
-                let spinner_c = spinner.clone();
-                let status_c = status_lbl.clone();
-                forget_btn.connect_clicked(move |btn| {
-                    if !confirmed.get() {
-                        confirmed.set(true);
-                        btn.set_label("Sure?");
-                        btn.remove_css_class("network-forget-btn");
-                        btn.add_css_class("network-forget-confirm-btn");
-                        // Auto-revert after 3 seconds
-                        let btn_revert = btn_c.clone();
-                        let confirmed_revert = confirmed_c.clone();
-                        glib::timeout_add_local_once(
-                            std::time::Duration::from_secs(3),
-                            move || {
-                                if confirmed_revert.get() {
-                                    confirmed_revert.set(false);
-                                    btn_revert.set_label("Forget");
-                                    btn_revert.remove_css_class("network-forget-confirm-btn");
-                                    btn_revert.add_css_class("network-forget-btn");
-                                }
-                            },
-                        );
-                    } else {
-                        confirmed.set(false);
-                        btn.set_sensitive(false);
-                        spinner_c.set_visible(true);
-                        spinner_c.start();
-                        status_c.set_visible(false);
+        btn_row.append(&spinner);
+        btn_row.append(&status_lbl);
+        btn_row.append(&disconnect_btn);
+        row_box.append(&btn_row);
 
-                        let ssid_bg = ssid.clone();
-                        let btn_poll = btn.clone();
-                        let spinner_poll = spinner_c.clone();
-                        let status_poll = status_c.clone();
-                        spawn_work(
-                            move || forget_network(&ssid_bg),
-                            move |result| {
-                                spinner_poll.stop();
-                                spinner_poll.set_visible(false);
-                                match &result {
-                                    NmResult::Success => {
-                                        if let Some(row) =
-                                            btn_poll.ancestor(ListBoxRow::static_type())
-                                        {
-                                            row.set_sensitive(false);
-                                        }
-                                    }
-                                    NmResult::Failure(_) => btn_poll.set_sensitive(true),
-                                }
-                                apply_nm_result(&status_poll, &result);
-                                auto_hide_status(&status_poll);
-                            },
-                        );
-                    }
-                });
-            }
+        connect_area.append(&row_box);
 
-            let connect_btn = Button::builder().label("Connect").build();
-            connect_btn.add_css_class("network-connect-btn");
+        wire_disconnect(
+            &disconnect_btn,
+            &spinner,
+            &status_lbl,
+            network.ssid.clone(),
+            on_change.clone(),
+        );
+    } else if network.is_known {
+        let btn_row = Box::builder()
+            .orientation(Orientation::Horizontal)
+            .halign(gtk4::Align::End)
+            .spacing(6)
+            .build();
 
-            btn_row.append(&spinner);
-            btn_row.append(&status_lbl);
-            btn_row.append(&forget_btn);
-            btn_row.append(&connect_btn);
-            connect_area.append(&btn_row);
+        let spinner = Spinner::new();
+        spinner.set_visible(false);
 
-            wire_connect_known(&connect_btn, &spinner, &status_lbl, network.ssid.clone());
-        } else if needs_password {
-            let pw_revealer = Revealer::builder()
-                .transition_type(RevealerTransitionType::SlideDown)
-                .transition_duration(200)
-                .reveal_child(false)
-                .build();
+        let status_lbl = Label::builder().label("").build();
+        status_lbl.add_css_class("network-conn-status");
+        status_lbl.set_visible(false);
 
-            let pw_area = Box::builder()
-                .orientation(Orientation::Vertical)
-                .spacing(4)
-                .build();
+        let forget_btn = Button::builder().label("Forget").build();
+        forget_btn.add_css_class("network-forget-btn");
+        wire_forget(
+            &forget_btn,
+            &spinner,
+            &status_lbl,
+            network.ssid.clone(),
+            on_change.clone(),
+        );
 
-            let pw_row = Box::builder()
-                .orientation(Orientation::Horizontal)
-                .spacing(6)
-                .build();
+        let connect_btn = Button::builder().label("Connect").build();
+        connect_btn.add_css_class("network-connect-btn");
+        wire_connect_known(
+            &connect_btn,
+            &spinner,
+            &status_lbl,
+            network.ssid.clone(),
+            on_change.clone(),
+        );
 
-            let pw_entry = PasswordEntry::builder()
-                .hexpand(true)
-                .placeholder_text("Password")
-                .show_peek_icon(true)
-                .build();
-            pw_entry.add_css_class("network-password-entry");
+        btn_row.append(&spinner);
+        btn_row.append(&status_lbl);
+        btn_row.append(&forget_btn);
+        btn_row.append(&connect_btn);
+        row_box.append(&btn_row);
 
-            let connect_btn = Button::builder().label("Connect").build();
-            connect_btn.add_css_class("network-connect-btn");
+        connect_area.append(&row_box);
 
-            pw_row.append(&pw_entry);
-            pw_row.append(&connect_btn);
-            pw_area.append(&pw_row);
-
-            let fb_row = Box::builder()
-                .orientation(Orientation::Horizontal)
-                .halign(gtk4::Align::End)
-                .spacing(6)
-                .build();
-
-            let spinner = Spinner::new();
-            spinner.set_visible(false);
-
-            let status_lbl = Label::builder().label("").build();
-            status_lbl.add_css_class("network-conn-status");
-            status_lbl.set_visible(false);
-
-            fb_row.append(&spinner);
-            fb_row.append(&status_lbl);
-            pw_area.append(&fb_row);
-
-            pw_revealer.set_child(Some(&pw_area));
-            connect_area.append(&pw_revealer);
-
-            wire_connect_new(
-                &connect_btn,
-                &pw_entry,
-                &spinner,
-                &status_lbl,
-                network.ssid.clone(),
-                false,
-            );
-
-            let click = gtk4::GestureClick::new();
-            {
-                let rev_c = pw_revealer.clone();
-                let entry_c = pw_entry.clone();
-                click.connect_released(move |_, _, _, _| {
-                    let visible = rev_c.reveals_child();
-                    rev_c.set_reveal_child(!visible);
-                    if !visible {
-                        entry_c.grab_focus();
-                    }
-                });
-            }
-            row_box.add_controller(click);
-        } else {
-            let btn_row = Box::builder()
-                .orientation(Orientation::Horizontal)
-                .halign(gtk4::Align::End)
-                .spacing(6)
-                .build();
-
-            let spinner = Spinner::new();
-            spinner.set_visible(false);
-
-            let status_lbl = Label::builder().label("").build();
-            status_lbl.add_css_class("network-conn-status");
-            status_lbl.set_visible(false);
-
-            let connect_btn = Button::builder().label("Connect").build();
-            connect_btn.add_css_class("network-connect-btn");
-
-            btn_row.append(&spinner);
-            btn_row.append(&status_lbl);
-            btn_row.append(&connect_btn);
-            connect_area.append(&btn_row);
-
-            wire_connect_open(&connect_btn, &spinner, &status_lbl, network.ssid.clone());
+        // Clicking the row activates connect
+        let click = gtk4::GestureClick::new();
+        {
+            let conn_c = connect_btn.clone();
+            click.connect_released(move |_, _, _, _| {
+                conn_c.emit_clicked();
+            });
         }
+        row_box.add_controller(click);
+    } else if needs_password {
+        let btn_row = Box::builder()
+            .orientation(Orientation::Horizontal)
+            .halign(gtk4::Align::End)
+            .spacing(6)
+            .build();
+
+        let toggle_btn = Button::builder().label("Connect").build();
+        toggle_btn.add_css_class("network-connect-btn");
+        btn_row.append(&toggle_btn);
+        row_box.append(&btn_row);
+
+        connect_area.append(&row_box);
+
+        let pw_revealer = Revealer::builder()
+            .transition_type(RevealerTransitionType::SlideDown)
+            .transition_duration(200)
+            .reveal_child(false)
+            .build();
+
+        let pw_area = Box::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(4)
+            .margin_start(8)
+            .margin_end(8)
+            .margin_bottom(4)
+            .build();
+
+        let pw_row = Box::builder()
+            .orientation(Orientation::Horizontal)
+            .spacing(6)
+            .build();
+
+        let pw_entry = PasswordEntry::builder()
+            .hexpand(true)
+            .placeholder_text("Password")
+            .show_peek_icon(true)
+            .build();
+        pw_entry.add_css_class("network-password-entry");
+
+        let join_btn = Button::builder().label("Join").build();
+        join_btn.add_css_class("network-connect-btn");
+
+        pw_row.append(&pw_entry);
+        pw_row.append(&join_btn);
+        pw_area.append(&pw_row);
+
+        let fb_row = Box::builder()
+            .orientation(Orientation::Horizontal)
+            .halign(gtk4::Align::End)
+            .spacing(6)
+            .build();
+
+        let spinner = Spinner::new();
+        spinner.set_visible(false);
+
+        let status_lbl = Label::builder().label("").build();
+        status_lbl.add_css_class("network-conn-status");
+        status_lbl.set_visible(false);
+
+        fb_row.append(&spinner);
+        fb_row.append(&status_lbl);
+        pw_area.append(&fb_row);
+
+        pw_revealer.set_child(Some(&pw_area));
+        connect_area.append(&pw_revealer);
+
+        wire_connect_new(
+            &join_btn,
+            &pw_entry,
+            &spinner,
+            &status_lbl,
+            network.ssid.clone(),
+            network.security.clone(),
+            false,
+            on_change.clone(),
+        );
+
+        let rev_c = pw_revealer.clone();
+        let entry_c = pw_entry.clone();
+        toggle_btn.connect_clicked(move |_| {
+            let visible = rev_c.reveals_child();
+            rev_c.set_reveal_child(!visible);
+            if !visible {
+                entry_c.grab_focus();
+            }
+        });
+
+        let click = gtk4::GestureClick::new();
+        {
+            let rev_c2 = pw_revealer.clone();
+            let entry_c2 = pw_entry.clone();
+            click.connect_released(move |_, _, _, _| {
+                let visible = rev_c2.reveals_child();
+                rev_c2.set_reveal_child(!visible);
+                if !visible {
+                    entry_c2.grab_focus();
+                }
+            });
+        }
+        row_box.add_controller(click);
+    } else {
+        let btn_row = Box::builder()
+            .orientation(Orientation::Horizontal)
+            .halign(gtk4::Align::End)
+            .spacing(6)
+            .build();
+
+        let spinner = Spinner::new();
+        spinner.set_visible(false);
+
+        let status_lbl = Label::builder().label("").build();
+        status_lbl.add_css_class("network-conn-status");
+        status_lbl.set_visible(false);
+
+        let connect_btn = Button::builder().label("Connect").build();
+        connect_btn.add_css_class("network-connect-btn");
+
+        btn_row.append(&spinner);
+        btn_row.append(&status_lbl);
+        btn_row.append(&connect_btn);
+        row_box.append(&btn_row);
+
+        connect_area.append(&row_box);
+
+        wire_connect_open(
+            &connect_btn,
+            &spinner,
+            &status_lbl,
+            network.ssid.clone(),
+            on_change.clone(),
+        );
+
+        let click = gtk4::GestureClick::new();
+        {
+            let conn_c = connect_btn.clone();
+            click.connect_released(move |_, _, _, _| {
+                conn_c.emit_clicked();
+            });
+        }
+        row_box.add_controller(click);
     }
 
     let list_row = ListBoxRow::builder().build();
@@ -328,7 +405,11 @@ fn build_wifi_row(network: &WifiNetwork) -> ListBoxRow {
 
 // ── Hidden network form ───────────────────────────────────────────────────────
 
-fn build_hidden_network_row(list: &ListBox, _state: &Rc<RefCell<NetworkState>>) {
+fn build_hidden_network_row(
+    list: &ListBox,
+    _state: &Rc<RefCell<NetworkState>>,
+    on_change: &Rc<dyn Fn()>,
+) {
     let outer = Box::builder()
         .orientation(Orientation::Vertical)
         .spacing(4)
@@ -344,6 +425,8 @@ fn build_hidden_network_row(list: &ListBox, _state: &Rc<RefCell<NetworkState>>) 
         .orientation(Orientation::Vertical)
         .spacing(6)
         .margin_top(4)
+        .margin_start(4)
+        .margin_end(4)
         .build();
     form.add_css_class("network-hidden-form");
 
@@ -392,14 +475,12 @@ fn build_hidden_network_row(list: &ListBox, _state: &Rc<RefCell<NetworkState>>) 
         let btn_c = connect_btn.clone();
         let spinner_c = spinner.clone();
         let status_c = status_lbl.clone();
+        let on_change_cb = on_change.clone();
 
-        // Enter in password field triggers connect.
-        {
-            let btn_enter = connect_btn.clone();
-            pw_entry.connect_activate(move |_| {
-                btn_enter.emit_clicked();
-            });
-        }
+        let btn_enter = connect_btn.clone();
+        pw_entry.connect_activate(move |_| {
+            btn_enter.emit_clicked();
+        });
 
         connect_btn.connect_clicked(move |_| {
             let ssid = ssid_c.text().to_string();
@@ -416,15 +497,23 @@ fn build_hidden_network_row(list: &ListBox, _state: &Rc<RefCell<NetworkState>>) 
             let btn_poll = btn_c.clone();
             let spinner_poll = spinner_c.clone();
             let status_poll = status_c.clone();
+            let on_change_done = on_change_cb.clone();
 
             spawn_work(
-                move || connect_new(&ssid, &password, true),
+                move || connect_new(&ssid, &password, "", true),
                 move |result| {
                     spinner_poll.stop();
                     spinner_poll.set_visible(false);
                     btn_poll.set_sensitive(true);
-                    apply_nm_result(&status_poll, &result);
-                    auto_hide_status(&status_poll);
+                    match &result {
+                        NmResult::Success => {
+                            on_change_done();
+                        }
+                        NmResult::Failure(_) => {
+                            apply_nm_result(&status_poll, &result);
+                            auto_hide_status(&status_poll);
+                        }
+                    }
                 },
             );
         });
@@ -458,7 +547,13 @@ fn build_hidden_network_row(list: &ListBox, _state: &Rc<RefCell<NetworkState>>) 
 
 // ── Connection wiring helpers ─────────────────────────────────────────────────
 
-fn wire_connect_known(btn: &Button, spinner: &Spinner, status_lbl: &Label, ssid: String) {
+fn wire_disconnect(
+    btn: &Button,
+    spinner: &Spinner,
+    status_lbl: &Label,
+    ssid: String,
+    on_change: Rc<dyn Fn()>,
+) {
     let btn_c = btn.clone();
     let spinner_c = spinner.clone();
     let status_c = status_lbl.clone();
@@ -473,6 +568,119 @@ fn wire_connect_known(btn: &Button, spinner: &Spinner, status_lbl: &Label, ssid:
         let btn_poll = btn_c.clone();
         let spinner_poll = spinner_c.clone();
         let status_poll = status_c.clone();
+        let on_change_cb = on_change.clone();
+
+        spawn_work(
+            move || disconnect_network(&ssid_bg),
+            move |result| {
+                spinner_poll.stop();
+                spinner_poll.set_visible(false);
+                match &result {
+                    NmResult::Success => {
+                        btn_poll.set_sensitive(true);
+                        on_change_cb();
+                    }
+                    NmResult::Failure(_) => {
+                        btn_poll.set_sensitive(true);
+                        apply_nm_result(&status_poll, &result);
+                        auto_hide_status(&status_poll);
+                    }
+                }
+            },
+        );
+    });
+}
+
+fn wire_forget(
+    btn: &Button,
+    spinner: &Spinner,
+    status_lbl: &Label,
+    ssid: String,
+    on_change: Rc<dyn Fn()>,
+) {
+    let ssid = ssid.clone();
+    let confirmed = Rc::new(Cell::new(false));
+    let confirmed_c = confirmed.clone();
+    let btn_c = btn.clone();
+    let spinner_c = spinner.clone();
+    let status_c = status_lbl.clone();
+
+    btn.connect_clicked(move |b| {
+        if !confirmed.get() {
+            confirmed.set(true);
+            b.set_label("Sure?");
+            b.remove_css_class("network-forget-btn");
+            b.add_css_class("network-forget-confirm-btn");
+            let btn_revert = btn_c.clone();
+            let confirmed_revert = confirmed_c.clone();
+            glib::timeout_add_local_once(
+                std::time::Duration::from_secs(3),
+                move || {
+                    if confirmed_revert.get() {
+                        confirmed_revert.set(false);
+                        btn_revert.set_label("Forget");
+                        btn_revert.remove_css_class("network-forget-confirm-btn");
+                        btn_revert.add_css_class("network-forget-btn");
+                    }
+                },
+            );
+        } else {
+            confirmed.set(false);
+            b.set_sensitive(false);
+            spinner_c.set_visible(true);
+            spinner_c.start();
+            status_c.set_visible(false);
+
+            let ssid_bg = ssid.clone();
+            let btn_poll = b.clone();
+            let spinner_poll = spinner_c.clone();
+            let status_poll = status_c.clone();
+            let on_change_cb = on_change.clone();
+
+            spawn_work(
+                move || forget_network(&ssid_bg),
+                move |result| {
+                    spinner_poll.stop();
+                    spinner_poll.set_visible(false);
+                    match &result {
+                        NmResult::Success => {
+                            btn_poll.set_sensitive(true);
+                            on_change_cb();
+                        }
+                        NmResult::Failure(_) => {
+                            btn_poll.set_sensitive(true);
+                            apply_nm_result(&status_poll, &result);
+                            auto_hide_status(&status_poll);
+                        }
+                    }
+                },
+            );
+        }
+    });
+}
+
+fn wire_connect_known(
+    btn: &Button,
+    spinner: &Spinner,
+    status_lbl: &Label,
+    ssid: String,
+    on_change: Rc<dyn Fn()>,
+) {
+    let btn_c = btn.clone();
+    let spinner_c = spinner.clone();
+    let status_c = status_lbl.clone();
+
+    btn.connect_clicked(move |_| {
+        btn_c.set_sensitive(false);
+        spinner_c.set_visible(true);
+        spinner_c.start();
+        status_c.set_visible(false);
+
+        let ssid_bg = ssid.clone();
+        let btn_poll = btn_c.clone();
+        let spinner_poll = spinner_c.clone();
+        let status_poll = status_c.clone();
+        let on_change_cb = on_change.clone();
 
         spawn_work(
             move || connect_known(&ssid_bg),
@@ -480,8 +688,15 @@ fn wire_connect_known(btn: &Button, spinner: &Spinner, status_lbl: &Label, ssid:
                 spinner_poll.stop();
                 spinner_poll.set_visible(false);
                 btn_poll.set_sensitive(true);
-                apply_nm_result(&status_poll, &result);
-                auto_hide_status(&status_poll);
+                match &result {
+                    NmResult::Success => {
+                        on_change_cb();
+                    }
+                    NmResult::Failure(_) => {
+                        apply_nm_result(&status_poll, &result);
+                        auto_hide_status(&status_poll);
+                    }
+                }
             },
         );
     });
@@ -493,7 +708,9 @@ fn wire_connect_new(
     spinner: &Spinner,
     status_lbl: &Label,
     ssid: String,
+    security: String,
     hidden: bool,
+    on_change: Rc<dyn Fn()>,
 ) {
     {
         let btn_enter = btn.clone();
@@ -515,24 +732,39 @@ fn wire_connect_new(
         status_c.set_visible(false);
 
         let ssid_bg = ssid.clone();
+        let sec_bg = security.clone();
         let btn_poll = btn_c.clone();
         let spinner_poll = spinner_c.clone();
         let status_poll = status_c.clone();
+        let on_change_cb = on_change.clone();
 
         spawn_work(
-            move || connect_new(&ssid_bg, &password, hidden),
+            move || connect_new(&ssid_bg, &password, &sec_bg, hidden),
             move |result| {
                 spinner_poll.stop();
                 spinner_poll.set_visible(false);
                 btn_poll.set_sensitive(true);
-                apply_nm_result(&status_poll, &result);
-                auto_hide_status(&status_poll);
+                match &result {
+                    NmResult::Success => {
+                        on_change_cb();
+                    }
+                    NmResult::Failure(_) => {
+                        apply_nm_result(&status_poll, &result);
+                        auto_hide_status(&status_poll);
+                    }
+                }
             },
         );
     });
 }
 
-fn wire_connect_open(btn: &Button, spinner: &Spinner, status_lbl: &Label, ssid: String) {
+fn wire_connect_open(
+    btn: &Button,
+    spinner: &Spinner,
+    status_lbl: &Label,
+    ssid: String,
+    on_change: Rc<dyn Fn()>,
+) {
     let btn_c = btn.clone();
     let spinner_c = spinner.clone();
     let status_c = status_lbl.clone();
@@ -547,15 +779,23 @@ fn wire_connect_open(btn: &Button, spinner: &Spinner, status_lbl: &Label, ssid: 
         let btn_poll = btn_c.clone();
         let spinner_poll = spinner_c.clone();
         let status_poll = status_c.clone();
+        let on_change_cb = on_change.clone();
 
         spawn_work(
-            move || connect_new(&ssid_bg, "", false),
+            move || connect_new(&ssid_bg, "", "", false),
             move |result| {
                 spinner_poll.stop();
                 spinner_poll.set_visible(false);
                 btn_poll.set_sensitive(true);
-                apply_nm_result(&status_poll, &result);
-                auto_hide_status(&status_poll);
+                match &result {
+                    NmResult::Success => {
+                        on_change_cb();
+                    }
+                    NmResult::Failure(_) => {
+                        apply_nm_result(&status_poll, &result);
+                        auto_hide_status(&status_poll);
+                    }
+                }
             },
         );
     });

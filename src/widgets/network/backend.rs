@@ -312,6 +312,10 @@ pub fn scan_wifi() -> Result<Vec<WifiNetwork>, String> {
     }
 
     let known = get_known_ssids();
+    let active_conn_ssid = match get_active_connection() {
+        ActiveConnection::Wifi { ssid, .. } => Some(ssid),
+        _ => None,
+    };
     let mut found = Vec::new();
 
     for path in &radios {
@@ -324,9 +328,12 @@ pub fn scan_wifi() -> Result<Vec<WifiNetwork>, String> {
             let wpa = nm::prop::<u32>(&conn, &ap, nm::IFACE_AP, "WpaFlags").unwrap_or(0);
             let rsn = nm::prop::<u32>(&conn, &ap, nm::IFACE_AP, "RsnFlags").unwrap_or(0);
 
+            let is_in_use = active.as_deref() == Some(ap.as_str())
+                || active_conn_ssid.as_deref() == Some(ssid.as_str());
+
             found.push(WifiNetwork {
                 is_known: known.contains(&ssid),
-                in_use: active.as_deref() == Some(ap.as_str()),
+                in_use: is_in_use,
                 signal: nm::prop::<u8>(&conn, &ap, nm::IFACE_AP, "Strength").unwrap_or(0),
                 security: nm::security_label(flags, wpa, rsn),
                 freq_mhz: nm::prop::<u32>(&conn, &ap, nm::IFACE_AP, "Frequency"),
@@ -450,15 +457,56 @@ pub fn connect_known(ssid: &str) -> NmResult {
     acting(move |conn| nm::activate_by_id(conn, &ssid))
 }
 
-pub fn connect_new(ssid: &str, password: &str, hidden: bool) -> NmResult {
-    let (ssid, password) = (ssid.to_string(), password.to_string());
+pub fn connect_new(ssid: &str, password: &str, security: &str, hidden: bool) -> NmResult {
+    let (ssid, password, security) = (ssid.to_string(), password.to_string(), security.to_string());
     acting(move |conn| {
+        // If a stored connection already exists with this SSID, delete it first to prevent duplicates.
+        let existing = nm::stored_connections(conn)
+            .into_iter()
+            .find(|(_, id, kind)| id == &ssid && kind == NM_TYPE_WIFI)
+            .map(|(path, _, _)| path);
+
+        if let Some(path) = existing {
+            let _ = nm::proxy(conn, &path, nm::IFACE_CONNECTION)
+                .and_then(|p| p.call::<_, _, ()>("Delete", &()).map_err(|e| nm::dbus_message(&e)));
+        }
+
         let device = nm::devices(conn)
             .into_iter()
             .find(|d| d.device_type == nm::DEVICE_TYPE_WIFI)
             .map(|d| d.path)
             .ok_or("No WiFi adapter")?;
-        nm::add_and_activate(conn, &device, &ssid, &password, hidden)
+        nm::add_and_activate(conn, &device, &ssid, &password, &security, hidden)
+    })
+}
+
+pub fn disconnect_active_wifi() -> NmResult {
+    acting(nm::deactivate_active_wifi)
+}
+
+pub fn disconnect_network(ssid: &str) -> NmResult {
+    let ssid = ssid.to_string();
+    acting(move |conn| {
+        let active = nm::paths(conn, nm::MANAGER_PATH, nm::IFACE_MANAGER, "ActiveConnections");
+        for path in active {
+            let id = nm::prop::<String>(conn, &path, nm::IFACE_ACTIVE, "Id");
+            if id.as_deref() == Some(&ssid) {
+                let target = zbus::zvariant::ObjectPath::try_from(path.as_str()).map_err(|e| e.to_string())?;
+                nm::proxy(conn, nm::MANAGER_PATH, nm::IFACE_MANAGER)?
+                    .call::<_, _, ()>("DeactivateConnection", &(&target,))
+                    .map_err(|e| nm::dbus_message(&e))?;
+                return Ok(());
+            }
+        }
+        for dev in nm::devices(conn) {
+            if dev.device_type == nm::DEVICE_TYPE_WIFI && dev.state > nm::DEVICE_STATE_DISCONNECTED {
+                nm::proxy(conn, &dev.path, nm::IFACE_DEVICE)?
+                    .call::<_, _, ()>("Disconnect", &())
+                    .map_err(|e| nm::dbus_message(&e))?;
+                return Ok(());
+            }
+        }
+        Err(format!("Network {ssid} is not currently active"))
     })
 }
 
