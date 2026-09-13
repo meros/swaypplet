@@ -27,6 +27,9 @@ pub struct DisplayWidgets {
 /// Widget handles needed by the periodic poller beyond DisplayWidgets.
 pub struct PollerWidgets {
     pub display: DisplayWidgets,
+    /// The section's own root, for the one question the poll asks before it
+    /// costs anything: is any of this on screen. See [`schedule_next`].
+    pub root: gtk4::Box,
     pub connectivity_label: Label,
     pub portal_btn: gtk4::Button,
     pub wifi_switch: gtk4::Switch,
@@ -58,8 +61,17 @@ struct CachedState {
     accelerated: bool,
 }
 
-/// Start a periodic poller that checks network state every 5s (or 2s after changes).
-/// Blocking nmcli calls run on a background thread to avoid blocking the GTK main thread.
+/// Follow NetworkManager for as long as the section is on screen: every 5 s,
+/// or every 2 s while something is changing.
+///
+/// One tick is five D-Bus conversations and about 120 ms of a worker thread
+/// (`backend::live::time_one_poll`), so it is not something to do to a
+/// closed panel. The tick therefore starts by asking whether the section is
+/// mapped and skips the whole poll when it is not — the panel is a
+/// long-lived process and spends most of its life hidden. Coming back is
+/// covered without waiting for a tick: `Panel::refresh` calls
+/// `NetworkSection::refresh` when the panel is shown, and opening the page
+/// calls `trigger_scan`.
 pub fn start_periodic_poller(state: Rc<RefCell<NetworkState>>, w: PollerWidgets) {
     let w = Rc::new(w);
     let cached = Rc::new(RefCell::new(CachedState {
@@ -84,51 +96,34 @@ fn schedule_next(
     };
 
     glib::timeout_add_local_once(interval, move || {
-        let (tx, rx) = std::sync::mpsc::channel::<PolledState>();
+        // Nothing of ours is on screen: no bus traffic, no worker, and the
+        // next tick is the slow one. `is_mapped` covers both ways the
+        // section leaves the screen — the panel window hidden, and the deck
+        // on another page — and stays true while the radio is off, which is
+        // a state the poll has to keep watching.
+        if !w.root.is_mapped() {
+            cached.borrow_mut().accelerated = false;
+            schedule_next(state, w, cached);
+            return;
+        }
 
-        std::thread::spawn(move || {
-            let polled = PolledState {
+        let (state_poll, w_poll, cached_poll) = (state.clone(), w.clone(), cached.clone());
+        let at = std::time::Instant::now();
+        crate::spawn::spawn_work(
+            || PolledState {
                 active: get_active_connection(),
                 connectivity: check_connectivity(),
                 wifi_radio: wifi_radio_enabled(),
                 interfaces: get_network_interfaces(),
                 vpns: get_vpn_connections(),
-            };
-            let _ = tx.send(polled);
-        });
-
-        let state_poll = state.clone();
-        let w_poll = w.clone();
-        let cached_poll = cached.clone();
-
-        let state_resched = state;
-        let w_resched = w;
-        let cached_resched = cached;
-
-        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-            match rx.try_recv() {
-                Ok(polled) => {
-                    let changed = apply_polled_state(&polled, &state_poll, &cached_poll, &w_poll);
-                    cached_poll.borrow_mut().accelerated = changed;
-
-                    schedule_next(
-                        state_resched.clone(),
-                        w_resched.clone(),
-                        cached_resched.clone(),
-                    );
-                    glib::ControlFlow::Break
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    schedule_next(
-                        state_resched.clone(),
-                        w_resched.clone(),
-                        cached_resched.clone(),
-                    );
-                    glib::ControlFlow::Break
-                }
-            }
-        });
+            },
+            move |polled| {
+                log::debug!("network: polled in {:?}", at.elapsed());
+                let changed = apply_polled_state(&polled, &state_poll, &cached_poll, &w_poll);
+                cached_poll.borrow_mut().accelerated = changed;
+                schedule_next(state_poll, w_poll, cached_poll);
+            },
+        );
     });
 }
 

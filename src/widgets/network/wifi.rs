@@ -197,9 +197,7 @@ fn build_wifi_row(
         connect_area.append(&row_box);
 
         wire_disconnect(
-            &disconnect_btn,
-            &spinner,
-            &status_lbl,
+            &Busy::new(&disconnect_btn, &spinner, &status_lbl),
             network.ssid.clone(),
             on_change.clone(),
         );
@@ -220,9 +218,7 @@ fn build_wifi_row(
         let forget_btn = Button::builder().label("Forget").build();
         forget_btn.add_css_class("network-forget-btn");
         wire_forget(
-            &forget_btn,
-            &spinner,
-            &status_lbl,
+            &Busy::new(&forget_btn, &spinner, &status_lbl),
             network.ssid.clone(),
             on_change.clone(),
         );
@@ -230,9 +226,7 @@ fn build_wifi_row(
         let connect_btn = Button::builder().label("Connect").build();
         connect_btn.add_css_class("network-connect-btn");
         wire_connect_known(
-            &connect_btn,
-            &spinner,
-            &status_lbl,
+            &Busy::new(&connect_btn, &spinner, &status_lbl),
             network.ssid.clone(),
             on_change.clone(),
         );
@@ -321,12 +315,11 @@ fn build_wifi_row(
         pw_revealer.set_child(Some(&pw_area));
         connect_area.append(&pw_revealer);
 
+        let ssid = network.ssid.clone();
         wire_connect_new(
-            &join_btn,
+            &Busy::new(&join_btn, &spinner, &status_lbl),
             &pw_entry,
-            &spinner,
-            &status_lbl,
-            network.ssid.clone(),
+            move || ssid.clone(),
             network.security.clone(),
             false,
             on_change.clone(),
@@ -380,9 +373,7 @@ fn build_wifi_row(
         connect_area.append(&row_box);
 
         wire_connect_open(
-            &connect_btn,
-            &spinner,
-            &status_lbl,
+            &Busy::new(&connect_btn, &spinner, &status_lbl),
             network.ssid.clone(),
             on_change.clone(),
         );
@@ -471,55 +462,18 @@ fn build_hidden_network_row(
     form.append(&btn_row);
     hidden_revealer.set_child(Some(&form));
 
-    // Wire connect button for hidden network.
+    // The SSID comes from the entry at the moment the button is pressed, and
+    // an empty one is not a network: `wire_connect_new` drops the click.
     {
-        let ssid_c = ssid_entry.clone();
-        let pw_c = pw_entry.clone();
-        let btn_c = connect_btn.clone();
-        let spinner_c = spinner.clone();
-        let status_c = status_lbl.clone();
-        let on_change_cb = on_change.clone();
-
-        let btn_enter = connect_btn.clone();
-        pw_entry.connect_activate(move |_| {
-            btn_enter.emit_clicked();
-        });
-
-        connect_btn.connect_clicked(move |_| {
-            let ssid = ssid_c.text().to_string();
-            if ssid.is_empty() {
-                return;
-            }
-            let password = pw_c.text().to_string();
-
-            btn_c.set_sensitive(false);
-            spinner_c.set_visible(true);
-            spinner_c.start();
-            status_c.set_visible(false);
-
-            let btn_poll = btn_c.clone();
-            let spinner_poll = spinner_c.clone();
-            let status_poll = status_c.clone();
-            let on_change_done = on_change_cb.clone();
-
-            spawn_work(
-                move || connect_new(&ssid, &password, "", true),
-                move |result| {
-                    spinner_poll.stop();
-                    spinner_poll.set_visible(false);
-                    btn_poll.set_sensitive(true);
-                    match &result {
-                        NmResult::Success => {
-                            on_change_done();
-                        }
-                        NmResult::Failure(_) => {
-                            apply_nm_result(&status_poll, &result);
-                            auto_hide_status(&status_poll);
-                        }
-                    }
-                },
-            );
-        });
+        let typed = ssid_entry.clone();
+        wire_connect_new(
+            &Busy::new(&connect_btn, &spinner, &status_lbl),
+            &pw_entry,
+            move || typed.text().to_string(),
+            String::new(),
+            true,
+            on_change.clone(),
+        );
     }
 
     let toggle_btn = Button::builder()
@@ -550,253 +504,146 @@ fn build_hidden_network_row(
 
 // ── Connection wiring helpers ─────────────────────────────────────────────────
 
-fn wire_disconnect(
-    btn: &Button,
-    spinner: &Spinner,
-    status_lbl: &Label,
-    ssid: String,
-    on_change: Rc<dyn Fn()>,
-) {
-    let btn_c = btn.clone();
-    let spinner_c = spinner.clone();
-    let status_c = status_lbl.clone();
+/// A row's button while a NetworkManager call is in flight, and what it does
+/// with the answer.
+///
+/// Six actions on these rows — connect, connect with a password, connect to a
+/// hidden network, connect to an open one, disconnect, forget —differ  only in the
+/// call they make. Each used to carry its own copy of: disable the button,
+/// show and start the spinner, hide the status, spawn, then stop, re-enable,
+/// and either refresh the section or show the failure for four seconds. Six
+/// copies is six places for the spinner to be left spinning on a path someone
+/// forgot.
+struct Busy {
+    btn: Button,
+    spinner: Spinner,
+    status: Label,
+}
 
-    btn.connect_clicked(move |_| {
-        btn_c.set_sensitive(false);
-        spinner_c.set_visible(true);
-        spinner_c.start();
-        status_c.set_visible(false);
+impl Busy {
+    fn new(btn: &Button, spinner: &Spinner, status: &Label) -> Rc<Self> {
+        Rc::new(Self {
+            btn: btn.clone(),
+            spinner: spinner.clone(),
+            status: status.clone(),
+        })
+    }
 
-        let ssid_bg = ssid.clone();
-        let btn_poll = btn_c.clone();
-        let spinner_poll = spinner_c.clone();
-        let status_poll = status_c.clone();
-        let on_change_cb = on_change.clone();
+    /// Run `work` on a worker, with the button held and the spinner turning
+    /// until it answers. Success refreshes the section through `on_change`,
+    /// which rebuilds this row and drops these widgets; failure says so on
+    /// the row itself and clears itself after a few seconds.
+    fn run(
+        self: &Rc<Self>,
+        work: impl FnOnce() -> NmResult + Send + 'static,
+        on_change: Rc<dyn Fn()>,
+    ) {
+        self.btn.set_sensitive(false);
+        self.spinner.set_visible(true);
+        self.spinner.start();
+        self.status.set_visible(false);
 
-        spawn_work(
-            move || disconnect_network(&ssid_bg),
-            move |result| {
-                spinner_poll.stop();
-                spinner_poll.set_visible(false);
-                match &result {
-                    NmResult::Success => {
-                        btn_poll.set_sensitive(true);
-                        on_change_cb();
-                    }
-                    NmResult::Failure(_) => {
-                        btn_poll.set_sensitive(true);
-                        apply_nm_result(&status_poll, &result);
-                        auto_hide_status(&status_poll);
-                    }
+        let this = self.clone();
+        spawn_work(work, move |result| {
+            this.spinner.stop();
+            this.spinner.set_visible(false);
+            this.btn.set_sensitive(true);
+            match &result {
+                NmResult::Success => on_change(),
+                NmResult::Failure(_) => {
+                    apply_nm_result(&this.status, &result);
+                    auto_hide_status(&this.status);
                 }
-            },
-        );
+            }
+        });
+    }
+}
+
+fn wire_disconnect(busy: &Rc<Busy>, ssid: String, on_change: Rc<dyn Fn()>) {
+    let busy_c = busy.clone();
+    busy.btn.clone().connect_clicked(move |_| {
+        let ssid = ssid.clone();
+        busy_c.run(move || disconnect_network(&ssid), on_change.clone());
     });
 }
 
-fn wire_forget(
-    btn: &Button,
-    spinner: &Spinner,
-    status_lbl: &Label,
-    ssid: String,
-    on_change: Rc<dyn Fn()>,
-) {
-    let ssid = ssid.clone();
+/// Forget asks twice. The first click turns the button into "Sure?" for three
+/// seconds; only the second one removes the saved connection, because the
+/// button sits beside Connect on a row the user is aiming at.
+fn wire_forget(busy: &Rc<Busy>, ssid: String, on_change: Rc<dyn Fn()>) {
     let confirmed = Rc::new(Cell::new(false));
-    let confirmed_c = confirmed.clone();
-    let btn_c = btn.clone();
-    let spinner_c = spinner.clone();
-    let status_c = status_lbl.clone();
-
-    btn.connect_clicked(move |b| {
+    let busy_c = busy.clone();
+    busy.btn.clone().connect_clicked(move |b| {
         if !confirmed.get() {
             confirmed.set(true);
             b.set_label("Sure?");
             b.remove_css_class("network-forget-btn");
             b.add_css_class("network-forget-confirm-btn");
-            let btn_revert = btn_c.clone();
-            let confirmed_revert = confirmed_c.clone();
+            let revert = b.clone();
+            let confirmed_revert = confirmed.clone();
             glib::timeout_add_local_once(std::time::Duration::from_secs(3), move || {
                 if confirmed_revert.get() {
                     confirmed_revert.set(false);
-                    btn_revert.set_label("Forget");
-                    btn_revert.remove_css_class("network-forget-confirm-btn");
-                    btn_revert.add_css_class("network-forget-btn");
+                    revert.set_label("Forget");
+                    revert.remove_css_class("network-forget-confirm-btn");
+                    revert.add_css_class("network-forget-btn");
                 }
             });
-        } else {
-            confirmed.set(false);
-            b.set_sensitive(false);
-            spinner_c.set_visible(true);
-            spinner_c.start();
-            status_c.set_visible(false);
-
-            let ssid_bg = ssid.clone();
-            let btn_poll = b.clone();
-            let spinner_poll = spinner_c.clone();
-            let status_poll = status_c.clone();
-            let on_change_cb = on_change.clone();
-
-            spawn_work(
-                move || forget_network(&ssid_bg),
-                move |result| {
-                    spinner_poll.stop();
-                    spinner_poll.set_visible(false);
-                    match &result {
-                        NmResult::Success => {
-                            btn_poll.set_sensitive(true);
-                            on_change_cb();
-                        }
-                        NmResult::Failure(_) => {
-                            btn_poll.set_sensitive(true);
-                            apply_nm_result(&status_poll, &result);
-                            auto_hide_status(&status_poll);
-                        }
-                    }
-                },
-            );
+            return;
         }
+        confirmed.set(false);
+        let ssid = ssid.clone();
+        busy_c.run(move || forget_network(&ssid), on_change.clone());
     });
 }
 
-fn wire_connect_known(
-    btn: &Button,
-    spinner: &Spinner,
-    status_lbl: &Label,
-    ssid: String,
-    on_change: Rc<dyn Fn()>,
-) {
-    let btn_c = btn.clone();
-    let spinner_c = spinner.clone();
-    let status_c = status_lbl.clone();
-
-    btn.connect_clicked(move |_| {
-        btn_c.set_sensitive(false);
-        spinner_c.set_visible(true);
-        spinner_c.start();
-        status_c.set_visible(false);
-
-        let ssid_bg = ssid.clone();
-        let btn_poll = btn_c.clone();
-        let spinner_poll = spinner_c.clone();
-        let status_poll = status_c.clone();
-        let on_change_cb = on_change.clone();
-
-        spawn_work(
-            move || connect_known(&ssid_bg),
-            move |result| {
-                spinner_poll.stop();
-                spinner_poll.set_visible(false);
-                btn_poll.set_sensitive(true);
-                match &result {
-                    NmResult::Success => {
-                        on_change_cb();
-                    }
-                    NmResult::Failure(_) => {
-                        apply_nm_result(&status_poll, &result);
-                        auto_hide_status(&status_poll);
-                    }
-                }
-            },
-        );
+fn wire_connect_known(busy: &Rc<Busy>, ssid: String, on_change: Rc<dyn Fn()>) {
+    let busy_c = busy.clone();
+    busy.btn.clone().connect_clicked(move |_| {
+        let ssid = ssid.clone();
+        busy_c.run(move || connect_known(&ssid), on_change.clone());
     });
 }
 
+/// An open network: the same call with no password and no security.
+fn wire_connect_open(busy: &Rc<Busy>, ssid: String, on_change: Rc<dyn Fn()>) {
+    let busy_c = busy.clone();
+    busy.btn.clone().connect_clicked(move |_| {
+        let ssid = ssid.clone();
+        busy_c.run(move || connect_new(&ssid, "", "", false), on_change.clone());
+    });
+}
+
+/// A secured network, with the password from `pw_entry`. Enter in the field
+/// is the same as pressing the button.
+///
+/// `ssid` is a closure rather than a string because the hidden-network row
+/// reads its SSID from an entry the user is still typing into; a visible row
+/// hands back the name it was built with.
 fn wire_connect_new(
-    btn: &Button,
+    busy: &Rc<Busy>,
     pw_entry: &PasswordEntry,
-    spinner: &Spinner,
-    status_lbl: &Label,
-    ssid: String,
+    ssid: impl Fn() -> String + 'static,
     security: String,
     hidden: bool,
     on_change: Rc<dyn Fn()>,
 ) {
     {
-        let btn_enter = btn.clone();
-        pw_entry.connect_activate(move |_| {
-            btn_enter.emit_clicked();
-        });
+        let btn_enter = busy.btn.clone();
+        pw_entry.connect_activate(move |_| btn_enter.emit_clicked());
     }
-
-    let btn_c = btn.clone();
+    let busy_c = busy.clone();
     let pw_c = pw_entry.clone();
-    let spinner_c = spinner.clone();
-    let status_c = status_lbl.clone();
-
-    btn.connect_clicked(move |_| {
+    busy.btn.clone().connect_clicked(move |_| {
+        let ssid = ssid();
+        if ssid.is_empty() {
+            return;
+        }
         let password = pw_c.text().to_string();
-        btn_c.set_sensitive(false);
-        spinner_c.set_visible(true);
-        spinner_c.start();
-        status_c.set_visible(false);
-
-        let ssid_bg = ssid.clone();
-        let sec_bg = security.clone();
-        let btn_poll = btn_c.clone();
-        let spinner_poll = spinner_c.clone();
-        let status_poll = status_c.clone();
-        let on_change_cb = on_change.clone();
-
-        spawn_work(
-            move || connect_new(&ssid_bg, &password, &sec_bg, hidden),
-            move |result| {
-                spinner_poll.stop();
-                spinner_poll.set_visible(false);
-                btn_poll.set_sensitive(true);
-                match &result {
-                    NmResult::Success => {
-                        on_change_cb();
-                    }
-                    NmResult::Failure(_) => {
-                        apply_nm_result(&status_poll, &result);
-                        auto_hide_status(&status_poll);
-                    }
-                }
-            },
-        );
-    });
-}
-
-fn wire_connect_open(
-    btn: &Button,
-    spinner: &Spinner,
-    status_lbl: &Label,
-    ssid: String,
-    on_change: Rc<dyn Fn()>,
-) {
-    let btn_c = btn.clone();
-    let spinner_c = spinner.clone();
-    let status_c = status_lbl.clone();
-
-    btn.connect_clicked(move |_| {
-        btn_c.set_sensitive(false);
-        spinner_c.set_visible(true);
-        spinner_c.start();
-        status_c.set_visible(false);
-
-        let ssid_bg = ssid.clone();
-        let btn_poll = btn_c.clone();
-        let spinner_poll = spinner_c.clone();
-        let status_poll = status_c.clone();
-        let on_change_cb = on_change.clone();
-
-        spawn_work(
-            move || connect_new(&ssid_bg, "", "", false),
-            move |result| {
-                spinner_poll.stop();
-                spinner_poll.set_visible(false);
-                btn_poll.set_sensitive(true);
-                match &result {
-                    NmResult::Success => {
-                        on_change_cb();
-                    }
-                    NmResult::Failure(_) => {
-                        apply_nm_result(&status_poll, &result);
-                        auto_hide_status(&status_poll);
-                    }
-                }
-            },
+        let security = security.clone();
+        busy_c.run(
+            move || connect_new(&ssid, &password, &security, hidden),
+            on_change.clone(),
         );
     });
 }

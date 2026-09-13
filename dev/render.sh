@@ -210,6 +210,12 @@ if [ "$MODE" = "panel" ] || [ "$MODE" = "launcher" ]; then
   done
 fi
 
+# Content that arrives after the first paint: a Wi-Fi scan is seconds of
+# nmcli, a bluetooth enumeration is a bus round trip, and the loop below stops
+# at the first non-blank frame, which is the one with the empty list on it.
+#   SWPP_SETTLE=8 dev/render.sh --mode preview:network
+[ -n "${SWPP_SETTLE:-}" ] && sleep "$SWPP_SETTLE"
+
 # Capture once GTK has actually painted. The headless paint can lag the map by
 # a variable margin, so re-grim until the PNG is clearly non-blank (a blank
 # solid-color frame compresses to a tiny file) rather than guessing one delay.

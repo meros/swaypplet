@@ -570,25 +570,36 @@ fn is_user_facing_interface(interface: &str, device_type: u32, state: u32) -> bo
     {
         return false;
     }
-    // Filter out internal and virtual device name prefixes
-    let internal_prefixes = [
-        "veth",
-        "docker",
-        "br-",
-        "virbr",
-        "tailscale",
-        "tun",
-        "tap",
-        "wg",
+    // Virtual devices, by the names their creators give them. Long enough
+    // that a prefix match is the whole test: nothing a person would name an
+    // adapter starts with any of these.
+    const VIRTUAL: [&str; 10] = [
+        "veth",      // container pair ends: veth<random hex>
+        "docker",    // docker0
+        "br-",       // docker's user-defined bridges
+        "virbr",     // libvirt
+        "tailscale", // tailscale0
+        "tunl",      // the kernel's IPIP device, and not "tun" plus a letter
         "dummy",
         "p2p-dev",
         "cni",
         "flannel",
     ];
-    if internal_prefixes
-        .iter()
-        .any(|prefix| interface.starts_with(prefix))
-    {
+    if VIRTUAL.iter().any(|prefix| interface.starts_with(prefix)) {
+        return false;
+    }
+
+    // The short ones need a boundary. A udev rule may name a real adapter
+    // anything, and "tun" on its own also swallows a device called
+    // "tundra", which is a wired card the user then cannot find. So these
+    // match only when what follows is not another letter — a number
+    // ("tun0", "wg0"), a separator ("wg-office"), or nothing at all.
+    const SHORT: [&str; 3] = ["tun", "tap", "wg"];
+    if SHORT.iter().any(|prefix| {
+        interface
+            .strip_prefix(prefix)
+            .is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_alphabetic()))
+    }) {
         return false;
     }
     true
@@ -927,6 +938,93 @@ mod tests {
     fn a_nameless_access_point_is_not_a_network() {
         assert!(merge_and_rank(vec![net("", 90, false, false)]).is_empty());
     }
+
+    // ── The interface list's filter ──────────────────────────────────────
+    //
+    // What it decides is what the Advanced group shows. Wrong in one
+    // direction it hides a real adapter the user is looking for; wrong in
+    // the other it lists a docker bridge and a wireguard tunnel as if they
+    // were hardware. Neither shows up in a test that only exercises Wi-Fi,
+    // which is why these are here.
+
+    const ETHERNET: u32 = 1;
+    const WIFI: u32 = nm::DEVICE_TYPE_WIFI;
+    const GENERIC: u32 = 20;
+    const ACTIVE: u32 = nm::DEVICE_STATE_DISCONNECTED + 70; // NM_DEVICE_STATE_ACTIVATED
+
+    #[test]
+    fn a_wired_adapter_is_user_facing() {
+        assert!(is_user_facing_interface("enp0s31f6", ETHERNET, ACTIVE));
+        assert!(is_user_facing_interface("eth0", ETHERNET, ACTIVE));
+        // Down is still a device someone may want to bring up.
+        assert!(is_user_facing_interface(
+            "enp0s31f6",
+            ETHERNET,
+            nm::DEVICE_STATE_DISCONNECTED
+        ));
+    }
+
+    #[test]
+    fn wifi_is_not_in_the_interface_list() {
+        // It has the whole section above it; listing it twice was the bug
+        // this filter exists to stop.
+        assert!(!is_user_facing_interface("wlp2s0", WIFI, ACTIVE));
+    }
+
+    #[test]
+    fn an_unmanaged_device_is_not_user_facing() {
+        assert!(!is_user_facing_interface(
+            "enp0s31f6",
+            ETHERNET,
+            nm::DEVICE_STATE_UNMANAGED
+        ));
+        // The states below unmanaged are unknown and unavailable, which are
+        // not devices to offer either.
+        assert!(!is_user_facing_interface("enp0s31f6", ETHERNET, 0));
+    }
+
+    #[test]
+    fn the_virtual_zoo_is_filtered_by_name() {
+        for iface in [
+            "lo",
+            "docker0",
+            "br-1a2b3c",
+            "virbr0",
+            "veth9f2a",
+            "tailscale0",
+            "tun0",
+            "tap0",
+            "wg0",
+            "dummy0",
+            "p2p-dev-wlp2s0",
+            "cni0",
+            "flannel.1",
+        ] {
+            assert!(
+                !is_user_facing_interface(iface, GENERIC, ACTIVE),
+                "{iface} should not be offered as an interface"
+            );
+        }
+    }
+
+    #[test]
+    fn a_real_name_that_starts_like_a_virtual_one_is_kept() {
+        // The prefixes are matched at the start of the name, so a device
+        // whose name merely contains one stays. `tunl0` and `wgX` are the
+        // near misses worth pinning: both really are virtual, and both are
+        // caught by prefix, while an ethernet named `tundra` is not.
+        assert!(is_user_facing_interface("tundra", ETHERNET, ACTIVE));
+        assert!(!is_user_facing_interface("tunl0", GENERIC, ACTIVE));
+        assert!(!is_user_facing_interface("wg-office", GENERIC, ACTIVE));
+    }
+
+    #[test]
+    fn loopback_is_out_by_type_as_well_as_by_name() {
+        // NM 1.42 gave loopback its own device type; before that it was
+        // generic and only the name caught it. Both paths still have to.
+        assert!(!is_user_facing_interface("lo", 32, ACTIVE));
+        assert!(!is_user_facing_interface("lo", GENERIC, ACTIVE));
+    }
 }
 
 #[cfg(test)]
@@ -959,6 +1057,37 @@ mod live {
             println!(
                 "active wifi conn: {name} powersave={}",
                 get_wifi_power_saving(&name)
+            );
+        }
+    }
+
+    /// What one tick of `monitor::start_periodic_poller` costs, which is the
+    /// number the poller's interval has to be weighed against: it is five
+    /// D-Bus conversations, one of them NetworkManager's connectivity check.
+    #[test]
+    #[ignore]
+    fn time_one_poll() {
+        use super::*;
+        for round in 1..=3 {
+            let at = std::time::Instant::now();
+            let _ = get_active_connection();
+            let active = at.elapsed();
+            let at = std::time::Instant::now();
+            let _ = check_connectivity();
+            let connectivity = at.elapsed();
+            let at = std::time::Instant::now();
+            let _ = wifi_radio_enabled();
+            let radio = at.elapsed();
+            let at = std::time::Instant::now();
+            let _ = get_network_interfaces();
+            let interfaces = at.elapsed();
+            let at = std::time::Instant::now();
+            let _ = get_vpn_connections();
+            let vpns = at.elapsed();
+            let total = active + connectivity + radio + interfaces + vpns;
+            println!(
+                "{round}: active {active:?}, connectivity {connectivity:?}, radio {radio:?}, \
+                 interfaces {interfaces:?}, vpns {vpns:?} — {total:?} total"
             );
         }
     }
