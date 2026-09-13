@@ -228,6 +228,12 @@ pub fn watch() {
 
 /// A snapshot of the live copy. For one field on a hot path, [`with`]
 /// reads without the clone.
+///
+/// The live copy is a thread-local, so this is a main-thread read. On a
+/// worker it does not fail and does not warn: it answers with a
+/// default-constructed `Settings`, which looks like a session where nothing
+/// was ever changed. Read what a worker needs before you spawn it and hand
+/// the values over. `palette::picked_wallpaper` carries the scar.
 pub fn current() -> Settings {
     LIVE.with(|live| live.with(Clone::clone))
 }
