@@ -356,12 +356,46 @@ impl Motion {
     }
 }
 
+/// How much of the theme the wallpaper colours.
+///
+/// The palette is derived rather than replaced: each colour keeps its tone
+/// and its chroma and only its hue moves, so the contrast the stylesheet was
+/// measured with survives whatever is on the desktop. `src/palette.rs` has
+/// the rule and the proof.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Tint {
+    /// The shipped gruvbox palette, and sway's borders as the config set
+    /// them. The default: a theme that follows the wallpaper is a taste, and
+    /// a taste is opted into.
+    #[default]
+    Off,
+    /// The accents follow the wallpaper; the greys stay gruvbox.
+    Accents,
+    /// The greys pick up a cast of the wallpaper's hue as well.
+    Full,
+}
+
+impl Tint {
+    pub const ALL: [Tint; 3] = [Tint::Off, Tint::Accents, Tint::Full];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Tint::Off => "Off — the shipped palette",
+            Tint::Accents => "Accents — hues from the wallpaper",
+            Tint::Full => "Full — surfaces tinted too",
+        }
+    }
+}
+
 /// The Look tab's second group. The wallpaper is the first and has its own
 /// section, since it has no system layer in this file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Look {
     #[serde(default)]
     pub motion: Motion,
+    #[serde(default)]
+    pub tint: Tint,
 }
 
 /// The volume and brightness keys.

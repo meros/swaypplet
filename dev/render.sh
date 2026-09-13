@@ -47,6 +47,12 @@ SOCK="$RUNTIME/sway-render-$$.sock"
 {
   printf 'output HEADLESS-1 resolution %sx%s position 0 0 scale 1\n' "$W" "$H"
   printf 'default_border none\nxwayland disable\n'
+  # A wallpaper, for a shot that is about one: the glass frosts what is
+  # behind it, and `look.tint` derives the palette from whatever sway's `bg`
+  # line names (swaypplet src/palette.rs). Without this the desktop is black,
+  # which is the best case for contrast and the wrong one for colour.
+  #   SWPP_WALLPAPER=~/Pictures/wallpapers/x.jpg dev/render.sh --mode panel
+  [ -n "${SWPP_WALLPAPER:-}" ] && printf 'output HEADLESS-1 bg "%s" fill\n' "$SWPP_WALLPAPER"
   # Preview windows are normal toplevels; float them so they render at their
   # natural requested size instead of being tiled to fill the output.
   printf 'for_window [app_id="dev.swaypplet..*"] floating enable\n'

@@ -25,6 +25,7 @@ mod lid;
 mod lock;
 mod notifications;
 mod osd;
+mod palette;
 mod panel;
 mod polkit;
 mod presence;

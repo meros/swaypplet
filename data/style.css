@@ -12,72 +12,13 @@
    the scale on purpose.
    ══════════════════════════════════════════════════════ */
 
-/* ── Palette ── */
-@define-color bg0_h     #1d2021;
-@define-color bg0       #32302f;   /* dark0_soft — matches waybar background */
-@define-color bg1       #3c3836;   /* matches waybar surface */
-@define-color bg2       #504945;
-@define-color bg3       #665c54;
-@define-color fg        #ebdbb2;   /* matches waybar text */
-@define-color fg_dim    #a89984;   /* matches waybar muted */
-
-/* Semantic accents — mirrors waybar accent semantics */
-@define-color accent           #689d6a;  /* accentPrimary (green/cyan) */
-@define-color accent_secondary #d79921;  /* accentSecondary (yellow) */
-@define-color accent_tertiary  #458588;  /* accentTertiary (blue) */
-@define-color accent_quaternary #b16286; /* accentQuaternary (magenta) */
-@define-color accent_quinary   #cc241d;  /* accentQuinary (red) */
-
-/* The bright gruvbox pair of each accent, for small type and thin marks on a
-   card ground. Measured on the notification card at its closed-down 0.72
-   tint over black: the base accents land at 3.7 (blue, magenta) to 5.0
-   (green), which carries a 3 px rail and falls short of 4.5 for 11 px text.
-   These are 5.8 to 9.3, so the ink uses them — and the rail follows, so one
-   card carries exactly one hue rather than two shades of it.
-
-   Not in theme/colors.nix, unlike the base accents: nothing on the Nix side
-   reads them, cross-repo-guard.nix checks only the names its paletteMap
-   lists, and a palette entry with one consumer belongs where its consumer
-   is. Promote them when a second surface wants them.
-
-   Six rather than four: the sender's hue is a hash, and with four buckets
-   two of the three cards on the render harness landed on the same one, which
-   is the one thing the channel is for. Gruvbox's bright row has exactly six
-   usable here — bright red is spoken for by the URGENT chip. Measured on the
-   same ground, the lowest of the six is 5.8:1. */
-@define-color accent_bright   #8ec07c;  /* aqua — bright pair of @accent */
-@define-color accent_bright_2 #fabd2f;  /* yellow */
-@define-color accent_bright_3 #83a598;  /* blue */
-@define-color accent_bright_4 #d3869b;  /* magenta */
-@define-color accent_bright_5 #b8bb26;  /* green */
-@define-color accent_bright_6 #fe8019;  /* orange */
-
-/* Legacy aliases — keep so existing class references keep working */
-@define-color red     #cc241d;   /* matches waybar accentQuinary */
-@define-color green   #b8bb26;
-@define-color yellow  #d79921;   /* matches waybar accentSecondary */
-@define-color blue    #458588;   /* matches waybar accentTertiary */
-@define-color purple  #b16286;   /* matches waybar accentQuaternary */
-@define-color aqua    #689d6a;   /* collapsed onto accent (accentPrimary) */
-@define-color orange  #fe8019;   /* keep for over-amplification warning */
-
-/* ── Semantic surface + state roles (the design system) ──
-   Three surface levels build depth without heavy shadows; active state is an
-   accent TINT (not a saturated fill), so the panel stays calm.
-   Spacing scale (use these literals consistently): 4 / 8 / 12 / 16 / 20.
-   Radius scale: 8 (buttons) / 10 (controls, entries) / 14 (cards, tiles)
-   / 18 (floating surfaces: panel, OSD, launcher, popups, dialogs). */
-@define-color surface        alpha(#32302f, 0.50);  /* panel base; half of the card is the compositor's material, and this is also its mask */
-@define-color surface_raised #32302f;               /* cards, tiles          */
-@define-color surface_hover  #3c3836;               /* hover / inactive fill */
-@define-color surface_track  #45403d;               /* slider trough, wells  */
-@define-color border_subtle  alpha(#ebdbb2, 0.08);  /* hairline separators — waybar card border */
-@define-color border_strong  alpha(#ebdbb2, 0.14);  /* card edges            */
-@define-color text_faint     #7c6f64;               /* tertiary text         */
-@define-color accent_tint    alpha(#689d6a, 0.20);  /* active tile/control bg*/
-@define-color accent_tint_hi alpha(#689d6a, 0.30);  /* active hover          */
-@define-color danger         #cc241d;
-@define-color danger_tint    alpha(#fb4934, 0.16);  /* destructive hover     */
+/* ── Palette ──
+   In data/palette.css, not here, and loaded in front of these rules by
+   `theme::load_css`. The wallpaper-derived palette replaces that file's
+   block wholesale (src/palette.rs), so a colour LITERAL in a rule below is
+   a colour the wallpaper cannot reach: name it there and reference it here.
+   `the_rules_carry_no_colour_literals` in src/theme.rs fails the build on
+   one that slips back in. */
 
 /* ── Glass card: shared base for floating surfaces (OSD, notification
    popups, launcher, polkit/lock cards, start menu). box-shadow stays
@@ -94,7 +35,7 @@
 .no-glass .glass-card,
 .no-glass .bar-root,
 .no-glass .panel-window {
-    background-color: alpha(#32302f, 0.94);
+    background-color: alpha(@bg0, 0.94);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
 }
 
@@ -1774,7 +1715,7 @@ revealer {
    happens near it). Raising the alpha also masks more of the card in, so
    there is more frost rather than less. */
 .notification-popup-content {
-    background-color: alpha(#32302f, 0.72);
+    background-color: alpha(@bg0, 0.72);
     box-shadow: none;
     padding: 12px 14px;
 }
@@ -1814,7 +1755,7 @@ revealer {
    0.500, so a collapsed card clears the line by the same 0.10 as every other
    one. #292727 is @surface's colour at the same 0.82. */
 .notification-popup-content.collapsed {
-    background-color: alpha(#292727, 0.72);
+    background-color: alpha(@card_dim, 0.72);
     border-color: alpha(@border_strong, 0.7);
 }
 
@@ -1836,7 +1777,7 @@ revealer {
    alpha rather than the colour drops the card into the flat-slab band.
    #3a2a28 is @surface's #32302f warmed toward @red at the same alpha. */
 .notification-popup-content.critical {
-    background-color: alpha(#3a2a28, 0.72);
+    background-color: alpha(@card_urgent, 0.72);
     border-color: alpha(@red, 0.35);
 }
 
@@ -1854,7 +1795,7 @@ revealer {
     font-weight: 700;
     letter-spacing: 1px;
     color: @bg0_h;
-    background-color: #fb4934;
+    background-color: @red_bright;
     border-radius: 5px;
     padding: 0 5px;
 }
@@ -2259,7 +2200,7 @@ revealer {
        premultiplied sum comes back to #32302f at alpha 0.500 exactly. This
        went unnoticed while `absorb` was 2.0 and every card was dark; it does
        not survive a clear material. */
-    background-color: alpha(#43403f, 0.375);
+    background-color: alpha(@glass_match, 0.375);
     /* Bottom lighter than top on purpose: the caption's reserved second line
        sits directly above this edge, so the optical margin down there is the
        padding plus whatever the caption did not use. 20 against 24 makes the
@@ -2765,7 +2706,7 @@ revealer {
 }
 
 .pill-icon-blue {
-    color: #83a598;
+    color: @accent_bright_3;
     font-size: 14px;
 }
 
@@ -2775,7 +2716,7 @@ revealer {
 }
 
 .pill-icon-red {
-    color: #fb4934;
+    color: @red_bright;
     font-size: 14px;
 }
 

@@ -1,0 +1,100 @@
+/* ══════════════════════════════════════════════════════
+   Swaypplet – the palette
+   ══════════════════════════════════════════════════════
+
+   Every colour the stylesheet names, and nothing else. Split out of
+   style.css so it can be REPLACED at runtime: `look.tint` derives this same
+   block from the wallpaper (src/palette.rs) and `theme::load_css` loads the
+   derived block in front of style.css's rules instead of this one.
+
+   The split is load-bearing. GTK4 resolves `@define-color` per CssProvider,
+   at parse time, so a second provider that redefines @accent does not
+   recolour a rule the first provider parsed. The palette and the rules have
+   to reach GTK as one string, which is why the rules carry no colour
+   literals: a hex value inside a rule is a colour the wallpaper cannot
+   reach. Add a name here rather than a literal there.
+
+   Gruvbox Dark with a warmer background, and the tones are the theme's
+   contrast skeleton: the derived palette keeps each entry's L* and swaps
+   only hue and chroma, so every ratio measured against these values holds
+   for a wallpaper-derived one too (src/palette.rs, "Tone is the contract").
+
+   nixos users/modules/theme/colors.nix holds the same values on the Nix side
+   for sway, foot and the rest; cross-repo-guard.nix fails the flake when the
+   two disagree.
+*/
+
+/* ── Palette ── */
+@define-color bg0_h     #1d2021;
+@define-color bg0       #32302f;   /* dark0_soft — matches waybar background */
+@define-color bg1       #3c3836;   /* matches waybar surface */
+@define-color bg2       #504945;
+@define-color bg3       #665c54;
+@define-color fg        #ebdbb2;   /* matches waybar text */
+@define-color fg_dim    #a89984;   /* matches waybar muted */
+
+/* Semantic accents — mirrors waybar accent semantics */
+@define-color accent           #689d6a;  /* accentPrimary (green/cyan) */
+@define-color accent_secondary #d79921;  /* accentSecondary (yellow) */
+@define-color accent_tertiary  #458588;  /* accentTertiary (blue) */
+@define-color accent_quaternary #b16286; /* accentQuaternary (magenta) */
+@define-color accent_quinary   #cc241d;  /* accentQuinary (red) */
+
+/* The bright gruvbox pair of each accent, for small type and thin marks on a
+   card ground. Measured on the notification card at its closed-down 0.72
+   tint over black: the base accents land at 3.7 (blue, magenta) to 5.0
+   (green), which carries a 3 px rail and falls short of 4.5 for 11 px text.
+   These are 5.8 to 9.3, so the ink uses them — and the rail follows, so one
+   card carries exactly one hue rather than two shades of it.
+
+   Not in theme/colors.nix, unlike the base accents: nothing on the Nix side
+   reads them, cross-repo-guard.nix checks only the names its paletteMap
+   lists, and a palette entry with one consumer belongs where its consumer
+   is. Promote them when a second surface wants them.
+
+   Six rather than four: the sender's hue is a hash, and with four buckets
+   two of the three cards on the render harness landed on the same one, which
+   is the one thing the channel is for. Gruvbox's bright row has exactly six
+   usable here — bright red is spoken for by the URGENT chip. Measured on the
+   same ground, the lowest of the six is 5.8:1. */
+@define-color accent_bright   #8ec07c;  /* aqua — bright pair of @accent */
+@define-color accent_bright_2 #fabd2f;  /* yellow */
+@define-color accent_bright_3 #83a598;  /* blue */
+@define-color accent_bright_4 #d3869b;  /* magenta */
+@define-color accent_bright_5 #b8bb26;  /* green */
+@define-color accent_bright_6 #fe8019;  /* orange */
+
+/* Legacy aliases — keep so existing class references keep working */
+@define-color red     #cc241d;   /* matches waybar accentQuinary */
+@define-color green   #b8bb26;
+@define-color yellow  #d79921;   /* matches waybar accentSecondary */
+@define-color blue    #458588;   /* matches waybar accentTertiary */
+@define-color purple  #b16286;   /* matches waybar accentQuaternary */
+@define-color aqua    #689d6a;   /* collapsed onto accent (accentPrimary) */
+@define-color orange  #fe8019;   /* keep for over-amplification warning */
+
+/* ── Semantic surface + state roles (the design system) ──
+   Three surface levels build depth without heavy shadows; active state is an
+   accent TINT (not a saturated fill), so the panel stays calm.
+   Spacing scale (use these literals consistently): 4 / 8 / 12 / 16 / 20.
+   Radius scale: 8 (buttons) / 10 (controls, entries) / 14 (cards, tiles)
+   / 18 (floating surfaces: panel, OSD, launcher, popups, dialogs). */
+@define-color surface        alpha(#32302f, 0.50);  /* panel base; half of the card is the compositor's material, and this is also its mask */
+@define-color surface_raised #32302f;               /* cards, tiles          */
+@define-color surface_hover  #3c3836;               /* hover / inactive fill */
+@define-color surface_track  #45403d;               /* slider trough, wells  */
+@define-color border_subtle  alpha(#ebdbb2, 0.08);  /* hairline separators — waybar card border */
+@define-color border_strong  alpha(#ebdbb2, 0.14);  /* card edges            */
+@define-color text_faint     #7c6f64;               /* tertiary text         */
+@define-color accent_tint    alpha(#689d6a, 0.20);  /* active tile/control bg*/
+@define-color accent_tint_hi alpha(#689d6a, 0.30);  /* active hover          */
+@define-color danger         #cc241d;
+@define-color danger_tint    alpha(#fb4934, 0.16);  /* destructive hover     */
+
+/* Colours the rules used to carry as literals. Each is derived from one
+   above by documented arithmetic, and each is here so that the derived
+   palette can carry the same relationship rather than a frozen hex value. */
+@define-color red_bright   #fb4934;  /* gruvbox bright red: the URGENT chip's ground, and what @danger_tint is mixed from */
+@define-color card_dim     #292727;  /* @bg0 at 0.82, for a collapsed notification card — a colour change, never an alpha one */
+@define-color card_urgent  #3a2a28;  /* @bg0 warmed toward @red, for a critical card's material */
+@define-color glass_match  #43403f;  /* @bg0 x 0.5/0.375: premultiplied at alpha 0.375 this comes back to @bg0 at 0.500 */
