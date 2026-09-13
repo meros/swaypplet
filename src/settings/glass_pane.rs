@@ -22,7 +22,7 @@ use gtk4::prelude::*;
 
 use super::glass::{self, GrainKind, SurfaceKind, System, Tuning};
 use super::preset;
-use super::ui::{kind_row, pretty_path, section_box};
+use super::ui::{self, kind_row, pretty_path, section_box};
 
 /// How long after the last slider motion the compositor is told.
 ///
@@ -588,7 +588,15 @@ impl GlassPane {
         let modified = saved.is_some();
         let tuning = saved.unwrap_or_else(|| Tuning::system(&system));
 
-        let status = gtk4::Label::builder().xalign(0.0).wrap(true).build();
+        // Capped like every other wrapping label in the pane (`ui::HINT_CHARS`,
+        // for what an uncapped one does to the whole tab's width). This tab
+        // builds its own status rather than taking `ui::footer`'s, because it
+        // also carries the Undo button.
+        let status = gtk4::Label::builder()
+            .xalign(0.0)
+            .wrap(true)
+            .max_width_chars(ui::HINT_CHARS)
+            .build();
         status.add_css_class("settings-status");
 
         let undo_btn = gtk4::Button::with_label("Undo");
@@ -617,9 +625,40 @@ impl GlassPane {
 
         root.append(&build_presets(&state));
         root.append(&build_kinds(&state));
-        for group in GROUPS {
-            root.append(&build_group(&state, group));
+
+        // The twenty-nine knobs go behind one row. Picking a preset and a
+        // profile is the settings pane's job; deciding what dispersion
+        // should be is a bench, and a bench in front of the presets meant
+        // the tab opened on a column of sliders and the choice most people
+        // want was below the fold.
+        let (expander, revealer) = ui::disclosure("Tune the material");
+        // Built on the first open, not now. A collapsed GtkRevealer still
+        // measures its child across the other axis, and twenty-nine slider
+        // rows gave GTK an answer it could not reconcile — "min width of 898
+        // for height of 581, but min height of 581 for width of 572" — after
+        // which it took 898 and the tab hung off the card. Empty until
+        // asked, it also saves building those rows for the sessions that
+        // never open it.
+        {
+            let state = state.clone();
+            let revealer = revealer.clone();
+            expander.connect_clicked(move |_| {
+                if revealer.child().is_some() {
+                    return;
+                }
+                let bench = gtk4::Box::builder()
+                    .orientation(gtk4::Orientation::Vertical)
+                    .spacing(10)
+                    .build();
+                for group in GROUPS {
+                    bench.append(&build_group(&state, group));
+                }
+                revealer.set_child(Some(&bench));
+            });
         }
+        root.append(&expander);
+        root.append(&revealer);
+
         root.append(&build_footer(&state, &status, &undo_btn));
 
         state.sync_controls();
@@ -671,6 +710,7 @@ fn unconfigured_note() -> gtk4::Box {
         )
         .xalign(0.0)
         .wrap(true)
+        .max_width_chars(ui::HINT_CHARS)
         .build();
     body.add_css_class("settings-empty-body");
 
@@ -685,15 +725,23 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
         "The shipped material, and other coherent physical glass presets (click any to preview).",
     );
 
-    let row = gtk4::FlowBox::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .selection_mode(gtk4::SelectionMode::None)
-        .min_children_per_line(2)
-        .max_children_per_line(5)
+    // A grid of three columns rather than a FlowBox, because a FlowBox is a
+    // height-for-width widget and GTK could not get a consistent answer out
+    // of this one inside the pane's fixed column: "min width of 898 for
+    // height of 581, but min height of 581 for width of 572", after which it
+    // took the 898 and the whole tab hung off the right of the card. The
+    // number of presets is known and small, so nothing here needs to reflow.
+    let row = gtk4::Grid::builder()
         .row_spacing(6)
         .column_spacing(6)
+        .column_homogeneous(true)
         .build();
     row.add_css_class("settings-presets");
+    let mut slot = 0i32;
+    let mut place = |btn: &gtk4::Button| {
+        row.attach(btn, slot % 3, slot / 3, 1, 1);
+        slot += 1;
+    };
 
     let system_btn = gtk4::Button::with_label("System");
     system_btn.add_css_class("settings-preset-btn");
@@ -707,7 +755,7 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
             state.replace(tuning, true);
         });
     }
-    row.append(&system_btn);
+    place(&system_btn);
 
     for p in &preset::ALL {
         let btn = gtk4::Button::with_label(p.name);
@@ -726,7 +774,7 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
                 true,
             )
         });
-        row.append(&btn);
+        place(&btn);
     }
 
     group.append(&row);
