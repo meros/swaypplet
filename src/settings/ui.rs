@@ -8,6 +8,17 @@ use std::path::Path;
 
 use gtk4::prelude::*;
 
+/// What a wrapping label is allowed to ASK for, in characters.
+///
+/// A GtkLabel with `wrap` set still requests the whole text on one line as
+/// its natural width, and it gets it when the parent has room: the hint on
+/// the Quiet Hours group is 780 px of text, which made the settings pane ask
+/// for 886 px and stretched every row on every tab to match (a GtkStack
+/// takes the widest page). This caps the request; the label still wraps to
+/// whatever width it is finally given, so at the pane's full column it fills
+/// the line as before.
+pub const HINT_CHARS: i32 = 64;
+
 /// A titled run of rows.
 pub fn section_box(title: &str, hint: &str) -> gtk4::Box {
     let container = gtk4::Box::builder()
@@ -24,6 +35,7 @@ pub fn section_box(title: &str, hint: &str) -> gtk4::Box {
         .label(hint)
         .xalign(0.0)
         .wrap(true)
+        .max_width_chars(HINT_CHARS)
         .build();
     sub.add_css_class("settings-group-hint");
     container.append(&sub);
@@ -126,6 +138,40 @@ pub fn scale_row(
     (row, scale)
 }
 
+/// A row that opens a run of rows under it, closed to begin with.
+///
+/// For the half of a tab that is a workbench rather than a setting: the
+/// panel is where a choice is made in one press, and a column of thirty
+/// sliders in front of that choice buries it. What is behind the disclosure
+/// is not hidden, it is second.
+///
+/// The same shape as the network section's "Advanced & Other Connections"
+/// (`widgets/network/mod.rs`), which predates this and still carries its own
+/// copy — it cannot reach this module.
+pub fn disclosure(label: &'static str) -> (gtk4::Button, gtk4::Revealer) {
+    let button = gtk4::Button::builder()
+        .label(format!("▸ {label}"))
+        .halign(gtk4::Align::Start)
+        .build();
+    button.add_css_class("section-expander");
+
+    let revealer = gtk4::Revealer::builder()
+        .transition_type(gtk4::RevealerTransitionType::SlideDown)
+        .transition_duration(200)
+        .reveal_child(false)
+        .build();
+
+    {
+        let revealer = revealer.clone();
+        button.connect_clicked(move |b| {
+            let open = revealer.reveals_child();
+            revealer.set_reveal_child(!open);
+            b.set_label(&format!("{} {label}", if open { "▸" } else { "▾" }));
+        });
+    }
+    (button, revealer)
+}
+
 /// The strip under a tab: its action buttons, and a line saying where the
 /// values currently come from.
 pub fn footer(buttons: &[&gtk4::Button]) -> (gtk4::Box, gtk4::Label) {
@@ -144,7 +190,11 @@ pub fn footer(buttons: &[&gtk4::Button]) -> (gtk4::Box, gtk4::Label) {
     }
     footer.append(&row);
 
-    let status = gtk4::Label::builder().xalign(0.0).wrap(true).build();
+    let status = gtk4::Label::builder()
+        .xalign(0.0)
+        .wrap(true)
+        .max_width_chars(HINT_CHARS)
+        .build();
     status.add_css_class("settings-status");
     footer.append(&status);
 

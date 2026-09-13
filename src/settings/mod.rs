@@ -29,6 +29,11 @@ pub mod wallpaper;
 
 use gtk4::prelude::*;
 
+/// The reading width of the settings column, in logical pixels. Wide enough
+/// for a 104 px label gutter and a control beside it; narrow enough that the
+/// pair reads as one row.
+const PANE_WIDTH: i32 = 560;
+
 /// A tab: its stack name, the omnibox prefixes that open it, and its title.
 struct Tab {
     name: &'static str,
@@ -95,6 +100,17 @@ impl SettingsSection {
         let root = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(10)
+            // A column, not a sheet. The Helm card is 740 to 1033 px wide
+            // (panel.rs, HELM_CARD_SIZE) and a settings row is a label and
+            // one control: left to expand, a switch ends up a thousand
+            // pixels from the word it belongs to, and the eye has to travel
+            // the whole card to pair them. So the pane asks for a reading
+            // width and centres in whatever it is given.
+            //
+            // A request rather than a maximum, because GTK4 has no clamp:
+            // below this the pane overflows instead of wrapping. It is safe
+            // here because `install_monitor_fit` does not take the card
+            // under about 620 px.
             .build();
         root.add_css_class("settings-pane");
 
@@ -122,6 +138,8 @@ impl SettingsSection {
             .spacing(6)
             .build();
         strip.add_css_class("settings-tabs");
+        // Over the column, not over the card.
+        strip.set_halign(gtk4::Align::Center);
         let mut tabs = Vec::new();
         let mut first: Option<gtk4::ToggleButton> = None;
         for tab in &TABS {
@@ -146,8 +164,36 @@ impl SettingsSection {
             tabs.push((tab.name, button));
         }
 
+        // The clamp. A ScrolledWindow with horizontal scrolling off does not
+        // pass its child's width request upward: it takes the width it is
+        // given and makes the child fit. Everything softer than that failed
+        // in turn — a width request is a floor and GTK still hands out the
+        // natural width above it, and the natural width here is whatever the
+        // widest single label, preset row or thumbnail grid asks for, which
+        // was 1120 px. Vertical scrolling is off too and the natural height
+        // propagates, so the pane is still as tall as its content and the
+        // panel's own scroller does the scrolling.
+        let clamp = gtk4::ScrolledWindow::builder()
+            // External rather than Never: with Never the scrolled window must
+            // be at least as wide as its child's minimum, and the child's
+            // minimum width here grows with its height (the wallpaper grid
+            // and the wrapping hints are both height-for-width), which is
+            // the "min width of 898 for height of 581" GTK was complaining
+            // about and the width it then allocated. External lets the width
+            // be decided here; nothing scrolls sideways because the content
+            // fits, and no scrollbar is drawn.
+            .hscrollbar_policy(gtk4::PolicyType::External)
+            .vscrollbar_policy(gtk4::PolicyType::Never)
+            .propagate_natural_width(false)
+            .propagate_natural_height(true)
+            .width_request(PANE_WIDTH)
+            .halign(gtk4::Align::Center)
+            .hexpand(false)
+            .child(&stack)
+            .build();
+
         root.append(&strip);
-        root.append(&stack);
+        root.append(&clamp);
 
         SettingsSection {
             root,
