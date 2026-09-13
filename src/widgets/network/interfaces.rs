@@ -18,17 +18,10 @@ pub fn rebuild_iface_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
     let interfaces = state.borrow().interfaces.clone();
 
     if interfaces.is_empty() {
-        let empty_lbl = Label::builder()
-            .label("No interfaces found")
-            .halign(gtk4::Align::Start)
-            .build();
-        empty_lbl.add_css_class("network-placeholder");
-        let row = ListBoxRow::builder().build();
-        row.set_child(Some(&empty_lbl));
-        row.add_css_class("network-row");
-        list.append(&row);
+        list.set_visible(false);
         return;
     }
+    list.set_visible(true);
 
     for iface in interfaces {
         let row_box = Box::builder()

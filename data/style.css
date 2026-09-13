@@ -1293,6 +1293,101 @@ revealer {
 }
 
 /* ── Network section ── */
+.network-header-bar {
+    background-color: @surface_raised;
+    border-radius: 12px;
+    padding: 10px 14px;
+    border: 1px solid @border_subtle;
+}
+
+.network-header-icon {
+    font-size: 20px;
+    color: @accent;
+    min-width: 24px;
+}
+
+.network-header-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: @fg;
+}
+
+.network-header-subtitle {
+    font-size: 11px;
+    color: @fg_dim;
+}
+
+.network-disabled-box {
+    padding: 36px 16px;
+}
+
+.network-disabled-icon {
+    font-size: 32px;
+    color: @fg_dim;
+    margin-bottom: 8px;
+}
+
+.network-disabled-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: @fg;
+    margin-bottom: 2px;
+}
+
+.network-disabled-subtitle {
+    font-size: 11px;
+    color: @fg_dim;
+}
+
+.network-hero-card {
+    background-color: @surface_raised;
+    border-radius: 12px;
+    padding: 12px 14px;
+    border: 1px solid alpha(@accent, 0.25);
+}
+
+.network-hero-icon {
+    font-size: 22px;
+    min-width: 28px;
+}
+
+.network-hero-ssid {
+    font-size: 14px;
+    font-weight: 700;
+    color: @fg;
+}
+
+.network-hero-status {
+    font-size: 11px;
+    color: @fg_dim;
+}
+
+.network-details-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    min-height: 24px;
+    background-color: transparent;
+    color: @fg_dim;
+    border-radius: 6px;
+    border: 1px solid @border_subtle;
+}
+
+.network-details-btn:hover {
+    background-color: alpha(white, 0.05);
+    color: @fg;
+}
+
+.network-hero-details {
+    padding-top: 8px;
+    margin-top: 6px;
+    border-top: 1px solid @border_subtle;
+}
+
+.network-toolbar {
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
 .network-current {
     padding: 4px 0;
 }

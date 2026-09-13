@@ -14,6 +14,9 @@ pub struct DisplayWidgets {
     pub current_icon: Label,
     pub current_ssid: Label,
     pub current_signal: Label,
+    pub hero_status: Label,
+    pub header_subtitle: Label,
+    pub hero_card: gtk4::Box,
     pub ip_label: Label,
     pub gateway_label: Label,
     pub dns_label: Label,
@@ -27,10 +30,13 @@ pub struct PollerWidgets {
     pub connectivity_label: Label,
     pub portal_btn: gtk4::Button,
     pub wifi_switch: gtk4::Switch,
-    pub wifi_controls_box: gtk4::Box,
+    pub wifi_content_box: gtk4::Box,
+    pub wifi_disabled_box: gtk4::Box,
     pub power_save_row: gtk4::Box,
     pub iface_list_box: ListBox,
+    pub iface_section_box: gtk4::Box,
     pub vpn_list_box: ListBox,
+    pub vpn_section_box: gtk4::Box,
 }
 
 /// State returned from the background polling thread.
@@ -144,9 +150,12 @@ fn apply_polled_state(
 
         state.borrow_mut().interfaces = polled.interfaces.clone();
         super::interfaces::rebuild_iface_list(&w.iface_list_box, state);
+        w.iface_section_box
+            .set_visible(!polled.interfaces.is_empty());
 
         state.borrow_mut().vpns = polled.vpns.clone();
         super::vpn::rebuild_vpn_list(&w.vpn_list_box, state);
+        w.vpn_section_box.set_visible(!polled.vpns.is_empty());
 
         changed = true;
     }
@@ -158,6 +167,7 @@ fn apply_polled_state(
             &w.connectivity_label,
             &w.portal_btn,
             &w.display.summary_text,
+            &w.display.hero_status,
         );
         changed = true;
     }
@@ -166,7 +176,11 @@ fn apply_polled_state(
         prev.wifi_radio = polled.wifi_radio;
         state.borrow_mut().wifi_radio_enabled = polled.wifi_radio;
         w.wifi_switch.set_state(polled.wifi_radio);
-        w.wifi_controls_box.set_visible(polled.wifi_radio);
+        w.wifi_content_box.set_visible(polled.wifi_radio);
+        w.wifi_disabled_box.set_visible(!polled.wifi_radio);
+        if !polled.wifi_radio {
+            w.display.header_subtitle.set_label("Wi-Fi is off");
+        }
         w.power_save_row.set_visible(
             polled.wifi_radio && matches!(state.borrow().active, ActiveConnection::Wifi { .. }),
         );
@@ -216,41 +230,85 @@ fn update_active_labels<'a>(active: &'a ActiveConnection, w: &DisplayWidgets) ->
             freq_mhz,
         } => {
             w.current_icon.set_label(signal_icon(*signal));
+            for class in [
+                "network-signal-none",
+                "network-signal-weak",
+                "network-signal-ok",
+                "network-signal-good",
+                "network-signal-excellent",
+            ] {
+                w.current_icon.remove_css_class(class);
+            }
+            w.current_icon.add_css_class(signal_css_class(*signal));
+
             w.current_ssid.set_label(ssid);
             let signal_text = match freq_mhz {
                 Some(freq) => format!("{}% · {}", signal, freq_band_label(*freq)),
                 None => format!("{}%", signal),
             };
             w.current_signal.set_label(&signal_text);
+            w.hero_status.set_label("Connected");
+            w.header_subtitle.set_label(&format!("Connected to {ssid}"));
+
             w.summary_icon.set_label(signal_icon(*signal));
             let summary_label = match freq_mhz {
                 Some(freq) => format!("{} · {}", ssid, freq_band_label(*freq)),
                 None => ssid.clone(),
             };
             w.summary_text.set_label(&summary_label);
+
             w.current_disconnect_btn.set_visible(true);
             w.current_disconnect_btn.set_sensitive(true);
             w.current_spinner.set_visible(false);
+            w.hero_card.set_visible(true);
             Some(device.as_str())
         }
         ActiveConnection::Ethernet { device } => {
             w.current_icon.set_label(ICON_ETHERNET);
-            w.current_ssid.set_label("Ethernet");
-            w.current_signal.set_label("");
+            for class in [
+                "network-signal-none",
+                "network-signal-weak",
+                "network-signal-ok",
+                "network-signal-good",
+                "network-signal-excellent",
+            ] {
+                w.current_icon.remove_css_class(class);
+            }
+            w.current_ssid.set_label("Wired Ethernet");
+            w.current_signal.set_label(&device.clone());
+            w.hero_status.set_label("Connected");
+            w.header_subtitle.set_label("Wired connection active");
+
             w.summary_icon.set_label(ICON_ETHERNET);
             w.summary_text.set_label("Wired");
+
             w.current_disconnect_btn.set_visible(false);
             w.current_spinner.set_visible(false);
+            w.hero_card.set_visible(true);
             Some(device.as_str())
         }
         ActiveConnection::Disconnected => {
             w.current_icon.set_label(ICON_DISCONNECTED);
+            for class in [
+                "network-signal-none",
+                "network-signal-weak",
+                "network-signal-ok",
+                "network-signal-good",
+                "network-signal-excellent",
+            ] {
+                w.current_icon.remove_css_class(class);
+            }
             w.current_ssid.set_label("Disconnected");
             w.current_signal.set_label("");
+            w.hero_status.set_label("");
+            w.header_subtitle.set_label("Not connected");
+
             w.summary_icon.set_label(ICON_DISCONNECTED);
             w.summary_text.set_label("Disconnected");
+
             w.current_disconnect_btn.set_visible(false);
             w.current_spinner.set_visible(false);
+            w.hero_card.set_visible(false);
             None
         }
     }
@@ -290,14 +348,28 @@ pub fn update_connectivity_display(
     label: &Label,
     portal_btn: &gtk4::Button,
     summary_text: &Label,
+    hero_status: &Label,
 ) {
     label.set_label(connectivity.label());
 
     label.remove_css_class("network-connectivity-ok");
     label.remove_css_class("network-connectivity-warn");
     match connectivity {
-        ConnectivityState::Full => label.add_css_class("network-connectivity-ok"),
-        _ => label.add_css_class("network-connectivity-warn"),
+        ConnectivityState::Full => {
+            label.add_css_class("network-connectivity-ok");
+            hero_status.set_label("Connected (Internet)");
+        }
+        ConnectivityState::Limited => {
+            label.add_css_class("network-connectivity-warn");
+            hero_status.set_label("Limited connectivity");
+        }
+        ConnectivityState::Portal => {
+            label.add_css_class("network-connectivity-warn");
+            hero_status.set_label("Login required");
+        }
+        _ => {
+            label.add_css_class("network-connectivity-warn");
+        }
     }
 
     portal_btn.set_visible(matches!(connectivity, ConnectivityState::Portal));
