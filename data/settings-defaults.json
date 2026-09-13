@@ -1,6 +1,7 @@
 {
   "look": {
-    "motion": "full"
+    "motion": "full",
+    "tint": "off"
   },
   "idle": {
     "dim_after_s": 240,

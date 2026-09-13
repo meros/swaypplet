@@ -348,6 +348,10 @@ pub fn run() {
             return;
         }
         theme::load_css();
+        // The bar outlives every wallpaper change in a session, so it follows
+        // the palette the panel derives instead of keeping the one it started
+        // with. Nothing here writes it.
+        theme::watch();
         crate::settings::store::init();
         // Keeps itself alive through its main-context event loop.
         let sway = SwayService::start();

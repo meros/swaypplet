@@ -6,7 +6,7 @@ gear in the flight deck; a bare `:` lists every prefix). Five tabs,
 
 | tab | edits | sections of `~/.config/swaypplet/settings.json` |
 |---|---|---|
-| Look | `output * bg` on the compositor; how much the shell animates | `wallpaper`, `look` |
+| Look | `output * bg` on the compositor; whether the theme takes its colours from it; how much the shell animates | `wallpaper`, `look` |
 | Idle & Lock | the idle manager's timers; the night window; walk-away lock; face unlock; what sudo and pkexec may ask for | `idle`, `elevate` |
 | Bar | clock format, segments, OSD placement, key steps, volume boost | `bar`, `keys` |
 | Alerts | popup linger, corner and depth; quiet hours; what a screenshot becomes | `alerts`, `capture` |
@@ -79,6 +79,16 @@ and Bar tabs is `nix <section>` into the clipboard.
 - **Look**: the wallpaper is one `output * bg` command over sway IPC;
   motion is read per animation (`anim::duration`), in every process that
   animates, which is why `lock::run` and `bar::run` call `store::init` too.
+- **Tint** (`look.tint`, off | accents | full) is the one setting that is
+  not read where it is used. The panel derives a palette from the wallpaper
+  (`src/palette.rs`) and writes `$XDG_CACHE_HOME/swaypplet/palette.css`;
+  every process reads that file at `theme::load_css` and the long-lived ones
+  follow it on `theme::watch`'s tick. The file's presence is the setting —
+  turning the tint off deletes it — so a reader needs neither the settings
+  nor an IPC round trip to know what colour anything is, which is what keeps
+  a 100 ms JPEG decode out of the lock screen's startup. The panel also
+  pushes the derived accents at sway's `client.*` window borders, and puts
+  the config's own colours back when the tint goes off.
 - **Alerts**: a popup reads linger, corner and depth as it is created and
   keeps them (`notifications/popup.rs`); quiet hours is a 30 s tick plus an
   observer (`notifications/quiet.rs`), edge-triggered so a manual DND
