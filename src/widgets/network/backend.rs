@@ -467,8 +467,10 @@ pub fn connect_new(ssid: &str, password: &str, security: &str, hidden: bool) -> 
             .map(|(path, _, _)| path);
 
         if let Some(path) = existing {
-            let _ = nm::proxy(conn, &path, nm::IFACE_CONNECTION)
-                .and_then(|p| p.call::<_, _, ()>("Delete", &()).map_err(|e| nm::dbus_message(&e)));
+            let _ = nm::proxy(conn, &path, nm::IFACE_CONNECTION).and_then(|p| {
+                p.call::<_, _, ()>("Delete", &())
+                    .map_err(|e| nm::dbus_message(&e))
+            });
         }
 
         let device = nm::devices(conn)
@@ -487,11 +489,17 @@ pub fn disconnect_active_wifi() -> NmResult {
 pub fn disconnect_network(ssid: &str) -> NmResult {
     let ssid = ssid.to_string();
     acting(move |conn| {
-        let active = nm::paths(conn, nm::MANAGER_PATH, nm::IFACE_MANAGER, "ActiveConnections");
+        let active = nm::paths(
+            conn,
+            nm::MANAGER_PATH,
+            nm::IFACE_MANAGER,
+            "ActiveConnections",
+        );
         for path in active {
             let id = nm::prop::<String>(conn, &path, nm::IFACE_ACTIVE, "Id");
             if id.as_deref() == Some(&ssid) {
-                let target = zbus::zvariant::ObjectPath::try_from(path.as_str()).map_err(|e| e.to_string())?;
+                let target = zbus::zvariant::ObjectPath::try_from(path.as_str())
+                    .map_err(|e| e.to_string())?;
                 nm::proxy(conn, nm::MANAGER_PATH, nm::IFACE_MANAGER)?
                     .call::<_, _, ()>("DeactivateConnection", &(&target,))
                     .map_err(|e| nm::dbus_message(&e))?;
@@ -499,7 +507,8 @@ pub fn disconnect_network(ssid: &str) -> NmResult {
             }
         }
         for dev in nm::devices(conn) {
-            if dev.device_type == nm::DEVICE_TYPE_WIFI && dev.state > nm::DEVICE_STATE_DISCONNECTED {
+            if dev.device_type == nm::DEVICE_TYPE_WIFI && dev.state > nm::DEVICE_STATE_DISCONNECTED
+            {
                 nm::proxy(conn, &dev.path, nm::IFACE_DEVICE)?
                     .call::<_, _, ()>("Disconnect", &())
                     .map_err(|e| nm::dbus_message(&e))?;
@@ -534,10 +543,10 @@ pub fn get_network_interfaces() -> Vec<NetworkInterface> {
     nm::devices(&conn)
         .into_iter()
         .filter_map(|device| {
-            let iface_type = device_type_name(device.device_type);
-            if iface_type == "loopback" || iface_type == "bridge" || device.interface == "lo" {
+            if !is_user_facing_interface(&device.interface, device.device_type, device.state) {
                 return None;
             }
+            let iface_type = device_type_name(device.device_type);
             Some(NetworkInterface {
                 enabled: device.state > nm::DEVICE_STATE_DISCONNECTED,
                 device: device.interface,
@@ -545,6 +554,44 @@ pub fn get_network_interfaces() -> Vec<NetworkInterface> {
             })
         })
         .collect()
+}
+
+fn is_user_facing_interface(interface: &str, device_type: u32, state: u32) -> bool {
+    // Ignore unmanaged devices (e.g. veth pairs, external containers)
+    if state <= nm::DEVICE_STATE_UNMANAGED {
+        return false;
+    }
+    let iface_type = device_type_name(device_type);
+    // Wi-Fi has its own dedicated top-level section; loopback/bridge are internal.
+    if iface_type == "loopback"
+        || iface_type == "bridge"
+        || iface_type == "wifi"
+        || interface == "lo"
+    {
+        return false;
+    }
+    // Filter out internal and virtual device name prefixes
+    let internal_prefixes = [
+        "veth",
+        "docker",
+        "br-",
+        "virbr",
+        "tailscale",
+        "tun",
+        "tap",
+        "wg",
+        "dummy",
+        "p2p-dev",
+        "cni",
+        "flannel",
+    ];
+    if internal_prefixes
+        .iter()
+        .any(|prefix| interface.starts_with(prefix))
+    {
+        return false;
+    }
+    true
 }
 
 /// `NM_DEVICE_TYPE_*` as the strings the icon table and the filters above

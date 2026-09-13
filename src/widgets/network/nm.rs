@@ -37,6 +37,9 @@ pub const IFACE_IP4: &str = "org.freedesktop.NetworkManager.IP4Config";
 /// `backend::device_type_name`, where they are turned into strings.
 pub const DEVICE_TYPE_WIFI: u32 = 2;
 
+/// `NM_DEVICE_STATE_UNMANAGED`. Devices not managed by NetworkManager.
+pub const DEVICE_STATE_UNMANAGED: u32 = 10;
+
 /// `NM_DEVICE_STATE_DISCONNECTED`. Anything at or below this is a device
 /// that cannot carry traffic without something else happening first.
 pub const DEVICE_STATE_DISCONNECTED: u32 = 30;
@@ -403,10 +406,7 @@ pub fn add_and_activate(
 
     let (new_conn_path, active_path): (OwnedObjectPath, OwnedObjectPath) =
         proxy(conn, MANAGER_PATH, IFACE_MANAGER)?
-            .call(
-                "AddAndActivateConnection",
-                &(&settings, &device, &root),
-            )
+            .call("AddAndActivateConnection", &(&settings, &device, &root))
             .map_err(|e| dbus_message(&e))?;
 
     wait_for_active_connection(

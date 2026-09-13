@@ -32,7 +32,7 @@ pub fn rebuild_wifi_list(
     };
 
     let filtered: Vec<WifiNetwork> = if query.is_empty() {
-        networks
+        networks.into_iter().filter(|n| !n.in_use).collect()
     } else {
         networks
             .into_iter()
@@ -42,7 +42,10 @@ pub fn rebuild_wifi_list(
 
     if filtered.is_empty() {
         let msg = if !query.is_empty() {
-            format!("No networks matching \"{}\"", state.borrow().search_query.trim())
+            format!(
+                "No networks matching \"{}\"",
+                state.borrow().search_query.trim()
+            )
         } else if state.borrow().scanning {
             "Scanning for networks…".to_string()
         } else {
@@ -613,17 +616,14 @@ fn wire_forget(
             b.add_css_class("network-forget-confirm-btn");
             let btn_revert = btn_c.clone();
             let confirmed_revert = confirmed_c.clone();
-            glib::timeout_add_local_once(
-                std::time::Duration::from_secs(3),
-                move || {
-                    if confirmed_revert.get() {
-                        confirmed_revert.set(false);
-                        btn_revert.set_label("Forget");
-                        btn_revert.remove_css_class("network-forget-confirm-btn");
-                        btn_revert.add_css_class("network-forget-btn");
-                    }
-                },
-            );
+            glib::timeout_add_local_once(std::time::Duration::from_secs(3), move || {
+                if confirmed_revert.get() {
+                    confirmed_revert.set(false);
+                    btn_revert.set_label("Forget");
+                    btn_revert.remove_css_class("network-forget-confirm-btn");
+                    btn_revert.add_css_class("network-forget-btn");
+                }
+            });
         } else {
             confirmed.set(false);
             b.set_sensitive(false);
