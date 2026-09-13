@@ -345,6 +345,11 @@ pub fn run(component: &str) {
             }
             "network" => {
                 let s = Box::leak(Box::new(NetworkSection::new()));
+                // The panel opens this as a subsheet page (panel.rs), which
+                // is the only state it is ever seen in. Without this the
+                // harness rendered the collapsed summary row on an empty
+                // canvas and every screenshot of the section was of nothing.
+                s.expand_for_page();
                 host.append(s.widget());
             }
             "bluetooth" => {

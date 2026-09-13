@@ -820,11 +820,24 @@ impl NetworkSection {
         // ── Async initial refresh ─────────────────────────────────────────
         section.refresh();
 
+        // And again whenever the section comes back on screen. The poller
+        // sleeps while nothing of ours is mapped (`monitor::schedule_next`),
+        // so without this the first thing a reopened page shows is whatever
+        // was true when it was last closed, for as long as a tick. `map`
+        // rather than a call from the panel, because there are three ways in
+        // — the panel being shown, the deck switching to the page, and the
+        // Wi-Fi pill — and this covers all of them at once.
+        {
+            let section_c = section.clone();
+            section.root.connect_map(move |_| section_c.refresh());
+        }
+
         // Start periodic poller.
         monitor::start_periodic_poller(
             section.state.clone(),
             monitor::PollerWidgets {
                 display: section.display_widgets(),
+                root: section.root.clone(),
                 connectivity_label: section.connectivity_label.clone(),
                 portal_btn: section.portal_btn.clone(),
                 wifi_switch: section.wifi_switch.clone(),

@@ -1720,13 +1720,19 @@ revealer {
     box-shadow: none;
 }
 
+/* The band tag on a network row (2.4G / 5G). Dim ink on a dark chip, and
+   measured like the rest of the file rather than dimmed by eye: @fg_dim at
+   opacity 0.7 on alpha(@bg3, 0.3) was 2.7:1 over the panel card, which is
+   under half the floor this stylesheet holds everywhere else and was the
+   smallest type on the row. The opacity is gone and the chip is darker
+   instead of the ink being lighter, so the tag stays quiet beside the SSID:
+   5.4:1 over the panel card, 5.8:1 over a notification-weight 0.72 one. */
 .network-band {
-    font-size: 9px;
+    font-size: 10px;
     color: @fg_dim;
-    opacity: 0.7;
     padding: 1px 4px;
     border-radius: 3px;
-    background-color: alpha(@bg3, 0.3);
+    background-color: alpha(@bg0_h, 0.55);
 }
 
 /* ── OSD overlay ── */
