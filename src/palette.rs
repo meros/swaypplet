@@ -408,16 +408,27 @@ fn marker_prefix() -> String {
     format!("/* swaypplet palette v{VERSION} key=")
 }
 
-/// The wallpaper the palette is derived from: the pick, else the one the
-/// sway config set. `None` when neither exists, which is a host whose
-/// compositor was never asked.
+/// The picked wallpaper, if the settings hold one.
 ///
-/// Blocking when there is no pick: it asks sway for its config.
-pub fn wallpaper_path() -> Option<PathBuf> {
-    store::current()
-        .wallpaper
-        .or_else(crate::settings::wallpaper::system_default)
-        .map(|w| w.path)
+/// Main thread only, and that is the whole reason this is not folded into
+/// [`wallpaper_path`]: `store::current` reads a thread-local, so on a worker
+/// it answers with a default-constructed `Settings` — no pick, no error, no
+/// way to tell. Deriving used to resolve the wallpaper inside the worker and
+/// so keyed every palette on the sway config's original `bg` line; the theme
+/// then never followed a wallpaper change, which is exactly what it looked
+/// like from the outside.
+fn picked_wallpaper() -> Option<PathBuf> {
+    store::current().wallpaper.map(|w| w.path)
+}
+
+/// The wallpaper the palette is derived from: `picked` when the caller found
+/// one, else the one the sway config set. `None` when neither exists, which
+/// is a host whose compositor was never asked.
+///
+/// Blocking when there is no pick: it asks sway for its config. Call it off
+/// the main thread, and read `picked` on the main thread — see above.
+fn wallpaper_path(picked: Option<PathBuf>) -> Option<PathBuf> {
+    picked.or_else(|| crate::settings::wallpaper::system_default().map(|w| w.path))
 }
 
 /// The palette block to put in front of the rules: the cache when there is
@@ -460,7 +471,11 @@ fn cached_key() -> Option<String> {
 /// The panel calls this; nothing else should, because two writers would take
 /// turns invalidating each other's file on every wallpaper change.
 pub fn refresh(done: impl FnOnce(bool) + 'static) {
+    // Both reads happen here, on the thread the settings live on. The worker
+    // below gets plain data and can reach nothing that would answer it
+    // wrongly — `picked_wallpaper` says what that cost once.
     let tint = store::current().look().tint;
+    let picked = picked_wallpaper();
     crate::spawn::spawn_work(
         move || {
             if tint == Tint::Off {
@@ -469,7 +484,7 @@ pub fn refresh(done: impl FnOnce(bool) + 'static) {
                 // palette on its next reload.
                 return drop_cache();
             }
-            let Some(image) = wallpaper_path() else {
+            let Some(image) = wallpaper_path(picked) else {
                 log::warn!("palette: no wallpaper to derive from");
                 return false;
             };
@@ -539,9 +554,7 @@ fn write_cache(marker: &str, body: &str) -> bool {
 /// asking sway: the picked wallpaper and the setting. A pick that is `None`
 /// means the sway config's own `bg`, which does not change under us.
 fn signature() -> (Option<PathBuf>, Tint) {
-    let settings = store::current();
-    let tint = settings.look().tint;
-    (settings.wallpaper.map(|w| w.path), tint)
+    (picked_wallpaper(), store::current().look().tint)
 }
 
 /// Keep the derived palette, this process's stylesheet and sway's borders in
