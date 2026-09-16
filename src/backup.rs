@@ -103,14 +103,12 @@ impl Tier {
         }
     }
 
+    /// One glyph for every tier, the way the battery keeps its ladder and
+    /// lets colour carry the warning. A segment that swaps a check for a
+    /// cross is two signals for one fact, and the check never said "backup"
+    /// in the first place.
     pub fn icon(self) -> &'static str {
-        match self {
-            Tier::Running => "󰁯",
-            Tier::Failed => "󰅚",
-            Tier::Stale => "󰀦",
-            Tier::Ok => "󰄬",
-            Tier::Unknown => "󰋗",
-        }
+        "󰁯"
     }
 }
 
