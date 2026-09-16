@@ -386,11 +386,9 @@ button.bar-clock:hover {
    "the nightly jobs ran", so green is the resting state and the segment
    earns its width by being readable when nothing is wrong. Amber reuses the
    battery's warning hue for a failed or two-night-old run. Unknown is the
-   resting gray, because a bar with no status files must claim nothing. */
-.bar-backup {
-    margin-right: 6px;
-}
-
+   resting gray, because a bar with no status files must claim nothing. The
+   chip, the divider and the band lane come from .bar-seg, as for every other
+   segment; only the hue is this module's. */
 .bar-backup.backup-ok {
     color: @accent_bright_5;
 }

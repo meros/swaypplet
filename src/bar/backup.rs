@@ -31,7 +31,7 @@ const CLASSES: [&str; 4] = [
 pub fn build(service: &Rc<BackupStatusService>) -> gtk4::Box {
     let segment = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
-        .css_classes(["bar-backup"])
+        .css_classes(["bar-backup", "bar-seg"])
         .build();
 
     let glyph = gtk4::Label::new(None);
