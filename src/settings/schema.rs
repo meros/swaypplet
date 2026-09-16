@@ -301,6 +301,9 @@ pub struct Bar {
     pub battery: bool,
     #[serde(default = "yes")]
     pub presence: bool,
+    /// The nightly backup's one-glyph verdict, beside the clock.
+    #[serde(default = "yes")]
+    pub backup: bool,
 }
 
 fn yes() -> bool {
@@ -318,6 +321,7 @@ impl Default for Bar {
             tray: true,
             battery: true,
             presence: true,
+            backup: true,
         }
     }
 }

@@ -4,6 +4,7 @@ mod app;
 mod audio;
 mod auth_field;
 mod avatar;
+mod backup;
 mod bar;
 mod clipboard;
 mod dmenu;

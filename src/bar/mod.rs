@@ -11,6 +11,7 @@
 //! a live panel, and `SWAYPPLET_NO_BAR=1` keeps the hosted bar off while
 //! an external bar owns the strip (see app.rs).
 
+mod backup;
 mod battery;
 mod board;
 mod clock;
@@ -74,6 +75,9 @@ pub struct BarManager {
     /// microphone glyph is its only reader here.
     audio: Rc<crate::audio::AudioService>,
     tasks: Rc<TaskStateService>,
+    /// One status watcher per bar process; every output's backup segment
+    /// reads the same snapshot.
+    backup: Rc<crate::backup::BackupStatusService>,
     tray: Rc<tray::TrayService>,
     /// What the start button does. In-process hosting passes a direct
     /// `panel.toggle()`; the standalone bar passes the cross-process
@@ -97,6 +101,7 @@ impl BarManager {
             sway,
             audio,
             tasks,
+            backup: crate::backup::BackupStatusService::start(),
             tray: tray::TrayService::start(),
             toggle_panel,
         });
@@ -144,6 +149,7 @@ impl BarManager {
                     &self.sway,
                     &self.audio,
                     &self.tasks,
+                    &self.backup,
                     &self.tray,
                     self.toggle_panel.clone(),
                 );
@@ -191,6 +197,7 @@ fn build_bar_window(
     sway: &Rc<SwayService>,
     audio: &Rc<crate::audio::AudioService>,
     tasks: &Rc<TaskStateService>,
+    backup: &Rc<crate::backup::BackupStatusService>,
     tray: &Rc<tray::TrayService>,
     toggle_panel: Rc<dyn Fn()>,
 ) -> (gtk4::Window, decision::DecisionSlot) {
@@ -270,6 +277,7 @@ fn build_bar_window(
     if let Some(presence) = presence::build() {
         track.append(&follow_setting(presence, |bar| bar.presence));
     }
+    track.append(&follow_setting(backup::build(backup), |bar| bar.backup));
     track.append(&clock::build());
     right.append(&track);
 

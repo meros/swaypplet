@@ -12,6 +12,7 @@ use crate::icons;
 use crate::launcher::LauncherView;
 use crate::notifications::store::NotificationStore;
 use crate::settings::SettingsSection;
+use crate::widgets::backup::BackupSection;
 use crate::widgets::{
     audio::AudioSection,
     bluetooth::BluetoothSection,
@@ -112,6 +113,7 @@ struct Sections {
     clipboard: ClipboardSection,
     power: PowerSection,
     users: UserSection,
+    backup: BackupSection,
     settings: Rc<SettingsSection>,
     /// Quick-strip toggle tiles (Night Light, Caffeine, etc.)
     tiles: RefCell<Vec<(gtk4::ToggleButton, tiles::TileSpec)>>,
@@ -129,6 +131,7 @@ impl Sections {
         self.clipboard.refresh();
         self.power.refresh();
         self.users.refresh();
+        self.backup.refresh();
         self.settings.refresh();
         for (btn, spec) in self.tiles.borrow().iter() {
             tiles::init_tile_state(btn, spec);
@@ -197,6 +200,9 @@ impl Panel {
         let clipboard = ClipboardSection::new();
         let power = PowerSection::new();
         let users = UserSection::new();
+        // Its own watcher: the panel outlives no bar process in particular,
+        // and the status directory is two small files.
+        let backup = BackupSection::new(&crate::backup::BackupStatusService::start());
         // Shared with the omnibox router below, which picks a tab by prefix.
         let settings = Rc::new(SettingsSection::new());
 
@@ -284,6 +290,7 @@ impl Panel {
                 .build();
             power_container.append(power.widget());
             power_container.append(users.widget());
+            power_container.append(backup.widget());
             let power_sheet =
                 build_subsheet("System State & Power", "󰁹", &power_container, move || ret());
             deck_stack.add_named(&power_sheet, Some("power"));
@@ -471,6 +478,7 @@ impl Panel {
             clipboard,
             power,
             users,
+            backup,
             settings,
             tiles: RefCell::new(tile_pairs),
         });
