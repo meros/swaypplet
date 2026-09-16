@@ -30,7 +30,7 @@ struct Segment {
     set: fn(&mut Bar, bool),
 }
 
-const SEGMENTS: [Segment; 5] = [
+const SEGMENTS: [Segment; 6] = [
     Segment {
         label: "Media mark",
         hint: "What is playing, at the left of the right cluster.",
@@ -54,6 +54,12 @@ const SEGMENTS: [Segment; 5] = [
         hint: "The presence sensor's mark. Nothing to hide on a machine without the sensor.",
         get: |b| b.presence,
         set: |b, v| b.presence = v,
+    },
+    Segment {
+        label: "Backup",
+        hint: "One glyph for the nightly backup: quiet when both jobs are fresh, amber when one failed or is two nights old.",
+        get: |b| b.backup,
+        set: |b, v| b.backup = v,
     },
     Segment {
         label: "Task board",
@@ -359,6 +365,9 @@ mod tests {
             moved.push(changed[0].clone());
         }
         moved.sort();
-        assert_eq!(moved, ["battery", "board", "media", "presence", "tray"]);
+        assert_eq!(
+            moved,
+            ["backup", "battery", "board", "media", "presence", "tray"]
+        );
     }
 }

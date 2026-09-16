@@ -380,6 +380,76 @@ button.bar-clock:hover {
     color: alpha(@fg, 0.65);
 }
 
+/* ── Backup segment (src/bar/backup.rs) ──
+   Right track, between presence and the clock. It breaks battery's
+   rest-is-gray rule on purpose: the glance this instrument exists for is
+   "the nightly jobs ran", so green is the resting state and the segment
+   earns its width by being readable when nothing is wrong. Amber reuses the
+   battery's warning hue for a failed or two-night-old run. Unknown is the
+   resting gray, because a bar with no status files must claim nothing. */
+.bar-backup {
+    margin-right: 6px;
+}
+
+.bar-backup.backup-ok {
+    color: @accent_bright_5;
+}
+
+.bar-backup.backup-running {
+    color: @accent_bright_3;
+}
+
+.bar-backup.backup-warn {
+    color: @accent_secondary;
+}
+
+.bar-backup.backup-unknown {
+    color: alpha(@fg, 0.45);
+}
+
+/* ── Backup readout (src/widgets/backup.rs, Helm power sheet) ──
+   The same snapshot as the bar segment, spelled out: the verdict chip
+   carries the tier's hue, the rows stay ink so a wall of amber does not
+   shout twice. */
+.backup-verdict {
+    font-size: 11px;
+}
+
+.backup-verdict.backup-ok {
+    color: @accent_bright_5;
+}
+
+.backup-verdict.backup-running {
+    color: @accent_bright_3;
+}
+
+.backup-verdict.backup-warn {
+    color: @accent_secondary;
+}
+
+.backup-verdict.backup-unknown {
+    color: alpha(@fg, 0.55);
+}
+
+.backup-job {
+    color: @fg;
+}
+
+.backup-when {
+    color: alpha(@fg, 0.65);
+    font-size: 11px;
+}
+
+.backup-target {
+    color: alpha(@fg, 0.55);
+    font-size: 11px;
+    margin-top: 2px;
+}
+
+.backup-run {
+    margin-top: 4px;
+}
+
 /* ── Media pill (src/bar/media.rs) ──
    Expanded 2026-08-12 from the single ♪ mark to art + title/artist + a
    transport row. `.paused` dims the whole pill, so a stopped player recedes

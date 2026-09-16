@@ -28,7 +28,8 @@
     "media": true,
     "tray": true,
     "battery": true,
-    "presence": true
+    "presence": true,
+    "backup": true
   },
   "keys": {
     "volume_step": 5,
