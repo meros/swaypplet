@@ -1871,20 +1871,18 @@ revealer {
    transforms in popup.rs); everything outside the cards must stay
    fully alpha-0 so compositor blur clips to the cards
    (see the window comment). */
-/* The ground is closed down from @surface's 0.50 to 0.72, which is the one
-   change every other line here depends on. At 0.50 the wallpaper sets the
-   card's contrast: the app name and the body measured 4.48:1 over a BLACK
-   desktop (dev/render.sh --mode notifications), which is the best case, and
-   a bright wallpaper lifts the ground and takes them under it. At 0.72 the
-   ground barely moves with what is behind it and the body clears 7:1.
-
-   Still a material, not a slab: the frost, the bevel and the hairline are
-   untouched, the wallpaper still reads through, and 0.72 is far above the
-   0.40 seeding line theme/glass.nix draws (see .collapsed below for what
-   happens near it). Raising the alpha also masks more of the card in, so
-   there is more frost rather than less. */
+/* The ground is @surface, the same fill every other glass card paints —
+   panel, OSD, launcher, lock card and popup are now one material, frost,
+   bevel and alpha included. (This spent a while at alpha(@bg0, 0.72), a
+   different hue AND a different alpha, which is what made popups read as a
+   separate material.) The trade the 0.72 was bought for is accepted here:
+   over a bright wallpaper the body's contrast is lower than 0.72 gave, but
+   the wallpaper reads through the card the same way it reads through the
+   panel and the launcher. The 0.40 seeding line from theme/glass.nix is
+   cleared by the same 0.10 margin as every other card (see .collapsed
+   below for what happens near it). */
 .notification-popup-content {
-    background-color: alpha(@bg0, 0.72);
+    background-color: @surface;
     box-shadow: none;
     padding: 12px 14px;
 }
@@ -1920,11 +1918,11 @@ revealer {
    0.82) scaled @surface's *alpha*, landing the card on 0.41 — one hundredth
    above the 0.40 seeding line, with the flat-slab band from theme/glass.nix
    immediately below it. A collapsed card was one rounding away from losing its
-   bevel entirely. The dimming is in the colour now and the alpha stays at
-   0.500, so a collapsed card clears the line by the same 0.10 as every other
-   one. #292727 is @surface's colour at the same 0.82. */
+   bevel entirely. The dimming is in the colour now and the alpha holds
+   @surface's 0.500, so a collapsed card clears the line by the same 0.10 as
+   every other one. #292727 is @surface's colour at the same 0.82. */
 .notification-popup-content.collapsed {
-    background-color: alpha(@card_dim, 0.72);
+    background-color: alpha(@card_dim, 0.50);
     border-color: alpha(@border_strong, 0.7);
 }
 
@@ -1946,7 +1944,7 @@ revealer {
    alpha rather than the colour drops the card into the flat-slab band.
    #3a2a28 is @surface's #32302f warmed toward @red at the same alpha. */
 .notification-popup-content.critical {
-    background-color: alpha(@card_urgent, 0.72);
+    background-color: alpha(@card_urgent, 0.50);
     border-color: alpha(@red, 0.35);
 }
 
