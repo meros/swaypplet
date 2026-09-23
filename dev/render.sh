@@ -31,6 +31,10 @@ if [ -z "${SWPP_DBUS:-}" ]; then
 fi
 
 BIN="${SWAYPPLET_BIN:-swaypplet}"
+# See preset-sheet.sh: the PATH sway can be a build whose liquid glass shader
+# does not compile headless; SWAY_BIN and GRIM_BIN name working ones.
+SWAY_BIN="${SWAY_BIN:-sway}"
+GRIM_BIN="${GRIM_BIN:-grim}"
 RES="1200x1600"; OUT="/tmp/swaypplet-shot.png"; MODE="panel"; CSS="${SWAYPPLET_CSS:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -83,9 +87,14 @@ cleanup() { [ -n "${SWAY_PID:-}" ] && kill "$SWAY_PID" 2>/dev/null || true; rm -
 trap cleanup EXIT
 
 export SWAYSOCK="$SOCK"
+# The nested socket, not the live session's. `sway_ipc::connect` tries
+# I3SOCK before SWAYSOCK (src/sway_ipc.rs), so a harness client that inherits
+# the live session's I3SOCK sends its glass replays and IPC there — to the
+# desktop on the user's screen, not to this one.
+unset I3SOCK
 # -d so the "Running compositor on wayland display 'X'" line (INFO level) is
 # logged; we parse the display name from it.
-WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 sway -d --config "$CFG" >"$LOG" 2>&1 &
+WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 "$SWAY_BIN" -d --config "$CFG" >"$LOG" 2>&1 &
 SWAY_PID=$!
 
 for _ in $(seq 1 80); do swaymsg -t get_version >/dev/null 2>&1 && break; sleep 0.1; done
@@ -222,7 +231,7 @@ fi
 captured=""
 for _ in $(seq 1 10); do
   sleep 0.5
-  grim -o HEADLESS-1 "$OUT" 2>/dev/null || true
+  "$GRIM_BIN" -o HEADLESS-1 "$OUT" 2>/dev/null || true
   sz=$(stat -c '%s' "$OUT" 2>/dev/null || echo 0)
   if [ "$sz" -gt 6000 ]; then captured=1; break; fi
 done
