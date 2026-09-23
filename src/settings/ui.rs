@@ -24,6 +24,7 @@ pub fn section_box(title: &str, hint: &str) -> gtk4::Box {
     let container = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
         .spacing(4)
+        .hexpand(true)
         .build();
     container.add_css_class("settings-group");
 

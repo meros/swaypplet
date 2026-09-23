@@ -277,6 +277,8 @@ impl State {
             .content_fit(gtk4::ContentFit::Cover)
             .width_request(THUMB_W)
             .height_request(THUMB_H)
+            .hexpand(true)
+            .halign(gtk4::Align::Fill)
             .build();
         button.set_child(Some(&picture));
         {
@@ -318,6 +320,7 @@ impl LookPane {
         let root = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(14)
+            .hexpand(true)
             .build();
 
         let group = section_box(
@@ -328,15 +331,10 @@ impl LookPane {
         let grid = gtk4::FlowBox::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .selection_mode(gtk4::SelectionMode::None)
-            // Two, and the reason is the decode: a thumbnail is decoded at
-            // twice THUMB_W for a 2x output, so a GtkPicture over it reports
-            // 264 px as its natural width whatever the CSS says. Four of
-            // those is an 1120 px row, and since a GtkStack takes the widest
-            // page's natural width, that one row set the width of all five
-            // settings tabs and stretched every switch to the far edge of
-            // the card. Two fits the pane's reading column exactly.
+            // Up to four thumbnails per row across the card width, flowing
+            // down to 3 or 2 when squeezed onto narrower displays.
             .min_children_per_line(2)
-            .max_children_per_line(2)
+            .max_children_per_line(4)
             .row_spacing(6)
             .column_spacing(6)
             .homogeneous(true)
