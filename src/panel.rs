@@ -504,12 +504,17 @@ impl Panel {
             self.launcher.reset();
             self.deck_stack.set_visible_child_name("launcher");
             self.reveal.show();
+            self.launcher.focus_entry();
+            // The section reads land as widget churn (sysfs, clipboard rows,
+            // wallpaper rescans, eight worker threads); measured on open they
+            // cost 2-11 ms on the main thread right where the fade needs the
+            // frame clock, and the elephant rebuild collides with them. Run
+            // them once the enter transition is over.
             let sections = self.sections.clone();
-            let launcher = self.launcher.clone();
-            glib::idle_add_local_once(move || {
-                sections.refresh();
-                launcher.focus_entry();
-            });
+            glib::timeout_add_local_once(
+                std::time::Duration::from_millis((anim::duration(anim::ENTER_MS) + 60.0) as u64),
+                move || sections.refresh(),
+            );
         }
     }
 
