@@ -112,12 +112,39 @@ fn derived() -> Material {
     }
 }
 
-pub static ALL: [Preset; 6] = [
+pub static ALL: [Preset; 7] = [
     // ── The shipped material, and the two nearest ways off it ────────
     Preset {
         name: "Bubble",
         hint: "The material this desktop ships: a wet lens, tight highlight, the wallpaper still readable through it.",
         build: base,
+    },
+    Preset {
+        name: "Liquid",
+        hint: "Optical glass: near-zero absorption, airy transmission, and a bright specular rim.",
+        build: || Material {
+            roughness: 0.01,
+            surface: SurfaceKind::ConvexSquircle,
+            refraction: 1.12,
+            dispersion: 0.008,
+            lensing: 0.24,
+            frost_radius: 4.0,
+            // Near nothing. Every other preset here smokes or frosts the
+            // backdrop; this one transmits it, which is the whole material —
+            // a card the wallpaper shows through at its own brightness, with
+            // the event at the rim.
+            absorb: 0.02,
+            absorb_floor: 0.0,
+            photochromic: 0.0,
+            // A whisper of forward scatter, so the card has a body over a
+            // busy wallpaper without going milky.
+            haze: 0.015,
+            specular: 0.28,
+            edge_light: 0.28,
+            grain: GrainKind::None,
+            grain_strength: 0.0,
+            ..derived()
+        },
     },
     Preset {
         name: "Sheet",
