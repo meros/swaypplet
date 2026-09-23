@@ -456,7 +456,16 @@ impl SurfaceSet {
             let caption = caption.clone();
             entry.connect_changed(move |_| caption.clear_status());
         }
-        entry.connect_activate(move |e| on_submit(e.text().to_string()));
+        // The secret leaves the widget the moment Enter takes it. Clearing it
+        // later, on the reject path in `set_verifying(false)`, left it sitting
+        // in the field on every path that never gets there: a greeter jump to
+        // a running session, whose surface comes back re-enabled with the
+        // password still in it, and a parked submit waiting on greetd.
+        entry.connect_activate(move |e| {
+            let secret = e.text().to_string();
+            e.set_text("");
+            on_submit(secret);
+        });
 
         // Keyboard focus lands in the entry as soon as the surface maps;
         // a click anywhere pulls it back (e.g. after unplugging a monitor).
