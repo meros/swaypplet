@@ -242,45 +242,28 @@ pub fn run() -> ! {
         let st = st.clone();
         Rc::new(move |password: String| submit(&st, password))
     };
-    // The greeter has no face check, so which output this is does not
-    // matter to it; it is the lock screen's indicator that has to sit under
-    // the camera.
-    let window = surfaces.build_surface(on_submit, None);
-
-    // A layer surface, not a fullscreened toplevel, and the namespace is the
-    // whole point: `layer_effects` keys on layer-shell namespaces, so this is
-    // what lets the greeter's card be the same liquid glass as the bar and as
-    // the lock card. It is also the only way the wallpaper reaches the screen
-    // at all now that the greeter's compositor draws it rather than this
-    // process: sway disables the background layer whenever a workspace holds a
-    // fullscreen container (`shell_background` in sway/desktop/transaction.c)
-    // and paints an opaque black rect behind it instead, so a fullscreened
-    // toplevel would sit on black no matter what `output * bg` was set to.
-    //
-    // Anchored to all four edges rather than sized: that is what makes a layer
-    // surface fill the output, and it keeps working across a mode change with
-    // nothing to recompute. Exclusive keyboard because this is a login prompt
-    // and it must own the keyboard from the moment it maps, with no pointer
-    // anywhere near it.
-    static CONFIG: crate::layer_shell::LayerShellConfig = crate::layer_shell::LayerShellConfig {
-        namespace: "swaypplet-greeter",
-        layer: gtk4_layer_shell::Layer::Overlay,
-        default_width: None,
-        default_height: None,
-        anchors: &[
-            (gtk4_layer_shell::Edge::Top, true),
-            (gtk4_layer_shell::Edge::Bottom, true),
-            (gtk4_layer_shell::Edge::Left, true),
-            (gtk4_layer_shell::Edge::Right, true),
-        ],
-        margins: &[],
-        keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
-        // Nothing else is on this compositor to reserve space from.
-        exclusive: false,
+    // One surface per monitor, every one of them a full card. `SurfaceSet`
+    // already mirrors status, chips, the reader pill and the username across
+    // its surfaces for the lock; the greeter used to build only one and let
+    // sway place it, so every other output showed bare wallpaper and no way
+    // in. A monitor that appears later (dock, DPMS wake) gets its own card,
+    // and one that goes away takes its window with it — a layer surface is
+    // bound to its wl_output and is rebuilt, never migrated (as in the bar).
+    let windows: Rc<RefCell<Vec<(gdk4::Monitor, gtk4::Window)>>> = Rc::default();
+    let monitors = gdk4::Display::default()
+        .expect("no gdk display")
+        .monitors();
+    let sync = {
+        let surfaces = surfaces.clone();
+        let windows = windows.clone();
+        let monitors = monitors.clone();
+        Rc::new(move || sync_surfaces(&surfaces, &windows, &monitors, &on_submit))
     };
-    // Before `present`, which is where GTK asks for the surface.
-    crate::layer_shell::make_layer_window(&window, &CONFIG, None);
-    window.present();
+    {
+        let sync = sync.clone();
+        monitors.connect_items_changed(move |_, _, _, _| sync());
+    }
+    sync();
 
     glib::timeout_add_seconds_local(1, {
         let surfaces = surfaces.clone();
@@ -360,6 +343,72 @@ pub fn run() -> ! {
     let ctx = glib::MainContext::default();
     while ctx.iteration(false) {}
     std::process::exit(*exit_code.borrow());
+}
+
+/// A layer surface, not a fullscreened toplevel, and the namespace is the
+/// whole point: `layer_effects` keys on layer-shell namespaces, so this is
+/// what lets the greeter's card be the same liquid glass as the bar and as
+/// the lock card. It is also the only way the wallpaper reaches the screen at
+/// all now that the greeter's compositor draws it rather than this process:
+/// sway disables the background layer whenever a workspace holds a fullscreen
+/// container (`shell_background` in sway/desktop/transaction.c) and paints an
+/// opaque black rect behind it instead, so a fullscreened toplevel would sit
+/// on black no matter what `output * bg` was set to.
+///
+/// Anchored to all four edges rather than sized: that is what makes a layer
+/// surface fill the output, and it keeps working across a mode change with
+/// nothing to recompute. Exclusive keyboard because this is a login prompt
+/// and it must own the keyboard from the moment it maps, with no pointer
+/// anywhere near it. With one card per output sway gives the keyboard to one
+/// of them; a click on another moves it there, as on the lock screen.
+static CONFIG: crate::layer_shell::LayerShellConfig = crate::layer_shell::LayerShellConfig {
+    namespace: "swaypplet-greeter",
+    layer: gtk4_layer_shell::Layer::Overlay,
+    default_width: None,
+    default_height: None,
+    anchors: &[
+        (gtk4_layer_shell::Edge::Top, true),
+        (gtk4_layer_shell::Edge::Bottom, true),
+        (gtk4_layer_shell::Edge::Left, true),
+        (gtk4_layer_shell::Edge::Right, true),
+    ],
+    margins: &[],
+    keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
+    // Nothing else is on this compositor to reserve space from.
+    exclusive: false,
+};
+
+/// Reconcile the greeter's cards against the current monitor list: destroy
+/// the window of a monitor that went away (`SurfaceSet` drops it on
+/// ::destroy) and build one for each monitor that has none.
+fn sync_surfaces(
+    surfaces: &SurfaceSet,
+    windows: &RefCell<Vec<(gdk4::Monitor, gtk4::Window)>>,
+    monitors: &gtk4::gio::ListModel,
+    on_submit: &Rc<dyn Fn(String)>,
+) {
+    let current: Vec<gdk4::Monitor> = monitors
+        .iter::<gdk4::Monitor>()
+        .filter_map(Result::ok)
+        .collect();
+    windows.borrow_mut().retain(|(monitor, window)| {
+        let alive = current.contains(monitor);
+        if !alive {
+            window.destroy();
+        }
+        alive
+    });
+    for monitor in current {
+        if windows.borrow().iter().any(|(m, _)| *m == monitor) {
+            continue;
+        }
+        let window = surfaces.build_surface(on_submit.clone(), Some(&monitor));
+        // Before `present`, which is where GTK asks for the surface.
+        crate::layer_shell::make_layer_window(&window, &CONFIG, Some(&monitor));
+        window.present();
+        windows.borrow_mut().push((monitor, window));
+    }
+    surfaces.focus_entry();
 }
 
 fn submit(st: &Rc<RefCell<State>>, password: String) {
