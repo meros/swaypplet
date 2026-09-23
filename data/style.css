@@ -680,10 +680,11 @@ popover.bar-popover > contents {
 }
 
 /* Session rows: click or Enter focuses the session's workspace. */
+/* No transition: arrow keys move focus through these rows, and a fade over
+   the keyed card fill leaves a dark ghost (see `.launcher-result`). */
 .bar-popover-row {
     padding: 6px 8px;
     border-radius: 8px;
-    transition: background-color 150ms ease;
 }
 
 .bar-popover-list row:hover .bar-popover-row,
@@ -2209,10 +2210,16 @@ revealer {
 .launcher-results {
 }
 
+/* No background transition, on purpose. The card's fill is the compositor's
+   fill key (glass.nix `fillKey`): a pixel within 1/255 of it is dropped, and
+   one 3/255 or more away is drawn whole, fill included. A fade from the
+   selected tint back to the card spends most of its frames in between, where
+   the row shows the dark fill under a vanishing accent: a dark ghost of the
+   old row until the last frames fall back inside the key. The selection moves
+   in one frame instead. */
 .launcher-result {
     padding: 10px 12px;
     border-radius: 10px;
-    transition: background-color 150ms ease;
 }
 
 .launcher-result:hover {
