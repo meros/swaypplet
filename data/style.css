@@ -3123,7 +3123,7 @@ revealer {
 
 .display-night-val {
     font-size: 11px;
-    font-family: @font_mono, monospace;
+    font-family: monospace;
     color: @accent_secondary;
     font-weight: 500;
 }
