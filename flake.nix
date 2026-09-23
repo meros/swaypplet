@@ -37,7 +37,7 @@
     in
     {
       overlays.default = final: prev: {
-        swaypplet = self.packages.${final.system}.swaypplet;
+        swaypplet = self.packages.${final.stdenv.hostPlatform.system}.swaypplet;
       };
 
       packages = forAllSystems (
