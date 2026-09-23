@@ -654,6 +654,12 @@ impl GlassPane {
                     bench.append(&build_group(&state, group));
                 }
                 revealer.set_child(Some(&bench));
+                // The bench's sync closures just joined `state.sync` after
+                // the one call to `sync_controls` in `new` — every knob built
+                // here defaulted to GTK's own 0 and stays there until the
+                // next edit runs the whole list. Run it once now so the
+                // sliders open on the tuning they represent.
+                state.sync_controls();
             });
         }
         root.append(&expander);
