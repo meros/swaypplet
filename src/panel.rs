@@ -331,8 +331,13 @@ impl Panel {
         // it is drawn on, live.
         {
             let ret = return_to_search.clone();
-            let settings_sheet =
-                build_subsheet("Settings", "󰒓", settings.widget(), move || ret());
+            let settings_sheet = build_subsheet_with_tabs(
+                "Settings",
+                "󰒓",
+                Some(settings.tabs_widget()),
+                settings.widget(),
+                move || ret(),
+            );
             deck_stack.add_named(&settings_sheet, Some("settings"));
         }
 
@@ -610,6 +615,16 @@ fn build_subsheet(
     content: &impl IsA<gtk4::Widget>,
     on_back: impl Fn() + 'static,
 ) -> gtk4::Box {
+    build_subsheet_with_tabs(title, icon, None::<&gtk4::Widget>, content, on_back)
+}
+
+fn build_subsheet_with_tabs(
+    title: &str,
+    icon: &str,
+    tabs: Option<&impl IsA<gtk4::Widget>>,
+    content: &impl IsA<gtk4::Widget>,
+    on_back: impl Fn() + 'static,
+) -> gtk4::Box {
     let container = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
         .spacing(8)
@@ -617,15 +632,30 @@ fn build_subsheet(
     container.add_css_class("helm-subsheet");
 
     let header = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(10)
+        .orientation(if tabs.is_some() {
+            gtk4::Orientation::Vertical
+        } else {
+            gtk4::Orientation::Horizontal
+        })
+        .spacing(if tabs.is_some() { 6 } else { 10 })
         .build();
     header.add_css_class("subsheet-header");
+
+    let top_row = if tabs.is_some() {
+        let row = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(10)
+            .build();
+        header.append(&row);
+        row
+    } else {
+        header.clone()
+    };
 
     let back_btn = gtk4::Button::builder().label("← Back (Esc)").build();
     back_btn.add_css_class("subsheet-back-btn");
     back_btn.connect_clicked(move |_| on_back());
-    header.append(&back_btn);
+    top_row.append(&back_btn);
 
     let title_lbl = gtk4::Label::builder()
         .label(&format!("{icon}  {title}"))
@@ -633,7 +663,11 @@ fn build_subsheet(
         .halign(gtk4::Align::Start)
         .build();
     title_lbl.add_css_class("subsheet-title");
-    header.append(&title_lbl);
+    top_row.append(&title_lbl);
+
+    if let Some(tabs) = tabs {
+        header.append(tabs.as_ref());
+    }
 
     container.append(&header);
 
@@ -643,6 +677,7 @@ fn build_subsheet(
     let scroller = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .vscrollbar_policy(gtk4::PolicyType::Automatic)
+        .propagate_natural_width(false)
         .vexpand(true)
         .min_content_height(SUBSHEET_HEIGHT)
         .max_content_height(420)

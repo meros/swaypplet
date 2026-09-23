@@ -3961,10 +3961,9 @@ scale.night-scale highlight {
 }
 
 /* ── Wallpaper thumbnails ──
-   Two to a row, at whatever width the pane's reading column leaves them
-   (settings/look_pane.rs says why two). The frame is the whole selection
-   cue: no tick, no overlay, because the image under it is the thing being
-   chosen and anything drawn over it hides part of that. */
+   Four to a row across the card width (wrapping to two when narrow). The frame
+   is the whole selection cue: no tick, no overlay, because the image under it
+   is the thing being chosen and anything drawn over it hides part of that. */
 .settings-wallpaper-thumb {
     padding: 0;
     min-width: 0;

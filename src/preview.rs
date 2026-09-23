@@ -249,7 +249,10 @@ pub fn run(component: &str) {
         // surface classes so it inherits the same styling context.
         let window = ApplicationWindow::builder()
             .application(app)
-            .default_width(440)
+            // Settings fills the Helm card's width (740 to 1033 px), so its
+            // preview opens at that width: at the 440 single-component default
+            // the tab strip clips and the columns read wrong.
+            .default_width(if component.starts_with("settings") { 820 } else { 440 })
             .default_height(600)
             .build();
         window.add_css_class("panel");
@@ -341,6 +344,7 @@ pub fn run(component: &str) {
                 if let Some(tab) = c.strip_prefix("settings.") {
                     s.show(tab);
                 }
+                host.append(s.tabs_widget());
                 host.append(s.widget());
             }
             "network" => {
