@@ -27,6 +27,11 @@ if [ -z "${SWPP_DBUS:-}" ]; then
 fi
 
 BIN="${SWAYPPLET_BIN:-swaypplet}"
+# The compositor to boot headless. Defaults to PATH, which on a NixOS host
+# can be a wrapper build whose scenefx fails the liquid glass shader compile
+# on the headless GLES2 path — pass SWAY_BIN=/…/swayfx-unwrapped/bin/sway.
+SWAY_BIN="${SWAY_BIN:-sway}"
+GRIM_BIN="${GRIM_BIN:-grim}"
 OUT="/tmp/swaypplet-presets"
 TUNINGS=""
 WALLPAPER="${SWPP_WALLPAPER:-}"
@@ -72,7 +77,7 @@ shot_one() {
   SWAYSOCK="$work/sway.sock" I3SOCK="$work/sway.sock" \
   SWAYPPLET_GLASS_CONFIG="$SYSTEM" \
     bash -c '
-      WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 timeout 90 sway -d --config "'"$cfg"'" >"'"$log"'" 2>&1 &
+      WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 timeout 90 '"$SWAY_BIN"' -d --config "'"$cfg"'" >"'"$log"'" 2>&1 &
       sway_pid=$!
       trap "kill $sway_pid 2>/dev/null" EXIT
       for _ in $(seq 1 80); do swaymsg -t get_version >/dev/null 2>&1 && break; sleep 0.1; done
@@ -88,7 +93,7 @@ shot_one() {
       sleep 2
       notify-send -t 60000 -a "'"$name"'" "Glass preset" "Möte nu — Åsa, Öresund. 12 GB in 4 m 12 s." || true
       sleep 2.5
-      grim -o HEADLESS-1 "'"$OUT"'/'"$name"'.png" || echo "grim failed for '"$name"'"
+      '"$GRIM_BIN"' -o HEADLESS-1 "'"$OUT"'/'"$name"'.png" || echo "grim failed for '"$name"'"
     '
   rm -rf "$work"
 }
