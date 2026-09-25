@@ -383,7 +383,7 @@ fn proc_comm(pid: i32) -> Option<String> {
     Some(comm.trim_end().to_string())
 }
 
-fn parent_pid(pid: i32) -> Option<i32> {
+pub(crate) fn parent_pid(pid: i32) -> Option<i32> {
     parent_pid_from_stat(&fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
 }
 
