@@ -110,6 +110,10 @@ pub struct Card {
     pub root: gtk4::Box,
     ring: super::carousel::Carousel,
     tiles: Vec<gtk4::Box>,
+    /// Each tile's picture, where in it the scene is drawn (x, y, w, h in
+    /// the picture's coordinates) and the layout area that scene is: what a
+    /// workspace switch hands off to sway to grow out of (`handoff`).
+    pictures: Vec<(gtk4::Widget, Option<(crate::handoff::Rect, crate::handoff::Rect)>)>,
     /// The pin mark in each tile's caption, shown for a pinned place.
     marks: Vec<gtk4::Label>,
     pub live: Live,
@@ -141,10 +145,25 @@ impl Card {
 
         let mut tiles = Vec::new();
         let mut marks = Vec::new();
+        let mut pictures = Vec::new();
         let mut live = Live::default();
         for (i, row) in built.iter().enumerate() {
             let scene = scenes.get(i).and_then(Option::as_ref);
-            let (tile, mark) = tile(row, scene, &mut live);
+            let (tile, mark, picture) = tile(row, scene, &mut live);
+            let drawn = scene.filter(|s| !s.windows.is_empty()).map(|s| {
+                let (k, dx, dy) =
+                    super::scene::fit(s.width, s.height, rows::PREVIEW_W, rows::PREVIEW_H);
+                (
+                    (dx, dy, f64::from(s.width) * k, f64::from(s.height) * k),
+                    (
+                        f64::from(s.x),
+                        f64::from(s.y),
+                        f64::from(s.width),
+                        f64::from(s.height),
+                    ),
+                )
+            });
+            pictures.push((picture, drawn));
             marks.push(mark);
             ring.append(&tile);
             tiles.push(tile);
@@ -159,9 +178,34 @@ impl Card {
             root,
             ring,
             tiles,
+            pictures,
             marks,
             live,
         }
+    }
+
+    /// Where place `index`'s picture is on screen and what layout area it
+    /// shows, for a switch there to grow out of it. `None` for an empty place
+    /// or one the screen cannot place.
+    pub fn handoff(&self, index: usize) -> Option<(crate::handoff::Rect, crate::handoff::Rect)> {
+        let (picture, drawn) = self.pictures.get(index)?;
+        let (inner, source) = (*drawn)?;
+        let tile = self.tiles.get(index)?;
+        let window = self.ring.root()?.downcast::<gtk4::Window>().ok()?;
+        // Picture -> tile by allocation, tile -> ring by the ring's own
+        // placement transform, ring -> window by allocation again.
+        let corner = |x: f64, y: f64| -> Option<(f64, f64)> {
+            let p = picture.compute_point(tile, &gtk4::graphene::Point::new(x as f32, y as f32))?;
+            let (rx, ry) = self.ring.place_point(index, p.x(), p.y())?;
+            let q = self
+                .ring
+                .compute_point(&window, &gtk4::graphene::Point::new(rx, ry))?;
+            Some((f64::from(q.x()), f64::from(q.y())))
+        };
+        let (x0, y0) = corner(inner.0, inner.1)?;
+        let (x1, y1) = corner(inner.0 + inner.2, inner.1 + inner.3)?;
+        let picture = crate::handoff::window_to_layout(&window, (x0, y0, x1 - x0, y1 - y0))?;
+        Some((picture, source))
     }
 
     pub fn window_ids(&self) -> Vec<String> {
@@ -205,16 +249,21 @@ pub fn texture(width: u32, height: u32, pixels: Vec<u8>) -> gdk::Texture {
 }
 
 /// One tile: the picture over its caption.
-fn tile(row: &Row, scene: Option<&Scene>, live: &mut Live) -> (gtk4::Box, gtk4::Label) {
+fn tile(
+    row: &Row,
+    scene: Option<&Scene>,
+    live: &mut Live,
+) -> (gtk4::Box, gtk4::Label, gtk4::Widget) {
     let tile = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
         .build();
     tile.add_css_class("jump-tile");
     tile.set_size_request(rows::TILE_W, rows::TILE_H);
-    tile.append(&preview(scene, rows::PREVIEW_W, rows::PREVIEW_H, live));
+    let picture = preview(scene, rows::PREVIEW_W, rows::PREVIEW_H, live);
+    tile.append(&picture);
     let (caption, mark) = caption(row);
     tile.append(&caption);
-    (tile, mark)
+    (tile, mark, picture)
 }
 
 /// A live picture of a workspace in a box of `w` by `h`: every window at

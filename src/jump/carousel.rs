@@ -395,6 +395,19 @@ impl Carousel {
         child.set_parent(self);
     }
 
+    /// Where a point of place `index` (in the place's own coordinates) is
+    /// drawn, in this widget's coordinates. The places are allocated at the
+    /// origin and put where they are by a transform in `snapshot`, which
+    /// GTK's own coordinate helpers do not see; this applies the same one,
+    /// perspective included. `None` for a place not on screen.
+    pub fn place_point(&self, index: usize, x: f32, y: f32) -> Option<(f32, f32)> {
+        let (w, h) = (self.width() as f32, self.height() as f32);
+        let s = slot(index, self.imp().pos.get(), f64::from(w))?;
+        let m = placed(&s, w, h).to_matrix();
+        let v = m.transform_vec4(&graphene::Vec4::new(x, y, 0.0, 1.0));
+        (v.w().abs() > f32::EPSILON).then(|| (v.x() / v.w(), v.y() / v.w()))
+    }
+
     /// Slide the row so place `index` is at the front. Animated from wherever
     /// the row is, so a quick run of steps moves it smoothly.
     pub fn turn_to(&self, index: usize) {
