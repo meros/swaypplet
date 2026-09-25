@@ -4074,10 +4074,6 @@ scale.night-scale highlight {
     box-shadow: none;
 }
 
-.jump-tile:not(.selected) .jump-preview {
-    opacity: 0.82;
-}
-
 /* One window. The panel and icon hold the spot until the first frame. The
    shadow is what lifts a picture off the desktop behind it. */
 .jump-window {

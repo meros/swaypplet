@@ -27,14 +27,14 @@ use std::cell::{Cell, RefCell};
 
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
-use gtk4::{glib, graphene, gsk};
+use gtk4::{gdk, glib, graphene, gsk};
 
 use super::rows;
 
 /// How far a side place is turned away, in degrees. Steep, so a side place
 /// takes little width and more of them fit; not so steep that its picture
 /// stops reading as one.
-const SIDE_DEG: f64 = 50.0;
+const SIDE_DEG: f64 = 56.0;
 /// How far behind the front a side place stands, in pixels.
 const SIDE_Z: f64 = -150.0;
 /// Between the front place and the first side place, on screen.
@@ -212,6 +212,10 @@ fn placed(s: &Slot, w: f32, h: f32) -> gsk::Transform {
     gsk::Transform::new().matrix(&graphene::Matrix::from_float(m))
 }
 
+/// Room around a place's texture for what it draws past its own edges: the
+/// window shadows and the selection ring.
+const TEXTURE_MARGIN: f32 = 32.0;
+
 mod imp {
     use super::*;
 
@@ -220,6 +224,10 @@ mod imp {
         /// Where the row is right now.
         pub pos: Cell<f64>,
         pub tick: RefCell<Option<gtk4::TickCallbackId>>,
+        /// A place turned left, rendered to a texture: its content node,
+        /// which GTK reuses until something in the place changes, and the
+        /// texture made from it (see `snapshot`).
+        pub textures: RefCell<Vec<Option<(gsk::RenderNode, gdk::Texture)>>>,
     }
 
     #[glib::object_subclass]
@@ -247,7 +255,7 @@ mod imp {
             }
         }
 
-        fn size_allocate(&self, width: i32, height: i32, _baseline: i32) {
+        fn size_allocate(&self, width: i32, _height: i32, _baseline: i32) {
             let pos = self.pos.get();
             let widget = self.obj();
             let mut child = widget.first_child();
@@ -257,8 +265,11 @@ mod imp {
                     Some(s) => {
                         c.set_child_visible(true);
                         c.set_opacity(s.opacity);
-                        let t = placed(&s, width as f32, height as f32);
-                        c.allocate(rows::TILE_W, rows::TILE_H, -1, Some(t));
+                        // At the origin, untransformed: `snapshot` places
+                        // it (see `left_group` for why it cannot be the
+                        // allocation transform). Nothing picks a place with
+                        // the pointer; the card is driven by the keyboard.
+                        c.allocate(rows::TILE_W, rows::TILE_H, -1, None);
                     }
                     None => c.set_child_visible(false),
                 }
@@ -283,11 +294,90 @@ mod imp {
                 i += 1;
             }
             children.sort_by(|a, b| b.0.total_cmp(&a.0));
-            for (_, _, c) in children {
-                widget.snapshot_child(&c, snapshot);
+            let (w, h) = (widget.width() as f32, widget.height() as f32);
+            let content = |c: &gtk4::Widget| {
+                let snap = gtk4::Snapshot::new();
+                widget.snapshot_child(c, &snap);
+                snap.to_node()
+            };
+
+            // Far to near. A place turned left is drawn from a texture of
+            // itself, rendered here at the output's scale. GTK draws the
+            // content of a 3D-transformed node at a scale it reads from the
+            // matrix with `graphene_matrix_decompose`
+            // (gskgpunodeprocessor.c, `extract_scale_from_transform`), and
+            // for these perspective matrices that reading follows the turn:
+            // 0.97 across for a place turned right, 0.29 for one turned left.
+            // Text, icons and anything GTK draws offscreen in a left place
+            // were rasterized at under a third of their size and stretched.
+            // Flipping the matrix, or drawing the left side through an
+            // offscreen of its own, still hands GTK a left-turned plane
+            // somewhere, so neither helped. A texture sampled with linear
+            // filtering is the one thing GTK draws under that transform
+            // without consulting the estimate.
+            let mut textures = self.textures.borrow_mut();
+            for (_, i, c) in &children {
+                let Some(s) = slot(*i, pos, width) else {
+                    continue;
+                };
+                let Some(node) = content(c) else { continue };
+                if s.angle >= 0.0 {
+                    snapshot.append_node(gsk::TransformNode::new(node, Some(&placed(&s, w, h))));
+                    continue;
+                }
+                if textures.len() <= *i {
+                    textures.resize(*i + 1, None);
+                }
+                // GTK hands back the same node until the place changes (a
+                // frame, the selection), so an unchanged place is not
+                // rendered again, and a slide renders nothing at all.
+                let texture = match &textures[*i] {
+                    // The cache holds the node, so its address cannot be reused
+                    // for another while it is compared here.
+                    Some((cached, texture)) if cached.as_ptr() == node.as_ptr() => texture.clone(),
+                    _ => {
+                        let Some(texture) = render_place(&*widget, &node) else {
+                            continue;
+                        };
+                        textures[*i] = Some((node, texture.clone()));
+                        texture
+                    }
+                };
+                let m = TEXTURE_MARGIN;
+                snapshot.save();
+                snapshot.transform(Some(&placed(&s, w, h)));
+                snapshot.append_scaled_texture(
+                    &texture,
+                    gsk::ScalingFilter::Linear,
+                    &graphene::Rect::new(
+                        -m,
+                        -m,
+                        rows::TILE_W as f32 + 2.0 * m,
+                        rows::TILE_H as f32 + 2.0 * m,
+                    ),
+                );
+                snapshot.restore();
             }
         }
     }
+}
+
+/// A place's content rendered to a texture at the output's scale, with
+/// [`TEXTURE_MARGIN`] around it. `None` before the widget has a renderer.
+fn render_place(widget: &impl IsA<gtk4::Widget>, node: &gsk::RenderNode) -> Option<gdk::Texture> {
+    let renderer = widget.native()?.renderer()?;
+    let sf = widget.scale_factor() as f32;
+    let m = TEXTURE_MARGIN;
+    let scaled = gsk::TransformNode::new(node, Some(&gsk::Transform::new().scale(sf, sf)));
+    Some(renderer.render_texture(
+        scaled,
+        Some(&graphene::Rect::new(
+            -m * sf,
+            -m * sf,
+            (rows::TILE_W as f32 + 2.0 * m) * sf,
+            (rows::TILE_H as f32 + 2.0 * m) * sf,
+        )),
+    ))
 }
 
 glib::wrapper! {

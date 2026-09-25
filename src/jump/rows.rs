@@ -22,8 +22,8 @@ use super::place::Place;
 /// The workspace picture, 16:10 like the panel. Fixed: a workspace on a
 /// portrait or ultrawide output is letterboxed inside it (`scene::fit`), and
 /// the tile does not change shape for it.
-pub const PREVIEW_W: i32 = 440;
-pub const PREVIEW_H: i32 = 275;
+pub const PREVIEW_W: i32 = 540;
+pub const PREVIEW_H: i32 = 338;
 /// Around the picture, inside the tile's selection ring.
 pub const TILE_PAD: i32 = 8;
 /// The chord, the label and the apps under the picture. One line, ellipsized.
