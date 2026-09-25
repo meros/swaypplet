@@ -3,6 +3,7 @@ use std::process::Command;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
+use gtk4::{gdk, gio};
 use gtk4_layer_shell::Edge;
 
 use crate::anim;
@@ -77,6 +78,7 @@ impl OsdCommand {
 
 // ── OSD result after performing action ───────────────────────────────────────
 
+#[derive(Clone)]
 enum OsdDisplay {
     Bar {
         icon: String,
@@ -234,8 +236,11 @@ struct Pending {
     settle: Option<glib::SourceId>,
 }
 
-#[derive(Clone)]
-pub struct Osd {
+/// The card on one output. A layer surface is bound to its `wl_output`, so
+/// a card is built for a monitor and destroyed with it, never moved.
+struct Card {
+    monitor: gdk::Monitor,
+    window: gtk4::Window,
     icon_label: gtk4::Label,
     bar: gtk4::ProgressBar,
     text_label: gtk4::Label,
@@ -243,21 +248,19 @@ pub struct Osd {
     indicator_label: gtk4::Label,
     bar_box: gtk4::Box,
     reveal: anim::Reveal,
-    timeout_id: Rc<RefCell<Option<glib::SourceId>>>,
-    bar_route: Rc<RefCell<Option<BarRoute>>>,
-    /// Set once the panel exists. Absent only in the standalone paths that
-    /// never send a volume command.
-    audio: Rc<RefCell<Option<Rc<crate::audio::AudioService>>>>,
-    showing: Rc<Cell<Showing>>,
-    pending: Rc<RefCell<Pending>>,
-    /// The rounded percentage and mute currently on the card. A snapshot
-    /// that would redraw the same thing is dropped, because showing a card
-    /// restarts its 1500 ms life and unrelated audio events are frequent.
-    drawn: Rc<Cell<Option<(i32, bool)>>>,
 }
 
-impl Osd {
-    pub fn new(app: &gtk4::Application) -> Self {
+impl Drop for Card {
+    fn drop(&mut self) {
+        // The alpha handle goes before its `wl_surface` (see
+        // `anim::Reveal::release_alpha`).
+        self.reveal.release_alpha();
+        crate::layer_shell::destroy_window(&self.window);
+    }
+}
+
+impl Card {
+    fn new(app: &gtk4::Application, monitor: gdk::Monitor) -> Card {
         static OSD_CONFIG: LayerShellConfig = LayerShellConfig {
             namespace: "swaypplet-osd",
             layer: gtk4_layer_shell::Layer::Overlay,
@@ -268,7 +271,7 @@ impl Osd {
             margins: &[(Edge::Bottom, 72)],
             keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
         };
-        let window = layer_shell::create_layer_window(app, &OSD_CONFIG);
+        let window = layer_shell::create_layer_window_on(app, &OSD_CONFIG, Some(&monitor));
         window.set_resizable(false);
         window.set_decorated(false);
 
@@ -341,19 +344,122 @@ impl Osd {
 
         let reveal = anim::Reveal::new(&window, &outer).content(&content);
 
-        Osd {
+        Card {
+            monitor,
+            window,
             icon_label,
             bar,
             text_label,
             indicator_label,
             bar_box,
             reveal,
+        }
+    }
+
+    fn draw(&self, display: &OsdDisplay) {
+        match display {
+            OsdDisplay::Bar {
+                icon,
+                fraction,
+                text,
+            } => {
+                self.icon_label.set_label(icon);
+                self.bar.set_fraction(*fraction);
+                self.text_label.set_label(text);
+                self.bar_box.set_visible(true);
+                self.indicator_label.set_visible(false);
+            }
+            OsdDisplay::Indicator {
+                icon,
+                label,
+                active,
+            } => {
+                self.icon_label.set_label(icon);
+                self.indicator_label.set_label(label);
+                self.bar_box.set_visible(false);
+                self.indicator_label.set_visible(true);
+                if *active {
+                    self.indicator_label.add_css_class("osd-indicator-active");
+                } else {
+                    self.indicator_label
+                        .remove_css_class("osd-indicator-active");
+                }
+            }
+        }
+    }
+}
+
+/// The OSD: one card per output, all showing the same thing at once. A key
+/// press has no output, so no one screen is the right one; the one you are
+/// looking at is among them either way.
+#[derive(Clone)]
+pub struct Osd {
+    app: gtk4::Application,
+    monitors: gio::ListModel,
+    cards: Rc<RefCell<Vec<Card>>>,
+    /// What is on the cards, for a monitor plugged in while they are up.
+    current: Rc<RefCell<Option<OsdDisplay>>>,
+    timeout_id: Rc<RefCell<Option<glib::SourceId>>>,
+    bar_route: Rc<RefCell<Option<BarRoute>>>,
+    /// Set once the panel exists. Absent only in the standalone paths that
+    /// never send a volume command.
+    audio: Rc<RefCell<Option<Rc<crate::audio::AudioService>>>>,
+    showing: Rc<Cell<Showing>>,
+    pending: Rc<RefCell<Pending>>,
+    /// The rounded percentage and mute currently on the card. A snapshot
+    /// that would redraw the same thing is dropped, because showing a card
+    /// restarts its 1500 ms life and unrelated audio events are frequent.
+    drawn: Rc<Cell<Option<(i32, bool)>>>,
+}
+
+impl Osd {
+    pub fn new(app: &gtk4::Application) -> Self {
+        let display = gdk::Display::default().expect("no gdk display");
+        let osd = Osd {
+            app: app.clone(),
+            monitors: display.monitors(),
+            cards: Rc::new(RefCell::new(Vec::new())),
+            current: Rc::new(RefCell::new(None)),
             timeout_id: Rc::new(RefCell::new(None)),
             bar_route: Rc::new(RefCell::new(None)),
             audio: Rc::new(RefCell::new(None)),
             showing: Rc::new(Cell::new(Showing::Other)),
             pending: Rc::new(RefCell::new(Pending::default())),
             drawn: Rc::new(Cell::new(None)),
+        };
+        // Intentional Rc cycle (monitors → handler → osd → monitors), as in
+        // the bar: the OSD lives for the process.
+        let this = osd.clone();
+        osd.monitors
+            .connect_items_changed(move |_, _, _, _| this.sync());
+        osd.sync();
+        osd
+    }
+
+    /// Reconcile the cards against the current monitor list, the same way
+    /// the bar does: drop the card of a monitor that left, build one for a
+    /// monitor that arrived, and put what the others show on it.
+    fn sync(&self) {
+        let current: Vec<gdk::Monitor> = self
+            .monitors
+            .iter::<gdk::Monitor>()
+            .filter_map(Result::ok)
+            .collect();
+
+        self.cards
+            .borrow_mut()
+            .retain(|card| current.contains(&card.monitor));
+
+        for monitor in current {
+            if self.cards.borrow().iter().any(|c| c.monitor == monitor) {
+                continue;
+            }
+            let card = Card::new(&self.app, monitor);
+            if let Some(display) = &*self.current.borrow() {
+                card.draw(display);
+                card.reveal.show();
+            }
+            self.cards.borrow_mut().push(card);
         }
     }
 
@@ -513,6 +619,19 @@ impl Osd {
         Some(volume_display(level, muted, is_mic))
     }
 
+    /// A one-line notice on the indicator card: an icon over a word or
+    /// two, on every output, gone after the usual 1.5 s. For a state change
+    /// that has nothing else to show, such as pinning the workspace you are
+    /// on (`jump/pin.rs`).
+    pub fn notice(&self, icon: &str, label: &str) {
+        self.showing.set(Showing::Other);
+        self.show_display(&OsdDisplay::Indicator {
+            icon: icon.to_string(),
+            label: label.to_string(),
+            active: true,
+        });
+    }
+
     fn show_display(&self, display: &OsdDisplay) {
         if let OsdDisplay::Bar {
             icon,
@@ -524,42 +643,19 @@ impl Osd {
         {
             return;
         }
-        match display {
-            OsdDisplay::Bar {
-                icon,
-                fraction,
-                text,
-            } => {
-                self.icon_label.set_label(icon);
-                self.bar.set_fraction(*fraction);
-                self.text_label.set_label(text);
-                self.bar_box.set_visible(true);
-                self.indicator_label.set_visible(false);
-            }
-            OsdDisplay::Indicator {
-                icon,
-                label,
-                active,
-            } => {
-                self.icon_label.set_label(icon);
-                self.indicator_label.set_label(label);
-                self.bar_box.set_visible(false);
-                self.indicator_label.set_visible(true);
-                if *active {
-                    self.indicator_label.add_css_class("osd-indicator-active");
-                } else {
-                    self.indicator_label
-                        .remove_css_class("osd-indicator-active");
-                }
-            }
+        for card in self.cards.borrow().iter() {
+            card.draw(display);
         }
+        *self.current.borrow_mut() = Some(display.clone());
 
         // Fade in (motion on glass, anim.rs). Retriggering mid-exit
         // reverses the fade from its current opacities; opacity never
         // unmaps the content, so the auto-sized surface stays put during
         // the transition (the old spacer overlay is gone with the
         // revealer).
-        self.reveal.show();
+        for card in self.cards.borrow().iter() {
+            card.reveal.show();
+        }
 
         // Cancel previous timeout
         if let Some(id) = self.timeout_id.borrow_mut().take() {
@@ -568,7 +664,8 @@ impl Osd {
 
         // Auto-hide after timeout: fade out, then unmap (Reveal hides the
         // window when the exit finishes)
-        let reveal_c = self.reveal.clone();
+        let cards = self.cards.clone();
+        let current = self.current.clone();
         let timeout_ref = self.timeout_id.clone();
         let showing = self.showing.clone();
         let drawn = self.drawn.clone();
@@ -578,7 +675,10 @@ impl Osd {
                 *timeout_ref.borrow_mut() = None;
                 showing.set(Showing::Other);
                 drawn.set(None);
-                reveal_c.hide();
+                current.replace(None);
+                for card in cards.borrow().iter() {
+                    card.reveal.hide();
+                }
             },
         );
         *self.timeout_id.borrow_mut() = Some(id);
