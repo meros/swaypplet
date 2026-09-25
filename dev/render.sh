@@ -74,7 +74,7 @@ SOCK="$RUNTIME/sway-render-$$.sock"
   # sway's parser wants the block across lines: a one-liner is read as an
   # unmatched '}' and the whole rule is dropped, which renders every surface
   # here unfrosted while looking like it worked.
-  for ns in swaypplet swaypplet-launcher swaypplet-osd swaypplet-notification swaypplet-polkit swaypplet-keybinds swaypplet-pin; do
+  for ns in swaypplet swaypplet-launcher swaypplet-osd swaypplet-notification swaypplet-polkit swaypplet-keybinds swaypplet-pin swaypplet-window-picker; do
     printf 'layer_effects "%s" {\n    blur enable\n    blur_ignore_transparent enable\n}\n' "$ns"
   done
   # The keybinding sheet reads the config sway loaded, so a nested session
@@ -127,7 +127,8 @@ rm -f "$RUNTIME/swaypplet.pid"
 case "$MODE" in
   polkit)    "$BIN" polkit-agent >/tmp/swpp-app.log 2>&1 & ;;
   jump)
-    SWAYPPLET_PEEK_OPEN="${SWPP_PEEK:-}" SWAYPPLET_PINS_OPEN="${SWPP_PINS_OPEN:-}" "$BIN" >/tmp/swpp-app.log 2>&1 &
+    SWAYPPLET_PEEK_OPEN="${SWPP_PEEK:-}" SWAYPPLET_PINS_OPEN="${SWPP_PINS_OPEN:-}" \
+      SWAYPPLET_PICK_FIRST="${SWPP_WINDOW_SHOT:-}" "$BIN" >/tmp/swpp-app.log 2>&1 &
     for _ in $(seq 1 200); do
       [ -e "$RUNTIME/swaypplet.pid" ] && break; sleep 0.1
     done
@@ -157,6 +158,12 @@ case "$MODE" in
     # (SWAYPPLET_PEEK_OPEN, set before launch above).
     if [ -n "${SWPP_PEEK:-}" ]; then
       sleep 1.2
+    # SWPP_WINDOW_SHOT=1 opens the screenshot window picker, which takes
+    # the first window by itself after 1.5 s (SWAYPPLET_PICK_FIRST, set on
+    # the main process above: the picker runs there, not in the client).
+    elif [ -n "${SWPP_WINDOW_SHOT:-}" ]; then
+      "$BIN" screenshot window >>/tmp/swpp-app.log 2>&1 || true
+      sleep 0.8
     # SWPP_PIN_REGION=x,y,w,h pins that rectangle of workspace 24's windows
     # (`swaypplet pin region x,y,w,h`, the selector's result without the
     # drag), then comes back to workspace 1.
