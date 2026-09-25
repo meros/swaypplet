@@ -85,7 +85,7 @@ struct LauncherState {
 /// instead of starting another.
 const WINDOW_PROVIDER: &str = "swaypplet-window";
 /// At most this many running-window rows, above the results.
-const MAX_WINDOW_ROWS: usize = 2;
+const MAX_WINDOW_ROWS: usize = 3;
 
 // ── Embeddable launcher view ────────────────────────────────────────────────
 
@@ -495,7 +495,7 @@ fn run_search(
             let mut running = if query_c.is_empty() {
                 Vec::new()
             } else {
-                running_windows(&results)
+                running_windows(&query_c, &results)
             };
             running.extend(results);
             running
@@ -595,12 +595,11 @@ const WINDOW_THUMB_H: i32 = 70;
 /// The windows already open for the best application match, as rows. Their
 /// identifier is `<con_id> <foreign toplevel identifier>`: the first to go
 /// there, the second to show it.
-fn running_windows(results: &[SearchResult]) -> Vec<SearchResult> {
-    let Some(app) = results.iter().find(|r| r.provider == "desktopapplications") else {
-        return Vec::new();
-    };
-    let names = app_names(app);
-    if names.is_empty() {
+fn running_windows(query: &str, results: &[SearchResult]) -> Vec<SearchResult> {
+    let app = results.iter().find(|r| r.provider == "desktopapplications");
+    let names = app.map(app_names).unwrap_or_default();
+    let words = title_words(query);
+    if names.is_empty() && words.is_empty() {
         return Vec::new();
     }
     let Some(tree) = crate::sway_ipc::connect()
@@ -609,20 +608,55 @@ fn running_windows(results: &[SearchResult]) -> Vec<SearchResult> {
     else {
         return Vec::new();
     };
-    crate::jump::scene::all_windows(&tree)
+    let windows: Vec<_> = crate::jump::scene::all_windows(&tree)
         .into_iter()
-        .filter(|(w, _, _)| w.id.is_some() && names.iter().any(|n| same_app(n, &w.app)))
+        .filter(|(w, _, _)| w.id.is_some())
+        .collect();
+    // A window whose title has the query in it comes first: that is the one
+    // being asked for by name. Then the windows of the app that matched.
+    let by_title = windows
+        .iter()
+        .filter(|(_, _, title)| title_matches(&words, title));
+    let by_app = windows.iter().filter(|(w, _, title)| {
+        !title_matches(&words, title) && names.iter().any(|n| same_app(n, &w.app))
+    });
+    by_title
+        .chain(by_app)
         .take(MAX_WINDOW_ROWS)
         .map(|(w, ws, title)| SearchResult {
             identifier: format!("{} {}", w.con_id, w.id.clone().unwrap_or_default()),
-            text: format!("Go to {}", if title.is_empty() { &w.app } else { &title }),
-            subtext: format!("{} \u{00b7} open on {}", app.text, ws),
+            text: format!("Go to {}", if title.is_empty() { &w.app } else { title }),
+            subtext: format!(
+                "{} \u{00b7} open on {}",
+                app.filter(|a| app_names(a).iter().any(|n| same_app(n, &w.app)))
+                    .map_or(w.app.as_str(), |a| a.text.as_str()),
+                ws
+            ),
             icon: String::new(),
             provider: WINDOW_PROVIDER.to_string(),
             score: 0,
             actions: Vec::new(),
         })
         .collect()
+}
+
+/// The words a window title has to contain, lowercased. None for a query
+/// under two characters, which would match nearly every title.
+fn title_words(query: &str) -> Vec<String> {
+    let query = query.trim().to_lowercase();
+    if query.chars().count() < 2 {
+        return Vec::new();
+    }
+    query.split_whitespace().map(str::to_string).collect()
+}
+
+/// Whether every query word is in the title, in any case.
+fn title_matches(words: &[String], title: &str) -> bool {
+    if words.is_empty() {
+        return false;
+    }
+    let title = title.to_lowercase();
+    words.iter().all(|w| title.contains(w.as_str()))
 }
 
 /// What an application result could be called as a window's app_id: its
@@ -1206,6 +1240,20 @@ fn provider_icon(provider: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_title_matches_every_query_word_in_any_case() {
+        let words = title_words("dreaded Board");
+        assert!(title_matches(&words, "The dreaded board view · The Norban project - Google Chrome"));
+        assert!(!title_matches(&words, "The dreaded list view"));
+        assert!(title_matches(&title_words("youtube"), "(238) YouTube - Google Chrome"));
+    }
+
+    #[test]
+    fn a_one_letter_query_matches_no_title() {
+        assert!(!title_matches(&title_words("y"), "(238) YouTube - Google Chrome"));
+        assert!(!title_matches(&title_words(" "), "anything"));
+    }
 
     fn app(identifier: &str, icon: &str) -> SearchResult {
         SearchResult {
