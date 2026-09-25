@@ -81,6 +81,25 @@ pub fn make_layer_window(
     }
 }
 
+/// Destroy a layer window, including one that was never shown.
+///
+/// Destroying a window takes it off the application, and on Wayland GTK then
+/// removes its surface from the session: `window_forget` in
+/// gtkapplication-wayland.c passes `gtk_native_get_surface()` straight to
+/// `gdk_wayland_toplevel_remove_from_session`, which dereferences it. A
+/// window that was never shown has no surface, so that is a NULL
+/// dereference, and the process goes down with every surface in it (GTK
+/// 4.22.4). Per-monitor cards (the keybind sheet, the OSD) and pins rebuilt
+/// on another output are routinely destroyed without ever having been shown,
+/// on an unplug or a focus change. Realizing first gives GTK the surface it
+/// assumes; nothing is mapped, so nothing appears.
+pub fn destroy_window(window: &gtk4::Window) {
+    if !window.is_realized() {
+        gtk4::prelude::WidgetExt::realize(window);
+    }
+    window.destroy();
+}
+
 /// The output with the camera above it.
 ///
 /// Everything that reports a face check has to appear on the built-in panel,
