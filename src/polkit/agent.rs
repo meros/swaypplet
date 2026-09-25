@@ -2,13 +2,12 @@
 //!
 //! Mirrors the threading model of `notifications/dbus.rs`: a dedicated
 //! background thread runs a current-thread tokio runtime hosting the zbus
-//! object server. RPC calls are forwarded to the GTK main thread over a
-//! `std::sync::mpsc` channel; the main thread fulfils each request and
+//! object server. RPC calls are forwarded to the GTK main thread over an
+//! `async_channel`; the main thread fulfils each request and
 //! signals completion through a `tokio::sync::oneshot::Sender` carried in
 //! the event payload.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 
 use tokio::sync::oneshot;
 use zbus::export::futures_util::StreamExt;
@@ -64,7 +63,7 @@ pub enum AgentEvent {
 /// The zbus interface object. Holds only a Send+Sync handle to the event
 /// channel — all real work happens on the main thread.
 pub struct Agent {
-    sender: Arc<Mutex<std::sync::mpsc::Sender<AgentEvent>>>,
+    sender: async_channel::Sender<AgentEvent>,
 }
 
 #[interface(name = "org.freedesktop.PolicyKit1.AuthenticationAgent")]
@@ -118,9 +117,7 @@ impl Agent {
 
         if self
             .sender
-            .lock()
-            .unwrap()
-            .send(AgentEvent::Begin {
+            .try_send(AgentEvent::Begin {
                 request,
                 reply: reply_tx,
             })
@@ -145,11 +142,7 @@ impl Agent {
 
     async fn cancel_authentication(&self, cookie: String) -> zbus::fdo::Result<()> {
         log::info!("polkit CancelAuthentication: cookie={cookie}");
-        let _ = self
-            .sender
-            .lock()
-            .unwrap()
-            .send(AgentEvent::Cancel { cookie });
+        let _ = self.sender.try_send(AgentEvent::Cancel { cookie });
         Ok(())
     }
 }
@@ -157,11 +150,9 @@ impl Agent {
 /// Spin up the zbus server, register the agent interface at
 /// `/dev/swaypplet/PolkitAgent`, and call
 /// `RegisterAuthenticationAgent` on the polkit Authority. Returns the
-/// receiving half of the event channel — to be polled on the GTK main
-/// thread via `glib::timeout_add_local`.
-pub fn start() -> std::sync::mpsc::Receiver<AgentEvent> {
-    let (tx, rx) = std::sync::mpsc::channel::<AgentEvent>();
-    let sender = Arc::new(Mutex::new(tx));
+/// receiving half of the event channel, awaited on the GTK main thread.
+pub fn start() -> async_channel::Receiver<AgentEvent> {
+    let (sender, rx) = async_channel::unbounded::<AgentEvent>();
 
     crate::spawn::spawn_tokio_thread("polkit-agent", async move {
         if let Err(e) = run(sender).await {
@@ -175,7 +166,7 @@ pub fn start() -> std::sync::mpsc::Receiver<AgentEvent> {
 const AGENT_OBJECT_PATH: &str = "/dev/swaypplet/PolkitAgent";
 const POLKIT_BUS_NAME: &str = "org.freedesktop.PolicyKit1";
 
-async fn run(sender: Arc<Mutex<std::sync::mpsc::Sender<AgentEvent>>>) -> zbus::Result<()> {
+async fn run(sender: async_channel::Sender<AgentEvent>) -> zbus::Result<()> {
     let conn = zbus::Connection::system().await?;
     let agent = Agent { sender };
 

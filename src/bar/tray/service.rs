@@ -2,6 +2,9 @@
 //! (same runtime pattern as `idle/logind.rs`), mirroring the item map to
 //! the GTK thread the way `sway_ipc` does: full snapshots per event, not
 //! deltas, so a lagged broadcast receiver can never leave the cache stale.
+//! A snapshot equal to the last one sent is dropped: the client emits an
+//! event for bus traffic that changes nothing the bar shows, and other
+//! clients join and leave the bus several times a second.
 //!
 //! `system-tray` requires zbus 5 while the rest of swaypplet sits on
 //! zbus 4; Cargo carries both majors and nothing crosses this module's
@@ -18,7 +21,7 @@ use tokio::sync::broadcast::error::RecvError;
 use crate::service::{Backoff, Observed};
 
 /// One SNI item as the bar renders it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct TrayItem {
     /// Bus address (unique name) — the stable key for widget reconciliation.
     pub address: String,
@@ -140,7 +143,8 @@ async fn session(
 ) -> Result<(), system_tray::error::Error> {
     let client = Client::new().await?;
     let mut events = client.subscribe();
-    if tx.send(snapshot(&client)).await.is_err() {
+    let mut last = None;
+    if send_changed(tx, snapshot(&client), &mut last).await.is_err() {
         return Ok(());
     }
 
@@ -153,7 +157,7 @@ async fn session(
                     // the item map we snapshot. That also makes Lagged
                     // harmless: the map is current regardless.
                     Ok(_) | Err(RecvError::Lagged(_)) => {
-                        if tx.send(snapshot(&client)).await.is_err() {
+                        if send_changed(tx, snapshot(&client), &mut last).await.is_err() {
                             return Ok(());
                         }
                     }
@@ -184,6 +188,22 @@ async fn session(
             }
         }
     }
+}
+
+/// Send `items` unless they equal the last snapshot sent. The crate's types
+/// have no `PartialEq`, but all of them serialize, and the snapshot holds
+/// only NeedsAttention items, so it is almost always empty.
+async fn send_changed(
+    tx: &async_channel::Sender<Vec<TrayItem>>,
+    items: Vec<TrayItem>,
+    last: &mut Option<Vec<u8>>,
+) -> Result<(), async_channel::SendError<Vec<TrayItem>>> {
+    let key = serde_json::to_vec(&items).ok();
+    if key.is_some() && key == *last {
+        return Ok(());
+    }
+    *last = key;
+    tx.send(items).await
 }
 
 fn snapshot(client: &Client) -> Vec<TrayItem> {

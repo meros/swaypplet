@@ -225,14 +225,14 @@ pub fn run() {
             }
         }
 
-        // The polkit agent thread, polled from the GTK main loop.
+        // The polkit agent thread's events, awaited on the GTK main loop:
+        // the process sleeps until polkit calls.
         let agent_rx = agent::start();
-        let inner_for_poll = inner.clone();
-        glib::timeout_add_local(Duration::from_millis(40), move || {
-            while let Ok(event) = agent_rx.try_recv() {
-                handle_agent_event(&inner_for_poll, event);
+        let inner_for_events = inner.clone();
+        glib::spawn_future_local(async move {
+            while let Ok(event) = agent_rx.recv().await {
+                handle_agent_event(&inner_for_events, event);
             }
-            glib::ControlFlow::Continue
         });
     });
 
