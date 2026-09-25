@@ -70,6 +70,14 @@ struct LauncherState {
     /// capture runs only while such rows are on screen (see `start_live`).
     live: RefCell<crate::jump::card::Live>,
     stream: RefCell<Option<crate::jump::live::Stream>>,
+    /// The windows `stream` captures, sorted, so a rebuild that shows the
+    /// same windows keeps the capture it has.
+    stream_ids: RefCell<Vec<String>>,
+    /// The last picture of each window shown, put on a rebuilt row at once.
+    /// The compositor sends a frame only when a window has damage, so a
+    /// row rebuilt on the next keystroke for an idle window would otherwise
+    /// stay an empty grey box until that window next draws.
+    textures: RefCell<std::collections::HashMap<String, gtk4::gdk::Texture>>,
 }
 
 /// The provider of the rows this launcher adds itself: a window of the app
@@ -141,6 +149,8 @@ impl LauncherView {
                 query_generation: 0,
                 live: RefCell::default(),
                 stream: RefCell::default(),
+                stream_ids: RefCell::default(),
+                textures: RefCell::default(),
             })),
             on_activate: Rc::new(RefCell::new(None)),
         };
@@ -150,7 +160,9 @@ impl LauncherView {
         let weak = Rc::downgrade(&view.state);
         view.root.connect_unmap(move |_| {
             if let Some(state) = weak.upgrade() {
-                state.borrow().stream.replace(None);
+                let s = state.borrow();
+                s.stream.replace(None);
+                s.stream_ids.borrow_mut().clear();
             }
         });
         view
@@ -382,10 +394,19 @@ impl Launcher {
             self.view.focus_entry();
             // Harness hook: the nested session in dev/render.sh has no
             // keyboard, so `SWAYPPLET_LAUNCHER_QUERY` types a query on open.
+            // Steps separated by `|` are typed 1.5 s apart, for what the
+            // rows do while a query grows ("spo|spot").
             if let Ok(query) = std::env::var("SWAYPPLET_LAUNCHER_QUERY")
                 && !query.is_empty()
             {
-                self.view.entry().set_text(&query);
+                for (i, step) in query.split('|').enumerate() {
+                    let entry = self.view.entry().clone();
+                    let step = step.to_string();
+                    glib::timeout_add_local_once(
+                        std::time::Duration::from_millis(1500 * i as u64),
+                        move || entry.set_text(&step),
+                    );
+                }
             }
         }
     }
@@ -523,11 +544,26 @@ fn rebuild_results_ui(
 }
 
 /// Capture the windows the running-window rows show, or stop capturing
-/// when there are none.
+/// when there are none. The rows are rebuilt on every keystroke; while they
+/// show the same windows, the capture carries on and each new row gets the
+/// window's last picture straight away.
 fn start_live(state: &Rc<RefCell<LauncherState>>) {
     let s = state.borrow();
-    let ids = s.live.borrow().window_ids();
+    let mut ids = s.live.borrow().window_ids();
+    ids.sort();
+    {
+        let live = s.live.borrow();
+        let mut textures = s.textures.borrow_mut();
+        textures.retain(|id, _| ids.contains(id));
+        for (id, texture) in textures.iter() {
+            live.show(id, texture);
+        }
+    }
+    if s.stream.borrow().is_some() && *s.stream_ids.borrow() == ids {
+        return;
+    }
     s.stream.replace(None);
+    *s.stream_ids.borrow_mut() = ids.clone();
     if ids.is_empty() {
         return;
     }
@@ -536,7 +572,12 @@ fn start_live(state: &Rc<RefCell<LauncherState>>) {
     glib::spawn_future_local(async move {
         while let Ok(frame) = rx.recv().await {
             let Some(state) = weak.upgrade() else { break };
-            state.borrow().live.borrow().frame(frame);
+            let id = frame.id.clone();
+            let s = state.borrow();
+            let texture = s.live.borrow().frame(frame);
+            if let Some(texture) = texture {
+                s.textures.borrow_mut().insert(id, texture);
+            }
         }
     });
     s.stream.replace(Some(crate::jump::live::Stream::start(

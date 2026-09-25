@@ -164,7 +164,9 @@ case "$MODE" in
     # windows already open.
     elif [ -n "${SWPP_LAUNCH_QUERY:-}" ]; then
       "$BIN" launcher >>/tmp/swpp-app.log 2>&1 || true
-      sleep 2.0
+      # Two seconds, and 1.5 more for each further `|` step of the query.
+      steps=$(printf '%s' "$SWPP_LAUNCH_QUERY" | tr -cd '|' | wc -c)
+      sleep "$(( 2 + (steps * 3 + 1) / 2 ))"
     # SWPP_WINDOW_SHOT=1 opens the screenshot window picker, which takes
     # the first window by itself after 1.5 s (SWAYPPLET_PICK_FIRST, set on
     # the main process above: the picker runs there, not in the client).
