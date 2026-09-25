@@ -154,6 +154,27 @@ integer scale 2.0.
 
 Still backlog: the workspace overview this machinery also enables.
 
+### 5b. Live workspace pictures (2026-09-24)
+
+`⌘ Tab` came back as pictures, per workspace this time: a ring of live tiles
+(`src/jump/carousel.rs`), each a workspace composed from per-window captures
+placed where sway has them (`scene.rs`), streamed for as long as the card is
+up (`live.rs`). The same picture opens over a bar button on hover
+(`peek.rs`) and can be pinned to a corner with no frame cap (`pin.rs`,
+`⌘ ⌃ p`). Windows on hidden workspaces keep sending frames when they change;
+an idle one sends one.
+
+Next, chosen: **the overview with a real start.** A long Super hold opens a
+full-screen overlay whose first frame is an output capture, identical to the
+screen, and the windows then fly from their real positions into a grid of
+workspaces. It wants the dmabuf capture path first (`GdkDmabufTextureBuilder`,
+gtk4 feature `v4_16`): full-size frames through the shm path cost a CPU copy
+and a box filter each, which the tiles can afford and a full screen cannot.
+
+Limits met on the way: swayfx offers only `Xbgr8888` for a toplevel capture,
+with the X byte 255 everywhere, so a translucent terminal shows its opaque
+background in a picture.
+
 ### 6. Night light and display profiles in-process (S each)
 
 `zwlr_gamma_control_manager_v1` retires gammastep (20 lines of config, one

@@ -58,6 +58,7 @@ struct AppState {
     launcher: Option<Launcher>,
     keybinds: Option<Rc<Keybinds>>,
     jump: Option<Rc<Jump>>,
+    pins: Option<crate::jump::pin::Pins>,
     /// Keep-alive only: the bar follows monitor hotplug by itself and has
     /// no external control surface.
     _bar: Option<Rc<BarManager>>,
@@ -143,6 +144,7 @@ pub fn run() {
         launcher: None,
         keybinds: None,
         jump: None,
+        pins: None,
         _bar: None,
     }));
 
@@ -244,6 +246,17 @@ pub fn run() {
         // ── Jump: Super+Tab, back through the workspaces you came from ──────
         let jump = Jump::new(app);
 
+        // ── Pins: a workspace kept in sight, live, in a corner ──────────────
+        let pins = crate::jump::pin::Pins::new(app);
+        {
+            let pins = pins.clone();
+            jump.set_pin(move |workspace| pins.toggle(workspace));
+        }
+        {
+            let osd = osd.clone();
+            pins.set_notice(move |icon, label| osd.notice(icon, label));
+        }
+
         // Screenshot card buttons (Annotate / Open / Delete). Registered on
         // activate rather than startup because the editor needs the
         // application to parent its window to.
@@ -263,6 +276,7 @@ pub fn run() {
                 }
             });
             let sway = SwayService::start();
+            pins.set_sway(sway.clone());
             // Stop-notification policy (vision O2): the store resolves a
             // notification's claude-pid hint to task + visibility here,
             // where the sway model lives — same /proc parent-chain hop and
@@ -317,6 +331,7 @@ pub fn run() {
         st.launcher = Some(launcher);
         st.keybinds = Some(keybinds);
         st.jump = Some(jump);
+        st.pins = Some(pins);
     });
 
     // ── Command-line handling ────────────────────────────────────────────────
@@ -353,6 +368,11 @@ pub fn run() {
                     Some("step-back") => jump.step_back(),
                     _ => jump.step(),
                 }
+            }
+        } else if args.len() > 1 && args[1] == "pin" {
+            let st = state_clone.borrow();
+            if let Some(ref pins) = st.pins {
+                pins.toggle_focused();
             }
         } else if args.len() > 1 && args[1] == "screenshot" {
             let shot = crate::screenshot::Shot::parse(args.get(2).map(String::as_str));
