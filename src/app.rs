@@ -372,7 +372,60 @@ pub fn run() {
         } else if args.len() > 1 && args[1] == "pin" {
             let st = state_clone.borrow();
             if let Some(ref pins) = st.pins {
-                pins.toggle_focused();
+                // `pin region x,y,w,h`: that rectangle on the focused
+                // output, no selector. For scripts, and for the harness,
+                // which has no pointer to drag with.
+                let given = args.get(3).and_then(|a| {
+                    let v: Vec<f64> = a.split(',').filter_map(|n| n.trim().parse().ok()).collect();
+                    (v.len() == 4).then(|| (v[0], v[1], v[2], v[3]))
+                });
+                if args.get(2).map(String::as_str) == Some("region")
+                    && let Some(area) = given
+                {
+                    let pins = pins.clone();
+                    crate::spawn::spawn_work(
+                        move || {
+                            let output = crate::sway_ipc::focused_output()?;
+                            let tree = crate::sway_ipc::connect().ok()?.get_tree().ok()?;
+                            Some((crate::jump::scene::window_at(&tree, &output, area)?, output))
+                        },
+                        move |found| {
+                            if let Some((region, output)) = found {
+                                pins.pin_region(region, Some(output));
+                            }
+                        },
+                    );
+                } else if args.get(2).map(String::as_str) == Some("region") {
+                    // Drag a rectangle on the frozen screen, and pin that
+                    // piece of the window under it.
+                    let pins = pins.clone();
+                    crate::screenshot::select::region(
+                        app,
+                        crate::screenshot::select::Mode::Region,
+                        move |selection| {
+                            let Some(selection) = selection else { return };
+                            let Some(area) = selection.area else { return };
+                            let output = selection.output.clone();
+                            crate::spawn::spawn_work(
+                                {
+                                    let output = output.clone();
+                                    move || {
+                                        let tree =
+                                            crate::sway_ipc::connect().ok()?.get_tree().ok()?;
+                                        crate::jump::scene::window_at(&tree, &output, area)
+                                    }
+                                },
+                                move |region| {
+                                    if let Some(region) = region {
+                                        pins.pin_region(region, Some(output));
+                                    }
+                                },
+                            );
+                        },
+                    );
+                } else {
+                    pins.toggle_focused();
+                }
             }
         } else if args.len() > 1 && args[1] == "screenshot" {
             let shot = crate::screenshot::Shot::parse(args.get(2).map(String::as_str));

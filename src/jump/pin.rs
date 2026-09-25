@@ -116,8 +116,27 @@ fn publish(names: Vec<String>) {
 
 // ── The pins ────────────────────────────────────────────────────────────
 
+/// What a region pin follows: one window, and the piece of it.
+#[derive(Clone)]
+struct RegionPin {
+    id: String,
+    con_id: i64,
+    crop: live::Crop,
+    /// The window's size at the last rebuild, so a resize rebuilds.
+    size: (i32, i32),
+}
+
 struct Pin {
+    /// Who the pin is: the workspace's name, or `window:<identifier>` for a
+    /// region pin.
+    key: String,
+    /// The workspace it shows, or the one its window is on; while that is on
+    /// a screen, the pin hides.
     workspace: String,
+    /// The footer's label.
+    label: String,
+    /// `Some` for a piece of one window rather than a whole workspace.
+    region: Option<RegionPin>,
     window: gtk4::Window,
     reveal: crate::anim::Reveal,
     /// Where the picture goes; rebuilt when the workspace changes shape.
@@ -233,16 +252,12 @@ impl Pins {
     }
 
     fn is_pinned(&self, workspace: &str) -> bool {
-        self.inner
-            .borrow()
-            .pins
-            .iter()
-            .any(|p| p.workspace == workspace)
+        self.inner.borrow().pins.iter().any(|p| p.key == workspace)
     }
 
-    fn announce(&self, icon: &str, verb: &str, workspace: &str) {
+    fn announce(&self, icon: &str, verb: &str, label: &str) {
         if let Some(notice) = &self.inner.borrow().notice {
-            notice(icon, &format!("{verb} {}", pin_label(workspace)));
+            notice(icon, &format!("{verb} {label}"));
         }
     }
 
@@ -252,6 +267,7 @@ impl Pins {
                 .borrow()
                 .pins
                 .iter()
+                .filter(|p| p.region.is_none())
                 .map(|p| p.workspace.clone())
                 .collect(),
         );
@@ -264,12 +280,16 @@ impl Pins {
         let monitor = output
             .as_deref()
             .and_then(layer_shell::monitor_by_connector);
-        let parts = build_window(&app, monitor.as_ref(), &workspace);
+        let label = pin_label(&workspace);
+        let parts = build_window(&app, monitor.as_ref(), &label);
 
         self.wire(&parts, &workspace);
 
         self.inner.borrow_mut().pins.push(Pin {
+            key: workspace.clone(),
             workspace: workspace.clone(),
+            label: label.clone(),
+            region: None,
             window: parts.window,
             reveal: parts.reveal,
             holder: parts.holder,
@@ -280,13 +300,60 @@ impl Pins {
             output: output.clone(),
         });
         // A new pin is meant to be seen: pinning brings the tucked ones back.
+        self.introduce();
+        self.announce(PIN_GLYPH, "PINNED", &label);
+    }
+
+    /// Pin a piece of one window, on `output`.
+    pub fn pin_region(&self, region: scene::Region, output: Option<String>) {
+        let Some(id) = region.window.id.clone() else {
+            return;
+        };
+        let key = format!("window:{id}");
+        if self.is_pinned(&key) {
+            self.unpin(&key);
+        }
+        let Some(app) = self.inner.borrow().app.clone() else {
+            return;
+        };
+        let monitor = output
+            .as_deref()
+            .and_then(layer_shell::monitor_by_connector);
+        let label = region_label(&region.window.app, &region.workspace);
+        let parts = build_window(&app, monitor.as_ref(), &label);
+        self.wire(&parts, &key);
+        self.inner.borrow_mut().pins.push(Pin {
+            key,
+            workspace: region.workspace.clone(),
+            label: label.clone(),
+            region: Some(RegionPin {
+                id,
+                con_id: region.window.con_id,
+                crop: region.frac,
+                size: (0, 0),
+            }),
+            window: parts.window,
+            reveal: parts.reveal,
+            holder: parts.holder,
+            live: Rc::default(),
+            stream: None,
+            scene: None,
+            introduce_until: Some(Instant::now() + INTRODUCE),
+            output,
+        });
+        self.introduce();
+        self.announce(PIN_GLYPH, "PINNED", &label);
+    }
+
+    /// After a pin is added: untuck, restack, publish, draw, and look again
+    /// once the introduction is over.
+    fn introduce(&self) {
         if self.inner.borrow().tucked {
             self.inner.borrow_mut().tucked = false;
             TUCKED.with(|t| t.set(false));
         }
         self.stack();
         self.publish();
-        self.announce(PIN_GLYPH, "PINNED", &workspace);
         self.refresh();
         // The introduction ends by itself: look again once it has.
         let this = self.clone();
@@ -295,17 +362,18 @@ impl Pins {
         });
     }
 
-    pub fn unpin(&self, workspace: &str) {
+    /// Unpin by key: a workspace's name, or a region pin's `window:<id>`.
+    pub fn unpin(&self, key: &str) {
         let pin = {
             let mut inner = self.inner.borrow_mut();
-            let Some(i) = inner.pins.iter().position(|p| p.workspace == workspace) else {
+            let Some(i) = inner.pins.iter().position(|p| p.key == key) else {
                 return;
             };
             inner.pins.remove(i)
         };
         self.stack();
         self.publish();
-        self.announce(UNPIN_GLYPH, "UNPINNED", workspace);
+        self.announce(UNPIN_GLYPH, "UNPINNED", &pin.label);
         // Slide out, then go. The pin lives in the hook until the exit is
         // over; a pin already hidden goes at once.
         if pin.reveal.is_shown() {
@@ -313,6 +381,25 @@ impl Pins {
             let slot = RefCell::new(Some(pin));
             reveal.connect_hidden(move || drop(slot.borrow_mut().take()));
             reveal.hide();
+        }
+    }
+
+    /// Go to what a pin shows: its workspace, or the window a region pin
+    /// follows (focusing it switches to its workspace).
+    fn go_pin(&self, key: &str) {
+        let target = self
+            .inner
+            .borrow()
+            .pins
+            .iter()
+            .find(|p| p.key == key)
+            .map(|p| (p.workspace.clone(), p.region.as_ref().map(|r| r.con_id)));
+        match target {
+            Some((_, Some(con_id))) => {
+                crate::sway_ipc::run_command(&format!("[con_id={con_id}] focus"));
+            }
+            Some((workspace, None)) => self.go(&workspace),
+            None => {}
         }
     }
 
@@ -326,7 +413,7 @@ impl Pins {
             let this = self.clone();
             let workspace = workspace.clone();
             click.connect_released(move |g, _, _, _| match g.current_button() {
-                gdk::BUTTON_PRIMARY => this.go(&workspace),
+                gdk::BUTTON_PRIMARY => this.go_pin(&workspace),
                 gdk::BUTTON_SECONDARY | gdk::BUTTON_MIDDLE => this.unpin(&workspace),
                 _ => {}
             });
@@ -360,9 +447,12 @@ impl Pins {
         }
         let monitor = layer_shell::monitor_by_connector(output);
         for i in moving {
-            let workspace = self.inner.borrow().pins[i].workspace.clone();
-            let parts = build_window(&app, monitor.as_ref(), &workspace);
-            self.wire(&parts, &workspace);
+            let (key, label) = {
+                let inner = self.inner.borrow();
+                (inner.pins[i].key.clone(), inner.pins[i].label.clone())
+            };
+            let parts = build_window(&app, monitor.as_ref(), &label);
+            self.wire(&parts, &key);
             let mut inner = self.inner.borrow_mut();
             let pin = &mut inner.pins[i];
             // The old surface goes as the new one comes: Drop order on the
@@ -374,6 +464,9 @@ impl Pins {
             pin.reveal = parts.reveal;
             pin.holder = parts.holder;
             pin.scene = None;
+            if let Some(region) = &mut pin.region {
+                region.size = (0, 0);
+            }
             pin.output = Some(output.to_string());
         }
         self.stack();
@@ -411,49 +504,62 @@ impl Pins {
                 None => (Vec::new(), None),
             };
         self.follow(focused_output.as_deref());
-        let names: Vec<String> = self
+        let wanted: Vec<(String, Option<String>)> = self
             .inner
             .borrow()
             .pins
             .iter()
-            .map(|p| p.workspace.clone())
+            .map(|p| (p.key.clone(), p.region.as_ref().map(|r| r.id.clone())))
             .collect();
         let this = self.clone();
         crate::spawn::spawn_work(
             move || {
                 let tree = crate::sway_ipc::connect().ok()?.get_tree().ok()?;
                 Some(
-                    names
+                    wanted
                         .into_iter()
-                        .map(|n| {
-                            let s = scene::scene(&tree, &n);
-                            (n, s)
+                        .map(|(key, window)| {
+                            let found = match window {
+                                None => scene::scene(&tree, &key).map(Found::Workspace),
+                                Some(id) => scene::find_window(&tree, &id)
+                                    .map(|(w, ws)| Found::Window(w, ws)),
+                            };
+                            (key, found)
                         })
                         .collect::<Vec<_>>(),
                 )
             },
-            move |scenes| {
-                let Some(scenes) = scenes else { return };
+            move |found| {
+                let Some(found) = found else { return };
                 let mut inner = this.inner.borrow_mut();
                 let tucked = inner.tucked;
-                // A workspace that is gone takes its pin with it.
+                // A workspace or a window that is gone takes its pin with it.
                 let before = inner.pins.len();
                 inner
                     .pins
-                    .retain(|p| scenes.iter().any(|(n, s)| *n == p.workspace && s.is_some()));
+                    .retain(|p| found.iter().any(|(k, f)| *k == p.key && f.is_some()));
                 let gone = inner.pins.len() != before;
                 let now = Instant::now();
                 for pin in &mut inner.pins {
-                    let scene = scenes
+                    let Some(f) = found
                         .iter()
-                        .find(|(n, _)| *n == pin.workspace)
-                        .and_then(|(_, s)| s.clone());
+                        .find(|(k, _)| *k == pin.key)
+                        .and_then(|(_, f)| f.clone())
+                    else {
+                        continue;
+                    };
+                    if let Found::Window(_, ws) = &f {
+                        pin.workspace = ws.clone();
+                    }
                     let introducing = pin.introduce_until.is_some_and(|t| now < t);
                     if !introducing {
                         pin.introduce_until = None;
                     }
                     let show = !tucked && (introducing || !on_screen.contains(&pin.workspace));
-                    update(pin, scene, show);
+                    match f {
+                        Found::Workspace(scene) => update(pin, Some(scene), show),
+                        Found::Window(window, _) => update_region(pin, &window, show),
+                    }
                 }
                 drop(inner);
                 this.stack();
@@ -465,19 +571,81 @@ impl Pins {
     }
 }
 
+/// What a refresh found for a pin.
+#[derive(Clone)]
+enum Found {
+    Workspace(Scene),
+    Window(scene::Window, String),
+}
+
+/// Hide a pin whose workspace is on a screen.
+fn hide(pin: &mut Pin) {
+    pin.stream = None;
+    // Only a pin that is shown has anything to hide. A surface `follow` has
+    // just rebuilt on another output was never shown, so it was never
+    // realized, and Reveal's exit path on it reached for a GDK surface that
+    // did not exist: the process went down, and every pin with it. That was
+    // "switching to a pinned workspace unpins it", whenever the switch also
+    // moved focus to the other screen.
+    if pin.reveal.is_shown() {
+        pin.reveal.hide();
+    }
+}
+
+/// Show or hide a region pin, and rebuild its picture when its window
+/// changed size.
+fn update_region(pin: &mut Pin, window: &scene::Window, show: bool) {
+    if !show {
+        hide(pin);
+        return;
+    }
+    let Some(region) = pin.region.as_mut() else {
+        return;
+    };
+    let size = (window.w, window.h);
+    if region.size != size || pin.stream.is_none() {
+        region.size = size;
+        while let Some(child) = pin.holder.first_child() {
+            pin.holder.remove(&child);
+        }
+        // The piece's own shape, fitted into the pin's box.
+        let (_, _, fw, fh) = region.crop;
+        let (pw, ph) = (f64::from(window.w) * fw, f64::from(window.h) * fh);
+        let (s, _, _) = scene::fit(pw.round() as i32, ph.round() as i32, PIN_W, PIN_H);
+        let picture = card::LivePicture::new();
+        picture.set_size_request(
+            ((pw * s).round() as i32).max(8),
+            ((ph * s).round() as i32).max(8),
+        );
+        picture.set_halign(gtk4::Align::Center);
+        pin.holder.append(&picture);
+        *pin.live.borrow_mut() = Live::default();
+        pin.live.borrow_mut().add(region.id.clone(), picture);
+
+        let (tx, rx) = async_channel::unbounded::<live::Frame>();
+        let live = pin.live.clone();
+        glib::spawn_future_local(async move {
+            while let Ok(frame) = rx.recv().await {
+                live.borrow().frame(frame);
+            }
+        });
+        pin.stream = Some(live::Stream::start_region(
+            region.id.clone(),
+            region.crop,
+            (PIN_W * 2) as u32,
+            0,
+            tx,
+        ));
+    }
+    if !pin.reveal.is_shown() {
+        pin.reveal.show();
+    }
+}
+
 /// Show or hide a pin, and rebuild its picture when its scene changed.
 fn update(pin: &mut Pin, scene: Option<Scene>, show: bool) {
     if !show {
-        pin.stream = None;
-        // Only a pin that is shown has anything to hide. A surface `follow`
-        // has just rebuilt on another output was never shown, so it was
-        // never realized, and Reveal's exit path on it reached for a GDK
-        // surface that did not exist: the process went down, and every pin
-        // with it. That was "switching to a pinned workspace unpins it",
-        // whenever the switch also moved focus to the other screen.
-        if pin.reveal.is_shown() {
-            pin.reveal.hide();
-        }
+        hide(pin);
         return;
     }
     let changed = pin.scene != scene;
@@ -510,6 +678,11 @@ fn update(pin: &mut Pin, scene: Option<Scene>, show: bool) {
     }
 }
 
+/// A region pin's label: the app, and where its window is.
+fn region_label(app: &str, workspace: &str) -> String {
+    format!("{app} \u{00b7} {}", pin_label(workspace))
+}
+
 /// The Super+Tab tile's label for the workspace, so a pin and its tile
 /// agree.
 fn pin_label(workspace: &str) -> String {
@@ -532,7 +705,7 @@ struct Parts {
     close: gtk4::Button,
 }
 
-fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, workspace: &str) -> Parts {
+fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: &str) -> Parts {
     static CONFIG: LayerShellConfig = LayerShellConfig {
         namespace: "swaypplet-pin",
         // Top, not Overlay: a fullscreen window covers a pin, the way it
@@ -578,10 +751,7 @@ fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, workspa
     let mark = gtk4::Label::new(Some(PIN_GLYPH));
     mark.add_css_class("jump-pin-mark");
     footer.append(&mark);
-    let label = gtk4::Label::builder()
-        .label(pin_label(workspace))
-        .xalign(0.0)
-        .build();
+    let label = gtk4::Label::builder().label(label).xalign(0.0).build();
     label.add_css_class("jump-pin-label");
     footer.append(&label);
     let hint = gtk4::Label::builder()

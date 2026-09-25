@@ -42,6 +42,8 @@ pub struct Window {
     pub id: Option<String>,
     /// `app_id`, or the X11 class, for the icon and the fallback tile.
     pub app: String,
+    /// sway's container id, for `[con_id=N] focus`.
+    pub con_id: i64,
     pub x: i32,
     pub y: i32,
     pub w: i32,
@@ -51,21 +53,7 @@ pub struct Window {
 /// The scene for the workspace called `name`, or `None` when it is gone.
 pub fn scene(tree: &Node, name: &str) -> Option<Scene> {
     let ws = find_workspace(tree, name)?;
-    let mut windows = Vec::new();
-
-    // A fullscreen view is the whole picture, at its own rect: the output's,
-    // which is larger than the workspace's when a bar reserves space.
-    if let Some(full) = find_fullscreen(ws) {
-        windows.push(content(full));
-    } else {
-        for child in &ws.nodes {
-            tiled(child, &mut windows);
-        }
-        for child in &ws.floating_nodes {
-            // A floating container can hold a whole tiled subtree.
-            tiled(child, &mut windows);
-        }
-    }
+    let mut windows = visible(ws);
 
     let Some((x0, y0, x1, y1)) = windows
         .iter()
@@ -87,6 +75,104 @@ pub fn scene(tree: &Node, name: &str) -> Option<Scene> {
         height: y1 - y0,
         windows,
     })
+}
+
+/// The windows a workspace shows, in layout coordinates, bottom first.
+///
+/// A fullscreen view is the whole picture, at its own rect: the output's,
+/// which is larger than the workspace's when a bar reserves space.
+fn visible(ws: &Node) -> Vec<Window> {
+    let mut windows = Vec::new();
+    if let Some(full) = find_fullscreen(ws) {
+        windows.push(content(full));
+    } else {
+        for child in &ws.nodes {
+            tiled(child, &mut windows);
+        }
+        for child in &ws.floating_nodes {
+            // A floating container can hold a whole tiled subtree.
+            tiled(child, &mut windows);
+        }
+    }
+    windows
+}
+
+/// A rectangle on screen, turned into a piece of one window.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Region {
+    pub window: Window,
+    /// The workspace it is on.
+    pub workspace: String,
+    /// The piece, as fractions of the window's content: x, y, width, height,
+    /// each in 0..=1. Fractions and not pixels, because a capture's buffer is
+    /// the window at the output's scale and the rect is in layout pixels.
+    pub frac: (f64, f64, f64, f64),
+}
+
+/// The window showing at the middle of `rect` on `output`, and the part of
+/// it `rect` covers. `rect` is in the output's own logical coordinates, as a
+/// region selector reports it. The topmost window wins: floating over tiled,
+/// fullscreen over all.
+pub fn window_at(tree: &Node, output: &str, rect: (f64, f64, f64, f64)) -> Option<Region> {
+    let out = tree
+        .nodes
+        .iter()
+        .find(|n| n.node_type == NodeType::Output && n.name.as_deref() == Some(output))?;
+    // An output's focus list starts with the workspace it shows.
+    let ws = out
+        .focus
+        .first()
+        .and_then(|id| out.nodes.iter().find(|n| n.id == *id))?;
+    let (x, y, w, h) = (
+        f64::from(out.rect.x) + rect.0,
+        f64::from(out.rect.y) + rect.1,
+        rect.2,
+        rect.3,
+    );
+    let (cx, cy) = (x + w / 2.0, y + h / 2.0);
+    let window = visible(ws).into_iter().rev().find(|win| {
+        let (wx, wy) = (f64::from(win.x), f64::from(win.y));
+        cx >= wx && cx < wx + f64::from(win.w) && cy >= wy && cy < wy + f64::from(win.h)
+    })?;
+    let (wx, wy, ww, wh) = (
+        f64::from(window.x),
+        f64::from(window.y),
+        f64::from(window.w).max(1.0),
+        f64::from(window.h).max(1.0),
+    );
+    // Clamped to the window: a drag that ran past its edge takes what of it
+    // there is.
+    let x0 = ((x - wx) / ww).clamp(0.0, 1.0);
+    let y0 = ((y - wy) / wh).clamp(0.0, 1.0);
+    let x1 = ((x + w - wx) / ww).clamp(0.0, 1.0);
+    let y1 = ((y + h - wy) / wh).clamp(0.0, 1.0);
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    Some(Region {
+        window,
+        workspace: ws.name.clone().unwrap_or_default(),
+        frac: (x0, y0, x1 - x0, y1 - y0),
+    })
+}
+
+/// A window by its identifier, wherever it is, and the workspace holding it.
+pub fn find_window(tree: &Node, id: &str) -> Option<(Window, String)> {
+    fn walk(node: &Node, ws: Option<&str>, id: &str) -> Option<(Window, String)> {
+        let ws = if node.node_type == NodeType::Workspace {
+            node.name.as_deref()
+        } else {
+            ws
+        };
+        if is_view(node) && node.foreign_toplevel_identifier.as_deref() == Some(id) {
+            return Some((content(node), ws.unwrap_or_default().to_string()));
+        }
+        node.nodes
+            .iter()
+            .chain(node.floating_nodes.iter())
+            .find_map(|c| walk(c, ws, id))
+    }
+    walk(tree, None, id)
 }
 
 fn find_workspace<'a>(node: &'a Node, name: &str) -> Option<&'a Node> {
@@ -165,6 +251,7 @@ fn window(node: &Node, (x, y, w, h): (i32, i32, i32, i32)) -> Window {
     Window {
         id: node.foreign_toplevel_identifier.clone(),
         app,
+        con_id: node.id,
         x,
         y,
         w,
@@ -371,6 +458,63 @@ mod tests {
     #[test]
     fn a_missing_workspace_is_none() {
         assert!(scene(&ws(vec![], vec![]), "7").is_none());
+    }
+
+    /// Output eDP-1 at layout x 1440, showing workspace "1": a tiled window
+    /// on the left half, a float over the middle.
+    fn two_outputs() -> Node {
+        let ws = node(json!({
+            "id": 10, "type": "workspace", "num": 1, "name": "1",
+            "rect": r(1440, 30, 1440, 870),
+            "nodes": [view(20, "left", "foot", r(1440, 30, 720, 870))],
+            "floating_nodes": [view(40, "float", "mpv", r(1840, 230, 400, 300))],
+        }));
+        let mut out = output(2, "eDP-1", vec![10], vec![ws]);
+        out["rect"] = r(1440, 0, 1440, 900);
+        tree(vec![2], vec![out])
+    }
+
+    #[test]
+    fn a_region_is_a_piece_of_the_window_under_its_middle() {
+        // 100..300 x 100..300 on eDP-1 is layout 1540..1740, inside "left".
+        let region = window_at(&two_outputs(), "eDP-1", (100.0, 100.0, 200.0, 200.0)).unwrap();
+        assert_eq!(region.window.id.as_deref(), Some("left"));
+        assert_eq!(region.workspace, "1");
+        let (x, y, w, h) = region.frac;
+        assert!((x - 100.0 / 720.0).abs() < 1e-9 && (w - 200.0 / 720.0).abs() < 1e-9);
+        assert!((y - 70.0 / 870.0).abs() < 1e-9 && (h - 200.0 / 870.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_float_on_top_wins_over_the_window_under_it() {
+        // Middle at layout (2000, 330): inside "left" (1440..2160) and inside
+        // the float above it (1840..2240), which is drawn on top.
+        let region = window_at(&two_outputs(), "eDP-1", (500.0, 280.0, 120.0, 100.0)).unwrap();
+        assert_eq!(region.window.id.as_deref(), Some("float"));
+    }
+
+    #[test]
+    fn a_drag_past_the_window_edge_is_clamped_to_it() {
+        // Layout 2040..2340, middle 2190: past "left", inside the float,
+        // whose right edge (2240) cuts the drag short.
+        let region = window_at(&two_outputs(), "eDP-1", (600.0, 400.0, 300.0, 100.0)).unwrap();
+        assert_eq!(region.window.id.as_deref(), Some("float"));
+        let (x, _, w, _) = region.frac;
+        assert!((x + w - 1.0).abs() < 1e-9, "ends at the float's edge");
+    }
+
+    #[test]
+    fn nothing_under_the_region_is_none() {
+        // Right half of the output has no window.
+        assert!(window_at(&two_outputs(), "eDP-1", (1200.0, 700.0, 50.0, 50.0)).is_none());
+        assert!(window_at(&two_outputs(), "DP-3", (0.0, 0.0, 50.0, 50.0)).is_none());
+    }
+
+    #[test]
+    fn a_window_is_found_by_its_identifier() {
+        let (win, ws) = find_window(&two_outputs(), "float").unwrap();
+        assert_eq!((win.con_id, ws.as_str()), (40, "1"));
+        assert!(find_window(&two_outputs(), "gone").is_none());
     }
 
     #[test]

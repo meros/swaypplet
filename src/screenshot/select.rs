@@ -34,6 +34,10 @@ pub struct Selection {
     #[allow(dead_code)]
     pub output: String,
     pub image: Image,
+    /// The dragged rectangle in the output's logical coordinates (x, y,
+    /// width, height); `None` for the whole output or a picked colour. What
+    /// a region pin needs to find the window under it.
+    pub area: Option<(f64, f64, f64, f64)>,
 }
 
 /// A drag in progress: the two corners, in widget coordinates.
@@ -605,6 +609,7 @@ impl Session {
         self.answer(Some(Selection {
             output: sheet.output.clone(),
             image: sheet.image.clone(),
+            area: None,
         }));
     }
 
@@ -624,6 +629,7 @@ impl Session {
             self.answer((!image.pixels.is_empty()).then(|| Selection {
                 output: sheet.output.clone(),
                 image,
+                area: None,
             }));
             return;
         }
@@ -649,6 +655,7 @@ impl Session {
                     self.answer(Some(Selection {
                         output: sheet.output.clone(),
                         image,
+                        area: Some((x, y, rw, rh)),
                     }));
                 }
             }
