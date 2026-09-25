@@ -4196,6 +4196,40 @@ button.bar-pins-tuck {
     color: alpha(@fg, 0.55);
 }
 
+/* The window picker for screenshots (src/screenshot/window.rs): a glass
+   card with a grid of every window, live. */
+.window-picker {
+    padding: 16px;
+}
+
+.window-picker-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: @fg_dim;
+}
+
+.window-picker-grid flowboxchild {
+    border-radius: 12px;
+    padding: 8px;
+}
+
+.window-picker-grid flowboxchild:selected,
+.window-picker-grid flowboxchild:hover {
+    background-color: @accent_tint;
+    box-shadow: inset 0 0 0 2px @accent;
+}
+
+.window-picker-name {
+    font-size: 13px;
+    color: @fg;
+}
+
+.window-picker-place {
+    font-size: 11px;
+    color: @fg_dim;
+}
+
 /* The key hints under the switcher's strip, on the desktop like the
    captions, so they carry the same shadow. */
 .jump-hint {

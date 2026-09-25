@@ -27,6 +27,7 @@ pub mod capture;
 pub mod deliver;
 pub mod record;
 pub mod select;
+pub mod window;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -45,6 +46,8 @@ pub enum Shot {
     Pick,
     /// Record video of a selected region.
     Record,
+    /// Pick one window, from any workspace, from a live grid.
+    Window,
 }
 
 impl Shot {
@@ -53,6 +56,7 @@ impl Shot {
             Some("screen") | Some("output") => Shot::Screen,
             Some("pick") | Some("color") | Some("colour") => Shot::Pick,
             Some("record") | Some("rec") | Some("video") => Shot::Record,
+            Some("window") => Shot::Window,
             _ => Shot::Region,
         }
     }
@@ -123,6 +127,18 @@ pub fn take(app: &gtk4::Application, store: &StoreRef, shot: Shot) {
 
     let store = store.clone();
     let app_for_editor = app.clone();
+    if shot == Shot::Window {
+        window::pick(app, move |image| {
+            keep(&store, &image);
+            if crate::settings::store::current().capture().annotate {
+                let store = store.clone();
+                annotate::open(&app_for_editor, image, move |edited| {
+                    keep(&store, &edited);
+                });
+            }
+        });
+        return;
+    }
     let mode = match shot {
         Shot::Pick => select::Mode::Pick,
         _ => select::Mode::Region,

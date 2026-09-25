@@ -156,6 +156,35 @@ pub fn window_at(tree: &Node, output: &str, rect: (f64, f64, f64, f64)) -> Optio
     })
 }
 
+/// Every window, on every workspace, in tree order: each with the workspace
+/// holding it and its title. The scratchpad's are left out; they are not on
+/// a workspace anyone can see.
+pub fn all_windows(tree: &Node) -> Vec<(Window, String, String)> {
+    fn walk(node: &Node, ws: Option<&str>, out: &mut Vec<(Window, String, String)>) {
+        let ws = if node.node_type == NodeType::Workspace {
+            node.name.as_deref()
+        } else {
+            ws
+        };
+        if let Some(ws) = ws
+            && !ws.starts_with("__")
+            && is_view(node)
+        {
+            out.push((
+                content(node),
+                ws.to_string(),
+                node.name.clone().unwrap_or_default(),
+            ));
+        }
+        for c in node.nodes.iter().chain(node.floating_nodes.iter()) {
+            walk(c, ws, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(tree, None, &mut out);
+    out
+}
+
 /// A window by its identifier, wherever it is, and the workspace holding it.
 pub fn find_window(tree: &Node, id: &str) -> Option<(Window, String)> {
     fn walk(node: &Node, ws: Option<&str>, id: &str) -> Option<(Window, String)> {
@@ -508,6 +537,16 @@ mod tests {
         // Right half of the output has no window.
         assert!(window_at(&two_outputs(), "eDP-1", (1200.0, 700.0, 50.0, 50.0)).is_none());
         assert!(window_at(&two_outputs(), "DP-3", (0.0, 0.0, 50.0, 50.0)).is_none());
+    }
+
+    #[test]
+    fn every_window_is_listed_with_its_workspace() {
+        let all = all_windows(&two_outputs());
+        let ids: Vec<(&str, &str)> = all
+            .iter()
+            .map(|(w, ws, _)| (w.id.as_deref().unwrap_or(""), ws.as_str()))
+            .collect();
+        assert_eq!(ids, [("left", "1"), ("float", "1")]);
     }
 
     #[test]
