@@ -74,7 +74,7 @@ SOCK="$RUNTIME/sway-render-$$.sock"
   # sway's parser wants the block across lines: a one-liner is read as an
   # unmatched '}' and the whole rule is dropped, which renders every surface
   # here unfrosted while looking like it worked.
-  for ns in swaypplet swaypplet-launcher swaypplet-osd swaypplet-notification swaypplet-polkit swaypplet-keybinds; do
+  for ns in swaypplet swaypplet-launcher swaypplet-osd swaypplet-notification swaypplet-polkit swaypplet-keybinds swaypplet-pin; do
     printf 'layer_effects "%s" {\n    blur enable\n    blur_ignore_transparent enable\n}\n' "$ns"
   done
   # The keybinding sheet reads the config sway loaded, so a nested session
