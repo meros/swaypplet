@@ -38,6 +38,11 @@ impl Live {
         self.pictures.keys().cloned().collect()
     }
 
+    /// Register a picture for a window's frames, drawn by the caller.
+    pub fn add(&mut self, id: String, picture: LivePicture) {
+        self.pictures.entry(id).or_default().push(picture);
+    }
+
     /// Put a frame on every picture of its window.
     pub fn frame(&self, frame: Frame) {
         let Some(pics) = self.pictures.get(&frame.id) else {

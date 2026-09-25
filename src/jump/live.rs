@@ -54,6 +54,9 @@ pub struct Stream {
     stop: Arc<AtomicBool>,
 }
 
+/// A piece of a window, as fractions of it: x, y, width, height in 0..=1.
+pub type Crop = (f64, f64, f64, f64);
+
 impl Stream {
     /// Capture the windows named by `ids` until dropped.
     ///
@@ -62,6 +65,33 @@ impl Stream {
     /// window sends a frame for every one the compositor renders for it.
     pub fn start(
         ids: Vec<String>,
+        max_edge: u32,
+        fps: u32,
+        tx: async_channel::Sender<Frame>,
+    ) -> Stream {
+        Stream::spawn(
+            ids.into_iter().map(|id| (id, None)).collect(),
+            max_edge,
+            fps,
+            tx,
+        )
+    }
+
+    /// Capture one piece of one window until dropped: every frame is cut to
+    /// `crop` at the buffer's full resolution before it is scaled, so a small
+    /// piece stays as sharp as the window is.
+    pub fn start_region(
+        id: String,
+        crop: Crop,
+        max_edge: u32,
+        fps: u32,
+        tx: async_channel::Sender<Frame>,
+    ) -> Stream {
+        Stream::spawn(vec![(id, Some(crop))], max_edge, fps, tx)
+    }
+
+    fn spawn(
+        ids: Vec<(String, Option<Crop>)>,
         max_edge: u32,
         fps: u32,
         tx: async_channel::Sender<Frame>,
@@ -97,7 +127,7 @@ impl Drop for Stream {
 const IDLE_POLL: Duration = Duration::from_millis(50);
 
 fn run(
-    ids: &[String],
+    ids: &[(String, Option<Crop>)],
     max_edge: u32,
     interval: Duration,
     tx: &async_channel::Sender<Frame>,
@@ -126,7 +156,7 @@ fn run(
         .ok_or("compositor does not advertise ext-foreign-toplevel-image-capture-source-v1")?;
     let shm = state.shm.clone().ok_or("compositor has no wl_shm")?;
 
-    for id in ids {
+    for (id, crop) in ids {
         let Some(handle) = state
             .toplevels
             .iter()
@@ -146,7 +176,7 @@ fn run(
         );
         state
             .sessions
-            .push(Session::new(id.clone(), source, session));
+            .push(Session::new(id.clone(), *crop, source, session));
     }
 
     while !stop.load(Ordering::Relaxed) && !tx.is_closed() {
@@ -163,7 +193,7 @@ fn run(
                 let (width, height, pixels) = downscale(
                     buffer.memory.as_slice(),
                     buffer.width,
-                    buffer.height,
+                    region(s.crop, buffer.width, buffer.height),
                     buffer.format,
                     max_edge,
                 );
@@ -260,16 +290,32 @@ fn dispatch_for(
 /// of source pixels and the result has no seams. `xrgb` carries no alpha, so
 /// it is written opaque; `argb` from the compositor is already premultiplied,
 /// and an average of premultiplied pixels stays premultiplied.
+/// The pixels of `crop` in a `w` by `h` buffer, as x, y, width, height;
+/// the whole buffer without one. At least one pixel each way.
+fn region(crop: Option<Crop>, w: u32, h: u32) -> (u32, u32, u32, u32) {
+    let Some((fx, fy, fw, fh)) = crop else {
+        return (0, 0, w, h);
+    };
+    let (wf, hf) = (f64::from(w), f64::from(h));
+    let x = ((fx * wf).round() as u32).min(w.saturating_sub(1));
+    let y = ((fy * hf).round() as u32).min(h.saturating_sub(1));
+    let rw = ((fw * wf).round() as u32).clamp(1, w - x);
+    let rh = ((fh * hf).round() as u32).clamp(1, h - y);
+    (x, y, rw, rh)
+}
+
+/// Box-filter the region `(x0, y0, w, h)` of a buffer `full_w` pixels wide
+/// so its longer side is at most `max_edge`.
 fn downscale(
     src: &[u8],
-    w: u32,
-    h: u32,
+    full_w: u32,
+    (x0, y0, w, h): (u32, u32, u32, u32),
     format: wl_shm::Format,
     max_edge: u32,
 ) -> (u32, u32, Vec<u8>) {
     let f = w.max(h).div_ceil(max_edge.max(1)).max(1);
     let (ow, oh) = ((w / f).max(1), (h / f).max(1));
-    let stride = (w * 4) as usize;
+    let stride = (full_w * 4) as usize;
     let opaque = matches!(format, wl_shm::Format::Xrgb8888 | wl_shm::Format::Xbgr8888);
     // Both ABGR formats are RGBA in memory; the card wants BGRA.
     let swap = matches!(format, wl_shm::Format::Xbgr8888 | wl_shm::Format::Abgr8888);
@@ -279,9 +325,9 @@ fn downscale(
     for oy in 0..oh {
         for ox in 0..ow {
             let mut acc = [0u32; 4];
-            for sy in oy * f..oy * f + f {
+            for sy in y0 + oy * f..y0 + oy * f + f {
                 let row = sy as usize * stride;
-                for sx in ox * f..ox * f + f {
+                for sx in x0 + ox * f..x0 + ox * f + f {
                     let i = row + sx as usize * 4;
                     acc[0] += u32::from(src[i]);
                     acc[1] += u32::from(src[i + 1]);
@@ -361,6 +407,8 @@ impl Drop for Buffer {
 
 struct Session {
     id: String,
+    /// Only this piece of the window is sent.
+    crop: Option<Crop>,
     source: ExtImageCaptureSourceV1,
     session: ExtImageCopyCaptureSessionV1,
     pending_size: Option<(u32, u32)>,
@@ -379,11 +427,13 @@ struct Session {
 impl Session {
     fn new(
         id: String,
+        crop: Option<Crop>,
         source: ExtImageCaptureSourceV1,
         session: ExtImageCopyCaptureSessionV1,
     ) -> Session {
         Session {
             id,
+            crop,
             source,
             session,
             pending_size: None,
@@ -633,7 +683,13 @@ mod tests {
     #[test]
     fn the_longer_edge_fits_and_the_aspect_holds() {
         let src = vec![0u8; 2560 * 1600 * 4];
-        let (w, h, px) = downscale(&src, 2560, 1600, wl_shm::Format::Xrgb8888, 320);
+        let (w, h, px) = downscale(
+            &src,
+            2560,
+            (0, 0, 2560, 1600),
+            wl_shm::Format::Xrgb8888,
+            320,
+        );
         assert_eq!((w, h), (320, 200));
         assert_eq!(px.len(), 320 * 200 * 4);
     }
@@ -642,7 +698,7 @@ mod tests {
     fn each_output_pixel_averages_its_square() {
         // 2x2 XRGB, BGRX in memory: two black pixels, two at blue 200.
         let src = [0, 0, 0, 0, 0, 0, 0, 0, 200, 0, 0, 0, 200, 0, 0, 0];
-        let (w, h, px) = downscale(&src, 2, 2, wl_shm::Format::Xrgb8888, 1);
+        let (w, h, px) = downscale(&src, 2, (0, 0, 2, 2), wl_shm::Format::Xrgb8888, 1);
         assert_eq!((w, h), (1, 1));
         assert_eq!(px, vec![100, 0, 0, 0xff]);
     }
@@ -650,14 +706,43 @@ mod tests {
     #[test]
     fn abgr_is_swapped_to_bgra_and_keeps_alpha() {
         let src = [10u8, 20, 30, 128];
-        let (_, _, px) = downscale(&src, 1, 1, wl_shm::Format::Abgr8888, 4);
+        let (_, _, px) = downscale(&src, 1, (0, 0, 1, 1), wl_shm::Format::Abgr8888, 4);
         assert_eq!(px, vec![30, 20, 10, 128]);
+    }
+
+    #[test]
+    fn a_crop_is_cut_from_the_full_buffer_before_scaling() {
+        // 4x2 XRGB: the right half is blue 200, the left black.
+        let mut src = vec![0u8; 4 * 2 * 4];
+        for y in 0..2 {
+            for x in 2..4 {
+                src[(y * 4 + x) * 4] = 200;
+            }
+        }
+        let (w, h, px) = downscale(&src, 4, (2, 0, 2, 2), wl_shm::Format::Xrgb8888, 8);
+        assert_eq!((w, h), (2, 2), "unscaled: the piece is small");
+        assert!(
+            px.chunks_exact(4).all(|p| p[0] == 200),
+            "only the blue half"
+        );
+    }
+
+    #[test]
+    fn a_crop_in_fractions_becomes_buffer_pixels() {
+        // A 2x buffer of a 1440x900 window: the fractions do not care.
+        assert_eq!(
+            region(Some((0.25, 0.5, 0.5, 0.25)), 2880, 1800),
+            (720, 900, 1440, 450)
+        );
+        assert_eq!(region(None, 2880, 1800), (0, 0, 2880, 1800));
+        // A crop running off the edge keeps at least a pixel, and stays in.
+        assert_eq!(region(Some((1.0, 1.0, 0.5, 0.5)), 100, 100), (99, 99, 1, 1));
     }
 
     #[test]
     fn a_small_window_is_not_scaled_up() {
         let src = vec![7u8; 10 * 6 * 4];
-        let (w, h, _) = downscale(&src, 10, 6, wl_shm::Format::Argb8888, 320);
+        let (w, h, _) = downscale(&src, 10, (0, 0, 10, 6), wl_shm::Format::Argb8888, 320);
         assert_eq!((w, h), (10, 6));
     }
 }

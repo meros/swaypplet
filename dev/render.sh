@@ -157,6 +157,16 @@ case "$MODE" in
     # (SWAYPPLET_PEEK_OPEN, set before launch above).
     if [ -n "${SWPP_PEEK:-}" ]; then
       sleep 1.2
+    # SWPP_PIN_REGION=x,y,w,h pins that rectangle of workspace 24's windows
+    # (`swaypplet pin region x,y,w,h`, the selector's result without the
+    # drag), then comes back to workspace 1.
+    elif [ -n "${SWPP_PIN_REGION:-}" ]; then
+      swaymsg "workspace number 24" >/dev/null 2>&1 || true
+      sleep 0.6
+      "$BIN" pin region "$SWPP_PIN_REGION" >>/tmp/swpp-app.log 2>&1 || true
+      sleep 0.8
+      swaymsg "workspace number 1" >/dev/null 2>&1 || true
+      sleep 1.2
     # SWPP_PIN=<n> pins workspace n the way the binding does (go there, run
     # `swaypplet pin`), then comes back, so the pin shows a hidden workspace.
     elif [ -n "${SWPP_PIN:-}" ]; then
