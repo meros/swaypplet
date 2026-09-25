@@ -208,6 +208,26 @@ pub fn run_command_then(cmd: &str, then: impl FnOnce() + 'static) {
     );
 }
 
+/// [`run_command_then`], telling `then` whether sway accepted the command:
+/// for a caller that falls back to something else when it did not.
+pub fn run_command_result(cmd: &str, then: impl FnOnce(bool) + 'static) {
+    let cmd = cmd.to_string();
+    crate::spawn::spawn_work(
+        move || {
+            connect()
+                .and_then(|mut c| c.run_command(&cmd))
+                .and_then(|outcomes| outcomes.into_iter().find(Result::is_err).unwrap_or(Ok(())))
+                .map_err(|e| format!("sway ipc: command `{cmd}` failed: {e}"))
+        },
+        |result| {
+            if let Err(msg) = &result {
+                log::info!("{msg}");
+            }
+            then(result.is_ok());
+        },
+    );
+}
+
 /// The focused output's connector name, or `None` when sway cannot say.
 ///
 /// Blocking, unlike everything else here that runs from the GTK thread: the
