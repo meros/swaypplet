@@ -20,12 +20,14 @@
 //!
 //! The surface is the shell's own glass, centered, keyboard-free: it appears
 //! while Super is held and leaves when it is released, so it has no business
-//! taking focus.
+//! taking focus. There is one card per output, so the sheet is in front of
+//! whichever screen the user is looking at, not the one sway had focused.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk4::prelude::*;
+use gtk4::{gdk, gio};
 
 use crate::anim;
 use crate::bar::workspaces::generic_label;
@@ -524,9 +526,31 @@ fn mod_rank(keys: &str) -> (usize, String) {
 
 // ── The surface ─────────────────────────────────────────────────────────
 
-pub struct Keybinds {
+/// The sheet on one output. A layer surface is bound to its `wl_output`, so
+/// a card is built for a monitor and destroyed with it, never moved.
+struct Card {
+    monitor: gdk::Monitor,
+    window: gtk4::Window,
     body: gtk4::Box,
     reveal: anim::Reveal,
+}
+
+impl Drop for Card {
+    fn drop(&mut self) {
+        // The alpha handle goes before its `wl_surface` (see
+        // `anim::Reveal::release_alpha`).
+        self.reveal.release_alpha();
+        crate::layer_shell::destroy_window(&self.window);
+    }
+}
+
+pub struct Keybinds {
+    app: gtk4::Application,
+    monitors: gio::ListModel,
+    cards: RefCell<Vec<Card>>,
+    /// What the cards are transitioning toward. Kept here rather than read
+    /// off a card, so a monitor plugged in mid-hold joins the others.
+    shown: Cell<bool>,
     loaded: Rc<Cell<bool>>,
     /// Super is still down and the sheet is still wanted. Cleared by any
     /// release, so a fetch or a hold that lands afterwards reveals nothing.
@@ -556,56 +580,58 @@ const COLUMNS: usize = 3;
 
 impl Keybinds {
     pub fn new(app: &gtk4::Application) -> Rc<Self> {
-        static CONFIG: LayerShellConfig = LayerShellConfig {
-            namespace: "swaypplet-keybinds",
-            layer: gtk4_layer_shell::Layer::Overlay,
-            exclusive: false,
-            default_width: None,
-            default_height: None,
-            anchors: &[],
-            margins: &[],
-            // Held-Super is not a focus gesture: the sheet reads and leaves.
-            keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
-        };
-
-        let window = layer_shell::create_layer_window(app, &CONFIG);
-        window.set_resizable(false);
-        window.set_decorated(false);
-
-        let wrapper = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .halign(gtk4::Align::Center)
-            .valign(gtk4::Align::Center)
-            .build();
-
-        let card = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .build();
-        card.add_css_class("glass-card");
-        card.add_css_class("keybinds-card");
-
-        let body = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(34)
-            .build();
-        body.add_css_class("keybinds-body");
-
-        card.append(&body);
-        wrapper.append(&card);
-        window.set_child(Some(&wrapper));
-
-        let reveal = anim::Reveal::new(&window, &card).content(&body);
-
-        Rc::new(Keybinds {
-            body,
-            reveal,
+        let display = gdk::Display::default().expect("no gdk display");
+        let this = Rc::new(Keybinds {
+            app: app.clone(),
+            monitors: display.monitors(),
+            cards: RefCell::new(Vec::new()),
+            shown: Cell::new(false),
             loaded: Rc::new(Cell::new(false)),
             pending_show: Rc::new(Cell::new(false)),
             held: Rc::new(Cell::new(false)),
             hold_timer: Rc::new(RefCell::new(None)),
             fetching: Rc::new(Cell::new(false)),
             rows: Rc::new(RefCell::new(Vec::new())),
-        })
+        });
+
+        let weak = Rc::downgrade(&this);
+        this.monitors.connect_items_changed(move |_, _, _, _| {
+            if let Some(this) = weak.upgrade() {
+                this.sync();
+            }
+        });
+        this.sync();
+
+        this
+    }
+
+    /// Reconcile the cards against the current monitor list, the same way
+    /// the bar does: drop the card of a monitor that left, build one for a
+    /// monitor that arrived.
+    fn sync(&self) {
+        let current: Vec<gdk::Monitor> = self
+            .monitors
+            .iter::<gdk::Monitor>()
+            .filter_map(Result::ok)
+            .collect();
+
+        self.cards
+            .borrow_mut()
+            .retain(|card| current.contains(&card.monitor));
+
+        for monitor in current {
+            if self.cards.borrow().iter().any(|c| c.monitor == monitor) {
+                continue;
+            }
+            let card = build_card(&self.app, monitor);
+            if self.loaded.get() {
+                fill(&card.body, &self.rows.borrow());
+            }
+            if self.shown.get() {
+                card.reveal.show();
+            }
+            self.cards.borrow_mut().push(card);
+        }
     }
 
     /// Ask for the sheet: Super went down.
@@ -652,7 +678,10 @@ impl Keybinds {
 
     fn try_reveal(&self) {
         if self.pending_show.get() && self.held.get() && self.loaded.get() {
-            self.reveal.show();
+            self.shown.set(true);
+            for card in self.cards.borrow().iter() {
+                card.reveal.show();
+            }
         }
     }
 
@@ -664,13 +693,16 @@ impl Keybinds {
         if let Some(id) = self.hold_timer.replace(None) {
             crate::spawn::remove_source(id);
         }
-        self.reveal.hide();
+        self.shown.set(false);
+        for card in self.cards.borrow().iter() {
+            card.reveal.hide();
+        }
     }
 
     /// For a keyboard-less caller (a click, a script). Skips the hold: an
     /// explicit toggle has already expressed the intent the hold tests for.
     pub fn toggle(self: &Rc<Self>) {
-        if self.reveal.is_shown() {
+        if self.shown.get() {
             self.hide();
         } else {
             self.held.set(true);
@@ -685,35 +717,90 @@ impl Keybinds {
     }
 
     fn rebuild(&self) {
-        while let Some(child) = self.body.first_child() {
-            self.body.remove(&child);
-        }
-
         let sections = self.rows.borrow();
-
-        // Each section goes in whichever column is currently shortest, costed
-        // as its rows plus its heading. Filling left-to-right instead would
-        // hand one column the 21-row workspace table and leave the sheet a
-        // third full — the sections are independent, so nothing is lost by
-        // letting a later one start an earlier column.
-        let columns: Vec<gtk4::Box> = (0..COLUMNS).map(|_| new_column()).collect();
-        let mut heights = vec![0usize; COLUMNS];
-
-        for (section, rows) in sections.iter() {
-            let shortest = heights
-                .iter()
-                .enumerate()
-                .min_by_key(|(i, h)| (**h, *i))
-                .map_or(0, |(i, _)| i);
-            columns[shortest].append(&section_widget(*section, rows));
-            heights[shortest] += rows.len() + 2;
+        for card in self.cards.borrow().iter() {
+            fill(&card.body, &sections);
         }
+    }
+}
 
-        for (column, height) in columns.iter().zip(&heights) {
-            // A column nothing landed in would still claim its min-width.
-            if *height > 0 {
-                self.body.append(column);
-            }
+fn build_card(app: &gtk4::Application, monitor: gdk::Monitor) -> Card {
+    static CONFIG: LayerShellConfig = LayerShellConfig {
+        namespace: "swaypplet-keybinds",
+        layer: gtk4_layer_shell::Layer::Overlay,
+        exclusive: false,
+        default_width: None,
+        default_height: None,
+        anchors: &[],
+        margins: &[],
+        // Held-Super is not a focus gesture: the sheet reads and leaves.
+        keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
+    };
+
+    let window = layer_shell::create_layer_window_on(app, &CONFIG, Some(&monitor));
+    window.set_resizable(false);
+    window.set_decorated(false);
+
+    let wrapper = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .halign(gtk4::Align::Center)
+        .valign(gtk4::Align::Center)
+        .build();
+
+    let card = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .build();
+    card.add_css_class("glass-card");
+    card.add_css_class("keybinds-card");
+
+    let body = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(34)
+        .build();
+    body.add_css_class("keybinds-body");
+
+    card.append(&body);
+    wrapper.append(&card);
+    window.set_child(Some(&wrapper));
+
+    let reveal = anim::Reveal::new(&window, &card).content(&body);
+
+    Card {
+        monitor,
+        window,
+        body,
+        reveal,
+    }
+}
+
+/// Print the sheet into one card's body, replacing what was there.
+fn fill(body: &gtk4::Box, sections: &Sheet) {
+    while let Some(child) = body.first_child() {
+        body.remove(&child);
+    }
+
+    // Each section goes in whichever column is currently shortest, costed
+    // as its rows plus its heading. Filling left-to-right instead would
+    // hand one column the 21-row workspace table and leave the sheet a
+    // third full — the sections are independent, so nothing is lost by
+    // letting a later one start an earlier column.
+    let columns: Vec<gtk4::Box> = (0..COLUMNS).map(|_| new_column()).collect();
+    let mut heights = vec![0usize; COLUMNS];
+
+    for (section, rows) in sections.iter() {
+        let shortest = heights
+            .iter()
+            .enumerate()
+            .min_by_key(|(i, h)| (**h, *i))
+            .map_or(0, |(i, _)| i);
+        columns[shortest].append(&section_widget(*section, rows));
+        heights[shortest] += rows.len() + 2;
+    }
+
+    for (column, height) in columns.iter().zip(&heights) {
+        // A column nothing landed in would still claim its min-width.
+        if *height > 0 {
+            body.append(column);
         }
     }
 }
