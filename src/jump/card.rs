@@ -252,7 +252,7 @@ pub fn preview(scene: Option<&Scene>, w: i32, h: i32, live: &mut Live) -> gtk4::
                 let (slot, pic) = window_slot(&win.app, ww, wh);
                 fixed.put(&slot, f64::from(x), f64::from(y));
                 if let Some(id) = &win.id {
-                    live.pictures.entry(id.clone()).or_default().push(pic);
+                    live.add(id.clone(), pic);
                 }
             }
         }

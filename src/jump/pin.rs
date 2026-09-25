@@ -654,7 +654,17 @@ fn update(pin: &mut Pin, scene: Option<Scene>, show: bool) {
             pin.holder.remove(&child);
         }
         *pin.live.borrow_mut() = Live::default();
-        let picture = card::preview(scene.as_ref(), PIN_W, PIN_H, &mut pin.live.borrow_mut());
+        // The workspace's own shape inside the pin's box, so the card hugs
+        // the picture: a box of fixed proportions letterboxed a 16:9 output
+        // with a band above and below it, which read as uneven margins.
+        let (w, h) = scene.as_ref().map_or((PIN_W, PIN_H), |scene| {
+            let (s, _, _) = scene::fit(scene.width, scene.height, PIN_W, PIN_H);
+            (
+                ((f64::from(scene.width) * s).round() as i32).clamp(8, PIN_W),
+                ((f64::from(scene.height) * s).round() as i32).clamp(8, PIN_H),
+            )
+        });
+        let picture = card::preview(scene.as_ref(), w, h, &mut pin.live.borrow_mut());
         pin.holder.append(&picture);
         pin.scene = scene;
 
