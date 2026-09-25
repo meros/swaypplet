@@ -1208,6 +1208,7 @@ fn populate_card(
     let id = notif.id;
     let store_c = store.clone();
     let names = Rc::new(window_names(notif));
+    let claude_pid = notif.claude_pid;
     let has_default = notif.actions.iter().any(|(key, _)| key == "default");
     let resident = notif.resident;
     gesture.connect_released(move |g, _, _, _| match g.current_button() {
@@ -1216,7 +1217,7 @@ fn populate_card(
         }
         gtk4::gdk::BUTTON_PRIMARY => {
             let store_c = store_c.clone();
-            jump_to_source(names.clone(), move |focused| {
+            jump_to_source(names.clone(), claude_pid, move |focused| {
                 // Nowhere to jump: the sender's own default action is the
                 // next best answer to "take me to this", and dismissing is
                 // the answer when it offered none.
@@ -1406,12 +1407,23 @@ fn window_names(notif: &Notification) -> Vec<String> {
 /// Focus the window the notification came from, and say whether there was
 /// one. `done` runs on the GTK thread either way.
 ///
+/// A Claude session names its process (`claude-pid`), and that is the only
+/// evidence used for it: the terminal that owns the session is the ancestor
+/// that owns a window. Its app name, "Claude Code", names no window, and on
+/// this desktop every session is in a terminal indistinguishable by name from
+/// the others. A session that has ended finds nothing, which falls through to
+/// the caller's fallback rather than to a guess.
+///
 /// The tree query is an IPC round trip, so it happens on a worker thread
 /// (`spawn::spawn_work`) rather than under the pointer. A sway that is not
 /// answering, or a name nothing in the tree matches, is a plain `false`: the
 /// caller has somewhere else to go and the card must never be left waiting.
-fn jump_to_source(names: Rc<Vec<String>>, done: impl FnOnce(bool) + 'static) {
-    if names.is_empty() {
+fn jump_to_source(
+    names: Rc<Vec<String>>,
+    claude_pid: Option<i32>,
+    done: impl FnOnce(bool) + 'static,
+) {
+    if names.is_empty() && claude_pid.is_none() {
         done(false);
         return;
     }
@@ -1422,7 +1434,10 @@ fn jump_to_source(names: Rc<Vec<String>>, done: impl FnOnce(bool) + 'static) {
                 .and_then(|mut c| c.get_tree())
                 .map_err(|e| log::warn!("sway ipc: get_tree failed: {e}"))
                 .ok()?;
-            find_window(&tree, &names)
+            match claude_pid {
+                Some(pid) => window_of_pid(&tree, pid, crate::task_state::parent_pid),
+                None => find_window(&tree, &names),
+            }
         },
         move |found| match found {
             Some(target) => {
@@ -1459,7 +1474,10 @@ fn focus_command(target: &Target) -> String {
 ///
 /// Exact beats the reverse-DNS tail (`org.mozilla.firefox` is `firefox`),
 /// which beats a substring — and a substring counts only from three
-/// characters up, because a two-letter token matches half the tree.
+/// characters up, because a two-letter token matches half the tree, and only
+/// for a one-word name. An app name of several words is a phrase, not an
+/// identifier: "Claude Code" contains "code", which is VS Code's `app_id`,
+/// and a click on a Claude notification used to land there.
 fn name_score(name: &str, id: &str) -> Option<u8> {
     let id = id.to_lowercase();
     if id == name {
@@ -1469,10 +1487,62 @@ fn name_score(name: &str, id: &str) -> Option<u8> {
     if tail(&id) == tail(name) {
         return Some(2);
     }
-    if name.len() >= 3 && id.len() >= 3 && (id.contains(name) || name.contains(&id)) {
+    if name.len() >= 3
+        && id.len() >= 3
+        && !name.contains(char::is_whitespace)
+        && (id.contains(name) || name.contains(&id))
+    {
         return Some(1);
     }
     None
+}
+
+/// The window that `pid` runs under: the view owned by `pid` itself or by
+/// its nearest ancestor that owns one. `parent` is injected so tests need no
+/// /proc.
+///
+/// A Claude session sits a few processes below its terminal (shell,
+/// wrappers), and each terminal window on this desktop is its own process,
+/// so the first ancestor with a view is the one window it is in.
+fn window_of_pid(root: &Node, pid: i32, parent: impl Fn(i32) -> Option<i32>) -> Option<Target> {
+    let mut views = std::collections::HashMap::new();
+    collect_pids(root, None, &mut views);
+    let mut p = pid;
+    while p > 1 {
+        if let Some(target) = views.remove(&p) {
+            return Some(target);
+        }
+        p = parent(p)?;
+    }
+    None
+}
+
+/// Every view that has a pid, keyed by it. The first view in tree order wins
+/// for a process with several windows, which a terminal here never is.
+fn collect_pids(
+    node: &Node,
+    workspace: Option<&str>,
+    out: &mut std::collections::HashMap<i32, Target>,
+) {
+    let workspace = if node.node_type == NodeType::Workspace {
+        node.name
+            .as_deref()
+            .filter(|name| !name.starts_with("__"))
+            .or(workspace)
+    } else {
+        workspace
+    };
+    if node.nodes.is_empty()
+        && let Some(pid) = node.pid
+    {
+        out.entry(pid).or_insert_with(|| Target {
+            con_id: node.id,
+            workspace: workspace.map(str::to_string),
+        });
+    }
+    for child in node.nodes.iter().chain(&node.floating_nodes) {
+        collect_pids(child, workspace, out);
+    }
 }
 
 /// The view this notification came from, or `None` when nothing in the tree
@@ -1719,6 +1789,25 @@ mod tests {
                         "num": 2,
                         "nodes": [node(serde_json::json!({"id": 13, "app_id": "kitty"}))],
                     })),
+                    // Two Claude sessions' terminals and a VS Code window,
+                    // the case the pid exists for.
+                    node(serde_json::json!({
+                        "type": "workspace",
+                        "name": "5:t2a",
+                        "num": 5,
+                        "nodes": [
+                            node(serde_json::json!({"id": 20, "app_id": "Alacritty", "pid": 500})),
+                            node(serde_json::json!({"id": 21, "app_id": "code", "pid": 510})),
+                        ],
+                    })),
+                    node(serde_json::json!({
+                        "type": "workspace",
+                        "name": "9:t3a",
+                        "num": 9,
+                        "nodes": [node(serde_json::json!({
+                            "id": 22, "app_id": "Alacritty", "pid": 600, "focused": true,
+                        }))],
+                    })),
                 ],
             }))],
         })))
@@ -1756,6 +1845,39 @@ mod tests {
         assert_eq!(name_score("ki", "kitty"), None);
         assert_eq!(name_score("kitty", "kitty"), Some(3));
         assert_eq!(name_score("org.kde.konsole", "konsole"), Some(2));
+        assert_eq!(name_score("firefox", "firefox-esr"), Some(1));
+    }
+
+    /// Process tree: claude 503 → shell 502 → alacritty 500, and claude 603
+    /// → shell 602 → wrapper 601 → alacritty 600. Everything else is init's.
+    fn parent(pid: i32) -> Option<i32> {
+        match pid {
+            503 => Some(502),
+            502 => Some(500),
+            603 => Some(602),
+            602 => Some(601),
+            601 => Some(600),
+            _ => Some(1),
+        }
+    }
+
+    #[test]
+    fn a_claude_notification_goes_to_the_terminal_its_session_runs_in() {
+        let t = tree();
+        let at = |pid| window_of_pid(&t, pid, parent).map(|t| (t.con_id, t.workspace));
+        assert_eq!(at(503), Some((20, Some("5:t2a".into()))));
+        // Not the focused terminal, and not the other session's.
+        assert_eq!(at(603), Some((22, Some("9:t3a".into()))));
+        // A session that has ended owns nothing: no guess.
+        assert_eq!(at(999), None);
+    }
+
+    #[test]
+    fn a_phrase_app_name_does_not_match_a_word_inside_it() {
+        // "Claude Code" once matched VS Code's app_id "code".
+        assert_eq!(name_score("claude code", "code"), None);
+        assert_eq!(found(&["claude code"]), None);
+        // One-word names keep their substring match.
         assert_eq!(name_score("firefox", "firefox-esr"), Some(1));
     }
 
