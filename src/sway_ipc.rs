@@ -208,6 +208,28 @@ pub fn run_command_then(cmd: &str, then: impl FnOnce() + 'static) {
     );
 }
 
+/// Run `cmds` in order on one connection, each on its own: a command sway
+/// rejects does not stop the ones after it, where a `;`-separated list would
+/// end at the first unknown command.
+pub fn run_commands(cmds: Vec<String>) {
+    crate::spawn::spawn_work(
+        move || {
+            let Ok(mut c) = connect() else { return };
+            for cmd in cmds {
+                match c.run_command(&cmd) {
+                    Ok(outcomes) => {
+                        if let Some(Err(e)) = outcomes.into_iter().find(Result::is_err) {
+                            log::debug!("sway ipc: `{cmd}`: {e}");
+                        }
+                    }
+                    Err(e) => log::warn!("sway ipc: `{cmd}` failed: {e}"),
+                }
+            }
+        },
+        |()| {},
+    );
+}
+
 /// [`run_command_then`], telling `then` whether sway accepted the command:
 /// for a caller that falls back to something else when it did not.
 pub fn run_command_result(cmd: &str, then: impl FnOnce(bool) + 'static) {

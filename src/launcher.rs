@@ -86,7 +86,9 @@ const MAX_WINDOW_ROWS: usize = 3;
 
 /// Search entry + scrolled results list, wired to elephant. Mountable inside
 /// any container. Calls the registered `on_activate` callback (if any) right
-/// after firing the activation, so a host popup can hide itself.
+/// after firing the activation, so a host popup can hide itself. Cloning
+/// shares the same view.
+#[derive(Clone)]
 pub struct LauncherView {
     root: gtk4::Box,
     entry: gtk4::SearchEntry,
@@ -162,6 +164,11 @@ impl LauncherView {
         view
     }
 
+    /// What Enter does: activate the selected row.
+    pub fn activate_selected(&self) {
+        activate_selected(&self.state, &self.results_box, &self.entry, &self.on_activate);
+    }
+
     pub fn entry(&self) -> &gtk4::SearchEntry {
         &self.entry
     }
@@ -235,18 +242,7 @@ impl LauncherView {
                 glib::Propagation::Stop
             }
             gtk4::gdk::Key::Return | gtk4::gdk::Key::KP_Enter => {
-                let s = view_state.borrow();
-                if let Some(item) = s.results.get(s.selected) {
-                    let provider = item.provider.clone();
-                    let identifier = item.identifier.clone();
-                    let action = default_action(item);
-                    let query = entry.text().to_string();
-                    drop(s);
-                    activate_async(provider, identifier, action, query);
-                    if let Some(cb) = on_activate.borrow().as_ref() {
-                        cb();
-                    }
-                }
+                activate_selected(&view_state, &results_box, &entry, &on_activate);
                 glib::Propagation::Stop
             }
             _ => glib::Propagation::Proceed,
@@ -393,12 +389,22 @@ impl Launcher {
             if let Ok(query) = std::env::var("SWAYPPLET_LAUNCHER_QUERY")
                 && !query.is_empty()
             {
-                for (i, step) in query.split('|').enumerate() {
+                let steps: Vec<String> = query.split('|').map(str::to_string).collect();
+                for (i, step) in steps.iter().enumerate() {
                     let entry = self.view.entry().clone();
-                    let step = step.to_string();
+                    let step = step.clone();
                     glib::timeout_add_local_once(
                         std::time::Duration::from_millis(1500 * i as u64),
                         move || entry.set_text(&step),
+                    );
+                }
+                // `SWAYPPLET_LAUNCHER_ACTIVATE=1` then presses Enter, 1.5 s
+                // after the last step: the launch hand-off, end to end.
+                if std::env::var("SWAYPPLET_LAUNCHER_ACTIVATE").is_ok_and(|v| !v.is_empty()) {
+                    let view = self.view.clone();
+                    glib::timeout_add_local_once(
+                        std::time::Duration::from_millis(1500 * steps.len() as u64),
+                        move || view.activate_selected(),
                     );
                 }
             }
@@ -440,11 +446,66 @@ fn move_selection_state(
     }
 }
 
+fn activate_selected(
+    state: &Rc<RefCell<LauncherState>>,
+    results_box: &gtk4::Box,
+    entry: &gtk4::SearchEntry,
+    on_activate: &OnActivate,
+) {
+    let s = state.borrow();
+    let Some(item) = s.results.get(s.selected) else {
+        return;
+    };
+    let provider = item.provider.clone();
+    let identifier = item.identifier.clone();
+    let action = default_action(item);
+    let query = entry.text().to_string();
+    let selected = s.selected;
+    drop(s);
+    if let Some(row) = nth_child(results_box, selected) {
+        hand_off_launch(&provider, &row);
+    }
+    activate_async(provider, identifier, action, query);
+    if let Some(cb) = on_activate.borrow().as_ref() {
+        cb();
+    }
+}
+
+/// An application about to start opens out of its row's icon (swayfx
+/// `handoff open`). Only for applications: every other provider either opens
+/// no window or, for the running-window rows, goes to one that exists.
+fn hand_off_launch(provider: &str, row: &gtk4::Widget) {
+    if provider == "desktopapplications"
+        && let Some(icon) = row.first_child()
+    {
+        crate::handoff::open_from(&icon);
+    }
+}
+
+/// The `n`th child of `parent`.
+fn nth_child(parent: &impl IsA<gtk4::Widget>, n: usize) -> Option<gtk4::Widget> {
+    let mut child = parent.first_child();
+    for _ in 0..n {
+        child = child?.next_sibling();
+    }
+    child
+}
+
 fn activate_async(provider: String, identifier: String, action: String, query: String) {
     if provider == WINDOW_PROVIDER {
         if let Some(con_id) = identifier.split_whitespace().next() {
             crate::sway_ipc::run_command(&format!("[con_id={con_id}] focus"));
         }
+        return;
+    }
+    // Harness hook: elephant runs in the live session and would start the
+    // app there. `SWAYPPLET_LAUNCH_EXEC=<cmd>` starts `cmd` through the sway
+    // this process talks to instead, after the same hand-off.
+    if provider == "desktopapplications"
+        && let Ok(cmd) = std::env::var("SWAYPPLET_LAUNCH_EXEC")
+        && !cmd.is_empty()
+    {
+        crate::sway_ipc::run_command(&format!("exec {cmd}"));
         return;
     }
     std::thread::spawn(move || {
@@ -815,7 +876,11 @@ fn build_result_row(
     let action = default_action(result);
     let query_str = query.to_string();
     let on_activate = on_activate.clone();
+    let row_weak = row.downgrade();
     gesture.connect_released(move |_, _, _, _| {
+        if let Some(row) = row_weak.upgrade() {
+            hand_off_launch(&provider, row.upcast_ref());
+        }
         activate_async(
             provider.clone(),
             identifier.clone(),

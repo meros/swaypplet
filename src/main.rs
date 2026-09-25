@@ -15,6 +15,7 @@ mod fp;
 mod gdm_shim;
 mod glib_unix;
 mod greet;
+mod handoff;
 mod icons;
 mod idle;
 mod inhibit;

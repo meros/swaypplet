@@ -29,6 +29,10 @@ use swayipc::{Node, NodeLayout, NodeType};
 /// workspace itself.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Scene {
+    /// Where the pictured area starts in the output layout: the windows'
+    /// bounding box, which is what a picture of the scene shows.
+    pub x: i32,
+    pub y: i32,
     pub width: i32,
     pub height: i32,
     /// Bottom first: tiled views, then floating ones.
@@ -61,6 +65,8 @@ pub fn scene(tree: &Node, name: &str) -> Option<Scene> {
         .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
     else {
         return Some(Scene {
+            x: ws.rect.x,
+            y: ws.rect.y,
             width: ws.rect.width,
             height: ws.rect.height,
             windows,
@@ -71,6 +77,8 @@ pub fn scene(tree: &Node, name: &str) -> Option<Scene> {
         w.y -= y0;
     }
     Some(Scene {
+        x: x0,
+        y: y0,
         width: x1 - x0,
         height: y1 - y0,
         windows,

@@ -70,6 +70,9 @@ struct State {
     names: Vec<String>,
     selected: usize,
     watchdog: Option<glib::SourceId>,
+    /// The selected place's picture and what it shows, taken as the card
+    /// unmaps: the switch that follows grows out of it (`handoff`).
+    handoff: Option<(crate::handoff::Rect, crate::handoff::Rect)>,
 }
 
 /// What `p` does with the selected workspace's name.
@@ -137,6 +140,7 @@ impl Jump {
                 names: Vec::new(),
                 selected: 0,
                 watchdog: None,
+                handoff: None,
             }),
         });
         this.wire();
@@ -262,12 +266,28 @@ impl Jump {
                 self.window.set_visible(true);
                 self.arm_watchdog();
                 self.start_stream();
+                // Harness hook: the nested session has no keyboard to let go
+                // of, so `SWAYPPLET_JUMP_RELEASE_MS=<ms>` releases Super that
+                // long after the card maps, down the same path.
+                if let Some(ms) = std::env::var("SWAYPPLET_JUMP_RELEASE_MS")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok())
+                {
+                    let this = self.clone();
+                    glib::timeout_add_local_once(std::time::Duration::from_millis(ms), move || {
+                        this.feed(Ev::SuperReleased)
+                    });
+                }
             }
             Action::Select(i) => {
                 self.select(i);
                 self.arm_watchdog();
             }
             Action::Unmap => {
+                // Measured while the card is still on screen.
+                let selected = self.state.borrow().selected;
+                let handoff = self.card.borrow().as_ref().and_then(|c| c.handoff(selected));
+                self.state.borrow_mut().handoff = handoff;
                 self.stream.replace(None);
                 self.disarm_watchdog();
                 self.window.set_visible(false);
@@ -282,7 +302,12 @@ impl Jump {
                     log::debug!("jump: cancelled, something else moved us to {origin:?}");
                     return;
                 }
-                crate::sway_ipc::run_command(&command);
+                let handoff = self.state.borrow_mut().handoff.take();
+                crate::handoff::run_workspace_switch(
+                    handoff.map(|h| h.0),
+                    handoff.map(|h| h.1),
+                    &command,
+                );
             }
         }
     }
