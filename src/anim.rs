@@ -519,11 +519,13 @@ impl Reveal {
     fn set_material_alpha(&self, a: f64) {
         match &*self.inner.alpha.borrow() {
             Some(m) => {
+                // `set` commits the surface itself, so the number lands on
+                // this frame without a redraw. A queue_draw here used to
+                // repaint the whole card every frame of every fade, and each
+                // of those commits cost the compositor a new outline for the
+                // glass.
                 m.set(a);
                 self.inner.pane.set_opacity(1.0);
-                // The multiplier is surface state, so it lands on the next
-                // commit and only a redraw produces one.
-                self.inner.pane.queue_draw();
             }
             None => self.inner.pane.set_opacity(a),
         }
