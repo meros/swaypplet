@@ -542,7 +542,14 @@ fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, workspa
         default_width: None,
         default_height: None,
         anchors: &[(Edge::Bottom, true), (Edge::Right, true)],
-        margins: &[(Edge::Bottom, MARGIN_BOTTOM), (Edge::Right, MARGIN_RIGHT)],
+        // No right margin on the surface: it reaches the screen's edge, and
+        // the gap to the card is the card's own (below). The entrance slides
+        // the card toward that edge and back, and a card moving inside its
+        // surface is what the compositor's glass follows (the pin namespace's
+        // glass entry masks it to the card's pixels, as the notifications'
+        // does); a surface that ended at the card clipped it instead, and its
+        // glass stood still.
+        margins: &[(Edge::Bottom, MARGIN_BOTTOM)],
         keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
     };
     let window = layer_shell::create_layer_window_on(app, &CONFIG, monitor);
@@ -599,6 +606,7 @@ fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, workspa
     // way (anim::Reveal, the shell's one entrance).
     let slide = crate::anim::SlideBin::horizontal();
     slide.set_child(&frame);
+    slide.set_margin_end(MARGIN_RIGHT);
     window.set_child(Some(&slide));
     let reveal = crate::anim::Reveal::new(&window, &frame)
         .content(&content)
