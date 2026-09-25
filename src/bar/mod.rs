@@ -18,7 +18,8 @@ mod clock;
 mod decision;
 mod hazards;
 mod media;
-mod popover;
+mod pins;
+pub(crate) mod popover;
 mod presence;
 mod start;
 mod tray;
@@ -162,32 +163,16 @@ impl BarManager {
         }
     }
 
-    /// Route a volume/brightness OSD into the decision slot on the
-    /// focused output's bar (any bar as fallback). `false` when no bar
-    /// exists, so the caller falls back to the center-screen card.
+    /// Route a volume/brightness OSD into the decision slot of every bar,
+    /// like the center card, which is on every output too: a key press has
+    /// no output. `false` when no bar exists, so the caller falls back to
+    /// the center-screen card.
     pub fn interject(&self, icon: &str, fraction: f64, text: &str) -> bool {
         let windows = self.windows.borrow();
-        let Some(first) = windows.first() else {
-            return false;
-        };
-        // gdk connector names match sway output names under wlroots.
-        let focused_output = self
-            .sway
-            .snapshot()
-            .workspaces
-            .iter()
-            .find(|w| w.focused)
-            .map(|w| w.output.clone());
-        let target = windows
-            .iter()
-            .find(|bar| {
-                focused_output
-                    .as_deref()
-                    .is_some_and(|out| bar.monitor.connector().is_some_and(|c| c == out))
-            })
-            .unwrap_or(first);
-        target.decision.interject(icon, fraction, text);
-        true
+        for bar in windows.iter() {
+            bar.decision.interject(icon, fraction, text);
+        }
+        !windows.is_empty()
     }
 }
 
@@ -245,6 +230,8 @@ fn build_bar_window(
     // then the instrument track. The Bar tab's Segments group hides the
     // ones it names; the hazard lane and the clock are not optional.
     right.append(&follow_setting(media::build(sway), |bar| bar.media));
+    // Where pinned workspaces live when they are not floating (jump/pin.rs).
+    right.append(&pins::build());
     right.append(&follow_setting(tray::build(tray), |bar| bar.tray));
     right.append(&hazards::build(sway, audio));
     // Battery + board + clock fuse into one segmented track (waybar's

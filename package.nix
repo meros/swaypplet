@@ -107,6 +107,13 @@ rustPlatform.buildRustPackage {
     SCRIPT
     chmod +x $out/bin/swaypplet-jump
 
+    # Pin — keep the focused workspace in sight, live (src/jump/pin.rs)
+    cat > $out/bin/swaypplet-pin <<SCRIPT
+    #!/bin/sh
+    exec $out/bin/swaypplet pin "\$@"
+    SCRIPT
+    chmod +x $out/bin/swaypplet-pin
+
     # Keybinding sheet — `show` / `hide` edges from the Super-hold watcher
     cat > $out/bin/swaypplet-keybinds <<SCRIPT
     #!/bin/sh

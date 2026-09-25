@@ -11,7 +11,13 @@
 #   dev/render.sh [--bin PATH] [--res WxH] [--out FILE] [--mode panel|launcher|polkit|preview:NAME] [--css FILE]
 #   SWPP_SEED_CLIPBOARD=1 dev/render.sh --mode preview:clipboard   # rows to draw
 #   dev/render.sh --mode keybinds --res 1600x1000                  # the held-Super sheet
-#   dev/render.sh --mode jump --res 1400x900                       # the Super+Tab list
+#   dev/render.sh --mode jump --res 1280x800                       # the Super+Tab card, live
+#   SWPP_SHOTS=3 dev/render.sh --mode jump --res 1280x800          # a series, and the diff
+#   SWPP_PEEK=24 dev/render.sh --mode jump --res 1280x800          # the bar's peek at workspace 24
+#   SWPP_PIN=24 dev/render.sh --mode jump --res 1280x800           # workspace 24 pinned, from 1
+#   SWPP_PIN=24 SWPP_PINS_OPEN=1 dev/render.sh --mode jump ...     # and the bar's pins popover
+#   SWPP_OUTPUTS=2 dev/render.sh --mode keybinds --res 1280x800    # every output, side by side
+#   SWPP_OUTPUTS=2 dev/render.sh --mode osd --res 1280x800         # the OSD card, on each output
 #   dev/render.sh --mode screenshot --res 1200x800                 # the region selector
 #   dev/render.sh --mode notifications --res 700x900                # the popup stack
 #   SWPP_SELECT_RECT=120,90,540,330 dev/render.sh --mode screenshot # with a selection drawn
@@ -68,7 +74,7 @@ SOCK="$RUNTIME/sway-render-$$.sock"
   # sway's parser wants the block across lines: a one-liner is read as an
   # unmatched '}' and the whole rule is dropped, which renders every surface
   # here unfrosted while looking like it worked.
-  for ns in swaypplet swaypplet-launcher swaypplet-osd swaypplet-notification swaypplet-polkit swaypplet-keybinds swaypplet-jump; do
+  for ns in swaypplet swaypplet-launcher swaypplet-osd swaypplet-notification swaypplet-polkit swaypplet-keybinds; do
     printf 'layer_effects "%s" {\n    blur enable\n    blur_ignore_transparent enable\n}\n' "$ns"
   done
   # The keybinding sheet reads the config sway loaded, so a nested session
@@ -94,7 +100,15 @@ export SWAYSOCK="$SOCK"
 unset I3SOCK
 # -d so the "Running compositor on wayland display 'X'" line (INFO level) is
 # logged; we parse the display name from it.
-WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 "$SWAY_BIN" -d --config "$CFG" >"$LOG" 2>&1 &
+# SWPP_OUTPUTS=n gives the session n outputs, each --res, side by side, and
+# the shot covers all of them: for a surface that has to be on every screen.
+OUTPUTS="${SWPP_OUTPUTS:-1}"
+for n in $(seq 2 "$OUTPUTS"); do
+  printf 'output HEADLESS-%s resolution %sx%s position %s 0 scale 1\n' "$n" "$W" "$H" "$(( (n - 1) * W ))" >> "$CFG"
+done
+GRIM_OUTPUT=(-o HEADLESS-1)
+[ "$OUTPUTS" -gt 1 ] && GRIM_OUTPUT=()
+WLR_HEADLESS_OUTPUTS="$OUTPUTS" WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 "$SWAY_BIN" -d --config "$CFG" >"$LOG" 2>&1 &
 SWAY_PID=$!
 
 for _ in $(seq 1 80); do swaymsg -t get_version >/dev/null 2>&1 && break; sleep 0.1; done
@@ -113,7 +127,7 @@ rm -f "$RUNTIME/swaypplet.pid"
 case "$MODE" in
   polkit)    "$BIN" polkit-agent >/tmp/swpp-app.log 2>&1 & ;;
   jump)
-    "$BIN" >/tmp/swpp-app.log 2>&1 &
+    SWAYPPLET_PEEK_OPEN="${SWPP_PEEK:-}" SWAYPPLET_PINS_OPEN="${SWPP_PINS_OPEN:-}" "$BIN" >/tmp/swpp-app.log 2>&1 &
     for _ in $(seq 1 200); do
       [ -e "$RUNTIME/swaypplet.pid" ] && break; sleep 0.1
     done
@@ -124,14 +138,66 @@ case "$MODE" in
     # refuses to draw anything for (src/jump/gesture.rs). Each stop gets a
     # window so the workspace survives being left, which is also what makes
     # the detail column show something.
-    for ws in 5 24 30 1; do
+    #
+    # The windows keep drawing (a coloured line every 50 ms), so the card's
+    # pictures of workspaces nobody is looking at have something to show
+    # moving: that is the claim a SWPP_SHOTS series checks. Workspace 24 gets
+    # two windows, for a split in its picture. SWPP_JUMP_APP overrides the
+    # client, for a shot of what a real one looks like.
+    ticker='i=0; while :; do i=$((i+1)); printf "\033[4%dm %05d %s \033[0m\n" $((i%6+1)) $i "$(date +%T.%N)"; sleep 0.05; done'
+    app="${SWPP_JUMP_APP:-alacritty -e sh -c '$ticker'}"
+    for ws in 5 24 24 30 1; do
       swaymsg "workspace number $ws" >/dev/null 2>&1 || true
-      swaymsg exec "${SWPP_JUMP_APP:-foot}" >/dev/null 2>&1 || true
+      swaymsg exec "timeout 120 $app" >/dev/null 2>&1 || true
       sleep 1.2
     done
     sleep 0.8
-    "$BIN" jump >>/tmp/swpp-app.log 2>&1 || true
-    sleep 0.6
+    # SWPP_PEEK=<workspace> opens the bar's peek at that workspace instead.
+    # The session has no pointer, so the app opens it itself on start
+    # (SWAYPPLET_PEEK_OPEN, set before launch above).
+    if [ -n "${SWPP_PEEK:-}" ]; then
+      sleep 1.2
+    # SWPP_PIN=<n> pins workspace n the way the binding does (go there, run
+    # `swaypplet pin`), then comes back, so the pin shows a hidden workspace.
+    elif [ -n "${SWPP_PIN:-}" ]; then
+      swaymsg "workspace number $SWPP_PIN" >/dev/null 2>&1 || true
+      sleep 0.4
+      "$BIN" pin >>/tmp/swpp-app.log 2>&1 || true
+      # SWPP_PIN_STAY=1 stays on the pinned workspace, for the shot of what
+      # pinning says: the OSD card, and the pin showing itself for a moment.
+      if [ -z "${SWPP_PIN_STAY:-}" ]; then
+        sleep 0.6
+        swaymsg "workspace number 1" >/dev/null 2>&1 || true
+        sleep 1.0
+      fi
+      # SWPP_PIN_VISIT=1 then visits the pinned workspace and comes back,
+      # which must leave it pinned.
+      if [ -n "${SWPP_PIN_VISIT:-}" ]; then
+        swaymsg "workspace number $SWPP_PIN" >/dev/null 2>&1 || true
+        sleep 1.0
+        swaymsg "workspace number 1" >/dev/null 2>&1 || true
+        sleep 1.5
+      fi
+      # SWPP_AFTER="cmd | cmd | ..." then runs sway commands, 1.2 s apart,
+      # for a scenario the flags above do not cover.
+      if [ -n "${SWPP_AFTER:-}" ]; then
+        IFS='|' read -ra steps <<< "$SWPP_AFTER"
+        for step in "${steps[@]}"; do
+          swaymsg "$step" >/dev/null 2>&1 || true
+          sleep 1.2
+        done
+      fi
+      # SWPP_PIN_FOCUS=<output> then moves focus there (with SWPP_OUTPUTS=2),
+      # for the pin following the screen you work on.
+      if [ -n "${SWPP_PIN_FOCUS:-}" ]; then
+        swaymsg "focus output $SWPP_PIN_FOCUS" >/dev/null 2>&1 || true
+        sleep 2.0
+        swaymsg -t get_outputs 2>/dev/null | grep -E '"name"|"focused"|"x"|"current_workspace"' > /tmp/swpp-outputs.txt || true
+      fi
+    else
+      "$BIN" jump >>/tmp/swpp-app.log 2>&1 || true
+      sleep 0.6
+    fi
     ;;
   notifications)
     "$BIN" >/tmp/swpp-app.log 2>&1 &
@@ -179,6 +245,17 @@ case "$MODE" in
     # below would otherwise pass on the frame before the selector maps.
     sleep 3
     ;;
+  osd)
+    # The caps-lock card: it reads the LED and changes nothing, where a
+    # volume or brightness key would move the real machine's level (the
+    # audio service talks to the user's own sound server).
+    "$BIN" >/tmp/swpp-app.log 2>&1 &
+    for _ in $(seq 1 200); do
+      [ -e "$RUNTIME/swaypplet.pid" ] && break; sleep 0.1
+    done
+    sleep 1.5
+    "$BIN" osd --caps-lock >>/tmp/swpp-app.log 2>&1 || true
+    ;;
   keybinds)
     "$BIN" >/tmp/swpp-app.log 2>&1 &
     # The sheet is a surface of the running panel, so it needs the panel up
@@ -206,7 +283,12 @@ case "$MODE" in
 esac
 
 mapped=""
+# A layer surface is never in the tree, so this wait cannot see one and runs
+# to its 6 s end. For the jump card that is fatal: its watchdog commits and
+# closes it after 3 s, so every shot missed it.
+case "$MODE" in jump|osd) mapped=layer ;; esac
 for _ in $(seq 1 60); do
+  [ -n "$mapped" ] && break
   swaymsg -t get_tree 2>/dev/null | grep -q '"app_id": *"[^"]*swaypplet' && { mapped=1; break; }
   sleep 0.1
 done
@@ -231,10 +313,25 @@ fi
 captured=""
 for _ in $(seq 1 10); do
   sleep 0.5
-  "$GRIM_BIN" -o HEADLESS-1 "$OUT" 2>/dev/null || true
+  "$GRIM_BIN" "${GRIM_OUTPUT[@]}" "$OUT" 2>/dev/null || true
   sz=$(stat -c '%s' "$OUT" 2>/dev/null || echo 0)
   if [ "$sz" -gt 6000 ]; then captured=1; break; fi
 done
+# A series, for a surface that is meant to move: SWPP_SHOTS more frames,
+# SWPP_SHOT_GAP seconds apart, named after OUT (-1, -2, ...), and the number
+# of pixels that differ between the first and the last. Zero means nothing
+# on screen changed, which for the jump card means its pictures are stills.
+if [ "${SWPP_SHOTS:-0}" -gt 0 ]; then
+  last="$OUT"
+  for n in $(seq 1 "$SWPP_SHOTS"); do
+    sleep "${SWPP_SHOT_GAP:-0.4}"
+    last="${OUT%.png}-$n.png"
+    "$GRIM_BIN" "${GRIM_OUTPUT[@]}" "$last" 2>/dev/null || true
+  done
+  changed=$(compare -metric AE "$OUT" "$last" null: 2>&1 >/dev/null || true)
+  echo "changed pixels, first to last shot: $changed"
+fi
+
 [ -z "$mapped" ] && { echo "WARNING: no swaypplet surface in tree"; echo "--- app log ---"; head -30 /tmp/swpp-app.log; }
 [ -z "$captured" ] && echo "WARNING: capture stayed blank after retries"
 echo "wrote $OUT (${W}x${H}, mode=$MODE, display=$WD)"

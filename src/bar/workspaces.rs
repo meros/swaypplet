@@ -100,6 +100,16 @@ pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box 
     let sway_cb = sway.clone();
     let tasks_cb = tasks.clone();
     let pills_cb = pills.clone();
+    // Read at hover time, for the peek: a workspace already on a screen gets
+    // none.
+    let sway_peek = sway.clone();
+    let on_screen: Rc<dyn Fn(&str) -> bool> = Rc::new(move |name| {
+        sway_peek
+            .snapshot()
+            .workspaces
+            .iter()
+            .any(|w| w.name == name && w.visible)
+    });
     let sync = Rc::new(move || {
         // The observer outlives the widget when its output is unplugged
         // (the service has no disconnect); a dead weak ref makes the
@@ -120,7 +130,7 @@ pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box 
         // a workspace switch no longer destroys the button under the
         // pointer and the 150 ms tier transitions actually get to play.
         if !matches_layout(&pills, &groups) {
-            *pills = raise(&container, &groups);
+            *pills = raise(&container, &groups, &on_screen);
         }
         apply(&pills, &groups, &plans);
     });
@@ -129,6 +139,20 @@ pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box 
     sway.connect_change(move || sync_cb());
     let sync_cb = sync.clone();
     tasks.connect_change(move || sync_cb());
+    // A pin mark appears or goes: the buttons are rebuilt only on a change of
+    // shape, so the mark is set here on the live ones.
+    // Weak: the registry outlives a bar unplugged with its output.
+    let weak_pills = Rc::downgrade(&pills);
+    crate::jump::pin::connect_changed(move || {
+        let Some(pills) = weak_pills.upgrade() else {
+            return;
+        };
+        for pill in pills.borrow().iter() {
+            for seg in &pill.segments {
+                seg.set_pinned(crate::jump::pin::is_pinned(&seg.workspace));
+            }
+        }
+    });
 
     container
 }
@@ -148,6 +172,20 @@ struct Segment {
     task: Option<usize>,
     button: gtk4::Button,
     view: Cell<SegView>,
+}
+
+impl Segment {
+    /// Show or hide the pin glyph after the label.
+    fn set_pinned(&self, pinned: bool) {
+        if let Some(mark) = self
+            .button
+            .child()
+            .and_then(|c| c.last_child())
+            .filter(|m| m.has_css_class("bar-ws-pin"))
+        {
+            mark.set_visible(pinned);
+        }
+    }
 }
 
 /// Everything CSS-visible about a segment, in one comparable value.
@@ -185,7 +223,11 @@ fn matches_layout(pills: &[Pill], groups: &[Group]) -> bool {
 /// Build the widget tree from scratch. State classes are left to
 /// [`apply`]; every fresh segment starts on a view no real state equals,
 /// so the first apply always writes.
-fn raise(container: &gtk4::Box, groups: &[Group]) -> Vec<Pill> {
+fn raise(
+    container: &gtk4::Box,
+    groups: &[Group],
+    on_screen: &Rc<dyn Fn(&str) -> bool>,
+) -> Vec<Pill> {
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
@@ -200,12 +242,21 @@ fn raise(container: &gtk4::Box, groups: &[Group]) -> Vec<Pill> {
                 .workspaces
                 .iter()
                 .map(|ws| {
+                    // The label, and a pin glyph shown while the workspace
+                    // is pinned (jump/pin.rs).
+                    let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 3);
+                    content.append(&label_widget(ws.num, &ws.name));
+                    let pin_mark = gtk4::Label::new(Some("\u{f0403}"));
+                    pin_mark.add_css_class("bar-ws-pin");
+                    pin_mark.set_visible(crate::jump::pin::is_pinned(&ws.name));
+                    content.append(&pin_mark);
                     let button = gtk4::Button::builder()
                         .css_classes(["bar-ws"])
-                        .child(&label_widget(ws.num, &ws.name))
+                        .child(&content)
                         .build();
                     let cmd = switch_command(ws.num, &ws.name);
                     button.connect_clicked(move |_| sway_ipc::run_command(&cmd));
+                    crate::jump::peek::attach(&button, ws.name.clone(), on_screen.clone());
                     widget.append(&button);
                     Segment {
                         workspace: ws.name.clone(),

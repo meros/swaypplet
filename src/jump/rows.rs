@@ -1,5 +1,8 @@
 //! One row per place, and the geometry of the card that holds them.
 //!
+//! A "row" is one place on the card. The card draws each as a tile with a live
+//! picture of the workspace over its caption, four tiles to a line.
+//!
 //! Every dimension here is a constant or a function of the row *count*. None
 //! of them is a function of window geometry, window count, title length or a
 //! texture's aspect ratio. That is deliberate and it is the whole fix for the
@@ -16,15 +19,23 @@ use super::place::Place;
 
 // ── Geometry ────────────────────────────────────────────────────────────
 
-/// Fixed. The card does not grow for a long session description, because the
-/// description is ellipsized instead - a surface that reflows while you hold a
-/// key is one you cannot aim at.
-pub const CARD_W: i32 = 520;
-/// Fixed, and identical on every row. A row with three window icons is the
-/// same height as a row with none.
-pub const ROW_H: i32 = 36;
-/// Above and below the rows.
-pub const CARD_PAD: i32 = 12;
+/// The workspace picture, 16:10 like the panel. Fixed: a workspace on a
+/// portrait or ultrawide output is letterboxed inside it (`scene::fit`), and
+/// the tile does not change shape for it.
+pub const PREVIEW_W: i32 = 440;
+pub const PREVIEW_H: i32 = 275;
+/// Around the picture, inside the tile's selection ring.
+pub const TILE_PAD: i32 = 8;
+/// The chord, the label and the apps under the picture. One line, ellipsized.
+pub const CAPTION_H: i32 = 40;
+pub const TILE_W: i32 = PREVIEW_W + 2 * TILE_PAD;
+pub const TILE_H: i32 = TILE_PAD + PREVIEW_H + CAPTION_H + TILE_PAD;
+/// The strip the places float in: as wide as the output, and as tall as the
+/// front place plus the room perspective takes above and below it. The side
+/// places are shorter than the front one, so nothing reaches past this.
+pub const STAGE_H: i32 = TILE_H + 32;
+/// The line of key hints under the stage.
+pub const HINT_H: i32 = 24;
 
 /// The list stops here. Nothing is lost by it: every workspace on this machine
 /// is one direct chord away, and the chord column on each row says which. A
@@ -32,16 +43,21 @@ pub const CARD_PAD: i32 = 12;
 /// not what "back to what I was doing" means.
 pub const MAX_ROWS: usize = 8;
 
-/// The card's size, from the row count and nothing else.
-pub fn card_size(rows: usize) -> (i32, i32) {
-    (CARD_W, CARD_PAD * 2 + ROW_H * rows as i32)
+/// The strip's height, from the row count and nothing else: nothing for no
+/// rows, and the one stage for any number. Its width is the output's; the
+/// number of places a side follows from it (`carousel::per_side`), and the
+/// row slides to show the rest. Nothing on it grows to hold more.
+pub fn strip_height(rows: usize) -> i32 {
+    if rows == 0 { 0 } else { STAGE_H + HINT_H }
 }
 
 /// How many rows a ring of `places` produces.
 ///
 /// `places[0]` is where you are and is never drawn, so a ring of one produces
 /// no rows at all - which is what makes `Super+Tab` a silent no-op on a fresh
-/// session rather than a card with nothing in it.
+/// session rather than a card with nothing in it. `rows` applies the same
+/// rule; this is its statement for the tests.
+#[cfg(test)]
 pub fn row_count(places: usize) -> usize {
     places.saturating_sub(1).min(MAX_ROWS)
 }
@@ -89,8 +105,22 @@ pub fn rows(
         .collect()
 }
 
+/// The label under a tile, with the chord taken out when the label ends in
+/// it. The bar's generic labels are a glyph and the workspace's key
+/// (`"󰗃 y"`), and the tile already prints the key in its badge, so the caption
+/// would say it twice. A task label (`"1¹"`) keeps its screen mark.
+pub fn caption_label(row: &Row) -> &str {
+    let Some(chord) = row.chord.as_deref() else {
+        return &row.label;
+    };
+    match row.label.strip_suffix(chord) {
+        Some(rest) if rest.is_empty() || rest.ends_with(' ') => rest.trim_end(),
+        _ => &row.label,
+    }
+}
+
 /// The label the bar would draw for this workspace.
-fn label_for(p: &Place) -> String {
+pub(crate) fn label_for(p: &Place) -> String {
     // Task workspaces are 1..=16 by the table's own numbering; everything else
     // takes the generic table's glyph, falling back to the raw name.
     if (1..=16).contains(&p.num) {
@@ -218,8 +248,9 @@ mod tests {
 
     #[test]
     fn the_card_is_a_function_of_row_count_and_nothing_else() {
-        for n in 0..=MAX_ROWS {
-            assert_eq!(card_size(n), (520, 24 + 36 * n as i32));
+        assert_eq!(strip_height(0), 0);
+        for n in 1..=MAX_ROWS {
+            assert_eq!(strip_height(n), TILE_H + 32 + HINT_H);
         }
     }
 
@@ -228,7 +259,7 @@ mod tests {
         let many = |_: &str| vec!["a".to_string(); 40];
         let a = rows(&ring(), &binds(), &no_apps, "eDP-1");
         let b = rows(&ring(), &binds(), &many, "eDP-1");
-        assert_eq!(card_size(a.len()), card_size(b.len()));
+        assert_eq!(strip_height(a.len()), strip_height(b.len()));
     }
 
     #[test]
@@ -237,7 +268,7 @@ mod tests {
         let a = rows(&ring(), &binds(), &no_apps, "eDP-1");
         let b = rows(&ring(), &binds(), &long, "eDP-1");
         assert_eq!(a.len(), b.len());
-        assert_eq!(card_size(a.len()), card_size(b.len()));
+        assert_eq!(strip_height(a.len()), strip_height(b.len()));
     }
 
     #[test]
@@ -246,19 +277,52 @@ mod tests {
         assert_eq!(row_count(2), 1);
         assert_eq!(row_count(9), 8);
         assert_eq!(row_count(40), MAX_ROWS);
-        let (_, h) = card_size(row_count(40));
-        assert_eq!(h, 24 + 36 * 8);
+        assert_eq!(strip_height(row_count(40)), strip_height(MAX_ROWS));
     }
 
     #[test]
     fn the_card_fits_every_output_it_can_be_drawn_on() {
-        // The smallest real target is the laptop at 1440x900 logical; the
-        // tallest card must still leave room for the bar.
-        let (w, h) = card_size(MAX_ROWS);
-        for (ow, oh) in [(1024, 768), (1440, 900), (1920, 1200), (2560, 1440)] {
-            assert!(w <= ow, "card {w} wide does not fit {ow}");
-            assert!(h + 40 <= oh, "card {h} tall does not clear the bar on {oh}");
+        // The smallest real target is the laptop panel, 2560x1600 at scale
+        // 2, so 1280x800 logical; the strip must still leave room for the bar,
+        // and the front place must fit its width.
+        let h = strip_height(MAX_ROWS);
+        for (ow, oh) in [(1280, 800), (1440, 900), (1920, 1200), (2560, 1440)] {
+            assert!(TILE_W <= ow, "the front place does not fit {ow}");
+            assert!(
+                h + 40 <= oh,
+                "strip {h} tall does not clear the bar on {oh}"
+            );
         }
+    }
+
+    // ── captions ────────────────────────────────────────────────────────
+
+    fn row(label: &str, chord: Option<&str>) -> Row {
+        Row {
+            chord: chord.map(str::to_string),
+            label: label.to_string(),
+            detail: String::new(),
+            windows: 0,
+            other_output: false,
+            command: String::new(),
+        }
+    }
+
+    #[test]
+    fn the_caption_does_not_repeat_the_chord() {
+        assert_eq!(caption_label(&row("\u{f05c3} y", Some("y"))), "\u{f05c3}");
+        assert_eq!(caption_label(&row("l", Some("l"))), "");
+    }
+
+    #[test]
+    fn a_task_label_keeps_its_screen_mark() {
+        assert_eq!(caption_label(&row("1\u{00b9}", Some("1"))), "1\u{00b9}");
+    }
+
+    #[test]
+    fn a_label_that_only_contains_the_chord_elsewhere_stays_whole() {
+        assert_eq!(caption_label(&row("key", Some("y"))), "key");
+        assert_eq!(caption_label(&row("scratch", None)), "scratch");
     }
 
     // ── rows ────────────────────────────────────────────────────────────
