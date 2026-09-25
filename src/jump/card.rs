@@ -43,12 +43,22 @@ impl Live {
         self.pictures.entry(id).or_default().push(picture);
     }
 
-    /// Put a frame on every picture of its window.
-    pub fn frame(&self, frame: Frame) {
-        let Some(pics) = self.pictures.get(&frame.id) else {
+    /// Put a frame on every picture of its window, and hand back the
+    /// texture it became, for a caller that keeps the last one.
+    pub fn frame(&self, frame: Frame) -> Option<gdk::Texture> {
+        if !self.pictures.contains_key(&frame.id) {
+            return None;
+        }
+        let texture = texture(frame.width, frame.height, frame.pixels);
+        self.show(&frame.id, &texture);
+        Some(texture)
+    }
+
+    /// Put a texture on every picture of a window.
+    pub fn show(&self, id: &str, texture: &gdk::Texture) {
+        let Some(pics) = self.pictures.get(id) else {
             return;
         };
-        let texture = texture(frame.width, frame.height, frame.pixels);
         for pic in pics {
             pic.set_texture(texture.clone());
             // The icon under it stops being visible once there are pixels;
