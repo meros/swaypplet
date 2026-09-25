@@ -32,14 +32,42 @@ pub struct Live {
     pictures: HashMap<String, Vec<LivePicture>>,
 }
 
+/// Most windows kept in [`LAST`]; past it the cache starts over, which only
+/// costs a grey box until each window next draws.
+const LAST_MAX: usize = 64;
+
+thread_local! {
+    /// The last picture of every window any surface has shown, by window.
+    ///
+    /// The compositor sends a frame only when a window has damage, so a
+    /// capture started again for an idle window - a launcher row rebuilt on
+    /// the next keystroke, a pin that followed focus to another output, the
+    /// peek opened a second time - gets no first frame, and its picture
+    /// stayed the grey placeholder until the window next drew. A new picture
+    /// starts from this instead. Thumbnails, so the memory is small.
+    static LAST: std::cell::RefCell<HashMap<String, gdk::Texture>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
 impl Live {
     /// Every window identifier drawn, for the capture to ask for.
     pub fn window_ids(&self) -> Vec<String> {
         self.pictures.keys().cloned().collect()
     }
 
-    /// Register a picture for a window's frames, drawn by the caller.
+    /// Register a picture for a window's frames, drawn by the caller. It
+    /// starts from the window's last picture, when one was ever shown.
     pub fn add(&mut self, id: String, picture: LivePicture) {
+        if let Some(texture) = LAST.with(|l| l.borrow().get(&id).cloned()) {
+            picture.set_texture(texture);
+            // Not parented yet: the caller appends it after this returns.
+            let weak = picture.downgrade();
+            glib::idle_add_local_once(move || {
+                if let Some(parent) = weak.upgrade().and_then(|p| p.parent()) {
+                    parent.add_css_class("live");
+                }
+            });
+        }
         self.pictures.entry(id).or_default().push(picture);
     }
 
@@ -51,6 +79,13 @@ impl Live {
         }
         let texture = texture(frame.width, frame.height, frame.pixels);
         self.show(&frame.id, &texture);
+        LAST.with(|l| {
+            let mut last = l.borrow_mut();
+            if last.len() >= LAST_MAX && !last.contains_key(&frame.id) {
+                last.clear();
+            }
+            last.insert(frame.id.clone(), texture.clone());
+        });
         Some(texture)
     }
 

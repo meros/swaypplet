@@ -73,11 +73,6 @@ struct LauncherState {
     /// The windows `stream` captures, sorted, so a rebuild that shows the
     /// same windows keeps the capture it has.
     stream_ids: RefCell<Vec<String>>,
-    /// The last picture of each window shown, put on a rebuilt row at once.
-    /// The compositor sends a frame only when a window has damage, so a
-    /// row rebuilt on the next keystroke for an idle window would otherwise
-    /// stay an empty grey box until that window next draws.
-    textures: RefCell<std::collections::HashMap<String, gtk4::gdk::Texture>>,
 }
 
 /// The provider of the rows this launcher adds itself: a window of the app
@@ -150,7 +145,6 @@ impl LauncherView {
                 live: RefCell::default(),
                 stream: RefCell::default(),
                 stream_ids: RefCell::default(),
-                textures: RefCell::default(),
             })),
             on_activate: Rc::new(RefCell::new(None)),
         };
@@ -545,20 +539,12 @@ fn rebuild_results_ui(
 
 /// Capture the windows the running-window rows show, or stop capturing
 /// when there are none. The rows are rebuilt on every keystroke; while they
-/// show the same windows, the capture carries on and each new row gets the
-/// window's last picture straight away.
+/// show the same windows, the capture carries on, and `Live::add` has
+/// already given each new row the window's last picture.
 fn start_live(state: &Rc<RefCell<LauncherState>>) {
     let s = state.borrow();
     let mut ids = s.live.borrow().window_ids();
     ids.sort();
-    {
-        let live = s.live.borrow();
-        let mut textures = s.textures.borrow_mut();
-        textures.retain(|id, _| ids.contains(id));
-        for (id, texture) in textures.iter() {
-            live.show(id, texture);
-        }
-    }
     if s.stream.borrow().is_some() && *s.stream_ids.borrow() == ids {
         return;
     }
@@ -572,12 +558,7 @@ fn start_live(state: &Rc<RefCell<LauncherState>>) {
     glib::spawn_future_local(async move {
         while let Ok(frame) = rx.recv().await {
             let Some(state) = weak.upgrade() else { break };
-            let id = frame.id.clone();
-            let s = state.borrow();
-            let texture = s.live.borrow().frame(frame);
-            if let Some(texture) = texture {
-                s.textures.borrow_mut().insert(id, texture);
-            }
+            state.borrow().live.borrow().frame(frame);
         }
     });
     s.stream.replace(Some(crate::jump::live::Stream::start(
