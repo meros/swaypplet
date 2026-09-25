@@ -128,7 +128,8 @@ case "$MODE" in
   polkit)    "$BIN" polkit-agent >/tmp/swpp-app.log 2>&1 & ;;
   jump)
     SWAYPPLET_PEEK_OPEN="${SWPP_PEEK:-}" SWAYPPLET_PINS_OPEN="${SWPP_PINS_OPEN:-}" \
-      SWAYPPLET_PICK_FIRST="${SWPP_WINDOW_SHOT:-}" "$BIN" >/tmp/swpp-app.log 2>&1 &
+      SWAYPPLET_PICK_FIRST="${SWPP_WINDOW_SHOT:-}" \
+      SWAYPPLET_LAUNCHER_QUERY="${SWPP_LAUNCH_QUERY:-}" "$BIN" >/tmp/swpp-app.log 2>&1 &
     for _ in $(seq 1 200); do
       [ -e "$RUNTIME/swaypplet.pid" ] && break; sleep 0.1
     done
@@ -158,6 +159,12 @@ case "$MODE" in
     # (SWAYPPLET_PEEK_OPEN, set before launch above).
     if [ -n "${SWPP_PEEK:-}" ]; then
       sleep 1.2
+    # SWPP_LAUNCH_QUERY=<text> opens the launcher with that query typed
+    # (SWAYPPLET_LAUNCHER_QUERY on the main process), for its rows of
+    # windows already open.
+    elif [ -n "${SWPP_LAUNCH_QUERY:-}" ]; then
+      "$BIN" launcher >>/tmp/swpp-app.log 2>&1 || true
+      sleep 2.0
     # SWPP_WINDOW_SHOT=1 opens the screenshot window picker, which takes
     # the first window by itself after 1.5 s (SWAYPPLET_PICK_FIRST, set on
     # the main process above: the picker runs there, not in the client).

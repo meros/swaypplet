@@ -4196,6 +4196,13 @@ button.bar-pins-tuck {
     color: alpha(@fg, 0.55);
 }
 
+/* A launcher row for a window already open (src/launcher.rs): the window
+   live where the icon would be. */
+.launcher-window-picture {
+    border-radius: 6px;
+    background-color: alpha(@bg0, 0.6);
+}
+
 /* The window picker for screenshots (src/screenshot/window.rs): a glass
    card with a grid of every window, live. */
 .window-picker {
