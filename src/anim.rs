@@ -232,6 +232,81 @@ pub fn animations_enabled() -> bool {
 /// which hide uses to sequence the unmap after the frost is gone — and on
 /// failure too, so a wedged socket can't strand a surface mapped forever.
 /// One command means one reply and one `then`, on either path.
+/// Who moves a namespace's surfaces for a [`Reveal`]'s settle.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Motion {
+    /// Not known yet: nobody slides, so the settle can never run twice. Costs
+    /// at most the settle on the entrance that asks.
+    Asked,
+    /// sway's `motion slide` in layer_effects: it moves the whole surface by
+    /// (1 - alpha) x distance, from the alpha modifier this Reveal already
+    /// sends, and the client draws nothing for it.
+    Compositor,
+    /// sway has no such option: the SlideBin moves the card inside the
+    /// surface, as before.
+    Client,
+}
+
+thread_local! {
+    /// Whether this sway has the layer motion option, once asked.
+    static MOTION: Cell<Option<Motion>> = const { Cell::new(None) };
+}
+
+/// A namespace no surface uses, for asking sway what it can parse.
+const PROBE_NAMESPACE: &str = "swaypplet-motion-probe";
+
+/// Whether sway moves layer surfaces itself, asking it the first time.
+///
+/// Never by sending the real option and reading the reply. A sway without
+/// the motion patch answers success to a layer_effects it cannot parse, and
+/// drops the namespace's existing effects while doing it: a panel told
+/// `motion` there loses its glass, and on 2026-09-25 a live sway fed that
+/// went down. The patched sway rejects a bad option with an error and keeps
+/// what it had. So the question is an invalid motion on a namespace nobody
+/// uses: an error means this sway parses motion, success means it does not
+/// even check, and either way nothing real is touched.
+fn motion_support() -> Motion {
+    if let Some(known) = MOTION.with(Cell::get) {
+        return known;
+    }
+    MOTION.with(|m| m.set(Some(Motion::Asked)));
+    crate::sway_ipc::run_command_result(
+        &format!("layer_effects \"{PROBE_NAMESPACE}\" \"motion probe\""),
+        |accepted| {
+            MOTION.with(|m| {
+                m.set(Some(if accepted {
+                    Motion::Client
+                } else {
+                    Motion::Compositor
+                }))
+            });
+        },
+    );
+    Motion::Asked
+}
+
+/// Tell sway to move `namespace`'s surfaces the way `bin` would, `px` along
+/// its axis. Sent on every show once sway is known to take it: it is one IPC
+/// call, and a `swaymsg reload` drops runtime layer_effects.
+fn request_motion(namespace: &str, bin: &SlideBin, px: f64) {
+    if motion_support() != Motion::Compositor {
+        return;
+    }
+    let edge = match (bin.imp().horizontal.get(), px >= 0.0) {
+        (true, true) => "right",
+        (true, false) => "left",
+        (false, true) => "bottom",
+        (false, false) => "top",
+    };
+    crate::sway_ipc::run_command_then(
+        &format!(
+            "layer_effects \"{namespace}\" \"motion slide {edge} {}\"",
+            px.abs().round()
+        ),
+        || {},
+    );
+}
+
 pub fn set_layer_blur(namespace: Option<glib::GString>, on: bool, then: impl FnOnce() + 'static) {
     let Some(ns) = namespace else {
         then();
@@ -457,6 +532,12 @@ impl Reveal {
         }
         if inner.window.is_layer_window() {
             set_layer_blur(inner.window.namespace(), true, || {});
+            if inner.alpha.borrow().is_some()
+                && let (Some(ns), Some((bin, px))) =
+                    (inner.window.namespace(), &*inner.slide.borrow())
+            {
+                request_motion(&ns, bin, *px);
+            }
         }
         if !animations_enabled() {
             self.cancel_tick();
@@ -485,7 +566,7 @@ impl Reveal {
                 });
             }
             if let Some((bin, px)) = &*inner.slide.borrow() {
-                bin.jump_to(*px);
+                bin.jump_to(if self.client_slides() { *px } else { 0.0 });
             }
         }
         self.animate(true);
@@ -500,6 +581,21 @@ impl Reveal {
             return;
         }
         self.animate(false);
+    }
+
+    /// Whether this Reveal moves its SlideBin itself. Only when sway cannot:
+    /// with the alpha modifier bound, the surface is a layer surface and sway
+    /// has the motion option, sway moves the whole surface from the same
+    /// alpha, and the card redraws nothing to move.
+    fn client_slides(&self) -> bool {
+        let inner = &self.inner;
+        if inner.alpha.borrow().is_none() || !inner.window.is_layer_window() {
+            return true;
+        }
+        if inner.window.namespace().is_none() {
+            return true;
+        }
+        motion_support() == Motion::Client
     }
 
     /// The material's current opacity: the compositor's number when it owns
@@ -595,11 +691,20 @@ impl Reveal {
         // Where the settle starts and ends, resolved once: a hide that
         // interrupts a show has to carry on from the offset the show reached,
         // exactly as the alpha does.
-        let slide = inner.slide.borrow().as_ref().and_then(|(bin, px)| {
-            let from = bin.offset();
-            let to = if entering { 0.0 } else { *px };
-            (from != to).then(|| (bin.clone(), from, to))
-        });
+        let client_slides = self.client_slides();
+        if !client_slides && let Some((bin, _)) = &*inner.slide.borrow() {
+            bin.jump_to(0.0);
+        }
+        let slide = inner
+            .slide
+            .borrow()
+            .as_ref()
+            .filter(|_| client_slides)
+            .and_then(|(bin, px)| {
+                let from = bin.offset();
+                let to = if entering { 0.0 } else { *px };
+                (from != to).then(|| (bin.clone(), from, to))
+            });
         let target = if entering { 1.0 } else { 0.0 };
         let total = duration(if entering { ENTER_MS } else { EXIT_MS });
         // Arriving decelerates into place; leaving gathers speed and goes.

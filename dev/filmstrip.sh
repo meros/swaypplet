@@ -100,6 +100,11 @@ cleanup() {
 trap cleanup EXIT
 
 export SWAYSOCK="$SOCK"
+# swaypplet reads I3SOCK before SWAYSOCK (src/sway_ipc.rs), so an inherited
+# I3SOCK sends the harness client's IPC to the live session instead. On
+# 2026-09-25 that delivered a layer_effects the live sway could not parse,
+# and the live sway went down with it.
+unset I3SOCK
 # scenefx's effects are GLES-only. A headless wlroots will happily pick the
 # pixman renderer, and then the frost silently does not exist, which is the
 # one thing this harness is for.
