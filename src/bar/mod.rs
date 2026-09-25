@@ -79,6 +79,9 @@ pub struct BarManager {
     /// One status watcher per bar process; every output's backup segment
     /// reads the same snapshot.
     backup: Rc<crate::backup::BackupStatusService>,
+    /// One MPRIS connection per bar process; every output's media mark
+    /// reads the same snapshot.
+    mpris: Rc<crate::mpris::MprisService>,
     tray: Rc<tray::TrayService>,
     /// What the start button does. In-process hosting passes a direct
     /// `panel.toggle()`; the standalone bar passes the cross-process
@@ -103,6 +106,7 @@ impl BarManager {
             audio,
             tasks,
             backup: crate::backup::BackupStatusService::start(),
+            mpris: crate::mpris::MprisService::start(),
             tray: tray::TrayService::start(),
             toggle_panel,
         });
@@ -144,16 +148,7 @@ impl BarManager {
                 .any(|bar| bar.monitor == monitor);
             if !known {
                 // build_bar_window maps the window itself (Reveal enter).
-                let (window, decision) = build_bar_window(
-                    &self.app,
-                    &monitor,
-                    &self.sway,
-                    &self.audio,
-                    &self.tasks,
-                    &self.backup,
-                    &self.tray,
-                    self.toggle_panel.clone(),
-                );
+                let (window, decision) = build_bar_window(self, &monitor);
                 self.windows.borrow_mut().push(BarWindow {
                     monitor,
                     window,
@@ -177,15 +172,21 @@ impl BarManager {
 }
 
 fn build_bar_window(
-    app: &gtk4::Application,
+    bar: &BarManager,
     monitor: &gdk::Monitor,
-    sway: &Rc<SwayService>,
-    audio: &Rc<crate::audio::AudioService>,
-    tasks: &Rc<TaskStateService>,
-    backup: &Rc<crate::backup::BackupStatusService>,
-    tray: &Rc<tray::TrayService>,
-    toggle_panel: Rc<dyn Fn()>,
 ) -> (gtk4::Window, decision::DecisionSlot) {
+    let BarManager {
+        app,
+        sway,
+        audio,
+        tasks,
+        backup,
+        mpris,
+        tray,
+        toggle_panel,
+        ..
+    } = bar;
+    let toggle_panel = toggle_panel.clone();
     let window = layer_shell::create_layer_window_on(app, &BAR_CONFIG, Some(monitor));
     // Resizable stays ON: the left+right anchors mean the compositor's
     // configure sets the width, and a non-resizable GTK window pins to its
@@ -229,7 +230,7 @@ fn build_bar_window(
     // Right cluster order per the vision: media mark, tray, hazard lane,
     // then the instrument track. The Bar tab's Segments group hides the
     // ones it names; the hazard lane and the clock are not optional.
-    right.append(&follow_setting(media::build(sway), |bar| bar.media));
+    right.append(&follow_setting(media::build(mpris), |bar| bar.media));
     // Where pinned workspaces live when they are not floating (jump/pin.rs).
     right.append(&pins::build());
     right.append(&follow_setting(tray::build(tray), |bar| bar.tray));

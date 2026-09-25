@@ -15,7 +15,7 @@ pub(crate) enum PlaybackStatus {
     Paused,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MediaState {
     pub(crate) status: PlaybackStatus,
     pub(crate) artist: String,
@@ -29,6 +29,27 @@ pub(crate) struct MediaState {
 }
 
 impl MediaState {
+    /// A state read over D-Bus (`crate::mpris`) rather than from playerctl.
+    /// No position: MPRIS does not signal it, and the bar does not show it.
+    pub(crate) fn from_mpris(
+        status: PlaybackStatus,
+        artist: String,
+        title: String,
+        art_url: Option<String>,
+        player_name: Option<String>,
+        length_secs: Option<f64>,
+    ) -> MediaState {
+        MediaState {
+            status,
+            artist,
+            title,
+            art_url,
+            player_name,
+            length_secs,
+            position_secs: None,
+        }
+    }
+
     /// Local album-art path for the bar media popover; remote URLs are
     /// skipped (would need fetch + cache), same rule as the panel section.
     pub(crate) fn art_path(&self) -> Option<String> {

@@ -5,14 +5,10 @@
 //! stopped/paused. No title text and no ambient progress — the mark is
 //! ambient; prose (art + title/artist) and the play-pause action live in
 //! the click-opened read-layer popover (bar/popover.rs). State comes from
-//! `widgets::media::read_state` (playerctl batch on a worker thread),
-//! refreshed every 3 s plus on every sway event — the pill's pre-existing
-//! cadence, kept as-is: the event hook covers keyboard media bindings
-//! (they emit window/tick traffic) without waiting out the poll, and a
-//! `playerctl -F` follower child would need lifecycle management the poll
-//! gets for free.
+//! `crate::mpris`, which the players push over D-Bus: nothing is polled,
+//! and a mark whose state did not change is not touched.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
@@ -20,7 +16,6 @@ use gtk4::prelude::*;
 use super::popover;
 use crate::icons;
 use crate::spawn::spawn_work;
-use crate::sway_ipc::SwayService;
 use crate::widgets::media::{self, MediaState, PlaybackStatus};
 
 /// The mark, its popover and the last known player state — cloned into
@@ -28,7 +23,6 @@ use crate::widgets::media::{self, MediaState, PlaybackStatus};
 #[derive(Clone)]
 struct Ui {
     root: gtk4::Box,
-    btn: gtk4::Button,
     art: gtk4::Image,
     text: gtk4::Label,
     play: gtk4::Label,
@@ -44,17 +38,15 @@ fn control_button(glyph: &str) -> gtk4::Button {
         .build()
 }
 
-/// Fire a playerctl transport command off-thread, then refresh so the pill
-/// reflects the result rather than guessing at it. playerctl blocks on D-Bus,
-/// which must not happen on the GTK thread.
-fn send(cmd: &'static str, refresh: Rc<dyn Fn() -> bool>) {
+/// Fire a playerctl transport command off-thread; playerctl blocks on
+/// D-Bus, which must not happen on the GTK thread. The player announces
+/// the result itself (crate::mpris), so nothing is read back here.
+fn send(cmd: &'static str) {
     spawn_work(
         move || {
             media::playerctl(&[cmd]);
         },
-        move |_| {
-            refresh();
-        },
+        |_| {},
     );
 }
 
@@ -62,7 +54,7 @@ fn send(cmd: &'static str, refresh: Rc<dyn Fn() -> bool>) {
 /// without forcing the row taller.
 const ART_PX: i32 = 18;
 
-pub fn build(sway: &Rc<SwayService>) -> gtk4::Box {
+pub fn build(mpris: &Rc<crate::mpris::MprisService>) -> gtk4::Box {
     // Art + title/artist open the popover; the transport keys are siblings,
     // not children, because GTK4 gives a Button's clicks to the Button and a
     // nested control would never see them.
@@ -109,7 +101,6 @@ pub fn build(sway: &Rc<SwayService>) -> gtk4::Box {
     let (pop, body) = popover::chassis(&btn);
     let ui = Ui {
         root: root.clone(),
-        btn: btn.clone(),
         art,
         text,
         play,
@@ -118,46 +109,18 @@ pub fn build(sway: &Rc<SwayService>) -> gtk4::Box {
         state: Rc::new(RefCell::new(None)),
     };
 
-    // Sway fires per-keystroke title snapshots; one playerctl batch in
-    // flight at a time is plenty. Returns false once the button is gone
-    // (output unplugged) so the poll timer can end itself.
-    let refresh: Rc<dyn Fn() -> bool> = {
+    // Pushed by the players themselves (crate::mpris): no poll, and nothing
+    // runs while nothing changes.
+    apply(&ui, mpris.snapshot());
+    {
         let weak = btn.downgrade();
         let ui = ui.clone();
-        let busy = Rc::new(Cell::new(false));
-        Rc::new(move || {
-            if weak.upgrade().is_none() {
-                return false;
+        let mpris_c = mpris.clone();
+        mpris.connect_change(move || {
+            // The service outlives a bar unplugged with its output.
+            if weak.upgrade().is_some() {
+                apply(&ui, mpris_c.snapshot());
             }
-            if busy.get() {
-                return true;
-            }
-            busy.set(true);
-            let busy = busy.clone();
-            let ui = ui.clone();
-            spawn_work(media::read_state, move |state| {
-                busy.set(false);
-                apply(&ui, state);
-            });
-            true
-        })
-    };
-
-    refresh();
-    {
-        let refresh = refresh.clone();
-        glib::timeout_add_seconds_local(3, move || {
-            if refresh() {
-                glib::ControlFlow::Continue
-            } else {
-                glib::ControlFlow::Break
-            }
-        });
-    }
-    {
-        let refresh = refresh.clone();
-        sway.connect_change(move || {
-            refresh();
         });
     }
 
@@ -174,14 +137,19 @@ pub fn build(sway: &Rc<SwayService>) -> gtk4::Box {
         (&play_btn, "play-pause"),
         (&next_btn, "next"),
     ] {
-        let refresh = refresh.clone();
-        button.connect_clicked(move |_| send(cmd, refresh.clone()));
+        button.connect_clicked(move |_| send(cmd));
     }
 
     root
 }
 
 fn apply(ui: &Ui, state: Option<MediaState>) {
+    // Nothing to redraw for a state already on screen. Setting the art again
+    // decodes the image from disk and lays the bar out anew.
+    if *ui.state.borrow() == state && ui.root.is_visible() == state.is_some() {
+        return;
+    }
+    let art_before = ui.state.borrow().as_ref().and_then(MediaState::art_path);
     let present = state.is_some();
     let playing = matches!(&state, Some(ms) if ms.status == PlaybackStatus::Playing);
 
@@ -190,7 +158,9 @@ fn apply(ui: &Ui, state: Option<MediaState>) {
         // the image collapses rather than holding an empty box.
         match ms.art_path() {
             Some(path) => {
-                ui.art.set_from_file(Some(&path));
+                if art_before.as_deref() != Some(path.as_str()) {
+                    ui.art.set_from_file(Some(&path));
+                }
                 ui.art.set_visible(true);
             }
             None => ui.art.set_visible(false),
@@ -305,18 +275,6 @@ fn render(ui: &Ui) {
         .halign(gtk4::Align::Center)
         .css_classes(["media-btn", "media-play-pause"])
         .build();
-    {
-        let ui = ui.clone();
-        play.connect_clicked(move |_| {
-            let ui = ui.clone();
-            spawn_work(
-                || {
-                    media::playerctl(&["play-pause"]);
-                    media::read_state()
-                },
-                move |state| apply(&ui, state),
-            );
-        });
-    }
+    play.connect_clicked(|_| send("play-pause"));
     ui.body.append(&play);
 }
