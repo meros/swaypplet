@@ -24,6 +24,7 @@ mod launcher;
 mod layer_shell;
 mod lid;
 mod lock;
+mod mpris;
 mod notifications;
 mod osd;
 mod palette;
