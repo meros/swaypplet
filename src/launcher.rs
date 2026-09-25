@@ -59,11 +59,25 @@ const DEFAULT_PROVIDERS: &[&str] = &[
     "websearch",
 ];
 
+/// What runs after an activation, so a host popup can hide itself.
+type OnActivate = Rc<RefCell<Option<Box<dyn Fn()>>>>;
+
 struct LauncherState {
     results: Vec<SearchResult>,
     selected: usize,
     query_generation: u64,
+    /// The pictures of the running-window rows, and their capture. The
+    /// capture runs only while such rows are on screen (see `start_live`).
+    live: RefCell<crate::jump::card::Live>,
+    stream: RefCell<Option<crate::jump::live::Stream>>,
 }
+
+/// The provider of the rows this launcher adds itself: a window of the app
+/// being searched for that is already open. Activating one goes there
+/// instead of starting another.
+const WINDOW_PROVIDER: &str = "swaypplet-window";
+/// At most this many running-window rows, above the results.
+const MAX_WINDOW_ROWS: usize = 2;
 
 // ── Embeddable launcher view ────────────────────────────────────────────────
 
@@ -78,7 +92,7 @@ pub struct LauncherView {
     /// output is allowed to shrink (see `install_monitor_fit`).
     scroller: gtk4::ScrolledWindow,
     state: Rc<RefCell<LauncherState>>,
-    on_activate: Rc<RefCell<Option<Box<dyn Fn()>>>>,
+    on_activate: OnActivate,
 }
 
 impl LauncherView {
@@ -125,11 +139,20 @@ impl LauncherView {
                 results: Vec::new(),
                 selected: 0,
                 query_generation: 0,
+                live: RefCell::default(),
+                stream: RefCell::default(),
             })),
             on_activate: Rc::new(RefCell::new(None)),
         };
 
         view.wire_search();
+        // Whatever hosts the view, a launcher off screen captures nothing.
+        let weak = Rc::downgrade(&view.state);
+        view.root.connect_unmap(move |_| {
+            if let Some(state) = weak.upgrade() {
+                state.borrow().stream.replace(None);
+            }
+        });
         view
     }
 
@@ -357,6 +380,13 @@ impl Launcher {
             self.view.reset();
             self.reveal.show();
             self.view.focus_entry();
+            // Harness hook: the nested session in dev/render.sh has no
+            // keyboard, so `SWAYPPLET_LAUNCHER_QUERY` types a query on open.
+            if let Ok(query) = std::env::var("SWAYPPLET_LAUNCHER_QUERY")
+                && !query.is_empty()
+            {
+                self.view.entry().set_text(&query);
+            }
         }
     }
 }
@@ -396,6 +426,12 @@ fn move_selection_state(
 }
 
 fn activate_async(provider: String, identifier: String, action: String, query: String) {
+    if provider == WINDOW_PROVIDER {
+        if let Some(con_id) = identifier.split_whitespace().next() {
+            crate::sway_ipc::run_command(&format!("[con_id={con_id}] focus"));
+        }
+        return;
+    }
     std::thread::spawn(move || {
         if let Err(e) = elephant::activate(&provider, &identifier, &action, &query) {
             log::warn!("Elephant activate failed: {}", e);
@@ -415,7 +451,7 @@ fn run_search(
     state: Rc<RefCell<LauncherState>>,
     results_box: gtk4::Box,
     scroller: gtk4::ScrolledWindow,
-    on_activate: Rc<RefCell<Option<Box<dyn Fn()>>>>,
+    on_activate: OnActivate,
 ) {
     // Empty query → default desktop-application list only.
     let providers: Vec<&str> = if query.is_empty() {
@@ -426,12 +462,22 @@ fn run_search(
 
     let query_c = query.clone();
     crate::spawn::spawn_work(
-        move || match elephant::query(&query_c, &providers, MAX_VISIBLE_RESULTS as i32) {
-            Ok(results) => results,
-            Err(e) => {
-                log::warn!("Elephant query failed: {}", e);
+        move || {
+            let results = match elephant::query(&query_c, &providers, MAX_VISIBLE_RESULTS as i32) {
+                Ok(results) => results,
+                Err(e) => {
+                    log::warn!("Elephant query failed: {}", e);
+                    Vec::new()
+                }
+            };
+            // An app already open offers its windows first.
+            let mut running = if query_c.is_empty() {
                 Vec::new()
-            }
+            } else {
+                running_windows(&results)
+            };
+            running.extend(results);
+            running
         },
         move |results| {
             // A newer query superseded this one while it ran — drop the results.
@@ -456,24 +502,180 @@ fn rebuild_results_ui(
     results_box: &gtk4::Box,
     state: &Rc<RefCell<LauncherState>>,
     query: &str,
-    on_activate: &Rc<RefCell<Option<Box<dyn Fn()>>>>,
+    on_activate: &OnActivate,
 ) {
     clear_results_box(results_box);
 
     let s = state.borrow();
     let selected = s.selected;
+    *s.live.borrow_mut() = crate::jump::card::Live::default();
 
     for (i, result) in s.results.iter().enumerate() {
-        let row = build_result_row(result, i == selected, query, on_activate);
+        let row = if result.provider == WINDOW_PROVIDER {
+            window_row(result, i == selected, &mut s.live.borrow_mut(), on_activate)
+        } else {
+            build_result_row(result, i == selected, query, on_activate)
+        };
         results_box.append(&row);
     }
+    drop(s);
+    start_live(state);
+}
+
+/// Capture the windows the running-window rows show, or stop capturing
+/// when there are none.
+fn start_live(state: &Rc<RefCell<LauncherState>>) {
+    let s = state.borrow();
+    let ids = s.live.borrow().window_ids();
+    s.stream.replace(None);
+    if ids.is_empty() {
+        return;
+    }
+    let (tx, rx) = async_channel::unbounded::<crate::jump::live::Frame>();
+    let weak = Rc::downgrade(state);
+    glib::spawn_future_local(async move {
+        while let Ok(frame) = rx.recv().await {
+            let Some(state) = weak.upgrade() else { break };
+            state.borrow().live.borrow().frame(frame);
+        }
+    });
+    s.stream.replace(Some(crate::jump::live::Stream::start(
+        ids,
+        (WINDOW_THUMB_W * 2) as u32,
+        20,
+        tx,
+    )));
+}
+
+/// A running-window row's picture, at most this box.
+const WINDOW_THUMB_W: i32 = 112;
+const WINDOW_THUMB_H: i32 = 70;
+
+/// The windows already open for the best application match, as rows. Their
+/// identifier is `<con_id> <foreign toplevel identifier>`: the first to go
+/// there, the second to show it.
+fn running_windows(results: &[SearchResult]) -> Vec<SearchResult> {
+    let Some(app) = results.iter().find(|r| r.provider == "desktopapplications") else {
+        return Vec::new();
+    };
+    let names = app_names(app);
+    if names.is_empty() {
+        return Vec::new();
+    }
+    let Some(tree) = crate::sway_ipc::connect()
+        .ok()
+        .and_then(|mut c| c.get_tree().ok())
+    else {
+        return Vec::new();
+    };
+    crate::jump::scene::all_windows(&tree)
+        .into_iter()
+        .filter(|(w, _, _)| w.id.is_some() && names.iter().any(|n| same_app(n, &w.app)))
+        .take(MAX_WINDOW_ROWS)
+        .map(|(w, ws, title)| SearchResult {
+            identifier: format!("{} {}", w.con_id, w.id.clone().unwrap_or_default()),
+            text: format!("Go to {}", if title.is_empty() { &w.app } else { &title }),
+            subtext: format!("{} \u{00b7} open on {}", app.text, ws),
+            icon: String::new(),
+            provider: WINDOW_PROVIDER.to_string(),
+            score: 0,
+            actions: Vec::new(),
+        })
+        .collect()
+}
+
+/// What an application result could be called as a window's app_id: its
+/// desktop entry and its icon name, lowercased, without `.desktop`.
+fn app_names(result: &SearchResult) -> Vec<String> {
+    let mut names = Vec::new();
+    for raw in [&result.identifier, &result.icon] {
+        let base = raw.rsplit('/').next().unwrap_or(raw);
+        let name = base.trim_end_matches(".desktop").to_lowercase();
+        if !name.is_empty() && !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
+}
+
+/// A desktop-entry name and an app_id name the same app: exactly, or by the
+/// last part of a reverse-DNS id (`org.mozilla.firefox` is `firefox`).
+fn same_app(name: &str, app_id: &str) -> bool {
+    let id = app_id.to_lowercase();
+    let tail = |s: &str| s.rsplit('.').next().unwrap_or(s).to_string();
+    id == name || tail(&id) == tail(name)
+}
+
+/// A running-window row: the window live where the icon would be, "Go to"
+/// its title, and where it is open.
+fn window_row(
+    result: &SearchResult,
+    selected: bool,
+    live: &mut crate::jump::card::Live,
+    on_activate: &OnActivate,
+) -> gtk4::Box {
+    let row = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(12)
+        .build();
+    row.add_css_class("launcher-result");
+    row.add_css_class("launcher-window");
+    if selected {
+        row.add_css_class("selected");
+    }
+    let picture = crate::jump::card::LivePicture::new();
+    picture.set_size_request(WINDOW_THUMB_W, WINDOW_THUMB_H);
+    picture.add_css_class("launcher-window-picture");
+    if let Some(id) = result.identifier.split_whitespace().nth(1) {
+        live.add(id.to_string(), picture.clone());
+    }
+    row.append(&picture);
+
+    let text_box = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .spacing(2)
+        .hexpand(true)
+        .valign(gtk4::Align::Center)
+        .build();
+    let name = gtk4::Label::builder()
+        .label(&result.text)
+        .halign(gtk4::Align::Start)
+        .ellipsize(gtk4::pango::EllipsizeMode::End)
+        .css_classes(["launcher-result-name"])
+        .build();
+    text_box.append(&name);
+    let sub = gtk4::Label::builder()
+        .label(&result.subtext)
+        .halign(gtk4::Align::Start)
+        .ellipsize(gtk4::pango::EllipsizeMode::End)
+        .css_classes(["launcher-result-sub"])
+        .build();
+    text_box.append(&sub);
+    row.append(&text_box);
+
+    let gesture = gtk4::GestureClick::new();
+    let identifier = result.identifier.clone();
+    let on_activate = on_activate.clone();
+    gesture.connect_released(move |_, _, _, _| {
+        activate_async(
+            WINDOW_PROVIDER.to_string(),
+            identifier.clone(),
+            String::new(),
+            String::new(),
+        );
+        if let Some(cb) = on_activate.borrow().as_ref() {
+            cb();
+        }
+    });
+    row.add_controller(gesture);
+    row
 }
 
 fn build_result_row(
     result: &SearchResult,
     selected: bool,
     query: &str,
-    on_activate: &Rc<RefCell<Option<Box<dyn Fn()>>>>,
+    on_activate: &OnActivate,
 ) -> gtk4::Box {
     let row = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
@@ -957,5 +1159,43 @@ fn provider_icon(provider: &str) -> &'static str {
         "menus" => "󰍜",
         "bookmarks" => "󰃃",
         _ => "󰍉",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app(identifier: &str, icon: &str) -> SearchResult {
+        SearchResult {
+            identifier: identifier.into(),
+            text: String::new(),
+            subtext: String::new(),
+            icon: icon.into(),
+            provider: "desktopapplications".into(),
+            score: 0,
+            actions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn an_application_is_named_by_its_entry_and_its_icon() {
+        let names = app_names(&app(
+            "/usr/share/applications/org.mozilla.firefox.desktop",
+            "firefox",
+        ));
+        assert_eq!(names, ["org.mozilla.firefox", "firefox"]);
+        assert_eq!(
+            app_names(&app("Alacritty.desktop", "Alacritty")),
+            ["alacritty"]
+        );
+    }
+
+    #[test]
+    fn a_window_matches_by_app_id_or_its_reverse_dns_tail() {
+        assert!(same_app("alacritty", "Alacritty"));
+        assert!(same_app("org.mozilla.firefox", "firefox"));
+        assert!(same_app("firefox", "org.mozilla.firefox"));
+        assert!(!same_app("code", "claude"));
     }
 }
