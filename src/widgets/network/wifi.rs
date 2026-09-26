@@ -3,13 +3,15 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 use gtk4::{
-    Box, Button, Entry, Label, ListBox, ListBoxRow, Orientation, PasswordEntry, Revealer,
-    RevealerTransitionType, Spinner,
+    Button, Entry, Label, ListBox, ListBoxRow, PasswordEntry, Revealer, RevealerTransitionType,
+    Spinner,
 };
 
 use super::NetworkState;
 use super::backend::*;
 use crate::spawn::spawn_work;
+use crate::tokens::space;
+use crate::ui;
 
 // ── WiFi list builder ─────────────────────────────────────────────────────────
 
@@ -52,16 +54,12 @@ pub fn rebuild_wifi_list(
             "No networks found".to_string()
         };
 
-        let empty_lbl = Label::builder()
-            .label(&msg)
-            .halign(gtk4::Align::Center)
-            .margin_top(8)
-            .margin_bottom(8)
-            .build();
-        empty_lbl.add_css_class("network-placeholder");
+        let empty_lbl = ui::text(&msg, ui::Text::Body, ui::Tone::Muted);
+        empty_lbl.set_halign(gtk4::Align::Center);
+        empty_lbl.set_margin_top(space(3));
+        empty_lbl.set_margin_bottom(space(3));
         let row = ListBoxRow::builder().build();
         row.set_child(Some(&empty_lbl));
-        row.add_css_class("network-row");
         list.append(&row);
     } else {
         let total = filtered.len();
@@ -83,11 +81,8 @@ pub fn rebuild_wifi_list(
             } else {
                 format!("Show all ({})", total)
             };
-            let more_btn = Button::builder()
-                .label(&btn_label)
-                .halign(gtk4::Align::Center)
-                .build();
-            more_btn.add_css_class("network-show-all-btn");
+            let more_btn = ui::small_button(&btn_label, ui::Kind::Flat);
+            more_btn.set_halign(gtk4::Align::Center);
 
             let state_c = state.clone();
             let list_c = list.clone();
@@ -102,7 +97,6 @@ pub fn rebuild_wifi_list(
 
             let row = ListBoxRow::builder().build();
             row.set_child(Some(&more_btn));
-            row.add_css_class("network-row");
             list.append(&row);
         }
     }
@@ -116,56 +110,31 @@ fn build_wifi_row(
     _state: &Rc<RefCell<NetworkState>>,
     on_change: &Rc<dyn Fn()>,
 ) -> ListBoxRow {
-    let connect_area = Box::builder()
-        .orientation(Orientation::Vertical)
-        .spacing(4)
-        .build();
+    let connect_area = ui::vbox(2);
 
-    let row_box = Box::builder()
-        .orientation(Orientation::Horizontal)
-        .spacing(8)
-        .margin_top(4)
-        .margin_bottom(4)
-        .margin_start(4)
-        .margin_end(4)
-        .build();
-
-    if network.in_use {
-        let dot = Label::builder().label("●").build();
-        dot.add_css_class("network-active-dot");
-        row_box.append(&dot);
-    }
-
-    let signal_lbl = Label::builder()
-        .label(signal_icon(network.signal))
-        .tooltip_text(format!("{}%", network.signal))
-        .build();
-    signal_lbl.add_css_class("network-icon");
-    signal_lbl.add_css_class(signal_css_class(network.signal));
-    row_box.append(&signal_lbl);
-
-    let ssid_lbl = Label::builder()
-        .label(&network.ssid)
-        .halign(gtk4::Align::Start)
-        .hexpand(true)
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .build();
-    ssid_lbl.add_css_class("network-ssid");
-    if network.in_use {
-        ssid_lbl.add_css_class("network-active");
-    }
-    row_box.append(&ssid_lbl);
+    let r = ui::row("", &network.ssid, "");
+    set_signal_glyph(
+        &r.icon,
+        signal_icon(network.signal),
+        signal_tone(network.signal),
+    );
+    r.icon.set_visible(true);
+    r.icon
+        .set_tooltip_text(Some(&format!("{}%", network.signal)));
+    // The network in use is the selected row.
+    ui::set_selected(&r.root, network.in_use);
+    let row_box = r.root.clone();
 
     if let Some(freq) = network.freq_mhz {
-        let band_lbl = Label::builder().label(freq_band_short(freq)).build();
-        band_lbl.add_css_class("network-band");
-        row_box.append(&band_lbl);
+        let band_lbl = ui::badge(freq_band_short(freq));
+        band_lbl.add_css_class("neutral");
+        r.end.append(&band_lbl);
     }
 
     if !network.security.is_empty() && network.security != "--" {
         let lock_lbl = Label::builder().label(ICON_LOCK).build();
-        lock_lbl.add_css_class("network-security");
-        row_box.append(&lock_lbl);
+        lock_lbl.set_tooltip_text(Some("Secured"));
+        r.end.append(&lock_lbl);
     }
 
     let needs_password =
@@ -173,26 +142,21 @@ fn build_wifi_row(
 
     if network.in_use {
         // Connected network: provide Disconnect button
-        let btn_row = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .halign(gtk4::Align::End)
-            .spacing(6)
-            .build();
+        let btn_row = ui::hbox(2);
+        btn_row.set_halign(gtk4::Align::End);
 
         let spinner = Spinner::new();
         spinner.set_visible(false);
 
-        let status_lbl = Label::builder().label("").build();
-        status_lbl.add_css_class("network-conn-status");
+        let status_lbl = ui::text("", ui::Text::Label, ui::Tone::Faint);
         status_lbl.set_visible(false);
 
-        let disconnect_btn = Button::builder().label("Disconnect").build();
-        disconnect_btn.add_css_class("network-disconnect-btn");
+        let disconnect_btn = ui::small_button("Disconnect", ui::Kind::Secondary);
 
         btn_row.append(&spinner);
         btn_row.append(&status_lbl);
         btn_row.append(&disconnect_btn);
-        row_box.append(&btn_row);
+        r.end.append(&btn_row);
 
         connect_area.append(&row_box);
 
@@ -202,29 +166,23 @@ fn build_wifi_row(
             on_change.clone(),
         );
     } else if network.is_known {
-        let btn_row = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .halign(gtk4::Align::End)
-            .spacing(6)
-            .build();
+        let btn_row = ui::hbox(2);
+        btn_row.set_halign(gtk4::Align::End);
 
         let spinner = Spinner::new();
         spinner.set_visible(false);
 
-        let status_lbl = Label::builder().label("").build();
-        status_lbl.add_css_class("network-conn-status");
+        let status_lbl = ui::text("", ui::Text::Label, ui::Tone::Faint);
         status_lbl.set_visible(false);
 
-        let forget_btn = Button::builder().label("Forget").build();
-        forget_btn.add_css_class("network-forget-btn");
+        let forget_btn = ui::small_button("Forget", ui::Kind::Flat);
         wire_forget(
             &Busy::new(&forget_btn, &spinner, &status_lbl),
             network.ssid.clone(),
             on_change.clone(),
         );
 
-        let connect_btn = Button::builder().label("Connect").build();
-        connect_btn.add_css_class("network-connect-btn");
+        let connect_btn = ui::small_button("Connect", ui::Kind::Secondary);
         wire_connect_known(
             &Busy::new(&connect_btn, &spinner, &status_lbl),
             network.ssid.clone(),
@@ -235,7 +193,7 @@ fn build_wifi_row(
         btn_row.append(&status_lbl);
         btn_row.append(&forget_btn);
         btn_row.append(&connect_btn);
-        row_box.append(&btn_row);
+        r.end.append(&btn_row);
 
         connect_area.append(&row_box);
 
@@ -249,63 +207,48 @@ fn build_wifi_row(
         }
         row_box.add_controller(click);
     } else if needs_password {
-        let btn_row = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .halign(gtk4::Align::End)
-            .spacing(6)
-            .build();
+        let btn_row = ui::hbox(2);
+        btn_row.set_halign(gtk4::Align::End);
 
-        let toggle_btn = Button::builder().label("Connect").build();
-        toggle_btn.add_css_class("network-connect-btn");
+        let toggle_btn = ui::small_button("Connect", ui::Kind::Secondary);
         btn_row.append(&toggle_btn);
-        row_box.append(&btn_row);
+        r.end.append(&btn_row);
 
         connect_area.append(&row_box);
 
         let pw_revealer = Revealer::builder()
             .transition_type(RevealerTransitionType::SlideDown)
-            .transition_duration(200)
+            .transition_duration(crate::anim::duration(crate::tokens::motion::EXPAND.ms) as u32)
             .reveal_child(false)
             .build();
 
-        let pw_area = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(4)
-            .margin_start(8)
-            .margin_end(8)
-            .margin_bottom(4)
-            .build();
+        let pw_area = ui::vbox(2);
+        pw_area.set_margin_start(space(3));
+        pw_area.set_margin_end(space(3));
+        pw_area.set_margin_bottom(space(2));
 
-        let pw_row = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(6)
-            .build();
+        let pw_row = ui::hbox(2);
 
         let pw_entry = PasswordEntry::builder()
             .hexpand(true)
             .placeholder_text("Password")
             .show_peek_icon(true)
             .build();
-        pw_entry.add_css_class("network-password-entry");
+        ui::entry(&pw_entry);
 
-        let join_btn = Button::builder().label("Join").build();
-        join_btn.add_css_class("network-connect-btn");
+        let join_btn = ui::small_button("Join", ui::Kind::Primary);
 
         pw_row.append(&pw_entry);
         pw_row.append(&join_btn);
         pw_area.append(&pw_row);
 
-        let fb_row = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .halign(gtk4::Align::End)
-            .spacing(6)
-            .build();
+        let fb_row = ui::hbox(2);
+        fb_row.set_halign(gtk4::Align::End);
 
         let spinner = Spinner::new();
         spinner.set_visible(false);
 
-        let status_lbl = Label::builder().label("").build();
-        status_lbl.add_css_class("network-conn-status");
+        let status_lbl = ui::text("", ui::Text::Label, ui::Tone::Faint);
         status_lbl.set_visible(false);
 
         fb_row.append(&spinner);
@@ -349,26 +292,21 @@ fn build_wifi_row(
         }
         row_box.add_controller(click);
     } else {
-        let btn_row = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .halign(gtk4::Align::End)
-            .spacing(6)
-            .build();
+        let btn_row = ui::hbox(2);
+        btn_row.set_halign(gtk4::Align::End);
 
         let spinner = Spinner::new();
         spinner.set_visible(false);
 
-        let status_lbl = Label::builder().label("").build();
-        status_lbl.add_css_class("network-conn-status");
+        let status_lbl = ui::text("", ui::Text::Label, ui::Tone::Faint);
         status_lbl.set_visible(false);
 
-        let connect_btn = Button::builder().label("Connect").build();
-        connect_btn.add_css_class("network-connect-btn");
+        let connect_btn = ui::small_button("Connect", ui::Kind::Secondary);
 
         btn_row.append(&spinner);
         btn_row.append(&status_lbl);
         btn_row.append(&connect_btn);
-        row_box.append(&btn_row);
+        r.end.append(&btn_row);
 
         connect_area.append(&row_box);
 
@@ -390,10 +328,6 @@ fn build_wifi_row(
 
     let list_row = ListBoxRow::builder().build();
     list_row.set_child(Some(&connect_area));
-    list_row.add_css_class("network-row");
-    if network.in_use {
-        list_row.add_css_class("network-row-active");
-    }
     list_row
 }
 
@@ -404,54 +338,42 @@ fn build_hidden_network_row(
     _state: &Rc<RefCell<NetworkState>>,
     on_change: &Rc<dyn Fn()>,
 ) {
-    let outer = Box::builder()
-        .orientation(Orientation::Vertical)
-        .spacing(4)
-        .build();
+    let outer = ui::vbox(2);
 
     let hidden_revealer = Revealer::builder()
         .transition_type(RevealerTransitionType::SlideDown)
-        .transition_duration(200)
+        .transition_duration(crate::anim::duration(crate::tokens::motion::EXPAND.ms) as u32)
         .reveal_child(false)
         .build();
 
-    let form = Box::builder()
-        .orientation(Orientation::Vertical)
-        .spacing(6)
-        .margin_top(4)
-        .margin_start(4)
-        .margin_end(4)
-        .build();
-    form.add_css_class("network-hidden-form");
+    let form = ui::vbox(2);
+    form.set_margin_top(space(2));
+    form.set_margin_start(space(3));
+    form.set_margin_end(space(3));
 
     let ssid_entry = Entry::builder()
         .placeholder_text("Network name (SSID)")
         .hexpand(true)
         .build();
-    ssid_entry.add_css_class("network-password-entry");
+    ui::entry(&ssid_entry);
 
     let pw_entry = PasswordEntry::builder()
         .placeholder_text("Password (leave empty for open)")
         .show_peek_icon(true)
         .hexpand(true)
         .build();
-    pw_entry.add_css_class("network-password-entry");
+    ui::entry(&pw_entry);
 
-    let btn_row = Box::builder()
-        .orientation(Orientation::Horizontal)
-        .halign(gtk4::Align::End)
-        .spacing(6)
-        .build();
+    let btn_row = ui::hbox(2);
+    btn_row.set_halign(gtk4::Align::End);
 
     let spinner = Spinner::new();
     spinner.set_visible(false);
 
-    let status_lbl = Label::builder().label("").build();
-    status_lbl.add_css_class("network-conn-status");
+    let status_lbl = ui::text("", ui::Text::Label, ui::Tone::Faint);
     status_lbl.set_visible(false);
 
-    let connect_btn = Button::builder().label("Connect").build();
-    connect_btn.add_css_class("network-connect-btn");
+    let connect_btn = ui::small_button("Connect", ui::Kind::Secondary);
 
     btn_row.append(&spinner);
     btn_row.append(&status_lbl);
@@ -476,11 +398,8 @@ fn build_hidden_network_row(
         );
     }
 
-    let toggle_btn = Button::builder()
-        .label("Connect to hidden network")
-        .halign(gtk4::Align::Center)
-        .build();
-    toggle_btn.add_css_class("network-show-all-btn");
+    let toggle_btn = ui::small_button("Connect to hidden network", ui::Kind::Flat);
+    toggle_btn.set_halign(gtk4::Align::Center);
     {
         let rev_c = hidden_revealer.clone();
         let ssid_c = ssid_entry.clone();
@@ -498,7 +417,6 @@ fn build_hidden_network_row(
 
     let list_row = ListBoxRow::builder().build();
     list_row.set_child(Some(&outer));
-    list_row.add_css_class("network-row");
     list.append(&list_row);
 }
 
@@ -577,16 +495,14 @@ fn wire_forget(busy: &Rc<Busy>, ssid: String, on_change: Rc<dyn Fn()>) {
         if !confirmed.get() {
             confirmed.set(true);
             b.set_label("Sure?");
-            b.remove_css_class("network-forget-btn");
-            b.add_css_class("network-forget-confirm-btn");
+            ui::set_button_kind(b, ui::Kind::Destructive);
             let revert = b.clone();
             let confirmed_revert = confirmed.clone();
             glib::timeout_add_local_once(std::time::Duration::from_secs(3), move || {
                 if confirmed_revert.get() {
                     confirmed_revert.set(false);
                     revert.set_label("Forget");
-                    revert.remove_css_class("network-forget-confirm-btn");
-                    revert.add_css_class("network-forget-btn");
+                    ui::set_button_kind(&revert, ui::Kind::Flat);
                 }
             });
             return;

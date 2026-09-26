@@ -93,16 +93,6 @@ pub enum Tier {
 }
 
 impl Tier {
-    /// The CSS class the bar segment and the Helm header both key off.
-    pub fn css(self) -> &'static str {
-        match self {
-            Tier::Ok => "backup-ok",
-            Tier::Running => "backup-running",
-            Tier::Stale | Tier::Failed => "backup-warn",
-            Tier::Unknown => "backup-unknown",
-        }
-    }
-
     /// One glyph for every tier, the way the battery keeps its ladder and
     /// lets colour carry the warning. A segment that swaps a check for a
     /// cross is two signals for one fact, and the check never said "backup"

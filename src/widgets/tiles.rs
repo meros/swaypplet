@@ -2,7 +2,8 @@
 //!
 //! Each tile is described once as a [`TileSpec`]; a single [`build_tile`]
 //! factory turns a spec into an optimistic toggle button with revert-on-failure
-//! and the `loading` CSS class. This replaces the per-toggle copy-pasted
+//! and the `loading` CSS class, drawn as the design system's tile
+//! (`ui::tile_toggle`). This replaces the per-toggle copy-pasted
 //! click-handler boilerplate that used to live in `header.rs`.
 //!
 //! A spec is presentation plus two function pointers, and that is the whole
@@ -191,32 +192,6 @@ pub fn build_tile(spec: &TileSpec) -> gtk4::ToggleButton {
     btn
 }
 
-/// Build a bare reveal tile (container + toggle button, icon + label content)
-/// with no radio action wired — used for reveal-only tiles like Display, where
-/// the panel attaches its own reveal handler.
-pub fn build_reveal_tile(icon: &str, label: &str) -> gtk4::ToggleButton {
-    make_toggle(icon, label)
-}
-
-/// Wrap a tile's toggle button in an overlay with a reveal chevron floating at
-/// the right edge. The chevron takes no layout width, so chevron and non-chevron
-/// tiles stay the same size in a homogeneous grid. Returns the grid-cell widget
-/// (the overlay) and the chevron button for the caller to wire.
-pub fn wrap_with_chevron(btn: &gtk4::ToggleButton) -> (gtk4::Overlay, gtk4::Button) {
-    let overlay = gtk4::Overlay::new();
-    overlay.add_css_class("startmenu-tile");
-    // Reserve room on the right so the label never slides under the chevron.
-    btn.add_css_class("has-chevron");
-    overlay.set_child(Some(btn));
-
-    let chevron = tile_chevron();
-    chevron.set_halign(gtk4::Align::End);
-    chevron.set_valign(gtk4::Align::Center);
-    overlay.add_overlay(&chevron);
-
-    (overlay, chevron)
-}
-
 /// Read the initial state for a tile (on a background thread) and apply it.
 pub fn init_tile_state(btn: &gtk4::ToggleButton, spec: &TileSpec) {
     let btn = btn.clone();
@@ -264,54 +239,11 @@ pub fn build_dnd_tile(store: Rc<RefCell<NotificationStore>>) -> gtk4::ToggleButt
 
 // ── Widget helpers ──────────────────────────────────────────────────────────
 
-/// The icon + label content shared by all tiles: glyph on the left, text label
-/// filling the rest, left-aligned. Lives inside the toggle button.
-fn tile_content(icon: &str, label_text: &str) -> gtk4::Box {
-    let content = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(10)
-        .build();
-    content.add_css_class("tile-content");
-
-    let icon_lbl = gtk4::Label::builder().label(icon).build();
-    icon_lbl.add_css_class("tile-icon");
-
-    let text_lbl = gtk4::Label::builder().label(label_text).xalign(0.0).build();
-    text_lbl.add_css_class("toggle-label");
-    text_lbl.set_hexpand(true);
-
-    content.append(&icon_lbl);
-    content.append(&text_lbl);
-    content
-}
-
-/// A reveal chevron that sits flush beside a tile's toggle button (same height).
-/// Callers wire its click handler and flip the glyph via [`set_chevron_open`].
-pub fn tile_chevron() -> gtk4::Button {
-    let chevron = gtk4::Button::builder().label("›").build();
-    chevron.add_css_class("startmenu-tile-chevron");
-    chevron
-}
-
-/// Flip a chevron between collapsed (›) and expanded (⌄) glyphs.
-pub fn set_chevron_open(chevron: &gtk4::Button, open: bool) {
-    chevron.set_label(if open { "⌄" } else { "›" });
-}
-
+/// The tile component (`ui::tile_toggle`): glyph and name on one button,
+/// the accent fill when on.
 fn make_toggle(icon: &str, label_text: &str) -> gtk4::ToggleButton {
-    let btn = gtk4::ToggleButton::builder().hexpand(true).build();
-    btn.add_css_class("toggle-btn");
-    btn.set_child(Some(&tile_content(icon, label_text)));
-
-    // Active state colors the whole button (icon + label) via `.toggle-btn.active`.
-    btn.connect_toggled(|btn| {
-        if btn.is_active() {
-            btn.add_css_class("active");
-        } else {
-            btn.remove_css_class("active");
-        }
-    });
-
+    let btn = crate::ui::tile_toggle(icon, label_text);
+    btn.set_hexpand(true);
     btn
 }
 

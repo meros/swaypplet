@@ -2,11 +2,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4::{Box, Button, Label, ListBox, ListBoxRow, Orientation, Spinner};
+use gtk4::{ListBox, ListBoxRow, Spinner};
 
 use super::NetworkState;
 use super::backend::*;
 use crate::spawn::spawn_work;
+use crate::ui;
 
 pub fn rebuild_vpn_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
     while let Some(child) = list.first_child() {
@@ -20,45 +21,22 @@ pub fn rebuild_vpn_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
     }
 
     for vpn in vpns {
-        let row_box = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(8)
-            .margin_top(4)
-            .margin_bottom(4)
-            .margin_start(4)
-            .margin_end(4)
-            .build();
+        let r = ui::row(ICON_VPN, &vpn.name, "");
+        set_signal_glyph(&r.icon, ICON_VPN, ui::Tone::Fg);
+        // A connected VPN is the selected row.
+        ui::set_selected(&r.root, vpn.active);
 
-        let icon_lbl = Label::builder().label(ICON_VPN).build();
-        icon_lbl.add_css_class("network-icon");
-        if vpn.active {
-            icon_lbl.add_css_class("network-vpn-active");
-        }
-
-        let name_lbl = Label::builder()
-            .label(&vpn.name)
-            .halign(gtk4::Align::Start)
-            .hexpand(true)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .build();
-        name_lbl.add_css_class("network-ssid");
-        if vpn.active {
-            name_lbl.add_css_class("network-active");
-        }
-
-        let badge_lbl = Label::builder().label(&vpn.vpn_type).build();
-        badge_lbl.add_css_class("vpn-type-badge");
+        let badge_lbl = ui::badge(&vpn.vpn_type);
+        badge_lbl.add_css_class("neutral");
 
         let spinner = Spinner::new();
         spinner.set_visible(false);
 
-        let status_lbl = Label::builder().label("").build();
-        status_lbl.add_css_class("network-conn-status");
+        let status_lbl = ui::text("", ui::Text::Label, ui::Tone::Faint);
         status_lbl.set_visible(false);
 
         let btn_label = if vpn.active { "Disconnect" } else { "Connect" };
-        let action_btn = Button::builder().label(btn_label).build();
-        action_btn.add_css_class("network-connect-btn");
+        let action_btn = ui::small_button(btn_label, ui::Kind::Secondary);
 
         {
             let name_clone = vpn.name.clone();
@@ -99,19 +77,13 @@ pub fn rebuild_vpn_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
             });
         }
 
-        row_box.append(&icon_lbl);
-        row_box.append(&name_lbl);
-        row_box.append(&badge_lbl);
-        row_box.append(&spinner);
-        row_box.append(&status_lbl);
-        row_box.append(&action_btn);
+        r.end.append(&badge_lbl);
+        r.end.append(&spinner);
+        r.end.append(&status_lbl);
+        r.end.append(&action_btn);
 
         let list_row = ListBoxRow::builder().build();
-        list_row.set_child(Some(&row_box));
-        list_row.add_css_class("network-row");
-        if vpn.active {
-            list_row.add_css_class("network-vpn-connected");
-        }
+        list_row.set_child(Some(&r.root));
         list.append(&list_row);
     }
 }

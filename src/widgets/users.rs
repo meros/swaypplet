@@ -14,6 +14,7 @@ use crate::avatar::avatar;
 use crate::icons;
 use crate::spawn::spawn_work;
 use crate::switch_user::{self, SwitchUser};
+use crate::ui;
 use crate::widgets::power::hide_panel_for_widget;
 
 /// Avatar diameter for panel rows.
@@ -26,23 +27,11 @@ pub struct UserSection {
 
 impl UserSection {
     pub fn new() -> Self {
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(6)
-            .build();
-        root.add_css_class("section");
+        let root = ui::group(2);
+        root.add_css_class("section-group");
+        root.append(&ui::heading("Users"));
 
-        let title = gtk4::Label::builder()
-            .label("Users")
-            .halign(gtk4::Align::Start)
-            .build();
-        title.add_css_class("section-title");
-        root.append(&title);
-
-        let list = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(2)
-            .build();
+        let list = ui::vbox(1);
         root.append(&list);
 
         // Host not configured for switching → no section at all (matches
@@ -91,8 +80,7 @@ fn rebuild_rows(list: &gtk4::Box, users: &[SwitchUser]) {
 
 fn rebuild_fallback(list: &gtk4::Box) {
     clear(list);
-    let btn = gtk4::Button::with_label(&format!("{}  Switch user", icons::SWITCH_USER));
-    btn.add_css_class("user-row");
+    let (btn, _) = ui::row_button(icons::SWITCH_USER, "Switch user", "");
     btn.connect_clicked(|b| {
         hide_panel_for_widget(b.upcast_ref());
         switch_user::cycle();
@@ -101,41 +89,24 @@ fn rebuild_fallback(list: &gtk4::Box) {
 }
 
 fn user_row(u: &SwitchUser) -> gtk4::Button {
-    let content = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(10)
-        .build();
+    let (btn, r) = ui::row_button("", &u.user, "");
 
     let av = avatar(&u.user, u.icon.as_deref(), AVATAR_SIZE, u.logged_in);
     if u.current {
         av.add_css_class("active");
     }
-    content.append(&av);
-
-    let name = gtk4::Label::builder()
-        .label(&u.user)
-        .halign(gtk4::Align::Start)
-        .hexpand(true)
-        .xalign(0.0)
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .build();
-    name.add_css_class("user-name");
-    content.append(&name);
+    r.root.prepend(&av);
 
     if u.fingerprint == Some(true) {
         let fp = gtk4::Label::new(Some(icons::FINGERPRINT));
-        fp.add_css_class("user-fp");
         fp.set_tooltip_text(Some("Fingerprint enrolled"));
-        content.append(&fp);
+        r.end.append(&fp);
     }
-
-    let btn = gtk4::Button::builder().child(&content).build();
-    btn.add_css_class("user-row");
 
     if u.current {
         // The invoking user: marked, non-actionable. A click just closes the
         // panel rather than pointlessly re-switching to self.
-        btn.add_css_class("active");
+        ui::set_selected(&btn, true);
         btn.connect_clicked(|b| hide_panel_for_widget(b.upcast_ref()));
     } else {
         let user = u.user.clone();

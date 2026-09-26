@@ -19,6 +19,7 @@ use gtk4::prelude::*;
 
 use crate::backup::{self, BackupStatusService};
 use crate::spawn::spawn_work;
+use crate::ui;
 
 const UNITS: [&str; 2] = [
     "restic-backups-home.service",
@@ -36,44 +37,25 @@ pub struct BackupSection {
 
 impl BackupSection {
     pub fn new(service: &Rc<BackupStatusService>) -> Self {
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(6)
-            .build();
-        root.add_css_class("section");
+        let root = ui::group(2);
+        root.add_css_class("section-group");
 
-        let header = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(8)
-            .build();
-        let title = gtk4::Label::builder()
-            .label("Backup")
-            .halign(gtk4::Align::Start)
-            .hexpand(true)
-            .xalign(0.0)
-            .build();
-        title.add_css_class("section-title");
+        let header = ui::hbox(3);
+        let title = ui::heading("Backup");
+        title.set_hexpand(true);
         header.append(&title);
-        let verdict = gtk4::Label::new(None);
-        verdict.add_css_class("backup-verdict");
+        let verdict = ui::status(ui::Status::Neutral, "");
         header.append(&verdict);
         root.append(&header);
 
-        let rows = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(2)
-            .build();
+        let rows = ui::vbox(1);
         root.append(&rows);
 
-        let target = gtk4::Label::builder()
-            .halign(gtk4::Align::Start)
-            .xalign(0.0)
-            .build();
-        target.add_css_class("backup-target");
+        let target = ui::text("", ui::Text::Caption, ui::Tone::Faint);
         root.append(&target);
 
-        let run_now = gtk4::Button::with_label("Back up now");
-        run_now.add_css_class("backup-run");
+        let run_now = ui::button("Back up now", ui::Kind::Secondary);
+        run_now.set_halign(gtk4::Align::Start);
         // The status file turns to `running` at ExecStartPre, which is what
         // re-enables the button later; this only stops a second click in the
         // seconds before that lands.
@@ -138,15 +120,7 @@ fn draw(
     let snapshot = service.snapshot();
     let tier = snapshot.tier();
 
-    for class in [
-        "backup-ok",
-        "backup-running",
-        "backup-warn",
-        "backup-unknown",
-    ] {
-        verdict.remove_css_class(class);
-    }
-    verdict.add_css_class(tier.css());
+    ui::set_status(verdict, status(tier));
     verdict.set_label(&format!("{} {}", tier.icon(), label(tier)));
 
     while let Some(child) = rows.first_child() {
@@ -175,6 +149,15 @@ fn draw(
     run_now.set_sensitive(!snapshot.jobs.iter().any(crate::backup::Job::running));
 }
 
+/// The verdict's status tone: healthy, attention, or nothing to say yet.
+fn status(tier: backup::Tier) -> ui::Status {
+    match tier {
+        backup::Tier::Ok => ui::Status::Ok,
+        backup::Tier::Stale | backup::Tier::Failed => ui::Status::Warn,
+        backup::Tier::Running | backup::Tier::Unknown => ui::Status::Neutral,
+    }
+}
+
 fn label(tier: backup::Tier) -> &'static str {
     match tier {
         backup::Tier::Ok => "up to date",
@@ -186,31 +169,14 @@ fn label(tier: backup::Tier) -> &'static str {
 }
 
 fn job_row(name: &str, detail: &str) -> gtk4::Box {
-    let row = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(10)
-        .build();
-    row.add_css_class("backup-row");
-
-    let job = gtk4::Label::builder()
-        .label(name)
-        .halign(gtk4::Align::Start)
-        .xalign(0.0)
-        .build();
-    job.add_css_class("backup-job");
-    row.append(&job);
-
+    let r = ui::row("", name, "");
     let when = gtk4::Label::builder()
         .label(detail)
-        .halign(gtk4::Align::End)
-        .hexpand(true)
         .xalign(1.0)
         .ellipsize(gtk4::pango::EllipsizeMode::End)
         .build();
-    when.add_css_class("backup-when");
-    row.append(&when);
-
-    row
+    r.end.append(&when);
+    r.root
 }
 
 /// Both units, one call. systemd queues the second behind the first through

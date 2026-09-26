@@ -800,3 +800,149 @@ pub fn list_row(content: &impl IsA<gtk4::Widget>) -> gtk4::ListBoxRow {
     content.add_css_class("ui-row");
     gtk4::ListBoxRow::builder().child(content).build()
 }
+
+// ── Added by the panel migration ────────────────────────────────────────
+
+impl Section {
+    /// The section as a page of its own (a Helm sub-sheet): no header, the
+    /// body open at once, and no fill, because the sheet is already the
+    /// group and a fill on it would only be a second ground.
+    pub fn show_as_page(&self) {
+        self.header.set_visible(false);
+        let duration = self.revealer.transition_duration();
+        self.revealer.set_transition_duration(0);
+        self.set_open(true);
+        self.revealer.set_transition_duration(duration);
+        self.root.add_css_class("page");
+    }
+}
+
+/// A heading over a list inside a section ("Available networks").
+pub fn heading(s: &str) -> gtk4::Label {
+    let l = text(s, Text::Label, Tone::Muted);
+    l.add_css_class("ui-strong");
+    l
+}
+
+/// A disclosure inside a section: a quiet line that opens a body under
+/// it. A section header would be a second group inside the first.
+pub struct Disclosure {
+    pub root: gtk4::Box,
+    pub button: gtk4::Button,
+    pub body: gtk4::Box,
+    pub revealer: gtk4::Revealer,
+}
+
+pub fn disclosure(label: &str) -> Disclosure {
+    let root = vbox(0);
+    root.add_css_class("ui-disclosure");
+    let button = gtk4::Button::new();
+    button.add_css_class("ui-disclosure-button");
+    button.set_halign(Align::Start);
+    let line = hbox(2);
+    let chevron = gtk4::Image::from_icon_name("pan-end-symbolic");
+    chevron.add_css_class("ui-disclosure-chevron");
+    let l = gtk4::Label::new(Some(label));
+    line.append(&chevron);
+    line.append(&l);
+    button.set_child(Some(&line));
+    let body = vbox(1);
+    let revealer = gtk4::Revealer::builder()
+        .transition_type(gtk4::RevealerTransitionType::SlideDown)
+        .transition_duration(crate::anim::duration(crate::tokens::motion::EXPAND.ms) as u32)
+        .child(&body)
+        .build();
+    root.append(&button);
+    root.append(&revealer);
+    {
+        let (root, revealer) = (root.clone(), revealer.clone());
+        button.connect_clicked(move |_| {
+            let open = !revealer.reveals_child();
+            revealer.set_reveal_child(open);
+            if open {
+                root.add_css_class("open");
+            } else {
+                root.remove_css_class("open");
+            }
+        });
+    }
+    Disclosure {
+        root,
+        button,
+        body,
+        revealer,
+    }
+}
+
+impl Disclosure {
+    pub fn set_open(&self, open: bool) {
+        self.revealer.set_reveal_child(open);
+        if open {
+            self.root.add_css_class("open");
+        } else {
+            self.root.remove_css_class("open");
+        }
+    }
+}
+
+/// A toggle tile that is itself the button: a glyph and a name. `on` is
+/// kept in step with the toggle's state.
+pub fn tile_toggle(icon: &str, title: &str) -> gtk4::ToggleButton {
+    let b = gtk4::ToggleButton::new();
+    b.add_css_class("ui-tile");
+    b.add_css_class("ui-tile-toggle");
+    let line = hbox(3);
+    let icon_l = gtk4::Label::new(Some(icon));
+    glyph(&icon_l, Text::Title, Tone::Fg);
+    let title_l = gtk4::Label::new(Some(title));
+    title_l.add_css_class("ui-tile-title");
+    title_l.set_xalign(0.0);
+    title_l.set_hexpand(true);
+    line.append(&icon_l);
+    line.append(&title_l);
+    b.set_child(Some(&line));
+    b.connect_toggled(|b| {
+        if b.is_active() {
+            b.add_css_class("on");
+        } else {
+            b.remove_css_class("on");
+        }
+    });
+    b
+}
+
+/// Turn a slider row's icon into a flat button (mute, say). The glyph
+/// stays the row's icon label, so callers keep setting it there.
+pub fn slider_icon_button(r: &SliderRow, tooltip: &str) -> gtk4::Button {
+    r.root.remove(&r.icon);
+    let b = gtk4::Button::new();
+    style_button(&b, Kind::Flat);
+    b.add_css_class("icon");
+    b.set_tooltip_text(Some(tooltip));
+    b.set_child(Some(&r.icon));
+    r.root.prepend(&b);
+    b
+}
+
+/// A progress bar whose fill says a status (charging, low) rather than a
+/// plain level; `None` is the accent fill.
+pub fn set_progress_status(p: &gtk4::ProgressBar, status: Option<Status>) {
+    for c in ["ok", "warn", "bad"] {
+        p.remove_css_class(c);
+    }
+    match status {
+        Some(Status::Ok) => p.add_css_class("ok"),
+        Some(Status::Warn) => p.add_css_class("warn"),
+        Some(Status::Bad) => p.add_css_class("bad"),
+        Some(Status::Neutral) | None => {}
+    }
+}
+
+/// Restyle a button as another kind in place ("Forget" turning into its
+/// destructive confirmation).
+pub fn set_button_kind(b: &gtk4::Button, kind: Kind) {
+    for c in ["primary", "flat", "destructive"] {
+        b.remove_css_class(c);
+    }
+    style_button(b, kind);
+}

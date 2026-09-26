@@ -7,95 +7,28 @@ use gtk4::prelude::*;
 use crate::icons;
 use crate::notifications::CloseReason;
 use crate::notifications::store::{self, NotificationStore};
+use crate::ui;
 
 pub struct NotificationsSection {
-    root: gtk4::Box,
+    section: Rc<ui::Section>,
     list_box: gtk4::Box,
     empty_label: gtk4::Label,
-    summary_btn: gtk4::Button,
-    summary_text: gtk4::Label,
-    summary_arrow: gtk4::Label,
-    detail_revealer: gtk4::Revealer,
     list_scroller: gtk4::ScrolledWindow,
     store: Rc<RefCell<NotificationStore>>,
 }
 
 impl NotificationsSection {
     pub fn new(store: Rc<RefCell<NotificationStore>>) -> Self {
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .build();
-        root.add_css_class("section");
-        root.add_css_class("notification-center");
-
-        // Summary row (always visible, toggles detail revealer)
-        let summary_content = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(6)
-            .build();
-
-        let summary_icon = gtk4::Label::new(Some(icons::NOTIFICATION));
-        summary_icon.add_css_class("section-summary-icon");
-
-        let summary_text = gtk4::Label::new(Some("No notifications"));
-        summary_text.add_css_class("section-summary-label");
-        summary_text.set_hexpand(true);
-        summary_text.set_xalign(0.0);
-        summary_text.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-
-        let summary_arrow = gtk4::Label::new(Some("▸"));
-        summary_arrow.add_css_class("section-expand-arrow");
-
-        summary_content.append(&summary_icon);
-        summary_content.append(&summary_text);
-        summary_content.append(&summary_arrow);
-
-        let summary_btn = gtk4::Button::builder().child(&summary_content).build();
-        summary_btn.add_css_class("section-summary");
-
-        let detail_revealer = gtk4::Revealer::builder()
-            .transition_type(gtk4::RevealerTransitionType::SlideDown)
-            .transition_duration(200)
-            .reveal_child(false)
-            .build();
-
-        {
-            let rev = detail_revealer.clone();
-            let arrow = summary_arrow.clone();
-            summary_btn.connect_clicked(move |_| {
-                let revealed = rev.reveals_child();
-                rev.set_reveal_child(!revealed);
-                arrow.set_label(if revealed { "▸" } else { "▾" });
-            });
-        }
-
-        root.append(&summary_btn);
-        root.append(&detail_revealer);
-
-        // Detail box (inside revealer)
-        let detail_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .build();
+        let section = Rc::new(ui::section(icons::NOTIFICATION, "Notifications", "None"));
+        ui::glyph(&section.icon, ui::Text::Title, ui::Tone::Fg);
 
         // Header row: title + clear all button
-        let header = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(8)
-            .build();
+        let header = ui::hbox(3);
 
-        let title = gtk4::Label::builder()
-            .label("NOTIFICATIONS")
-            .halign(gtk4::Align::Start)
-            .hexpand(true)
-            .build();
-        title.add_css_class("section-title");
+        let title = ui::heading("Notifications");
+        title.set_hexpand(true);
 
-        let clear_btn = gtk4::Button::builder()
-            .label(icons::NOTIFICATION_CLEAR)
-            .tooltip_text("Clear all")
-            .build();
-        clear_btn.add_css_class("flat");
-        clear_btn.add_css_class("notification-clear-btn");
+        let clear_btn = ui::glyph_button(icons::NOTIFICATION_CLEAR, "Clear all", ui::Kind::Flat);
 
         let store_clear = store.clone();
         clear_btn.connect_clicked(move |_| {
@@ -104,7 +37,7 @@ impl NotificationsSection {
 
         header.append(&title);
         header.append(&clear_btn);
-        detail_box.append(&header);
+        section.body.append(&header);
 
         // Scrollable list area
         let scroll = gtk4::ScrolledWindow::builder()
@@ -114,54 +47,44 @@ impl NotificationsSection {
             .max_content_height(300)
             .build();
 
-        let list_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(4)
-            .build();
+        let list_box = ui::vbox(2);
 
-        let empty_label = gtk4::Label::builder()
-            .label("No notifications")
-            .halign(gtk4::Align::Center)
-            .build();
-        empty_label.add_css_class("placeholder");
+        let empty_label = ui::text("No notifications", ui::Text::Body, ui::Tone::Muted);
+        empty_label.set_halign(gtk4::Align::Center);
+        empty_label.add_css_class("section-empty");
         list_box.append(&empty_label);
 
         scroll.set_child(Some(&list_box));
-        detail_box.append(&scroll);
+        section.body.append(&scroll);
 
-        detail_revealer.set_child(Some(&detail_box));
-
-        let section = Self {
-            root,
+        let notifications = Self {
+            section,
             list_box,
             empty_label,
-            summary_btn,
-            summary_text,
-            summary_arrow,
-            detail_revealer,
             list_scroller: scroll.clone(),
             store: store.clone(),
         };
 
         // Subscribe to changes for live updates
-        let list_box_c = section.list_box.clone();
-        let empty_label_c = section.empty_label.clone();
-        let summary_text_c = section.summary_text.clone();
-        let summary_arrow_c = section.summary_arrow.clone();
-        let detail_revealer_c = section.detail_revealer.clone();
+        let list_box_c = notifications.list_box.clone();
+        let empty_label_c = notifications.empty_label.clone();
+        let section_c = notifications.section.clone();
         let store_change = store.clone();
         store.borrow_mut().connect_change(move || {
-            let has_notifications =
-                rebuild_list(&list_box_c, &empty_label_c, &summary_text_c, &store_change);
+            let has_notifications = rebuild_list(
+                &list_box_c,
+                &empty_label_c,
+                &section_c.summary,
+                &store_change,
+            );
             // Auto-expand when new notifications arrive
-            if has_notifications && !detail_revealer_c.reveals_child() {
-                detail_revealer_c.set_reveal_child(true);
-                summary_arrow_c.set_label("▾");
+            if has_notifications && !section_c.revealer.reveals_child() {
+                section_c.set_open(true);
             }
         });
 
-        section.rebuild();
-        section
+        notifications.rebuild();
+        notifications
     }
 
     pub fn refresh(&self) {
@@ -171,15 +94,11 @@ impl NotificationsSection {
     /// Switch into page mode: reveal detail immediately, hide the summary
     /// toggle row.
     pub fn expand_for_page(&self) {
-        self.summary_btn.set_visible(false);
-        self.detail_revealer.set_transition_duration(0);
-        self.detail_revealer.set_reveal_child(true);
-        self.detail_revealer.set_transition_duration(200);
-        self.summary_arrow.set_label("▾");
+        self.section.show_as_page();
     }
 
     pub fn widget(&self) -> &gtk4::Box {
-        &self.root
+        &self.section.root
     }
 
     /// Cap the internal list scroller. Embedding contexts (start menu) use
@@ -193,7 +112,7 @@ impl NotificationsSection {
         rebuild_list(
             &self.list_box,
             &self.empty_label,
-            &self.summary_text,
+            &self.section.summary,
             &self.store,
         );
     }
@@ -226,9 +145,8 @@ fn rebuild_list(
 
     // Update summary text
     match count {
-        0 => summary_text.set_label("No notifications"),
-        1 => summary_text.set_label("1 notification"),
-        n => summary_text.set_label(&format!("{n} notifications")),
+        0 => summary_text.set_label("None"),
+        n => summary_text.set_label(&format!("{n}")),
     }
 
     if notifications.is_empty() {
@@ -249,12 +167,7 @@ fn rebuild_list(
 
     for (app_name, notifs) in &grouped {
         if !app_name.is_empty() {
-            let group_label = gtk4::Label::builder()
-                .label(app_name.to_uppercase())
-                .halign(gtk4::Align::Start)
-                .build();
-            group_label.add_css_class("notification-app-name");
-            list_box.append(&group_label);
+            list_box.append(&ui::heading(app_name));
         }
 
         for notif in notifs {
@@ -270,65 +183,42 @@ fn build_entry(
     notif: &crate::notifications::Notification,
     store: &Rc<RefCell<NotificationStore>>,
 ) -> gtk4::Box {
-    let row = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(8)
-        .build();
-    row.add_css_class("notification-entry");
+    let r = ui::row("", &notif.summary, "");
 
-    // Text content
-    let vbox = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(1)
-        .hexpand(true)
-        .build();
-
-    let header_row = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(8)
-        .build();
-
-    let summary = gtk4::Label::builder()
-        .label(&notif.summary)
-        .halign(gtk4::Align::Start)
-        .hexpand(true)
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .build();
-    summary.add_css_class("notification-summary");
-
-    let time_label = gtk4::Label::builder()
-        .label(format_relative_time(notif.timestamp))
-        .halign(gtk4::Align::End)
-        .build();
-    time_label.add_css_class("notification-time");
-
-    header_row.append(&summary);
+    // The time sits after the summary, in the row's metadata tone.
+    let time_label = ui::text(
+        &format_relative_time(notif.timestamp),
+        ui::Text::Caption,
+        ui::Tone::Faint,
+    );
+    let texts = r
+        .title
+        .parent()
+        .and_downcast::<gtk4::Box>()
+        .expect("a row's title sits in its text column");
+    let header_row = ui::hbox(3);
+    texts.remove(&r.title);
+    r.title.set_hexpand(true);
+    header_row.append(&r.title);
     header_row.append(&time_label);
-    vbox.append(&header_row);
+    texts.prepend(&header_row);
 
     if !notif.body.is_empty() {
         let markup = crate::notifications::markup::sanitize(&notif.body);
-        let body = gtk4::Label::builder()
-            .label(&markup)
-            .use_markup(true)
-            .halign(gtk4::Align::Start)
-            .wrap(true)
-            .wrap_mode(gtk4::pango::WrapMode::WordChar)
-            .max_width_chars(50)
-            .lines(3)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .build();
-        body.add_css_class("notification-body");
-        vbox.append(&body);
+        let body = &r.subtitle;
+        body.set_label(&markup);
+        body.set_use_markup(true);
+        body.set_wrap(true);
+        body.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+        body.set_max_width_chars(50);
+        body.set_lines(3);
+        body.set_visible(true);
     }
 
     if let Some(progress) = notif.progress {
-        let bar = gtk4::ProgressBar::builder()
-            .fraction(progress as f64 / 100.0)
-            .hexpand(true)
-            .build();
-        bar.add_css_class("notification-progress");
-        vbox.append(&bar);
+        let bar = ui::progress(progress as f64 / 100.0);
+        bar.set_hexpand(true);
+        texts.append(&bar);
     }
 
     // The notification's own actions, which used to exist only on the popup
@@ -337,19 +227,13 @@ fn build_entry(
     // what makes an action reachable without a pointer at all (P8) — and it
     // does that without an input grab on an overlay-layer surface.
     if !notif.actions.is_empty() {
-        let actions_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(4)
-            .build();
-        actions_box.add_css_class("notification-actions");
+        let actions_box = ui::hbox(2);
 
         for (key, label) in &notif.actions {
             // "default" is what clicking the notification itself means; in a
             // list of rows there is no such gesture to hang it on, so it gets
             // a button like any other.
-            let btn = gtk4::Button::builder().label(label).build();
-            btn.add_css_class("flat");
-            btn.add_css_class("notification-action-btn");
+            let btn = ui::small_button(label, ui::Kind::Secondary);
 
             let id = notif.id;
             let key_c = key.clone();
@@ -363,27 +247,20 @@ fn build_entry(
             });
             actions_box.append(&btn);
         }
-        vbox.append(&actions_box);
+        texts.append(&actions_box);
     }
 
-    row.append(&vbox);
-
     // Dismiss button
-    let dismiss_btn = gtk4::Button::builder()
-        .label(icons::CLOSE)
-        .valign(gtk4::Align::Center)
-        .build();
-    dismiss_btn.add_css_class("flat");
-    dismiss_btn.add_css_class("notification-dismiss-btn");
+    let dismiss_btn = ui::glyph_button(icons::CLOSE, "Dismiss", ui::Kind::Flat);
 
     let id = notif.id;
     let store_c = store.clone();
     dismiss_btn.connect_clicked(move |_| {
         store::store_close(&store_c, id, CloseReason::Dismissed);
     });
-    row.append(&dismiss_btn);
+    r.end.append(&dismiss_btn);
 
-    row
+    r.root
 }
 
 fn format_relative_time(timestamp: SystemTime) -> String {

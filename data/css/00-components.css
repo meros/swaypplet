@@ -960,3 +960,298 @@ list.ui-list > row:focus > .ui-row {
     border-radius: var(--radius-tile);
     background-color: var(--fill-3);
 }
+
+/* ── Section as a page (added by the panel migration) ──────────────────
+   A Helm sub-sheet shows one section as its whole page: the sheet is the
+   group, so the section drops its own fill and its body's inset. */
+
+.ui-section.page {
+    background-color: transparent;
+}
+
+.ui-section.page .ui-section-body {
+    padding: 0;
+}
+
+/* ── Disclosure (added by the panel migration) ─────────────────────────
+   A quiet line inside a section that opens a body under it. */
+
+button.ui-disclosure-button {
+    min-height: var(--control-height);
+    padding: 0 var(--space-3);
+    border: none;
+    border-radius: var(--radius-control);
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg-muted);
+    font-size: var(--type-label);
+    font-weight: var(--w-strong);
+    transition: background-image var(--motion-state),
+                color var(--motion-state);
+}
+
+button.ui-disclosure-button:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+    color: var(--fg);
+}
+
+button.ui-disclosure-button:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+button.ui-disclosure-button:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+/* Its own chevron class: a section's chevron rule reaches every chevron
+   inside an open section, and a closed disclosure must still point right. */
+.ui-disclosure-chevron {
+    transition: -gtk-icon-transform var(--motion-expand);
+}
+
+.ui-disclosure.open > button .ui-disclosure-chevron {
+    -gtk-icon-transform: rotate(90deg);
+}
+
+/* ── Toggle tile as one button (added by the panel migration) ──────────
+   The tile itself is the toggle, so the states sit on it rather than on a
+   button inside. Sizes stay on .ui-tile, where a surface may place it. */
+
+.ui-tile-toggle {
+    padding: 0 var(--space-4);
+    border: none;
+    background-image: none;
+    box-shadow: none;
+    outline: 0 solid transparent;
+    transition: background-color var(--motion-state),
+                background-image var(--motion-state),
+                color var(--motion-state),
+                opacity var(--motion-state);
+}
+
+button.ui-tile-toggle:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+button.ui-tile-toggle:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+button.ui-tile-toggle:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+button.ui-tile-toggle:disabled {
+    background-color: var(--fill-2);
+    background-image: none;
+    color: var(--fg-disabled);
+}
+
+/* Waiting on the tool the tile drives. */
+.ui-tile-toggle.loading {
+    opacity: 0.6;
+}
+
+/* ── Slider marks and over-range (added by the panel migration) ────────
+   `ui::set_class(scale, "over", …)`: past the normal range (volume over
+   100 %), the fill turns warning. */
+
+scale.ui-slider marks label {
+    font-size: var(--type-caption);
+    color: var(--fg-faint);
+}
+
+scale.ui-slider.over highlight,
+scale.ui-slider.over fill {
+    background-color: var(--warning-bg);
+}
+
+/* ── Tones on component parts (added by the panel migration) ───────────
+   A part's own colour rule comes after the tone classes above, so a tone
+   on a part names both classes to win. */
+
+.ui-row-icon.ui-warning,
+.ui-slider-icon.ui-warning { color: var(--warning); }
+
+.ui-row-icon.ui-danger,
+.ui-slider-icon.ui-danger { color: var(--danger); }
+
+/* ── Progress with a status (added by the panel migration) ──────────────
+   A level that is also a verdict: charging, low. */
+
+progressbar.ui-progress.ok progress   { background-color: var(--success-bg); }
+progressbar.ui-progress.warn progress { background-color: var(--warning-bg); }
+progressbar.ui-progress.bad progress  { background-color: var(--danger-bg); }
+
+/* ── Busy row (added by the panel migration) ───────────────────────────
+   `ui::set_class(row, "busy", …)`: a row waiting on something it asked
+   for. */
+
+.ui-row.busy {
+    opacity: 0.6;
+    transition: opacity var(--motion-state);
+}
+
+/* ── Bare GTK widgets (added by the panel migration) ───────────────────
+   The look of a button, scale, switch, entry … that no component wraps
+   yet. These match every such widget in the process; they used to sit in
+   03-panel.css, after the surfaces' own rules, and repainted component
+   buttons elsewhere. Here they come first, so any surface or component
+   rule wins. The panel itself no longer relies on them; other surfaces
+   still build bare GTK widgets (settings panes, the Helm rail and pills,
+   polkit, the lock screen, notification popups, pins). No :hover or
+   :active: a bare button has none until it moves onto ui::button. Delete
+   a block once `grep` finds no bare user of that widget. */
+
+button {
+    min-height: 32px;
+    padding: var(--space-3) var(--space-4);
+    border: none;
+    border-radius: var(--radius-control);
+    background-color: var(--fill-2);
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg);
+    transition: background-color var(--motion-state),
+                background-image var(--motion-state);
+}
+
+button:disabled {
+    color: var(--fg-disabled);
+    background-image: none;
+}
+
+button:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+/* Notification popups and pins still ask for a quiet button by GTK's
+   name; ui::Kind::Flat carries the same class and has its own rules. */
+button.flat:not(.ui-btn) {
+    background-color: transparent;
+    color: var(--fg-muted);
+    font-size: var(--type-caption);
+    padding: var(--space-2) var(--space-3);
+    min-height: 28px;
+}
+
+/* The settings panes' disclosure (src/settings/ui.rs::disclosure) until it
+   moves onto ui::disclosure. */
+button.section-expander {
+    background-color: transparent;
+    color: var(--fg-muted);
+    font-size: var(--type-label);
+    padding: var(--space-2) var(--space-3);
+    min-height: 28px;
+}
+
+scale:not(.ui-slider) {
+    min-height: 10px;
+    /* Horizontal padding absorbs the knob's negative-margin overhang so
+       the knob never clips at the widget edge. */
+    padding: var(--space-3) var(--space-3);
+}
+
+scale:not(.ui-slider) marks label {
+    color: var(--fg-faint);
+    font-size: var(--type-caption);
+}
+
+scale:not(.ui-slider) trough {
+    background-color: var(--fill-3);
+    border-radius: var(--radius-pill);
+    min-height: 10px;
+}
+
+scale:not(.ui-slider) highlight {
+    background-color: var(--accent-bg);
+    border-radius: var(--radius-pill);
+    min-height: 10px;
+}
+
+scale:not(.ui-slider) slider {
+    background-color: var(--knob);
+    border-radius: var(--radius-pill);
+    min-width: 20px;
+    min-height: 20px;
+    margin: calc(-1 * var(--space-3));
+    box-shadow: 0 1px 4px var(--scrim);
+    transition: all var(--motion-state);
+}
+
+scale:not(.ui-slider):focus-visible slider {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+switch:not(.ui-switch) {
+    background-color: var(--fill-3);
+    background-image: none;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    min-width: 40px;
+    min-height: 22px;
+    box-shadow: none;
+    transition: background-color var(--motion-state);
+}
+
+switch:not(.ui-switch):checked {
+    background-color: var(--accent-bg);
+}
+
+switch:not(.ui-switch) slider {
+    background-color: var(--knob);
+    background-image: none;
+    border: none;
+    border-radius: var(--radius-pill);
+    min-width: 16px;
+    min-height: 16px;
+    margin: var(--space-1);
+    box-shadow: 0 1px 2px var(--scrim);
+}
+
+switch:not(.ui-switch):checked slider {
+    background-color: var(--on-accent);
+}
+
+switch:not(.ui-switch):disabled {
+    opacity: 0.38;
+}
+
+entry:not(.ui-entry) {
+    background-color: var(--surface-raised);
+    color: var(--fg);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-control);
+    padding: var(--space-3) var(--space-4);
+    min-height: 36px;
+    caret-color: var(--accent);
+}
+
+entry:not(.ui-entry):focus-within {
+    box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+dropdown > button {
+    background-color: var(--fill-3);
+}
+
+separator {
+    background-color: var(--border-subtle);
+    min-height: 1px;
+    margin: var(--space-2) 0;
+}
+
+scrollbar slider {
+    background-color: var(--fill-3);
+    border-radius: var(--radius-pill);
+    min-width: 3px;
+}
+
+scrollbar slider:hover {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}

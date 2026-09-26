@@ -284,10 +284,7 @@ impl Panel {
         // Page 6: System Power Diagnostics & Users
         {
             let ret = return_to_search.clone();
-            let power_container = gtk4::Box::builder()
-                .orientation(gtk4::Orientation::Vertical)
-                .spacing(12)
-                .build();
+            let power_container = crate::ui::vbox(4);
             power_container.append(power.widget());
             power_container.append(users.widget());
             power_container.append(backup.widget());
@@ -505,6 +502,17 @@ impl Panel {
             self.deck_stack.set_visible_child_name("launcher");
             self.reveal.show();
             self.launcher.focus_entry();
+            // Harness hook: the nested session in dev/render.sh has no
+            // keyboard, so `SWAYPPLET_PANEL_QUERY` types an omnibox prefix
+            // (":wifi") on open, for a shot of that sub-sheet.
+            if let Ok(query) = std::env::var("SWAYPPLET_PANEL_QUERY")
+                && !query.is_empty()
+            {
+                let entry = self.launcher.entry().clone();
+                glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
+                    entry.set_text(&query)
+                });
+            }
             // The section reads land as widget churn (sysfs, clipboard rows,
             // wallpaper rescans, eight worker threads); measured on open they
             // cost 2-11 ms on the main thread right where the fade needs the

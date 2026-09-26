@@ -6,6 +6,7 @@ use gtk4::prelude::*;
 
 use crate::icons;
 use crate::spawn::spawn_work;
+use crate::ui;
 
 // ── Backend ───────────────────────────────────────────────────────────────────
 
@@ -164,96 +165,66 @@ pub struct MediaSection {
 impl MediaSection {
     pub fn new() -> Self {
         // ── Root container ───────────────────────────────────────────────────
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(6)
-            .visible(false)
-            .build();
-        root.add_css_class("section");
+        let root = ui::group(2);
+        root.add_css_class("section-group");
+        root.set_visible(false);
 
         // ── Section title row with player badge ──────────────────────────────
-        let title_row = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(6)
-            .build();
+        let title_row = ui::hbox(2);
 
-        let section_title = gtk4::Label::builder()
-            .label("NOW PLAYING")
-            .halign(gtk4::Align::Start)
-            .hexpand(true)
-            .build();
-        section_title.add_css_class("section-title");
+        let section_title = ui::heading("Now Playing");
+        section_title.set_hexpand(true);
 
-        let player_badge = gtk4::Label::builder()
-            .label("")
-            .halign(gtk4::Align::End)
-            .valign(gtk4::Align::Center)
-            .visible(false)
-            .build();
-        player_badge.add_css_class("media-player-badge");
+        let player_badge = ui::text("", ui::Text::Caption, ui::Tone::Faint);
+        player_badge.set_valign(gtk4::Align::Center);
+        player_badge.set_visible(false);
 
         title_row.append(&section_title);
         title_row.append(&player_badge);
         root.append(&title_row);
 
         // ── Content row: album art + track info ──────────────────────────────
-        let content_row = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(12)
-            .build();
+        let content_row = ui::hbox(4);
 
-        // Album art (picture or fallback icon)
-        let art_frame = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .halign(gtk4::Align::Center)
-            .valign(gtk4::Align::Center)
-            .overflow(gtk4::Overflow::Hidden)
-            .build();
-        art_frame.add_css_class("media-art-frame");
+        // Album art (picture or fallback icon), in the thumb's rounded frame.
+        let art_frame = ui::thumb();
+        art_frame.set_orientation(gtk4::Orientation::Vertical);
+        art_frame.add_css_class("media-section-art");
 
         let art_image = gtk4::Picture::builder()
             .content_fit(gtk4::ContentFit::Cover)
             .visible(false)
+            .vexpand(true)
             .build();
-        art_image.add_css_class("media-art");
 
         let art_fallback = gtk4::Label::builder()
             .label("󰎆")
             .halign(gtk4::Align::Center)
             .valign(gtk4::Align::Center)
+            .vexpand(true)
             .visible(true)
             .build();
-        art_fallback.add_css_class("media-art-fallback");
+        ui::glyph(&art_fallback, ui::Text::DisplaySm, ui::Tone::Muted);
 
         art_frame.append(&art_image);
         art_frame.append(&art_fallback);
         content_row.append(&art_frame);
 
         // Track info column
-        let info_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(2)
-            .hexpand(true)
-            .valign(gtk4::Align::Center)
-            .build();
+        let info_box = ui::vbox(1);
+        info_box.set_hexpand(true);
+        info_box.set_valign(gtk4::Align::Center);
 
-        let title_label = gtk4::Label::builder()
-            .label("")
-            .halign(gtk4::Align::Start)
-            .hexpand(true)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .max_width_chars(28)
-            .build();
-        title_label.add_css_class("media-title");
+        let title_label = ui::text("", ui::Text::Body, ui::Tone::Fg);
+        title_label.add_css_class("ui-strong");
+        title_label.set_hexpand(true);
+        title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        title_label.set_max_width_chars(28);
 
-        let artist_label = gtk4::Label::builder()
-            .label("")
-            .halign(gtk4::Align::Start)
-            .hexpand(true)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .max_width_chars(28)
-            .build();
-        artist_label.add_css_class("media-artist");
+        let artist_label = ui::text("", ui::Text::Label, ui::Tone::Muted);
+        artist_label.set_hexpand(true);
+        artist_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        artist_label.set_max_width_chars(28);
 
         info_box.append(&title_label);
         info_box.append(&artist_label);
@@ -261,43 +232,41 @@ impl MediaSection {
         root.append(&content_row);
 
         // ── Progress bar + time ──────────────────────────────────────────────
-        let progress_row = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(2)
-            .build();
+        let progress_row = ui::vbox(1);
 
-        let progress_bar = gtk4::ProgressBar::builder().hexpand(true).build();
-        progress_bar.add_css_class("media-progress");
+        let progress_bar = ui::progress(0.0);
+        progress_bar.set_hexpand(true);
 
-        let time_label = gtk4::Label::builder()
-            .label("")
-            .halign(gtk4::Align::End)
-            .visible(false)
-            .build();
-        time_label.add_css_class("media-time");
+        let time_label = ui::text("", ui::Text::Caption, ui::Tone::Faint);
+        time_label.add_css_class("ui-numeric");
+        time_label.set_halign(gtk4::Align::End);
+        time_label.set_visible(false);
 
         progress_row.append(&progress_bar);
         progress_row.append(&time_label);
         root.append(&progress_row);
 
         // ── Controls row ──────────────────────────────────────────────────────
-        let controls = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(8)
-            .halign(gtk4::Align::Center)
-            .build();
-        controls.add_css_class("media-controls");
+        let controls = ui::hbox(3);
+        controls.set_halign(gtk4::Align::Center);
+        controls.add_css_class("media-section-controls");
 
-        let prev_btn = gtk4::Button::with_label(icons::MEDIA_PREV);
-        prev_btn.add_css_class("media-btn");
+        let prev_btn = ui::glyph_button(icons::MEDIA_PREV, "Previous", ui::Kind::Flat);
+        prev_btn.add_css_class("pill");
 
-        let play_pause_btn = gtk4::Button::with_label(icons::MEDIA_PLAY);
-        play_pause_btn.add_css_class("media-btn");
-        play_pause_btn.add_css_class("media-play-pause");
+        let play_pause_btn =
+            ui::glyph_button(icons::MEDIA_PLAY, "Play or pause", ui::Kind::Secondary);
+        play_pause_btn.add_css_class("pill");
 
-        let next_btn = gtk4::Button::with_label(icons::MEDIA_NEXT);
-        next_btn.add_css_class("media-btn");
+        let next_btn = ui::glyph_button(icons::MEDIA_NEXT, "Next", ui::Kind::Flat);
+        next_btn.add_css_class("pill");
 
+        // The transport glyphs read at title size, not the button's body size.
+        for b in [&prev_btn, &play_pause_btn, &next_btn] {
+            if let Some(l) = b.child().and_downcast::<gtk4::Label>() {
+                ui::glyph(&l, ui::Text::Title, ui::Tone::Fg);
+            }
+        }
         controls.append(&prev_btn);
         controls.append(&play_pause_btn);
         controls.append(&next_btn);
@@ -521,17 +490,13 @@ impl MediaSection {
                     w.time_label.set_visible(false);
                 }
 
-                // Play/pause button icon + "suggested" class.
-                // Also toggles `.playing` on the section root so descendants
-                // (e.g. `.media-art-frame`) can drive the breathing animation.
+                // Play/pause: the one primary action while something plays.
                 if ms.status == PlaybackStatus::Playing {
                     w.play_pause_btn.set_label(icons::MEDIA_PAUSE);
-                    w.play_pause_btn.add_css_class("suggested");
-                    root.add_css_class("playing");
+                    w.play_pause_btn.add_css_class("primary");
                 } else {
                     w.play_pause_btn.set_label(icons::MEDIA_PLAY);
-                    w.play_pause_btn.remove_css_class("suggested");
-                    root.remove_css_class("playing");
+                    w.play_pause_btn.remove_css_class("primary");
                 }
             }
         }

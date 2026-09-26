@@ -75,14 +75,21 @@ pub fn signal_icon(strength: u8) -> &'static str {
     }
 }
 
-pub fn signal_css_class(strength: u8) -> &'static str {
+/// A signal is only coloured when it is a problem: weak is a warning, none
+/// is danger, and anything usable stays in the icon's own tone.
+pub fn signal_tone(strength: u8) -> crate::ui::Tone {
     match strength {
-        0..=20 => "network-signal-none",
-        21..=40 => "network-signal-weak",
-        41..=60 => "network-signal-ok",
-        61..=80 => "network-signal-good",
-        _ => "network-signal-excellent",
+        0..=20 => crate::ui::Tone::Danger,
+        21..=40 => crate::ui::Tone::Warning,
+        _ => crate::ui::Tone::Fg,
     }
+}
+
+/// Draw a network glyph (a row's or the hero's icon) at title size, in the
+/// tone its signal earns.
+pub fn set_signal_glyph(icon: &gtk4::Label, glyph: &str, tone: crate::ui::Tone) {
+    icon.set_label(glyph);
+    crate::ui::glyph(icon, crate::ui::Text::Title, tone);
 }
 
 // ── Data types ────────────────────────────────────────────────────────────────
@@ -848,14 +855,13 @@ pub fn get_active_wifi_conn_name() -> Option<String> {
 
 // ── Shared UI helpers ─────────────────────────────────────────────────────────
 
-/// Apply an `NmResult` to a status label: set text, CSS class, and visibility.
+/// Apply an `NmResult` to a status label: set text, tone, and visibility.
 pub fn apply_nm_result(status_lbl: &gtk4::Label, result: &NmResult) {
     use gtk4::prelude::*;
     match result {
         NmResult::Success => {
             status_lbl.set_label("✓");
-            status_lbl.add_css_class("network-status-ok");
-            status_lbl.remove_css_class("network-status-err");
+            crate::ui::set_text_style(status_lbl, crate::ui::Text::Label, crate::ui::Tone::Success);
         }
         NmResult::Failure(msg) => {
             let display = if msg.is_empty() {
@@ -864,8 +870,7 @@ pub fn apply_nm_result(status_lbl: &gtk4::Label, result: &NmResult) {
                 msg.as_str()
             };
             status_lbl.set_label(display);
-            status_lbl.add_css_class("network-status-err");
-            status_lbl.remove_css_class("network-status-ok");
+            crate::ui::set_text_style(status_lbl, crate::ui::Text::Label, crate::ui::Tone::Danger);
         }
     }
     status_lbl.set_visible(true);

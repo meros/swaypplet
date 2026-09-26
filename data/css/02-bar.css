@@ -154,50 +154,6 @@
     min-height: 48px;
 }
 
-/* ── Backup readout (src/widgets/backup.rs, Helm power sheet) ──
-   Not the bar's: the same snapshot as the bar segment, spelled out, and
-   left here where it has always lived until the Helm's own migration moves
-   it onto the components. The verdict carries the tier's status colour,
-   the rows stay ink so a wall of amber does not shout twice. */
-.backup-verdict {
-    font-size: var(--type-caption);
-}
-
-.backup-verdict.backup-ok {
-    color: var(--success);
-}
-
-.backup-verdict.backup-running {
-    color: var(--fg);
-}
-
-.backup-verdict.backup-warn {
-    color: var(--warning);
-}
-
-.backup-verdict.backup-unknown {
-    color: var(--fg-faint);
-}
-
-.backup-job {
-    color: var(--fg);
-}
-
-.backup-when {
-    color: var(--fg-muted);
-    font-size: var(--type-caption);
-}
-
-.backup-target {
-    color: var(--fg-faint);
-    font-size: var(--type-caption);
-    margin-top: var(--space-1);
-}
-
-.backup-run {
-    margin-top: var(--space-2);
-}
-
 /* ── Shared keyframes ──
    Not the bar's either: the panel's media art (03-panel.css) and the
    notification card (06-notifications.css) breathe with this while a

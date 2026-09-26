@@ -5,6 +5,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use crate::icons;
+use crate::ui;
 
 // ── brightnessctl helpers ─────────────────────────────────────────────────────
 
@@ -33,10 +34,9 @@ fn set_brightness(value: u32) {
 // ── BrightnessSection ─────────────────────────────────────────────────────────
 
 pub struct BrightnessSection {
-    root: gtk4::Box,
+    section: ui::Section,
     scale: gtk4::Scale,
     pct_label: gtk4::Label,
-    summary_text: gtk4::Label,
     /// Guard flag: true while `refresh()` is programmatically updating the scale
     /// so the value-changed handler does not call `brightnessctl set` in response.
     updating: Rc<RefCell<bool>>,
@@ -44,71 +44,13 @@ pub struct BrightnessSection {
 
 impl BrightnessSection {
     pub fn new() -> Self {
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(6)
-            .build();
-        root.add_css_class("section");
+        let section = ui::section(icons::BRIGHTNESS, "Brightness", "0%");
+        ui::glyph(&section.icon, ui::Text::Title, ui::Tone::Fg);
 
-        // ── Summary row (always visible) ──────────────────────────────────────
-        let summary_content = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(6)
-            .build();
-
-        let summary_icon = gtk4::Label::builder()
-            .label(icons::BRIGHTNESS)
-            .halign(gtk4::Align::Center)
-            .valign(gtk4::Align::Center)
-            .build();
-        summary_icon.add_css_class("section-summary-icon");
-
-        let summary_text = gtk4::Label::builder()
-            .label("0%")
-            .halign(gtk4::Align::Start)
-            .hexpand(true)
-            .xalign(0.0)
-            .build();
-        summary_text.add_css_class("section-summary-label");
-
-        let summary_arrow = gtk4::Label::builder()
-            .label("▸")
-            .halign(gtk4::Align::Center)
-            .valign(gtk4::Align::Center)
-            .build();
-        summary_arrow.add_css_class("section-expand-arrow");
-
-        summary_content.append(&summary_icon);
-        summary_content.append(&summary_text);
-        summary_content.append(&summary_arrow);
-
-        let summary_btn = gtk4::Button::builder().child(&summary_content).build();
-        summary_btn.add_css_class("section-summary");
-
-        // ── Detail revealer ───────────────────────────────────────────────────
-        let detail_revealer = gtk4::Revealer::builder()
-            .transition_type(gtk4::RevealerTransitionType::SlideDown)
-            .transition_duration(200)
-            .reveal_child(false)
-            .build();
-
-        // ── Brightness row (inside revealer) ──────────────────────────────────
-        let row = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(6)
-            .build();
-        row.add_css_class("volume-row");
-
-        let icon = gtk4::Label::builder()
-            .label(icons::BRIGHTNESS)
-            .halign(gtk4::Align::Center)
-            .valign(gtk4::Align::Center)
-            .build();
-        icon.add_css_class("volume-icon-btn");
-
-        let scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 1.0, 100.0, 1.0);
-        scale.set_hexpand(true);
-        scale.set_draw_value(false);
+        // ── Brightness row (inside the section body) ──────────────────────────
+        let row = ui::slider_row(icons::BRIGHTNESS, 1.0, 100.0, 1.0);
+        ui::glyph(&row.icon, ui::Text::Title, ui::Tone::Fg);
+        let scale = row.scale.clone();
         // Same rail furniture as the volume scale (widgets/audio.rs): quarter
         // ticks plus one labelled reference. Both scales are hoisted into the
         // start menu's telemetry ribbon side by side, and one rail with ticks
@@ -120,30 +62,11 @@ impl BrightnessSection {
         }
         scale.add_mark(50.0, gtk4::PositionType::Bottom, Some("50%"));
 
-        let pct_label = gtk4::Label::new(Some("0%"));
-        pct_label.add_css_class("volume-pct");
+        let pct_label = row.value.clone();
+        pct_label.set_text("0%");
         pct_label.set_width_chars(5);
-        pct_label.set_xalign(1.0);
 
-        row.append(&icon);
-        row.append(&scale);
-        row.append(&pct_label);
-
-        detail_revealer.set_child(Some(&row));
-
-        // ── Toggle gesture ────────────────────────────────────────────────────
-        {
-            let revealer = detail_revealer.clone();
-            let arrow = summary_arrow.clone();
-            summary_btn.connect_clicked(move |_| {
-                let expanded = !revealer.reveals_child();
-                revealer.set_reveal_child(expanded);
-                arrow.set_text(if expanded { "▾" } else { "▸" });
-            });
-        }
-
-        root.append(&summary_btn);
-        root.append(&detail_revealer);
+        section.body.append(&row.root);
 
         let updating = Rc::new(RefCell::new(false));
 
@@ -161,15 +84,14 @@ impl BrightnessSection {
             });
         }
 
-        let section = BrightnessSection {
-            root,
+        let brightness = BrightnessSection {
+            section,
             scale,
             pct_label,
-            summary_text,
             updating,
         };
-        section.refresh();
-        section
+        brightness.refresh();
+        brightness
     }
 
     /// Re-reads brightness from `brightnessctl` on a background thread and
@@ -178,7 +100,7 @@ impl BrightnessSection {
         let updating = self.updating.clone();
         let scale = self.scale.clone();
         let pct_label = self.pct_label.clone();
-        let summary_text = self.summary_text.clone();
+        let summary_text = self.section.summary.clone();
 
         crate::spawn::spawn_work(
             || read_brightness(),
@@ -195,7 +117,7 @@ impl BrightnessSection {
     }
 
     pub fn widget(&self) -> &gtk4::Box {
-        &self.root
+        &self.section.root
     }
 
     /// Clone of the brightness `gtk4::Scale` (range 1–100) so it can be hoisted
