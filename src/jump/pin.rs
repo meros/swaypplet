@@ -37,7 +37,7 @@ use gtk4_layer_shell::{Edge, LayerShell as _};
 use super::card::{self, Live};
 use super::live;
 use super::scene::{self, Scene};
-use crate::shell::layer::{self, LayerShellConfig};
+use crate::shell::{Namespace, Surface, layer};
 use crate::sway::ipc::SwayService;
 
 /// The picture, 16:10.
@@ -137,8 +137,7 @@ struct Pin {
     label: String,
     /// `Some` for a piece of one window rather than a whole workspace.
     region: Option<RegionPin>,
-    window: gtk4::Window,
-    reveal: crate::anim::Reveal,
+    surface: Surface,
     /// Where the picture goes; rebuilt when the workspace changes shape.
     holder: gtk4::Box,
     live: Rc<RefCell<Live>>,
@@ -152,10 +151,8 @@ struct Pin {
 
 impl Drop for Pin {
     fn drop(&mut self) {
+        // The capture before the surface it draws into.
         self.stream = None;
-        // The alpha handle goes before its `wl_surface`.
-        self.reveal.release_alpha();
-        crate::shell::layer::destroy_window(&self.window);
     }
 }
 
@@ -309,8 +306,7 @@ impl Pins {
             workspace: workspace.clone(),
             label: label.clone(),
             region: None,
-            window: parts.window,
-            reveal: parts.reveal,
+            surface: parts.surface,
             holder: parts.holder,
             live: Rc::default(),
             stream: None,
@@ -351,8 +347,7 @@ impl Pins {
                 crop: region.frac,
                 size: (0, 0),
             }),
-            window: parts.window,
-            reveal: parts.reveal,
+            surface: parts.surface,
             holder: parts.holder,
             live: Rc::default(),
             stream: None,
@@ -399,11 +394,11 @@ impl Pins {
         self.announce(UNPIN_GLYPH, "UNPINNED", &pin.label);
         // Slide out, then go. The pin lives in the hook until the exit is
         // over; a pin already hidden goes at once.
-        if pin.reveal.is_shown() {
-            let reveal = pin.reveal.clone();
+        if pin.surface.is_shown() {
+            let surface = pin.surface.clone();
             let slot = RefCell::new(Some(pin));
-            reveal.connect_hidden(move || drop(slot.borrow_mut().take()));
-            reveal.hide();
+            surface.connect_hidden(move || drop(slot.borrow_mut().take()));
+            surface.hide();
         }
     }
 
@@ -478,13 +473,9 @@ impl Pins {
             self.wire(&parts, &key);
             let mut inner = self.inner.borrow_mut();
             let pin = &mut inner.pins[i];
-            // The old surface goes as the new one comes: Drop order on the
-            // replaced fields is not Drop of the pin, so release by hand.
+            // The old surface goes as the new one comes, its capture first.
             pin.stream = None;
-            pin.reveal.release_alpha();
-            crate::shell::layer::destroy_window(&pin.window);
-            pin.window = parts.window;
-            pin.reveal = parts.reveal;
+            pin.surface = parts.surface;
             pin.holder = parts.holder;
             pin.scene = None;
             if let Some(region) = &mut pin.region {
@@ -498,7 +489,8 @@ impl Pins {
     /// Stack the pins up from the corner, oldest lowest.
     fn stack(&self) {
         for (i, pin) in self.inner.borrow().pins.iter().enumerate() {
-            pin.window
+            pin.surface
+                .window()
                 .set_margin(Edge::Bottom, MARGIN_BOTTOM + i as i32 * PIN_STEP);
         }
     }
@@ -612,8 +604,8 @@ fn hide(pin: &mut Pin) {
     // did not exist: the process went down, and every pin with it. That was
     // "switching to a pinned workspace unpins it", whenever the switch also
     // moved focus to the other screen.
-    if pin.reveal.is_shown() {
-        pin.reveal.hide();
+    if pin.surface.is_shown() {
+        pin.surface.hide();
     }
 }
 
@@ -662,8 +654,8 @@ fn update_region(pin: &mut Pin, window: &scene::Window, show: bool) {
             tx,
         ));
     }
-    if !pin.reveal.is_shown() {
-        pin.reveal.show();
+    if !pin.surface.is_shown() {
+        pin.surface.show();
     }
 }
 
@@ -708,8 +700,8 @@ fn update(pin: &mut Pin, scene: Option<Scene>, show: bool) {
             pin.stream = Some(live::Stream::start(ids, (PIN_W * 2) as u32, 0, tx));
         }
     }
-    if !pin.reveal.is_shown() {
-        pin.reveal.show();
+    if !pin.surface.is_shown() {
+        pin.surface.show();
     }
 }
 
@@ -722,40 +714,36 @@ fn region_label(app: &str, workspace: &str) -> String {
 }
 
 struct Parts {
-    window: gtk4::Window,
-    reveal: crate::anim::Reveal,
+    surface: Surface,
     holder: gtk4::Box,
     close: gtk4::Button,
 }
 
 fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: &str) -> Parts {
-    static CONFIG: LayerShellConfig = LayerShellConfig {
-        namespace: crate::shell::Namespace::Pin,
+    let surface = Surface::builder(app, Namespace::Pin)
+        .monitor(monitor)
         // Top, not Overlay: a fullscreen window covers a pin, the way it
         // covers the bar.
-        layer: gtk4_layer_shell::Layer::Top,
-        exclusive: false,
-        default_width: None,
-        default_height: None,
-        anchors: &[(Edge::Bottom, true), (Edge::Right, true)],
+        .layer(gtk4_layer_shell::Layer::Top)
+        .anchor(&[Edge::Bottom, Edge::Right])
         // No right margin on the surface: it reaches the screen's edge, and
         // the gap to the card is the card's own (below). The entrance slides
         // the card toward that edge and back, and a card moving inside its
-        // surface is what the compositor's glass follows (the pin namespace's
-        // glass entry masks it to the card's pixels, as the notifications'
-        // does); a surface that ended at the card clipped it instead, and its
-        // glass stood still.
-        margins: &[(Edge::Bottom, MARGIN_BOTTOM)],
-        keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
-    };
-    let window = layer::create_layer_window_on(app, &CONFIG, monitor);
-    window.set_resizable(false);
-    window.set_decorated(false);
-
-    let frame = crate::ui::vbox(2);
-    crate::ui::surface::adopt(&frame);
-    crate::ui::card::adopt(&frame, crate::ui::Card::Floating);
+        // surface is what the compositor's glass follows (the pin
+        // namespace's glass entry masks it to the card's pixels, as the
+        // notifications' does); a surface that ended at the card clipped it
+        // instead, and its glass stood still.
+        .margin(Edge::Bottom, MARGIN_BOTTOM)
+        .card(crate::ui::Card::Floating)
+        // Slides in from the screen's edge and fades up, and leaves the same
+        // way (anim::Reveal, the shell's one entrance).
+        .slide(gtk4::Orientation::Horizontal, SLIDE_PX)
+        .build();
+    let frame = surface.card();
     frame.add_css_class("jump-pin");
+    if let Some(slide) = surface.slide() {
+        slide.set_margin_end(MARGIN_RIGHT);
+    }
 
     let content = crate::ui::vbox(2);
 
@@ -798,20 +786,10 @@ fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: 
     content.append(&footer);
 
     frame.append(&content);
-
-    // Slides in from the screen's edge and fades up, and leaves the same
-    // way (anim::Reveal, the shell's one entrance).
-    let slide = crate::anim::SlideBin::horizontal();
-    slide.set_child(&frame);
-    slide.set_margin_end(MARGIN_RIGHT);
-    window.set_child(Some(&slide));
-    let reveal = crate::anim::Reveal::new(&window, &frame)
-        .content(&content)
-        .slide(&slide, SLIDE_PX);
+    surface.set_content(&content);
 
     Parts {
-        window,
-        reveal,
+        surface,
         holder,
         close,
     }
