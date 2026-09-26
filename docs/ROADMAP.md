@@ -86,6 +86,16 @@ Exit-node state and peer reachability. `tailscaled` is its own daemon, so
 the NetworkManager VPN rows do not see it; the network code only filters
 out the `tailscale0` interface today.
 
+## Waiting for a decision
+
+- **Light-mode lock text over a dark or busy wallpaper.** Since 2026-09-26
+  a dark halo in light mode stays under the glass mask, or it turns into
+  milky glass. Light ink there reaches Lc 61 (calm) and 47 (busy) against
+  75. Two fixes, both visible design changes: a glass plate behind the
+  clock and date in light mode (the text then uses the card's tokens), or
+  a deeper scrim over the wallpaper in light mode. `tokens/backdrop.rs`
+  names the floors the tests hold.
+
 ## From the prior-art bank
 
 Candidates from [prior-art/](prior-art/README.md), not yet ranked against
