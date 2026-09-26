@@ -1,0 +1,541 @@
+//! The components of the design system (docs/design-system.md §6).
+//!
+//! One builder per component, each handing back plain GTK widgets with the
+//! `ui-*` classes `data/css/00-components.css` styles. A surface is
+//! assembled from these; its own classes may place things but not colour,
+//! size type or round corners.
+//!
+//! Spacing between children comes from `tokens::space`, never a literal.
+
+use gtk4::prelude::*;
+use gtk4::{Align, Orientation};
+
+use crate::tokens::space;
+
+// ── Text ────────────────────────────────────────────────────────────────
+
+/// The type scale (§3.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Text {
+    Display,
+    DisplaySm,
+    Title,
+    TitleSm,
+    Body,
+    Label,
+    Caption,
+}
+
+impl Text {
+    fn class(self) -> &'static str {
+        match self {
+            Text::Display => "ui-display",
+            Text::DisplaySm => "ui-display-sm",
+            Text::Title => "ui-title",
+            Text::TitleSm => "ui-title-sm",
+            Text::Body => "ui-body",
+            Text::Label => "ui-label",
+            Text::Caption => "ui-caption",
+        }
+    }
+}
+
+/// The text levels and status tones (§3.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    Fg,
+    Muted,
+    Faint,
+    Accent,
+    Success,
+    Warning,
+    Danger,
+}
+
+impl Tone {
+    fn class(self) -> Option<&'static str> {
+        match self {
+            Tone::Fg => None,
+            Tone::Muted => Some("ui-muted"),
+            Tone::Faint => Some("ui-faint"),
+            Tone::Accent => Some("ui-accent"),
+            Tone::Success => Some("ui-success"),
+            Tone::Warning => Some("ui-warning"),
+            Tone::Danger => Some("ui-danger"),
+        }
+    }
+}
+
+/// A label on the type scale, in a tone.
+pub fn text(s: &str, size: Text, tone: Tone) -> gtk4::Label {
+    let l = gtk4::Label::new(Some(s));
+    l.add_css_class(size.class());
+    if let Some(c) = tone.class() {
+        l.add_css_class(c);
+    }
+    l.set_xalign(0.0);
+    l
+}
+
+/// Restyle an existing label onto the scale.
+pub fn set_text_style(l: &gtk4::Label, size: Text, tone: Tone) {
+    for c in [
+        "ui-display", "ui-display-sm", "ui-title", "ui-title-sm", "ui-body", "ui-label", "ui-caption",
+        "ui-muted", "ui-faint", "ui-accent", "ui-success", "ui-warning", "ui-danger",
+    ] {
+        l.remove_css_class(c);
+    }
+    l.add_css_class(size.class());
+    if let Some(c) = tone.class() {
+        l.add_css_class(c);
+    }
+}
+
+// ── Layout helpers ──────────────────────────────────────────────────────
+
+/// A box whose spacing is a step of the space scale (1-based, §3.5).
+pub fn stack(orientation: Orientation, step: usize) -> gtk4::Box {
+    gtk4::Box::new(orientation, space(step))
+}
+
+pub fn vbox(step: usize) -> gtk4::Box {
+    stack(Orientation::Vertical, step)
+}
+
+pub fn hbox(step: usize) -> gtk4::Box {
+    stack(Orientation::Horizontal, step)
+}
+
+/// Padding on all four sides from the space scale, as margins.
+pub fn pad(w: &impl IsA<gtk4::Widget>, step: usize) {
+    let p = space(step);
+    w.set_margin_top(p);
+    w.set_margin_bottom(p);
+    w.set_margin_start(p);
+    w.set_margin_end(p);
+}
+
+// ── Surface and card ────────────────────────────────────────────────────
+
+/// Mark a window's root as a design-system surface: base type and colour.
+pub fn surface(w: &impl IsA<gtk4::Widget>) {
+    w.add_css_class("ui-surface");
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Card {
+    /// A floating card: panel, launcher, notifications, polkit, lock.
+    Floating,
+    /// Thin glass: the bar, the OSD, the face cue.
+    Thin,
+}
+
+/// Make `w` a glass card.
+pub fn card(w: &impl IsA<gtk4::Widget>, kind: Card) {
+    w.add_css_class("ui-card");
+    if kind == Card::Thin {
+        w.add_css_class("thin");
+    }
+}
+
+/// A fill inside a card, for grouping (never glass on glass).
+pub fn group(step: usize) -> gtk4::Box {
+    let b = vbox(step);
+    b.add_css_class("ui-group");
+    b
+}
+
+pub fn separator() -> gtk4::Box {
+    let s = gtk4::Box::new(Orientation::Horizontal, 0);
+    s.add_css_class("ui-separator");
+    s
+}
+
+// ── Button ──────────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Primary,
+    Secondary,
+    Flat,
+    Destructive,
+}
+
+fn style_button(b: &gtk4::Button, kind: Kind) {
+    b.add_css_class("ui-btn");
+    match kind {
+        Kind::Primary => b.add_css_class("primary"),
+        Kind::Flat => b.add_css_class("flat"),
+        Kind::Destructive => b.add_css_class("destructive"),
+        Kind::Secondary => {}
+    }
+}
+
+pub fn button(label: &str, kind: Kind) -> gtk4::Button {
+    let b = gtk4::Button::with_label(label);
+    style_button(&b, kind);
+    b
+}
+
+/// Restyle an existing button as a component button.
+pub fn make_button(b: &gtk4::Button, kind: Kind) {
+    style_button(b, kind);
+}
+
+pub fn icon_button(icon: &str, tooltip: &str, kind: Kind) -> gtk4::Button {
+    let b = gtk4::Button::from_icon_name(icon);
+    style_button(&b, kind);
+    b.add_css_class("icon");
+    b.set_tooltip_text(Some(tooltip));
+    b
+}
+
+/// A button whose face is a glyph from the icon font.
+pub fn glyph_button(glyph: &str, tooltip: &str, kind: Kind) -> gtk4::Button {
+    let b = gtk4::Button::with_label(glyph);
+    style_button(&b, kind);
+    b.add_css_class("icon");
+    b.set_tooltip_text(Some(tooltip));
+    b
+}
+
+// ── Row ─────────────────────────────────────────────────────────────────
+
+/// One list row: an icon, a title over a subtitle, and an end slot.
+pub struct Row {
+    pub root: gtk4::Box,
+    pub icon: gtk4::Label,
+    pub title: gtk4::Label,
+    pub subtitle: gtk4::Label,
+    pub end: gtk4::Box,
+}
+
+/// `icon` is a glyph from the icon font; empty for none.
+pub fn row(icon: &str, title: &str, subtitle: &str) -> Row {
+    let root = hbox(4);
+    root.add_css_class("ui-row");
+    let icon_l = gtk4::Label::new(Some(icon));
+    icon_l.add_css_class("ui-row-icon");
+    icon_l.set_visible(!icon.is_empty());
+    let texts = vbox(0);
+    texts.set_valign(Align::Center);
+    texts.set_hexpand(true);
+    let title_l = gtk4::Label::new(Some(title));
+    title_l.add_css_class("ui-row-title");
+    title_l.set_xalign(0.0);
+    title_l.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    let sub = gtk4::Label::new(Some(subtitle));
+    sub.add_css_class("ui-row-subtitle");
+    sub.set_xalign(0.0);
+    sub.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    sub.set_visible(!subtitle.is_empty());
+    texts.append(&title_l);
+    texts.append(&sub);
+    let end = hbox(3);
+    end.add_css_class("ui-row-end");
+    end.set_valign(Align::Center);
+    root.append(&icon_l);
+    root.append(&texts);
+    root.append(&end);
+    Row {
+        root,
+        icon: icon_l,
+        title: title_l,
+        subtitle: sub,
+        end,
+    }
+}
+
+/// A row you can press: the row inside a flat button.
+pub fn row_button(icon: &str, title: &str, subtitle: &str) -> (gtk4::Button, Row) {
+    let r = row(icon, title, subtitle);
+    r.root.remove_css_class("ui-row");
+    let b = gtk4::Button::new();
+    b.add_css_class("ui-row");
+    b.add_css_class("activatable");
+    b.set_child(Some(&r.root));
+    (b, r)
+}
+
+pub fn set_selected(w: &impl IsA<gtk4::Widget>, selected: bool) {
+    if selected {
+        w.add_css_class("selected");
+    } else {
+        w.remove_css_class("selected");
+    }
+}
+
+// ── Section ─────────────────────────────────────────────────────────────
+
+/// A collapsible group: a header that says what is inside and its state,
+/// and a body that opens under it.
+pub struct Section {
+    pub root: gtk4::Box,
+    pub header: gtk4::Button,
+    pub icon: gtk4::Label,
+    pub title: gtk4::Label,
+    pub summary: gtk4::Label,
+    pub body: gtk4::Box,
+    pub revealer: gtk4::Revealer,
+}
+
+pub fn section(icon: &str, title: &str, summary: &str) -> Section {
+    let root = vbox(0);
+    root.add_css_class("ui-section");
+    let header = gtk4::Button::new();
+    header.add_css_class("ui-section-header");
+    let line = hbox(3);
+    let icon_l = gtk4::Label::new(Some(icon));
+    icon_l.add_css_class("ui-row-icon");
+    let title_l = gtk4::Label::new(Some(title));
+    title_l.add_css_class("ui-section-title");
+    title_l.set_xalign(0.0);
+    let summary_l = gtk4::Label::new(Some(summary));
+    summary_l.add_css_class("ui-section-summary");
+    summary_l.set_hexpand(true);
+    summary_l.set_xalign(1.0);
+    summary_l.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    let chevron = gtk4::Image::from_icon_name("pan-end-symbolic");
+    chevron.add_css_class("ui-section-chevron");
+    line.append(&icon_l);
+    line.append(&title_l);
+    line.append(&summary_l);
+    line.append(&chevron);
+    header.set_child(Some(&line));
+    let body = vbox(1);
+    body.add_css_class("ui-section-body");
+    let revealer = gtk4::Revealer::builder()
+        .transition_type(gtk4::RevealerTransitionType::SlideDown)
+        .transition_duration(crate::tokens::DURATION[1].1)
+        .child(&body)
+        .build();
+    root.append(&header);
+    root.append(&revealer);
+    {
+        let (root, revealer) = (root.clone(), revealer.clone());
+        header.connect_clicked(move |_| {
+            let open = !revealer.reveals_child();
+            revealer.set_reveal_child(open);
+            if open {
+                root.add_css_class("open");
+            } else {
+                root.remove_css_class("open");
+            }
+        });
+    }
+    Section {
+        root,
+        header,
+        icon: icon_l,
+        title: title_l,
+        summary: summary_l,
+        body,
+        revealer,
+    }
+}
+
+impl Section {
+    pub fn set_open(&self, open: bool) {
+        self.revealer.set_reveal_child(open);
+        if open {
+            self.root.add_css_class("open");
+        } else {
+            self.root.remove_css_class("open");
+        }
+    }
+}
+
+// ── Slider and switch ───────────────────────────────────────────────────
+
+pub struct SliderRow {
+    pub root: gtk4::Box,
+    pub icon: gtk4::Label,
+    pub scale: gtk4::Scale,
+    pub value: gtk4::Label,
+}
+
+/// A slider in a full-width row of its own (principle: sliders own a row).
+pub fn slider_row(icon: &str, min: f64, max: f64, step: f64) -> SliderRow {
+    let root = hbox(4);
+    root.add_css_class("ui-slider-row");
+    let icon_l = gtk4::Label::new(Some(icon));
+    icon_l.add_css_class("ui-slider-icon");
+    let scale = gtk4::Scale::with_range(Orientation::Horizontal, min, max, step);
+    scale.add_css_class("ui-slider");
+    scale.set_hexpand(true);
+    scale.set_draw_value(false);
+    let value = gtk4::Label::new(None);
+    value.add_css_class("ui-slider-value");
+    value.set_xalign(1.0);
+    root.append(&icon_l);
+    root.append(&scale);
+    root.append(&value);
+    SliderRow {
+        root,
+        icon: icon_l,
+        scale,
+        value,
+    }
+}
+
+pub fn slider(s: &gtk4::Scale) {
+    s.add_css_class("ui-slider");
+}
+
+pub fn switch() -> gtk4::Switch {
+    let s = gtk4::Switch::new();
+    s.add_css_class("ui-switch");
+    s.set_valign(Align::Center);
+    s
+}
+
+/// A row with a switch at its end.
+pub fn switch_row(title: &str, subtitle: &str) -> (Row, gtk4::Switch) {
+    let r = row("", title, subtitle);
+    let s = switch();
+    r.end.append(&s);
+    (r, s)
+}
+
+// ── Chip, badge, key, status ────────────────────────────────────────────
+
+pub fn chip(label: &str) -> gtk4::Button {
+    let b = gtk4::Button::with_label(label);
+    b.add_css_class("ui-chip");
+    b
+}
+
+pub fn chip_label(label: &str) -> gtk4::Label {
+    let l = gtk4::Label::new(Some(label));
+    l.add_css_class("ui-chip");
+    l
+}
+
+pub fn badge(text: &str) -> gtk4::Label {
+    let l = gtk4::Label::new(Some(text));
+    l.add_css_class("ui-badge");
+    l
+}
+
+pub fn key(text: &str) -> gtk4::Label {
+    let l = gtk4::Label::new(Some(text));
+    l.add_css_class("ui-key");
+    l
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Status {
+    Ok,
+    Warn,
+    Bad,
+    Neutral,
+}
+
+/// A status: a dot and a word, both in the status colour.
+pub fn status(kind: Status, label: &str) -> gtk4::Label {
+    let l = gtk4::Label::new(Some(&format!("\u{25cf} {label}")));
+    l.add_css_class("ui-status");
+    set_status(&l, kind);
+    l
+}
+
+pub fn set_status(l: &gtk4::Label, kind: Status) {
+    for c in ["ok", "warn", "bad", "neutral"] {
+        l.remove_css_class(c);
+    }
+    l.add_css_class(match kind {
+        Status::Ok => "ok",
+        Status::Warn => "warn",
+        Status::Bad => "bad",
+        Status::Neutral => "neutral",
+    });
+}
+
+// ── Field ───────────────────────────────────────────────────────────────
+
+pub struct Field {
+    pub root: gtk4::Box,
+    pub help: gtk4::Label,
+}
+
+/// A labelled input with a help line that turns into the error.
+pub fn field(label: &str, input: &impl IsA<gtk4::Widget>, help: &str) -> Field {
+    let root = vbox(2);
+    root.add_css_class("ui-field");
+    if !label.is_empty() {
+        let l = gtk4::Label::new(Some(label));
+        l.add_css_class("ui-field-label");
+        l.set_xalign(0.0);
+        root.append(&l);
+    }
+    input.add_css_class("ui-entry");
+    root.append(input);
+    let h = gtk4::Label::new(Some(help));
+    h.add_css_class("ui-field-help");
+    h.set_xalign(0.0);
+    h.set_wrap(true);
+    h.set_visible(!help.is_empty());
+    root.append(&h);
+    Field { root, help: h }
+}
+
+impl Field {
+    /// Show `msg` as the error, or clear it.
+    pub fn set_error(&self, msg: Option<&str>) {
+        match msg {
+            Some(m) => {
+                self.root.add_css_class("error");
+                self.help.set_text(m);
+                self.help.set_visible(true);
+            }
+            None => {
+                self.root.remove_css_class("error");
+            }
+        }
+    }
+}
+
+pub fn entry(input: &impl IsA<gtk4::Widget>) {
+    input.add_css_class("ui-entry");
+}
+
+// ── Menu ────────────────────────────────────────────────────────────────
+
+pub fn menu() -> gtk4::Box {
+    let b = vbox(0);
+    b.add_css_class("ui-menu");
+    b
+}
+
+pub fn menu_item(label: &str, accel: &str, danger: bool) -> gtk4::Button {
+    let b = gtk4::Button::new();
+    b.add_css_class("ui-menu-item");
+    if danger {
+        b.add_css_class("danger");
+    }
+    let line = hbox(4);
+    let l = gtk4::Label::new(Some(label));
+    l.set_hexpand(true);
+    l.set_xalign(0.0);
+    line.append(&l);
+    if !accel.is_empty() {
+        let a = gtk4::Label::new(Some(accel));
+        a.add_css_class("ui-menu-accel");
+        line.append(&a);
+    }
+    b.set_child(Some(&line));
+    b
+}
+
+// ── Progress ────────────────────────────────────────────────────────────
+
+pub fn progress(fraction: f64) -> gtk4::ProgressBar {
+    let p = gtk4::ProgressBar::new();
+    p.add_css_class("ui-progress");
+    p.set_fraction(fraction);
+    p
+}
+
+pub fn make_progress(p: &gtk4::ProgressBar) {
+    p.add_css_class("ui-progress");
+}

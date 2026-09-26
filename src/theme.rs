@@ -32,6 +32,7 @@ thread_local! {
 
 /// The rules, one file per surface, in cascade order.
 pub const RULES: &[(&str, &str)] = &[
+    ("00-components.css", include_str!("../data/css/00-components.css")),
     ("01-base.css", include_str!("../data/css/01-base.css")),
     ("02-bar.css", include_str!("../data/css/02-bar.css")),
     ("03-panel.css", include_str!("../data/css/03-panel.css")),

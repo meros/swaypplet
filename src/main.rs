@@ -43,6 +43,7 @@ mod switch_user;
 mod task_state;
 mod theme;
 mod tokens;
+mod ui;
 mod widgets;
 
 fn main() {

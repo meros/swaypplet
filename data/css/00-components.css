@@ -1,0 +1,620 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Components (docs/design-system.md §6), built by src/ui/.
+
+   Every class here is `ui-*`, so it cannot collide with GTK's built-in
+   theme (which already styles .card, .pill, .flat …) and so a lint can tell
+   a component rule from a layout rule. Only these rules set colour, type or
+   shape; a surface's own file places things.
+
+   Colours are semantic tokens (§3.2), never primitives. State overlays are
+   background-images of --state-*, laid over whatever background-color the
+   widget has, so one rule serves a fill, the accent and nothing (§3.3).
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Base ─────────────────────────────────────────────────────────────── */
+
+.ui-surface {
+    font-family: "UbuntuSans Nerd Font", "Ubuntu Sans", "Noto Sans", sans-serif;
+    font-size: var(--type-body);
+    font-weight: var(--w-regular);
+    color: var(--fg);
+}
+
+/* ── Type ─────────────────────────────────────────────────────────────── */
+
+.ui-display    { font-size: var(--type-display);    font-weight: var(--w-heavy); }
+.ui-display-sm { font-size: var(--type-display-sm); font-weight: var(--w-heavy); }
+.ui-title      { font-size: var(--type-title);      font-weight: var(--w-strong); }
+.ui-title-sm   { font-size: var(--type-title-sm);   font-weight: var(--w-strong); }
+.ui-body       { font-size: var(--type-body); }
+.ui-label      { font-size: var(--type-label); }
+.ui-caption    { font-size: var(--type-caption); }
+.ui-strong     { font-weight: var(--w-strong); }
+.ui-mono       { font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace; }
+.ui-numeric    { font-feature-settings: "tnum"; }
+
+.ui-muted      { color: var(--fg-muted); }
+.ui-faint      { color: var(--fg-faint); }
+.ui-accent     { color: var(--accent); }
+.ui-success    { color: var(--success); }
+.ui-warning    { color: var(--warning); }
+.ui-danger     { color: var(--danger); }
+
+/* ── Card: the glass surface ─────────────────────────────────────────────
+   Paints the key only so the compositor finds the card's shape; the
+   compositor drops it and draws the material (§4). Never a box-shadow: the
+   compositor would frost its translucent pixels into a halo. */
+
+.ui-card {
+    background-color: var(--surface-key);
+    border-radius: var(--radius-card);
+    border: 1px solid var(--border-strong);
+}
+
+.ui-card.thin {
+    border-radius: var(--radius-thin);
+}
+
+.no-glass .ui-card {
+    background-color: var(--surface-raised);
+    box-shadow: var(--shadow-solid);
+}
+
+/* ── Group: a fill inside a card (never glass on glass) ─────────────── */
+
+.ui-group {
+    background-color: var(--fill-1);
+    border-radius: var(--radius-tile);
+}
+
+/* ── Button ─────────────────────────────────────────────────────────── */
+
+button.ui-btn {
+    min-height: var(--control-height);
+    min-width: 0;
+    padding: 0 var(--space-4);
+    border: none;
+    border-radius: var(--radius-control);
+    background-color: var(--fill-2);
+    background-image: none;
+    box-shadow: none;
+    outline: 0 solid transparent;
+    color: var(--fg);
+    font-size: var(--type-body);
+    font-weight: var(--w-strong);
+    text-shadow: none;
+    -gtk-icon-shadow: none;
+    transition: background-color var(--dur-fast) var(--ease-standard),
+                background-image var(--dur-fast) var(--ease-standard),
+                color var(--dur-fast) var(--ease-standard),
+                outline-color var(--dur-fast) var(--ease-standard);
+}
+
+button.ui-btn:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+button.ui-btn:active,
+button.ui-btn:checked:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+button.ui-btn:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+button.ui-btn:disabled {
+    color: var(--fg-disabled);
+    background-image: none;
+}
+
+button.ui-btn.primary,
+button.ui-btn:checked {
+    background-color: var(--accent-bg);
+    color: var(--on-accent);
+}
+
+button.ui-btn.flat {
+    background-color: transparent;
+}
+
+button.ui-btn.destructive {
+    background-color: var(--danger-bg);
+    color: var(--on-status);
+}
+
+button.ui-btn.primary:disabled,
+button.ui-btn.destructive:disabled {
+    background-color: var(--fill-2);
+    color: var(--fg-disabled);
+}
+
+button.ui-btn.icon {
+    min-width: var(--control-height);
+    padding: 0;
+}
+
+button.ui-btn.pill {
+    border-radius: var(--radius-pill);
+}
+
+button.ui-btn.small {
+    min-height: 24px;
+    padding: 0 var(--space-3);
+    font-size: var(--type-label);
+}
+
+/* ── Row: one form for device, list and settings rows ───────────────── */
+
+.ui-row {
+    min-height: var(--row-height);
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-tile);
+    border: none;
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg);
+    transition: background-color var(--dur-fast) var(--ease-standard),
+                background-image var(--dur-fast) var(--ease-standard);
+}
+
+.ui-row.activatable:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+.ui-row.activatable:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+.ui-row.selected,
+.ui-row:selected {
+    background-color: var(--fill-2);
+}
+
+.ui-row.activatable:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+.ui-row-icon {
+    color: var(--fg-muted);
+    -gtk-icon-size: 18px;
+    min-width: 24px;
+}
+
+.ui-row.selected .ui-row-icon {
+    color: var(--accent);
+}
+
+.ui-row-title {
+    font-size: var(--type-body);
+    font-weight: var(--w-strong);
+    color: var(--fg);
+}
+
+.ui-row-subtitle {
+    font-size: var(--type-label);
+    color: var(--fg-muted);
+}
+
+.ui-row-end {
+    font-size: var(--type-label);
+    color: var(--fg-faint);
+}
+
+/* ── Section: a collapsible group header and its body ───────────────── */
+
+.ui-section {
+    background-color: var(--fill-1);
+    border-radius: var(--radius-tile);
+}
+
+button.ui-section-header {
+    min-height: var(--row-height);
+    padding: 0 var(--space-4);
+    border: none;
+    border-radius: var(--radius-tile);
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg);
+    transition: background-image var(--dur-fast) var(--ease-standard);
+}
+
+button.ui-section-header:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+button.ui-section-header:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+button.ui-section-header:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+.ui-section-title {
+    font-size: var(--type-title-sm);
+    font-weight: var(--w-strong);
+}
+
+.ui-section-summary {
+    font-size: var(--type-label);
+    color: var(--fg-muted);
+}
+
+.ui-section-chevron {
+    color: var(--fg-faint);
+    transition: -gtk-icon-transform var(--dur-standard) var(--ease-standard);
+}
+
+.ui-section.open .ui-section-chevron {
+    -gtk-icon-transform: rotate(90deg);
+}
+
+.ui-section-body {
+    padding: 0 var(--space-2) var(--space-2) var(--space-2);
+}
+
+/* ── Toggle tile: a pill with an optional drill-in. Accent means on. ─── */
+
+.ui-tile {
+    min-height: var(--tile-height);
+    border-radius: var(--radius-tile);
+    background-color: var(--fill-2);
+    color: var(--fg);
+}
+
+.ui-tile.on {
+    background-color: var(--accent-bg);
+    color: var(--on-accent);
+}
+
+.ui-tile button {
+    border: none;
+    border-radius: var(--radius-tile);
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: inherit;
+    padding: 0 var(--space-4);
+    transition: background-image var(--dur-fast) var(--ease-standard);
+}
+
+.ui-tile button:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+.ui-tile button:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+.ui-tile button:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+.ui-tile-title {
+    font-size: var(--type-body);
+    font-weight: var(--w-strong);
+}
+
+.ui-tile-state {
+    font-size: var(--type-caption);
+    color: var(--fg-muted);
+}
+
+.ui-tile.on .ui-tile-state {
+    color: inherit;
+    opacity: 0.8;
+}
+
+.ui-tile button.ui-tile-more {
+    min-width: 36px;
+    padding: 0;
+    border-left: 1px solid var(--border-subtle);
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+
+.ui-tile.on button.ui-tile-more {
+    border-left-color: var(--state-pressed);
+}
+
+/* ── Slider ─────────────────────────────────────────────────────────── */
+
+scale.ui-slider {
+    padding: var(--space-3) 0;
+    min-height: 22px;
+}
+
+scale.ui-slider trough {
+    min-height: var(--track-height);
+    border-radius: var(--radius-pill);
+    border: none;
+    background-color: var(--fill-3);
+    background-image: none;
+    box-shadow: none;
+}
+
+scale.ui-slider highlight,
+scale.ui-slider fill {
+    border-radius: var(--radius-pill);
+    border: none;
+    background-color: var(--accent-bg);
+    background-image: none;
+}
+
+scale.ui-slider slider {
+    min-width: 16px;
+    min-height: 16px;
+    margin: -6px 0;
+    border-radius: var(--radius-pill);
+    border: none;
+    background-color: var(--knob);
+    background-image: none;
+    box-shadow: 0 1px 3px var(--scrim);
+    transition: transform var(--dur-fast) var(--ease-standard);
+}
+
+scale.ui-slider:hover slider {
+    transform: scale(1.1);
+}
+
+scale.ui-slider:focus-visible slider {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+scale.ui-slider:disabled highlight {
+    background-color: var(--fg-disabled);
+}
+
+.ui-slider-icon {
+    color: var(--fg-muted);
+    min-width: 20px;
+}
+
+.ui-slider-value {
+    font-size: var(--type-caption);
+    font-feature-settings: "tnum";
+    color: var(--fg-faint);
+    min-width: 36px;
+}
+
+/* ── Switch ─────────────────────────────────────────────────────────── */
+
+switch.ui-switch {
+    min-width: 38px;
+    min-height: 22px;
+    border: none;
+    border-radius: var(--radius-pill);
+    background-color: var(--fill-3);
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg);
+    transition: background-color var(--dur-fast) var(--ease-standard);
+}
+
+switch.ui-switch:checked {
+    background-color: var(--accent-bg);
+}
+
+switch.ui-switch slider {
+    min-width: 16px;
+    min-height: 16px;
+    margin: 3px;
+    border: none;
+    border-radius: var(--radius-pill);
+    background-color: var(--knob);
+    background-image: none;
+    box-shadow: 0 1px 2px var(--scrim);
+}
+
+switch.ui-switch:checked slider {
+    background-color: var(--on-accent);
+}
+
+switch.ui-switch:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+switch.ui-switch:disabled {
+    opacity: 0.5;
+}
+
+/* ── Chip, badge, key, status ───────────────────────────────────────── */
+
+.ui-chip {
+    min-height: 26px;
+    padding: 0 var(--space-4);
+    border: none;
+    border-radius: var(--radius-pill);
+    background-color: var(--fill-2);
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg);
+    font-size: var(--type-label);
+    font-weight: var(--w-strong);
+}
+
+button.ui-chip:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+.ui-chip.selected,
+button.ui-chip:checked {
+    background-color: var(--accent-bg);
+    color: var(--on-accent);
+}
+
+.ui-badge {
+    min-width: 18px;
+    min-height: 18px;
+    padding: 0 var(--space-2);
+    border-radius: var(--radius-pill);
+    background-color: var(--danger-bg);
+    color: var(--on-status);
+    font-size: var(--type-caption);
+    font-weight: var(--w-heavy);
+}
+
+.ui-badge.neutral {
+    background-color: var(--fill-3);
+    color: var(--fg);
+}
+
+.ui-key {
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-control);
+    background-color: var(--accent-tint);
+    color: var(--accent);
+    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
+    font-size: var(--type-label);
+    font-weight: var(--w-strong);
+}
+
+.ui-status {
+    font-size: var(--type-label);
+    font-weight: var(--w-strong);
+}
+
+.ui-status.ok      { color: var(--success); }
+.ui-status.warn    { color: var(--warning); }
+.ui-status.bad     { color: var(--danger); }
+.ui-status.neutral { color: var(--fg-muted); }
+
+/* ── Field ──────────────────────────────────────────────────────────── */
+
+.ui-field-label {
+    font-size: var(--type-label);
+    color: var(--fg-muted);
+}
+
+entry.ui-entry,
+passwordentry.ui-entry {
+    min-height: 34px;
+    padding: 0 var(--space-4);
+    border: none;
+    border-radius: var(--radius-control);
+    background-color: var(--fill-1);
+    background-image: none;
+    box-shadow: inset 0 0 0 1px var(--border-subtle);
+    color: var(--fg);
+    caret-color: var(--accent);
+    font-size: var(--type-body);
+    transition: box-shadow var(--dur-fast) var(--ease-standard);
+}
+
+entry.ui-entry:focus-within,
+passwordentry.ui-entry:focus-within {
+    box-shadow: inset 0 0 0 1px var(--border-strong), 0 0 0 2px var(--focus-ring);
+    outline: none;
+}
+
+entry.ui-entry text placeholder,
+passwordentry.ui-entry text placeholder {
+    color: var(--fg-faint);
+}
+
+entry.ui-entry selection,
+passwordentry.ui-entry selection {
+    background-color: var(--accent-tint);
+    color: var(--fg);
+}
+
+.ui-field.error entry.ui-entry,
+.ui-field.error passwordentry.ui-entry {
+    box-shadow: inset 0 0 0 1px var(--danger);
+}
+
+.ui-field-help {
+    font-size: var(--type-caption);
+    color: var(--fg-faint);
+}
+
+.ui-field.error .ui-field-help {
+    color: var(--danger);
+}
+
+/* ── Menu ───────────────────────────────────────────────────────────── */
+
+.ui-menu {
+    padding: var(--space-2);
+    border-radius: var(--radius-tile);
+}
+
+button.ui-menu-item {
+    min-height: 32px;
+    padding: 0 var(--space-3);
+    border: none;
+    border-radius: var(--radius-control);
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg);
+    font-size: var(--type-body);
+    font-weight: var(--w-regular);
+}
+
+button.ui-menu-item:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+button.ui-menu-item:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+button.ui-menu-item.danger {
+    color: var(--danger);
+}
+
+.ui-menu-accel {
+    font-size: var(--type-caption);
+    color: var(--fg-faint);
+}
+
+.ui-separator {
+    min-height: 1px;
+    margin: var(--space-2) var(--space-3);
+    background-color: var(--border-subtle);
+}
+
+/* ── Avatar ─────────────────────────────────────────────────────────── */
+
+.ui-avatar {
+    border-radius: var(--radius-pill);
+    color: var(--on-status);
+    font-weight: var(--w-heavy);
+}
+
+.ui-avatar-presence {
+    min-width: 10px;
+    min-height: 10px;
+    border-radius: var(--radius-pill);
+    background-color: var(--success);
+    box-shadow: 0 0 0 2px var(--surface-raised);
+}
+
+/* ── Progress ───────────────────────────────────────────────────────── */
+
+progressbar.ui-progress trough {
+    min-height: var(--track-height);
+    border: none;
+    border-radius: var(--radius-pill);
+    background-color: var(--fill-3);
+    background-image: none;
+    box-shadow: none;
+}
+
+progressbar.ui-progress progress {
+    min-height: var(--track-height);
+    border: none;
+    border-radius: var(--radius-pill);
+    background-color: var(--accent-bg);
+    background-image: none;
+}
