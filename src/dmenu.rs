@@ -20,28 +20,11 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4_layer_shell::Edge;
 use serde::{Deserialize, Serialize};
 
-use crate::shell::layer::{self, LayerShellConfig};
+use crate::shell::{Namespace, Surface};
 use crate::theme;
 
-// Reuses the launcher's namespace so swayfx layer_effects (blur) apply.
-static DMENU_CONFIG: LayerShellConfig = LayerShellConfig {
-    namespace: crate::shell::Namespace::Launcher,
-    layer: gtk4_layer_shell::Layer::Overlay,
-    exclusive: false,
-    default_width: None,
-    default_height: None,
-    anchors: &[
-        (Edge::Top, true),
-        (Edge::Bottom, true),
-        (Edge::Left, true),
-        (Edge::Right, true),
-    ],
-    margins: &[],
-    keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
-};
 
 /// Cap on rendered rows — stdin can be arbitrarily long, the screen isn't.
 const MAX_ROWS: usize = 30;
@@ -227,16 +210,14 @@ struct State {
 }
 
 pub(crate) struct Picker {
-    window: gtk4::Window,
+    /// Dropped by the first `finish`, which destroys the window and with it
+    /// the exclusive keyboard grab.
+    surface: RefCell<Option<Surface>>,
     entry: gtk4::SearchEntry,
     results_box: gtk4::Box,
     state: RefCell<State>,
     /// Taken on the first `finish`; later calls are no-ops.
     done: RefCell<Option<Box<dyn FnOnce(Option<String>)>>>,
-    /// Owns the surface's alpha for as long as the picker is up. Set right
-    /// after the window is built, so the enter transition is not driving a
-    /// Reveal that has already been dropped.
-    reveal: RefCell<Option<crate::anim::Reveal>>,
 }
 
 /// Build and present a picker window on `app`. `on_done` runs exactly once —
@@ -247,18 +228,24 @@ pub(crate) fn present_picker(
     items: Vec<String>,
     on_done: impl FnOnce(Option<String>) + 'static,
 ) -> Rc<Picker> {
-    let window = layer::create_layer_window(app, &DMENU_CONFIG);
-
-    let backdrop = gtk4::Box::builder().hexpand(true).vexpand(true).build();
-
-    let container = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .halign(gtk4::Align::Center)
-        .valign(gtk4::Align::Center)
-        .width_request(480)
+    // The launcher's namespace, so it wears the launcher's glass.
+    let surface = Surface::builder(app, Namespace::Launcher)
+        .fill()
+        .keyboard(gtk4_layer_shell::KeyboardMode::Exclusive)
+        // Same chassis as the launcher and the polkit dialog: the glass card.
+        .card(crate::ui::Card::Floating)
         .build();
-    // Same chassis as the launcher and the polkit dialog: the glass card.
-    crate::ui::card::adopt(&container, crate::ui::Card::Floating);
+    let window = surface.window().clone();
+    surface.root().set_hexpand(true);
+    surface.root().set_vexpand(true);
+
+    // Centred on the output: the root gives the card all of its height and
+    // the card takes its natural size in the middle of it.
+    let container = surface.card().clone();
+    container.set_halign(gtk4::Align::Center);
+    container.set_valign(gtk4::Align::Center);
+    container.set_vexpand(true);
+    container.set_width_request(480);
     container.add_css_class("launcher-container");
     container.add_css_class("dmenu");
 
@@ -304,15 +291,10 @@ pub(crate) fn present_picker(
     view.append(&entry);
     view.append(&scroller);
     container.append(&view);
-
-    let overlay = gtk4::Overlay::new();
-    overlay.set_child(Some(&backdrop));
-    overlay.add_overlay(&container);
-    crate::ui::surface::adopt(&overlay);
-    window.set_child(Some(&overlay));
+    surface.set_content(&view);
 
     let picker = Rc::new(Picker {
-        window: window.clone(),
+        surface: RefCell::new(Some(surface.clone())),
         entry: entry.clone(),
         results_box,
         state: RefCell::new(State {
@@ -322,16 +304,13 @@ pub(crate) fn present_picker(
             query: String::new(),
         }),
         done: RefCell::new(Some(Box::new(on_done))),
-        reveal: RefCell::new(None),
     });
 
     // Click on the backdrop (not the card) cancels.
-    let backdrop_click = gtk4::GestureClick::new();
     {
         let picker = picker.clone();
-        backdrop_click.connect_released(move |_, _, _, _| picker.finish(None));
+        surface.connect_backdrop_click(move || picker.finish(None));
     }
-    backdrop.add_controller(backdrop_click);
 
     // Live filtering — local list, no debounce needed.
     {
@@ -369,18 +348,10 @@ pub(crate) fn present_picker(
 
     picker.refilter("");
     // Enter transition (motion on glass, anim.rs). The exit stays instant by
-    // design: finish() destroys the window so the exclusive keyboard grab
-    // releases immediately.
-    //
-    // The Reveal is held on the Picker rather than dropped as a temporary.
-    // It owns the surface's alpha, and `SurfaceAlpha`'s Drop resets the
-    // multiplier to opaque and destroys the object — as a temporary that
-    // landed the moment the transition ended, which is precisely why this
-    // picker used to snap to full opacity instead of fading in.
-    let reveal = crate::anim::Reveal::new(&window, &container).content(&view);
-    reveal.show();
+    // design: finish() drops the surface, which destroys the window so the
+    // exclusive keyboard grab releases immediately.
+    surface.show();
     window.present();
-    *picker.reveal.borrow_mut() = Some(reveal);
     entry.grab_focus();
     picker
 }
@@ -399,7 +370,9 @@ impl Picker {
         let Some(done) = self.done.borrow_mut().take() else {
             return;
         };
-        self.window.destroy();
+        // Taken before it drops: the surface's own handlers hold the picker.
+        let surface = self.surface.borrow_mut().take();
+        drop(surface);
         done(reply);
     }
 
