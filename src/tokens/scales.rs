@@ -25,9 +25,9 @@ pub struct Scales {
 pub fn scales(inputs: Inputs) -> Scales {
     let hue = inputs.tint.hue();
     let anchors = inputs.neutral.anchors(inputs.mode);
-    let anchors = match hue {
-        Some(h) if inputs.tint.casts_neutral() => anchors.map(|c| tint::cast(c, h)),
-        _ => anchors,
+    let anchors = match inputs.tint.ground() {
+        Some(g) => anchors.map(|c| tint::cast(c, g)),
+        None => anchors,
     };
     let [a1, a3, a12] = anchors.map(Oklch::from);
     let mut n = [a1; 12];
@@ -165,7 +165,7 @@ mod tests {
     }
 
     /// Accents leaves the greys exactly alone; Full casts them toward the
-    /// wallpaper at their own lightness.
+    /// wallpaper's ground at their own lightness.
     #[test]
     fn only_full_reaches_the_neutrals() {
         for inputs in every::input() {
@@ -177,7 +177,7 @@ mod tests {
             match inputs.tint {
                 Tint::Off => {}
                 Tint::Accents(_) => assert_eq!(s.neutral, off.neutral, "{inputs:?}"),
-                Tint::Full(h) => {
+                Tint::Full(p) => {
                     for (a, b) in off.neutral.iter().zip(&s.neutral) {
                         let (a, b) = (Oklch::from(*a), Oklch::from(*b));
                         assert!((a.0 - b.0).abs() < 0.01, "{inputs:?}: {a:?} -> {b:?}");
@@ -185,7 +185,7 @@ mod tests {
                     }
                     let ground = Oklch::from(s.neutral[2]);
                     assert!(
-                        tint::difference(ground.2, f64::from(h)).abs() < 3.0,
+                        tint::difference(ground.2, f64::from(p.ground)).abs() < 3.0,
                         "{inputs:?}: the ground is at hue {:.1}",
                         ground.2
                     );

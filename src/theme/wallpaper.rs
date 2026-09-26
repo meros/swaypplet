@@ -1,9 +1,12 @@
-//! The wallpaper's hue, for the tint input (docs/design-system.md §2.2).
+//! The wallpaper's colours, for the tint input (docs/design-system.md §2.2).
 //!
-//! This module's whole job is one number: the OKLCH hue of the wallpaper's
-//! source colour. `theme::inputs` reads it and hands it to the token
-//! generator as `Tint`, which decides what each colour family does with it
-//! (`tokens::tint`). Nothing here knows what a colour is for.
+//! This module's whole job is up to three colours of the wallpaper: the
+//! primary (what the image is about), the ground (what most of it is) and a
+//! secondary (another colour it has). `theme::inputs` reads their hues and
+//! hands them to the token generator as a `tokens::Palette` inside `Tint`,
+//! and `tokens::tint` decides what each colour family does with them.
+//! Nothing here knows what a colour is for, and nothing here takes a
+//! lightness: the tokens own every tone.
 //!
 //! ## Who computes it
 //!
@@ -12,8 +15,8 @@
 //! the key press and the password field. So exactly one process samples: the
 //! panel, off the main thread, whenever the wallpaper or the setting changes.
 //! It writes `$XDG_CACHE_HOME/swaypplet/wallpaper-source` (one line: a
-//! version, a key over the image's path, mtime and size, and the source
-//! colour), and every process reads that line. A missing or foreign file is
+//! version, a key over the image's path, mtime and size, and the three
+//! colours), and every process reads that line. A missing or foreign file is
 //! not an error and never blocks: the tint is off until the sample lands.
 
 use std::path::{Path, PathBuf};
@@ -23,11 +26,11 @@ use material_colors::quantize::{Quantizer, QuantizerCelebi};
 use material_colors::score::Score;
 
 use crate::settings::store::{self, Tint};
-use crate::tokens::{Oklch, Rgb};
+use crate::tokens::{Oklch, Palette, Rgb, tint};
 
 /// Bump when the sampling changes, so a cache written by the old rule is a
 /// miss rather than a stale colour that looks right.
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 
 /// The wallpaper is decoded down to this before it is quantized. 128²
 /// pixels is 16 k samples, which is more than Celebi needs to find the
@@ -38,6 +41,41 @@ const SAMPLE: i32 = 128;
 /// Colours the quantizer reduces the image to, before `Score` ranks them.
 const MAX_COLORS: usize = 64;
 
+/// The OKLCH chroma below which a colour of the image is a grey and gives no
+/// hue: about HCT chroma 5, which is where `Score` draws the same line.
+const GREY: f64 = 0.03;
+
+/// A hue's share of the image counts every colour within this many degrees
+/// of it, as `Score` does, so a gradient is one hue and not a dozen.
+const WINDOW: f64 = 15.0;
+
+/// The ground must cover at least this share of the image. Less, and no hue
+/// dominates (a grey photo with a coloured detail); the ground is then the
+/// primary, as the single-hue tint was.
+const GROUND_SHARE: f64 = 0.20;
+
+/// The secondary must cover at least this share, so a speck is not a colour.
+const SECONDARY_SHARE: f64 = 0.05;
+
+/// The colours the tokens take from one image.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sample {
+    pub primary: Rgb,
+    pub ground: Rgb,
+    pub secondary: Option<Rgb>,
+}
+
+impl Sample {
+    /// The hues, in whole OKLCH degrees.
+    fn palette(self) -> Palette {
+        Palette {
+            primary: hue_of(self.primary),
+            ground: hue_of(self.ground),
+            secondary: self.secondary.map(hue_of),
+        }
+    }
+}
+
 /// What `Score` answers when nothing in the image is usable. Only compared
 /// against, never used: a monochrome wallpaper has no hue to give, and then
 /// the tint stays off rather than inventing one.
@@ -45,15 +83,17 @@ fn no_colour() -> Argb {
     Argb::new(255, 0x68, 0x9d, 0x6a)
 }
 
-// ── The source colour ───────────────────────────────────────────────────
+// ── The colours ─────────────────────────────────────────────────────────
 
-/// The wallpaper's colour to build a tint on: Material's quantizer over the
-/// image, then Material's `Score`, which drops the near-greys, the colours
-/// with too little of the image behind them, and the dark yellow-greens its
-/// `dislike` module calls out. `None` for an image with nothing usable in it.
+/// The wallpaper's colours to build a tint on: Material's quantizer over the
+/// image, then Material's `Score` for the primary and the secondary (it drops
+/// the near-greys, the colours with too little of the image behind them, and
+/// the dark yellow-greens its `dislike` module calls out, and hands back
+/// hues at least 15° apart), and the population for the ground. `None` for
+/// an image with nothing usable in it.
 ///
 /// Blocking, and it decodes an image. Call it off the main thread.
-pub fn source_from_image(path: &Path) -> Option<Rgb> {
+pub fn sample_image(path: &Path) -> Option<Sample> {
     let pixels = sample(path)?;
     let quantized = QuantizerCelebi::quantize(&pixels, MAX_COLORS);
     let ranked = Score::score(
@@ -62,13 +102,66 @@ pub fn source_from_image(path: &Path) -> Option<Rgb> {
         Some(no_colour()),
         Some(true),
     );
-    let first = ranked.first().copied()?;
-    (first != no_colour()).then(|| {
+    let rgb = |c: &Argb| {
         Rgb(
-            f64::from(first.red) / 255.0,
-            f64::from(first.green) / 255.0,
-            f64::from(first.blue) / 255.0,
+            f64::from(c.red) / 255.0,
+            f64::from(c.green) / 255.0,
+            f64::from(c.blue) / 255.0,
         )
+    };
+    let ranked: Vec<Rgb> = ranked
+        .iter()
+        .filter(|c| **c != no_colour())
+        .map(rgb)
+        .collect();
+    let counts: Vec<(Rgb, u32)> = quantized
+        .color_to_count
+        .iter()
+        .map(|(c, n)| (rgb(c), *n))
+        .collect();
+    pick(&counts, &ranked)
+}
+
+/// The share of the image within [`WINDOW`] of `hue`, greys left out of the
+/// hue but counted in the whole.
+fn share(counts: &[(Rgb, u32)], hue: f64) -> f64 {
+    let total: u32 = counts.iter().map(|(_, n)| n).sum();
+    if total == 0 {
+        return 0.0;
+    }
+    let near: u32 = counts
+        .iter()
+        .filter(|(c, _)| {
+            let o = Oklch::from(*c);
+            o.1 >= GREY && tint::difference(o.2, hue).abs() <= WINDOW
+        })
+        .map(|(_, n)| n)
+        .sum();
+    f64::from(near) / f64::from(total)
+}
+
+/// The three colours out of the quantized image and `Score`'s ranking.
+/// Pure, so the rules are tested on made-up images.
+fn pick(counts: &[(Rgb, u32)], ranked: &[Rgb]) -> Option<Sample> {
+    let primary = *ranked.first()?;
+    let hue = |c: Rgb| Oklch::from(c).2;
+    let secondary = ranked[1..].iter().copied().find(|c| {
+        tint::difference(hue(primary), hue(*c)).abs() >= tint::SECONDARY_APART
+            && share(counts, hue(*c)) >= SECONDARY_SHARE
+    });
+    // The ground: the chromatic colour with the most of the image around its
+    // hue, if that is enough of the image to be a ground at all.
+    let ground = counts
+        .iter()
+        .filter(|(c, _)| Oklch::from(*c).1 >= GREY)
+        .map(|(c, n)| (*c, share(counts, hue(*c)), *n))
+        .max_by(|a, b| a.1.total_cmp(&b.1).then(a.2.cmp(&b.2)))
+        .filter(|(_, sh, _)| *sh >= GROUND_SHARE)
+        .map_or(primary, |(c, _, _)| c);
+    Some(Sample {
+        primary,
+        ground,
+        secondary,
     })
 }
 
@@ -116,8 +209,8 @@ fn cache_path() -> Option<PathBuf> {
     Some(cache_dir()?.join("wallpaper-source"))
 }
 
-/// What the source colour is a function of: the image, by path, mtime and
-/// size. The setting is not in it: the colour is the same at either reach.
+/// What the colours are a function of: the image, by path, mtime and size.
+/// The setting is not in it: the colours are the same at either reach.
 fn key(image: &Path) -> String {
     let meta = std::fs::metadata(image).ok();
     let mtime = meta
@@ -144,35 +237,55 @@ fn key(image: &Path) -> String {
 }
 
 /// The cache's one line.
-fn line(key: &str, source: Rgb) -> String {
+fn line(key: &str, s: Sample) -> String {
     format!(
-        "swaypplet-wallpaper v{VERSION} key={key} source={}\n",
-        source.css()
+        "swaypplet-wallpaper v{VERSION} key={key} primary={} ground={} secondary={}\n",
+        s.primary.css(),
+        s.ground.css(),
+        s.secondary.map_or_else(|| "none".to_string(), |c| c.css()),
     )
 }
 
-/// The key and the source colour out of a cache line this build wrote.
-fn parse(text: &str) -> Option<(String, Rgb)> {
+/// A `#rrggbb` word.
+fn colour(word: &str) -> Option<Rgb> {
+    let hex = word.strip_prefix('#')?;
+    let v = u32::from_str_radix(hex, 16)
+        .ok()
+        .filter(|_| hex.len() == 6)?;
+    Some(Rgb::hex(v))
+}
+
+/// The key and the colours out of a cache line this build wrote.
+fn parse(text: &str) -> Option<(String, Sample)> {
     let mut words = text.split_whitespace();
     (words.next()? == "swaypplet-wallpaper").then_some(())?;
     (words.next()? == format!("v{VERSION}")).then_some(())?;
     let key = words.next()?.strip_prefix("key=")?.to_string();
-    let hex = words.next()?.strip_prefix("source=#")?;
-    let v = u32::from_str_radix(hex, 16)
-        .ok()
-        .filter(|_| hex.len() == 6)?;
-    Some((key, Rgb::hex(v)))
+    let primary = colour(words.next()?.strip_prefix("primary=")?)?;
+    let ground = colour(words.next()?.strip_prefix("ground=")?)?;
+    let secondary = match words.next()?.strip_prefix("secondary=")? {
+        "none" => None,
+        word => Some(colour(word)?),
+    };
+    Some((
+        key,
+        Sample {
+            primary,
+            ground,
+            secondary,
+        },
+    ))
 }
 
-fn read_cache() -> Option<(String, Rgb)> {
+fn read_cache() -> Option<(String, Sample)> {
     parse(&std::fs::read_to_string(cache_path()?).ok()?)
 }
 
-/// The wallpaper's hue, as the last sample left it. A bare file read: it
+/// The wallpaper's hues, as the last sample left them. A bare file read: it
 /// runs in every process that builds the stylesheet, on the main thread,
 /// the lock screen among them, so it asks neither sway nor the image.
-pub fn hue() -> Option<u16> {
-    read_cache().map(|(_, source)| hue_of(source))
+pub fn palette() -> Option<Palette> {
+    read_cache().map(|(_, s)| s.palette())
 }
 
 /// Write the cache next to itself and rename over it, so a reader in another
@@ -243,17 +356,12 @@ fn refresh() {
             if read_cache().is_some_and(|(k, _)| k == key) {
                 return false;
             }
-            let Some(source) = source_from_image(&image) else {
+            let Some(sample) = sample_image(&image) else {
                 log::info!("wallpaper: no usable colour in {}", image.display());
                 return false;
             };
-            log::info!(
-                "wallpaper: {} -> source {} (hue {})",
-                image.display(),
-                source.css(),
-                hue_of(source)
-            );
-            write_cache(&line(&key, source))
+            log::info!("wallpaper: {} -> {:?}", image.display(), sample.palette());
+            write_cache(&line(&key, sample))
         },
         |changed| {
             if changed {
@@ -263,7 +371,7 @@ fn refresh() {
     );
 }
 
-/// Keep the sampled hue in step with the wallpaper and the setting, for as
+/// Keep the sampled colours in step with the wallpaper and the setting, for as
 /// long as the process runs.
 ///
 /// The panel calls this and nothing else does: it is the one process that
@@ -294,15 +402,63 @@ mod tests {
 
     #[test]
     fn the_cache_line_reads_back() {
-        let source = Rgb::hex(0x3a6ea5);
-        let text = line(&key(Path::new("/tmp/a.png")), source);
-        assert_eq!(text.lines().count(), 1);
-        let (k, back) = parse(&text).unwrap();
-        assert_eq!(k, key(Path::new("/tmp/a.png")));
-        assert_eq!(back.css(), source.css());
-        // Another build's file is a miss, not a colour.
-        assert!(parse(&text.replace(&format!("v{VERSION}"), "v1")).is_none());
-        assert!(parse("/* swaypplet palette v1 key=0 */").is_none());
+        for secondary in [None, Some(Rgb::hex(0xd65d0e))] {
+            let sample = Sample {
+                primary: Rgb::hex(0x3a6ea5),
+                ground: Rgb::hex(0x203040),
+                secondary,
+            };
+            let text = line(&key(Path::new("/tmp/a.png")), sample);
+            assert_eq!(text.lines().count(), 1);
+            let (k, back) = parse(&text).unwrap();
+            assert_eq!(k, key(Path::new("/tmp/a.png")));
+            assert_eq!(back, sample);
+            // Another build's file is a miss, not a colour.
+            assert!(parse(&text.replace(&format!("v{VERSION}"), "v2")).is_none());
+        }
+        assert!(parse("swaypplet-wallpaper v2 key=0 source=#3a6ea5").is_none());
+    }
+
+    fn at(hue: f64) -> Rgb {
+        Rgb::from(Oklch(0.6, 0.12, hue))
+    }
+
+    /// A blue sky with a red boat: the accent is the boat, the ground the
+    /// sky, and the sky is far enough from the boat to be the secondary too.
+    #[test]
+    fn the_ground_is_the_area_and_the_primary_the_ranking() {
+        let (sky, boat) = (at(250.0), at(25.0));
+        let counts = [(sky, 800), (boat, 60), (Rgb(0.5, 0.5, 0.5), 140)];
+        let s = pick(&counts, &[boat, sky]).unwrap();
+        assert_eq!(s.primary, boat);
+        assert_eq!(s.ground, sky);
+        assert_eq!(s.secondary, Some(sky));
+    }
+
+    #[test]
+    fn a_second_colour_needs_distance_and_area() {
+        let (a, near, far, speck) = (at(250.0), at(280.0), at(60.0), at(140.0));
+        // 30° away: the same colour, no secondary.
+        let s = pick(&[(a, 700), (near, 300)], &[a, near]).unwrap();
+        assert_eq!(s.secondary, None);
+        // Far enough but a speck: no secondary.
+        let s = pick(&[(a, 980), (speck, 20)], &[a, speck]).unwrap();
+        assert_eq!(s.secondary, None);
+        // Far and big enough.
+        let s = pick(&[(a, 700), (far, 300)], &[a, far]).unwrap();
+        assert_eq!(s.secondary, Some(far));
+    }
+
+    /// A grey photo with one coloured detail has no ground of its own; the
+    /// ground is then the primary, which is the single-hue tint.
+    #[test]
+    fn no_dominant_hue_leaves_the_ground_on_the_primary() {
+        let detail = at(140.0);
+        let counts = [(Rgb(0.4, 0.4, 0.4), 900), (detail, 100)];
+        let s = pick(&counts, &[detail]).unwrap();
+        assert_eq!(s.ground, detail);
+        assert_eq!(s.palette(), Palette::single(hue_of(detail)));
+        assert!(pick(&counts, &[]).is_none());
     }
 
     #[test]
@@ -334,13 +490,8 @@ mod tests {
     fn print_wallpaper_source() {
         let image =
             PathBuf::from(std::env::var_os("SWPP_WALLPAPER_IMAGE").expect("SWPP_WALLPAPER_IMAGE"));
-        match source_from_image(&image) {
-            Some(s) => println!(
-                "source {} hue {} from {}",
-                s.css(),
-                hue_of(s),
-                image.display()
-            ),
+        match sample_image(&image) {
+            Some(s) => println!("{s:?} {:?} from {}", s.palette(), image.display()),
             None => println!("no usable colour in {}", image.display()),
         }
     }

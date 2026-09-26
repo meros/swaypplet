@@ -13,14 +13,15 @@ pub struct Status {
     pub danger_bg: Rgb,
 }
 
-/// The status set for `inputs`: the shipped one per mode, harmonised toward
-/// the wallpaper by at most `tint::STATUS_CAP` under a tint.
+/// The status set for `inputs`: the shipped one per mode, each colour
+/// harmonised toward the nearest wallpaper hue by at most `tint::STATUS_CAP`
+/// under a tint.
 pub fn status(inputs: Inputs) -> Status {
     let st = shipped_status(inputs.mode);
-    let Some(h) = inputs.tint.hue() else {
+    let Some(p) = inputs.tint.palette() else {
         return st;
     };
-    let t = |c: Rgb| tint::harmonized(c, h);
+    let t = |c: Rgb| tint::harmonized(c, p);
     Status {
         success: t(st.success),
         success_bg: t(st.success_bg),
@@ -60,8 +61,9 @@ pub const ON_STATUS: Rgb = Rgb::WHITE;
 /// notification came from (a1–a6). Never state, never decoration. Per slot:
 /// the readable tone (text, dots, rails) and the fill (solid chips).
 ///
-/// Under a tint all six turn by the one angle that puts slot 1 on the
-/// wallpaper's hue, so they stay as far apart as they were (§2.2).
+/// Under a tint all six turn by one angle (`tint::categorical_turn`): slot 1
+/// onto the wallpaper's primary, nudged to bring another slot onto its
+/// secondary. One angle, so they stay as far apart as they were (§2.2).
 pub fn categorical(inputs: Inputs) -> [(Rgb, Rgb); 6] {
     let mode = inputs.mode;
     let tinted = inputs.tint.hue().is_some();
@@ -78,9 +80,9 @@ pub fn categorical(inputs: Inputs) -> [(Rgb, Rgb); 6] {
         if tinted { tint::to_rgb(o) } else { o.into() }
     };
     let raw = raw_categorical(mode);
-    let raw = match inputs.tint.hue() {
-        Some(h) => {
-            let delta = tint::difference(Oklch::from(raw[0].1).2, h);
+    let raw = match inputs.tint.palette() {
+        Some(p) => {
+            let delta = tint::categorical_turn(raw.map(|(_, f)| Oklch::from(f).2), p);
             raw.map(|(t, f)| (tint::rotated(t, delta), tint::rotated(f, delta)))
         }
         None => raw,

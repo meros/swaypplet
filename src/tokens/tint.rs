@@ -6,27 +6,33 @@
 //! the contrast tests in `tokens/apca.rs` hold the tinted token
 //! sets to the same targets as the shipped ones.
 //!
-//! What the wallpaper gives is one number: the OKLCH hue of its source colour
-//! (`theme::wallpaper` samples it). Each colour family takes it its own way,
-//! and every rule keeps a colour's **lightness**, because lightness is what
-//! the contrast is made of:
+//! What the wallpaper gives is a [`Palette`] of up to three OKLCH hues
+//! (`theme::wallpaper` samples them), each with its own job. The image gives
+//! hue only: every rule keeps a colour's **lightness**, because lightness is
+//! what the contrast is made of.
 //!
-//! - **Accent**: the whole family takes the wallpaper's hue, each step keeping
-//!   its lightness and chroma. The accent input still decides how loud the
-//!   accent is (its chroma and its tone per mode); the wallpaper decides which
-//!   colour it is.
-//! - **Categorical**: rotated rigidly, all six by the one angle that puts slot
-//!   1 (aqua, the shipped accent) on the wallpaper's hue. Rigid, so the six
-//!   stay as far apart as gruvbox put them: they exist to be told apart, and
-//!   pulling each toward the source would squeeze them into a band. The angle
-//!   is anchored on the categorical set itself rather than on the accent
-//!   input, so which app a colour means does not depend on the accent picked.
-//! - **Status**: harmonised toward the wallpaper by at most [`STATUS_CAP`]
-//!   degrees (Material's `Blend.harmonize`, capped tighter). Red stays red.
-//! - **Neutral**, under [`Tint::Full`] only: the three anchors take the
-//!   wallpaper's hue at a chroma held inside [`CAST`], so the ground picks up
-//!   a cast of the wallpaper without becoming a colour, and a grey preset
-//!   (`pure`) gets one too.
+//! - **Primary**, the colour the image is about (Material's `Score`, which
+//!   ranks by area and chroma). The **accent** family takes it, each step
+//!   keeping its lightness and chroma. The accent input still decides how
+//!   loud the accent is; the wallpaper decides which colour it is.
+//! - **Ground**, the hue that covers the most of the image. Under
+//!   [`Tint::Full`] the three **neutral** anchors take it at a chroma held
+//!   inside [`CAST`], so the surfaces pick up the wallpaper's ground while the
+//!   accent can be its highlight: a blue sky with a red boat gives blue-grey
+//!   glass and a red accent.
+//! - **Secondary**, a second colour of the image, at least
+//!   [`SECONDARY_APART`] from the primary. The **categorical** set is turned
+//!   rigidly, all six by one angle, so they stay as far apart as gruvbox put
+//!   them: they exist to be told apart. The angle puts slot 1 on the primary,
+//!   then moves by at most [`CATEGORICAL_SLACK`] to bring the nearest other
+//!   slot onto the secondary. Assigning the slots straight from the image
+//!   would squeeze them into a band, because most wallpapers are analogous.
+//! - **Status** colours turn toward the nearest of the three by at most
+//!   [`STATUS_CAP`] (Material's `Blend.harmonize`, capped tighter). Red stays
+//!   red.
+//!
+//! A wallpaper with one usable colour gives a palette whose three hues are
+//! that one, which is the single-hue tint this module had before.
 //!
 //! A hue moved at a kept chroma can fall outside sRGB; [`to_rgb`] then gives
 //! up chroma, never lightness, until it fits.
@@ -34,26 +40,69 @@
 use super::color::oklch_linear;
 use super::{Oklch, Rgb};
 
-/// How far the wallpaper reaches into the tokens, with its hue in whole
-/// OKLCH degrees (so `Inputs` stays `Eq` and a change below a degree does
-/// not reload the stylesheet).
+/// The wallpaper's hues, in whole OKLCH degrees (so `Inputs` stays `Eq`
+/// and a change below a degree does not reload the stylesheet).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Palette {
+    /// The accent's hue: the colour the image is about.
+    pub primary: u16,
+    /// The neutral cast's hue: the colour most of the image is.
+    pub ground: u16,
+    /// A second colour of the image, far enough from the primary to read as
+    /// another colour, for the categorical set.
+    pub secondary: Option<u16>,
+}
+
+impl Palette {
+    /// One hue for every job: an image with a single usable colour.
+    pub const fn single(hue: u16) -> Palette {
+        Palette {
+            primary: hue,
+            ground: hue,
+            secondary: None,
+        }
+    }
+
+    /// The hues, primary first, for the rules that turn toward the nearest.
+    pub fn hues(self) -> impl Iterator<Item = f64> {
+        [Some(self.primary), self.secondary, Some(self.ground)]
+            .into_iter()
+            .flatten()
+            .map(|h| f64::from(h % 360))
+    }
+}
+
+/// How far the wallpaper reaches into the tokens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Tint {
     /// The shipped tokens, byte for byte.
     #[default]
     Off,
     /// Accent, categorical and status follow the wallpaper; the greys stay.
-    Accents(u16),
-    /// The greys pick up a cast of it as well.
-    Full(u16),
+    Accents(Palette),
+    /// The greys pick up the wallpaper's ground as well.
+    Full(Palette),
 }
 
 impl Tint {
-    /// The wallpaper's hue, when there is a tint at all.
-    pub fn hue(self) -> Option<f64> {
+    /// The wallpaper's hues, when there is a tint at all.
+    pub fn palette(self) -> Option<Palette> {
         match self {
             Tint::Off => None,
-            Tint::Accents(h) | Tint::Full(h) => Some(f64::from(h % 360)),
+            Tint::Accents(p) | Tint::Full(p) => Some(p),
+        }
+    }
+
+    /// The accent's hue, when there is a tint at all.
+    pub fn hue(self) -> Option<f64> {
+        self.palette().map(|p| f64::from(p.primary % 360))
+    }
+
+    /// The hue the neutral anchors take, under [`Tint::Full`] only.
+    pub fn ground(self) -> Option<f64> {
+        match self {
+            Tint::Full(p) => Some(f64::from(p.ground % 360)),
+            _ => None,
         }
     }
 
@@ -62,6 +111,14 @@ impl Tint {
         matches!(self, Tint::Full(_))
     }
 }
+
+/// How far apart the secondary must be from the primary. Closer than this
+/// the two read as one colour, and the categorical set gains nothing.
+pub const SECONDARY_APART: f64 = 45.0;
+
+/// How far the categorical rotation may leave the primary to reach the
+/// secondary. Slot 1 stays within this of the primary.
+pub const CATEGORICAL_SLACK: f64 = 15.0;
 
 /// How far a status colour may turn toward the wallpaper. Material uses 15
 /// for the same job; 12 keeps gruvbox red (OKLCH hue 29) out of orange
@@ -114,10 +171,42 @@ pub fn rotated(c: Rgb, delta: f64) -> Rgb {
     with_hue(c, h + delta)
 }
 
-/// `c` turned toward `hue` by at most [`STATUS_CAP`].
-pub fn harmonized(c: Rgb, hue: f64) -> Rgb {
+/// `c` turned toward the nearest of `palette`'s hues by at most
+/// [`STATUS_CAP`].
+pub fn harmonized(c: Rgb, palette: Palette) -> Rgb {
     let h = Oklch::from(c).2;
-    with_hue(c, harmonize(h, hue, STATUS_CAP))
+    let nearest = palette
+        .hues()
+        .min_by(|a, b| difference(h, *a).abs().total_cmp(&difference(h, *b).abs()))
+        .unwrap_or(h);
+    with_hue(c, harmonize(h, nearest, STATUS_CAP))
+}
+
+/// The one angle the categorical set turns by, given the six slots' hues:
+/// slot 1 onto the primary, then within [`CATEGORICAL_SLACK`] of that, the
+/// angle that brings the nearest other slot closest to the secondary. Whole
+/// degrees, so the search is 31 candidates.
+pub fn categorical_turn(slots: [f64; 6], palette: Palette) -> f64 {
+    let base = difference(slots[0], f64::from(palette.primary % 360));
+    let Some(secondary) = palette.secondary.map(|s| f64::from(s % 360)) else {
+        return base;
+    };
+    let miss = |turn: f64| {
+        slots[1..]
+            .iter()
+            .map(|h| difference(h + turn, secondary).abs())
+            .fold(f64::INFINITY, f64::min)
+    };
+    let slack = CATEGORICAL_SLACK as i32;
+    (-slack..=slack)
+        .map(|e| base + f64::from(e))
+        // Ties go to the smaller departure from the primary.
+        .min_by(|a, b| {
+            miss(*a)
+                .total_cmp(&miss(*b))
+                .then((a - base).abs().total_cmp(&(b - base).abs()))
+        })
+        .unwrap_or(base)
 }
 
 /// A neutral anchor with the wallpaper's cast: its lightness, the
@@ -139,6 +228,47 @@ mod tests {
         assert!((harmonize(0.0, 180.0, 12.0) - 12.0).abs() < 1e-9);
         // Already there: no movement, and no drift past the target.
         assert!((harmonize(100.0, 104.0, 12.0) - 104.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_categorical_turn_reaches_for_the_secondary_within_its_slack() {
+        let slots = [150.0, 80.0, 200.0, 0.0, 110.0, 55.0];
+        // No secondary: slot 1 lands on the primary exactly.
+        let turn = categorical_turn(slots, Palette::single(260));
+        assert!(difference(slots[0] + turn, 260.0).abs() < 1e-9);
+        // A secondary 10° off where a slot would land: the set turns 10°.
+        let lone = categorical_turn(slots, Palette::single(260));
+        let target = (slots[2] + lone + 10.0).rem_euclid(360.0);
+        let p = Palette {
+            primary: 260,
+            ground: 260,
+            secondary: Some(target.round() as u16),
+        };
+        let turn = categorical_turn(slots, p);
+        assert!((turn - lone - 10.0).abs() < 1.0, "{turn} vs {lone}");
+        // Never further than the slack from the primary, however far away
+        // the secondary is.
+        for s in (0..360).step_by(7) {
+            let p = Palette {
+                secondary: Some(s),
+                ..Palette::single(260)
+            };
+            let turn = categorical_turn(slots, p);
+            assert!(difference(slots[0] + turn, 260.0).abs() <= CATEGORICAL_SLACK + 1e-9);
+        }
+    }
+
+    #[test]
+    fn status_turns_toward_the_nearest_hue() {
+        // Gruvbox red (hue ~29) with a palette of blue and orange: it turns
+        // toward the orange, not the blue.
+        let p = Palette {
+            primary: 260,
+            ground: 260,
+            secondary: Some(50),
+        };
+        let h = Oklch::from(harmonized(Rgb::hex(0xcc241d), p)).2;
+        assert!(h > Oklch::from(Rgb::hex(0xcc241d)).2, "{h}");
     }
 
     #[test]

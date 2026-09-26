@@ -51,16 +51,16 @@ fn build(look: &Look, mode: Mode, tint: Tint) -> Inputs {
     }
 }
 
-/// The Look setting's reach with the wallpaper's hue, as the panel last
+/// The Look setting's reach with the wallpaper's hues, as the panel last
 /// sampled it (`super::wallpaper`). Off until a sample exists: a wallpaper
 /// with no usable colour, or one not sampled yet, leaves the tokens shipped.
 fn tint(reach: Reach) -> Tint {
     if reach == Reach::Off {
         return Tint::Off;
     }
-    match (reach, super::wallpaper::hue()) {
-        (Reach::Accents, Some(h)) => Tint::Accents(h),
-        (Reach::Full, Some(h)) => Tint::Full(h),
+    match (reach, super::wallpaper::palette()) {
+        (Reach::Accents, Some(p)) => Tint::Accents(p),
+        (Reach::Full, Some(p)) => Tint::Full(p),
         _ => Tint::Off,
     }
 }

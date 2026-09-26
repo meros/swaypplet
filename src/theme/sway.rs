@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn the_borders_follow_the_tint() {
         let tinted = client_colors(Inputs {
-            tint: tokens::Tint::Accents(265),
+            tint: tokens::Tint::Accents(tokens::Palette::single(265)),
             ..Inputs::default()
         });
         assert_ne!(tinted[0], client_colors(Inputs::default())[0]);

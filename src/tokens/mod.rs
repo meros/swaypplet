@@ -13,7 +13,7 @@
 //! |---|---|
 //! | `color.rs` | [`Rgb`], [`Oklch`], the OKLCH interpolation |
 //! | `inputs.rs` | [`Mode`], [`Accent`], [`Neutral`], [`Contrast`], [`Inputs`] |
-//! | `tint.rs` | [`Tint`], the wallpaper's hue as an input (§2.2) |
+//! | `tint.rs` | [`Tint`], the wallpaper's hues as an input (§2.2) |
 //! | `scales.rs` | [`scales`]: neutral and accent, 12 steps each (§3.1) |
 //! | `semantic.rs` | [`status`], [`categorical`], [`levels`] (§3.2, §3.3) |
 //! | `material.rs` | [`material`] per mode and `glass_body` (§4) |
@@ -43,4 +43,4 @@ pub use inputs::{Accent, Contrast, Inputs, Mode, Neutral};
 pub use material::material;
 pub use scales::scales;
 pub use semantic::{ON_STATUS, Status, categorical, levels, status};
-pub use tint::Tint;
+pub use tint::{Palette, Tint};

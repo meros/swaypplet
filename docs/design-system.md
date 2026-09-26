@@ -68,13 +68,24 @@ night light uses (`gammastep.nix`: 55.6 N, 13.0 E; Nix writes it to
 
 The tint is an input like the others: the generator builds the scales from
 it, so the stylesheet, the glass body, Cairo drawing and sway's window
-borders all move together, and §5 tests the tinted sets. The one value it
-needs from outside the settings is the wallpaper's **hue**: the OKLCH hue of
-the image's source colour (Material's quantizer and `Score`), in whole
-degrees. The panel samples it (`src/theme/wallpaper.rs`) into
-`$XDG_CACHE_HOME/swaypplet/wallpaper-source`, and every process reads that
+borders all move together, and §5 tests the tinted sets. What it needs from
+outside the settings is a **palette** of up to three OKLCH hues of the
+wallpaper, in whole degrees, each with one job:
+
+| Hue | Picked as | Threshold |
+|---|---|---|
+| primary | Material's `Score` over the quantized image: area and chroma | the first ranked colour; none, and the tint is off |
+| ground | the chromatic hue with the most of the image within ±15° of it | at least 20 % of the image, else the primary |
+| secondary | the next `Score` colour far enough from the primary | at least 45° from it and 5 % of the image, else none |
+
+The image gives hue only. Taking its lightness is what breaks the contrast
+of palette generators that do (pywal); Material and KDE take hue and keep
+tone per role, and so does this. The panel samples the palette
+(`src/theme/wallpaper.rs`) into `$XDG_CACHE_HOME/swaypplet/wallpaper-source`
+once per wallpaper, off the main thread, and every process reads that one
 line. A wallpaper with no usable colour, or one not sampled yet, leaves the
-tint off. `src/tokens/tint.rs` holds the rule.
+tint off; one with a single colour gives a palette of three equal hues.
+`src/tokens/tint.rs` holds the rules.
 
 Every rule keeps each colour's **lightness**, because lightness is what the
 contrast is made of; only hue moves, and chroma gives way (never lightness)
@@ -82,10 +93,12 @@ where a hue does not fit in sRGB.
 
 | Family | `accents` and `full` | Why |
 |---|---|---|
-| accent | every step takes the wallpaper's hue, keeping its lightness and chroma | the accent input still sets how loud it is; the wallpaper sets which colour |
-| categorical | all six turn by the one angle that puts slot 1 on the wallpaper's hue | rigid, so they stay as far apart as gruvbox put them; anchored on slot 1, not on the accent input, so an app's colour does not depend on the accent picked |
-| status | each turns toward the wallpaper's hue by at most 12° | red stays red: 12° keeps it out of orange |
-| neutral | `full` only: the three anchors take the wallpaper's hue at a chroma held within 0.010–0.025 | a cast, not a colour; a grey preset gets one too, and the glass body (`fill_color`) follows |
+| accent | every step takes the primary, keeping its lightness and chroma | the accent input still sets how loud it is; the wallpaper sets which colour |
+| categorical | all six turn by one angle: slot 1 onto the primary, then by at most 15° more to bring the nearest other slot onto the secondary | rigid, so they stay as far apart as gruvbox put them. Slots are never assigned straight from the image: most wallpapers are analogous, and the six would collapse into a band |
+| status | each turns toward the nearest palette hue by at most 12° | red stays red: 12° keeps it out of orange |
+| neutral | `full` only: the three anchors take the ground at a chroma held within 0.010–0.025 | a cast, not a colour. The ground and not the primary, so a blue sky with a red boat gives blue-grey glass and a red accent; the glass body (`fill_color`) follows |
+
+There is no second accent token. One is added when a component needs it.
 
 `off` is the untinted token set, byte for byte.
 

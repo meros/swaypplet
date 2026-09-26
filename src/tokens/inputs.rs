@@ -133,6 +133,7 @@ impl Default for Inputs {
 #[cfg(test)]
 pub(super) mod every {
     use super::*;
+    use crate::tokens::tint::Palette;
 
     /// The wallpaper hues the tinted tests run at: every 5° round the
     /// circle. The tint is whole degrees, so every hue it can take is one
@@ -146,8 +147,17 @@ pub(super) mod every {
     pub fn tint() -> Vec<Tint> {
         let mut v = vec![Tint::Off];
         for h in hues() {
-            v.push(Tint::Accents(h));
-            v.push(Tint::Full(h));
+            v.push(Tint::Accents(Palette::single(h)));
+            v.push(Tint::Full(Palette::single(h)));
+            // A second colour a third of the way round, and a ground that is
+            // not the accent: the sets a real wallpaper gives.
+            let two = Palette {
+                primary: h,
+                ground: (h + 180) % 360,
+                secondary: Some((h + 120) % 360),
+            };
+            v.push(Tint::Accents(two));
+            v.push(Tint::Full(two));
         }
         v
     }
