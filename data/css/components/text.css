@@ -47,31 +47,27 @@
 .ui-danger     { color: var(--danger); }
 
 /* Text standing on bare wallpaper with no card behind it (the lock's clock,
-   date and switch-user button). It is light in both modes: it never sits on
-   glass, only on the wallpaper under the black scrim, which the mode does not
-   change and which only ever darkens. The mode's --fg is ink in light mode,
-   on exactly that dark ground. --on-status is the token the scale already
-   keeps white in both modes.
+   date and switch-user button, the switcher's caption). Its ink and halo
+   follow the wallpaper behind it, not the mode: the panel measures the
+   region once per wallpaper and the tokens pick light ink on a dark halo or
+   dark ink on a light one, with a denser halo over a busy image
+   (src/tokens/backdrop.rs, --fg-on-wallpaper and --halo-on-wallpaper).
 
-   Colour cannot make light text readable on a light image; a shadow that
-   darkens the ground around the glyphs can. The scrim is stacked because one
-   layer of it is too thin to give 13–18 px glyphs an edge: four tight layers
-   reach about 0.6 at the core, three soft ones make the halo. */
-:root {
-    --fg-on-wallpaper: var(--on-status);
-}
-
+   Colour alone cannot make text readable on every image; a halo that moves
+   the ground around the glyphs toward the opposite of the ink can. Four
+   tight layers give the glyphs an edge (0.59 core at the lightest), three
+   soft ones make the halo. */
 .ui-on-wallpaper,
 button.ui-btn.ui-on-wallpaper {
     color: var(--fg-on-wallpaper);
     text-shadow:
-        0 1px 3px var(--scrim),
-        0 1px 3px var(--scrim),
-        0 1px 3px var(--scrim),
-        0 1px 3px var(--scrim),
-        0 2px 14px var(--scrim),
-        0 2px 14px var(--scrim),
-        0 2px 14px var(--scrim);
+        0 1px 3px var(--halo-on-wallpaper),
+        0 1px 3px var(--halo-on-wallpaper),
+        0 1px 3px var(--halo-on-wallpaper),
+        0 1px 3px var(--halo-on-wallpaper),
+        0 2px 14px var(--halo-on-wallpaper),
+        0 2px 14px var(--halo-on-wallpaper),
+        0 2px 14px var(--halo-on-wallpaper);
 }
 
 /* A caption whose tone changes in place (an error arriving, a success):

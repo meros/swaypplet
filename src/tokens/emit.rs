@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 
 use super::{
     COMPONENT, DURATION, Inputs, Mode, ON_STATUS, RADIUS, Rgb, SPACE, SURFACE_KEY, TYPE,
-    categorical, levels, motion, scales, status,
+    categorical, levels, motion, on_wallpaper, scales, status,
 };
 
 fn mixed(color: Rgb, share: f64) -> String {
@@ -97,6 +97,11 @@ pub fn css(inputs: Inputs) -> String {
     put("danger", st.danger.css());
     put("danger-bg", st.danger_bg.css());
     put("on-status", ON_STATUS.css());
+    // Text on bare wallpaper: the ink and its halo follow the wallpaper
+    // behind it, not the mode (`backdrop.rs`).
+    let ow = on_wallpaper(inputs.backdrop);
+    put("fg-on-wallpaper", ow.ink.css());
+    put("halo-on-wallpaper", mixed(ow.halo, ow.halo_alpha));
     put("danger-tint", mixed(st.danger_bg, 0.16));
     put("warning-tint", mixed(st.warning_bg, 0.16));
     put("success-tint", mixed(st.success_bg, 0.16));
@@ -209,6 +214,8 @@ mod tests {
             "warning",
             "danger",
             "on-status",
+            "fg-on-wallpaper",
+            "halo-on-wallpaper",
             "type-body",
             "space-5",
             "radius-card",

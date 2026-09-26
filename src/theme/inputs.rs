@@ -6,7 +6,7 @@ use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
 
 use crate::settings::schema::{Look, ThemeMode, Tint as Reach};
-use crate::tokens::{Inputs, Mode, Tint};
+use crate::tokens::{Backdrop, Inputs, Mode, Palette, Tint};
 
 /// How long a sun-driven switch may wait for the session to be locked
 /// before it happens anyway (§2.1).
@@ -22,6 +22,8 @@ thread_local! {
     static PENDING: RefCell<Option<(Mode, Instant)>> = const { RefCell::new(None) };
     /// The tint last resolved.
     static TINT: Cell<Tint> = const { Cell::new(Tint::Off) };
+    /// The wallpaper text's backdrop last read.
+    static BACKDROP: Cell<Option<Backdrop>> = const { Cell::new(None) };
 }
 
 /// The mode last resolved.
@@ -33,14 +35,19 @@ fn shown_mode() -> Mode {
 /// than resolved again: see `theme::shown`.
 pub(super) fn shown() -> Inputs {
     let look = crate::settings::store::with(|s| s.look());
-    build(&look, SHOWN.with(Cell::get), TINT.with(Cell::get))
+    build(
+        &look,
+        SHOWN.with(Cell::get),
+        TINT.with(Cell::get),
+        BACKDROP.with(Cell::get),
+    )
 }
 
 /// The one place outside tests that an `Inputs` is made: the Look settings,
 /// with a mode and a tint already resolved. [`inputs`] resolves them and
 /// [`shown`] reuses the last resolution; both end here, so the two cannot
 /// map a Look setting differently.
-fn build(look: &Look, mode: Mode, tint: Tint) -> Inputs {
+fn build(look: &Look, mode: Mode, tint: Tint, backdrop: Option<Backdrop>) -> Inputs {
     Inputs {
         mode,
         accent: look.accent,
@@ -48,17 +55,18 @@ fn build(look: &Look, mode: Mode, tint: Tint) -> Inputs {
         contrast: look.contrast,
         motion: (look.motion.scale() * 100.0).round() as u8,
         tint,
+        backdrop,
     }
 }
 
 /// The Look setting's reach with the wallpaper's hues, as the panel last
 /// sampled it (`super::wallpaper`). Off until a sample exists: a wallpaper
 /// with no usable colour, or one not sampled yet, leaves the tokens shipped.
-fn tint(reach: Reach) -> Tint {
+fn tint(reach: Reach, palette: Option<Palette>) -> Tint {
     if reach == Reach::Off {
         return Tint::Off;
     }
-    match (reach, super::wallpaper::palette()) {
+    match (reach, palette) {
         (Reach::Accents, Some(p)) => Tint::Accents(p),
         (Reach::Full, Some(p)) => Tint::Full(p),
         _ => Tint::Off,
@@ -135,9 +143,15 @@ pub fn inputs() -> Inputs {
             ThemeMode::Auto => when_unseen(sun_mode()),
         }
     });
-    let tint = tint(look.tint);
+    // One read of the one-line cache for both of the wallpaper's inputs.
+    let (palette, backdrop) = match super::wallpaper::read() {
+        Some((palette, backdrop)) => (palette, Some(backdrop)),
+        None => (None, None),
+    };
+    let tint = tint(look.tint, palette);
     SHOWN.with(|s| s.set(mode));
     TINT.with(|t| t.set(tint));
+    BACKDROP.with(|b| b.set(backdrop));
     STARTED.with(|s| s.set(true));
-    build(&look, mode, tint)
+    build(&look, mode, tint, backdrop)
 }

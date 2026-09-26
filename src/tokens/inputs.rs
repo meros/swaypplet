@@ -5,7 +5,7 @@
 //! wallpaper's hue) is `theme::inputs`, which is the one place an
 //! [`Inputs`] is built outside tests.
 
-use super::{Rgb, Tint};
+use super::{Backdrop, Rgb, Tint};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -113,6 +113,9 @@ pub struct Inputs {
     pub motion: u8,
     /// The wallpaper's hue and how far it reaches (§2.2).
     pub tint: Tint,
+    /// What the wallpaper is behind text that stands on it, when the panel
+    /// has measured it (§3.3, `backdrop.rs`).
+    pub backdrop: Option<Backdrop>,
 }
 
 impl Default for Inputs {
@@ -124,6 +127,7 @@ impl Default for Inputs {
             contrast: Contrast::Standard,
             motion: 100,
             tint: Tint::Off,
+            backdrop: None,
         }
     }
 }
@@ -178,6 +182,7 @@ pub(super) mod every {
                                 contrast,
                                 motion: 100,
                                 tint,
+                                backdrop: None,
                             });
                         }
                     }
