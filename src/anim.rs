@@ -489,13 +489,6 @@ impl Reveal {
 
     /// Everything drawn on the glass; fades over the full enter/exit
     /// duration. Without one, pane and content fade as a single channel.
-    pub fn content(self, content: &impl IsA<gtk4::Widget>) -> Self {
-        *self.inner.content.borrow_mut() = Some(content.clone().upcast());
-        self
-    }
-
-    /// Point at the content after the fact, for a surface whose contents are
-    /// rebuilt in place.
     pub fn set_content(&self, content: &impl IsA<gtk4::Widget>) {
         *self.inner.content.borrow_mut() = Some(content.clone().upcast());
     }

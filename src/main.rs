@@ -28,7 +28,6 @@ mod service;
 mod services;
 mod settings;
 mod spawn;
-mod surface;
 mod sway;
 mod switch_user;
 mod theme;

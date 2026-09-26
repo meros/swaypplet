@@ -1,6 +1,6 @@
 //! The popup notification stack at the top-right.
 //!
-//! Each card is its own [`GlassSurface`], which is what makes the rest of
+//! Each card is its own [`CardSurface`], which is what makes the rest of
 //! this file short. The compositor's frost and its alpha are per surface, so
 //! a card that owns one fades as a material: the blur collapses with the
 //! tint instead of hanging on as a frosted rectangle holding no colour. It
@@ -10,7 +10,7 @@
 //! What is left here is the choreography: which card sits where, which one
 //! gives way when the stack is full, and when each one expires. The
 //! transitions themselves belong to `anim::Reveal`, and the surface to
-//! `surface::GlassSurface`.
+//! `card_surface::CardSurface`.
 //!
 //! One column per output, not one column. A card is pinned to the focused
 //! output when it is created (`sway::ipc::focused_output_from`: the panel's
@@ -32,11 +32,10 @@ use gtk4_layer_shell::Edge;
 use super::card::{age_label, populate_card, set_critical_class, wants_keyboard};
 use super::timers::{Timer, cancel_timer, make_timer, pause_timers, resume_timers};
 use crate::anim;
-use crate::shell::layer::LayerShellConfig;
 use crate::services::notifications::store::{self, NotificationStore};
 use crate::services::notifications::{CloseReason, Notification};
 use crate::settings::store::{Alerts, Corner};
-use crate::surface::GlassSurface;
+use super::card_surface::CardSurface;
 use crate::sway::ipc::SwayService;
 
 // ── Stack geometry ──
@@ -70,39 +69,19 @@ pub(super) fn alerts() -> Alerts {
 }
 
 /// One column per corner. Anchors are protocol state on the surface, so a
-/// corner is a config rather than a number.
-const fn popup_config(anchors: &'static [(Edge, bool)]) -> LayerShellConfig {
-    LayerShellConfig {
-        namespace: crate::shell::Namespace::Notification,
-        layer: gtk4_layer_shell::Layer::Overlay,
-        exclusive: false,
-        default_width: Some(WINDOW_WIDTH),
-        default_height: Some(WINDOW_HEIGHT),
-        anchors,
-        margins: &[],
-        keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
-    }
-}
-
-static POPUP_TOP_RIGHT: LayerShellConfig = popup_config(&[(Edge::Top, true), (Edge::Right, true)]);
-static POPUP_TOP_LEFT: LayerShellConfig = popup_config(&[(Edge::Top, true), (Edge::Left, true)]);
-static POPUP_BOTTOM_RIGHT: LayerShellConfig =
-    popup_config(&[(Edge::Bottom, true), (Edge::Right, true)]);
-static POPUP_BOTTOM_LEFT: LayerShellConfig =
-    popup_config(&[(Edge::Bottom, true), (Edge::Left, true)]);
-
-fn config_for(corner: Corner) -> &'static LayerShellConfig<'static> {
+/// corner is a set of edges rather than a number.
+fn anchors_for(corner: Corner) -> &'static [Edge] {
     match corner {
-        Corner::TopRight => &POPUP_TOP_RIGHT,
-        Corner::TopLeft => &POPUP_TOP_LEFT,
-        Corner::BottomRight => &POPUP_BOTTOM_RIGHT,
-        Corner::BottomLeft => &POPUP_BOTTOM_LEFT,
+        Corner::TopRight => &[Edge::Top, Edge::Right],
+        Corner::TopLeft => &[Edge::Top, Edge::Left],
+        Corner::BottomRight => &[Edge::Bottom, Edge::Right],
+        Corner::BottomLeft => &[Edge::Bottom, Edge::Left],
     }
 }
 
 pub(super) struct Card {
     pub(super) id: u32,
-    pub(super) surface: GlassSurface,
+    pub(super) surface: CardSurface,
     pub(super) timer: Timer,
     /// Which app sent it, for the per-app cap.
     pub(super) app: String,
@@ -305,7 +284,13 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
         (s.app.clone(), s.hovered)
     };
     let corner = alerts().corner;
-    let surface = GlassSurface::new(&app, config_for(corner), anim::SLIDE_PX, monitor.as_ref());
+    let surface = CardSurface::new(
+        &app,
+        anchors_for(corner),
+        WINDOW_WIDTH,
+        WINDOW_HEIGHT,
+        monitor.as_ref(),
+    );
     // The surface's pane is already the design system's card: one key, one
     // radius, one hairline, and the tints `set_critical_class` and `reflow`
     // lay over the key.
@@ -323,7 +308,6 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
         surface.pane().set_halign(gtk4::Align::End);
         surface.pane().set_margin_end(EDGE_MARGIN);
     }
-    crate::ui::surface::adopt(surface.pane());
     set_critical_class(surface.pane(), notif);
 
     let overflow = overflow_for(st, &notif.app_name);
@@ -488,7 +472,7 @@ fn ranks_per_output(outputs: &[Option<&str>]) -> Vec<usize> {
 /// arithmetic rather than two.
 pub(super) fn reflow(st: &Rc<RefCell<State>>) {
     let full = usize::from(alerts().stack);
-    let plan: Vec<(GlassSurface, f64, f64, bool)> = {
+    let plan: Vec<(CardSurface, f64, f64, bool)> = {
         let s = st.borrow();
         let showing: Vec<&Card> = s.cards.iter().rev().filter(|c| !c.exiting).collect();
         let outputs: Vec<Option<&str>> = showing.iter().map(|c| c.output.as_deref()).collect();

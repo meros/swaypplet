@@ -1,3 +1,8 @@
+//! The layer-shell window under every swaypplet surface. Only `shell` makes
+//! one ([`Surface`](super::Surface); design lint `layer-window`), and the
+//! greeter alone converts a window it built itself, through
+//! [`make_layer_window`].
+
 use gtk4::gdk;
 use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
@@ -16,13 +21,9 @@ pub struct LayerShellConfig<'a> {
     pub exclusive: bool,
 }
 
-pub fn create_layer_window(app: &gtk4::Application, config: &LayerShellConfig) -> gtk4::Window {
-    create_layer_window_on(app, config, None)
-}
-
 /// `monitor: None` lets the compositor pick the output (usually the
 /// focused one); per-output surfaces like the bar pin one explicitly.
-pub fn create_layer_window_on(
+pub(super) fn create_layer_window_on(
     app: &gtk4::Application,
     config: &LayerShellConfig,
     monitor: Option<&gdk::Monitor>,
@@ -95,7 +96,7 @@ pub fn make_layer_window(
 /// on another output are routinely destroyed without ever having been shown,
 /// on an unplug or a focus change. Realizing first gives GTK the surface it
 /// assumes; nothing is mapped, so nothing appears.
-pub fn destroy_window(window: &gtk4::Window) {
+pub(super) fn destroy_window(window: &gtk4::Window) {
     if !window.is_realized() {
         gtk4::prelude::WidgetExt::realize(window);
     }
