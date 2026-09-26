@@ -5,8 +5,9 @@ motion from one set of tokens, and its widgets from one set of components.**
 The tokens are generated from five inputs (mode, accent, neutral, contrast,
 and the wallpaper tint); nothing else in the stylesheet or the code picks a
 colour or a size. This
-file is the source of truth: `data/tokens.css`, `src/tokens.rs`, `src/ui/`
-and the lint tests implement it, and a change to any of them starts here.
+file is the source of truth: the generator (`src/tokens/`), the runtime that
+resolves its inputs and loads the stylesheet (`src/theme/`), the components
+(`src/ui/`) and the lint tests implement it, and a change to any of them starts here.
 
 The research behind it (Material 3, Apple HIG and Liquid Glass, Fluent 2,
 libadwaita, Radix, Carbon, Primer, Linear) and the audit of the stylesheet
@@ -40,7 +41,9 @@ before it are summarised in the zoo, `docs/design-system-zoo.html`.
 | tint | `off`, `accents`, `full`, with the wallpaper's hue | `off` | settings: Look → Theme colour (§2.2) |
 
 Nix ships the defaults in `theme/settings.nix`; the settings pane changes
-them per user. `src/tokens.rs` turns them into `tokens.css` on every change.
+them per user. `src/theme/inputs.rs` resolves them (the sun for `auto`, the
+wallpaper's hue for the tint) into one `tokens::Inputs`, and `tokens::css`
+(`src/tokens/emit.rs`) turns that into `tokens.css` on every change.
 
 ### 2.1 Auto mode follows the sun
 
@@ -52,7 +55,7 @@ night light uses (`gammastep.nix`: 55.6 N, 13.0 E; Nix writes it to
   below, with the state held in between. The 6° band stops a switch from
   flickering at dawn and keeps light mode out of the dimmest civil twilight.
 - The elevation comes from the NOAA solar position formulas, in
-  `src/tokens/sun.rs`, with no network and no new daemon: the long-lived
+  `src/theme/sun.rs`, with no network and no new daemon: the long-lived
   panel process checks once a minute and at wake from suspend.
 - **A switch never happens in front of you.** When the sun crosses, the
   switch waits for the first of: idle (the same idle hint the lock uses),
@@ -93,8 +96,18 @@ Primitives are private to `tokens.css`. Component tokens exist only where a
 component needs a value no semantic token gives (listed in §3.8).
 
 All tokens are CSS custom properties on `:root` (GTK ≥ 4.16). Rust never
-reads them back: values the code needs (`src/tokens.rs`) come from the same
+reads them back: values the code needs (`crate::tokens`) come from the same
 generator that writes the file.
+
+`src/tokens/` is pure: inputs in, values out, no I/O and no GTK. One file
+per concern: `color.rs` (sRGB, OKLCH), `inputs.rs`, `tint.rs`, `scales.rs`
+(§3.1), `semantic.rs` (status, categorical, text levels), `material.rs`
+(§4), `apca.rs` (§5), `fixed.rs` (space, type, radius, durations, the fill
+key, component sizes), `motion.rs` (§3.8) and `emit.rs` (`tokens.css`).
+`src/theme/` is the runtime around it: `inputs.rs` (the one place an
+`Inputs` is built), `sun.rs` (§2.1), `wallpaper.rs` (§2.2), `locked.rs`,
+`paint.rs` (the token colours for Cairo), `sway.rs` (window borders) and
+`mod.rs` (the stylesheet, its reload, and `watch`).
 
 ### 3.1 Primitives: two 12-step scales per mode
 
@@ -353,7 +366,12 @@ raw `--dur-*` and `--ease-*` stay available for a transition that lists
 several properties with one meaning.
 
 The Motion setting scales every duration when the tokens are generated
-(full, half, or one frame), so a rule never has to know about it.
+(full, half, or one frame), so a rule never has to know about it. Rust
+reads the same scale through `anim::ms`. A GTK revealer or stack keeps its
+`transition_duration` as a number, so `ui::revealer` and `ui::page_stack`
+remember each one they build (weakly, with its motion) and set it again
+whenever the stylesheet reloads or reduced motion flips: a change reaches
+the transitions already on screen, not only the ones built after it.
 
 **Rules.** An enter pairs with an exit, never with another enter. The lock
 is an enter and an unlock an exit, not a page: the lock has to be up before
@@ -433,9 +451,9 @@ reaches Lc 62 there, 71 at high contrast):
 | `--on-accent` on `--accent-bg` | 60 |
 | `--on-status` on each status fill | 60 |
 
-`src/tokens/mod.rs` tests all of them for all 144 untinted input
+`src/tokens/apca.rs` tests all of them for all 72 untinted input
 combinations (2 modes, 6 accents, 3 neutrals, 2 contrasts), and each of
-those again under `accents` and `full` at every 5° of wallpaper hue: 20,880
+those again under `accents` and `full` at every 5° of wallpaper hue: 10,440
 token sets. A token set that fails does not ship.
 
 ## 6. Components
@@ -479,8 +497,9 @@ The API has three shapes (the module docs of `src/ui/mod.rs`):
 | Avatar (`avatar`) | `ui::avatar(name, icon, size, logged_in)` | | | `.ui-avatar` (`.cat-n`, `.active`), `.ui-avatar-presence` |
 | Motion (`motion`) | `ui::revealer(transition, motion)`, `ui::page_stack(transition, motion)` | | `set_breathing`, `ui::shake(&w)` (one-shot) | `.ui-breathing`, `.ui-shake` |
 
-`ui::icons` holds the icon-font glyphs; `ui::paint()` the token colours
-for code that draws with Cairo. `data/css/components/gtk.css` styles what
+`ui::icons` holds the icon-font glyphs; `theme::paint()` the token colours
+for code that draws with Cairo (it reads the inputs on screen, so it lives
+with the theme), and `ui::set_source` puts one on a Cairo context. `data/css/components/gtk.css` styles what
 GTK builds itself (windows, a popover menu's buttons and separators,
 scrollbars) and comes last in the cascade.
 

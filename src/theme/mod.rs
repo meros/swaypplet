@@ -10,6 +10,21 @@
 //! long-lived ones ([`watch`]) follow the inputs after startup: the Look
 //! settings, the sun, and the wallpaper's hue (`wallpaper`), which the panel
 //! samples and every process reads.
+//!
+//! The theme is the runtime around the pure generator in `crate::tokens`:
+//!
+//! | file | holds |
+//! |---|---|
+//! | `mod.rs` | the stylesheet, [`reload`], [`observe`], [`watch`] |
+//! | `inputs.rs` | [`inputs`] and [`shown`]: the one `Inputs` builder |
+//! | `sun.rs` | the sun's elevation, for `auto` (§2.1) |
+//! | `wallpaper.rs` | the wallpaper's hue, for the tint (§2.2) |
+//! | `locked.rs` | logind's LockedHint, to time a sun switch |
+//! | `paint.rs` | [`Paint`]: the token colours for Cairo |
+//! | `sway.rs` | sway's window borders from the tokens |
+//!
+//! It sits below `crate::settings::glass`: the material is sent through the
+//! callback [`watch`] is given, not by a call up.
 
 use std::cell::RefCell;
 

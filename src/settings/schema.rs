@@ -365,7 +365,7 @@ impl Motion {
 /// A token input (docs/design-system.md §2.2): each colour keeps its
 /// lightness and only its hue moves, so the contrast the tokens are tested
 /// at survives whatever is on the desktop. `src/tokens/tint.rs` has the
-/// rule, and the contrast tests in `src/tokens/mod.rs` the proof.
+/// rule, and the contrast tests in `src/tokens/apca.rs` the proof.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Tint {

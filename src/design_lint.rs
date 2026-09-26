@@ -133,7 +133,7 @@ impl Rule {
                 "there is no named palette any more (the tokens replaced it): map `@name` to its token with the table in §9"
             }
             Token => {
-                "only tokens the generator emits (src/tokens/mod.rs `css`) and component-local properties in data/css/components/; a new value is a new token in the spec first"
+                "only tokens the generator emits (src/tokens/emit.rs `css`) and component-local properties in data/css/components/; a new value is a new token in the spec first"
             }
             Primitive => {
                 "primitives are private to the generator: use the semantic token for the step's job (§3.1, §3.2)"
