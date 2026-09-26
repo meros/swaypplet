@@ -21,6 +21,7 @@ type Build<T> = Box<dyn Fn(&gdk::Monitor) -> T>;
 pub struct PerMonitor<T> {
     entries: RefCell<Vec<(gdk::Monitor, T)>>,
     build: RefCell<Option<Build<T>>>,
+    after: RefCell<Option<Box<dyn Fn()>>>,
 }
 
 impl<T: 'static> PerMonitor<T> {
@@ -31,7 +32,15 @@ impl<T: 'static> PerMonitor<T> {
         Rc::new(PerMonitor {
             entries: RefCell::new(Vec::new()),
             build: RefCell::new(None),
+            after: RefCell::new(None),
         })
+    }
+
+    /// Run `f` after every reconciliation that added or dropped an entry
+    /// (the greeter moves keyboard focus to a card that still exists). Set it
+    /// before [`watch`](Self::watch) to have it run for the first one too.
+    pub fn after_change(&self, f: impl Fn() + 'static) {
+        *self.after.borrow_mut() = Some(Box::new(f));
     }
 
     /// Build an entry for every monitor now, and keep doing so as monitors
@@ -70,6 +79,7 @@ impl<T: 'static> PerMonitor<T> {
             *entries = keep;
             gone
         };
+        let mut changed = !gone.is_empty();
         drop(gone);
 
         for monitor in current {
@@ -82,6 +92,10 @@ impl<T: 'static> PerMonitor<T> {
                 build(&monitor)
             };
             self.entries.borrow_mut().push((monitor, entry));
+            changed = true;
+        }
+        if changed && let Some(after) = &*self.after.borrow() {
+            after();
         }
     }
 

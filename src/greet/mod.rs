@@ -249,19 +249,24 @@ pub fn run() -> ! {
     // in. A monitor that appears later (dock, DPMS wake) gets its own card,
     // and one that goes away takes its window with it — a layer surface is
     // bound to its wl_output and is rebuilt, never migrated (as in the bar).
-    let windows: Rc<RefCell<Vec<(gdk4::Monitor, gtk4::Window)>>> = Rc::default();
-    let monitors = gdk4::Display::default().expect("no gdk display").monitors();
-    let sync = {
-        let surfaces = surfaces.clone();
-        let windows = windows.clone();
-        let monitors = monitors.clone();
-        Rc::new(move || sync_surfaces(&surfaces, &windows, &monitors, &on_submit))
-    };
+    //
+    // Held until the main loop returns: the set watches the monitors
+    // weakly, and dropping it destroys every card.
+    let windows = crate::shell::PerMonitor::new();
     {
-        let sync = sync.clone();
-        monitors.connect_items_changed(move |_, _, _, _| sync());
+        let surfaces = surfaces.clone();
+        windows.after_change(move || surfaces.focus_entry());
     }
-    sync();
+    {
+        let surfaces = surfaces.clone();
+        windows.watch(move |monitor| {
+            let window = surfaces.build_surface(on_submit.clone(), Some(monitor));
+            // Before `present`, which is where GTK asks for the surface.
+            crate::shell::layer::make_layer_window(&window, &CONFIG, Some(monitor));
+            window.present();
+            GreeterWindow(window)
+        });
+    }
 
     glib::timeout_add_seconds_local(1, {
         let surfaces = surfaces.clone();
@@ -337,6 +342,9 @@ pub fn run() -> ! {
     }
 
     main_loop.run();
+    // The cards stay up to the end, as they always have: the process is
+    // leaving, and destroying them here would only race the session start.
+    std::mem::forget(windows);
     // Flush remaining main-context work before the Wayland socket goes away.
     let ctx = glib::MainContext::default();
     while ctx.iteration(false) {}
@@ -376,37 +384,14 @@ static CONFIG: crate::shell::layer::LayerShellConfig = crate::shell::layer::Laye
     exclusive: false,
 };
 
-/// Reconcile the greeter's cards against the current monitor list: destroy
-/// the window of a monitor that went away (`SurfaceSet` drops it on
-/// ::destroy) and build one for each monitor that has none.
-fn sync_surfaces(
-    surfaces: &SurfaceSet,
-    windows: &RefCell<Vec<(gdk4::Monitor, gtk4::Window)>>,
-    monitors: &gtk4::gio::ListModel,
-    on_submit: &Rc<dyn Fn(String)>,
-) {
-    let current: Vec<gdk4::Monitor> = monitors
-        .iter::<gdk4::Monitor>()
-        .filter_map(Result::ok)
-        .collect();
-    windows.borrow_mut().retain(|(monitor, window)| {
-        let alive = current.contains(monitor);
-        if !alive {
-            window.destroy();
-        }
-        alive
-    });
-    for monitor in current {
-        if windows.borrow().iter().any(|(m, _)| *m == monitor) {
-            continue;
-        }
-        let window = surfaces.build_surface(on_submit.clone(), Some(&monitor));
-        // Before `present`, which is where GTK asks for the surface.
-        crate::shell::layer::make_layer_window(&window, &CONFIG, Some(&monitor));
-        window.present();
-        windows.borrow_mut().push((monitor, window));
+/// One output's greeter card. Dropped when its monitor goes away, which
+/// destroys the window (`SurfaceSet` forgets it on ::destroy).
+struct GreeterWindow(gtk4::Window);
+
+impl Drop for GreeterWindow {
+    fn drop(&mut self) {
+        self.0.destroy();
     }
-    surfaces.focus_entry();
 }
 
 fn submit(st: &Rc<RefCell<State>>, password: String) {
