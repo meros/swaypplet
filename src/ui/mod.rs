@@ -169,8 +169,15 @@ pub fn page_stack(
 
 // ── Surface and card ────────────────────────────────────────────────────
 
-/// Mark a window's root as a design-system surface: base type and colour.
+/// Mark a window's root child as a design-system surface: base type and
+/// colour. Never the window itself: GTK's `window.background` outranks
+/// `.ui-surface` there, so the class would do nothing (design lint
+/// `surface-on-window`).
 pub fn surface(w: &impl IsA<gtk4::Widget>) {
+    debug_assert!(
+        !w.is::<gtk4::Window>(),
+        "ui::surface goes on the window's root child, not the window"
+    );
     w.add_css_class("ui-surface");
 }
 

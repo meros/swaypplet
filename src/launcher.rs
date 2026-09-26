@@ -309,7 +309,6 @@ pub struct Launcher {
 impl Launcher {
     pub fn new(app: &gtk4::Application) -> Self {
         let window = layer_shell::create_layer_window(app, &LAUNCHER_CONFIG);
-        crate::ui::surface(&window);
 
         let backdrop = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
@@ -333,6 +332,7 @@ impl Launcher {
 
         backdrop.append(&top_spacer);
         backdrop.append(&container);
+        crate::ui::surface(&backdrop);
         window.set_child(Some(&backdrop));
 
         install_monitor_fit(&window, &top_spacer, &container, LAUNCHER_CARD_SIZE, None);

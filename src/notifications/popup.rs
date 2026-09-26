@@ -351,7 +351,7 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
         surface.pane().set_halign(gtk4::Align::End);
         surface.pane().set_margin_end(EDGE_MARGIN);
     }
-    crate::ui::surface(surface.window());
+    crate::ui::surface(surface.pane());
     set_critical_class(surface.pane(), notif);
 
     let overflow = overflow_for(st, &notif.app_name);

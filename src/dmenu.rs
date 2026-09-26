@@ -248,7 +248,6 @@ pub(crate) fn present_picker(
     on_done: impl FnOnce(Option<String>) + 'static,
 ) -> Rc<Picker> {
     let window = layer_shell::create_layer_window(app, &DMENU_CONFIG);
-    crate::ui::surface(&window);
 
     let backdrop = gtk4::Box::builder().hexpand(true).vexpand(true).build();
 
@@ -309,6 +308,7 @@ pub(crate) fn present_picker(
     let overlay = gtk4::Overlay::new();
     overlay.set_child(Some(&backdrop));
     overlay.add_overlay(&container);
+    crate::ui::surface(&overlay);
     window.set_child(Some(&overlay));
 
     let picker = Rc::new(Picker {

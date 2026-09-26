@@ -18,6 +18,7 @@
 //! | `rust-space`      | a box spacing or widget margin that is a non-zero literal    | Rust |
 //! | `rust-colour`     | a Cairo / `gdk::RGBA` colour from numeric literals            | Rust |
 //! | `rust-class`      | a CSS class added in Rust that no stylesheet styles          | Rust |
+//! | `surface-on-window` | `ui::surface` / `ui::solid_window` given a window rather than its root child | Rust |
 //! | `motion-bypass`   | a motion token's `.ms` read, or a `transition_duration` set, outside `anim::ms` / `ui::revealer` | Rust except src/anim.rs |
 //!
 //! Every CSS rule reads the files in [`crate::theme::RULES`] with comments
@@ -73,6 +74,7 @@ pub enum Rule {
     RustColour,
     RustClass,
     MotionBypass,
+    SurfaceOnWindow,
 }
 
 use Rule::*;
@@ -82,7 +84,13 @@ impl Rule {
     const CSS_TOKENS: &[Rule] = &[Token, Primitive];
     const CSS_SCALES: &[Rule] = &[FontSize, FontWeight, Radius, Space, Motion];
     const CSS_HYGIENE: &[Rule] = &[SurfaceLook];
-    const RUST: &[Rule] = &[RustSpace, RustColour, RustClass, MotionBypass];
+    const RUST: &[Rule] = &[
+        RustSpace,
+        RustColour,
+        RustClass,
+        MotionBypass,
+        SurfaceOnWindow,
+    ];
 
     fn id(self) -> &'static str {
         match self {
@@ -101,6 +109,7 @@ impl Rule {
             RustColour => "rust-colour",
             RustClass => "rust-class",
             MotionBypass => "motion-bypass",
+            SurfaceOnWindow => "surface-on-window",
         }
     }
 
@@ -144,6 +153,9 @@ impl Rule {
             }
             RustClass => {
                 "the class is styled nowhere in data/css/: a typo, or a dead class; use a ui::* component or style it"
+            }
+            SurfaceOnWindow => {
+                "put `ui::surface` on the window's root child: `window.background` outranks `.ui-surface` on the window node, so the class does nothing there"
             }
             MotionBypass => {
                 "`ui::revealer(transition, motion)` / `ui::page_stack(..)` for a GTK transition, `anim::ms(motion)` / `anim::span(motion)` for a length: they go through `anim::duration`, so Look → Motion and reduced motion reach them"
@@ -1208,6 +1220,22 @@ fn rust_violations() -> Vec<Violation> {
             }
         }
 
+        // A surface class on the window node, where it loses to GTK's own
+        // `window.background`. Read off the argument: a window is named
+        // `window`, `win`, `*_window` or reached by `.window()`.
+        for needle in ["ui::surface(", "ui::solid_window("] {
+            for (at, args) in calls(&code, needle) {
+                if names_a_window(args) {
+                    push(
+                        at,
+                        SurfaceOnWindow,
+                        snippet(at, args, needle),
+                        "the class goes on the window's root child".into(),
+                    );
+                }
+            }
+        }
+
         // Classes.
         for needle in ["add_css_class(", ".css_classes(", "set_css_classes("] {
             for (at, args) in calls(&code, needle) {
@@ -1228,6 +1256,17 @@ fn rust_violations() -> Vec<Violation> {
         }
     }
     out
+}
+
+/// Whether a call argument names a window rather than a widget in it.
+fn names_a_window(arg: &str) -> bool {
+    let a = arg.trim().trim_start_matches('&').trim();
+    let last = a
+        .rsplit(['.', ':'])
+        .next()
+        .unwrap_or(a)
+        .trim_end_matches("()");
+    last == "window" || last == "win" || last.ends_with("_window")
 }
 
 /// Offsets of every `<TOKEN>.ms` where TOKEN is a motion token's constant
@@ -1545,6 +1584,9 @@ fn the_linter_catches_what_it_should() {
     );
     assert_eq!(calls(&code, ".spacing(").len(), 0);
     assert_eq!(calls(&code, "set_spacing(").len(), 1);
+    assert!(names_a_window("&window") && names_a_window("surface.window()"));
+    assert!(names_a_window("&self.picker_window") && !names_a_window("&backdrop"));
+    assert!(!names_a_window("surface.pane()") && !names_a_window("&window_box"));
     assert_eq!(
         motion_token_ms("a(motion::EXPAND.ms as u32); ENTER.ms; x.msg; EXPANDED.ms").len(),
         2
@@ -1572,6 +1614,7 @@ fn print_the_ledger() {
         RustColour,
         RustClass,
         MotionBypass,
+        SurfaceOnWindow,
     ]);
     let mut s = String::new();
     for (file, by_rule) in &found {

@@ -137,6 +137,7 @@ impl GlassSurface {
         }
     }
 
+    #[allow(dead_code)] // the accessor pairs with pane(); no caller needs it today
     pub fn window(&self) -> &gtk4::Window {
         &self.inner.window
     }
