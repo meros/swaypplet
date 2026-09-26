@@ -323,21 +323,55 @@ pub fn run(component: &str) {
                     .column_homogeneous(true)
                     .build();
                 grid.add_css_class("startmenu-tile-grid");
+                // `SWAYPPLET_PREVIEW_TILES=on` draws every tile on with a
+                // status line, from made-up words: no reading, and no
+                // action (`set_active` emits `toggled`; the actions are on
+                // `clicked`).
+                let fixture = std::env::var_os("SWAYPPLET_PREVIEW_TILES").is_some();
+                let fixture_status = |label: &str| match label {
+                    "Night Light" => "Sun · 3500 K",
+                    "No Sleep" => "Until 14:30",
+                    "No Lock" => "Until turned off",
+                    _ => "",
+                };
                 let specs = tiles::tile_specs();
                 let mut col = 0i32;
                 let mut row = 0i32;
-                for spec in specs.iter() {
-                    let btn = tiles::build_tile(spec);
-                    tiles::init_tile_state(&btn, spec);
-                    grid.attach(&btn, col, row, 1, 1);
+                let mut place = |w: &gtk4::Widget| {
+                    grid.attach(w, col, row, 1, 1);
                     col += 1;
                     if col >= 2 {
                         col = 0;
                         row += 1;
                     }
+                };
+                for spec in specs.iter() {
+                    if spec.status.is_some() {
+                        let tile = tiles::build_split(spec, |_| {});
+                        if fixture {
+                            tile.toggle.set_active(true);
+                            crate::ui::set_tile_status(&tile, fixture_status(spec.label));
+                        } else {
+                            tiles::init_tile_state(&tile.toggle, spec);
+                            tiles::refresh_status(&tile.status, spec);
+                        }
+                        place(tile.root.upcast_ref());
+                    } else {
+                        let btn = tiles::build_tile(spec);
+                        if fixture {
+                            btn.set_active(true);
+                        } else {
+                            tiles::init_tile_state(&btn, spec);
+                        }
+                        place(btn.upcast_ref());
+                    }
                 }
-                let dnd = tiles::build_dnd_tile(store.clone());
-                grid.attach(&dnd, col, row, 1, 1);
+                let dnd = tiles::build_dnd_split(store.clone(), |_| {});
+                if fixture {
+                    dnd.toggle.set_active(true);
+                    crate::ui::set_tile_status(&dnd, "Quiet until 07:00");
+                }
+                place(dnd.root.upcast_ref());
                 host.append(&grid);
             }
             // Audio and Bluetooth draw fixtures: every state worth a look at

@@ -1,6 +1,16 @@
-//! The battery and the CPU governor, read from sysfs: the state behind the
-//! panel's power section and the bar's battery pill and decision slot, and
-//! the words both of them say about it. No widgets here.
+//! The battery and the power profile: the state behind the panel's power
+//! section and the bar's battery pill and decision slot, and the words both
+//! of them say about it. No widgets here.
+//!
+//! The battery is read from sysfs, and `services::battery` decides *when*:
+//! on UPower's change signals, never on a timer. UPower's own time
+//! estimates, which it smooths over minutes, replace the instantaneous
+//! `energy / power_now` division when it has them.
+//!
+//! The profile is power-profiles-daemon's where that runs (settable), and
+//! otherwise what the firmware and the CPU say (read-only): on this host
+//! auto-cpufreq owns both, and power-profiles-daemon is off because the two
+//! fight.
 
 use std::fs;
 
@@ -9,6 +19,8 @@ use std::fs;
 // ---------------------------------------------------------------------------
 
 const CPU_GOVERNOR: &str = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor";
+const CPU_EPP: &str = "/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference";
+const PLATFORM_PROFILE: &str = "/sys/firmware/acpi/platform_profile";
 
 fn read_sysfs(path: &str) -> Option<String> {
     match fs::read_to_string(path) {
@@ -119,23 +131,108 @@ pub(crate) struct BatteryState {
     energy_full_wh: Option<f64>,
     /// Battery health as percentage of design capacity (energy_full / energy_full_design * 100)
     pub(crate) health_pct: Option<u8>,
+    /// Charge cycles, when the firmware counts them.
+    pub(crate) cycles: Option<u32>,
+    /// The firmware's charge window: starts charging below `start`, stops
+    /// at `end`. Root-only to change (sysfs), so shown, never set, here.
+    pub(crate) charge_start: Option<u8>,
+    pub(crate) charge_end: Option<u8>,
+    /// UPower's smoothed estimates, seconds; `None` when it has none yet.
+    pub(crate) upower_to_empty_s: Option<u64>,
+    pub(crate) upower_to_full_s: Option<u64>,
 }
 
+/// The power profile and who owns it.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum GovernorProfile {
-    Performance,
-    Balanced,
-    Powersave,
-    Other(String),
+pub(crate) enum Profile {
+    /// power-profiles-daemon: `power-saver`, `balanced` or `performance`,
+    /// settable. `degraded` is its reason when performance is held back
+    /// (`lap-detected`, `high-operating-temperature`); `holds` are the
+    /// applications holding a profile.
+    Daemon {
+        active: String,
+        choices: Vec<String>,
+        degraded: Option<String>,
+        holds: Vec<String>,
+    },
+    /// No daemon: what the firmware and the CPU are set to, by whoever owns
+    /// them. Read-only.
+    Firmware {
+        platform: Option<String>,
+        epp: Option<String>,
+        governor: Option<String>,
+        owner: Option<&'static str>,
+    },
 }
 
-impl GovernorProfile {
-    fn from_sysfs(raw: &str) -> Self {
-        match raw.trim() {
-            "performance" => GovernorProfile::Performance,
-            "schedutil" | "ondemand" | "conservative" => GovernorProfile::Balanced,
-            "powersave" => GovernorProfile::Powersave,
-            other => GovernorProfile::Other(other.to_owned()),
+impl Profile {
+    /// The one word for it: the daemon's profile, else the firmware's.
+    pub(crate) fn name(&self) -> String {
+        let pretty = |p: &str| match p {
+            "power-saver" | "low-power" | "quiet" => "Power saver".to_string(),
+            "balanced" => "Balanced".to_string(),
+            "performance" => "Performance".to_string(),
+            other => other.to_string(),
+        };
+        match self {
+            Profile::Daemon { active, .. } => pretty(active),
+            Profile::Firmware { platform, epp, governor, .. } => platform
+                .as_deref()
+                .or(epp.as_deref())
+                .or(governor.as_deref())
+                .map_or_else(|| "Unknown".to_string(), pretty),
+        }
+    }
+
+    /// The line under it: why it is what it is.
+    pub(crate) fn detail(&self) -> String {
+        match self {
+            Profile::Daemon { degraded: Some(why), .. } => {
+                format!("Performance held back: {}", why.replace('-', " "))
+            }
+            Profile::Daemon { holds, .. } if !holds.is_empty() => {
+                format!("Held by {}", holds.join(", "))
+            }
+            Profile::Daemon { .. } => "power-profiles-daemon".to_string(),
+            Profile::Firmware { epp, governor, owner, .. } => {
+                // Who owns it first: that is why there is no switch here.
+                let mut parts = vec![match owner {
+                    Some(o) => format!("Managed by {o}"),
+                    None => "Read only".to_string(),
+                }];
+                match (epp, governor) {
+                    (Some(e), _) => parts.push(format!("CPU {}", e.replace('_', " "))),
+                    (None, Some(g)) => parts.push(format!("governor {g}")),
+                    (None, None) => {}
+                }
+                parts.join(" · ")
+            }
+        }
+    }
+}
+
+impl BatteryState {
+    /// A made-up battery for the render harness's fixtures.
+    pub(crate) fn fixture(
+        capacity: u8,
+        state: ChargeState,
+        watts: f64,
+        to_empty_s: Option<u64>,
+        to_full_s: Option<u64>,
+    ) -> BatteryState {
+        BatteryState {
+            capacity,
+            charging: state == ChargeState::Charging,
+            state,
+            power_w: Some(watts),
+            energy_now_wh: Some(f64::from(capacity) * 0.7),
+            energy_full_wh: Some(70.0),
+            health_pct: Some(94),
+            cycles: Some(168),
+            charge_start: Some(75),
+            charge_end: Some(80),
+            upower_to_empty_s: to_empty_s,
+            upower_to_full_s: to_full_s,
         }
     }
 }
@@ -188,6 +285,7 @@ pub(crate) fn read_battery(bat_path: &str) -> Option<BatteryState> {
         _ => None,
     };
 
+    let pct = |f: &str| read_sysfs(&format!("{bat_path}/{f}")).and_then(|s| s.parse::<u8>().ok());
     Some(BatteryState {
         capacity,
         charging,
@@ -196,6 +294,13 @@ pub(crate) fn read_battery(bat_path: &str) -> Option<BatteryState> {
         energy_now_wh,
         energy_full_wh,
         health_pct,
+        cycles: read_sysfs(&format!("{bat_path}/cycle_count"))
+            .and_then(|s| s.parse().ok())
+            .filter(|c| *c > 0),
+        charge_start: pct("charge_control_start_threshold"),
+        charge_end: pct("charge_control_end_threshold"),
+        upower_to_empty_s: None,
+        upower_to_full_s: None,
     })
 }
 
@@ -240,6 +345,13 @@ fn format_hours(h: f64) -> Option<String> {
 
 fn battery_sub_text(bat: &BatteryState) -> String {
     let estimate = |wh: Option<f64>| -> Option<String> {
+        let upower = match bat.state {
+            ChargeState::Charging => bat.upower_to_full_s,
+            _ => bat.upower_to_empty_s,
+        };
+        if let Some(s) = upower {
+            return format_hours(s as f64 / 3600.0);
+        }
         let power = bat.power_w.filter(|w| *w >= 0.001)?;
         format_hours(wh? / power)
     };
@@ -277,6 +389,13 @@ pub(crate) fn eta_text(bat: &BatteryState) -> Option<String> {
     if bat.capacity >= ALMOST_FULL_PCT {
         return None;
     }
+    match (bat.state, bat.upower_to_full_s, bat.upower_to_empty_s) {
+        (ChargeState::Charging, Some(s), _) => return format_hours(s as f64 / 3600.0),
+        (ChargeState::Discharging | ChargeState::Unknown, _, Some(s)) => {
+            return format_hours(s as f64 / 3600.0);
+        }
+        _ => {}
+    }
     let power = bat.power_w.filter(|w| *w >= 0.001)?;
     match bat.state {
         ChargeState::Charging => {
@@ -295,6 +414,9 @@ pub(crate) fn time_to_empty_text(bat: &BatteryState) -> Option<String> {
     if bat.charging {
         return None;
     }
+    if let Some(s) = bat.upower_to_empty_s {
+        return format_hours(s as f64 / 3600.0);
+    }
     match (bat.power_w, bat.energy_now_wh) {
         (Some(power), Some(energy)) if power >= 0.001 => format_hours(energy / power),
         _ => None,
@@ -308,6 +430,26 @@ pub(crate) fn battery_summary_text(bat: &BatteryState) -> String {
     format!("{}% · {}", bat.capacity, battery_sub_text(bat))
 }
 
+/// The firmware's charge window as words ("Charges to 80 %, from 75 %"),
+/// `None` when it charges to full or does not say.
+pub(crate) fn charge_limit_text(bat: &BatteryState) -> Option<String> {
+    let end = bat.charge_end.filter(|e| *e < 100)?;
+    Some(match bat.charge_start.filter(|s| *s > 0 && *s < end) {
+        Some(start) => format!("Charges to {end} %, from {start} %"),
+        None => format!("Charges to {end} %"),
+    })
+}
+
+/// Health and cycles as one line ("Health 94 % · 168 cycles").
+pub(crate) fn health_text(bat: &BatteryState) -> Option<String> {
+    match (bat.health_pct, bat.cycles) {
+        (Some(h), Some(c)) => Some(format!("Health {h} % · {c} cycles")),
+        (Some(h), None) => Some(format!("Health {h} %")),
+        (None, Some(c)) => Some(format!("{c} cycles")),
+        (None, None) => None,
+    }
+}
+
 /// Present draw ("7.2 W") for the bar battery popover; `None` when sysfs
 /// gives no settled power_now reading.
 pub(crate) fn watts_text(bat: &BatteryState) -> Option<String> {
@@ -317,13 +459,88 @@ pub(crate) fn watts_text(bat: &BatteryState) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Governor helpers
+// The power profile
 // ---------------------------------------------------------------------------
 
-pub(crate) fn read_governor() -> GovernorProfile {
-    read_sysfs(CPU_GOVERNOR)
-        .map(|s| GovernorProfile::from_sysfs(&s))
-        .unwrap_or(GovernorProfile::Balanced)
+/// The profile, from power-profiles-daemon when it is on the bus, else from
+/// sysfs. Blocking (one D-Bus round trip at most); call from a worker. Read
+/// when the section opens and after a change, never on a timer.
+pub(crate) fn read_profile() -> Profile {
+    if let Some(p) = read_daemon_profile() {
+        return p;
+    }
+    let quiet = |p: &str| std::fs::read_to_string(p).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    Profile::Firmware {
+        platform: quiet(PLATFORM_PROFILE),
+        epp: quiet(CPU_EPP),
+        governor: quiet(CPU_GOVERNOR),
+        owner: std::path::Path::new("/run/current-system/sw/bin/auto-cpufreq")
+            .exists()
+            .then_some("auto-cpufreq"),
+    }
+}
+
+/// power-profiles-daemon's names, newest first: it moved under UPower in
+/// 0.20 and keeps the old name as an alias.
+const PPD: [(&str, &str, &str); 2] = [
+    (
+        "org.freedesktop.UPower.PowerProfiles",
+        "/org/freedesktop/UPower/PowerProfiles",
+        "org.freedesktop.UPower.PowerProfiles",
+    ),
+    ("net.hadess.PowerProfiles", "/net/hadess/PowerProfiles", "net.hadess.PowerProfiles"),
+];
+
+fn read_daemon_profile() -> Option<Profile> {
+    use std::collections::HashMap;
+    use zbus::zvariant::OwnedValue;
+    let conn = zbus::blocking::Connection::system().ok()?;
+    let dbus = zbus::blocking::fdo::DBusProxy::new(&conn).ok()?;
+    for (name, path, iface) in PPD {
+        let bus_name = zbus::names::BusName::try_from(name).ok()?;
+        if !dbus.name_has_owner(bus_name).unwrap_or(false) {
+            continue;
+        }
+        let proxy = zbus::blocking::Proxy::new(&conn, name, path, iface).ok()?;
+        let active: String = proxy.get_property("ActiveProfile").ok()?;
+        let profiles: Vec<HashMap<String, OwnedValue>> =
+            proxy.get_property("Profiles").unwrap_or_default();
+        let choices = profiles
+            .iter()
+            .filter_map(|p| p.get("Profile").and_then(|v| v.downcast_ref::<&str>().ok().map(str::to_string)))
+            .collect();
+        let degraded: String = proxy.get_property("PerformanceDegraded").unwrap_or_default();
+        let holds: Vec<HashMap<String, OwnedValue>> =
+            proxy.get_property("ActiveProfileHolds").unwrap_or_default();
+        let holds = holds
+            .iter()
+            .filter_map(|h| h.get("ApplicationId").and_then(|v| v.downcast_ref::<&str>().ok().map(str::to_string)))
+            .collect();
+        return Some(Profile::Daemon {
+            active,
+            choices,
+            degraded: (!degraded.is_empty()).then_some(degraded),
+            holds,
+        });
+    }
+    None
+}
+
+/// Ask power-profiles-daemon for `profile`. Blocking; a worker only. Only
+/// reachable from a control that exists when [`Profile::settable`].
+pub(crate) fn set_profile(profile: &str) -> bool {
+    let Ok(conn) = zbus::blocking::Connection::system() else {
+        return false;
+    };
+    for (name, path, iface) in PPD {
+        let Ok(proxy) = zbus::blocking::Proxy::new(&conn, name, path, iface) else {
+            continue;
+        };
+        if proxy.set_property("ActiveProfile", profile).is_ok() {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -339,6 +556,11 @@ mod tests {
             energy_now_wh: None,
             energy_full_wh: None,
             health_pct: None,
+            cycles: None,
+            charge_start: None,
+            charge_end: None,
+            upower_to_empty_s: None,
+            upower_to_full_s: None,
         }
     }
 
@@ -351,6 +573,11 @@ mod tests {
             energy_now_wh: Some(now),
             energy_full_wh: Some(full),
             health_pct: None,
+            cycles: None,
+            charge_start: None,
+            charge_end: None,
+            upower_to_empty_s: None,
+            upower_to_full_s: None,
         }
     }
 
@@ -388,5 +615,45 @@ mod tests {
         // power_now == 0 — meter hasn't settled yet.
         assert_eq!(watts_text(&bat(Some(0.0))), None);
         assert_eq!(watts_text(&bat(None)), None);
+    }
+
+    #[test]
+    fn upower_estimates_win_over_the_instant_division() {
+        let mut d = charged(ChargeState::Discharging, 50, 50.0, 100.0);
+        d.upower_to_empty_s = Some(2 * 3600 + 30 * 60);
+        assert_eq!(eta_text(&d).as_deref(), Some("2h 30m"));
+        assert_eq!(time_to_empty_text(&d).as_deref(), Some("2h 30m"));
+    }
+
+    #[test]
+    fn the_charge_window_is_said_only_when_it_limits() {
+        let mut b = bat(None);
+        b.charge_end = Some(100);
+        assert_eq!(charge_limit_text(&b), None);
+        b.charge_end = Some(80);
+        b.charge_start = Some(75);
+        assert_eq!(charge_limit_text(&b).as_deref(), Some("Charges to 80 %, from 75 %"));
+        b.charge_start = Some(0);
+        assert_eq!(charge_limit_text(&b).as_deref(), Some("Charges to 80 %"));
+    }
+
+    #[test]
+    fn a_profile_says_what_it_is_and_why() {
+        let fw = Profile::Firmware {
+            platform: Some("low-power".into()),
+            epp: Some("balance_power".into()),
+            governor: Some("powersave".into()),
+            owner: Some("auto-cpufreq"),
+        };
+        assert_eq!(fw.name(), "Power saver");
+        assert_eq!(fw.detail(), "Managed by auto-cpufreq · CPU balance power");
+        let held = Profile::Daemon {
+            active: "performance".into(),
+            choices: vec![],
+            degraded: Some("lap-detected".into()),
+            holds: vec![],
+        };
+        assert_eq!(held.name(), "Performance");
+        assert_eq!(held.detail(), "Performance held back: lap detected");
     }
 }

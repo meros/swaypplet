@@ -78,7 +78,9 @@ struct Ui {
 /// same 30 s poll (it feeds the decision slot's battery occupant, which
 /// adds no poll of its own).
 pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
-    let path = power::find_battery_path()?;
+    if !crate::services::battery::start() {
+        return None;
+    }
 
     let icon = gtk4::Label::new(None);
     let pct = gtk4::Label::builder()
@@ -115,14 +117,13 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
     ui::segment::adopt(&root, false);
     root.append(&slide);
 
-    // Read layer (vision increment 8): click opens the battery section.
-    // One sysfs read per open — no timer while closed.
+    // Read layer (vision increment 8): click opens the battery's detail.
+    // The battery is the observed reading; the profile is read on open.
     {
         let (pop, body) = popover::chassis(&root);
-        let path = path.clone();
         let click = gtk4::GestureClick::new();
         click.connect_released(move |_, _, _, _| {
-            let Some(bat) = power::read_battery(&path) else {
+            let Some(bat) = crate::services::battery::current() else {
                 return;
             };
             while let Some(child) = body.first_child() {
@@ -133,13 +134,19 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
                 ui::Text::Body,
                 ui::Tone::Fg,
             ));
-            if let Some(watts) = power::watts_text(&bat) {
-                body.append(&ui::text(
-                    &format!("Draw {watts}"),
-                    ui::Text::Caption,
-                    ui::Tone::Muted,
-                ));
+            let lines = [
+                power::watts_text(&bat).map(|w| format!("Drawing {w}")),
+                power::health_text(&bat),
+                power::charge_limit_text(&bat),
+            ];
+            for line in lines.into_iter().flatten() {
+                body.append(&ui::text(&line, ui::Text::Caption, ui::Tone::Muted));
             }
+            let profile = ui::text("", ui::Text::Caption, ui::Tone::Muted);
+            body.append(&profile);
+            crate::spawn::spawn_work(power::read_profile, move |p| {
+                profile.set_label(&format!("{} · {}", p.name(), p.detail()));
+            });
             pop.popup();
         });
         root.add_controller(click);
@@ -155,26 +162,20 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
         slide,
         tier: Cell::new(None),
     });
-    if let Some(bat) = power::read_battery(&path) {
+    if let Some(bat) = crate::services::battery::current() {
         apply(&root, &ui, &bat);
         on_state(&bat);
     }
 
-    // Own 30 s timer, deliberately not is_mapped-gated like the panel's
-    // (widgets/power.rs): the bar is always on screen, and the critical
-    // escalation must not wait for a map event to start.
+    // UPower's change signals move it (`services::battery`): a plug shows
+    // at once, and nothing wakes while the battery holds still.
     let weak = root.downgrade();
-    glib::timeout_add_seconds_local(30, move || {
-        let Some(root) = weak.upgrade() else {
-            return glib::ControlFlow::Break;
+    crate::services::battery::observe(move || {
+        let (Some(root), Some(bat)) = (weak.upgrade(), crate::services::battery::current()) else {
+            return;
         };
-        if let Some(bat) = power::read_battery(&path) {
-            apply(&root, &ui, &bat);
-            on_state(&bat);
-        }
-        // A failed read keeps the last-known display (transient sysfs
-        // hiccups around suspend); no reason to stop polling.
-        glib::ControlFlow::Continue
+        apply(&root, &ui, &bat);
+        on_state(&bat);
     });
 
     Some(root)

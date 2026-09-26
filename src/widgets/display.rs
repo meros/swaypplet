@@ -1,81 +1,86 @@
-use std::process::Command;
+use std::cell::Cell;
+use std::rc::Rc;
 
 use gtk4::prelude::*;
 use gtk4::{Box, Label};
-use serde::Deserialize;
 
 use crate::services::displays;
-use crate::settings::store::{self, NightLight};
+use crate::settings::store::{self, NightLight, NightSchedule};
 use crate::spawn::spawn_work;
 use crate::ui;
 use crate::ui::icons;
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
-/// One entry from `swaymsg -t get_outputs`; unknown fields are ignored.
-#[derive(Debug, Clone, Deserialize)]
+/// One output as the section shows it, from sway's `get_outputs` over the
+/// app's own IPC connection (no `swaymsg` process per refresh).
+#[derive(Debug, Clone, PartialEq)]
 struct OutputInfo {
     name: String,
     active: bool,
-    /// Absent for disabled outputs.
-    current_mode: Option<Mode>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct Mode {
-    width: u32,
-    height: u32,
-    /// Refresh rate in millihertz (e.g. 60000 = 60 Hz).
-    refresh: u32,
+    /// Width, height and refresh in mHz; absent for disabled outputs.
+    mode: Option<(i32, i32, i32)>,
+    scale: Option<f64>,
+    /// "Make Model", when sway knows them.
+    product: Option<String>,
 }
 
 // ── Backend helpers ───────────────────────────────────────────────────────────
 
-/// Run `swaymsg -t get_outputs --raw` and parse the JSON response.
+/// sway's outputs. Blocking (one IPC round trip); call from a worker.
 fn get_outputs() -> Vec<OutputInfo> {
-    let Ok(out) = Command::new("swaymsg")
-        .args(["-t", "get_outputs", "--raw"])
-        .output()
-    else {
-        return Vec::new();
+    let outputs = match crate::sway::ipc::connect().and_then(|mut c| c.get_outputs()) {
+        Ok(o) => o,
+        Err(e) => {
+            log::warn!("display: get_outputs: {e}");
+            return Vec::new();
+        }
     };
-
-    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
-        log::warn!("failed to parse swaymsg get_outputs JSON: {}", e);
-        Vec::new()
-    })
+    outputs
+        .into_iter()
+        .map(|o| OutputInfo {
+            product: Some(format!("{} {}", o.make, o.model))
+                .filter(|p| !p.trim().is_empty() && !p.contains("Unknown")),
+            mode: o.current_mode.map(|m| (m.width, m.height, m.refresh)),
+            scale: o.scale,
+            active: o.active,
+            name: o.name,
+        })
+        .collect()
 }
 
-/// Format refresh rate: millihertz → integer Hz string.
-fn format_refresh(mhz: u32) -> String {
-    format!("{}Hz", (mhz + 500) / 1000)
+/// "2880×1800 @ 60 Hz · scale 2" for an active output, "Off" otherwise.
+fn describe(o: &OutputInfo) -> String {
+    let Some((w, h, mhz)) = o.mode.filter(|m| m.0 > 0 && m.1 > 0) else {
+        return "Off".to_string();
+    };
+    let mut s = format!("{w}×{h}");
+    if mhz > 0 {
+        s.push_str(&format!(" @ {} Hz", (mhz + 500) / 1000));
+    }
+    if let Some(scale) = o.scale.filter(|s| (*s - 1.0).abs() > 1e-6) {
+        s.push_str(&format!(" · scale {}", trim(scale)));
+    }
+    s
 }
 
-// ── Toggle action ─────────────────────────────────────────────────────────────
-
-/// Run `swaymsg output <name> enable|disable` (blocking — call from a
-/// background thread, e.g. via `spawn_work`).
-fn toggle_output_blocking(name: &str, enable: bool) -> bool {
-    let cmd = if enable { "enable" } else { "disable" };
-    Command::new("swaymsg")
-        .args(["output", name, cmd])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+/// A scale without trailing zeros: 2, 1.5, 1.25.
+fn trim(v: f64) -> String {
+    let s = format!("{v:.2}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 // ── Row builder ───────────────────────────────────────────────────────────────
 
 /// Build a single output row and return it along with the widget that should be
 /// refreshed when the toggle completes (`output_list`).
-fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) -> Box {
-    let mode_text = match &output.current_mode {
-        Some(m) if m.width > 0 && m.height > 0 => {
-            format!("{}x{} @ {}", m.width, m.height, format_refresh(m.refresh))
-        }
-        _ => "—".to_string(),
+fn make_output_row(output: &OutputInfo, shared: &Rc<Cell<usize>>, output_list: &Box) -> Box {
+    let title = match &output.product {
+        Some(p) => format!("{} · {p}", output.name),
+        None => output.name.clone(),
     };
-    let r = ui::row(icons::DISPLAY, &output.name, &mode_text);
+    let r = ui::row(icons::DISPLAY, &title, &describe(output));
+    let active_count = shared.get();
 
     // Disable button is suppressed when it would turn off the last active display.
     let can_disable = output.active && active_count > 1;
@@ -96,29 +101,26 @@ fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) 
         let name = output.name.clone();
         let active = output.active;
         let output_list_c = output_list.clone();
+        let count = shared.clone();
 
         toggle_btn.connect_clicked(move |btn| {
-            // Re-validate against the freshest state before disabling: the
-            // row's `can_disable` was computed at last list-populate time,
-            // so two rapid Disable clicks on two active displays could both
-            // pass the stale check and leave zero active outputs.
-            if active && get_outputs().iter().filter(|o| o.active).count() <= 1 {
+            // The shared count, not the row's copy: two rapid Disable clicks
+            // on two active displays must not both pass and leave none. The
+            // first one takes its display off the count before sway answers.
+            if active && count.get() <= 1 {
                 btn.set_tooltip_text(Some("Cannot disable the only active display"));
                 return;
             }
-
+            if active {
+                count.set(count.get() - 1);
+            }
             btn.set_sensitive(false);
-
-            // Refresh the list after the command completes.
-            let name_bg = name.clone();
+            let cmd = format!("output {name} {}", if active { "disable" } else { "enable" });
             let output_list_refresh = output_list_c.clone();
-            spawn_work(
-                move || toggle_output_blocking(&name_bg, !active),
-                move |_ok| {
-                    // Re-populate the list to reflect the new state.
-                    populate_output_list(&output_list_refresh);
-                },
-            );
+            let count = count.clone();
+            crate::sway::ipc::run_command_result(&cmd, move |_ok| {
+                refresh_list(&output_list_refresh, &count);
+            });
         });
     }
 
@@ -128,21 +130,20 @@ fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) 
 
 // ── List population ───────────────────────────────────────────────────────────
 
-/// Clear `list` and rebuild it from the current `swaymsg` output (synchronous).
-fn populate_output_list(list: &Box) {
-    populate_output_list_with_data(list, &get_outputs());
+/// Read the outputs on a worker, then rebuild `list`.
+fn refresh_list(list: &Box, active: &Rc<Cell<usize>>) {
+    let (list, active) = (list.clone(), active.clone());
+    spawn_work(get_outputs, move |outputs| populate_output_list_with_data(&list, &outputs, &active));
 }
 
 /// Clear `list` and rebuild it from pre-fetched output data.
-fn populate_output_list_with_data(list: &Box, outputs: &[OutputInfo]) {
+fn populate_output_list_with_data(list: &Box, outputs: &[OutputInfo], active: &Rc<Cell<usize>>) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
-
-    let active_count = outputs.iter().filter(|o| o.active).count();
-
+    active.set(outputs.iter().filter(|o| o.active).count());
     for output in outputs {
-        list.append(&make_output_row(output, active_count, list));
+        list.append(&make_output_row(output, active, list));
     }
 }
 
@@ -221,6 +222,8 @@ fn populate_profiles(group: &Box, list: &Box) {
 pub struct DisplaySection {
     section: ui::Section,
     output_list: Box,
+    /// Active outputs as last read, shared by every row's Disable.
+    active: Rc<Cell<usize>>,
 }
 
 impl DisplaySection {
@@ -232,7 +235,17 @@ impl DisplaySection {
         // ── Night light warmth, above the outputs ─────────────────────────────
         let night = ui::group(1);
         night.add_css_class("display-night");
-        night.append(&ui::heading("Night Light Warmth"));
+        night.append(&ui::heading("Night Light"));
+        // On or off, and when: the tile's switch and its schedule, here with
+        // the warmth they apply.
+        let current = store::current().night_light();
+        let (on_row, on) = ui::switch_row("Night light", night_when(current.schedule));
+        on.set_active(current.enabled);
+        on.connect_active_notify(|s| {
+            let on = s.is_active();
+            store::edit::<NightLight>(|n| n.enabled = on);
+        });
+        night.append(&on_row.root);
         let night_row = ui::slider_row(
             "󰖔",
             f64::from(NightLight::MIN_K),
@@ -260,11 +273,17 @@ impl DisplaySection {
             // slider; the handler above then writes back what is already
             // there, which the store drops.
             let scale = night_row.scale.clone();
+            let (on, when) = (on.clone(), on_row.subtitle.clone());
             store::observe(move || {
-                let k = f64::from(store::current().night_light().night_k);
+                let n = store::current().night_light();
+                let k = f64::from(n.night_k);
                 if (scale.value() - k).abs() >= 1.0 {
                     scale.set_value(k);
                 }
+                if on.is_active() != n.enabled {
+                    on.set_active(n.enabled);
+                }
+                when.set_label(night_when(n.schedule));
             });
         }
         night.append(&night_row.root);
@@ -311,6 +330,7 @@ impl DisplaySection {
         let display = Self {
             section,
             output_list,
+            active: Rc::new(Cell::new(0)),
         };
 
         {
@@ -318,9 +338,10 @@ impl DisplaySection {
             // summary follow. Only on a change; nothing polls.
             let output_list = display.output_list.clone();
             let summary = display.section.summary.clone();
+            let active = display.active.clone();
             displays::observe(move || {
                 populate_profiles(&profiles, &profile_list);
-                refresh_outputs(&output_list, &summary);
+                refresh_outputs(&output_list, &summary, &active);
             });
         }
 
@@ -328,12 +349,10 @@ impl DisplaySection {
         display
     }
 
-    /// Re-query swaymsg and rebuild the output list and summary label.
-    ///
-    /// The blocking `swaymsg` call runs on a background thread; the UI is
-    /// updated on the GTK main thread once the result arrives.
+    /// Read the outputs again (on a worker) and rebuild the list and the
+    /// summary.
     pub fn refresh(&self) {
-        refresh_outputs(&self.output_list, &self.section.summary);
+        refresh_outputs(&self.output_list, &self.section.summary, &self.active);
     }
 
     /// Switch into page mode: the body alone, open at once.
@@ -349,12 +368,13 @@ impl DisplaySection {
 
 /// Re-query the outputs off the main thread, then rebuild the list and the
 /// summary: the profile on screen, and how many displays.
-fn refresh_outputs(output_list: &Box, summary_text: &Label) {
+fn refresh_outputs(output_list: &Box, summary_text: &Label, active: &Rc<Cell<usize>>) {
     let output_list = output_list.clone();
     let summary_text = summary_text.clone();
+    let active = active.clone();
     {
         spawn_work(get_outputs, move |outputs| {
-            populate_output_list_with_data(&output_list, &outputs);
+            populate_output_list_with_data(&output_list, &outputs, &active);
 
             let active_count = outputs.iter().filter(|o| o.active).count();
             let summary = match active_count {
@@ -372,5 +392,32 @@ fn refresh_outputs(output_list: &Box, summary_text: &Label) {
             };
             summary_text.set_label(&summary);
         });
+    }
+}
+
+/// The night light's schedule, in words.
+fn night_when(schedule: NightSchedule) -> &'static str {
+    match schedule {
+        NightSchedule::Sun => "Warm from dusk to dawn",
+        NightSchedule::Always => "Warm all day",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn out(mode: Option<(i32, i32, i32)>, scale: Option<f64>) -> OutputInfo {
+        OutputInfo { name: "eDP-1".into(), active: mode.is_some(), mode, scale, product: None }
+    }
+
+    #[test]
+    fn an_output_is_described_with_its_scale_only_when_scaled() {
+        assert_eq!(describe(&out(Some((2880, 1800, 60001)), Some(2.0))), "2880×1800 @ 60 Hz · scale 2");
+        assert_eq!(describe(&out(Some((3840, 2160, 60000)), Some(1.5))), "3840×2160 @ 60 Hz · scale 1.5");
+        assert_eq!(describe(&out(Some((1920, 1080, 144000)), Some(1.0))), "1920×1080 @ 144 Hz");
+        assert_eq!(describe(&out(None, None)), "Off");
+        // A headless output reports no refresh: no "@ 0 Hz".
+        assert_eq!(describe(&out(Some((1000, 900, 0)), Some(1.0))), "1000×900");
     }
 }

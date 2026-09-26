@@ -64,6 +64,17 @@ pub struct TileSpec {
     /// successful read and every successful toggle. Feeds in-process
     /// consumers (the bar's hazard lane) without them polling the tool.
     pub on_state: Option<Rc<dyn Fn(bool)>>,
+    /// The split tile's status line: why the tile is in its state.
+    pub status: Option<Status>,
+}
+
+/// Where a tile's status line comes from.
+#[derive(Clone)]
+pub enum Status {
+    /// A blocking read (a unit's description), on a worker.
+    Worker(Arc<dyn Fn() -> String + Send + Sync>),
+    /// A read of main-thread state (the settings).
+    Main(Rc<dyn Fn() -> String>),
 }
 
 /// Every tile the quick strip can show: Wi-Fi, Bluetooth, Night Light and
@@ -99,6 +110,7 @@ fn wifi_spec() -> TileSpec {
         }),
         read_state: Arc::new(read_wifi_state),
         on_state: None,
+        status: None,
     }
 }
 
@@ -111,6 +123,7 @@ fn bluetooth_spec() -> TileSpec {
         action: Arc::new(|on| crate::services::bluez::set_powered(on).is_ok()),
         read_state: Arc::new(read_bluetooth_state),
         on_state: None,
+        status: None,
     }
 }
 
@@ -129,6 +142,7 @@ fn night_light_spec() -> TileSpec {
         }),
         read_state: Arc::new(read_night_state),
         on_state: None,
+        status: Some(Status::Main(Rc::new(night_status))),
     }
 }
 
@@ -145,6 +159,7 @@ fn inhibitor_spec(which: Inhibitor) -> TileSpec {
         action: Arc::new(move |on| which.arm(on)),
         read_state: Arc::new(move || which.read().into()),
         on_state: Some(Rc::new(move |armed| inhibit::publish(which, armed))),
+        status: Some(Status::Worker(Arc::new(move || inhibitor_status(which)))),
     }
 }
 
@@ -152,7 +167,75 @@ fn inhibitor_spec(which: Inhibitor) -> TileSpec {
 /// optimistic-toggle + revert-on-failure + `loading` behavior once.
 pub fn build_tile(spec: &TileSpec) -> gtk4::ToggleButton {
     let btn = make_toggle(spec.icon, spec.label);
+    wire(&btn, spec);
+    btn
+}
 
+/// A split tile from a spec: the body is the same toggle as [`build_tile`],
+/// `on_detail` runs for the chevron.
+pub fn build_split(spec: &TileSpec, on_detail: impl Fn(&gtk4::Button) + 'static) -> crate::ui::SplitTile {
+    let tile = crate::ui::tile_split(spec.icon, spec.label);
+    tile.root.set_hexpand(true);
+    wire(&tile.toggle, spec);
+    tile.detail.connect_clicked(on_detail);
+    tile
+}
+
+/// Read a tile's status line again, from its spec's source.
+pub fn refresh_status(label: &gtk4::Label, spec: &TileSpec) {
+    let show = |label: &gtk4::Label, text: String| {
+        label.set_visible(!text.is_empty());
+        label.set_label(&text);
+    };
+    match &spec.status {
+        None => {}
+        Some(Status::Main(read)) => show(label, read()),
+        Some(Status::Worker(read)) => {
+            let (read, label) = (read.clone(), label.clone());
+            spawn::spawn_work(move || read(), move |text| show(&label, text));
+        }
+    }
+}
+
+/// A popover of durations for a timed switch, under `anchor`: each item
+/// arms `which` for that long (or until turned off), then `done` runs with
+/// whether it took.
+pub fn duration_menu(anchor: &gtk4::Button, which: Inhibitor, done: impl Fn(bool) + 'static) {
+    let menu = crate::ui::menu();
+    let pop = crate::ui::popover(&menu, gtk4::PositionType::Top);
+    pop.set_parent(anchor);
+    let done: Rc<dyn Fn(bool)> = Rc::new(done);
+    for (label, minutes) in [
+        ("For 30 minutes", Some(30)),
+        ("For 1 hour", Some(60)),
+        ("For 2 hours", Some(120)),
+        ("For 4 hours", Some(240)),
+        ("Until turned off", None),
+    ] {
+        let item = crate::ui::menu_item(label, "", false);
+        let (pop_c, done) = (pop.clone(), done.clone());
+        item.connect_clicked(move |_| {
+            pop_c.popdown();
+            let done = done.clone();
+            spawn::spawn_work(
+                move || which.arm_for(true, minutes),
+                move |ok| {
+                    if ok {
+                        inhibit::publish(which, true);
+                    }
+                    done(ok);
+                },
+            );
+        });
+        menu.append(&item);
+    }
+    pop.connect_closed(|p| p.unparent());
+    pop.popup();
+}
+
+/// The optimistic toggle, its revert on failure, and the `loading` state,
+/// on any toggle button.
+fn wire(btn: &gtk4::ToggleButton, spec: &TileSpec) {
     let spec = spec.clone();
     let btn_h = btn.clone();
     btn.connect_clicked(move |_| {
@@ -187,8 +270,6 @@ pub fn build_tile(spec: &TileSpec) -> gtk4::ToggleButton {
             },
         );
     });
-
-    btn
 }
 
 /// Read the initial state for a tile (on a background thread) and apply it.
@@ -211,29 +292,27 @@ pub fn init_tile_state(btn: &gtk4::ToggleButton, spec: &TileSpec) {
     );
 }
 
-/// DND is store-backed (main-thread state), so it gets a dedicated builder:
-/// no background action, just flips the store.
-pub fn build_dnd_tile(store: Rc<RefCell<NotificationStore>>) -> gtk4::ToggleButton {
-    let btn = make_toggle("󰍷", "DND");
-
+/// Do Not Disturb as a split tile: the body flips the store, the chevron
+/// runs `on_detail`, and the status line says why ([`dnd_status`]).
+pub fn build_dnd_split(
+    store: Rc<RefCell<NotificationStore>>,
+    on_detail: impl Fn(&gtk4::Button) + 'static,
+) -> crate::ui::SplitTile {
+    let tile = crate::ui::tile_split("󰍷", "DND");
+    tile.root.set_hexpand(true);
     let active = store.borrow().is_dnd();
-    btn.set_active(active);
-    set_tooltip(
-        &btn,
-        active,
-        "Do Not Disturb: active",
-        "Do Not Disturb: off",
-    );
-
-    let store_c = store.clone();
-    let btn_h = btn.clone();
-    btn.connect_clicked(move |_| {
-        let on = btn_h.is_active();
-        set_tooltip(&btn_h, on, "Do Not Disturb: active", "Do Not Disturb: off");
-        store_c.borrow_mut().set_dnd(on);
+    tile.toggle.set_active(active);
+    crate::ui::set_tile_status(&tile, &dnd_status(active));
+    let status = tile.status.clone();
+    tile.toggle.connect_clicked(move |b| {
+        let on = b.is_active();
+        store.borrow_mut().set_dnd(on);
+        let text = dnd_status(on);
+        status.set_visible(!text.is_empty());
+        status.set_label(&text);
     });
-
-    btn
+    tile.detail.connect_clicked(on_detail);
+    tile
 }
 
 // ── Widget helpers ──────────────────────────────────────────────────────────
@@ -304,3 +383,43 @@ fn read_night_state() -> TileState {
         TileState::Inactive
     }
 }
+
+// ── Status lines ─────────────────────────────────────────────────────────────
+
+/// "Until 14:30" for a timed inhibitor, "Until turned off" for one armed
+/// without an end, empty when off. Blocking.
+fn inhibitor_status(which: Inhibitor) -> String {
+    if !which.armed() {
+        return String::new();
+    }
+    match which.until() {
+        Some(t) => format!("Until {t}"),
+        None => "Until turned off".to_string(),
+    }
+}
+
+/// "Sun · 3500 K" or "All day · 3500 K": short enough for a tile. Main
+/// thread.
+fn night_status() -> String {
+    use crate::settings::store::{self, NightSchedule};
+    let n = store::current().night_light();
+    let when = match n.schedule {
+        NightSchedule::Sun => "Sun",
+        NightSchedule::Always => "All day",
+    };
+    format!("{when} · {} K", n.night_k)
+}
+
+/// Why Do Not Disturb is what it is: the quiet hours' end when they armed
+/// it, their start when they will, and "Until turned off" otherwise.
+pub fn dnd_status(on: bool) -> String {
+    let alerts = crate::settings::store::current().alerts();
+    let hour = gtk4::glib::DateTime::now_local().map(|t| t.hour() as u8).unwrap_or(12);
+    match (on, alerts.quiet, alerts.quiet && alerts.in_quiet_hours(hour)) {
+        (true, _, true) => format!("Quiet until {:02}:00", alerts.quiet_to_h),
+        (true, _, false) => "Until turned off".to_string(),
+        (false, true, false) => format!("Quiet from {:02}:00", alerts.quiet_from_h),
+        _ => String::new(),
+    }
+}
+
