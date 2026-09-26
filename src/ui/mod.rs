@@ -946,3 +946,215 @@ pub fn set_button_kind(b: &gtk4::Button, kind: Kind) {
     }
     style_button(b, kind);
 }
+
+// ── Auth components (added by the auth migration) ───────────────────────
+
+/// Make `w` the glass card that sits over a [`scrim`]: the lock's and the
+/// greeter's. It paints the key pre-compensated for the black under it, so
+/// the two layers composite to exactly the key every other card paints and
+/// the compositor drops them (`.ui-card.over-scrim` in 00-components.css has
+/// the arithmetic). Only ever over a scrim: on its own it lands in the band
+/// `glass.nix` reserves for nothing, a flat slab with no bevel.
+pub fn card_over_scrim(w: &impl IsA<gtk4::Widget>) {
+    card(w, Card::Floating);
+    w.add_css_class("over-scrim");
+}
+
+/// The dimming layer under a modal full-screen surface (`--scrim`).
+pub fn scrim() -> gtk4::Box {
+    let b = vbox(0);
+    b.add_css_class("ui-scrim");
+    b.set_hexpand(true);
+    b.set_vexpand(true);
+    b
+}
+
+/// What a surface paints when it only needs *a* commit, never a visible
+/// pixel: the lock's commit pixel, drawn at 1–2/255 alpha so GSK sees a
+/// changed node and nobody sees anything. Black is the scrim's colour, so
+/// even that one 255th adds nothing the scrim under it does not already.
+pub const INVISIBLE_INK: crate::tokens::Rgb = crate::tokens::Rgb::BLACK;
+
+/// Text that stands on bare wallpaper, with no card behind it: gives the
+/// glyphs an edge with a shadow of the scrim.
+pub fn on_wallpaper(w: &impl IsA<gtk4::Widget>) {
+    w.add_css_class("ui-on-wallpaper");
+}
+
+/// A well: a box sunk below the card, for text that came from outside it
+/// (a command line, polkit's raw details).
+pub fn well() -> gtk4::Box {
+    let b = vbox(0);
+    b.add_css_class("ui-well");
+    b
+}
+
+/// Style a dropdown as a control on the card.
+pub fn dropdown(d: &gtk4::DropDown) {
+    d.add_css_class("ui-dropdown");
+}
+
+/// A chip whose face is a widget rather than a word: an avatar and a name.
+pub fn chip_with(child: &impl IsA<gtk4::Widget>) -> gtk4::Button {
+    let b = gtk4::Button::new();
+    b.add_css_class("ui-chip");
+    b.add_css_class("rich");
+    b.set_child(Some(child));
+    b
+}
+
+/// What an auth field says about the methods behind it (a component state
+/// of `ui::field`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FieldState {
+    /// A reader is accepting a finger: the field breathes.
+    Armed,
+    /// The stack is checking: a steady accent hairline.
+    Busy,
+    /// Rejected: one danger flash. Re-adding it restarts the flash.
+    Reject,
+}
+
+impl FieldState {
+    fn class(self) -> &'static str {
+        match self {
+            FieldState::Armed => "armed",
+            FieldState::Busy => "busy",
+            FieldState::Reject => "reject",
+        }
+    }
+}
+
+/// Turn a state of a `ui::field` (its `root`) on or off.
+pub fn set_field_state(field: &impl IsA<gtk4::Widget>, state: FieldState, on: bool) {
+    set_class(field, state.class(), on);
+}
+
+/// A caption whose tone changes in place: the colour moves as a state.
+pub fn live_caption(l: &gtk4::Label) {
+    l.add_css_class("ui-live-caption");
+}
+
+/// Mark `label` monospace: a command, a key, raw details.
+pub fn mono(label: &gtk4::Label) {
+    label.add_css_class("ui-mono");
+}
+
+// ── Avatar ──────────────────────────────────────────────────────────────
+
+/// A round avatar for `name`: the picture at `icon_path` when it loads,
+/// otherwise a monogram on a categorical fill hashed from the name. `size` is
+/// the diameter in px; `logged_in` adds the presence dot. Add `.active` to
+/// ring the current user.
+pub fn avatar(name: &str, icon_path: Option<&str>, size: i32, logged_in: bool) -> gtk4::Widget {
+    crate::avatar::avatar(name, icon_path, size, logged_in)
+}
+
+// ── Face indicator ──────────────────────────────────────────────────────
+
+/// Every state the face can be in. Enumerated rather than derived, because
+/// swapping to a new state means clearing the old ones and GTK cannot be
+/// asked which is set.
+pub const FACE_STATES: [&str; 5] = ["looking", "dark", "found", "ok", "fail"];
+
+/// The face in a ring. It is a face, not a spinner: a ring said "something is
+/// happening", a face says what. Three boxes placed by hand in a `Fixed` so
+/// the eyes and mouth move as paint (transforms), never as allocation.
+/// `size` is the ring's outer size in px; the face scales with it.
+pub fn face_ring(size: i32) -> gtk4::Box {
+    let ring = gtk4::Box::builder()
+        .width_request(size)
+        .height_request(size)
+        .valign(Align::Center)
+        .build();
+    ring.add_css_class("ui-face-ring");
+
+    let inner = gtk4::Fixed::builder()
+        .width_request(size)
+        .height_request(size)
+        .build();
+
+    // Drawn on a 22 px grid and scaled from it.
+    let unit = f64::from(size) / 22.0;
+    let px = |v: f64| (v * unit).round();
+    let eye_size = px(4.0) as i32;
+    let eye = || {
+        let e = gtk4::Box::builder()
+            .width_request(eye_size)
+            .height_request(eye_size)
+            .build();
+        e.add_css_class("ui-face-eye");
+        e
+    };
+    let mouth = gtk4::Box::builder()
+        .width_request(px(8.0) as i32)
+        .height_request(px(4.0) as i32)
+        .build();
+    mouth.add_css_class("ui-face-mouth");
+
+    inner.put(&eye(), px(6.0), px(7.0));
+    inner.put(&eye(), px(12.0), px(7.0));
+    inner.put(&mouth, px(7.0), px(12.0));
+    ring.append(&inner);
+    ring
+}
+
+/// The face indicator: a thin glass pill holding the ring and a line of
+/// words, inside a wrapper that carries the entrance.
+pub struct FacePill {
+    /// Carries the entrance (`ui-face-enter`, toggled with `set_class`), so
+    /// a state change on the pill cannot replay it.
+    pub wrap: gtk4::Box,
+    pub pill: gtk4::Box,
+    pub ring: gtk4::Box,
+    pub label: gtk4::Label,
+}
+
+pub fn face_pill(ring_size: i32) -> FacePill {
+    let pill = hbox(4);
+    pill.set_halign(Align::Center);
+    pill.set_valign(Align::Start);
+    card(&pill, Card::Thin);
+    pill.add_css_class("ui-face-pill");
+    let ring = face_ring(ring_size);
+    let label = text("", Text::Body, Tone::Fg);
+    label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    label.set_hexpand(true);
+    pill.append(&ring);
+    pill.append(&label);
+    let wrap = vbox(0);
+    wrap.set_halign(Align::Center);
+    wrap.set_valign(Align::Start);
+    wrap.append(&pill);
+    FacePill {
+        wrap,
+        pill,
+        ring,
+        label,
+    }
+}
+
+/// Put the ring (and the pill, if given) into `state`, one of
+/// [`FACE_STATES`]. Empty clears without setting anything, which is what a
+/// hidden indicator wants: a stale class on a hidden widget makes the next
+/// show start mid-animation in the previous state.
+///
+/// The pill carries the state as well as the ring because three states say
+/// something the ring cannot: `dark` and `ok` recolour the pill, `looking`
+/// breathes its border. The ring keeps the face's motion and the verdict
+/// keyframes, so the two never animate one property on nested nodes.
+pub fn set_face_state(ring: &gtk4::Box, pill: Option<&gtk4::Box>, state: &str) {
+    for old in FACE_STATES {
+        ring.remove_css_class(old);
+        if let Some(pill) = pill {
+            pill.remove_css_class(old);
+        }
+    }
+    if state.is_empty() {
+        return;
+    }
+    ring.add_css_class(state);
+    if let Some(pill) = pill {
+        pill.add_css_class(state);
+    }
+}

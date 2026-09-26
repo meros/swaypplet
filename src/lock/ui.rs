@@ -14,9 +14,9 @@ use gtk4::prelude::*;
 
 use crate::anim::animations_enabled;
 use crate::auth_field::{AuthField, Caption, Tone};
-use crate::avatar::avatar;
 use crate::icons;
 use crate::switch_user;
+use crate::ui;
 
 /// Data for one user chip. Sourced from [`crate::switch_user::list`] when
 /// available (avatar + presence), otherwise just a name.
@@ -48,10 +48,10 @@ impl UserChip {
 const CHIP_AVATAR_SIZE: i32 = 36;
 
 /// How long [`SurfaceSet::begin_handoff`] runs before the caller actually
-/// switches. Long enough to read as a deliberate handoff, short enough that
-/// the machine still feels instant — Apple's HIG puts that band at
-/// 100–500ms and M3's emphasized-exit durations sit right about here.
-pub const HANDOFF: Duration = Duration::from_millis(180);
+/// switches: the picker's exit (`--motion-exit`, the same token the chips
+/// and the card leave on in the stylesheet). Long enough to read as a
+/// deliberate handoff, short enough that the machine still feels instant.
+pub const HANDOFF: Duration = Duration::from_millis(crate::tokens::motion::EXIT.ms as u64);
 
 /// How long after the switch fires before [`SurfaceSet::end_handoff`] puts the
 /// card back. Both surfaces that play the handoff outlive it: the greeter is
@@ -207,8 +207,10 @@ impl SurfaceSet {
         on_submit: Rc<dyn Fn(String)>,
         monitor: Option<&gdk4::Monitor>,
     ) -> gtk4::Window {
+        // Transparent, like every other swaypplet window, on the lock and on
+        // the greeter alike: the compositor draws the wallpaper and puts the
+        // glass on it, so an opaque fill here would hide both.
         let window = gtk4::Window::new();
-        window.add_css_class("lock");
         let internal = monitor.is_some_and(crate::layer_shell::is_internal);
         let content = self.build_content(&window, on_submit, internal);
         window.set_child(Some(&content));
@@ -224,6 +226,7 @@ impl SurfaceSet {
         internal: bool,
     ) -> gtk4::Widget {
         let overlay = gtk4::Overlay::new();
+        ui::surface(&overlay);
 
         // The scrim, and nothing else full-screen. On both surfaces this
         // builds, the wallpaper under it and the glass behind the card are the
@@ -235,11 +238,19 @@ impl SurfaceSet {
         // which is why the wallpaper decode this used to do is gone rather than
         // made conditional.
         //
-        // The scrim's alpha is deliberately below the compositor's mask
-        // threshold (users/modules/theme/glass.nix, 0.48) so it reads as
-        // backdrop and only the card and the face pill stencil the glass.
-        let backdrop = gtk4::Box::builder().hexpand(true).vexpand(true).build();
-        backdrop.add_css_class("lock-scrim");
+        // The scrim's alpha is deliberately below the compositor's discard
+        // line (users/modules/theme/glass.nix: mask threshold 0.40 less 0.12,
+        // so 0.28) so it reads as backdrop and only the card and the face
+        // pill stencil the glass. A scrim between the discard and the seeding
+        // line would be drawn as material that seeds no bevel, and the whole
+        // screen would become a flat slab.
+        //
+        // It is also half of the card's key arithmetic: the card is painted
+        // pre-compensated for exactly this black (`ui::card_over_scrim`), so
+        // the two composite to the key the compositor drops. It dims the
+        // card's backdrop as well as the screen, which is why it is 0.20 and
+        // not the 0.45 it carried when the locker painted its own wallpaper.
+        let backdrop = ui::scrim();
         overlay.set_child(Some(&backdrop));
 
         // One pixel that changes on demand, so the surface has something to
@@ -257,41 +268,43 @@ impl SurfaceSet {
                 // Two alphas one 255th apart: different enough that GSK sees
                 // a changed node and damages it, far too close to be seen.
                 let a = f64::from(1 + phase.get() % 2) / 255.0;
-                cr.set_source_rgba(0.0, 0.0, 0.0, a);
+                let ink = ui::INVISIBLE_INK;
+                cr.set_source_rgba(ink.0, ink.1, ink.2, a);
                 let _ = cr.paint();
             });
         }
 
         // ── Centered column: clock, date, card ───────────────────────
-        let column = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .halign(gtk4::Align::Center)
-            .valign(gtk4::Align::Center)
-            .spacing(0)
-            .build();
+        let column = ui::vbox(0);
+        column.set_halign(gtk4::Align::Center);
+        column.set_valign(gtk4::Align::Center);
 
-        let clock = gtk4::Label::builder().label("").build();
-        clock.add_css_class("lock-clock");
-        let date = gtk4::Label::builder().label("").build();
+        // The clock and the date stand on bare wallpaper under the scrim,
+        // with no card behind them: their shadow is what gives the glyphs an
+        // edge on a bright image, which no text colour can.
+        let clock = ui::text("", ui::Text::Display, ui::Tone::Fg);
+        clock.set_xalign(0.5);
+        clock.add_css_class("ui-numeric");
+        ui::on_wallpaper(&clock);
+        let date = ui::text("", ui::Text::Title, ui::Tone::Fg);
+        date.set_xalign(0.5);
         date.add_css_class("lock-date");
+        ui::on_wallpaper(&date);
 
-        // spacing 0: every gap below is an explicit margin, because the gaps
-        // are deliberately unequal (6 under the field, 16 above the switch
-        // button) and a GtkBox has exactly one spacing to give.
-        let card = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(0)
-            .width_request(360)
-            .build();
-        // `.glass-card` is what makes the card glass: its `@surface` fill is
-        // above the compositor's mask threshold, so the material is stencilled
-        // to exactly this box. The card used to be hosted in a GlassPane that
-        // drew a blurred copy of the wallpaper behind it and ramped its sigma
-        // in; the compositor owns that now, and it has the material up before
-        // this surface's first frame rather than a few frames after it.
-        card.add_css_class("glass-card");
+        // spacing 0: every gap below is an explicit margin in 10-lock.css,
+        // because the gaps are deliberately unequal and a GtkBox has exactly
+        // one spacing to give.
+        let card = ui::vbox(0);
+        card.set_width_request(360);
+        // The card is what makes the glass: its composite over the scrim is
+        // the key, above the compositor's mask threshold, so the material is
+        // stencilled to exactly this box. The card used to be hosted in a
+        // GlassPane that drew a blurred copy of the wallpaper behind it and
+        // ramped its sigma in; the compositor owns that now, and it has the
+        // material up before this surface's first frame rather than a few
+        // frames after it.
+        ui::card_over_scrim(&card);
         card.add_css_class("lock-card");
-        card.set_margin_top(48);
 
         if self.crossfade.get() {
             window.add_css_class("lock-crossfade");
@@ -313,11 +326,8 @@ impl SurfaceSet {
         let users = self.users.borrow().clone();
         let mut user_chips: Vec<(String, gtk4::Button)> = Vec::new();
         let chip_row = greet_mode.then(|| {
-            let row = gtk4::Box::builder()
-                .orientation(gtk4::Orientation::Horizontal)
-                .spacing(10)
-                .halign(gtk4::Align::Center)
-                .build();
+            let row = ui::hbox(3);
+            row.set_halign(gtk4::Align::Center);
             row.add_css_class("lock-chip-row");
             let active = self.active_user.borrow().clone();
             user_chips = fill_chip_row(&row, &users, &active, &self.on_user_select);
@@ -403,47 +413,30 @@ impl SurfaceSet {
         // wording changes underneath a shape that does not. `.face-pill`
         // carries a fixed width in the stylesheet, shared with the elevate
         // cue, so "Looking for you" and "Didn't recognise you" occupy exactly
-        // the same box.
-        let face_pill = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(12)
-            .halign(gtk4::Align::Center)
-            .valign(gtk4::Align::Start)
-            .visible(false)
-            .build();
-        face_pill.add_css_class("face-pill");
-        // A face in a ring, drawn in CSS and shared with the elevate cue
-        // (`face_ring::build`): it glances while looking, stills when found,
-        // smiles on a match and frowns on a miss. A font glyph can do none
-        // of that.
-        let face_ring = crate::face_ring::build(22);
-        let face_label = gtk4::Label::builder()
-            .label("")
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .xalign(0.0)
-            .hexpand(true)
-            .build();
-        face_label.add_css_class("face-pill-label");
-        face_pill.append(&face_ring);
-        face_pill.append(&face_label);
-
-        // The entrance rides on a wrapper rather than on the pill. `animation`
-        // is a single property, so an entrance on .face-pill would be rewritten
-        // by every state class -- and every looking -> face edge would replay
-        // the arrival, dropping the pill mid-check. Two nodes, two independent
-        // animations.
+        // the same box. The face in the ring (`ui::face_ring`) glances while
+        // looking, stills when found, smiles on a match and frowns on a miss.
         //
-        // Frosted like everything else, and by the same route as the card: the
-        // pill's `@surface` fill is above the compositor's mask threshold, so
-        // the session-lock material is stencilled to it. It used to carry a
-        // client-side glass pane of its own for want of that.
-        let face_wrap = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .halign(gtk4::Align::Center)
-            .valign(gtk4::Align::Start)
-            .build();
-        face_wrap.set_margin_top(56);
-        face_wrap.append(&face_pill);
+        // The entrance rides on the wrapper rather than on the pill.
+        // `animation` is a single property, so an entrance on the pill would
+        // be rewritten by every state class -- and every looking -> face edge
+        // would replay the arrival, dropping the pill mid-check. Two nodes,
+        // two independent animations.
+        //
+        // Frosted like everything else, and by the same route as the card: it
+        // sits over the same scrim, so it paints the same pre-compensated key
+        // and the two layers land on the key the compositor drops. It used to
+        // paint the plain key, which over the scrim composited to 0.60 and
+        // came out as a dark tint laid over the material rather than as the
+        // material; before that it carried a client-side glass pane.
+        let ui::FacePill {
+            wrap: face_wrap,
+            pill: face_pill,
+            ring: face_ring,
+            label: face_label,
+        } = ui::face_pill(22);
+        ui::card_over_scrim(&face_pill);
+        face_pill.add_css_class("face-pill");
+        face_pill.set_visible(false);
 
         overlay.add_overlay(&column);
         overlay.add_overlay(&face_wrap);
@@ -630,11 +623,7 @@ impl SurfaceSet {
                 }
             }
             for (name, chip) in &s.user_chips {
-                if name == user {
-                    chip.add_css_class("active");
-                } else {
-                    chip.remove_css_class("active");
-                }
+                ui::set_selected(chip, name == user);
             }
             s.entry.grab_focus();
         }
@@ -786,7 +775,7 @@ impl SurfaceSet {
     /// Auth accepted — green flash while the unlock request goes out.
     pub fn flash_success(&self) {
         for s in self.inner.borrow().iter() {
-            s.card.add_css_class("lock-success");
+            ui::set_class(&s.card, "success", true);
             s.entry.set_sensitive(false);
         }
     }
@@ -811,21 +800,21 @@ impl SurfaceSet {
             let arriving = visible && !s.face_pill.is_visible();
             s.face_pill.set_visible(visible);
             if !visible {
-                s.face_wrap.remove_css_class("face-pill-enter");
+                ui::set_class(&s.face_wrap, "ui-face-enter", false);
                 continue;
             }
             if arriving {
                 // Re-added on the next main-loop turn so the style actually
                 // recomputes between removal and addition; adding it back in
                 // the same frame would not restart the animation.
-                s.face_wrap.remove_css_class("face-pill-enter");
+                ui::set_class(&s.face_wrap, "ui-face-enter", false);
                 let wrap = s.face_wrap.clone();
                 glib::idle_add_local_once(move || {
-                    wrap.add_css_class("face-pill-enter");
+                    ui::set_class(&wrap, "ui-face-enter", true);
                 });
             }
             s.face_label.set_label(label);
-            crate::face_ring::apply(&s.face_ring, Some(&s.face_pill), state);
+            ui::set_face_state(&s.face_ring, Some(&s.face_pill), state);
         }
     }
 
@@ -869,9 +858,6 @@ impl SurfaceSet {
     }
 }
 
-/// One pill-shaped user chip: round avatar (with presence dot) + name. The
-/// caller wires the click; `active` marks the current user (accent ring via
-/// the `.lock-user-chip.active` CSS descendant selector).
 /// Clear `row` and (re)build one greeter chip per user, wiring each to the
 /// shared select callback. Returns the (name, button) handles so the surface
 /// can toggle the active class on username changes. Shared by the initial
@@ -904,22 +890,16 @@ fn fill_chip_row(
     chips
 }
 
+/// One user chip: round avatar (with presence dot) and name. The caller
+/// wires the click; `active` selects the current user's chip.
 fn avatar_chip(user: &str, icon: Option<&str>, logged_in: bool, active: bool) -> gtk4::Button {
-    let content = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(10)
-        .valign(gtk4::Align::Center)
-        .build();
-    content.append(&avatar(user, icon, CHIP_AVATAR_SIZE, logged_in));
+    let content = ui::hbox(3);
+    content.set_valign(gtk4::Align::Center);
+    content.append(&ui::avatar(user, icon, CHIP_AVATAR_SIZE, logged_in));
+    content.append(&gtk4::Label::new(Some(user)));
 
-    let name = gtk4::Label::new(Some(user));
-    content.append(&name);
-
-    let chip = gtk4::Button::builder().child(&content).build();
-    chip.add_css_class("lock-user-chip");
-    if active {
-        chip.add_css_class("active");
-    }
+    let chip = ui::chip_with(&content);
+    ui::set_selected(&chip, active);
     chip
 }
 
@@ -934,8 +914,17 @@ fn avatar_chip(user: &str, icon: Option<&str>, logged_in: bool, active: bool) ->
 /// The switch itself never touches this session's lock: `to_greeter` locks our
 /// session (a no-op, it already is) and activates a *different* VT. Nothing
 /// here can unlock, and the compositor keeps the session hidden throughout.
+///
+/// It hangs below the card on bare wallpaper with nothing behind it, and it is
+/// the lock screen's whole switching affordance, so it carries the same shadow
+/// as the date: unobtrusive is a matter of weight (a flat button), and being
+/// unreadable over a bright image is not one colour can fix.
 fn build_switch_button(set: &SurfaceSet) -> gtk4::Button {
-    let btn = gtk4::Button::with_label(&format!("{}  Switch user", icons::SWITCH_USER));
+    let btn = ui::button(
+        &format!("{}  Switch user", icons::SWITCH_USER),
+        ui::Kind::Flat,
+    );
+    ui::on_wallpaper(&btn);
     btn.add_css_class("lock-switch-user");
     btn.set_halign(gtk4::Align::Center);
     let set = set.clone();

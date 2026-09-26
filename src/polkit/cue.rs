@@ -46,7 +46,7 @@ static CUE_CONFIG: LayerShellConfig = LayerShellConfig {
     // Left and right anchored too, so the surface spans the output and its
     // geometry never depends on the pill inside it. A surface that resized
     // with its content renegotiated size mid-animation, and clipped
-    // `.face-pill-dark`'s glow -- 22px of blur at 3px spread, which reaches
+    // `.ui-face-pill.dark`'s glow -- 22px of blur at 3px spread, which reaches
     // well past the pill's own box.
     anchors: &[(Edge::Top, true), (Edge::Left, true), (Edge::Right, true)],
     margins: &[],
@@ -58,7 +58,7 @@ static CUE_CONFIG: LayerShellConfig = LayerShellConfig {
 pub struct Cue {
     window: gtk4::Window,
     /// Carries the entrance animation, so a state change on the pill cannot
-    /// replay it. See .face-pill-enter in the stylesheet.
+    /// replay it. See `.ui-face-enter` in 00-components.css.
     strip: gtk4::Box,
     pill: gtk4::Box,
     ring: gtk4::Box,
@@ -68,36 +68,29 @@ pub struct Cue {
 impl Cue {
     pub fn new(app: &gtk4::Application) -> Self {
         let window = create_layer_window(app, &CUE_CONFIG);
-        window.add_css_class("face-cue");
         window.set_visible(false);
         // Re-applied on every map: the region lives on the GdkSurface, which
         // is created at map and re-laid-out on output changes.
         window.connect_map(clear_input_region);
 
-        let pill = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(10)
-            .halign(gtk4::Align::Center)
-            .valign(gtk4::Align::Start)
-            .build();
+        // The same indicator the lock screen pins under the camera, built by
+        // the same component, so the two cannot drift: a face that means
+        // "hold still" here and "searching" there is worse than none.
+        let crate::ui::FacePill {
+            wrap: strip,
+            pill,
+            ring,
+            label,
+        } = crate::ui::face_pill(18);
         pill.add_css_class("face-pill");
-        pill.set_margin_top(56);
 
-        // A fixed strip to hold it. Height is the pill's offset plus its own
-        // height plus room for the glow and the 18px the entrance travels;
-        // sizing to the content instead would clip both and make the surface
-        // resize on every animation frame.
-        let strip = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .height_request(180)
-            .build();
-        strip.append(&pill);
-
-        let ring = crate::face_ring::build(18);
-        let label = gtk4::Label::builder().label("").build();
-        label.add_css_class("face-pill-label");
-        pill.append(&ring);
-        pill.append(&label);
+        // The wrapper is a fixed strip. Height is the pill's offset plus its
+        // own height plus room for the glow and the 18px the entrance
+        // travels; sizing to the content instead would clip both and make the
+        // surface resize on every animation frame.
+        strip.set_halign(gtk4::Align::Fill);
+        strip.set_height_request(180);
+        crate::ui::surface(&strip);
         window.set_child(Some(&strip));
 
         Cue {
@@ -126,7 +119,7 @@ impl Cue {
             self.window.set_visible(false);
             return;
         }
-        crate::face_ring::apply(&self.ring, Some(&self.pill), state);
+        crate::ui::set_face_state(&self.ring, Some(&self.pill), state);
         self.label.set_label(text);
         if self.window.is_visible() {
             // Already up: this is a state change, not an arrival. Touching the
@@ -145,11 +138,11 @@ impl Cue {
         // so starting the entrance from here would spend its first frames
         // racing surface allocation -- which is visible, and always as a
         // stutter at exactly the moment the cue is trying to catch the eye.
-        self.strip.remove_css_class("face-pill-enter");
+        crate::ui::set_class(&self.strip, "ui-face-enter", false);
         self.window.set_visible(true);
         let strip = self.strip.clone();
         self.window.add_tick_callback(move |window, _| {
-            strip.add_css_class("face-pill-enter");
+            crate::ui::set_class(&strip, "ui-face-enter", true);
             // Re-applied here as well as below: the region is a property of
             // the GdkSurface, which does not exist until the window maps, and
             // the strip spans the whole width of the output. An unset region
