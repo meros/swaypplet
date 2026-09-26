@@ -411,8 +411,35 @@ Only these, because no semantic token gives their value:
 | `--track-height` | 6 px | slider and progress tracks |
 | `--knob` | dark `--neutral-12`, light white | the slider and switch knob |
 | `--on-accent-muted` | `--on-accent` at 80 % | the second line on an accent fill, a tile's state under its name |
-| `--fg-on-wallpaper` | `--on-status` (white) | text standing on bare wallpaper under the lock's black scrim (the clock, the date): light in both modes, because that ground only ever darkens |
+| `--fg-on-wallpaper` | `--on-status` (white) or a dark ink (`#1d2021`), from the wallpaper | text standing on bare wallpaper (the lock's clock, date and switch-user button, the switcher's caption); see below |
+| `--halo-on-wallpaper` | black or white, 0.20–0.40 per layer | the halo under that text, the opposite of the ink |
 | `--surface-key-over-scrim` | the key, pre-compensated | a glass card over the 0.20 scrim (the lock, the greeter), so the pair composites to exactly the key |
+
+**Text on the wallpaper.** Text with no card behind it stands on whatever
+the wallpaper is, and the mode does not change the wallpaper, so its tone
+follows the image and not the mode. The panel's wallpaper sampler measures
+the image's relative luminance on a 4 × 4 grid, once per wallpaper and off
+the main thread, and writes it into the same one-line cache as the tint's
+hues. Every process reads it; the lock screen never decodes the image. The
+middle 2 × 2 cells, where all such text sits, are pooled into a mean and a
+deviation, and `src/tokens/backdrop.rs` picks the ink and the halo:
+
+- light ink on a black halo, or dark ink on a white one: whichever reaches
+  Lc 75 at the glyph edge with the lighter halo, light first at a tie (the
+  shipped look);
+- the halo is four tight layers at 0.20, 0.30, 0.40 or 0.50 alpha each (a
+  core of 0.59 to 0.94), denser over a busy image;
+- the ground the contrast is measured on is the region's mean minus and
+  plus one deviation, with and without the lock's 0.20 scrim, blended with
+  the half of the halo's core that reaches a glyph edge (the shadows are
+  blurred, so the edge sits on the halo's shoulder; 0.5 is calibrated on
+  renders, where the full core called white on a white page readable).
+
+Every region from black to white is tested: up to 10 % deviation the clock
+reaches Lc 75; over a bright region busier than that, no halo gets there
+and the clock is held to Lc 68 (it reaches 69–75). The smaller text's Lc 60
+holds everywhere. With no sample yet the answer is the shipped look: white
+ink on a black halo at 0.20.
 
 ## 4. Glass and the modes
 

@@ -16,6 +16,7 @@
 //! | `tint.rs` | [`Tint`], the wallpaper's hues as an input (§2.2) |
 //! | `scales.rs` | [`scales`]: neutral and accent, 12 steps each (§3.1) |
 //! | `semantic.rs` | [`status`], [`categorical`], [`levels`] (§3.2, §3.3) |
+//! | `backdrop.rs` | [`Backdrop`], [`on_wallpaper`]: ink and halo for text on bare wallpaper |
 //! | `material.rs` | [`material`] per mode and `glass_body` (§4) |
 //! | `apca.rs` | [`apca`], and the §5 contrast tests |
 //! | `fixed.rs` | space, type, radius, durations, the fill key, component sizes |
@@ -23,6 +24,7 @@
 //! | `emit.rs` | [`css`]: `tokens.css` |
 
 mod apca;
+mod backdrop;
 mod color;
 mod emit;
 mod fixed;
@@ -34,6 +36,7 @@ mod semantic;
 pub mod tint;
 
 pub use apca::apca;
+pub use backdrop::{Backdrop, on_wallpaper};
 pub use color::{Oklch, Rgb};
 pub use emit::css;
 pub use fixed::{COMPONENT, DURATION, RADIUS, SPACE, SURFACE_KEY, TYPE, space};

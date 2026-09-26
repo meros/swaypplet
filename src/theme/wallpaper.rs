@@ -25,12 +25,12 @@ use material_colors::color::Argb;
 use material_colors::quantize::{Quantizer, QuantizerCelebi};
 use material_colors::score::Score;
 
-use crate::settings::store::{self, Tint};
-use crate::tokens::{Oklch, Palette, Rgb, tint};
+use crate::settings::store;
+use crate::tokens::{Backdrop, Oklch, Palette, Rgb, tint};
 
 /// Bump when the sampling changes, so a cache written by the old rule is a
 /// miss rather than a stale colour that looks right.
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 
 /// The wallpaper is decoded down to this before it is quantized. 128²
 /// pixels is 16 k samples, which is more than Celebi needs to find the
@@ -65,6 +65,80 @@ pub struct Sample {
     pub secondary: Option<Rgb>,
 }
 
+/// The side of the luminance grid: the image as 4 × 4 cells.
+pub const GRID: usize = 4;
+
+/// Where text stands on the wallpaper with no card behind it: the middle
+/// two rows and columns. The lock's clock, date and switch-user button are
+/// one centred column (`lock::ui`), and the switcher's caption sits under
+/// its middle workspace (`jump`); a single region keeps one tone for all of
+/// them, and pooling the four cells counts the brightest part of it.
+pub const TEXT_ROWS: std::ops::RangeInclusive<usize> = 1..=2;
+pub const TEXT_COLS: std::ops::RangeInclusive<usize> = 1..=2;
+
+/// The image's relative luminance per cell of a [`GRID`] × [`GRID`] grid:
+/// each cell's mean and standard deviation, in whole percent, row major.
+/// What the tokens need to pick an ink for text on the wallpaper
+/// (`tokens::on_wallpaper`) without decoding the image again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Grid {
+    pub mean: [u8; GRID * GRID],
+    pub spread: [u8; GRID * GRID],
+}
+
+impl Grid {
+    /// The cells in `rows` × `cols` pooled into one backdrop: the mean of
+    /// the means, and the deviation over the whole region (within each cell
+    /// and between them), so a region half white and half black is busy
+    /// even when each cell is flat.
+    pub fn region(
+        &self,
+        rows: std::ops::RangeInclusive<usize>,
+        cols: std::ops::RangeInclusive<usize>,
+    ) -> Backdrop {
+        let (mut m, mut sq, mut n) = (0.0, 0.0, 0.0);
+        for r in rows {
+            for c in cols.clone() {
+                let i = r * GRID + c;
+                let (mean, sd) = (
+                    f64::from(self.mean[i]) / 100.0,
+                    f64::from(self.spread[i]) / 100.0,
+                );
+                m += mean;
+                sq += sd * sd + mean * mean;
+                n += 1.0;
+            }
+        }
+        if n == 0.0 {
+            return Backdrop {
+                luminance: 0,
+                spread: 0,
+            };
+        }
+        let (m, sq) = (m / n, sq / n);
+        let sd = (sq - m * m).max(0.0).sqrt();
+        let pct = |v: f64| (v * 100.0).round().clamp(0.0, 100.0) as u8;
+        Backdrop {
+            luminance: pct(m),
+            spread: pct(sd),
+        }
+    }
+
+    /// The backdrop wallpaper text stands on.
+    pub fn text_backdrop(&self) -> Backdrop {
+        self.region(TEXT_ROWS, TEXT_COLS)
+    }
+}
+
+/// Everything one sample of the wallpaper leaves in the cache.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Cached {
+    /// The colours for the tint; `None` for an image with no usable colour.
+    pub colours: Option<Sample>,
+    /// The luminance grid, for text on the wallpaper.
+    pub grid: Grid,
+}
+
 impl Sample {
     /// The hues, in whole OKLCH degrees.
     fn palette(self) -> Palette {
@@ -89,12 +163,13 @@ fn no_colour() -> Argb {
 /// image, then Material's `Score` for the primary and the secondary (it drops
 /// the near-greys, the colours with too little of the image behind them, and
 /// the dark yellow-greens its `dislike` module calls out, and hands back
-/// hues at least 15° apart), and the population for the ground. `None` for
-/// an image with nothing usable in it.
+/// hues at least 15° apart), and the population for the ground; and the
+/// luminance grid from the same decode. `None` only when the image cannot
+/// be read; an image with no usable colour still has a grid.
 ///
 /// Blocking, and it decodes an image. Call it off the main thread.
-pub fn sample_image(path: &Path) -> Option<Sample> {
-    let pixels = sample(path)?;
+pub fn sample_image(path: &Path) -> Option<Cached> {
+    let (pixels, grid) = sample(path)?;
     let quantized = QuantizerCelebi::quantize(&pixels, MAX_COLORS);
     let ranked = Score::score(
         &quantized.color_to_count,
@@ -119,7 +194,10 @@ pub fn sample_image(path: &Path) -> Option<Sample> {
         .iter()
         .map(|(c, n)| (rgb(c), *n))
         .collect();
-    pick(&counts, &ranked)
+    Some(Cached {
+        colours: pick(&counts, &ranked),
+        grid,
+    })
 }
 
 /// The share of the image within [`WINDOW`] of `hue`, greys left out of the
@@ -165,8 +243,8 @@ fn pick(counts: &[(Rgb, u32)], ranked: &[Rgb]) -> Option<Sample> {
     })
 }
 
-/// The image, decoded small, as opaque pixels.
-fn sample(path: &Path) -> Option<Vec<Argb>> {
+/// The image, decoded small, as opaque pixels, and its luminance grid.
+fn sample(path: &Path) -> Option<(Vec<Argb>, Grid)> {
     let pixbuf = gtk4::gdk_pixbuf::Pixbuf::from_file_at_scale(path, SAMPLE, SAMPLE, true)
         .map_err(|e| log::warn!("wallpaper: cannot read {}: {e}", path.display()))
         .ok()?;
@@ -175,6 +253,7 @@ fn sample(path: &Path) -> Option<Vec<Argb>> {
     let (w, h) = (pixbuf.width() as usize, pixbuf.height() as usize);
     let bytes = pixbuf.read_pixel_bytes();
     let mut pixels = Vec::with_capacity(w * h);
+    let mut cells = Cells::new(w, h);
     for y in 0..h {
         let row = y * stride;
         for x in 0..w {
@@ -186,9 +265,67 @@ fn sample(path: &Path) -> Option<Vec<Argb>> {
                 continue;
             }
             pixels.push(Argb::new(255, r, g, b));
+            cells.add(x, y, [r, g, b]);
         }
     }
-    Some(pixels)
+    Some((pixels, cells.grid()))
+}
+
+/// The luminance grid being accumulated over a decode.
+struct Cells {
+    w: usize,
+    h: usize,
+    sum: [f64; GRID * GRID],
+    sq: [f64; GRID * GRID],
+    n: [u32; GRID * GRID],
+    /// sRGB byte to linear light, once.
+    linear: [f64; 256],
+}
+
+impl Cells {
+    fn new(w: usize, h: usize) -> Cells {
+        let mut linear = [0.0; 256];
+        for (i, v) in linear.iter_mut().enumerate() {
+            let c = i as f64 / 255.0;
+            *v = if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            };
+        }
+        Cells {
+            w: w.max(1),
+            h: h.max(1),
+            sum: [0.0; GRID * GRID],
+            sq: [0.0; GRID * GRID],
+            n: [0; GRID * GRID],
+            linear,
+        }
+    }
+
+    fn add(&mut self, x: usize, y: usize, [r, g, b]: [u8; 3]) {
+        let l = &self.linear;
+        let lum = 0.2126 * l[r as usize] + 0.7152 * l[g as usize] + 0.0722 * l[b as usize];
+        let cell = (y * GRID / self.h).min(GRID - 1) * GRID + (x * GRID / self.w).min(GRID - 1);
+        self.sum[cell] += lum;
+        self.sq[cell] += lum * lum;
+        self.n[cell] += 1;
+    }
+
+    fn grid(&self) -> Grid {
+        let mut g = Grid::default();
+        for i in 0..GRID * GRID {
+            if self.n[i] == 0 {
+                continue;
+            }
+            let n = f64::from(self.n[i]);
+            let m = self.sum[i] / n;
+            let sd = (self.sq[i] / n - m * m).max(0.0).sqrt();
+            g.mean[i] = (m * 100.0).round().clamp(0.0, 100.0) as u8;
+            g.spread[i] = (sd * 100.0).round().clamp(0.0, 100.0) as u8;
+        }
+        g
+    }
 }
 
 /// The hue the tokens take from `source`, in whole OKLCH degrees.
@@ -237,13 +374,31 @@ fn key(image: &Path) -> String {
 }
 
 /// The cache's one line.
-fn line(key: &str, s: Sample) -> String {
+fn line(key: &str, c: &Cached) -> String {
+    let word = |c: Option<Rgb>| c.map_or_else(|| "none".to_string(), |c| c.css());
+    let hex = |v: &[u8]| v.iter().map(|b| format!("{b:02x}")).collect::<String>();
     format!(
-        "swaypplet-wallpaper v{VERSION} key={key} primary={} ground={} secondary={}\n",
-        s.primary.css(),
-        s.ground.css(),
-        s.secondary.map_or_else(|| "none".to_string(), |c| c.css()),
+        "swaypplet-wallpaper v{VERSION} key={key} primary={} ground={} secondary={} luma={} spread={}\n",
+        word(c.colours.map(|s| s.primary)),
+        word(c.colours.map(|s| s.ground)),
+        word(c.colours.and_then(|s| s.secondary)),
+        hex(&c.grid.mean),
+        hex(&c.grid.spread),
     )
+}
+
+/// `GRID²` percentages out of two hex digits each.
+fn cells(word: &str) -> Option<[u8; GRID * GRID]> {
+    if word.len() != GRID * GRID * 2 {
+        return None;
+    }
+    let mut out = [0; GRID * GRID];
+    for (i, v) in out.iter_mut().enumerate() {
+        *v = u8::from_str_radix(word.get(i * 2..i * 2 + 2)?, 16)
+            .ok()
+            .filter(|v| *v <= 100)?;
+    }
+    Some(out)
 }
 
 /// A `#rrggbb` word.
@@ -255,37 +410,49 @@ fn colour(word: &str) -> Option<Rgb> {
     Some(Rgb::hex(v))
 }
 
-/// The key and the colours out of a cache line this build wrote.
-fn parse(text: &str) -> Option<(String, Sample)> {
+/// The key and the sample out of a cache line this build wrote.
+fn parse(text: &str) -> Option<(String, Cached)> {
     let mut words = text.split_whitespace();
     (words.next()? == "swaypplet-wallpaper").then_some(())?;
     (words.next()? == format!("v{VERSION}")).then_some(())?;
     let key = words.next()?.strip_prefix("key=")?.to_string();
-    let primary = colour(words.next()?.strip_prefix("primary=")?)?;
-    let ground = colour(words.next()?.strip_prefix("ground=")?)?;
-    let secondary = match words.next()?.strip_prefix("secondary=")? {
-        "none" => None,
-        word => Some(colour(word)?),
+    let optional = |word: &str| match word {
+        "none" => Some(None),
+        word => colour(word).map(Some),
     };
-    Some((
-        key,
-        Sample {
+    let primary = optional(words.next()?.strip_prefix("primary=")?)?;
+    let ground = optional(words.next()?.strip_prefix("ground=")?)?;
+    let secondary = optional(words.next()?.strip_prefix("secondary=")?)?;
+    let mean = cells(words.next()?.strip_prefix("luma=")?)?;
+    let spread = cells(words.next()?.strip_prefix("spread=")?)?;
+    let colours = match (primary, ground) {
+        (Some(primary), Some(ground)) => Some(Sample {
             primary,
             ground,
             secondary,
+        }),
+        _ => None,
+    };
+    Some((
+        key,
+        Cached {
+            colours,
+            grid: Grid { mean, spread },
         },
     ))
 }
 
-fn read_cache() -> Option<(String, Sample)> {
+fn read_cache() -> Option<(String, Cached)> {
     parse(&std::fs::read_to_string(cache_path()?).ok()?)
 }
 
-/// The wallpaper's hues, as the last sample left them. A bare file read: it
-/// runs in every process that builds the stylesheet, on the main thread,
-/// the lock screen among them, so it asks neither sway nor the image.
-pub fn palette() -> Option<Palette> {
-    read_cache().map(|(_, s)| s.palette())
+/// What the tokens take from the wallpaper, as the last sample left it: its
+/// hues (when it has usable ones) and the backdrop text on it stands on.
+/// One bare file read: it runs in every process that builds the stylesheet,
+/// on the main thread, the lock screen among them, so it asks neither sway
+/// nor the image.
+pub fn read() -> Option<(Option<Palette>, Backdrop)> {
+    read_cache().map(|(_, c)| (c.colours.map(Sample::palette), c.grid.text_backdrop()))
 }
 
 /// Write the cache next to itself and rename over it, so a reader in another
@@ -337,14 +504,12 @@ fn wallpaper_path(picked: Option<PathBuf>) -> Option<PathBuf> {
 
 /// Sample the current wallpaper on a worker thread if the cache does not
 /// already hold it, and reload this process's stylesheet when it moved.
-/// With the tint off nothing is sampled; the cache stays for when it comes
-/// back on.
+/// Sampled whatever the tint: text on the wallpaper needs the luminance grid
+/// with the tint off as well. Once per wallpaper; the key keeps a restart
+/// from sampling again.
 fn refresh() {
     // Both reads happen here, on the thread the settings live on. The worker
     // gets plain data and can reach nothing that would answer it wrongly.
-    if store::current().look().tint == Tint::Off {
-        return;
-    }
     let picked = picked_wallpaper();
     crate::spawn::spawn_work(
         move || {
@@ -357,11 +522,15 @@ fn refresh() {
                 return false;
             }
             let Some(sample) = sample_image(&image) else {
-                log::info!("wallpaper: no usable colour in {}", image.display());
                 return false;
             };
-            log::info!("wallpaper: {} -> {:?}", image.display(), sample.palette());
-            write_cache(&line(&key, sample))
+            log::info!(
+                "wallpaper: {} -> {:?}, text on {:?}",
+                image.display(),
+                sample.colours.map(Sample::palette),
+                sample.grid.text_backdrop()
+            );
+            write_cache(&line(&key, &sample))
         },
         |changed| {
             if changed {
@@ -384,7 +553,8 @@ pub fn follow_settings() {
         let _ = std::fs::remove_file(dir.join("palette.css"));
     }
     refresh();
-    let signature = || (picked_wallpaper(), store::current().look().tint);
+    // The wallpaper only: the sample is the same at every tint setting.
+    let signature = picked_wallpaper;
     let last = std::rc::Rc::new(std::cell::RefCell::new(signature()));
     store::observe(move || {
         let now = signature();
@@ -402,21 +572,79 @@ mod tests {
 
     #[test]
     fn the_cache_line_reads_back() {
-        for secondary in [None, Some(Rgb::hex(0xd65d0e))] {
-            let sample = Sample {
-                primary: Rgb::hex(0x3a6ea5),
-                ground: Rgb::hex(0x203040),
-                secondary,
-            };
-            let text = line(&key(Path::new("/tmp/a.png")), sample);
+        let mut grid = Grid::default();
+        for i in 0..GRID * GRID {
+            grid.mean[i] = (i * 6) as u8;
+            grid.spread[i] = (i * 2) as u8;
+        }
+        let with = |secondary| Sample {
+            primary: Rgb::hex(0x3a6ea5),
+            ground: Rgb::hex(0x203040),
+            secondary,
+        };
+        for colours in [None, Some(with(None)), Some(with(Some(Rgb::hex(0xd65d0e))))] {
+            let cached = Cached { colours, grid };
+            let text = line(&key(Path::new("/tmp/a.png")), &cached);
             assert_eq!(text.lines().count(), 1);
             let (k, back) = parse(&text).unwrap();
             assert_eq!(k, key(Path::new("/tmp/a.png")));
-            assert_eq!(back, sample);
+            assert_eq!(back, cached);
             // Another build's file is a miss, not a colour.
-            assert!(parse(&text.replace(&format!("v{VERSION}"), "v2")).is_none());
+            assert!(parse(&text.replace(&format!("v{VERSION}"), "v3")).is_none());
         }
-        assert!(parse("swaypplet-wallpaper v2 key=0 source=#3a6ea5").is_none());
+        assert!(parse("swaypplet-wallpaper v3 key=0 primary=#3a6ea5 ground=#3a6ea5 secondary=none").is_none());
+    }
+
+    /// Luminance per cell, on an image made up of known greys.
+    #[test]
+    fn the_grid_measures_each_cell_and_pools_a_region() {
+        // Left half white, right half black, 64 × 64.
+        let mut cells = Cells::new(64, 64);
+        for y in 0..64 {
+            for x in 0..64 {
+                let v = if x < 32 { 255 } else { 0 };
+                cells.add(x, y, [v, v, v]);
+            }
+        }
+        let g = cells.grid();
+        for r in 0..GRID {
+            assert_eq!(g.mean[r * GRID], 100);
+            assert_eq!(g.mean[r * GRID + 3], 0);
+            assert_eq!(g.spread[r * GRID], 0);
+        }
+        // The middle 2 × 2 straddles the edge: half bright, flat cells, and
+        // busy as a region.
+        let b = g.text_backdrop();
+        assert_eq!(b.luminance, 50);
+        assert_eq!(b.spread, 50);
+
+        // Mid grey (sRGB 128) is about 22 % relative luminance.
+        let mut cells = Cells::new(8, 8);
+        for y in 0..8 {
+            for x in 0..8 {
+                cells.add(x, y, [128, 128, 128]);
+            }
+        }
+        let b = cells.grid().text_backdrop();
+        assert_eq!((b.luminance, b.spread), (22, 0));
+    }
+
+    /// The ink follows the region: dark on a white page, light at night.
+    #[test]
+    fn a_bright_wallpaper_gets_dark_ink() {
+        let flat = |v: u8| {
+            let mut cells = Cells::new(16, 16);
+            for y in 0..16 {
+                for x in 0..16 {
+                    cells.add(x, y, [v, v, v]);
+                }
+            }
+            cells.grid().text_backdrop()
+        };
+        let page = crate::tokens::on_wallpaper(Some(flat(250)));
+        let night = crate::tokens::on_wallpaper(Some(flat(10)));
+        assert_ne!(page.ink, night.ink);
+        assert_eq!(night.ink, crate::tokens::ON_STATUS);
     }
 
     fn at(hue: f64) -> Rgb {
@@ -491,8 +719,31 @@ mod tests {
         let image =
             PathBuf::from(std::env::var_os("SWPP_WALLPAPER_IMAGE").expect("SWPP_WALLPAPER_IMAGE"));
         match sample_image(&image) {
-            Some(s) => println!("{s:?} {:?} from {}", s.palette(), image.display()),
-            None => println!("no usable colour in {}", image.display()),
+            Some(s) => println!(
+                "{s:?} {:?} text on {:?} from {}",
+                s.colours.map(Sample::palette),
+                s.grid.text_backdrop(),
+                image.display()
+            ),
+            None => println!("cannot read {}", image.display()),
         }
+    }
+
+    /// The harness's way to give a lock preview a measured wallpaper: sample
+    /// the image and write the cache line into `$XDG_CACHE_HOME`, as the
+    /// panel would.
+    ///
+    /// ```text
+    /// XDG_CACHE_HOME=/tmp/x SWPP_WALLPAPER_IMAGE=~/Pictures/wallpapers/x.jpg \
+    ///   cargo test -- --ignored write_wallpaper_cache
+    /// ```
+    #[test]
+    #[ignore = "harness tool: writes the cache for SWPP_WALLPAPER_IMAGE"]
+    fn write_wallpaper_cache() {
+        let image =
+            PathBuf::from(std::env::var_os("SWPP_WALLPAPER_IMAGE").expect("SWPP_WALLPAPER_IMAGE"));
+        let sample = sample_image(&image).expect("a readable image");
+        assert!(write_cache(&line(&key(&image), &sample)));
+        println!("text on {:?}", sample.grid.text_backdrop());
     }
 }

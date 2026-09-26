@@ -169,8 +169,9 @@ pub mod glyph {
 pub mod on_wallpaper {
     use gtk4::prelude::*;
 
-    /// Text that stands on bare wallpaper, with no card behind it: gives the
-    /// glyphs an edge with a shadow of the scrim.
+    /// Text that stands on bare wallpaper, with no card behind it. Its ink
+    /// and the halo that gives the glyphs an edge follow the wallpaper
+    /// behind it (`tokens::on_wallpaper`): dark ink on a bright image.
     pub fn adopt(w: &impl IsA<gtk4::Widget>) {
         w.add_css_class("ui-on-wallpaper");
     }
