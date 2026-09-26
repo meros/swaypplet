@@ -489,15 +489,13 @@ impl System {
             .join("; ")
     }
 
-    /// Push `material` at the running compositor. Fire and forget: sway
-    /// answers `CMD_SUCCESS` even when a criteria failed to parse
-    /// (`cmd_layer_effects` ignores a NULL result), so there is no reply worth
-    /// waiting on.
+    /// Push `material` at the running compositor, stopping a fade in
+    /// progress. Sway answers `CMD_SUCCESS` even when a criteria failed to
+    /// parse (`cmd_layer_effects` ignores a NULL result), so there is no reply
+    /// worth reading; the push only waits for the one before it, so two can
+    /// never land in the wrong order (`glass_fade`).
     pub fn apply(&self, tuning: &Tuning) {
-        let cmd = self.command(tuning);
-        if !cmd.is_empty() {
-            crate::sway::ipc::run_command(&cmd);
-        }
+        super::glass_fade::direct(self, tuning);
     }
 }
 
@@ -581,7 +579,9 @@ pub fn apply_saved_for(inputs: crate::tokens::Inputs) {
         && inputs.contrast == crate::tokens::Contrast::Standard
         && !inputs.tint.casts_neutral();
     if saved.is_none() && default_look {
-        // The sway config already carries exactly this.
+        // The sway config already carries exactly this: nothing to send, but
+        // a later mode switch fades from it.
+        super::glass_fade::assume(for_mode(Tuning::system(&system), inputs));
         return;
     }
     if saved.is_some() {
@@ -591,7 +591,9 @@ pub fn apply_saved_for(inputs: crate::tokens::Inputs) {
         );
     }
     let tuning = saved.unwrap_or_else(|| Tuning::system(&system));
-    system.apply(&for_mode(tuning, inputs));
+    // Over `page`, with the stylesheet (`theme::fade`); at once when this is
+    // the first push of the process.
+    super::glass_fade::send(&system, for_mode(tuning, inputs));
 }
 
 /// The material as the theme's mode tunes it (docs/design-system.md §4).

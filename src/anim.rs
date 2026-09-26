@@ -421,6 +421,95 @@ pub fn glass_channel(from: f64, to: f64, t: f64) -> f64 {
     from + (to - from) * standard(t)
 }
 
+// ── Frames: a run of frames with no surface of its own ──────────────────
+
+struct FramesInner {
+    tick: RefCell<Option<gtk4::TickCallbackId>>,
+    guard: RefCell<Option<glib::SourceId>>,
+    done: RefCell<Option<Box<dyn FnOnce()>>>,
+}
+
+/// Linear progress 0..1 over `ms`, one call per frame, for a change that has
+/// no surface of its own to animate: the theme's colours fading, the glass
+/// material following them. It rides the frame clock of a window already on
+/// screen, so it ticks at the display's rate and only while something is
+/// drawn; with no window mapped there is nothing to fade and
+/// [`Frames::start`] answers `None`, so the caller jumps to the end.
+///
+/// `done` runs once at the end, on the frame that reaches 1 (`frame` is not
+/// called with 1 itself), or `ms` + 250 ms after the start if that window
+/// stopped drawing on the way: a fade never outlives its duration by more
+/// than that. [`Frames::cancel`] stops it without calling either.
+#[derive(Clone)]
+pub struct Frames(Rc<FramesInner>);
+
+impl Frames {
+    pub fn start(
+        ms: f64,
+        frame: impl Fn(f64) + 'static,
+        done: impl FnOnce() + 'static,
+    ) -> Option<Frames> {
+        let widget = gtk4::Window::list_toplevels()
+            .into_iter()
+            .find(|w| w.is_mapped())?;
+        let this = Frames(Rc::new(FramesInner {
+            tick: RefCell::new(None),
+            guard: RefCell::new(None),
+            done: RefCell::new(Some(Box::new(done))),
+        }));
+        let span_us = (ms * 1000.0).max(1.0);
+        let start = Cell::new(None::<i64>);
+        let inner = this.0.clone();
+        let id = widget.add_tick_callback(move |_, clock| {
+            let now = clock.frame_time();
+            let t0 = start.get().unwrap_or_else(|| {
+                start.set(Some(now));
+                now
+            });
+            let t = (now - t0) as f64 / span_us;
+            if t < 1.0 {
+                frame(t);
+                return glib::ControlFlow::Continue;
+            }
+            // Returning Break removes this callback; forget the id so a
+            // cancel from inside `done` does not remove it a second time.
+            drop(inner.tick.borrow_mut().take());
+            Frames(inner.clone()).end(true);
+            glib::ControlFlow::Break
+        });
+        *this.0.tick.borrow_mut() = Some(id);
+        let inner = this.0.clone();
+        let guard = glib::timeout_add_local_once(
+            std::time::Duration::from_millis(ms.round() as u64 + 250),
+            move || {
+                // Already fired: its id is spent, so only forget it.
+                inner.guard.borrow_mut().take();
+                Frames(inner).end(true);
+            },
+        );
+        *this.0.guard.borrow_mut() = Some(guard);
+        Some(this)
+    }
+
+    /// Stop without calling `done`. Idempotent.
+    pub fn cancel(&self) {
+        self.end(false);
+    }
+
+    fn end(&self, call_done: bool) {
+        if let Some(id) = self.0.tick.borrow_mut().take() {
+            id.remove();
+        }
+        if let Some(id) = self.0.guard.borrow_mut().take() {
+            id.remove();
+        }
+        let done = self.0.done.borrow_mut().take();
+        if call_done && let Some(done) = done {
+            done();
+        }
+    }
+}
+
 // ── Reveal: the shared show/hide transition ────────────────────────────
 
 struct RevealInner {

@@ -150,6 +150,16 @@ Same for the greeter, which is a plain toplevel and always uses it.
 So the rule holds on both paths: **one curve, one duration, whoever is
 driving.**
 
+## The theme itself moves
+
+A change of mode, tint or wallpaper used to be the one whole-screen change
+with no motion at all: every colour and the glass replaced in one frame. It
+now fades over `page` (500 ms, standard), the colours through OKLCH and the
+glass material on the compositor, both on the same curve. How, and what each
+frame costs: docs/design-system.md §2.3. The rule it keeps from this file: a
+fade that cannot hold its frames gives up frames, never input. A step slower
+than 25 ms is followed by a frame with no step.
+
 ## Keeping it
 
 Nothing in GTK4 CSS can enforce this, so a check does. `dev/motion-census.sh`
