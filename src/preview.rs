@@ -340,8 +340,19 @@ pub fn run(component: &str) {
                 grid.attach(&dnd, col, row, 1, 1);
                 host.append(&grid);
             }
+            // Audio and Bluetooth draw fixtures: every state worth a look at
+            // once, and nothing a click in the preview could change on the
+            // real sound server or adapter. SWAYPPLET_PREVIEW_LIVE=1 reads
+            // the real ones instead.
             "audio" => {
-                let s = Box::leak(Box::new(AudioSection::new(crate::services::audio::AudioService::start())));
+                let service = if live() {
+                    crate::services::audio::AudioService::start()
+                } else {
+                    let s = crate::services::audio::AudioService::fixture(fixtures::audio());
+                    s.set_fixture_level(0.42);
+                    s
+                };
+                let s = Box::leak(Box::new(AudioSection::new(service)));
                 s.expand_for_preview();
                 host.append(s.widget());
             }
@@ -373,7 +384,13 @@ pub fn run(component: &str) {
                 host.append(s.widget());
             }
             "bluetooth" => {
-                let s = BluetoothSection::new();
+                let service = if live() {
+                    crate::services::bluetooth::BluetoothService::start()
+                } else {
+                    crate::services::bluetooth::BluetoothService::fixture(fixtures::bluetooth())
+                };
+                let s = BluetoothSection::new(service);
+                s.expand_for_page();
                 host.append(s.widget());
                 std::mem::forget(s);
             }
@@ -506,3 +523,133 @@ pub fn run(component: &str) {
     // so GApplication doesn't try to parse it as GTK options.
     app.run_with_args(&["swaypplet"]);
 }
+
+/// Whether a preview reads the real services rather than fixtures.
+fn live() -> bool {
+    std::env::var_os("SWAYPPLET_PREVIEW_LIVE").is_some()
+}
+
+/// Made-up states for the previews: every row state at once.
+mod fixtures {
+    use crate::services::audio::{
+        AudioState, Card, Device, DeviceKind, Profile, Stream, VolumeState,
+    };
+    use crate::services::bluetooth::{BtState, Op};
+    use crate::services::bluez::{self, Snapshot};
+
+    fn vol(volume: f64, muted: bool) -> VolumeState {
+        VolumeState { volume, muted }
+    }
+
+    fn device(i: u32, name: &str, kind: DeviceKind, detail: &str, default: bool) -> Device {
+        Device {
+            id: format!("fixture.{i}"),
+            index: i,
+            name: name.into(),
+            is_default: default,
+            channels: 2,
+            volume: vol(0.64, false),
+            kind,
+            detail: detail.into(),
+            card: (kind == DeviceKind::Headphones).then_some(7),
+            available: kind != DeviceKind::Hdmi,
+        }
+    }
+
+    fn stream(i: u32, name: &str, icon: &str, volume: f64, muted: bool) -> Stream {
+        Stream {
+            index: i,
+            name: name.into(),
+            channels: 2,
+            volume: vol(volume, muted),
+            recording: false,
+            icon: Some(icon.into()),
+        }
+    }
+
+    pub fn audio() -> AudioState {
+        let sinks = vec![
+            device(1, "WH-1000XM5", DeviceKind::Headphones, "Bluetooth", true),
+            device(2, "Speakers", DeviceKind::Speakers, "Built-in", false),
+            device(3, "LG 28H2U", DeviceKind::Hdmi, "HDMI", false),
+            device(4, "USB DAC", DeviceKind::Usb, "USB", false),
+        ];
+        let sources = vec![
+            device(11, "Microphone", DeviceKind::Microphone, "Built-in", true),
+            device(12, "Webcam", DeviceKind::Webcam, "USB", false),
+        ];
+        AudioState {
+            sink: Some(vol(0.64, false)),
+            source: Some(vol(0.8, false)),
+            sinks,
+            sources,
+            streams: vec![
+                stream(21, "Spotify", "spotify-client", 0.9, false),
+                stream(22, "Firefox", "firefox", 0.5, true),
+                stream(23, "Slack", "com.slack.Slack", 0.3, false),
+            ],
+            recorders: Vec::new(),
+            cards: vec![Card {
+                index: 7,
+                profiles: vec![
+                    Profile {
+                        name: "a2dp-sink".into(),
+                        description: "High Fidelity Playback (A2DP Sink)".into(),
+                        available: true,
+                    },
+                    Profile {
+                        name: "headset-head-unit".into(),
+                        description: "Headset Head Unit (HSP/HFP)".into(),
+                        available: true,
+                    },
+                ],
+                active: Some("a2dp-sink".into()),
+            }],
+            connected: true,
+        }
+    }
+
+    fn bt(i: u8, name: &str, hint: &str, connected: bool, paired: bool) -> bluez::Device {
+        let mac = format!("00:1A:7D:DA:71:{i:02X}");
+        bluez::Device {
+            path: format!("/org/bluez/hci0/dev_{}", mac.replace(':', "_")),
+            mac,
+            name: name.into(),
+            icon_hint: Some(hint.into()),
+            connected,
+            paired,
+            trusted: paired,
+            battery: None,
+            rssi: (!paired).then_some(-50 - i16::from(i)),
+            named: true,
+        }
+    }
+
+    pub fn bluetooth() -> BtState {
+        let mut buds = bt(1, "WH-1000XM5", "audio-headphones", true, true);
+        buds.battery = Some(72);
+        let keyboard = bt(2, "MX Keys", "input-keyboard", true, true);
+        let speaker = bt(3, "Kitchen speaker", "audio-card", false, true);
+        let mouse = bt(4, "MX Master 3S", "input-mouse", false, true);
+        let phone = bt(5, "Pixel 9", "phone", false, false);
+        let watch = bt(6, "Garmin Venu", "watch", false, false);
+        let ops = [
+            (speaker.mac.clone(), Op::Connecting),
+            (mouse.mac.clone(), Op::Failed("Not responding. Is it on and in range?".into())),
+            (phone.mac.clone(), Op::Confirm("482 915".into())),
+        ]
+        .into_iter()
+        .collect();
+        BtState {
+            snapshot: Snapshot {
+                available: true,
+                powered: true,
+                discovering: true,
+                devices: vec![buds, keyboard, speaker, mouse, phone, watch],
+                adapter: Some("/org/bluez/hci0".into()),
+            },
+            ops,
+        }
+    }
+}
+

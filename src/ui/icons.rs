@@ -63,3 +63,29 @@ pub fn volume_icon(volume: f64, muted: bool, is_mic: bool) -> &'static str {
         SPEAKER_HIGH
     }
 }
+
+// ── Devices (audio outputs and inputs, Bluetooth) ───────────────────────────
+pub const SPEAKERS: &str = "󰓃";
+pub const HEADPHONES: &str = "󰋋";
+pub const HEADSET: &str = "󰋎";
+pub const TV: &str = "󰔂";
+pub const USB: &str = "󰕓";
+pub const WEBCAM: &str = "󰄀";
+pub const BLUETOOTH: &str = "󰂯";
+pub const BLUETOOTH_OFF: &str = "󰂲";
+pub const BLUETOOTH_CONNECTED: &str = "󰂱";
+pub const KEYBOARD: &str = "󰌌";
+pub const MOUSE: &str = "󰍽";
+pub const PHONE: &str = "󰏲";
+pub const WATCH: &str = "󰖉";
+pub const GAMEPAD: &str = "󰊴";
+pub const COMPUTER: &str = "󰟀";
+
+/// A battery glyph for a percentage, in tenths.
+pub fn battery(percent: u8) -> &'static str {
+    const STEPS: [&str; 11] = [
+        "󰂎", "󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹",
+    ];
+    STEPS[usize::from(percent.min(100)).div_ceil(10).min(10)]
+}
+

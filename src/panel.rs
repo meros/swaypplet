@@ -185,7 +185,8 @@ impl Panel {
         let audio = AudioSection::new(audio_service.clone());
         let brightness = BrightnessSection::new();
         let network = NetworkSection::new();
-        let bluetooth = BluetoothSection::new();
+        let bluetooth =
+            BluetoothSection::new(crate::services::bluetooth::BluetoothService::start());
         let display = DisplaySection::new();
         let media = MediaSection::new();
         let notifications = NotificationsSection::new(store.clone());

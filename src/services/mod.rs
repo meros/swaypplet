@@ -11,6 +11,7 @@
 
 pub mod audio;
 pub mod backup;
+pub mod bluetooth;
 pub mod bluez;
 pub mod clipboard;
 pub mod displays;
