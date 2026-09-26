@@ -22,6 +22,7 @@
 
 /* ── Type ─────────────────────────────────────────────────────────────── */
 
+.ui-hero       { font-size: var(--type-hero);       font-weight: var(--w-light); }
 .ui-display    { font-size: var(--type-display);    font-weight: var(--w-heavy); }
 .ui-display-sm { font-size: var(--type-display-sm); font-weight: var(--w-heavy); }
 .ui-title      { font-size: var(--type-title);      font-weight: var(--w-strong); }
@@ -1254,6 +1255,411 @@ scrollbar slider {
 
 scrollbar slider:hover {
     background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+/* ── Auth components (added by the auth migration) ─────────────────────
+   What the lock screen, the greeter, the polkit card and the face cue need
+   that no component above gives: the lock card's pre-compensated key, the
+   scrim, text on bare wallpaper, a recessed well, a dropdown, the avatar's
+   identity fill and states, the chip handoff and the face indicator. */
+
+/* The card over the scrim: the key, pre-compensated for the black under it.
+
+   The lock and the greeter paint --scrim (black at 0.20) under the whole
+   screen and the card on top of it, and the compositor has to find the
+   card's composite on exactly the key every other card paints (--surface-key,
+   #32302f at 0.50; `fillKey` in the nixos repo's users/modules/theme/glass.nix)
+   so it drops those pixels and draws the material. Two layers reach 0.50 when
+   the card is painted at a = (0.50 − 0.20) / (1 − 0.20) = 0.375, which is the
+   key's alpha × 0.75. Its colour has to come back up by what the black under
+   it takes away: the scrim adds nothing to the premultiplied sum, so the card
+   carries the key's premultiplied colour at the lower alpha, the key's colour
+   × 0.50 / 0.375 = × 4/3. Composited: 0.375 × 4/3 × #32302f = 0.50 × #32302f
+   at alpha 0.375 + 0.20 × 0.625 = 0.500, which is #32302f at 0.500 exactly.
+   (The legacy literal was #43403f, the same product rounded to 8 bits.)
+
+   Derived from the key rather than written down, so the two cannot drift.
+   Change --scrim and both factors move: check the result against the table
+   in glass.nix (discard line 0.28, seeding line 0.40), not against either
+   number alone. */
+:root {
+    --surface-key-over-scrim: color(from var(--surface-key) srgb
+        calc(r * 4 / 3) calc(g * 4 / 3) calc(b * 4 / 3) / calc(alpha * 0.75));
+}
+
+.ui-card.over-scrim {
+    background-color: var(--surface-key-over-scrim);
+}
+
+/* A card that has just said yes: the border takes the accent, nothing else
+   moves. Approval is stated, not celebrated. */
+.ui-card.success {
+    border-color: var(--accent-bg);
+    transition: border-color var(--motion-state);
+}
+
+/* The scrim: the dimming layer under a modal full-screen surface. Its alpha
+   is below the compositor's discard line (0.28), so it stays backdrop and
+   only the cards above it stencil glass. The lock card's key arithmetic
+   above depends on it. */
+.ui-scrim {
+    background-color: var(--scrim);
+}
+
+/* Text standing on bare wallpaper with no card behind it (the lock's clock,
+   date and switch-user button). It is light in both modes: it never sits on
+   glass, only on the wallpaper under the black scrim, which the mode does not
+   change and which only ever darkens. The mode's --fg is ink in light mode,
+   on exactly that dark ground. --on-status is the token the scale already
+   keeps white in both modes.
+
+   Colour cannot make light text readable on a light image; a shadow that
+   darkens the ground around the glyphs can. The scrim is stacked because one
+   layer of it is too thin to give 13–18 px glyphs an edge: four tight layers
+   reach about 0.6 at the core, three soft ones make the halo. */
+:root {
+    --fg-on-wallpaper: var(--on-status);
+}
+
+.ui-on-wallpaper,
+button.ui-btn.ui-on-wallpaper {
+    color: var(--fg-on-wallpaper);
+    text-shadow:
+        0 1px 3px var(--scrim),
+        0 1px 3px var(--scrim),
+        0 1px 3px var(--scrim),
+        0 1px 3px var(--scrim),
+        0 2px 14px var(--scrim),
+        0 2px 14px var(--scrim),
+        0 2px 14px var(--scrim);
+}
+
+/* A well: sunk below the card rather than laid on it, for text that came
+   from outside the card (the command asking to run as root, polkit's raw
+   details). Quoted evidence, not something the card wrote. */
+.ui-well {
+    background-color: var(--scrim);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-tile);
+    color: var(--fg);
+}
+
+/* A dropdown: the field's fill and hairline around GTK's own button. */
+dropdown.ui-dropdown > button {
+    min-height: var(--control-height);
+    padding: 0 var(--space-3);
+    border: none;
+    border-radius: var(--radius-control);
+    background-color: var(--fill-1);
+    background-image: none;
+    box-shadow: inset 0 0 0 1px var(--border-subtle);
+    color: var(--fg);
+    font-size: var(--type-body);
+    transition: background-image var(--motion-state);
+}
+
+dropdown.ui-dropdown > button:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+dropdown.ui-dropdown > button:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+/* The avatar's monogram fill: identity, so a categorical colour picked by
+   hashing the name (ui::avatar). Never set under a picture. */
+.ui-avatar.cat-1 { background-color: var(--cat-1-bg); }
+.ui-avatar.cat-2 { background-color: var(--cat-2-bg); }
+.ui-avatar.cat-3 { background-color: var(--cat-3-bg); }
+.ui-avatar.cat-4 { background-color: var(--cat-4-bg); }
+.ui-avatar.cat-5 { background-color: var(--cat-5-bg); }
+.ui-avatar.cat-6 { background-color: var(--cat-6-bg); }
+
+/* The current user: a ring, as an outline rather than a border, because a
+   border would shrink the avatar's draw area. */
+.ui-avatar.active {
+    outline: 2px solid var(--accent-bg);
+    outline-offset: 1px;
+}
+
+/* A chip that can hold more than a word (an avatar and a name). */
+button.ui-chip.rich {
+    padding: var(--space-1) var(--space-5) var(--space-1) var(--space-1);
+    transition: background-color var(--motion-state),
+                background-image var(--motion-state),
+                color var(--motion-state);
+}
+
+/* ── The handoff: picking a face and landing in that session ──
+   The picked chip blooms while everything else dissolves; the surface on the
+   far side of the VT fades its card up from the same frame. All of it is the
+   picker leaving, so it is an exit, and it fits inside lock::ui::HANDOFF,
+   which is the same token. The transform is the topping: where GTK ignores
+   it the bloom and the dissolve still carry the beat. */
+@keyframes ui-handoff-bloom {
+    0%   { outline-width: 2px; outline-color: var(--focus-ring); }
+    55%  { outline-width: 7px; outline-color: var(--focus-ring); }
+    100% { outline-width: 7px; outline-color: transparent; }
+}
+
+button.ui-chip.picked {
+    background-color: var(--accent-tint);
+    box-shadow: inset 0 0 0 1px var(--accent-bg);
+    color: var(--fg);
+    transform: scale(1.06);
+    transition: transform var(--motion-exit),
+                background-color var(--motion-state),
+                box-shadow var(--motion-state);
+}
+
+button.ui-chip.picked .ui-avatar {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
+    animation: ui-handoff-bloom var(--motion-exit) forwards;
+}
+
+/* Everyone you did not pick steps back first, so the eye is left holding one
+   face when the screen goes. */
+button.ui-chip.dropped {
+    opacity: 0;
+    transform: scale(0.94);
+    transition: opacity var(--motion-exit),
+                transform var(--motion-exit);
+}
+
+/* ── The auth field's states (ui::set_field_state) ──
+   What the field says about the methods behind it, in pixels it already
+   owns (its hairline and its ring), so no state moves the card. */
+
+/* Armed: a reader is accepting a finger. The field breathes, because the
+   largest piece of moving accent on the card is what the affordance needs
+   to survive being folded into the entry. An attention loop: its own
+   period. */
+@keyframes ui-field-armed {
+    0%, 100% { box-shadow: inset 0 0 0 1px var(--border-strong), 0 0 0 2px var(--accent-tint); }
+    50%      { box-shadow: inset 0 0 0 1px var(--accent-bg), 0 0 0 2px var(--focus-ring); }
+}
+
+.ui-field.armed entry.ui-entry,
+.ui-field.armed passwordentry.ui-entry {
+    animation: ui-field-armed 2s ease-in-out infinite;
+}
+
+/* Busy: PAM is checking. A steady accent hairline and no pulse: a
+   field-scale signal, where greying the whole card would read as a fault. */
+.ui-field.busy entry.ui-entry,
+.ui-field.busy passwordentry.ui-entry {
+    animation: none;
+    box-shadow: inset 0 0 0 1px var(--accent-bg);
+}
+
+/* Rejected: one flash of the danger colour that fades back to the field's
+   own look, alongside the card's shake. Paint only, so it composes with the
+   shake instead of fighting it for the frame. A one-shot verdict that has to
+   be seen next to the shake, so the scale's longest length. */
+@keyframes ui-field-reject {
+    from { box-shadow: inset 0 0 0 1px var(--danger); background-color: var(--danger-tint); }
+}
+
+.ui-field.reject entry.ui-entry,
+.ui-field.reject passwordentry.ui-entry {
+    animation: ui-field-reject var(--dur-long) var(--ease-decelerate);
+}
+
+/* A caption whose tone changes in place (an error arriving, a success):
+   the colour moves as a state. */
+.ui-live-caption {
+    transition: color var(--motion-state);
+}
+
+/* ── The face indicator (ui::face_pill, ui::face_ring) ──
+   A ring with a face in it: it glances while the camera looks, stills and
+   meets your eye when it has found you, smiles on a match, frowns on a miss,
+   and closes its eyes when no usable frame arrives. Every state is paint on
+   a fixed box; nothing changes an allocation. The pill is thin glass.
+
+   Colours say the state and nothing else: accent while looking and found
+   (the one thing to look at), success on a match, danger on a miss, warning
+   when it is too dark to see. */
+.ui-face-ring {
+    border: 2px solid var(--border-strong);
+    border-radius: var(--radius-pill);
+    min-width: 18px;
+    min-height: 18px;
+}
+
+.ui-face-eye {
+    background-color: var(--fg);
+    border-radius: var(--radius-pill);
+    opacity: 0.85;
+}
+
+.ui-face-mouth {
+    border-bottom: 2px solid var(--fg);
+    border-radius: 0 0 var(--radius-control) var(--radius-control);
+    opacity: 0.85;
+}
+
+/* Looking: the eyes glance left and right and the mouth is a flat line.
+   Searching, not progress: nobody knows how long finding a face takes. */
+.ui-face-ring.looking {
+    border-color: var(--border-strong);
+    border-top-color: var(--accent);
+}
+.ui-face-ring.looking .ui-face-eye {
+    animation: ui-face-glance 2.6s ease-in-out infinite;
+}
+.ui-face-ring.looking .ui-face-mouth {
+    /* Full thickness: at 22 px a half-height line is a smudge, not a mouth. */
+    border-radius: 0;
+}
+
+/* Dark: no motion at all, because nothing is being searched. The eyes close:
+   it cannot see. */
+.ui-face-ring.dark {
+    border-color: var(--border-subtle);
+    border-top-color: var(--warning);
+}
+.ui-face-ring.dark .ui-face-eye { transform: scaleY(0.25); opacity: 0.6; }
+.ui-face-ring.dark .ui-face-mouth { border-radius: 0; opacity: 0.6; }
+
+/* Found: the glance stops and the eyes meet yours. The stop is the signal to
+   hold still. */
+.ui-face-ring.found {
+    border-color: var(--accent);
+    animation: ui-face-ring-pulse 0.9s ease-in-out infinite;
+}
+.ui-face-ring.found .ui-face-eye {
+    background-color: var(--accent);
+    opacity: 1;
+    animation: ui-face-blink 3.2s ease-in-out infinite;
+}
+.ui-face-ring.found .ui-face-mouth { border-color: var(--accent); }
+
+/* Recognised: it smiles. A tint behind, not a fill: the smile is drawn in
+   the same colour and needs the dark behind it to read. */
+.ui-face-ring.ok {
+    border-color: var(--success);
+    background-color: var(--success-tint);
+    animation: ui-face-ring-ok var(--motion-enter);
+}
+.ui-face-ring.ok .ui-face-eye {
+    background-color: var(--success);
+    opacity: 1;
+    transform: scaleY(0.45);
+}
+.ui-face-ring.ok .ui-face-mouth {
+    border-color: var(--success);
+    border-bottom-width: 2px;
+    border-radius: 0 0 var(--radius-tile) var(--radius-tile);
+    transform: scaleY(1.35);
+    animation: ui-face-smile var(--motion-enter);
+}
+
+/* Not recognised: a frown and a shake, not a cross. It retries on its own,
+   so it reads as "that didn't work", not as a verdict. */
+.ui-face-ring.fail {
+    border-color: var(--danger);
+    /* A one-shot shake: attention, which no motion token names, so the
+       scale's length and curve rather than a meaning. */
+    animation: ui-face-ring-fail var(--dur-emphasis) var(--ease-standard);
+}
+.ui-face-ring.fail .ui-face-eye { background-color: var(--danger); opacity: 1; }
+.ui-face-ring.fail .ui-face-mouth {
+    border-color: var(--danger);
+    /* The same arc turned over and dropped under the eyes. Translate first:
+       after the rotation it would move the mouth up instead. */
+    transform: translateY(3px) rotate(180deg);
+}
+
+/* Motion. The verdicts arrive (the smile, the punch, the pill's glow are one
+   --motion-enter, so they land together, and lock::FACE_SETTLE holds the
+   unlock for the same token). The glance, the blink, the found pulse, the
+   attention breath are attention loops: rhythms rather than transitions, so
+   they keep their own periods, chosen against a heartbeat rather than
+   against the scale (docs/design-system.md §3.8). */
+@keyframes ui-face-glance {
+    0%, 18%   { transform: translateX(0); }
+    30%, 45%  { transform: translateX(-2px); }
+    58%, 73%  { transform: translateX(2px); }
+    85%, 100% { transform: translateX(0); }
+}
+
+@keyframes ui-face-blink {
+    0%, 92%, 100% { transform: scaleY(1); }
+    96%           { transform: scaleY(0.15); }
+}
+
+@keyframes ui-face-smile {
+    from { transform: scaleY(0.5); }
+    to   { transform: scaleY(1.35); }
+}
+
+@keyframes ui-face-ring-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.55; }
+}
+
+/* An elastic punch that settles, the length of FACE_SETTLE in
+   src/lock/mod.rs so it lands with the unlock. The glow is a tint, under the compositor's
+   discard line, so it never frosts into a halo. */
+@keyframes ui-face-ring-ok {
+    0%   { transform: scale(0.6); opacity: 0.3; }
+    55%  { transform: scale(1.18); opacity: 1; box-shadow: 0 0 16px var(--success-tint); }
+    100% { transform: scale(1.0); opacity: 1; box-shadow: 0 0 0 transparent; }
+}
+
+@keyframes ui-face-ring-fail {
+    0%, 100% { transform: translateX(0); }
+    25%      { transform: translateX(-4px); }
+    75%      { transform: translateX(4px); }
+}
+
+/* The pill. Its entrance rides on a wrapper (.ui-face-enter), never on the
+   pill: `animation` is one property, and the state classes below rewrite it,
+   so an entrance here would replay on every looking → found edge. */
+.ui-face-enter {
+    animation: ui-face-arrive var(--motion-enter);
+}
+
+/* Upward, toward the camera: motion leads the gaze. A transform, never a
+   margin, so the arrival costs no layout. */
+@keyframes ui-face-arrive {
+    from { opacity: 0; transform: translateY(18px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Looking: breathe the border exactly twice and stop. Twice catches the
+   periphery once; an indefinite pulse becomes a strobe the user resents. The
+   border, not a glow: pixels the pill owns, one property on one node. */
+.ui-face-pill.looking {
+    animation: ui-face-attention 1.6s ease-in-out 2;
+}
+
+@keyframes ui-face-attention {
+    0%, 100% { border-color: var(--border-strong); }
+    50%      { border-color: var(--accent); }
+}
+
+/* Too dark: the one state worth a steadier, warmer pull, because holding
+   still will not fix it and checking the light will. The one box-shadow on
+   the pill, and it survives on purpose: its peak alpha (the tint, 0.16) is
+   below the compositor's discard line (0.28), so it stays backdrop and never
+   becomes glass. Without it "too dark" would be pixel-identical to neutral. */
+.ui-face-pill.dark {
+    box-shadow: 0 0 22px 3px var(--warning-tint);
+}
+
+/* A match glows once and stops, on the pill's own border and fill. The end
+   is left to the pill's own values, so it settles on whichever key it
+   paints (the plain one, or the one over a scrim). */
+.ui-face-pill.ok {
+    animation: ui-face-pill-ok var(--motion-enter);
+}
+
+@keyframes ui-face-pill-ok {
+    from { border-color: var(--success-bg); background-color: var(--success-tint); }
 }
 
 /* ── Notification components (added by the notifications migration) ──────

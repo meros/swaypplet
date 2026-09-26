@@ -1,313 +1,48 @@
 /* ── Elevation, on the polkit card ──
    `sudo` and `pkexec` are one question — may this run as root? — so they get
-   one card, the polkit one. These rules are what that card grows when the
+   one card, the polkit one. These rules place what that card grows when the
    request arrives through pam_face instead of through polkit: a command well
    and a consequence line, because pam_face carries no action id and no
-   vendor message, only the process that asked.
-
-   Everything else on the card is already styled above: the face check reports
-   through the same .auth-field mark and .auth-caption the fingerprint uses, so
-   the two biometrics read as the pair they are, and the buttons are the
-   card's own. */
-
-/* The command, recessed. Sinking it below the card surface is what makes it
-   read as quoted evidence rather than as a label the dialog wrote about
-   itself — it is the one element on the card that came from outside. */
+   vendor message, only the process that asked. The well is `ui::well`: sunk
+   below the card, because the command is the one element on the card that
+   came from outside it. */
 .face-confirm-well {
-    background-color: alpha(black, 0.28);
-    border: 1px solid @border_strong;
-    border-radius: 10px;
-    padding: 10px 12px;
+    padding: var(--space-3) var(--space-4);
     /* Elevate card only, where these two sit between the message and a field
        that is not there. Their own margins, so the password path pays for
        neither. */
-    margin-bottom: 8px;
+    margin-bottom: var(--space-3);
 }
 
-.face-confirm-command {
-    font-family: monospace;
-    font-size: 0.92rem;
-    color: @fg;
-}
-
-/* Stated, not shouted. The escalation is the reason to think, but colouring
-   it as a warning on every legitimate sudo would spend the alarm on nothing
-   and leave none for when it matters. */
 .face-confirm-consequence {
-    font-size: 0.85rem;
-    color: @fg_dim;
-    margin-bottom: 12px;
+    margin-bottom: var(--space-4);
 }
 
-/* ── Face unlock indicator ──
+/* ── Face unlock indicator (`ui::face_pill`) ──
    Pinned top-centre, under the camera, in every context that runs a face
    check. Fixed position is the feature: one place to look, and looking there
    puts the face on-axis to the lens, which is worth real accuracy on a sensor
-   with no depth channel.
+   with no depth channel. What it looks like and how it moves is the
+   component's; where it goes is here.
 
-   The ring is drawn here rather than set as a font glyph because it has to
-   move: sweep while looking, lock when a face is found, complete on a match,
-   break on a failure. A glyph can do none of that. */
+   The pill arrives travelling upward, toward the camera, because the
+   periphery is far better at motion than at a steady state and motion leads
+   the gaze. Safe on both surfaces that use it: the lock surface is
+   ext-session-lock, and the elevate cue has its own namespace. */
+
 /* Fixed width, shared by the lock screen's indicator and the elevate cue.
    The wording changes as the check proceeds -- "Looking for you", "Hold
    still", "Didn't recognise you" -- and a pill sized to its own text would
    grow and shrink around a ring the user is watching. One box, one place,
-   the words change inside it. */
+   the words change inside it.
+
+   Exactly the width of the lock card's rows below it: the 360 card less its
+   two --space-6 paddings and its 1px border each side is a 310px content
+   column, and this pill's padding (2 x --space-4) and border (2 x 1) come
+   off that. */
 .face-pill {
-    background-color: @surface;
-    border: 1px solid @border_strong;
-    border-radius: 999px;
-    padding: 6px 12px;
-    /* Exactly the width of the card's rows below it: 360 card less 2x26
-       padding less the card's own 1px border each side is a 306px content
-       column, and this pill's padding (2x12) and border (2x1) come off that.
-       The old 274 forgot the card's border and overhung by a pixel a side. */
-    min-width: 280px;
-}
-
-.face-pill-label {
-    color: @fg;
-    font-size: 0.95rem;
-}
-
-.face-ring {
-    border: 2px solid @bg3;
-    border-radius: 50%;
-    min-width: 18px;
-    min-height: 18px;
-}
-
-/* ── The face inside the ring ──
-   Three boxes placed by hand (face_ring::build): two eyes and a mouth. They
-   move as transforms, never as allocation, so the pill's geometry is the same
-   in every state and the motion costs no layout. The colour is the ring's
-   accent for the state, so the face and the ring always agree. */
-.face-glyph { background-color: transparent; }
-
-.face-eye {
-    background-color: @fg;
-    border-radius: 50%;
-    opacity: 0.85;
-}
-
-.face-mouth {
-    border-bottom: 2px solid @fg;
-    border-radius: 0 0 6px 6px;
-    opacity: 0.85;
-}
-
-/* Looking: the eyes glance left and right, unhurried, and blink now and then.
-   Reads as searching rather than progress, because there is no progress to
-   report -- the daemon does not know how long finding a face will take, and a
-   determinate bar would be a lie. The old lit arc spun for the same reason;
-   a face that looks around says it in the language people already read. */
-.face-ring-looking {
-    border-color: @bg3;
-    border-top-color: @accent_tertiary;
-}
-.face-ring-looking .face-eye {
-    animation: face-glance 2.6s ease-in-out infinite;
-}
-.face-ring-looking .face-mouth {
-    /* Neutral: a flat line while nothing is known. Full thickness -- at the
-       ring's real 22 px a half-height line is a smudge, not a mouth. */
-    border-radius: 0;
-}
-
-/* Dark: no motion at all. Nothing is being searched, because no usable frame
-   is arriving, and a moving face would imply the system is making progress.
-   The eyes close: it cannot see. */
-.face-ring-dark {
-    border-color: @bg2;
-    border-top-color: @accent_secondary;
-}
-.face-ring-dark .face-eye { transform: scaleY(0.25); opacity: 0.6; }
-.face-ring-dark .face-mouth { border-radius: 0; opacity: 0.6; }
-
-/* Found: the glance stops and the eyes meet yours. The stop is the signal --
-   it tells the user to hold still without a word of instruction. */
-.face-ring-found {
-    border-color: @accent_tertiary;
-    animation: face-ring-pulse 0.9s ease-in-out infinite;
-}
-.face-ring-found .face-eye {
-    background-color: @accent_tertiary;
-    opacity: 1;
-    animation: face-blink 3.2s ease-in-out infinite;
-}
-.face-ring-found .face-mouth { border-color: @accent_tertiary; border-radius: 0 0 4px 4px; }
-
-/* Recognised: it smiles. The eyes crease, the mouth curves, the ring fills. */
-.face-ring-ok {
-    border-color: @accent;
-    /* A tint, not a fill: the smile is drawn in the same accent and needs
-       the dark behind it to read. */
-    background-color: alpha(@accent, 0.14);
-    animation: face-ring-ok 500ms cubic-bezier(0, 0, 0, 1);
-}
-.face-ring-ok .face-eye {
-    background-color: @accent;
-    opacity: 1;
-    transform: scaleY(0.45);
-}
-.face-ring-ok .face-mouth {
-    border-color: @accent;
-    border-bottom-width: 2px;
-    border-radius: 0 0 8px 8px;
-    transform: scaleY(1.35);
-    animation: face-smile 400ms cubic-bezier(0.2, 0, 0, 1);
-}
-
-/* Not recognised: a frown and a shake, not a cross. The attempt will retry on
-   its own, so the failure should read as "that didn't work" rather than as a
-   verdict. */
-.face-ring-fail {
-    border-color: @accent_quinary;
-    animation: face-ring-fail 300ms cubic-bezier(0.2, 0, 0, 1);
-}
-.face-ring-fail .face-eye { background-color: @accent_quinary; opacity: 1; }
-.face-ring-fail .face-mouth {
-    border-color: @accent_quinary;
-    /* Turned over: the same arc, the other way up, and dropped a little so
-       the turned arc sits under the eyes rather than between them. Order
-       matters: translate first moves along the parent's axis; after the
-       rotation it would move the mouth up instead. */
-    transform: translateY(3px) rotate(180deg);
-}
-
-@keyframes face-glance {
-    0%, 18%   { transform: translateX(0); }
-    30%, 45%  { transform: translateX(-2px); }
-    58%, 73%  { transform: translateX(2px); }
-    85%, 100% { transform: translateX(0); }
-}
-
-@keyframes face-blink {
-    0%, 92%, 100% { transform: scaleY(1); }
-    96%           { transform: scaleY(0.15); }
-}
-
-@keyframes face-smile {
-    from { transform: scaleY(0.5); }
-    to   { transform: scaleY(1.35); }
-}
-
-@keyframes face-ring-pulse {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.55; }
-}
-
-/* Completes outward with an elastic spring punch and settles.
-   Sized to FACE_SETTLE in src/lock/mod.rs so the visual punch aligns
-   with session unlock handoff. */
-@keyframes face-ring-ok {
-    0%   { transform: scale(0.6); opacity: 0.3; }
-    55%  { transform: scale(1.18); opacity: 1; box-shadow: 0 0 16px alpha(@accent, 0.5); }
-    100% { transform: scale(1.0); opacity: 1; box-shadow: 0 0 0px transparent; }
-}
-
-/* A shake, not a cross. */
-@keyframes face-ring-fail {
-    0%, 100% { transform: translateX(0); }
-    25%      { transform: translateX(-4px); }
-    75%      { transform: translateX(4px); }
-}
-
-/* ── Drawing the eye to the camera ──
-   This overlay has a job beyond reporting status: it has to get the user to
-   look at the lens. A face presented off-axis is the single most common
-   reason a good enrolment fails to match, and no amount of daemon tuning
-   fixes a head pointed at the terminal.
-
-   Two mechanisms, both chosen for how peripheral vision actually works.
-
-   Onset motion first. The periphery is far better at detecting a change in
-   motion than a steady state, so the pill ARRIVES rather than appearing, and
-   it arrives travelling upward — toward the camera. Direction matters:
-   motion leads the gaze, so an upward drift walks the eye to the lens
-   instead of merely announcing itself somewhere near it.
-
-   Then a glow that pulses exactly twice and stops. Twice is enough to catch
-   the periphery once; an indefinite pulse becomes a strobe the user resents
-   within a day, and this fires every single time they sit down. The cue has
-   to be forgettable when it works.
-
-   Safe on both surfaces that use it: the lock surface is ext-session-lock,
-   and the elevate cue has its own namespace with no layer_effects entry, so
-   a box-shadow is a real shadow rather than something blur_ignore_transparent
-   frosts into a halo. Deliberately NOT put on .face-ring, which is also used
-   on the polkit card, and that layer IS blurred. */
-/* Entrance as a transform, never as a margin.
-   margin-top is a layout property: animating it re-ran allocation on every
-   frame, and on the cue's own layer surface that renegotiated the surface
-   size too -- a Wayland roundtrip per frame, which is exactly as smooth as it
-   sounds. transform is a paint-time property. Same 18px of upward travel,
-   same curve, no layout at all.
-
-   On a WRAPPER, not on the pill. `animation` is one property, so the
-   entrance and the attention pulse cannot both live on .face-pill: the state
-   classes rewrite it, and every looking -> face -> looking edge replayed the
-   entrance, dropping the pill 18px and fading it out mid-check. That was most
-   of the stutter. Two nodes, two independent animations, and a state change
-   can no longer disturb an arrival that already happened. */
-.face-pill-enter {
-    animation: face-pill-arrive 400ms cubic-bezier(0, 0, 0, 1);
-}
-
-/* The ring spins under its own transform. Keeping this one off the ring
-   matters: two transform animations on nested nodes compose fine, but only if
-   neither is a layout property. */
-@keyframes face-pill-arrive {
-    from { opacity: 0; transform: translateY(18px); }
-    to   { opacity: 1; transform: translateY(0); }
-}
-
-.face-pill-looking {
-    animation: face-pill-attention 1.6s ease-in-out 2;
-}
-
-/* Breathe the border, not a glow around it.
-   This used to be a 26px box-shadow at 5px spread, and under blur that shadow
-   was the reason the cue surface could not be frosted at all: scenefx's
-   blur_ignore_transparent discarded only pixels at alpha exactly 0, so every
-   translucent pixel of a drop shadow frosted into a flat halo the size of the
-   surface. Liquid glass replaced that with a threshold and the ban with a
-   ceiling (see .face-pill-dark below), but the border stays: it says the same
-   thing in the same vocabulary the armed auth field uses, in pixels the pill
-   already owns, and an animated border-color is one property on one node
-   where an animated shadow re-rasterises a gaussian every frame. */
-@keyframes face-pill-attention {
-    0%, 100% { border-color: @border_strong; }
-    50%      { border-color: alpha(@accent_tertiary, 0.85); }
-}
-
-/* Too dark is the one state worth a steadier, warmer pull: the user cannot
-   fix it by holding still, and the thing they should do is check the light
-   rather than keep staring.
-
-   The one surviving box-shadow on this surface, and it survives on purpose.
-   The compositor's material discards every pixel under mask_threshold - 0.12
-   (0.36 as shipped), so a shadow whose peak alpha stays below that line is
-   backdrop and never becomes glass: 0.28 clears it with room to spare. Raising
-   it past 0.36 puts the halo back. Removing it instead leaves .face-pill-dark
-   with no declarations at all, which makes "too dark" pixel-identical to
-   neutral -- in the one state you can only reproduce by putting a camera in
-   bad light. See users/modules/theme/glass.nix in the nixos repo for the three
-   bands. */
-.face-pill-dark {
-    box-shadow: 0 0 22px 3px alpha(@accent_secondary, 0.28);
-}
-
-/* Success glows once and stops. The session holds only for the ring's
-   overshoot, so the tail of this plays into a surface on its way out. */
-.face-pill-ok {
-    animation: face-pill-ok 500ms cubic-bezier(0, 0, 0, 1);
-}
-
-/* Same shape as the attention breathe above: the match lands on the border
-   and the fill, which are the pill's own pixels and cost one property each,
-   where a glow that grew from 0 re-rasterised its gaussian every frame. */
-@keyframes face-pill-ok {
-    0%   { border-color: @accent; background-color: alpha(@accent, 0.22); }
-    100% { border-color: @border_strong; background-color: @surface; }
+    padding: var(--space-3) var(--space-4);
+    min-width: 284px;
+    /* Under the camera: the offset the eye learns. */
+    margin-top: calc(var(--space-7) + var(--space-6));
 }

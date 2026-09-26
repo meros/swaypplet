@@ -60,13 +60,38 @@ pub fn run(component: &str) {
         // its card are the compositor's, from `layer_effects "session-lock"`,
         // and no plain toplevel gets either.
         if component == "lock" {
-            let window: gtk4::Window = ApplicationWindow::builder()
-                .application(app)
-                .default_width(1280)
-                .default_height(800)
-                .build()
-                .upcast();
-            window.add_css_class("lock");
+            // LOCAL RENDER PATCH (never committed): host the lock content on a
+            // layer surface named like the session lock, so the harness's
+            // real `layer_effects "session-lock"` material draws behind it.
+            static LOCK_LAYER: crate::layer_shell::LayerShellConfig =
+                crate::layer_shell::LayerShellConfig {
+                    namespace: "session-lock",
+                    layer: gtk4_layer_shell::Layer::Overlay,
+                    default_width: None,
+                    default_height: None,
+                    anchors: &[
+                        (gtk4_layer_shell::Edge::Top, true),
+                        (gtk4_layer_shell::Edge::Bottom, true),
+                        (gtk4_layer_shell::Edge::Left, true),
+                        (gtk4_layer_shell::Edge::Right, true),
+                    ],
+                    margins: &[],
+                    keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
+                    exclusive: false,
+                };
+            if std::env::var_os("SWAYPPLET_PREVIEW_LAYER").is_some() {
+                crate::settings::glass::apply_saved();
+            }
+            let window: gtk4::Window = if std::env::var_os("SWAYPPLET_PREVIEW_LAYER").is_some() {
+                crate::layer_shell::create_layer_window(app, &LOCK_LAYER)
+            } else {
+                ApplicationWindow::builder()
+                    .application(app)
+                    .default_width(1280)
+                    .default_height(800)
+                    .build()
+                    .upcast()
+            };
             let set = crate::lock::ui::SurfaceSet::new();
             // Greeter-mode preview: SWAYPPLET_GREET_USERS=meros,melvin adds
             // the user chips + username row on top of the lock card.
@@ -158,6 +183,9 @@ pub fn run(component: &str) {
         // Password "ok" flashes success; anything else shakes.
         if component == "polkit" {
             use crate::polkit::dialog::{Callbacks, Card, Methods, PolkitDialog, StatusKind};
+            if std::env::var_os("SWAYPPLET_PREVIEW_LAYER").is_some() {
+                crate::settings::glass::apply_saved();
+            }
             let dialog = PolkitDialog::new(app);
             let request = crate::polkit::agent::AuthRequest {
                 action_id: "org.freedesktop.policykit.exec".into(),
@@ -176,7 +204,10 @@ pub fn run(component: &str) {
                 message: request.message.as_str(),
                 icon_name: "",
                 action_id: request.action_id.as_str(),
-                command: None,
+                command: std::env::var("SWAYPPLET_PREVIEW_POLKIT_STATE")
+                    .unwrap_or_default()
+                    .contains("command")
+                    .then_some("sudo nixos-rebuild switch --flake .#laptop"),
                 identities: &request.identities,
                 details: crate::polkit::dialog::format_details(&request),
                 password: true,
