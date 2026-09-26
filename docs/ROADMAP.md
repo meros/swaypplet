@@ -16,11 +16,11 @@ Sizes: S is a day or less, M a few days, L a week or more.
 
 ## In progress
 
-| Item | Branch | Detail |
-|---|---|---|
-| Colour and material transitions: a mode, tint or wallpaper change fades over `page` (500 ms) instead of cutting | `theme-anim` | [design-system.md §2](design-system.md), [MOTION.md](MOTION.md) |
-| No 1-second polling: the theme follows its files through file monitors | main | |
-| Display profiles in the process, replacing kanshi (`services::displays`); the nixos side still has to move the profiles to `theme/settings.nix` and drop `kanshi.nix` | `displays` | [SETTINGS.md](SETTINGS.md), [research/display-profiles.md](research/display-profiles.md) |
+Nothing. Everything started on 2026-09-26 is merged: the glass page,
+colour transitions, the launcher, night light and display profiles in the
+process, grouped notifications, the shared peek and pin, lock text that
+follows the wallpaper, event-driven updates with no polling, the frame
+gate, and the rebuilt network, audio, Bluetooth, power and tile settings.
 
 ## Next
 
@@ -44,18 +44,7 @@ Why now: the motion tokens (`move`, `travel`) and `anim::Reveal` exist, and
 the design system says what each duration means, so this is the last
 motion piece without a home.
 
-### 2. Display profiles in the process (M), after night light
-
-Night light is in the process since 2026-09-26 (`services::gamma`). The
-other half retires kanshi: match
-and apply output profiles in the panel over `zwlr_output_manager_v1`, which
-applies every output in one step and reports success or failure. Sway IPC
-stays for moving workspaces. Profiles live in a `displays` settings section
-with Nix defaults; kanshi's matching carries over (every output claimed,
-first match wins, the current profile stays while it matches). About 1,300
-lines. Design, sources and risks: [research/display-profiles.md](research/display-profiles.md).
-
-### 3. Focus and quiet modes that know the context (M)
+### 2. Focus and quiet modes that know the context (M)
 
 Do not disturb switches on by itself while a screen is shared or a window is
 fullscreen, and off after. Notifications that arrive meanwhile do not pop
@@ -64,7 +53,7 @@ list. The lock screen gets the same summary row. The screen-share signal is
 the privacy indicator's (camera and screen capture are the blocked half of
 that item in [history](history/shell-ideas-2026-08.md)).
 
-### 4. The overview with a real start (L)
+### 3. The overview with a real start (L)
 
 A long Super hold opens a full-screen overlay whose first frame is an output
 capture, identical to the screen; the windows then fly from their real
@@ -73,18 +62,12 @@ positions into a grid of workspaces. Needs the dmabuf capture path first
 a CPU copy and a box filter each, which the Super+Tab tiles can afford and a
 full screen cannot. Builds on item 1's motion.
 
-### 5. Emoji and character picker that types (M)
+### 4. Emoji and character picker that types (M)
 
 `zwp_input_method_manager_v2` and `zwp_virtual_keyboard_manager_v1` are
 both advertised, so the picker inserts into the focused surface instead of
 going through the clipboard. The dmenu chassis is most of the UI. Could
 also be a launcher prefix once the `launcher` branch lands.
-
-### 6. Tailscale in the network section (S)
-
-Exit-node state and peer reachability. `tailscaled` is its own daemon, so
-the NetworkManager VPN rows do not see it; the network code only filters
-out the `tailscale0` interface today.
 
 ## Waiting for a decision
 
