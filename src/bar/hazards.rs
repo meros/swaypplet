@@ -41,7 +41,7 @@ use gtk4::prelude::*;
 
 use crate::audio::AudioService;
 use crate::inhibit::{self, Inhibitor};
-use crate::sway_ipc::SwayService;
+use crate::sway::ipc::SwayService;
 use crate::ui;
 
 // ── Widget ──────────────────────────────────────────────────────────────

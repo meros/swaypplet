@@ -104,8 +104,8 @@ cleanup() { [ -n "${SWAY_PID:-}" ] && kill "$SWAY_PID" 2>/dev/null || true; rm -
 trap cleanup EXIT
 
 export SWAYSOCK="$SOCK"
-# The nested socket, not the live session's. `sway_ipc::connect` tries
-# I3SOCK before SWAYSOCK (src/sway_ipc.rs), so a harness client that inherits
+# The nested socket, not the live session's. `sway::ipc::connect` tries
+# I3SOCK before SWAYSOCK (src/sway/ipc.rs), so a harness client that inherits
 # the live session's I3SOCK sends its glass replays and IPC there — to the
 # desktop on the user's screen, not to this one.
 unset I3SOCK

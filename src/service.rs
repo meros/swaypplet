@@ -1,4 +1,4 @@
-//! Shared skeleton for the bar's push services (`sway_ipc`, `bar::tray`):
+//! Shared skeleton for the bar's push services (`sway::ipc`, `bar::tray`):
 //! an observed state cell for the GTK side plus the reconnect-backoff
 //! ladder their worker loops share.
 

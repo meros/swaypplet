@@ -39,7 +39,7 @@ mod service;
 mod settings;
 mod spawn;
 mod surface;
-mod sway_ipc;
+mod sway;
 mod switch_user;
 mod task_state;
 mod theme;

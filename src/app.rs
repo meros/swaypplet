@@ -17,7 +17,7 @@ use crate::notifications::store::NotificationStore;
 use crate::notifications::{dbus, popup::PopupManager};
 use crate::osd::{Osd, OsdCommand};
 use crate::panel::Panel;
-use crate::sway_ipc::SwayService;
+use crate::sway::ipc::SwayService;
 use crate::theme;
 
 const APP_ID: &str = "dev.swaypplet.panel";
@@ -403,8 +403,8 @@ pub fn run() {
                     let pins = pins.clone();
                     crate::spawn::spawn_work(
                         move || {
-                            let output = crate::sway_ipc::focused_output()?;
-                            let tree = crate::sway_ipc::connect().ok()?.get_tree().ok()?;
+                            let output = crate::sway::ipc::focused_output()?;
+                            let tree = crate::sway::ipc::connect().ok()?.get_tree().ok()?;
                             Some((crate::jump::scene::window_at(&tree, &output, area)?, output))
                         },
                         move |found| {
@@ -429,7 +429,7 @@ pub fn run() {
                                     let output = output.clone();
                                     move || {
                                         let tree =
-                                            crate::sway_ipc::connect().ok()?.get_tree().ok()?;
+                                            crate::sway::ipc::connect().ok()?.get_tree().ok()?;
                                         crate::jump::scene::window_at(&tree, &output, area)
                                     }
                                 },

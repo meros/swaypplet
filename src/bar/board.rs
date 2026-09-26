@@ -27,7 +27,7 @@ use gtk4::prelude::*;
 
 use super::popover::TaskPopover;
 use crate::anim::{self, SlideBin};
-use crate::sway_ipc::SwayService;
+use crate::sway::ipc::SwayService;
 use crate::task_state::{Activity, SessionState, TaskState, TaskStateService, task_of_name};
 use crate::ui;
 

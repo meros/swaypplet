@@ -6,7 +6,7 @@
 //! open the task section: full description, raw `N/M ETA` text,
 //! per-session rows with status_mtime-derived durations (ages straddling
 //! a detected suspend read approximate, "~9h"), and row activation (click
-//! or Enter) focusing the session's workspace over the same sway_ipc path
+//! or Enter) focusing the session's workspace over the same sway::ipc path
 //! as the keybindings. The task-find/task-rename actions the bay click
 //! used to fire directly live on as footer buttons; their sway
 //! keybindings are independent and unaffected. A last-message row appears
@@ -23,9 +23,9 @@ use std::time::{Duration, SystemTime};
 use gtk4::prelude::*;
 
 use super::board::session_age;
-use super::workspaces::switch_command;
 use crate::spawn::spawn_work;
-use crate::sway_ipc;
+use crate::sway::ipc;
+use crate::sway::workspace::switch_command;
 use crate::task_state::{Activity, SessionState, TaskState, first_line, state_dir};
 use crate::ui;
 
@@ -119,7 +119,7 @@ impl TaskPopover {
             let popover = self.inner.popover.clone();
             list.connect_row_activated(move |_, row| {
                 if let Some(workspace) = targets.get(row.index() as usize) {
-                    sway_ipc::run_command(&focus_command(workspace));
+                    ipc::run_command(&focus_command(workspace));
                     popover.popdown();
                 }
             });

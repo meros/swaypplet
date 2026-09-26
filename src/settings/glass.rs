@@ -491,7 +491,7 @@ impl System {
     pub fn apply(&self, tuning: &Tuning) {
         let cmd = self.command(tuning);
         if !cmd.is_empty() {
-            crate::sway_ipc::run_command(&cmd);
+            crate::sway::ipc::run_command(&cmd);
         }
     }
 }

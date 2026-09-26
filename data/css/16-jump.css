@@ -23,7 +23,7 @@
     background-color: transparent;
 }
 
-/* Peek (src/jump/peek.rs): the bar popover chassis around a tile's picture,
+/* Peek (src/bar/peek.rs): the bar popover chassis around a tile's picture,
    with no ground of its own either. */
 .jump-peek {
     padding: var(--space-3);

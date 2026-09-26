@@ -18,12 +18,13 @@ mod clock;
 mod decision;
 mod hazards;
 mod media;
+mod peek;
 mod pins;
-pub(crate) mod popover;
+mod popover;
 mod presence;
 mod start;
 mod tray;
-pub(crate) mod workspaces;
+mod workspaces;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -35,7 +36,7 @@ use gtk4_layer_shell::{Edge, Layer};
 
 use crate::anim;
 use crate::layer_shell::{self, LayerShellConfig};
-use crate::sway_ipc::SwayService;
+use crate::sway::ipc::SwayService;
 use crate::task_state::TaskStateService;
 use crate::theme;
 

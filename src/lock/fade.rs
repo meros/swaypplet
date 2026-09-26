@@ -559,7 +559,7 @@ impl Cadence {
 /// session restart.
 fn arm_compositor() -> bool {
     let deadline = (duration(ENTER.ms) * 3.0 + 400.0).clamp(800.0, 60_000.0) as i64;
-    let result = crate::sway_ipc::connect()
+    let result = crate::sway::ipc::connect()
         .and_then(|mut c| c.run_command(format!("lock_fade on {deadline}")));
     match result {
         Ok(outcome) => {

@@ -272,7 +272,7 @@ fn motion_support() -> Motion {
         return known;
     }
     MOTION.with(|m| m.set(Some(Motion::Asked)));
-    crate::sway_ipc::run_command_result(
+    crate::sway::ipc::run_command_result(
         &format!("layer_effects \"{PROBE_NAMESPACE}\" \"motion probe\""),
         |accepted| {
             MOTION.with(|m| {
@@ -300,7 +300,7 @@ fn request_motion(namespace: &str, bin: &SlideBin, px: f64) {
         (false, true) => "bottom",
         (false, false) => "top",
     };
-    crate::sway_ipc::run_command_then(
+    crate::sway::ipc::run_command_then(
         &format!(
             "layer_effects \"{namespace}\" \"motion slide {edge} {}\"",
             px.abs().round()
@@ -354,7 +354,7 @@ pub fn set_layer_blur(namespace: Option<glib::GString>, on: bool, then: impl FnO
     } else {
         "blur disable; liquid_glass disable"
     };
-    crate::sway_ipc::run_command_then(&format!("layer_effects \"{ns}\" \"{effects}\""), then);
+    crate::sway::ipc::run_command_then(&format!("layer_effects \"{ns}\" \"{effects}\""), then);
 }
 
 thread_local! {

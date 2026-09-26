@@ -10,7 +10,7 @@
 //! and d were retired.
 //!
 //! So the sheet is derived instead. Sway's IPC hands back the config it
-//! actually loaded ([`sway_ipc::config_text`]); every `bindsym` in it becomes a
+//! actually loaded ([`ipc::config_text`]); every `bindsym` in it becomes a
 //! row, and the only hand-written part is presentation: which section a command
 //! belongs in, and how to say it in fewer characters than the command itself.
 //! A binding whose command matches nothing still renders, under `OTHER`, with
@@ -30,9 +30,9 @@ use gtk4::prelude::*;
 use gtk4::{gdk, gio};
 
 use crate::anim;
-use crate::bar::workspaces::generic_label;
 use crate::layer_shell::{self, LayerShellConfig};
-use crate::sway_ipc;
+use crate::sway::ipc;
+use crate::sway::workspace::generic_label;
 
 // ── The sheet's structure ───────────────────────────────────────────────
 
@@ -662,7 +662,7 @@ impl Keybinds {
         }
 
         let this = self.clone();
-        crate::spawn::spawn_work(sway_ipc::config_text, move |config| {
+        crate::spawn::spawn_work(ipc::config_text, move |config| {
             this.fetching.set(false);
             match config {
                 Ok(config) => {

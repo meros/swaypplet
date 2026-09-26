@@ -34,7 +34,7 @@
 //!
 //! One thread owns the connection and its mainloop; snapshots cross to the
 //! GTK side through an `async_channel` into an [`Observed`], the same shape
-//! `sway_ipc`, `bar::tray` and `clipboard` use. Commands go the other way
+//! `sway::ipc`, `bar::tray` and `clipboard` use. Commands go the other way
 //! through an `mpsc`. Nothing polls: the server sends a subscription event,
 //! the thread re-reads, and the panel redraws only when the snapshot
 //! actually differs.
@@ -260,7 +260,7 @@ impl AudioService {
 
 // ── The audio thread ────────────────────────────────────────────────────
 
-/// Connect, serve, reconnect. Mirrors `sway_ipc::run`.
+/// Connect, serve, reconnect. Mirrors `sway::ipc::run`.
 fn run(
     tx: &async_channel::Sender<AudioState>,
     commands: &mpsc::Receiver<Command>,

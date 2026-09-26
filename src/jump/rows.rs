@@ -2,8 +2,8 @@
 //! caption (the chord that reaches it, the bar's label, what is on it) and
 //! the command that switches to it.
 
-use crate::bar::workspaces::generic_label;
 use crate::keybinds::Binding;
+use crate::sway::workspace::{label_text, switch_command};
 
 use super::place::Place;
 
@@ -75,11 +75,11 @@ pub fn row(
     let names = apps(&p.name);
     Row {
         chord: chord_for(bindings, p),
-        label: label_for(p),
+        label: label_text(p.num, &p.name),
         detail: detail_for(&names),
         windows: names.len(),
         other_output: p.output != focused_output,
-        command: crate::bar::workspaces::switch_command(p.num, &p.name),
+        command: switch_command(p.num, &p.name),
     }
 }
 
@@ -94,20 +94,6 @@ pub fn caption_label(row: &Row) -> &str {
     match row.label.strip_suffix(chord) {
         Some(rest) if rest.is_empty() || rest.ends_with(' ') => rest.trim_end(),
         _ => &row.label,
-    }
-}
-
-/// The label the bar would draw for this workspace.
-pub(crate) fn label_for(p: &Place) -> String {
-    // Task workspaces are 1..=16 by the table's own numbering; everything else
-    // takes the generic table's glyph, falling back to the raw name.
-    if (1..=16).contains(&p.num) {
-        let task = ((p.num - 1) / 4) + 1;
-        let screen = ((p.num - 1) % 4) as usize;
-        const SUP: [&str; 4] = ["\u{00b9}", "\u{00b2}", "\u{00b3}", "\u{2074}"];
-        format!("{task}{}", SUP[screen])
-    } else {
-        generic_label(p.num, &p.name).to_string()
     }
 }
 

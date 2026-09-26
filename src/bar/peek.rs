@@ -15,14 +15,15 @@ use std::rc::Rc;
 use gtk4::glib;
 use gtk4::prelude::*;
 
-use super::card::{self, Live};
-use super::live;
+use super::popover;
+use crate::jump::card::{self, Live};
+use crate::jump::live;
 
 /// How long the pointer rests on a button before the peek opens.
 const HOVER_MS: u64 = 350;
 /// The picture, at the Super+Tab tile's size.
-const PEEK_W: i32 = super::rows::PREVIEW_W;
-const PEEK_H: i32 = super::rows::PREVIEW_H;
+const PEEK_W: i32 = crate::jump::rows::PREVIEW_W;
+const PEEK_H: i32 = crate::jump::rows::PREVIEW_H;
 /// Frames per second per window. Enough to read as live; a peek is a glance.
 const PEEK_FPS: u32 = 30;
 
@@ -99,8 +100,8 @@ fn open(state: &Rc<RefCell<Peek>>, button: &gtk4::Button, workspace: String) {
     let button = button.clone();
     crate::spawn::spawn_work(
         move || {
-            let tree = crate::sway_ipc::connect().ok()?.get_tree().ok()?;
-            super::scene::scene(&tree, &workspace)
+            let tree = crate::sway::ipc::connect().ok()?.get_tree().ok()?;
+            crate::jump::scene::scene(&tree, &workspace)
         },
         move |scene| {
             if state.borrow().generation != generation || button.parent().is_none() {
@@ -112,7 +113,7 @@ fn open(state: &Rc<RefCell<Peek>>, button: &gtk4::Button, workspace: String) {
     );
 }
 
-fn show(state: &Rc<RefCell<Peek>>, button: &gtk4::Button, scene: &super::scene::Scene) {
+fn show(state: &Rc<RefCell<Peek>>, button: &gtk4::Button, scene: &crate::jump::scene::Scene) {
     let live = state.borrow().live.clone();
     *live.borrow_mut() = Live::default();
     let picture = card::preview(Some(scene), PEEK_W, PEEK_H, &mut live.borrow_mut());
@@ -120,7 +121,7 @@ fn show(state: &Rc<RefCell<Peek>>, button: &gtk4::Button, scene: &super::scene::
 
     // The bar's own popover chassis, so a peek looks like every other thing
     // that opens from the bar.
-    let (popover, body) = crate::bar::popover::chassis(button);
+    let (popover, body) = popover::chassis(button);
     body.add_css_class("jump-peek");
     body.append(&picture);
     // No grab: the pointer is still on the button, and the click that

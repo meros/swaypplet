@@ -20,7 +20,7 @@
 //! One thread owns a second Wayland connection (GDK keeps its own, and this
 //! one blocks on pipe reads that must never sit in front of a frame). It
 //! pushes through an `async_channel` into an [`Observed`] on the GTK side,
-//! the same shape `sway_ipc` and `bar::tray` use, so consumers connect and
+//! the same shape `sway::ipc` and `bar::tray` use, so consumers connect and
 //! read exactly as they do there. Requests go the other way as plain
 //! Wayland calls: proxies are `Send`, so setting the selection from the GTK
 //! thread is safe as long as the watcher thread is the one dispatching the

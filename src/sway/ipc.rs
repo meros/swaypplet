@@ -410,27 +410,15 @@ fn output_infos(root: &Node) -> Vec<OutputInfo> {
 /// Walk the layout tree once, collecting a pid → workspace map.
 fn index_tree(root: &Node) -> HashMap<i32, String> {
     let mut pids = HashMap::new();
-    walk(root, None, &mut pids);
-    pids
-}
-
-fn walk(node: &Node, workspace: Option<&str>, pids: &mut HashMap<i32, String>) {
-    let workspace = if node.node_type == NodeType::Workspace {
+    super::tree::for_each(root, |node, workspace| {
         // The scratchpad is a pseudo-workspace named __i3_scratch; its
         // views are off screen and must stay out of the task map.
-        match node.name.as_deref() {
-            Some("__i3_scratch") | None => None,
-            name => name,
+        let workspace = workspace.filter(|name| *name != "__i3_scratch");
+        if let (Some(pid), Some(ws)) = (node.pid, workspace) {
+            pids.insert(pid, ws.to_string());
         }
-    } else {
-        workspace
-    };
-    if let (Some(pid), Some(ws)) = (node.pid, workspace) {
-        pids.insert(pid, ws.to_string());
-    }
-    for child in node.nodes.iter().chain(&node.floating_nodes) {
-        walk(child, workspace, pids);
-    }
+    });
+    pids
 }
 
 /// True when the focused node is fullscreen (`fullscreen_mode` 1 =

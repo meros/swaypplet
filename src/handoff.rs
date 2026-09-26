@@ -61,7 +61,7 @@ pub fn surface_origin(window: &gtk4::Window) -> Option<(f64, f64)> {
 
 /// The output's usable area: the rect sway gives the workspace shown there.
 fn usable_area(connector: &str) -> Option<Rect> {
-    let workspaces = crate::sway_ipc::connect().ok()?.get_workspaces().ok()?;
+    let workspaces = crate::sway::ipc::connect().ok()?.get_workspaces().ok()?;
     let ws = workspaces
         .iter()
         .find(|ws| ws.output == connector && ws.visible)?;
@@ -106,6 +106,6 @@ fn fmt(r: Rect) -> String {
 /// The next new window opens out of `widget`.
 pub fn open_from(widget: &impl IsA<gtk4::Widget>) {
     if let Some(r) = widget_rect(widget, None) {
-        crate::sway_ipc::run_command(&format!("handoff open {}", fmt(r)));
+        crate::sway::ipc::run_command(&format!("handoff open {}", fmt(r)));
     }
 }

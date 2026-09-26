@@ -21,7 +21,7 @@ use std::time::{Duration, Instant, SystemTime};
 use gio::prelude::*;
 
 use crate::service::Observed;
-use crate::sway_ipc::{SwayService, SwayState};
+use crate::sway::ipc::{SwayService, SwayState};
 
 // ── Model ───────────────────────────────────────────────────────────────
 

@@ -45,7 +45,7 @@ pub fn pick(app: &gtk4::Application, done: impl FnOnce(Image) + 'static) {
     let app = app.clone();
     crate::spawn::spawn_work(
         || {
-            let tree = crate::sway_ipc::connect().ok()?.get_tree().ok()?;
+            let tree = crate::sway::ipc::connect().ok()?.get_tree().ok()?;
             Some(scene::all_windows(&tree))
         },
         move |windows| {
