@@ -703,10 +703,17 @@ fn ribbon_pill(icon: &str, label: &str, stack: &gtk4::Stack, page: &'static str)
 
 /// A ribbon pill holding a slider, and the glyph button in front of it that
 /// flips the deck to the slider's page.
+///
+/// The ribbon's slider is its own, on the section's adjustment, rather than
+/// the section's slider moved up here: that one carries the page's marks
+/// (100 % on the volume rail), which GTK draws under the track, and in a
+/// pill one control tall they pushed the track against the pill's top edge.
+/// Sharing the adjustment keeps the two in step both ways, and the section's
+/// own slider stays on its page.
 fn ribbon_slider(
     icon: &str,
     tooltip: &str,
-    scale: &gtk4::Scale,
+    adjustment: &gtk4::Adjustment,
     stack: &gtk4::Stack,
     page: &'static str,
 ) -> gtk4::Box {
@@ -722,17 +729,17 @@ fn ribbon_slider(
     }
     pill.append(&btn);
 
+    let scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, Some(adjustment));
+    ui::slider(&scale);
     scale.set_draw_value(false);
     scale.set_hexpand(true);
+    scale.set_valign(gtk4::Align::Center);
     // A floor, not a size: the scale expands to fill the ribbon wherever
     // there is room, so lowering it only decides how much the ribbon can give
     // up on a narrow output. A slider is the right thing to squeeze first,
     // because it stays usable at any width while a label has to be cut.
     scale.set_width_request(44);
-    if scale.parent().is_some() {
-        scale.unparent();
-    }
-    pill.append(scale);
+    pill.append(&scale);
     pill
 }
 
@@ -765,7 +772,7 @@ fn build_telemetry_ribbon(
     ribbon.append(&ribbon_slider(
         icons::SPEAKER_HIGH,
         "Open Audio Devices & Mixer (:audio)",
-        &audio.output_volume_scale(),
+        &audio.output_volume_scale().adjustment(),
         deck_stack,
         "audio",
     ));
@@ -774,7 +781,7 @@ fn build_telemetry_ribbon(
     ribbon.append(&ribbon_slider(
         icons::BRIGHTNESS,
         "Open Display & Monitors (:disp)",
-        &brightness.brightness_scale(),
+        &brightness.brightness_scale().adjustment(),
         deck_stack,
         "displays",
     ));
