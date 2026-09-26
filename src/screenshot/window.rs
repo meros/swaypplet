@@ -13,12 +13,11 @@ use std::rc::Rc;
 
 use gtk4::glib;
 use gtk4::prelude::*;
-use gtk4_layer_shell::LayerShell as _;
 
 use super::capture::Image;
 use crate::jump::card::{Live, LivePicture};
 use crate::jump::{live, scene};
-use crate::shell::layer::{self, LayerShellConfig};
+use crate::shell::{Namespace, Surface};
 
 /// A window's picture in the grid, at most this box, keeping its shape.
 const TILE_W: i32 = 240;
@@ -34,7 +33,8 @@ const FULL: u32 = 1 << 15;
 type Done = Box<dyn FnOnce(Image)>;
 
 struct Picker {
-    window: gtk4::Window,
+    /// Dropped by `close`, which ends the picker.
+    surface: RefCell<Option<Surface>>,
     stream: RefCell<Option<live::Stream>>,
     done: RefCell<Option<Done>>,
 }
@@ -63,25 +63,17 @@ pub fn pick(app: &gtk4::Application, done: impl FnOnce(Image) + 'static) {
 }
 
 fn show(app: &gtk4::Application, windows: Vec<(scene::Window, String, String)>, done: Done) {
-    static CONFIG: LayerShellConfig = LayerShellConfig {
-        namespace: crate::shell::Namespace::WindowPicker,
-        layer: gtk4_layer_shell::Layer::Overlay,
-        exclusive: false,
-        default_width: None,
-        default_height: None,
-        anchors: &[],
-        margins: &[],
+    let surface = Surface::builder(app, Namespace::WindowPicker)
         // It is driven by the keyboard, so it takes it.
-        keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
-    };
-    let window = layer::create_layer_window(app, &CONFIG);
-    window.set_decorated(false);
+        .keyboard(gtk4_layer_shell::KeyboardMode::Exclusive)
+        .card(crate::ui::Card::Floating)
+        .build();
+    let window = surface.window().clone();
 
-    let card = crate::ui::vbox(3);
+    let card = surface.card();
+    card.set_spacing(crate::tokens::space(3));
     card.set_halign(gtk4::Align::Center);
     card.set_valign(gtk4::Align::Center);
-    crate::ui::surface::adopt(&card);
-    crate::ui::card::adopt(&card, crate::ui::Card::Floating);
     card.add_css_class("window-picker");
     card.append(&crate::ui::overline(
         "Screenshot a window",
@@ -116,10 +108,9 @@ fn show(app: &gtk4::Application, windows: Vec<(scene::Window, String, String)>, 
         grid.append(&tile(win, workspace, name, &id, &mut live));
         ids.push(id);
     }
-    window.set_child(Some(&card));
 
     let picker = Rc::new(Picker {
-        window: window.clone(),
+        surface: RefCell::new(Some(surface.clone())),
         stream: RefCell::new(None),
         done: RefCell::new(Some(done)),
     });
@@ -164,10 +155,10 @@ fn show(app: &gtk4::Application, windows: Vec<(scene::Window, String, String)>, 
     }
     window.add_controller(keys);
 
+    // Fades in with its glass (anim::Reveal counts it, and dropping the
+    // surface in `close` gives it back).
+    surface.show();
     window.present();
-    // The glass under the card (the namespace's entry in the compositor's
-    // config); anim.rs counts it, and `close` gives it back.
-    crate::anim::set_layer_blur(window.namespace(), true, || {});
     if let Some(first) = grid.child_at_index(0) {
         grid.select_child(&first);
         first.grab_focus();
@@ -229,7 +220,10 @@ fn tile(win: &scene::Window, workspace: &str, name: &str, id: &str, live: &mut L
 fn take(picker: &Rc<Picker>, id: String) {
     // The grid's stream stops; the shot has a stream of its own.
     picker.stream.replace(None);
-    picker.window.set_visible(false);
+    // Out of the shot at once, not faded: the capture starts now.
+    if let Some(surface) = &*picker.surface.borrow() {
+        surface.window().set_visible(false);
+    }
     let (tx, rx) = async_channel::bounded::<live::Frame>(1);
     let shot = live::Stream::start(vec![id], FULL, 0, tx);
     let picker = picker.clone();
@@ -247,8 +241,9 @@ fn take(picker: &Rc<Picker>, id: String) {
 fn close(picker: &Rc<Picker>) {
     picker.stream.replace(None);
     picker.done.borrow_mut().take();
-    crate::anim::set_layer_blur(picker.window.namespace(), false, || {});
-    crate::shell::layer::destroy_window(&picker.window);
+    // Taken before it drops: the surface's own handlers hold the picker.
+    let surface = picker.surface.borrow_mut().take();
+    drop(surface);
 }
 
 /// A live frame (premultiplied BGRA) as a screenshot image (straight RGBA).
