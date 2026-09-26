@@ -2,7 +2,7 @@
 //! screenshot becomes.
 //!
 //! Two sections, `alerts` and `capture`, on one tab with one footer. The
-//! popup rows are read per card (`notifications/popup.rs`), the schedule by
+//! popup rows are read per card (`notifications/stack.rs`), the schedule by
 //! `services/notifications/quiet.rs` on its tick and on every change here, and the
 //! capture rows by `screenshot/` at the moment of the shot.
 

@@ -13,7 +13,7 @@ use crate::jump::Jump;
 use crate::keybinds::Keybinds;
 use crate::launcher::Launcher;
 use crate::layer_shell::{self, LayerShellConfig};
-use crate::notifications::popup::PopupManager;
+use crate::notifications::stack::PopupManager;
 use crate::osd::{Osd, OsdCommand};
 use crate::panel::Panel;
 use crate::services::notifications::dbus;

@@ -8,7 +8,7 @@
 //! The card is a notification, not a bespoke surface. `NotificationStore`
 //! already draws a picture, already lays out action buttons, already handles
 //! dismissal and history, and the popup already treats a wide image as a
-//! screenshot rather than an avatar (`notifications/popup.rs`). A second
+//! screenshot rather than an avatar (`notifications/card.rs`). A second
 //! surface doing the same job would be the notification stack with fewer
 //! years on it.
 
