@@ -241,14 +241,6 @@ pub fn make_button(b: &gtk4::Button, kind: Kind) {
     style_button(b, kind);
 }
 
-pub fn icon_button(icon: &str, tooltip: &str, kind: Kind) -> gtk4::Button {
-    let b = gtk4::Button::from_icon_name(icon);
-    style_button(&b, kind);
-    b.add_css_class("icon");
-    b.set_tooltip_text(Some(tooltip));
-    b
-}
-
 /// A button whose face is a glyph from the icon font.
 pub fn glyph_button(glyph: &str, tooltip: &str, kind: Kind) -> gtk4::Button {
     let b = gtk4::Button::with_label(glyph);
@@ -332,7 +324,6 @@ pub struct Section {
     pub root: gtk4::Box,
     pub header: gtk4::Button,
     pub icon: gtk4::Label,
-    pub title: gtk4::Label,
     pub summary: gtk4::Label,
     pub body: gtk4::Box,
     pub revealer: gtk4::Revealer,
@@ -386,7 +377,6 @@ pub fn section(icon: &str, title: &str, summary: &str) -> Section {
         root,
         header,
         icon: icon_l,
-        title: title_l,
         summary: summary_l,
         body,
         revealer,
@@ -437,10 +427,6 @@ pub fn slider_row(icon: &str, min: f64, max: f64, step: f64) -> SliderRow {
     }
 }
 
-pub fn slider(s: &gtk4::Scale) {
-    s.add_css_class("ui-slider");
-}
-
 pub fn switch() -> gtk4::Switch {
     let s = gtk4::Switch::new();
     s.add_css_class("ui-switch");
@@ -457,18 +443,6 @@ pub fn switch_row(title: &str, subtitle: &str) -> (Row, gtk4::Switch) {
 }
 
 // ── Chip, badge, key, status ────────────────────────────────────────────
-
-pub fn chip(label: &str) -> gtk4::Button {
-    let b = gtk4::Button::with_label(label);
-    b.add_css_class("ui-chip");
-    b
-}
-
-pub fn chip_label(label: &str) -> gtk4::Label {
-    let l = gtk4::Label::new(Some(label));
-    l.add_css_class("ui-chip");
-    l
-}
 
 pub fn badge(text: &str) -> gtk4::Label {
     let l = gtk4::Label::new(Some(text));
@@ -514,11 +488,10 @@ pub fn set_status(l: &gtk4::Label, kind: Status) {
 
 pub struct Field {
     pub root: gtk4::Box,
-    pub help: gtk4::Label,
 }
 
-/// A labelled input with a help line that turns into the error.
-pub fn field(label: &str, input: &impl IsA<gtk4::Widget>, help: &str) -> Field {
+/// A labelled input: the label (empty for none) over the entry.
+pub fn field(label: &str, input: &impl IsA<gtk4::Widget>) -> Field {
     let root = vbox(2);
     root.add_css_class("ui-field");
     if !label.is_empty() {
@@ -529,29 +502,7 @@ pub fn field(label: &str, input: &impl IsA<gtk4::Widget>, help: &str) -> Field {
     }
     input.add_css_class("ui-entry");
     root.append(input);
-    let h = gtk4::Label::new(Some(help));
-    h.add_css_class("ui-field-help");
-    h.set_xalign(0.0);
-    h.set_wrap(true);
-    h.set_visible(!help.is_empty());
-    root.append(&h);
-    Field { root, help: h }
-}
-
-impl Field {
-    /// Show `msg` as the error, or clear it.
-    pub fn set_error(&self, msg: Option<&str>) {
-        match msg {
-            Some(m) => {
-                self.root.add_css_class("error");
-                self.help.set_text(m);
-                self.help.set_visible(true);
-            }
-            None => {
-                self.root.remove_css_class("error");
-            }
-        }
-    }
+    Field { root }
 }
 
 pub fn entry(input: &impl IsA<gtk4::Widget>) {

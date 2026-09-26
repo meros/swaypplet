@@ -117,7 +117,7 @@ impl AuthField {
     /// `PasswordEntry`; the chrome around them is identical either way.
     pub fn new(input: &impl IsA<gtk4::Widget>) -> Self {
         input.as_ref().set_hexpand(true);
-        let field = crate::ui::field("", input, "");
+        let field = crate::ui::field("", input);
         field.root.set_hexpand(true);
         Self { root: field.root }
     }

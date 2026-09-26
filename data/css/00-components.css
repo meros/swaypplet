@@ -301,54 +301,9 @@ button.ui-section-header:focus-visible {
     color: var(--on-accent);
 }
 
-.ui-tile button {
-    border: none;
-    border-radius: var(--radius-tile);
-    background-color: transparent;
-    background-image: none;
-    box-shadow: none;
-    color: inherit;
-    padding: 0 var(--space-4);
-    transition: background-image var(--motion-state);
-}
-
-.ui-tile button:hover {
-    background-image: linear-gradient(var(--state-hover), var(--state-hover));
-}
-
-.ui-tile button:active {
-    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
-}
-
-.ui-tile button:focus-visible {
-    outline: 2px solid var(--focus-ring);
-    outline-offset: -2px;
-}
-
 .ui-tile-title {
     font-size: var(--type-body);
     font-weight: var(--w-strong);
-}
-
-.ui-tile-state {
-    font-size: var(--type-caption);
-    color: var(--fg-muted);
-}
-
-.ui-tile.on .ui-tile-state {
-    color: var(--on-accent-muted);
-}
-
-.ui-tile button.ui-tile-more {
-    min-width: 36px;
-    padding: 0;
-    border-left: 1px solid var(--border-subtle);
-    border-top-left-radius: 0;
-    border-bottom-left-radius: 0;
-}
-
-.ui-tile.on button.ui-tile-more {
-    border-left-color: var(--state-pressed);
 }
 
 /* ── Slider ─────────────────────────────────────────────────────────── */
@@ -556,20 +511,6 @@ entry.ui-entry selection,
 passwordentry.ui-entry selection {
     background-color: var(--accent-tint);
     color: var(--fg);
-}
-
-.ui-field.error entry.ui-entry,
-.ui-field.error passwordentry.ui-entry {
-    box-shadow: inset 0 0 0 1px var(--danger);
-}
-
-.ui-field-help {
-    font-size: var(--type-caption);
-    color: var(--fg-faint);
-}
-
-.ui-field.error .ui-field-help {
-    color: var(--danger);
 }
 
 /* ── Menu ───────────────────────────────────────────────────────────── */
@@ -1120,16 +1061,15 @@ progressbar.ui-progress.bad progress  { background-color: var(--danger-bg); }
     transition: opacity var(--motion-state);
 }
 
-/* ── Bare GTK widgets (added by the panel migration) ───────────────────
-   The look of a button, scale, switch, entry … that no component wraps
-   yet. These match every such widget in the process; they used to sit in
-   03-panel.css, after the surfaces' own rules, and repainted component
-   buttons elsewhere. Here they come first, so any surface or component
-   rule wins. The panel itself no longer relies on them; other surfaces
-   still build bare GTK widgets (settings panes, the Helm rail and pills,
-   polkit, the lock screen, notification popups, pins). No :hover or
-   :active: a bare button has none until it moves onto ui::button. Delete
-   a block once `grep` finds no bare user of that widget. */
+/* ── Bare GTK widgets ────────────────────────────────────────────────────
+   What GTK builds inside its own widgets, which no component class can
+   reach: the buttons of a popover menu (the tray's) and a dropdown, the
+   separators between a menu's sections, the scrollbars of a scrolled
+   window. Every button the shell builds itself is a component (`ui::button`
+   and kin), which outranks `button` on its class. Not first, though:
+   `button:disabled` and `button:focus-visible` tie with `button.ui-*` on
+   specificity, and sitting after those components they give each one a
+   disabled look and a focus ring it does not write itself. */
 
 button {
     min-height: 32px;
@@ -1152,117 +1092,6 @@ button:disabled {
 button:focus-visible {
     outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
-}
-
-/* Notification popups and pins still ask for a quiet button by GTK's
-   name; ui::Kind::Flat carries the same class and has its own rules. */
-button.flat:not(.ui-btn) {
-    background-color: transparent;
-    color: var(--fg-muted);
-    font-size: var(--type-caption);
-    padding: var(--space-2) var(--space-3);
-    min-height: 28px;
-}
-
-/* The settings panes' disclosure (src/settings/ui.rs::disclosure) until it
-   moves onto ui::disclosure. */
-button.section-expander {
-    background-color: transparent;
-    color: var(--fg-muted);
-    font-size: var(--type-label);
-    padding: var(--space-2) var(--space-3);
-    min-height: 28px;
-}
-
-scale:not(.ui-slider) {
-    min-height: 10px;
-    /* Horizontal padding absorbs the knob's negative-margin overhang so
-       the knob never clips at the widget edge. */
-    padding: var(--space-3) var(--space-3);
-}
-
-scale:not(.ui-slider) marks label {
-    color: var(--fg-faint);
-    font-size: var(--type-caption);
-}
-
-scale:not(.ui-slider) trough {
-    background-color: var(--fill-3);
-    border-radius: var(--radius-pill);
-    min-height: 10px;
-}
-
-scale:not(.ui-slider) highlight {
-    background-color: var(--accent-bg);
-    border-radius: var(--radius-pill);
-    min-height: 10px;
-}
-
-scale:not(.ui-slider) slider {
-    background-color: var(--knob);
-    border-radius: var(--radius-pill);
-    min-width: 20px;
-    min-height: 20px;
-    margin: calc(-1 * var(--space-3));
-    box-shadow: 0 1px 4px var(--scrim);
-    transition: all var(--motion-state);
-}
-
-scale:not(.ui-slider):focus-visible slider {
-    outline: 2px solid var(--focus-ring);
-    outline-offset: 2px;
-}
-
-switch:not(.ui-switch) {
-    background-color: var(--fill-3);
-    background-image: none;
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-pill);
-    min-width: 40px;
-    min-height: 22px;
-    box-shadow: none;
-    transition: background-color var(--motion-state);
-}
-
-switch:not(.ui-switch):checked {
-    background-color: var(--accent-bg);
-}
-
-switch:not(.ui-switch) slider {
-    background-color: var(--knob);
-    background-image: none;
-    border: none;
-    border-radius: var(--radius-pill);
-    min-width: 16px;
-    min-height: 16px;
-    margin: var(--space-1);
-    box-shadow: 0 1px 2px var(--scrim);
-}
-
-switch:not(.ui-switch):checked slider {
-    background-color: var(--on-accent);
-}
-
-switch:not(.ui-switch):disabled {
-    opacity: 0.38;
-}
-
-entry:not(.ui-entry) {
-    background-color: var(--surface-raised);
-    color: var(--fg);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-control);
-    padding: var(--space-3) var(--space-4);
-    min-height: 36px;
-    caret-color: var(--accent);
-}
-
-entry:not(.ui-entry):focus-within {
-    box-shadow: 0 0 0 2px var(--focus-ring);
-}
-
-dropdown > button {
-    background-color: var(--fill-3);
 }
 
 separator {
