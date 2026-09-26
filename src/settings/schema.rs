@@ -392,10 +392,43 @@ impl Tint {
     }
 }
 
+/// Light, dark, or whichever the sun says (docs/design-system.md §2.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemeMode {
+    /// Dark from dusk to dawn, light in between, at the location in
+    /// /etc/swaypplet/theme.json. Dark when no location is known.
+    #[default]
+    Auto,
+    Dark,
+    Light,
+}
+
+impl ThemeMode {
+    pub const ALL: [ThemeMode; 3] = [ThemeMode::Auto, ThemeMode::Dark, ThemeMode::Light];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ThemeMode::Auto => "Auto — light by day, dark by night",
+            ThemeMode::Dark => "Dark",
+            ThemeMode::Light => "Light",
+        }
+    }
+}
+
 /// The Look tab's second group. The wallpaper is the first and has its own
 /// section, since it has no system layer in this file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Look {
+    /// The theme inputs (docs/design-system.md §2).
+    #[serde(default)]
+    pub mode: ThemeMode,
+    #[serde(default)]
+    pub accent: crate::tokens::Accent,
+    #[serde(default)]
+    pub neutral: crate::tokens::Neutral,
+    #[serde(default)]
+    pub contrast: crate::tokens::Contrast,
     #[serde(default)]
     pub motion: Motion,
     #[serde(default)]

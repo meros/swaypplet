@@ -15,6 +15,9 @@
 //! over the glass body, computed through the material the way
 //! `liquid_glass.frag` does it, over white, mid-grey and black behind.
 
+pub mod motion;
+pub mod sun;
+
 use std::fmt::Write as _;
 
 // ── Colour ──────────────────────────────────────────────────────────────
@@ -128,14 +131,18 @@ pub enum Mode {
     Light,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Contrast {
+    #[default]
     Standard,
     High,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Accent {
+    #[default]
     Aqua,
     Yellow,
     Blue,
@@ -144,8 +151,10 @@ pub enum Accent {
     Red,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Neutral {
+    #[default]
     Gruvbox,
     Slate,
     Pure,
@@ -214,6 +223,8 @@ pub struct Inputs {
     pub accent: Accent,
     pub neutral: Neutral,
     pub contrast: Contrast,
+    /// The Motion setting as a percentage of every duration: 100, 50 or 0.
+    pub motion: u8,
 }
 
 impl Default for Inputs {
@@ -223,6 +234,7 @@ impl Default for Inputs {
             accent: Accent::Aqua,
             neutral: Neutral::Gruvbox,
             contrast: Contrast::Standard,
+            motion: 100,
         }
     }
 }
@@ -688,12 +700,18 @@ pub fn css(inputs: Inputs) -> String {
     for (name, px) in RADIUS {
         put(&format!("radius-{name}"), format!("{px}px"));
     }
+    // Motion, scaled by the Motion setting. Zero is one frame's worth, not
+    // zero: GTK skips a transition of 0 but the end state must still land.
+    let scaled = |ms: f64| (ms * f64::from(inputs.motion) / 100.0).max(1.0).round();
     for (name, ms) in DURATION {
-        put(&format!("dur-{name}"), format!("{ms}ms"));
+        put(&format!("dur-{name}"), format!("{}ms", scaled(f64::from(ms))));
     }
-    put("ease-standard", "cubic-bezier(0.2, 0, 0, 1)".into());
-    put("ease-decelerate", "cubic-bezier(0, 0, 0, 1)".into());
-    put("ease-accelerate", "cubic-bezier(0.3, 0, 1, 1)".into());
+    put("ease-standard", motion::STANDARD.css());
+    put("ease-decelerate", motion::DECELERATE.css());
+    put("ease-accelerate", motion::ACCELERATE.css());
+    for m in motion::ALL {
+        put(&format!("motion-{}", m.name), format!("{}ms {}", scaled(m.ms), m.curve.css()));
+    }
 
     // Component tokens (§3.9).
     put("control-height", "30px".into());
@@ -727,6 +745,7 @@ mod tests {
                             accent,
                             neutral,
                             contrast,
+                            motion: 100,
                         });
                     }
                 }
@@ -925,7 +944,7 @@ mod tests {
             "space-5",
             "radius-card",
             "dur-fast",
-            "ease-standard",
+            "ease-standard", "motion-state", "motion-enter", "motion-exit", "motion-travel",
         ] {
             assert!(css.contains(&format!("  --{name}: ")), "missing --{name}");
         }

@@ -299,21 +299,36 @@ Two tokens for the rest:
 
 ### 3.8 Motion
 
-The ladder the stylesheet already keeps (`docs/MOTION.md`), as tokens.
-`src/anim.rs` reads the same numbers from `tokens.rs`.
+Motion is named by what it means on screen; the duration and curve follow
+from the meaning, so two things that mean the same move the same way on
+every surface. `src/tokens/motion.rs` decides them, the stylesheet gets
+them as `--motion-*` (duration and curve in one token, for `transition`
+and `animation`), and `src/anim.rs` reads the same values.
 
-| Token | Value | Use |
-|---|---|---|
-| `--dur-fast` | 150 ms | colour, opacity, state |
-| `--dur-standard` | 200 ms | small movement: chevrons, revealers, switches |
-| `--dur-emphasis` | 300 ms | entrances |
-| `--dur-spatial` | 400 ms | surfaces moving: panels, the switcher strip |
-| `--dur-long` | 500 ms | the lock and greeter crossfades |
-| `--ease-standard` | `cubic-bezier(0.2, 0, 0, 1)` | everything by default |
-| `--ease-decelerate` | `cubic-bezier(0, 0, 0, 1)` | entering |
-| `--ease-accelerate` | `cubic-bezier(0.3, 0, 1, 1)` | leaving |
+| Token | Duration | Curve | Means |
+|---|---|---|---|
+| `--motion-state` | 150 ms | standard | a control changing state: hover, press, colour, a check |
+| `--motion-expand` | 200 ms | standard | something opening or closing in place: a section, a chevron, a switch knob, a revealer |
+| `--motion-enter` | 300 ms | decelerate | something arriving: a card, a notification, a row that was not there |
+| `--motion-exit` | 200 ms | accelerate | something leaving; shorter than its entrance, because waiting for a thing to go is dead time |
+| `--motion-move` | 300 ms | standard | something on screen moving to where it now belongs: a reflow, a reorder, a resize |
+| `--motion-travel` | 400 ms | standard | a whole surface crossing a distance: the switcher strip, a panel sliding in |
+| `--motion-page` | 500 ms | standard | the whole screen changing: the lock and greeter crossfades |
 
-Reduced motion (`Look.motion`) scales the durations as today.
+The curves: standard `cubic-bezier(0.2, 0, 0, 1)`, decelerate
+`cubic-bezier(0, 0, 0, 1)`, accelerate `cubic-bezier(0.3, 0, 1, 1)`. The
+raw `--dur-*` and `--ease-*` stay available for a transition that lists
+several properties with one meaning.
+
+The Motion setting scales every duration when the tokens are generated
+(full, half, or one frame), so a rule never has to know about it.
+
+**Rules.** An enter pairs with an exit, never with another enter. Colour
+and opacity changes of a control are `state`, even when they accompany a
+move. A surface's entrance is `enter` for its content and `travel` for the
+surface itself when it crosses the screen. Attention loops (a pulse, a
+shake, breathing) are the only animations that name their own period, and
+only inside `@keyframes` that repeat.
 
 ### 3.9 Component tokens
 
@@ -415,8 +430,9 @@ Tests in `src/tokens.rs` and `src/theme.rs`, run by `cargo test`:
    §3.2–3.9. Primitives (`--neutral-n`, `--accent-n`) are refused.
 3. **Only the scales.** Every `font-size` is a `--type-*` token; every
    `border-radius` a `--radius-*` token; every padding, margin and
-   `border-spacing` a `--space-*` token or 0; every duration a `--dur-*`
-   token.
+   `border-spacing` a `--space-*` token or 0; every transition and
+   non-looping animation a `--motion-*` token (or `--dur-*` with
+   `--ease-*`).
 4. **Contrast** (§5) for every input combination.
 5. **Rust**: no `set_spacing`, `margin_*` or `spacing(...)` with a literal
    other than those in `tokens::SPACE`; no Cairo colour literals outside
