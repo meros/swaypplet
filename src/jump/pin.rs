@@ -168,6 +168,10 @@ struct Inner {
     notice: Option<Notice>,
     pins: Vec<Pin>,
     tucked: bool,
+    /// Held out of sight while the Super+Tab switcher is up. Not the same
+    /// as tucked: nothing changes in the bar, and they come back on their
+    /// own when it closes.
+    held: bool,
 }
 
 #[derive(Clone, Default)]
@@ -189,6 +193,17 @@ impl Pins {
         self.inner.borrow_mut().tucked = tucked;
         TUCKED.with(|t| t.set(tucked));
         notify();
+        self.refresh();
+    }
+
+    /// Hide every pin while the Super+Tab switcher is up, and bring them
+    /// back after. The switcher's workspaces and its ring are under the
+    /// pins' layer, and a pin over them hides part of what you choose from.
+    pub fn set_held(&self, held: bool) {
+        if self.inner.borrow().held == held {
+            return;
+        }
+        self.inner.borrow_mut().held = held;
         self.refresh();
     }
 
@@ -537,6 +552,7 @@ impl Pins {
                 let Some(found) = found else { return };
                 let mut inner = this.inner.borrow_mut();
                 let tucked = inner.tucked;
+                let held = inner.held;
                 // A workspace or a window that is gone takes its pin with it.
                 let before = inner.pins.len();
                 inner
@@ -559,7 +575,8 @@ impl Pins {
                     if !introducing {
                         pin.introduce_until = None;
                     }
-                    let show = introducing || (!tucked && !on_screen.contains(&pin.workspace));
+                    let show = !held
+                        && (introducing || (!tucked && !on_screen.contains(&pin.workspace)));
                     match f {
                         Found::Workspace(scene) => update(pin, Some(scene), show),
                         Found::Window(window, _) => update_region(pin, &window, show),
