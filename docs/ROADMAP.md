@@ -102,7 +102,7 @@ the items above. Each names the entries it comes from.
 | Topic | Status | Detail |
 |---|---|---|
 | Glass that responds to what is behind it | Researched, not scheduled. Photochromic already covers brightness. The one experiment worth running: a busyness term in the shader (4 extra frost taps, under 0.1 ms a frame) that adds frost and body over a busy backdrop and is zero over a flat one, so every contrast test holds. Stop if it shows no visible legibility win. No per-surface readback, no light/dark flip per surface | [research/adaptive-glass.md](research/adaptive-glass.md) |
-| Display profiles in the process (kanshi's replacement) | Built on `displays` (see In progress) | [research/display-profiles.md](research/display-profiles.md) |
+| Display profiles in the process (kanshi's replacement) | Built 2026-09-26 (`services::displays`); the research is the design record | [research/display-profiles.md](research/display-profiles.md) |
 | Liquid glass optics | Reference for the shader's parameters | [research/liquid-glass.md](research/liquid-glass.md) |
 
 ## Rejected
