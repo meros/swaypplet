@@ -85,6 +85,24 @@ Exit-node state and peer reachability. `tailscaled` is its own daemon, so
 the NetworkManager VPN rows do not see it; the network code only filters
 out the `tailscale0` interface today.
 
+## From the prior-art bank
+
+Candidates from [prior-art/](prior-art/README.md), not yet ranked against
+the items above. Each names the entries it comes from.
+
+| Candidate | Size | Why | Source |
+|---|---|---|---|
+| Tell the apps: publish color-scheme, accent, contrast and reduced motion through the XDG settings portal and gsettings when the mode changes. Today nixos `scaling.nix` pins apps to `prefer-dark`, so in light mode the apps stay dark | S | the most visible gap in light mode | [xdg-portal-appearance](prior-art/theming/xdg-portal-appearance.md) |
+| Urgency as interruption level: low never pops, critical breaks through quiet mode and never times out | S | the freedesktop spec already carries it | [ios-interruption-levels](prior-art/notifications-wm/ios-interruption-levels.md) |
+| Frame gate v2: lateness relative to refresh, per-animation tags, the compositor's render time, the shipped glass settings, a cold first open | S–M | the gate should say who dropped the frame | [motion/README](prior-art/motion/README.md) |
+| Launcher learns (prefix → item), fallback rows, per-row actions, `nucleo` fuzzy matching | S–M each | ranked in the launchers synthesis | [launchers/README](prior-art/launchers/README.md) |
+| Settings rows as launcher results, opening the pane on the row | M | every other platform searches settings | [settings-search](prior-art/theming/settings-search.md) |
+| A solid twin of the glass for Reduce Transparency, high contrast and power saving | M | Apple and Microsoft both keep one | [apple-vibrancy-materials](prior-art/motion/apple-vibrancy-materials.md) |
+| Export the tokens (base16, libadwaita `gtk.css`, Qt palette, ANSI) so terminals and apps follow | M | follows "tell the apps" | [matugen](prior-art/theming/matugen.md), [stylix](prior-art/theming/stylix.md) |
+| Velocity kept when an animation is interrupted (`Reveal` keeps position only) | M | interruptions read as a jolt | [swiftui-spring-animations](prior-art/motion/swiftui-spring-animations.md) |
+| `ext-background-effect-v1` in the swayfx patch: per-card blur regions | L | fixes frost on transparent gaps; KWin, niri, Mutter have it | [ext-background-effect](prior-art/wayland/ext-background-effect.md) |
+| `xdg-activation-v1` tokens from the launcher, pins and notification actions | S | correct focus for what swaypplet raises | [xdg-activation](prior-art/wayland/xdg-activation.md) |
+
 ## Research
 
 | Topic | Status | Detail |

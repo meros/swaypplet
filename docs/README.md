@@ -30,6 +30,12 @@
 | [research/adaptive-glass.md](research/adaptive-glass.md) | Glass that responds to its backdrop, beyond the photochromic term |
 | [research/display-profiles.md](research/display-profiles.md) | Display profiles in the process, replacing kanshi |
 
+## Prior art
+
+| Document | Covers |
+|---|---|
+| [prior-art/README.md](prior-art/README.md) | 332 entries on shells, mobile UI, launchers, Wayland, theming, notifications and motion: what worked, what failed, and what swaypplet takes from it. [INDEX.md](prior-art/INDEX.md) lists every entry |
+
 ## History
 
 | Document | Covers |

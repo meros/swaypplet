@@ -1,0 +1,6364 @@
+[
+ {
+  "name": "Secondary actions on a result (action panel)",
+  "slug": "action-panel",
+  "domain": "launchers",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Quicksilver, LaunchBar, Alfred, Raycast, KRunner",
+  "years": "2003–present",
+  "status": "current",
+  "tags": [
+   "actions",
+   "modifiers",
+   "cmd-k",
+   "tab",
+   "right arrow",
+   "verb-object"
+  ],
+  "relevance": "high",
+  "path": "launchers/action-panel.md"
+ },
+ {
+  "name": "Adaptive input history (query-to-choice learning)",
+  "slug": "adaptive-input-history",
+  "domain": "launchers",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Quicksilver, LaunchBar, Firefox, Chrome, Alfred, Spotlight",
+  "years": "2003–present",
+  "status": "current",
+  "tags": [
+   "ranking",
+   "learning",
+   "abbreviations",
+   "mnemonics",
+   "moz_inputhistory",
+   "prefix"
+  ],
+  "relevance": "high",
+  "path": "launchers/adaptive-input-history.md"
+ },
+ {
+  "name": "Albert",
+  "slug": "albert",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "cross",
+  "vendor": "Manuel Schneider",
+  "years": "2014–present",
+  "status": "current",
+  "tags": [
+   "qt",
+   "c++",
+   "python plugins",
+   "triggers",
+   "fallbacks",
+   "usage ranking"
+  ],
+  "relevance": "medium",
+  "path": "launchers/albert.md"
+ },
+ {
+  "name": "Alfred",
+  "slug": "alfred",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "macOS",
+  "vendor": "Running with Crayons",
+  "years": "2010–present",
+  "status": "current",
+  "tags": [
+   "workflows",
+   "script filter",
+   "universal actions",
+   "file buffer",
+   "fallback searches",
+   "powerpack"
+  ],
+  "relevance": "high",
+  "path": "launchers/alfred.md"
+ },
+ {
+  "name": "anyrun",
+  "slug": "anyrun",
+  "domain": "launchers",
+  "kind": "project",
+  "platform": "Wayland",
+  "vendor": "Kirottu and anyrun-org",
+  "years": "2023–present",
+  "status": "current",
+  "tags": [
+   "rust",
+   "gtk4",
+   "dylib plugins",
+   "abi_stable",
+   "krunner-like"
+  ],
+  "relevance": "medium",
+  "path": "launchers/anyrun.md"
+ },
+ {
+  "name": "Arc command bar",
+  "slug": "arc-command-bar",
+  "domain": "launchers",
+  "kind": "feature",
+  "platform": "cross",
+  "vendor": "The Browser Company",
+  "years": "2022–2025",
+  "status": "discontinued",
+  "tags": [
+   "browser",
+   "command bar",
+   "tabs",
+   "history",
+   "commands",
+   "sunset"
+  ],
+  "relevance": "low",
+  "path": "launchers/arc-command-bar.md"
+ },
+ {
+  "name": "Assistant and AI launchers (Siri, Cortana, Copilot, Raycast AI)",
+  "slug": "assistant-launchers",
+  "domain": "launchers",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Apple, Microsoft, Raycast, others",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "ai",
+   "assistant",
+   "natural language",
+   "llm",
+   "screen context",
+   "failure"
+  ],
+  "relevance": "medium",
+  "path": "launchers/assistant-launchers.md"
+ },
+ {
+  "name": "Browser omnibox and awesomebar",
+  "slug": "browser-omnibox",
+  "domain": "launchers",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Google (Chrome), Mozilla (Firefox)",
+  "years": "2008–present",
+  "status": "current",
+  "tags": [
+   "unified input",
+   "inline autocomplete",
+   "keyword search",
+   "tab to search",
+   "providers"
+  ],
+  "relevance": "high",
+  "path": "launchers/browser-omnibox.md"
+ },
+ {
+  "name": "Butler",
+  "slug": "butler",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "macOS",
+  "vendor": "Many Tricks (Peter Maurer)",
+  "years": "2002–c. 2013",
+  "status": "discontinued",
+  "tags": [
+   "menu bar launcher",
+   "hot keys",
+   "clipboard",
+   "bookmarks",
+   "discontinued"
+  ],
+  "relevance": "low",
+  "path": "launchers/butler.md"
+ },
+ {
+  "name": "Cerebro",
+  "slug": "cerebro",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "cross",
+  "vendor": "Alexandr Subbotin and community",
+  "years": "2016–c. 2021",
+  "status": "failed",
+  "tags": [
+   "electron",
+   "npm plugins",
+   "previews",
+   "abandoned"
+  ],
+  "relevance": "low",
+  "path": "launchers/cerebro.md"
+ },
+ {
+  "name": "ChromeOS launcher and the Everything button",
+  "slug": "chromeos-launcher",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "other",
+  "vendor": "Google",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "launcher key",
+   "bubble launcher",
+   "continue section",
+   "settings search",
+   "dedicated key"
+  ],
+  "relevance": "medium",
+  "path": "launchers/chromeos-launcher.md"
+ },
+ {
+  "name": "Cmd+K palettes in web apps (Superhuman, Linear, Slack, Notion)",
+  "slug": "cmd-k-web-apps",
+  "domain": "launchers",
+  "kind": "pattern",
+  "platform": "web",
+  "vendor": "Superhuman, Linear, Slack, Notion, and others",
+  "years": "2017–present",
+  "status": "current",
+  "tags": [
+   "cmd-k",
+   "command palette",
+   "shortcut training",
+   "context actions"
+  ],
+  "relevance": "medium",
+  "path": "launchers/cmd-k-web-apps.md"
+ },
+ {
+  "name": "The dmenu protocol",
+  "slug": "dmenu-protocol",
+  "domain": "launchers",
+  "kind": "protocol",
+  "platform": "cross",
+  "vendor": "suckless (dmenu), adopted by rofi, wofi, fuzzel, tofi, bemenu, walker",
+  "years": "2006–present",
+  "status": "current",
+  "tags": [
+   "stdin",
+   "stdout",
+   "unix pipe",
+   "adapter",
+   "scripts"
+  ],
+  "relevance": "high",
+  "path": "launchers/dmenu-protocol.md"
+ },
+ {
+  "name": "Everything (voidtools)",
+  "slug": "everything-voidtools",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "Windows",
+  "vendor": "voidtools (David Carpenter)",
+  "years": "2009–present",
+  "status": "current",
+  "tags": [
+   "filename index",
+   "ntfs mft",
+   "usn journal",
+   "instant search",
+   "memory"
+  ],
+  "relevance": "medium",
+  "path": "launchers/everything-voidtools.md"
+ },
+ {
+  "name": "Fallback searches",
+  "slug": "fallback-searches",
+  "domain": "launchers",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Alfred, Albert, PowerToys Command Palette, Chrome keyword search",
+  "years": "2010–present",
+  "status": "current",
+  "tags": [
+   "no results",
+   "web search",
+   "explicit network",
+   "empty state"
+  ],
+  "relevance": "high",
+  "path": "launchers/fallback-searches.md"
+ },
+ {
+  "name": "Firefox frecency",
+  "slug": "firefox-frecency",
+  "domain": "launchers",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Mozilla",
+  "years": "2008–present",
+  "status": "current",
+  "tags": [
+   "ranking",
+   "frecency",
+   "exponential decay",
+   "visit weights",
+   "interactions"
+  ],
+  "relevance": "high",
+  "path": "launchers/firefox-frecency.md"
+ },
+ {
+  "name": "Flow Launcher",
+  "slug": "flow-launcher",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "Windows",
+  "vendor": "Flow Launcher community",
+  "years": "2020–present",
+  "status": "current",
+  "tags": [
+   "wox fork",
+   "plugin store",
+   "json-rpc",
+   "everything integration",
+   "community"
+  ],
+  "relevance": "medium",
+  "path": "launchers/flow-launcher.md"
+ },
+ {
+  "name": "fuzzel",
+  "slug": "fuzzel",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Daniel Eklöf (dnkl)",
+  "years": "2020–present",
+  "status": "current",
+  "tags": [
+   "fast",
+   "fcft",
+   "launch count",
+   "dmenu",
+   "icons"
+  ],
+  "relevance": "medium",
+  "path": "launchers/fuzzel.md"
+ },
+ {
+  "name": "fzf matching algorithm",
+  "slug": "fzf-algorithm",
+  "domain": "launchers",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Junegunn Choi",
+  "years": "2013–present",
+  "status": "current",
+  "tags": [
+   "fuzzy matching",
+   "smith-waterman",
+   "scoring",
+   "bonuses",
+   "greedy"
+  ],
+  "relevance": "high",
+  "path": "launchers/fzf-algorithm.md"
+ },
+ {
+  "name": "fzy matching algorithm",
+  "slug": "fzy-algorithm",
+  "domain": "launchers",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "John Hawthorn",
+  "years": "2014–present",
+  "status": "current",
+  "tags": [
+   "fuzzy matching",
+   "dynamic programming",
+   "optimal alignment",
+   "scoring"
+  ],
+  "relevance": "medium",
+  "path": "launchers/fzy-algorithm.md"
+ },
+ {
+  "name": "GNOME Do",
+  "slug": "gnome-do",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "GNOME",
+  "vendor": "David Siegel and contributors",
+  "years": "2007–c. 2013",
+  "status": "failed",
+  "tags": [
+   "mono",
+   "quicksilver clone",
+   "docky",
+   "abandoned"
+  ],
+  "relevance": "low",
+  "path": "launchers/gnome-do.md"
+ },
+ {
+  "name": "GNOME Shell search providers",
+  "slug": "gnome-shell-search-providers",
+  "domain": "launchers",
+  "kind": "protocol",
+  "platform": "GNOME",
+  "vendor": "GNOME",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "dbus",
+   "SearchProvider2",
+   "overview",
+   "per-app results",
+   "subsearch"
+  ],
+  "relevance": "high",
+  "path": "launchers/gnome-shell-search-providers.md"
+ },
+ {
+  "name": "Keypirinha",
+  "slug": "keypirinha",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "Windows",
+  "vendor": "Jean-Charles Lefebvre",
+  "years": "2016–c. 2021",
+  "status": "niche",
+  "tags": [
+   "portable",
+   "embedded python",
+   "catalog",
+   "speed",
+   "dormant"
+  ],
+  "relevance": "low",
+  "path": "launchers/keypirinha.md"
+ },
+ {
+  "name": "KRunner and Milou",
+  "slug": "krunner-milou",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "KDE",
+  "vendor": "KDE",
+  "years": "2008–present",
+  "status": "current",
+  "tags": [
+   "runners",
+   "threaded match",
+   "relevance",
+   "dbus runners",
+   "informational match"
+  ],
+  "relevance": "high",
+  "path": "launchers/krunner-milou.md"
+ },
+ {
+  "name": "Kupfer",
+  "slug": "kupfer",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "GNOME",
+  "vendor": "Ulrik Sverdrup, later Karol Będkowski",
+  "years": "2007–present",
+  "status": "niche",
+  "tags": [
+   "quicksilver-style",
+   "object-action-object",
+   "python",
+   "plugins"
+  ],
+  "relevance": "low",
+  "path": "launchers/kupfer.md"
+ },
+ {
+  "name": "Launcher latency budgets",
+  "slug": "latency-budgets",
+  "domain": "launchers",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Nielsen (1993), Doherty and Thadani (1982), tofi, Everything",
+  "years": "1982–present",
+  "status": "current",
+  "tags": [
+   "latency",
+   "100 ms",
+   "frame budget",
+   "debounce",
+   "first frame",
+   "perceived speed"
+  ],
+  "relevance": "high",
+  "path": "launchers/latency-budgets.md"
+ },
+ {
+  "name": "LaunchBar",
+  "slug": "launchbar",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "macOS",
+  "vendor": "Objective Development",
+  "years": "1995–present (NeXTSTEP), 2001– (Mac OS X)",
+  "status": "niche",
+  "tags": [
+   "abbreviation learning",
+   "instant send",
+   "browse",
+   "sub-search"
+  ],
+  "relevance": "high",
+  "path": "launchers/launchbar.md"
+ },
+ {
+  "name": "Listary",
+  "slug": "listary",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "Windows",
+  "vendor": "Bopsoft",
+  "years": "2010–present",
+  "status": "current",
+  "tags": [
+   "type-anywhere",
+   "file dialogs",
+   "quick switch",
+   "context"
+  ],
+  "relevance": "medium",
+  "path": "launchers/listary.md"
+ },
+ {
+  "name": "macOS Help menu search",
+  "slug": "macos-help-menu-search",
+  "domain": "launchers",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2007–present",
+  "status": "current",
+  "tags": [
+   "menu search",
+   "discoverability",
+   "shortcut teaching",
+   "cmd-shift-/"
+  ],
+  "relevance": "medium",
+  "path": "launchers/macos-help-menu-search.md"
+ },
+ {
+  "name": "nucleo (Rust fuzzy matcher)",
+  "slug": "nucleo-matcher",
+  "domain": "launchers",
+  "kind": "project",
+  "platform": "cross",
+  "vendor": "Pascal Kuthe (Helix editor)",
+  "years": "2023–present",
+  "status": "current",
+  "tags": [
+   "rust",
+   "fuzzy matching",
+   "smith-waterman",
+   "unicode",
+   "parallel",
+   "crate"
+  ],
+  "relevance": "high",
+  "path": "launchers/nucleo-matcher.md"
+ },
+ {
+  "name": "Launcher plugin security models",
+  "slug": "plugin-security-models",
+  "domain": "launchers",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Raycast, PowerToys, anyrun, Alfred, KRunner, GNOME, elephant",
+  "years": "2003–present",
+  "status": "current",
+  "tags": [
+   "plugins",
+   "sandbox",
+   "out of process",
+   "review",
+   "supply chain"
+  ],
+  "relevance": "high",
+  "path": "launchers/plugin-security-models.md"
+ },
+ {
+  "name": "PowerToys Command Palette",
+  "slug": "powertoys-command-palette",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "Windows",
+  "vendor": "Microsoft (open source)",
+  "years": "2025–present",
+  "status": "current",
+  "tags": [
+   "out-of-process extensions",
+   "winget",
+   "home pins",
+   "dock",
+   "compact mode",
+   "fallback"
+  ],
+  "relevance": "high",
+  "path": "launchers/powertoys-command-palette.md"
+ },
+ {
+  "name": "PowerToys Run",
+  "slug": "powertoys-run",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "Windows",
+  "vendor": "Microsoft (open source)",
+  "years": "2020–present (superseded)",
+  "status": "discontinued",
+  "tags": [
+   "alt+space",
+   "action keywords",
+   "in-process plugins",
+   "dotnet"
+  ],
+  "relevance": "medium",
+  "path": "launchers/powertoys-run.md"
+ },
+ {
+  "name": "Quicksilver",
+  "slug": "quicksilver",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "macOS",
+  "vendor": "Blacktree (Nicholas Jitkoff), later open source",
+  "years": "2003–present",
+  "status": "niche",
+  "tags": [
+   "verb-object",
+   "three panes",
+   "catalog",
+   "mnemonics",
+   "plugins"
+  ],
+  "relevance": "medium",
+  "path": "launchers/quicksilver.md"
+ },
+ {
+  "name": "Raycast",
+  "slug": "raycast",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "cross",
+  "vendor": "Raycast Technologies",
+  "years": "2020–present",
+  "status": "current",
+  "tags": [
+   "extension store",
+   "react",
+   "action panel",
+   "ai",
+   "window management",
+   "snippets",
+   "clipboard"
+  ],
+  "relevance": "high",
+  "path": "launchers/raycast.md"
+ },
+ {
+  "name": "rofi",
+  "slug": "rofi",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "cross",
+  "vendor": "Dave Davenport (davatorium) and contributors",
+  "years": "2014–present",
+  "status": "current",
+  "tags": [
+   "modes",
+   "combi",
+   "script mode",
+   "dmenu",
+   "x11",
+   "wayland",
+   "theming"
+  ],
+  "relevance": "high",
+  "path": "launchers/rofi.md"
+ },
+ {
+  "name": "Sherlock",
+  "slug": "sherlock",
+  "domain": "launchers",
+  "kind": "project",
+  "platform": "Wayland",
+  "vendor": "Skxxtz",
+  "years": "2024–present",
+  "status": "current",
+  "tags": [
+   "rust",
+   "gtk4",
+   "aliases",
+   "async widgets",
+   "fallback.json"
+  ],
+  "relevance": "medium",
+  "path": "launchers/sherlock.md"
+ },
+ {
+  "name": "Spotlight (macOS)",
+  "slug": "spotlight",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2005–present",
+  "status": "current",
+  "tags": [
+   "system search",
+   "metadata index",
+   "top hit",
+   "actions",
+   "quick keys",
+   "clipboard history"
+  ],
+  "relevance": "high",
+  "path": "launchers/spotlight.md"
+ },
+ {
+  "name": "Synapse (and Zeitgeist)",
+  "slug": "synapse-zeitgeist",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "GNOME",
+  "vendor": "Synapse project; Zeitgeist project",
+  "years": "2010–c. 2014",
+  "status": "failed",
+  "tags": [
+   "vala",
+   "activity log",
+   "zeitgeist",
+   "relevance",
+   "abandoned"
+  ],
+  "relevance": "medium",
+  "path": "launchers/synapse-zeitgeist.md"
+ },
+ {
+  "name": "tofi",
+  "slug": "tofi",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Phil Jones (philj56)",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "latency",
+   "startup",
+   "harfbuzz",
+   "dmenu",
+   "benchmark"
+  ],
+  "relevance": "medium",
+  "path": "launchers/tofi.md"
+ },
+ {
+  "name": "Ulauncher",
+  "slug": "ulauncher",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "GNOME",
+  "vendor": "Ulauncher project",
+  "years": "2015–present",
+  "status": "current",
+  "tags": [
+   "python",
+   "gtk",
+   "extensions",
+   "websocket",
+   "long beta"
+  ],
+  "relevance": "low",
+  "path": "launchers/ulauncher.md"
+ },
+ {
+  "name": "Unity HUD",
+  "slug": "unity-hud",
+  "domain": "launchers",
+  "kind": "feature",
+  "platform": "other",
+  "vendor": "Canonical",
+  "years": "2012–2017",
+  "status": "failed",
+  "tags": [
+   "menu search",
+   "dbusmenu",
+   "global menu",
+   "intent",
+   "ubuntu"
+  ],
+  "relevance": "medium",
+  "path": "launchers/unity-hud.md"
+ },
+ {
+  "name": "Unity Dash shopping lens",
+  "slug": "unity-shopping-lens",
+  "domain": "launchers",
+  "kind": "feature",
+  "platform": "other",
+  "vendor": "Canonical",
+  "years": "2012–2014",
+  "status": "failed",
+  "tags": [
+   "privacy",
+   "amazon",
+   "online results",
+   "trust",
+   "default-on"
+  ],
+  "relevance": "medium",
+  "path": "launchers/unity-shopping-lens.md"
+ },
+ {
+  "name": "Vicinae",
+  "slug": "vicinae",
+  "domain": "launchers",
+  "kind": "project",
+  "platform": "cross",
+  "vendor": "vicinaehq",
+  "years": "2025–present",
+  "status": "current",
+  "tags": [
+   "c++",
+   "qt",
+   "raycast compatible",
+   "extensions",
+   "dmenu",
+   "linux"
+  ],
+  "relevance": "high",
+  "path": "launchers/vicinae.md"
+ },
+ {
+  "name": "Sublime Text and VS Code command palettes",
+  "slug": "vscode-sublime-command-palette",
+  "domain": "launchers",
+  "kind": "feature",
+  "platform": "cross",
+  "vendor": "Sublime HQ; Microsoft",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "command palette",
+   "goto anything",
+   "quick open prefixes",
+   "keybinding hints",
+   "recently used"
+  ],
+  "relevance": "high",
+  "path": "launchers/vscode-sublime-command-palette.md"
+ },
+ {
+  "name": "walker and elephant",
+  "slug": "walker-elephant",
+  "domain": "launchers",
+  "kind": "project",
+  "platform": "Wayland",
+  "vendor": "Andrej Benz (abenz1267)",
+  "years": "2023–present",
+  "status": "current",
+  "tags": [
+   "gtk4",
+   "rust",
+   "daemon",
+   "protobuf",
+   "unix socket",
+   "providers"
+  ],
+  "relevance": "high",
+  "path": "launchers/walker-elephant.md"
+ },
+ {
+  "name": "Windows Start search (Cortana, Bing, Copilot)",
+  "slug": "windows-start-search",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2007–present",
+  "status": "current",
+  "tags": [
+   "start menu",
+   "web results",
+   "bing",
+   "cortana",
+   "copilot key",
+   "failure"
+  ],
+  "relevance": "high",
+  "path": "launchers/windows-start-search.md"
+ },
+ {
+  "name": "wofi",
+  "slug": "wofi",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Scoopta",
+  "years": "2019–present",
+  "status": "niche",
+  "tags": [
+   "gtk3",
+   "layer-shell",
+   "rofi-like",
+   "dmenu",
+   "css"
+  ],
+  "relevance": "low",
+  "path": "launchers/wofi.md"
+ },
+ {
+  "name": "Wox",
+  "slug": "wox",
+  "domain": "launchers",
+  "kind": "product",
+  "platform": "Windows",
+  "vendor": "Wox project (qianlifeng)",
+  "years": "2013–present",
+  "status": "niche",
+  "tags": [
+   "alfred clone",
+   "python plugins",
+   "stalled",
+   "fork",
+   "rewrite"
+  ],
+  "relevance": "low",
+  "path": "launchers/wox.md"
+ },
+ {
+  "name": "Always-on displays (Nokia Glance Screen to AOD)",
+  "slug": "always-on-glance-screen",
+  "domain": "mobile",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Nokia, Motorola, Samsung, Google, Apple",
+  "years": "2012–present",
+  "status": "current",
+  "tags": [
+   "ambient",
+   "low-power",
+   "clock",
+   "notifications",
+   "glanceable",
+   "oled"
+  ],
+  "relevance": "medium",
+  "path": "mobile/always-on-glance-screen.md"
+ },
+ {
+  "name": "Android 12 Internet tile",
+  "slug": "android-12-internet-tile",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2021–present",
+  "status": "failed",
+  "tags": [
+   "quick-settings",
+   "toggles",
+   "consolidation",
+   "regression",
+   "user-backlash"
+  ],
+  "relevance": "medium",
+  "path": "mobile/android-12-internet-tile.md"
+ },
+ {
+  "name": "Android Automotive OS",
+  "slug": "android-automotive",
+  "domain": "mobile",
+  "kind": "product",
+  "platform": "Android",
+  "vendor": "Google and car makers",
+  "years": "2017–present",
+  "status": "current",
+  "tags": [
+   "car",
+   "templates",
+   "safety",
+   "restricted-ui",
+   "oem-theming"
+  ],
+  "relevance": "low",
+  "path": "mobile/android-automotive.md"
+ },
+ {
+  "name": "Android conversations and bubbles",
+  "slug": "android-conversations-bubbles",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2020–present",
+  "status": "current",
+  "tags": [
+   "notifications",
+   "people",
+   "priority",
+   "floating",
+   "sections"
+  ],
+  "relevance": "medium",
+  "path": "mobile/android-conversations-bubbles.md"
+ },
+ {
+  "name": "Android Live Updates (ProgressStyle and status-bar chips)",
+  "slug": "android-live-updates",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2025–present",
+  "status": "current",
+  "tags": [
+   "ongoing-activity",
+   "status-bar",
+   "chip",
+   "progress",
+   "notifications"
+  ],
+  "relevance": "high",
+  "path": "mobile/android-live-updates.md"
+ },
+ {
+  "name": "Android notification channels",
+  "slug": "android-notification-channels",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2017–present",
+  "status": "current",
+  "tags": [
+   "notifications",
+   "per-category-control",
+   "importance",
+   "user-control"
+  ],
+  "relevance": "high",
+  "path": "mobile/android-notification-channels.md"
+ },
+ {
+  "name": "Android Quick Settings",
+  "slug": "android-quick-settings",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2012–present",
+  "status": "current",
+  "tags": [
+   "quick-settings",
+   "tiles",
+   "toggles",
+   "extensibility",
+   "two-stage-pull"
+  ],
+  "relevance": "high",
+  "path": "mobile/android-quick-settings.md"
+ },
+ {
+  "name": "Android Slices",
+  "slug": "android-slices",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2018–2021",
+  "status": "failed",
+  "tags": [
+   "templates",
+   "app-content-in-system",
+   "search",
+   "deprecated"
+  ],
+  "relevance": "low",
+  "path": "mobile/android-slices.md"
+ },
+ {
+  "name": "BlackBerry Hub (BB10)",
+  "slug": "bb10-hub",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "other",
+  "vendor": "BlackBerry",
+  "years": "2013–2017",
+  "status": "failed",
+  "tags": [
+   "unified-inbox",
+   "notifications",
+   "messages",
+   "flow",
+   "gestures"
+  ],
+  "relevance": "medium",
+  "path": "mobile/bb10-hub.md"
+ },
+ {
+  "name": "BlackBerry 10 Peek and Flow",
+  "slug": "bb10-peek",
+  "domain": "mobile",
+  "kind": "pattern",
+  "platform": "other",
+  "vendor": "BlackBerry",
+  "years": "2013–2017",
+  "status": "failed",
+  "tags": [
+   "gesture",
+   "peek",
+   "preview",
+   "cancelable",
+   "flow",
+   "no-buttons"
+  ],
+  "relevance": "high",
+  "path": "mobile/bb10-peek.md"
+ },
+ {
+  "name": "CarPlay Dashboard",
+  "slug": "carplay-dashboard",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2019–present",
+  "status": "current",
+  "tags": [
+   "glanceable",
+   "split-view",
+   "driver-distraction",
+   "fixed-layout",
+   "priority"
+  ],
+  "relevance": "medium",
+  "path": "mobile/carplay-dashboard.md"
+ },
+ {
+  "name": "Dynamic Island",
+  "slug": "dynamic-island",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "status",
+   "morph",
+   "shared-element",
+   "ongoing-activity",
+   "cutout",
+   "pill"
+  ],
+  "relevance": "high",
+  "path": "mobile/dynamic-island.md"
+ },
+ {
+  "name": "Firefox OS",
+  "slug": "firefox-os",
+  "domain": "mobile",
+  "kind": "product",
+  "platform": "other",
+  "vendor": "Mozilla",
+  "years": "2013–2016",
+  "status": "failed",
+  "tags": [
+   "web-platform",
+   "low-end",
+   "ecosystem",
+   "html-apps"
+  ],
+  "relevance": "low",
+  "path": "mobile/firefox-os.md"
+ },
+ {
+  "name": "Google Now cards",
+  "slug": "google-now-cards",
+  "domain": "mobile",
+  "kind": "product",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2012–2016",
+  "status": "discontinued",
+  "tags": [
+   "proactive",
+   "cards",
+   "context",
+   "prediction",
+   "assistant"
+  ],
+  "relevance": "medium",
+  "path": "mobile/google-now-cards.md"
+ },
+ {
+  "name": "HarmonyOS service widgets and atomic services",
+  "slug": "harmonyos-service-cards",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "other",
+  "vendor": "Huawei",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "widgets",
+   "swipe-up-icon",
+   "install-free",
+   "cards",
+   "service-center"
+  ],
+  "relevance": "medium",
+  "path": "mobile/harmonyos-service-cards.md"
+ },
+ {
+  "name": "iOS App Library",
+  "slug": "ios-app-library",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2020–present",
+  "status": "current",
+  "tags": [
+   "launcher",
+   "automatic-organization",
+   "categories",
+   "search",
+   "suggestions"
+  ],
+  "relevance": "medium",
+  "path": "mobile/ios-app-library.md"
+ },
+ {
+  "name": "iOS Control Center",
+  "slug": "ios-control-center",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2013–present",
+  "status": "current",
+  "tags": [
+   "quick-settings",
+   "toggles",
+   "customization",
+   "controls-api",
+   "pages",
+   "sliders"
+  ],
+  "relevance": "high",
+  "path": "mobile/ios-control-center.md"
+ },
+ {
+  "name": "iOS Focus modes",
+  "slug": "ios-focus-modes",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "do-not-disturb",
+   "context",
+   "automation",
+   "notifications",
+   "home-screen",
+   "filters"
+  ],
+  "relevance": "high",
+  "path": "mobile/ios-focus-modes.md"
+ },
+ {
+  "name": "Interruption levels and Notification Summary",
+  "slug": "ios-interruption-levels-summary",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "notifications",
+   "priority",
+   "batching",
+   "digest",
+   "time-sensitive"
+  ],
+  "relevance": "high",
+  "path": "mobile/ios-interruption-levels-summary.md"
+ },
+ {
+  "name": "iOS 16 Lock Screen customization",
+  "slug": "ios-lock-screen-customization",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "lock-screen",
+   "wallpaper",
+   "depth",
+   "typography",
+   "widgets",
+   "personalization"
+  ],
+  "relevance": "medium",
+  "path": "mobile/ios-lock-screen-customization.md"
+ },
+ {
+  "name": "iOS home-screen widgets and Smart Stack",
+  "slug": "ios-widgets-smart-stack",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2020–present",
+  "status": "current",
+  "tags": [
+   "widgets",
+   "glanceable",
+   "relevance",
+   "timeline",
+   "stack"
+  ],
+  "relevance": "medium",
+  "path": "mobile/ios-widgets-smart-stack.md"
+ },
+ {
+  "name": "iPadOS Stage Manager and iPadOS 26 windowing",
+  "slug": "ipados-stage-manager",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "windowing",
+   "window-sets",
+   "workspaces",
+   "recents",
+   "touch-to-desktop"
+  ],
+  "relevance": "medium",
+  "path": "mobile/ipados-stage-manager.md"
+ },
+ {
+  "name": "Kindle and e-ink UI constraints",
+  "slug": "kindle-eink-refresh",
+  "domain": "mobile",
+  "kind": "pattern",
+  "platform": "other",
+  "vendor": "Amazon, E Ink",
+  "years": "2007–present",
+  "status": "current",
+  "tags": [
+   "e-ink",
+   "refresh",
+   "ghosting",
+   "stillness",
+   "low-power",
+   "cadence"
+  ],
+  "relevance": "low",
+  "path": "mobile/kindle-eink-refresh.md"
+ },
+ {
+  "name": "Liquid Glass (iOS 26 and siblings)",
+  "slug": "liquid-glass-ios26",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2025–present",
+  "status": "current",
+  "tags": [
+   "glass",
+   "material",
+   "translucency",
+   "lensing",
+   "legibility",
+   "accessibility",
+   "design-language"
+  ],
+  "relevance": "high",
+  "path": "mobile/liquid-glass-ios26.md"
+ },
+ {
+  "name": "Live Activities",
+  "slug": "live-activities",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "ongoing-activity",
+   "lock-screen",
+   "push-updates",
+   "budget",
+   "stand-down"
+  ],
+  "relevance": "high",
+  "path": "mobile/live-activities.md"
+ },
+ {
+  "name": "Material 3 Expressive",
+  "slug": "material-3-expressive",
+  "domain": "mobile",
+  "kind": "pattern",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2025–present",
+  "status": "current",
+  "tags": [
+   "motion",
+   "springs",
+   "shape",
+   "emphasis",
+   "research",
+   "design-language"
+  ],
+  "relevance": "medium",
+  "path": "mobile/material-3-expressive.md"
+ },
+ {
+  "name": "Material You dynamic color (monet)",
+  "slug": "material-you-dynamic-color",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "wallpaper",
+   "palette",
+   "theming",
+   "tonal-palette",
+   "hct",
+   "color-extraction"
+  ],
+  "relevance": "high",
+  "path": "mobile/material-you-dynamic-color.md"
+ },
+ {
+  "name": "Nokia N9 Swipe UI (MeeGo Harmattan)",
+  "slug": "meego-n9-swipe",
+  "domain": "mobile",
+  "kind": "product",
+  "platform": "other",
+  "vendor": "Nokia",
+  "years": "2011–2012",
+  "status": "failed",
+  "tags": [
+   "gestures",
+   "edge-swipe",
+   "home-views",
+   "no-buttons",
+   "linux",
+   "qt"
+  ],
+  "relevance": "medium",
+  "path": "mobile/meego-n9-swipe.md"
+ },
+ {
+  "name": "Metro design language (panorama and pivot)",
+  "slug": "metro-design-language",
+  "domain": "mobile",
+  "kind": "pattern",
+  "platform": "other",
+  "vendor": "Microsoft",
+  "years": "2006–2015",
+  "status": "discontinued",
+  "tags": [
+   "typography",
+   "flat",
+   "content-before-chrome",
+   "panorama",
+   "pivot",
+   "motion"
+  ],
+  "relevance": "medium",
+  "path": "mobile/metro-design-language.md"
+ },
+ {
+  "name": "Predictive Back",
+  "slug": "predictive-back",
+  "domain": "mobile",
+  "kind": "pattern",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "gesture",
+   "preview",
+   "cancelable",
+   "motion",
+   "navigation",
+   "scrubbing"
+  ],
+  "relevance": "medium",
+  "path": "mobile/predictive-back.md"
+ },
+ {
+  "name": "Sailfish OS covers and pulley menus",
+  "slug": "sailfish-covers-pulley",
+  "domain": "mobile",
+  "kind": "product",
+  "platform": "other",
+  "vendor": "Jolla",
+  "years": "2013–present",
+  "status": "niche",
+  "tags": [
+   "gestures",
+   "active-covers",
+   "cover-actions",
+   "pulley-menu",
+   "remorse-timer",
+   "linux",
+   "qt"
+  ],
+  "relevance": "medium",
+  "path": "mobile/sailfish-covers-pulley.md"
+ },
+ {
+  "name": "StandBy",
+  "slug": "standby-mode",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2023–present",
+  "status": "current",
+  "tags": [
+   "ambient",
+   "idle",
+   "clock",
+   "night-mode",
+   "red-shift",
+   "glanceable-at-distance"
+  ],
+  "relevance": "medium",
+  "path": "mobile/standby-mode.md"
+ },
+ {
+  "name": "tvOS focus engine and parallax",
+  "slug": "tvos-focus-engine",
+  "domain": "mobile",
+  "kind": "pattern",
+  "platform": "other",
+  "vendor": "Apple",
+  "years": "2015–present",
+  "status": "current",
+  "tags": [
+   "focus",
+   "keyboard-navigation",
+   "parallax",
+   "10-foot-ui",
+   "depth"
+  ],
+  "relevance": "medium",
+  "path": "mobile/tvos-focus-engine.md"
+ },
+ {
+  "name": "Ubuntu Touch edge gestures (Unity 8, Lomiri)",
+  "slug": "ubuntu-touch-edges",
+  "domain": "mobile",
+  "kind": "product",
+  "platform": "other",
+  "vendor": "Canonical, later UBports",
+  "years": "2013–present",
+  "status": "niche",
+  "tags": [
+   "gestures",
+   "edges",
+   "launcher",
+   "convergence",
+   "linux",
+   "qml"
+  ],
+  "relevance": "medium",
+  "path": "mobile/ubuntu-touch-edges.md"
+ },
+ {
+  "name": "Ubuntu Touch scopes",
+  "slug": "ubuntu-touch-scopes",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "other",
+  "vendor": "Canonical",
+  "years": "2013–2018",
+  "status": "failed",
+  "tags": [
+   "aggregation",
+   "content-first",
+   "search",
+   "home-screen"
+  ],
+  "relevance": "low",
+  "path": "mobile/ubuntu-touch-scopes.md"
+ },
+ {
+  "name": "visionOS glass material and ornaments",
+  "slug": "visionos-glass-ornaments",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "other",
+  "vendor": "Apple",
+  "years": "2023–present",
+  "status": "current",
+  "tags": [
+   "glass",
+   "vibrancy",
+   "spatial",
+   "ornaments",
+   "hierarchy",
+   "legibility"
+  ],
+  "relevance": "high",
+  "path": "mobile/visionos-glass-ornaments.md"
+ },
+ {
+  "name": "watchOS complications",
+  "slug": "watchos-complications",
+  "domain": "mobile",
+  "kind": "pattern",
+  "platform": "other",
+  "vendor": "Apple",
+  "years": "2015–present",
+  "status": "current",
+  "tags": [
+   "glanceable",
+   "fixed-slots",
+   "families",
+   "budget",
+   "watch-face"
+  ],
+  "relevance": "medium",
+  "path": "mobile/watchos-complications.md"
+ },
+ {
+  "name": "watchOS Smart Stack",
+  "slug": "watchos-smart-stack",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "other",
+  "vendor": "Apple",
+  "years": "2023–present",
+  "status": "current",
+  "tags": [
+   "widgets",
+   "relevance",
+   "glanceable",
+   "wrist",
+   "context"
+  ],
+  "relevance": "medium",
+  "path": "mobile/watchos-smart-stack.md"
+ },
+ {
+  "name": "Palm webOS cards",
+  "slug": "webos-cards",
+  "domain": "mobile",
+  "kind": "pattern",
+  "platform": "other",
+  "vendor": "Palm, later HP and LG",
+  "years": "2009–2012 (phones); LG TVs since 2014",
+  "status": "discontinued",
+  "tags": [
+   "multitasking",
+   "cards",
+   "gestures",
+   "stacks",
+   "spatial-model",
+   "switcher"
+  ],
+  "relevance": "high",
+  "path": "mobile/webos-cards.md"
+ },
+ {
+  "name": "webOS Just Type",
+  "slug": "webos-just-type",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "other",
+  "vendor": "Palm, HP",
+  "years": "2009–2012",
+  "status": "discontinued",
+  "tags": [
+   "launcher",
+   "search",
+   "actions",
+   "type-to-act",
+   "extensible"
+  ],
+  "relevance": "high",
+  "path": "mobile/webos-just-type.md"
+ },
+ {
+  "name": "webOS notification bar",
+  "slug": "webos-notifications",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "other",
+  "vendor": "Palm, HP",
+  "years": "2009–2012",
+  "status": "discontinued",
+  "tags": [
+   "notifications",
+   "non-modal",
+   "ambient",
+   "stack",
+   "dismiss-gesture"
+  ],
+  "relevance": "medium",
+  "path": "mobile/webos-notifications.md"
+ },
+ {
+  "name": "Windows Phone Live Tiles",
+  "slug": "windows-phone-live-tiles",
+  "domain": "mobile",
+  "kind": "feature",
+  "platform": "other",
+  "vendor": "Microsoft",
+  "years": "2010–2021",
+  "status": "failed",
+  "tags": [
+   "tiles",
+   "glanceable",
+   "animation",
+   "start-screen",
+   "ambient-motion"
+  ],
+  "relevance": "high",
+  "path": "mobile/windows-phone-live-tiles.md"
+ },
+ {
+  "name": "Android animator duration scale",
+  "slug": "android-animator-duration-scale",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "animation-scale",
+   "developer-options",
+   "accessibility",
+   "remove-animations",
+   "debugging"
+  ],
+  "relevance": "high",
+  "path": "motion/android-animator-duration-scale.md"
+ },
+ {
+  "name": "Android Choreographer and RenderThread",
+  "slug": "android-choreographer-renderthread",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2012–present",
+  "status": "current",
+  "tags": [
+   "vsync",
+   "frame-clock",
+   "render-thread",
+   "project-butter",
+   "display-list"
+  ],
+  "relevance": "high",
+  "path": "motion/android-choreographer-renderthread.md"
+ },
+ {
+  "name": "Android Frame Pacing library (Swappy)",
+  "slug": "android-frame-pacing-swappy",
+  "domain": "motion",
+  "kind": "project",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2019–present",
+  "status": "current",
+  "tags": [
+   "frame-pacing",
+   "presentation-time",
+   "buffer-stuffing",
+   "swap-interval"
+  ],
+  "relevance": "medium",
+  "path": "motion/android-frame-pacing-swappy.md"
+ },
+ {
+  "name": "Android FrameTimeline",
+  "slug": "android-frametimeline",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "perfetto",
+   "jank-attribution",
+   "expected-vs-actual",
+   "surfaceflinger",
+   "tracing"
+  ],
+  "relevance": "high",
+  "path": "motion/android-frametimeline.md"
+ },
+ {
+  "name": "JankStats",
+  "slug": "android-jankstats",
+  "domain": "motion",
+  "kind": "project",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "jank",
+   "frame-metrics",
+   "heuristics",
+   "state-annotation",
+   "production-telemetry"
+  ],
+  "relevance": "high",
+  "path": "motion/android-jankstats.md"
+ },
+ {
+  "name": "Jetpack Macrobenchmark",
+  "slug": "android-macrobenchmark",
+  "domain": "motion",
+  "kind": "project",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "benchmark",
+   "ci",
+   "frame-timing",
+   "percentiles",
+   "regression-gate"
+  ],
+  "relevance": "high",
+  "path": "motion/android-macrobenchmark.md"
+ },
+ {
+  "name": "Apple materials and vibrancy",
+  "slug": "apple-vibrancy-materials",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2013–present",
+  "status": "current",
+  "tags": [
+   "blur",
+   "vibrancy",
+   "materials",
+   "reduce-transparency",
+   "liquid-glass",
+   "legibility"
+  ],
+  "relevance": "high",
+  "path": "motion/apple-vibrancy-materials.md"
+ },
+ {
+  "name": "Battery-aware animation (Low Power Mode, Battery Saver)",
+  "slug": "battery-aware-animation",
+  "domain": "motion",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Apple, Microsoft, Google",
+  "years": "2015–present",
+  "status": "current",
+  "tags": [
+   "power",
+   "low-power-mode",
+   "battery-saver",
+   "transparency",
+   "fallback",
+   "refresh-cap"
+  ],
+  "relevance": "high",
+  "path": "motion/battery-aware-animation.md"
+ },
+ {
+  "name": "\"Animation: from cartoons to the user interface\"",
+  "slug": "chang-ungar-cartoon-animation",
+  "domain": "motion",
+  "kind": "pattern",
+  "platform": "other",
+  "vendor": "Bay-Wei Chang and David Ungar (Sun, Self project)",
+  "years": "1993",
+  "status": "research",
+  "tags": [
+   "animation-principles",
+   "solidity",
+   "exaggeration",
+   "reinforcement",
+   "self"
+  ],
+  "relevance": "medium",
+  "path": "motion/chang-ungar-cartoon-animation.md"
+ },
+ {
+  "name": "Chrome compositor thread and compositor-only properties",
+  "slug": "chrome-compositor-thread",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "web",
+  "vendor": "Google",
+  "years": "2012–present",
+  "status": "current",
+  "tags": [
+   "compositor",
+   "layers",
+   "transform",
+   "opacity",
+   "off-main-thread",
+   "will-change"
+  ],
+  "relevance": "high",
+  "path": "motion/chrome-compositor-thread.md"
+ },
+ {
+  "name": "Chromium perf bots, dashboard and Pinpoint",
+  "slug": "chromium-perf-dashboard-pinpoint",
+  "domain": "motion",
+  "kind": "project",
+  "platform": "cross",
+  "vendor": "Google",
+  "years": "2012–present",
+  "status": "current",
+  "tags": [
+   "ci",
+   "perf-regression",
+   "bisect",
+   "anomaly-detection",
+   "sheriff"
+  ],
+  "relevance": "medium",
+  "path": "motion/chromium-perf-dashboard-pinpoint.md"
+ },
+ {
+  "name": "Compiz and Beryl",
+  "slug": "compiz-effects",
+  "domain": "motion",
+  "kind": "product",
+  "platform": "other",
+  "vendor": "Novell, Beryl community, Canonical",
+  "years": "2006–2017",
+  "status": "discontinued",
+  "tags": [
+   "x11",
+   "compositor",
+   "wobbly-windows",
+   "cube",
+   "plugins",
+   "effects"
+  ],
+  "relevance": "medium",
+  "path": "motion/compiz-effects.md"
+ },
+ {
+  "name": "Core Animation and the render server",
+  "slug": "core-animation-render-server",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2007–present",
+  "status": "current",
+  "tags": [
+   "compositor",
+   "render-server",
+   "implicit-animation",
+   "layer-tree",
+   "off-main-thread"
+  ],
+  "relevance": "high",
+  "path": "motion/core-animation-render-server.md"
+ },
+ {
+  "name": "CSS linear() easing",
+  "slug": "css-linear-easing",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "web",
+  "vendor": "W3C CSS WG (Jake Archibald and others)",
+  "years": "2023–present",
+  "status": "current",
+  "tags": [
+   "css",
+   "easing",
+   "spring-approximation",
+   "piecewise-linear"
+  ],
+  "relevance": "medium",
+  "path": "motion/css-linear-easing.md"
+ },
+ {
+  "name": "Designing Fluid Interfaces (WWDC18)",
+  "slug": "designing-fluid-interfaces",
+  "domain": "motion",
+  "kind": "pattern",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2018",
+  "status": "current",
+  "tags": [
+   "interruptible",
+   "velocity-handoff",
+   "momentum-projection",
+   "gesture",
+   "spring",
+   "UIViewPropertyAnimator"
+  ],
+  "relevance": "high",
+  "path": "motion/designing-fluid-interfaces.md"
+ },
+ {
+  "name": "Doherty threshold (400 ms)",
+  "slug": "doherty-threshold",
+  "domain": "motion",
+  "kind": "pattern",
+  "platform": "other",
+  "vendor": "IBM (Doherty and Thadani)",
+  "years": "1982",
+  "status": "research",
+  "tags": [
+   "response-time",
+   "productivity",
+   "perception",
+   "400ms"
+  ],
+  "relevance": "medium",
+  "path": "motion/doherty-threshold.md"
+ },
+ {
+  "name": "Dual Kawase / dual filtering blur",
+  "slug": "dual-kawase-blur",
+  "domain": "motion",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Masaki Kawase; Marius Bjørge (ARM)",
+  "years": "2003–present",
+  "status": "current",
+  "tags": [
+   "blur",
+   "kawase",
+   "dual-filter",
+   "bandwidth",
+   "mobile-gpu",
+   "gaussian"
+  ],
+  "relevance": "high",
+  "path": "motion/dual-kawase-blur.md"
+ },
+ {
+  "name": "Pop and Rebound physics animation libraries",
+  "slug": "facebook-pop-rebound",
+  "domain": "motion",
+  "kind": "project",
+  "platform": "cross",
+  "vendor": "Facebook",
+  "years": "2013–2017",
+  "status": "discontinued",
+  "tags": [
+   "spring",
+   "physics",
+   "dynamic-animation",
+   "open-source",
+   "Paper"
+  ],
+  "relevance": "medium",
+  "path": "motion/facebook-pop-rebound.md"
+ },
+ {
+  "name": "Fluent motion timing and easing",
+  "slug": "fluent-motion-timing",
+  "domain": "motion",
+  "kind": "pattern",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2017–present",
+  "status": "current",
+  "tags": [
+   "easing",
+   "duration",
+   "connected-animation",
+   "tokens",
+   "WinUI"
+  ],
+  "relevance": "medium",
+  "path": "motion/fluent-motion-timing.md"
+ },
+ {
+  "name": "Flutter Impeller",
+  "slug": "flutter-impeller",
+  "domain": "motion",
+  "kind": "project",
+  "platform": "cross",
+  "vendor": "Google (Flutter)",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "shader-compilation-jank",
+   "precompiled-shaders",
+   "first-frame",
+   "renderer"
+  ],
+  "relevance": "high",
+  "path": "motion/flutter-impeller.md"
+ },
+ {
+  "name": "GTK4 CSS transitions and tick callbacks",
+  "slug": "gtk-css-animation-costs",
+  "domain": "motion",
+  "kind": "pattern",
+  "platform": "GNOME",
+  "vendor": "GNOME (GTK)",
+  "years": "2014–present",
+  "status": "current",
+  "tags": [
+   "gtk4",
+   "css",
+   "transitions",
+   "frame-clock",
+   "tick-callback",
+   "box-shadow",
+   "snapshot"
+  ],
+  "relevance": "high",
+  "path": "motion/gtk-css-animation-costs.md"
+ },
+ {
+  "name": "GTK4 GSK renderers (ngl and vulkan)",
+  "slug": "gtk4-gsk-unified-renderers",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "GNOME",
+  "vendor": "GNOME (GTK)",
+  "years": "2024–present",
+  "status": "current",
+  "tags": [
+   "gtk4",
+   "gsk",
+   "render-nodes",
+   "vulkan",
+   "ngl",
+   "ubershader",
+   "fractional-scaling"
+  ],
+  "relevance": "high",
+  "path": "motion/gtk4-gsk-unified-renderers.md"
+ },
+ {
+  "name": "Hyprland animation tree",
+  "slug": "hyprland-animations",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "Wayland",
+  "vendor": "Hyprland (vaxry and contributors)",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "bezier",
+   "spring",
+   "animation-tree",
+   "config",
+   "deciseconds",
+   "styles"
+  ],
+  "relevance": "medium",
+  "path": "motion/hyprland-animations.md"
+ },
+ {
+  "name": "Hyprland blur, xray and new_optimizations",
+  "slug": "hyprland-blur-optimizations",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "Wayland",
+  "vendor": "Hyprland",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "blur",
+   "kawase",
+   "xray",
+   "cache",
+   "vfr",
+   "damage",
+   "glass"
+  ],
+  "relevance": "high",
+  "path": "motion/hyprland-blur-optimizations.md"
+ },
+ {
+  "name": "ProMotion adaptive refresh",
+  "slug": "ios-promotion-adaptive-refresh",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2017–present",
+  "status": "current",
+  "tags": [
+   "120hz",
+   "variable-refresh",
+   "CADisplayLink",
+   "frame-rate-range",
+   "power"
+  ],
+  "relevance": "medium",
+  "path": "motion/ios-promotion-adaptive-refresh.md"
+ },
+ {
+  "name": "Is It Snappy?",
+  "slug": "is-it-snappy",
+  "domain": "motion",
+  "kind": "project",
+  "platform": "iOS",
+  "vendor": "Chad Austin",
+  "years": "2017–present",
+  "status": "niche",
+  "tags": [
+   "input-latency",
+   "high-speed-camera",
+   "end-to-end",
+   "photon"
+  ],
+  "relevance": "medium",
+  "path": "motion/is-it-snappy.md"
+ },
+ {
+  "name": "KWin effects and global animation speed",
+  "slug": "kwin-animation-speed",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "KDE",
+  "vendor": "KDE",
+  "years": "2008–present",
+  "status": "current",
+  "tags": [
+   "effects",
+   "animation-speed",
+   "slider",
+   "scripted-effects",
+   "instant"
+  ],
+  "relevance": "medium",
+  "path": "motion/kwin-animation-speed.md"
+ },
+ {
+  "name": "KWin blur with dual Kawase",
+  "slug": "kwin-blur-dual-kawase",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "KDE",
+  "vendor": "KDE",
+  "years": "2018–present",
+  "status": "current",
+  "tags": [
+   "blur",
+   "dual-kawase",
+   "downsample",
+   "gpu-cost",
+   "noise",
+   "contrast"
+  ],
+  "relevance": "high",
+  "path": "motion/kwin-blur-dual-kawase.md"
+ },
+ {
+  "name": "Low-latency direct-touch research",
+  "slug": "low-latency-touch-research",
+  "domain": "motion",
+  "kind": "pattern",
+  "platform": "other",
+  "vendor": "Microsoft Research (Ng, Lepinski, Wigdor, Sanders, Dietz)",
+  "years": "2012–2014",
+  "status": "research",
+  "tags": [
+   "latency",
+   "perception",
+   "dragging",
+   "touch",
+   "1ms",
+   "jnd"
+  ],
+  "relevance": "medium",
+  "path": "motion/low-latency-touch-research.md"
+ },
+ {
+  "name": "M3 Expressive motion physics system",
+  "slug": "m3-expressive-spring-motion",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2025–present",
+  "status": "current",
+  "tags": [
+   "spring",
+   "motion-scheme",
+   "spatial",
+   "effects",
+   "damping",
+   "stiffness",
+   "tokens"
+  ],
+  "relevance": "high",
+  "path": "motion/m3-expressive-spring-motion.md"
+ },
+ {
+  "name": "Material motion easing and duration tokens",
+  "slug": "material-motion-easing-tokens",
+  "domain": "motion",
+  "kind": "pattern",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2014–present",
+  "status": "current",
+  "tags": [
+   "easing",
+   "duration",
+   "tokens",
+   "cubic-bezier",
+   "emphasized",
+   "design-system"
+  ],
+  "relevance": "high",
+  "path": "motion/material-motion-easing-tokens.md"
+ },
+ {
+  "name": "Mutter dynamic triple buffering",
+  "slug": "mutter-dynamic-triple-buffering",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "GNOME",
+  "vendor": "Canonical / GNOME",
+  "years": "2020–2025",
+  "status": "current",
+  "tags": [
+   "triple-buffering",
+   "frame-pacing",
+   "gpu-clock",
+   "latency",
+   "upstreaming"
+  ],
+  "relevance": "high",
+  "path": "motion/mutter-dynamic-triple-buffering.md"
+ },
+ {
+  "name": "Mutter frame clock and frame timings",
+  "slug": "mutter-frame-clock",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "GNOME",
+  "vendor": "GNOME",
+  "years": "2020–present",
+  "status": "current",
+  "tags": [
+   "frame-clock",
+   "per-output",
+   "scheduling",
+   "max-render-time",
+   "sysprof",
+   "latency"
+  ],
+  "relevance": "high",
+  "path": "motion/mutter-frame-clock.md"
+ },
+ {
+  "name": "niri springs and animation config",
+  "slug": "niri-spring-animations",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "Wayland",
+  "vendor": "niri (Ivan Molodetskikh)",
+  "years": "2023–present",
+  "status": "current",
+  "tags": [
+   "spring",
+   "gesture",
+   "slowdown",
+   "custom-shader",
+   "interruptible",
+   "scrollable-tiling"
+  ],
+  "relevance": "high",
+  "path": "motion/niri-spring-animations.md"
+ },
+ {
+  "name": "picom (compton) X11 compositor",
+  "slug": "picom",
+  "domain": "motion",
+  "kind": "project",
+  "platform": "other",
+  "vendor": "compton / yshui and contributors",
+  "years": "2011–present",
+  "status": "niche",
+  "tags": [
+   "x11",
+   "compositor",
+   "fading",
+   "dual-kawase",
+   "vsync",
+   "unredirect",
+   "damage"
+  ],
+  "relevance": "low",
+  "path": "motion/picom.md"
+ },
+ {
+  "name": "prefers-reduced-motion and Reduce Motion",
+  "slug": "prefers-reduced-motion",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "cross",
+  "vendor": "Apple (iOS 7, WebKit), W3C",
+  "years": "2013–present",
+  "status": "current",
+  "tags": [
+   "accessibility",
+   "reduced-motion",
+   "vestibular",
+   "media-query",
+   "dissolve"
+  ],
+  "relevance": "high",
+  "path": "motion/prefers-reduced-motion.md"
+ },
+ {
+  "name": "Qt Quick scene graph and Animators",
+  "slug": "qt-quick-scene-graph",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "KDE",
+  "vendor": "The Qt Company",
+  "years": "2012–present",
+  "status": "current",
+  "tags": [
+   "scene-graph",
+   "render-thread",
+   "animator",
+   "batching",
+   "vsync",
+   "rhi"
+  ],
+  "relevance": "medium",
+  "path": "motion/qt-quick-scene-graph.md"
+ },
+ {
+  "name": "RAIL performance model",
+  "slug": "rail-performance-model",
+  "domain": "motion",
+  "kind": "pattern",
+  "platform": "web",
+  "vendor": "Google",
+  "years": "2015–present",
+  "status": "current",
+  "tags": [
+   "budgets",
+   "response",
+   "animation",
+   "idle",
+   "100ms",
+   "10ms"
+  ],
+  "relevance": "high",
+  "path": "motion/rail-performance-model.md"
+ },
+ {
+  "name": "Response time limits (0.1 / 1 / 10 s)",
+  "slug": "response-time-limits",
+  "domain": "motion",
+  "kind": "pattern",
+  "platform": "other",
+  "vendor": "Miller; Card, Robertson, Mackinlay; Nielsen",
+  "years": "1968–1993",
+  "status": "research",
+  "tags": [
+   "perception",
+   "latency",
+   "100ms",
+   "instantaneous",
+   "feedback"
+  ],
+  "relevance": "high",
+  "path": "motion/response-time-limits.md"
+ },
+ {
+  "name": "SwiftUI springs as the default animation",
+  "slug": "swiftui-spring-animations",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2019–present",
+  "status": "current",
+  "tags": [
+   "spring",
+   "bounce",
+   "duration",
+   "interruptible",
+   "velocity",
+   "retargeting"
+  ],
+  "relevance": "high",
+  "path": "motion/swiftui-spring-animations.md"
+ },
+ {
+  "name": "Typometer and \"Typing with pleasure\"",
+  "slug": "typometer",
+  "domain": "motion",
+  "kind": "project",
+  "platform": "cross",
+  "vendor": "Pavel Fatin",
+  "years": "2015",
+  "status": "niche",
+  "tags": [
+   "input-latency",
+   "measurement",
+   "editors",
+   "screen-capture",
+   "jitter"
+  ],
+  "relevance": "high",
+  "path": "motion/typometer.md"
+ },
+ {
+  "name": "Variable refresh rate for desktop UI",
+  "slug": "variable-refresh-desktop",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "cross",
+  "vendor": "VESA, AMD, NVIDIA; sway, KWin, Mutter",
+  "years": "2014–present",
+  "status": "current",
+  "tags": [
+   "vrr",
+   "adaptive-sync",
+   "freesync",
+   "lfc",
+   "flicker",
+   "frame-pacing"
+  ],
+  "relevance": "medium",
+  "path": "motion/variable-refresh-desktop.md"
+ },
+ {
+  "name": "WCAG 2.3.3 Animation from Interactions and vestibular disorders",
+  "slug": "wcag-animation-from-interactions",
+  "domain": "motion",
+  "kind": "pattern",
+  "platform": "web",
+  "vendor": "W3C WAI",
+  "years": "2018–present",
+  "status": "current",
+  "tags": [
+   "accessibility",
+   "wcag",
+   "vestibular",
+   "motion-sickness",
+   "aaa"
+  ],
+  "relevance": "medium",
+  "path": "motion/wcag-animation-from-interactions.md"
+ },
+ {
+  "name": "Windows Acrylic and Mica",
+  "slug": "windows-acrylic-mica",
+  "domain": "motion",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2017–present",
+  "status": "current",
+  "tags": [
+   "blur",
+   "acrylic",
+   "mica",
+   "noise",
+   "luminosity",
+   "fallback",
+   "power"
+  ],
+  "relevance": "high",
+  "path": "motion/windows-acrylic-mica.md"
+ },
+ {
+  "name": "Windows Desktop Window Manager",
+  "slug": "windows-dwm",
+  "domain": "motion",
+  "kind": "product",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2006–present",
+  "status": "current",
+  "tags": [
+   "compositor",
+   "aero",
+   "glass",
+   "flip-model",
+   "directcomposition",
+   "fallback"
+  ],
+  "relevance": "medium",
+  "path": "motion/windows-dwm.md"
+ },
+ {
+  "name": "10/GUI and Con10uum",
+  "slug": "10gui",
+  "domain": "notifications-wm",
+  "kind": "project",
+  "platform": "other",
+  "vendor": "R. Clayton Miller",
+  "years": "2009",
+  "status": "research",
+  "tags": [
+   "concept",
+   "multitouch",
+   "linear-windows",
+   "scrolling-wm"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/10gui.md"
+ },
+ {
+  "name": "Alt-Tab and Cmd-Tab switcher designs",
+  "slug": "alt-tab-switchers",
+  "domain": "notifications-wm",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Microsoft, Apple, GNOME, KDE",
+  "years": "1990–present",
+  "status": "current",
+  "tags": [
+   "alt-tab",
+   "mru",
+   "thumbnails",
+   "app-vs-window",
+   "keyboard"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/alt-tab-switchers.md"
+ },
+ {
+  "name": "Android home screen widgets",
+  "slug": "android-app-widgets",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2009–present",
+  "status": "current",
+  "tags": [
+   "widgets",
+   "home-screen",
+   "remoteviews",
+   "material-you"
+  ],
+  "relevance": "low",
+  "path": "notifications-wm/android-app-widgets.md"
+ },
+ {
+  "name": "Android bundled notifications and direct reply",
+  "slug": "android-bundled-notifications",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2016–present",
+  "status": "current",
+  "tags": [
+   "grouping",
+   "bundles",
+   "inline-reply",
+   "summary"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/android-bundled-notifications.md"
+ },
+ {
+  "name": "Android conversations section and bubbles",
+  "slug": "android-conversations-bubbles",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2020–present",
+  "status": "current",
+  "tags": [
+   "conversations",
+   "people",
+   "priority",
+   "bubbles",
+   "sections"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/android-conversations-bubbles.md"
+ },
+ {
+  "name": "Android notification channels and importance",
+  "slug": "android-notification-channels",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2017–present",
+  "status": "current",
+  "tags": [
+   "channels",
+   "importance",
+   "per-category",
+   "user-control"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/android-notification-channels.md"
+ },
+ {
+  "name": "Android notification cooldown",
+  "slug": "android-notification-cooldown",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2024–present",
+  "status": "current",
+  "tags": [
+   "rate-limit",
+   "flood",
+   "volume",
+   "group-chat"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/android-notification-cooldown.md"
+ },
+ {
+  "name": "Apple Intelligence notification summaries",
+  "slug": "apple-intelligence-summaries",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2024–present",
+  "status": "current",
+  "tags": [
+   "ai",
+   "llm",
+   "summaries",
+   "misinformation",
+   "trust",
+   "priority"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/apple-intelligence-summaries.md"
+ },
+ {
+  "name": "BumpTop",
+  "slug": "bumptop",
+  "domain": "notifications-wm",
+  "kind": "product",
+  "platform": "cross",
+  "vendor": "BumpTop (Anand Agarawala), acquired by Google",
+  "years": "2006–2010",
+  "status": "discontinued",
+  "tags": [
+   "physics",
+   "3d-desktop",
+   "piles",
+   "multitouch",
+   "skeuomorphism"
+  ],
+  "relevance": "low",
+  "path": "notifications-wm/bumptop.md"
+ },
+ {
+  "name": "Clippy (Office Assistant)",
+  "slug": "clippy",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "1997–2007",
+  "status": "failed",
+  "tags": [
+   "assistant",
+   "interruption",
+   "proactive-help",
+   "anthropomorphism"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/clippy.md"
+ },
+ {
+  "name": "Compiz (desktop cube, wobbly windows)",
+  "slug": "compiz-cube-wobbly",
+  "domain": "notifications-wm",
+  "kind": "project",
+  "platform": "other",
+  "vendor": "Novell (David Reveman), Beryl community, Compiz Fusion",
+  "years": "2006–2016",
+  "status": "discontinued",
+  "tags": [
+   "compositor",
+   "effects",
+   "plugins",
+   "cube",
+   "wobbly",
+   "linux"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/compiz-cube-wobbly.md"
+ },
+ {
+  "name": "Copilot key",
+  "slug": "copilot-key",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2024–present",
+  "status": "current",
+  "tags": [
+   "keyboard",
+   "hardware",
+   "assistant",
+   "remapping",
+   "accessibility"
+  ],
+  "relevance": "low",
+  "path": "notifications-wm/copilot-key.md"
+ },
+ {
+  "name": "Cortana",
+  "slug": "cortana",
+  "domain": "notifications-wm",
+  "kind": "product",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2014–2023",
+  "status": "discontinued",
+  "tags": [
+   "assistant",
+   "voice",
+   "taskbar",
+   "search",
+   "deprecated"
+  ],
+  "relevance": "low",
+  "path": "notifications-wm/cortana.md"
+ },
+ {
+  "name": "Exposé and Mission Control",
+  "slug": "expose-mission-control",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2003–present",
+  "status": "current",
+  "tags": [
+   "overview",
+   "window-overview",
+   "spaces",
+   "spatial-continuity",
+   "animation"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/expose-mission-control.md"
+ },
+ {
+  "name": "PowerToys FancyZones",
+  "slug": "fancyzones",
+  "domain": "notifications-wm",
+  "kind": "project",
+  "platform": "Windows",
+  "vendor": "Microsoft (PowerToys)",
+  "years": "2019–present",
+  "status": "current",
+  "tags": [
+   "zones",
+   "custom-layouts",
+   "shift-drag",
+   "tiling"
+  ],
+  "relevance": "low",
+  "path": "notifications-wm/fancyzones.md"
+ },
+ {
+  "name": "Desktop Notifications Specification (org.freedesktop.Notifications)",
+  "slug": "freedesktop-notification-spec",
+  "domain": "notifications-wm",
+  "kind": "protocol",
+  "platform": "cross",
+  "vendor": "freedesktop.org (originally Galago project)",
+  "years": "2004–present (1.3, 2024-08-18)",
+  "status": "current",
+  "tags": [
+   "dbus",
+   "notifications",
+   "urgency",
+   "hints",
+   "actions",
+   "persistence",
+   "activation-token"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/freedesktop-notification-spec.md"
+ },
+ {
+  "name": "GNOME 3.0 reception",
+  "slug": "gnome-3-0-reception",
+  "domain": "notifications-wm",
+  "kind": "product",
+  "platform": "GNOME",
+  "vendor": "GNOME Project",
+  "years": "2011",
+  "status": "current",
+  "tags": [
+   "gnome-shell",
+   "activities",
+   "paradigm-shift",
+   "forks",
+   "reception"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/gnome-3-0-reception.md"
+ },
+ {
+  "name": "GNOME Shell notifications",
+  "slug": "gnome-shell-notifications",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "GNOME",
+  "vendor": "GNOME Project",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "message-tray",
+   "calendar-popover",
+   "banners",
+   "dnd",
+   "grouping",
+   "portal"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/gnome-shell-notifications.md"
+ },
+ {
+  "name": "Growl",
+  "slug": "growl",
+  "domain": "notifications-wm",
+  "kind": "project",
+  "platform": "macOS",
+  "vendor": "Growl project (Christopher Forsythe, lead)",
+  "years": "2004–2020",
+  "status": "discontinued",
+  "tags": [
+   "third-party",
+   "notification-hub",
+   "themes",
+   "gntp",
+   "network"
+  ],
+  "relevance": "low",
+  "path": "notifications-wm/growl.md"
+ },
+ {
+  "name": "Apple Focus modes",
+  "slug": "ios-focus-modes",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "focus",
+   "dnd",
+   "context",
+   "filters",
+   "automation",
+   "status-sharing"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/ios-focus-modes.md"
+ },
+ {
+  "name": "iOS interruption levels (Passive, Active, Time Sensitive, Critical)",
+  "slug": "ios-interruption-levels",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "interruption-level",
+   "time-sensitive",
+   "critical",
+   "passive",
+   "focus"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/ios-interruption-levels.md"
+ },
+ {
+  "name": "iOS scheduled notification summary",
+  "slug": "ios-scheduled-summary",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "batching",
+   "digest",
+   "schedule",
+   "deferral"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/ios-scheduled-summary.md"
+ },
+ {
+  "name": "KDE 4.0 launch",
+  "slug": "kde-4-0-launch",
+  "domain": "notifications-wm",
+  "kind": "product",
+  "platform": "KDE",
+  "vendor": "KDE",
+  "years": "2008",
+  "status": "failed",
+  "tags": [
+   "release",
+   "rewrite",
+   "plasma",
+   "expectations",
+   "communication"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/kde-4-0-launch.md"
+ },
+ {
+  "name": "KDE Activities",
+  "slug": "kde-activities",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "KDE",
+  "vendor": "KDE",
+  "years": "2010–present",
+  "status": "niche",
+  "tags": [
+   "activities",
+   "contexts",
+   "virtual-desktops",
+   "scope"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/kde-activities.md"
+ },
+ {
+  "name": "KDE Plasma notifications",
+  "slug": "kde-plasma-notifications",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "KDE",
+  "vendor": "KDE",
+  "years": "2019–present",
+  "status": "current",
+  "tags": [
+   "dnd",
+   "history",
+   "grouping",
+   "screen-mirroring",
+   "job-progress",
+   "fullscreen"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/kde-plasma-notifications.md"
+ },
+ {
+  "name": "Launchpad removal in macOS Tahoe",
+  "slug": "launchpad-removal-tahoe",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2011–2025",
+  "status": "discontinued",
+  "tags": [
+   "launcher",
+   "app-grid",
+   "spotlight",
+   "removal",
+   "backlash"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/launchpad-removal-tahoe.md"
+ },
+ {
+  "name": "MacBook Pro Touch Bar",
+  "slug": "macbook-touch-bar",
+  "domain": "notifications-wm",
+  "kind": "product",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2016–2023",
+  "status": "discontinued",
+  "tags": [
+   "contextual-controls",
+   "hardware",
+   "function-keys",
+   "discoverability"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/macbook-touch-bar.md"
+ },
+ {
+  "name": "macOS Dashboard",
+  "slug": "macos-dashboard",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2005–2019",
+  "status": "discontinued",
+  "tags": [
+   "widgets",
+   "overlay",
+   "html",
+   "konfabulator"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/macos-dashboard.md"
+ },
+ {
+  "name": "macOS desktop widgets (Sonoma)",
+  "slug": "macos-desktop-widgets",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2023–present",
+  "status": "current",
+  "tags": [
+   "widgets",
+   "desktop",
+   "monochrome",
+   "fade",
+   "focus-aware"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/macos-desktop-widgets.md"
+ },
+ {
+  "name": "macOS Notification Center",
+  "slug": "macos-notification-center",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2012–present",
+  "status": "current",
+  "tags": [
+   "notification-center",
+   "banners",
+   "alerts",
+   "grouping",
+   "widgets"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/macos-notification-center.md"
+ },
+ {
+  "name": "Microsoft Courier",
+  "slug": "microsoft-courier",
+  "domain": "notifications-wm",
+  "kind": "product",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2008–2010",
+  "status": "failed",
+  "tags": [
+   "dual-screen",
+   "pen",
+   "journal",
+   "concept",
+   "cancelled"
+  ],
+  "relevance": "low",
+  "path": "notifications-wm/microsoft-courier.md"
+ },
+ {
+  "name": "KDE Plasma widgets (plasmoids)",
+  "slug": "plasma-widgets",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "KDE",
+  "vendor": "KDE",
+  "years": "2008–present",
+  "status": "current",
+  "tags": [
+   "plasmoids",
+   "panel",
+   "desktop",
+   "qml",
+   "extensibility",
+   "security"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/plasma-widgets.md"
+ },
+ {
+  "name": "Presentation mode detection (cross-platform pattern)",
+  "slug": "presentation-mode-dnd",
+  "domain": "notifications-wm",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Microsoft, Apple, KDE and others",
+  "years": "2006–present",
+  "status": "current",
+  "tags": [
+   "presentation",
+   "screen-share",
+   "mirroring",
+   "fullscreen",
+   "dnd",
+   "context"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/presentation-mode-dnd.md"
+ },
+ {
+  "name": "Screen Time and Digital Wellbeing",
+  "slug": "screen-time-digital-wellbeing",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "cross",
+  "vendor": "Apple (iOS 12), Google (Android 9)",
+  "years": "2018–present",
+  "status": "current",
+  "tags": [
+   "usage-tracking",
+   "app-limits",
+   "wind-down",
+   "grayscale",
+   "bedtime"
+  ],
+  "relevance": "low",
+  "path": "notifications-wm/screen-time-digital-wellbeing.md"
+ },
+ {
+  "name": "Siri",
+  "slug": "siri",
+  "domain": "notifications-wm",
+  "kind": "product",
+  "platform": "iOS",
+  "vendor": "Apple",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "assistant",
+   "voice",
+   "overpromise",
+   "delay"
+  ],
+  "relevance": "low",
+  "path": "notifications-wm/siri.md"
+ },
+ {
+  "name": "Snarl",
+  "slug": "snarl",
+  "domain": "notifications-wm",
+  "kind": "project",
+  "platform": "Windows",
+  "vendor": "full phat products",
+  "years": "2005–present",
+  "status": "niche",
+  "tags": [
+   "third-party",
+   "growl-clone",
+   "gntp",
+   "network",
+   "windows"
+  ],
+  "relevance": "low",
+  "path": "notifications-wm/snarl.md"
+ },
+ {
+  "name": "Stage Manager",
+  "slug": "stage-manager",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "window-groups",
+   "strip",
+   "thumbnails",
+   "focus"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/stage-manager.md"
+ },
+ {
+  "name": "Project Looking Glass",
+  "slug": "sun-looking-glass",
+  "domain": "notifications-wm",
+  "kind": "project",
+  "platform": "other",
+  "vendor": "Sun Microsystems (Hideya Kawahara)",
+  "years": "2003–2007",
+  "status": "failed",
+  "tags": [
+   "3d-desktop",
+   "java3d",
+   "research",
+   "window-backs"
+  ],
+  "relevance": "low",
+  "path": "notifications-wm/sun-looking-glass.md"
+ },
+ {
+  "name": "Ubuntu convergence (Unity 8, Ubuntu Touch, Ubuntu Edge)",
+  "slug": "ubuntu-convergence",
+  "domain": "notifications-wm",
+  "kind": "project",
+  "platform": "other",
+  "vendor": "Canonical",
+  "years": "2011–2017",
+  "status": "failed",
+  "tags": [
+   "convergence",
+   "phone-as-desktop",
+   "unity8",
+   "mir"
+  ],
+  "relevance": "low",
+  "path": "notifications-wm/ubuntu-convergence.md"
+ },
+ {
+  "name": "Unity Shopping Lens (Amazon results in the Dash)",
+  "slug": "unity-shopping-lens",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "other",
+  "vendor": "Canonical (Ubuntu)",
+  "years": "2012–2016",
+  "status": "failed",
+  "tags": [
+   "search",
+   "privacy",
+   "ads",
+   "launcher",
+   "trust"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/unity-shopping-lens.md"
+ },
+ {
+  "name": "Virtual desktops (Rooms, Spaces, Task View, GNOME workspaces)",
+  "slug": "virtual-desktops-spaces",
+  "domain": "notifications-wm",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Xerox PARC, Apple, Microsoft, GNOME and others",
+  "years": "1986–present",
+  "status": "current",
+  "tags": [
+   "workspaces",
+   "spaces",
+   "dynamic-workspaces",
+   "task-view"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/virtual-desktops-spaces.md"
+ },
+ {
+  "name": "Windows Vista User Account Control",
+  "slug": "vista-uac",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2007–present",
+  "status": "current",
+  "tags": [
+   "permissions",
+   "prompts",
+   "alert-fatigue",
+   "secure-desktop",
+   "dialog-blindness"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/vista-uac.md"
+ },
+ {
+  "name": "Windows 11 Widgets board",
+  "slug": "windows-11-widgets",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "widgets",
+   "news-feed",
+   "msn",
+   "ads",
+   "dma",
+   "taskbar"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/windows-11-widgets.md"
+ },
+ {
+  "name": "Windows 8 Charms bar and full-screen Start",
+  "slug": "windows-8-charms-start-screen",
+  "domain": "notifications-wm",
+  "kind": "product",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2012–2015",
+  "status": "failed",
+  "tags": [
+   "charms",
+   "start-screen",
+   "hot-corners",
+   "touch-first",
+   "convergence"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/windows-8-charms-start-screen.md"
+ },
+ {
+  "name": "Windows toasts, Action Center and Notification Center",
+  "slug": "windows-action-center-toasts",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2012–present",
+  "status": "current",
+  "tags": [
+   "toasts",
+   "action-center",
+   "quick-settings",
+   "grouping"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/windows-action-center-toasts.md"
+ },
+ {
+  "name": "Windows Flip 3D",
+  "slug": "windows-flip-3d",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2007–2012",
+  "status": "discontinued",
+  "tags": [
+   "switcher",
+   "3d",
+   "eye-candy",
+   "aero"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/windows-flip-3d.md"
+ },
+ {
+  "name": "Windows Quiet Hours, Focus Assist and Do Not Disturb",
+  "slug": "windows-focus-assist",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2015–present",
+  "status": "current",
+  "tags": [
+   "dnd",
+   "automatic-rules",
+   "fullscreen",
+   "game",
+   "duplicating-display",
+   "summary"
+  ],
+  "relevance": "high",
+  "path": "notifications-wm/windows-focus-assist.md"
+ },
+ {
+  "name": "Live Tiles",
+  "slug": "windows-live-tiles",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2010–2021",
+  "status": "discontinued",
+  "tags": [
+   "tiles",
+   "start",
+   "glanceable",
+   "motion",
+   "metro"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/windows-live-tiles.md"
+ },
+ {
+  "name": "Windows Recall",
+  "slug": "windows-recall",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2024–present",
+  "status": "current",
+  "tags": [
+   "screenshots",
+   "ai",
+   "privacy",
+   "security",
+   "opt-in",
+   "rollout"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/windows-recall.md"
+ },
+ {
+  "name": "Windows Sets (tabbed windows)",
+  "slug": "windows-sets",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2017–2019",
+  "status": "failed",
+  "tags": [
+   "tabs",
+   "window-groups",
+   "cancelled",
+   "cross-app"
+  ],
+  "relevance": "low",
+  "path": "notifications-wm/windows-sets.md"
+ },
+ {
+  "name": "Windows Sidebar and Desktop Gadgets",
+  "slug": "windows-sidebar-gadgets",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2007–2012",
+  "status": "discontinued",
+  "tags": [
+   "widgets",
+   "gadgets",
+   "sidebar",
+   "security",
+   "html"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/windows-sidebar-gadgets.md"
+ },
+ {
+  "name": "Windows Snap, Snap Layouts and Snap Groups",
+  "slug": "windows-snap-layouts",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2009–present",
+  "status": "current",
+  "tags": [
+   "snapping",
+   "tiling",
+   "layouts",
+   "groups",
+   "maximize-hover"
+  ],
+  "relevance": "medium",
+  "path": "notifications-wm/windows-snap-layouts.md"
+ },
+ {
+  "name": "Windows Timeline",
+  "slug": "windows-timeline",
+  "domain": "notifications-wm",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2018–2021",
+  "status": "discontinued",
+  "tags": [
+   "activity-history",
+   "resume",
+   "cloud-sync",
+   "privacy",
+   "task-view"
+  ],
+  "relevance": "low",
+  "path": "notifications-wm/windows-timeline.md"
+ },
+ {
+  "name": "Budgie and Raven",
+  "slug": "budgie-raven",
+  "domain": "shells",
+  "kind": "product",
+  "platform": "other",
+  "vendor": "Solus, then Buddies of Budgie",
+  "years": "2013–present",
+  "status": "current",
+  "tags": [
+   "sidebar",
+   "notifications",
+   "applets",
+   "gtk",
+   "wayland-port"
+  ],
+  "relevance": "medium",
+  "path": "shells/budgie-raven.md"
+ },
+ {
+  "name": "ChromeOS shelf and launcher",
+  "slug": "chromeos-shelf-launcher",
+  "domain": "shells",
+  "kind": "product",
+  "platform": "other",
+  "vendor": "Google",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "shelf",
+   "launcher",
+   "search",
+   "everything-key",
+   "continue-section"
+  ],
+  "relevance": "medium",
+  "path": "shells/chromeos-shelf-launcher.md"
+ },
+ {
+  "name": "Cinnamon",
+  "slug": "cinnamon",
+  "domain": "shells",
+  "kind": "product",
+  "platform": "other",
+  "vendor": "Linux Mint",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "traditional-desktop",
+   "fork",
+   "applets",
+   "spices",
+   "x11"
+  ],
+  "relevance": "low",
+  "path": "shells/cinnamon.md"
+ },
+ {
+  "name": "COSMIC desktop",
+  "slug": "cosmic-desktop",
+  "domain": "shells",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "System76",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "rust",
+   "iced",
+   "tiling",
+   "wayland",
+   "panel",
+   "applets",
+   "theming"
+  ],
+  "relevance": "high",
+  "path": "shells/cosmic-desktop.md"
+ },
+ {
+  "name": "Deepin Desktop Environment (DDE)",
+  "slug": "deepin-dde",
+  "domain": "shells",
+  "kind": "product",
+  "platform": "other",
+  "vendor": "Deepin Technology (UnionTech)",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "dock-modes",
+   "control-center",
+   "polish",
+   "qt",
+   "trust"
+  ],
+  "relevance": "low",
+  "path": "shells/deepin-dde.md"
+ },
+ {
+  "name": "Linux display managers and greeters (GDM, SDDM, LightDM, greetd)",
+  "slug": "display-managers-greeters",
+  "domain": "shells",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "GNOME, KDE, Canonical, greetd project",
+  "years": "2004–present",
+  "status": "current",
+  "tags": [
+   "greeter",
+   "login",
+   "lock-screen",
+   "consistency",
+   "wayland"
+  ],
+  "relevance": "medium",
+  "path": "shells/display-managers-greeters.md"
+ },
+ {
+  "name": "elementary OS Pantheon",
+  "slug": "elementary-pantheon",
+  "domain": "shells",
+  "kind": "product",
+  "platform": "other",
+  "vendor": "elementary, Inc.",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "top-panel",
+   "dock",
+   "dark-schedule",
+   "consistency",
+   "gtk"
+  ],
+  "relevance": "high",
+  "path": "shells/elementary-pantheon.md"
+ },
+ {
+  "name": "GNOME Activities overview",
+  "slug": "gnome-activities-overview",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "GNOME",
+  "vendor": "GNOME Project",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "overview",
+   "workspaces",
+   "search",
+   "gestures",
+   "spatial"
+  ],
+  "relevance": "high",
+  "path": "shells/gnome-activities-overview.md"
+ },
+ {
+  "name": "GNOME dynamic workspaces",
+  "slug": "gnome-dynamic-workspaces",
+  "domain": "shells",
+  "kind": "pattern",
+  "platform": "GNOME",
+  "vendor": "GNOME Project",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "workspaces",
+   "dynamic",
+   "empty-workspace",
+   "spatial"
+  ],
+  "relevance": "medium",
+  "path": "shells/gnome-dynamic-workspaces.md"
+ },
+ {
+  "name": "GNOME quick settings",
+  "slug": "gnome-quick-settings",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "GNOME",
+  "vendor": "GNOME Project",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "quick-settings",
+   "toggles",
+   "pills",
+   "submenus",
+   "panel"
+  ],
+  "relevance": "high",
+  "path": "shells/gnome-quick-settings.md"
+ },
+ {
+  "name": "GNOME Shell extensions",
+  "slug": "gnome-shell-extensions",
+  "domain": "shells",
+  "kind": "pattern",
+  "platform": "GNOME",
+  "vendor": "GNOME Project and community",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "extensibility",
+   "monkey-patching",
+   "breakage",
+   "plugins"
+  ],
+  "relevance": "medium",
+  "path": "shells/gnome-shell-extensions.md"
+ },
+ {
+  "name": "GNOME top bar without a system tray",
+  "slug": "gnome-top-bar-no-tray",
+  "domain": "shells",
+  "kind": "pattern",
+  "platform": "GNOME",
+  "vendor": "GNOME Project",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "top-bar",
+   "tray",
+   "statusnotifier",
+   "minimalism",
+   "background-apps"
+  ],
+  "relevance": "medium",
+  "path": "shells/gnome-top-bar-no-tray.md"
+ },
+ {
+  "name": "BeOS and Haiku Deskbar",
+  "slug": "haiku-deskbar",
+  "domain": "shells",
+  "kind": "product",
+  "platform": "other",
+  "vendor": "Be Inc., Haiku Project",
+  "years": "1996–present",
+  "status": "niche",
+  "tags": [
+   "taskbar",
+   "compact",
+   "replicants",
+   "historic",
+   "corner"
+  ],
+  "relevance": "medium",
+  "path": "shells/haiku-deskbar.md"
+ },
+ {
+  "name": "Hot corners",
+  "slug": "hot-corners",
+  "domain": "shells",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Apple, GNOME, Microsoft",
+  "years": "2003–present",
+  "status": "current",
+  "tags": [
+   "pointer",
+   "fitts-law",
+   "corners",
+   "accidental-activation"
+  ],
+  "relevance": "low",
+  "path": "shells/hot-corners.md"
+ },
+ {
+  "name": "KDE Activities",
+  "slug": "kde-activities",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "KDE",
+  "vendor": "KDE",
+  "years": "2010–present",
+  "status": "niche",
+  "tags": [
+   "contexts",
+   "workspaces",
+   "failed-idea",
+   "desktop-layout"
+  ],
+  "relevance": "low",
+  "path": "shells/kde-activities.md"
+ },
+ {
+  "name": "Plasma floating panel",
+  "slug": "kde-floating-panel",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "KDE",
+  "vendor": "KDE",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "panel",
+   "floating",
+   "maximize",
+   "adaptive",
+   "dodge-windows"
+  ],
+  "relevance": "high",
+  "path": "shells/kde-floating-panel.md"
+ },
+ {
+  "name": "Plasma Overview and Desktop Grid",
+  "slug": "kde-overview-effect",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "KDE",
+  "vendor": "KDE",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "overview",
+   "workspaces",
+   "gestures",
+   "kwin-effect",
+   "search"
+  ],
+  "relevance": "high",
+  "path": "shells/kde-overview-effect.md"
+ },
+ {
+  "name": "KDE Plasma panels and widgets",
+  "slug": "kde-plasma-panels-widgets",
+  "domain": "shells",
+  "kind": "product",
+  "platform": "KDE",
+  "vendor": "KDE",
+  "years": "2008–present",
+  "status": "current",
+  "tags": [
+   "panel",
+   "widgets",
+   "plasmoids",
+   "customization",
+   "qml"
+  ],
+  "relevance": "medium",
+  "path": "shells/kde-plasma-panels-widgets.md"
+ },
+ {
+  "name": "Liquid Glass on macOS",
+  "slug": "liquid-glass-macos",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2025–present",
+  "status": "current",
+  "tags": [
+   "glass",
+   "material",
+   "translucency",
+   "legibility",
+   "accessibility"
+  ],
+  "relevance": "high",
+  "path": "shells/liquid-glass-macos.md"
+ },
+ {
+  "name": "Two-stage lock screen (curtain, then credentials)",
+  "slug": "lock-screen-curtain",
+  "domain": "shells",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Microsoft, GNOME, Apple (contrast)",
+  "years": "2012–present",
+  "status": "current",
+  "tags": [
+   "lock-screen",
+   "greeter",
+   "curtain",
+   "notifications",
+   "privacy"
+  ],
+  "relevance": "high",
+  "path": "shells/lock-screen-curtain.md"
+ },
+ {
+  "name": "Mac OS X Aqua",
+  "slug": "mac-os-x-aqua",
+  "domain": "shells",
+  "kind": "product",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2000–2012",
+  "status": "discontinued",
+  "tags": [
+   "historic",
+   "visual-language",
+   "skeuomorphism",
+   "translucency",
+   "pinstripes"
+  ],
+  "relevance": "medium",
+  "path": "shells/mac-os-x-aqua.md"
+ },
+ {
+  "name": "macOS Control Center",
+  "slug": "macos-control-center",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2020–present",
+  "status": "current",
+  "tags": [
+   "quick-settings",
+   "modules",
+   "toggles",
+   "customization",
+   "menu-bar"
+  ],
+  "relevance": "high",
+  "path": "shells/macos-control-center.md"
+ },
+ {
+  "name": "macOS Dock",
+  "slug": "macos-dock",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple (from NeXT)",
+  "years": "2001–present",
+  "status": "current",
+  "tags": [
+   "dock",
+   "launcher",
+   "running-indicator",
+   "magnification",
+   "minimize"
+  ],
+  "relevance": "low",
+  "path": "shells/macos-dock.md"
+ },
+ {
+  "name": "macOS menu bar",
+  "slug": "macos-menu-bar",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "1984–present",
+  "status": "current",
+  "tags": [
+   "top-bar",
+   "global-menu",
+   "fitts-law",
+   "status-items",
+   "transparency"
+  ],
+  "relevance": "medium",
+  "path": "shells/macos-menu-bar.md"
+ },
+ {
+  "name": "macOS Notification Center",
+  "slug": "macos-notification-center",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2012–present",
+  "status": "current",
+  "tags": [
+   "notifications",
+   "widgets",
+   "grouping",
+   "focus",
+   "history"
+  ],
+  "relevance": "medium",
+  "path": "shells/macos-notification-center.md"
+ },
+ {
+  "name": "Exposé and Mission Control",
+  "slug": "mission-control-expose",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2003–present",
+  "status": "current",
+  "tags": [
+   "overview",
+   "window-picker",
+   "spaces",
+   "animation",
+   "spatial"
+  ],
+  "relevance": "high",
+  "path": "shells/mission-control-expose.md"
+ },
+ {
+  "name": "NeXTSTEP Dock",
+  "slug": "nextstep-dock",
+  "domain": "shells",
+  "kind": "product",
+  "platform": "other",
+  "vendor": "NeXT",
+  "years": "1989–1997",
+  "status": "discontinued",
+  "tags": [
+   "dock",
+   "historic",
+   "tiles",
+   "running-state",
+   "appicons"
+  ],
+  "relevance": "low",
+  "path": "shells/nextstep-dock.md"
+ },
+ {
+  "name": "Spotlight as shell command line",
+  "slug": "spotlight-shell",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2005–present",
+  "status": "current",
+  "tags": [
+   "search",
+   "launcher",
+   "actions",
+   "clipboard-history",
+   "keyboard"
+  ],
+  "relevance": "high",
+  "path": "shells/spotlight-shell.md"
+ },
+ {
+  "name": "Stage Manager",
+  "slug": "stage-manager",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2022–present",
+  "status": "niche",
+  "tags": [
+   "window-management",
+   "groups",
+   "recent-apps",
+   "failed-idea"
+  ],
+  "relevance": "low",
+  "path": "shells/stage-manager.md"
+ },
+ {
+  "name": "StatusNotifierItem and the Plasma System Tray",
+  "slug": "statusnotifier-status-filter",
+  "domain": "shells",
+  "kind": "protocol",
+  "platform": "KDE",
+  "vendor": "KDE, freedesktop.org",
+  "years": "2009–present",
+  "status": "current",
+  "tags": [
+   "tray",
+   "statusnotifier",
+   "dbus",
+   "needs-attention",
+   "overflow"
+  ],
+  "relevance": "high",
+  "path": "shells/statusnotifier-status-filter.md"
+ },
+ {
+  "name": "Unity HUD",
+  "slug": "unity-hud",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "other",
+  "vendor": "Canonical",
+  "years": "2012–2017",
+  "status": "discontinued",
+  "tags": [
+   "command-palette",
+   "menus",
+   "search",
+   "keyboard",
+   "alt-key"
+  ],
+  "relevance": "medium",
+  "path": "shells/unity-hud.md"
+ },
+ {
+  "name": "Unity Launcher and Dash",
+  "slug": "unity-launcher-dash",
+  "domain": "shells",
+  "kind": "product",
+  "platform": "other",
+  "vendor": "Canonical",
+  "years": "2010–2017",
+  "status": "discontinued",
+  "tags": [
+   "launcher",
+   "dash",
+   "lenses",
+   "badges",
+   "privacy",
+   "failed-idea"
+  ],
+  "relevance": "medium",
+  "path": "shells/unity-launcher-dash.md"
+ },
+ {
+  "name": "Windows 11 Start menu",
+  "slug": "windows-11-start-menu",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "start-menu",
+   "launcher",
+   "recommended",
+   "categories",
+   "ads"
+  ],
+  "relevance": "medium",
+  "path": "shells/windows-11-start-menu.md"
+ },
+ {
+  "name": "Windows 11 taskbar",
+  "slug": "windows-11-taskbar",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "taskbar",
+   "centered",
+   "customization-regression",
+   "bar-position"
+  ],
+  "relevance": "medium",
+  "path": "shells/windows-11-taskbar.md"
+ },
+ {
+  "name": "Windows 8 Start screen and Charms",
+  "slug": "windows-8-start-screen",
+  "domain": "shells",
+  "kind": "product",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2012–2015",
+  "status": "failed",
+  "tags": [
+   "start-menu",
+   "touch",
+   "live-tiles",
+   "hot-corners",
+   "charms",
+   "failed-idea"
+  ],
+  "relevance": "medium",
+  "path": "shells/windows-8-start-screen.md"
+ },
+ {
+  "name": "Windows 95 Start menu and taskbar",
+  "slug": "windows-95-start-menu",
+  "domain": "shells",
+  "kind": "product",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "1995–present",
+  "status": "current",
+  "tags": [
+   "start-menu",
+   "taskbar",
+   "historic",
+   "discoverability",
+   "tray"
+  ],
+  "relevance": "medium",
+  "path": "shells/windows-95-start-menu.md"
+ },
+ {
+  "name": "Focus assist automatic rules",
+  "slug": "windows-focus-auto-dnd",
+  "domain": "shells",
+  "kind": "pattern",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2018–present",
+  "status": "current",
+  "tags": [
+   "do-not-disturb",
+   "context",
+   "presentation",
+   "fullscreen",
+   "summary"
+  ],
+  "relevance": "high",
+  "path": "shells/windows-focus-auto-dnd.md"
+ },
+ {
+  "name": "Mica and Acrylic materials",
+  "slug": "windows-mica",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2017–present",
+  "status": "current",
+  "tags": [
+   "material",
+   "wallpaper-tint",
+   "performance",
+   "fluent",
+   "glass"
+  ],
+  "relevance": "high",
+  "path": "shells/windows-mica.md"
+ },
+ {
+  "name": "Windows Quick Settings and Action Center",
+  "slug": "windows-quick-settings",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2015–present",
+  "status": "current",
+  "tags": [
+   "quick-settings",
+   "notifications",
+   "action-center",
+   "toggles"
+  ],
+  "relevance": "medium",
+  "path": "shells/windows-quick-settings.md"
+ },
+ {
+  "name": "Snap Layouts and Snap Groups",
+  "slug": "windows-snap-layouts",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "window-management",
+   "tiling",
+   "zones",
+   "groups",
+   "discoverability"
+  ],
+  "relevance": "medium",
+  "path": "shells/windows-snap-layouts.md"
+ },
+ {
+  "name": "Windows Timeline",
+  "slug": "windows-timeline",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2018–2021",
+  "status": "failed",
+  "tags": [
+   "activity-history",
+   "task-view",
+   "cross-device",
+   "privacy",
+   "failed-idea"
+  ],
+  "relevance": "low",
+  "path": "shells/windows-timeline.md"
+ },
+ {
+  "name": "Windows 11 Widgets board",
+  "slug": "windows-widgets-board",
+  "domain": "shells",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "widgets",
+   "news-feed",
+   "hover",
+   "distraction",
+   "failed-idea"
+  ],
+  "relevance": "medium",
+  "path": "shells/windows-widgets-board.md"
+ },
+ {
+  "name": "Xfce and LXQt panels",
+  "slug": "xfce-lxqt-panels",
+  "domain": "shells",
+  "kind": "product",
+  "platform": "other",
+  "vendor": "Xfce, LXQt projects",
+  "years": "1996–present",
+  "status": "current",
+  "tags": [
+   "panel",
+   "lightweight",
+   "conservative",
+   "plugins",
+   "x11"
+  ],
+  "relevance": "low",
+  "path": "shells/xfce-lxqt-panels.md"
+ },
+ {
+  "name": "Adobe Leonardo (contrast-based colour)",
+  "slug": "adobe-leonardo",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "cross",
+  "vendor": "Adobe (Nate Baldwin)",
+  "years": "2019–present",
+  "status": "current",
+  "tags": [
+   "contrast-ratio",
+   "adaptive-color",
+   "spectrum",
+   "background-brightness",
+   "generator"
+  ],
+  "relevance": "high",
+  "path": "theming/adobe-leonardo.md"
+ },
+ {
+  "name": "Android dark theme schedule and bedtime mode",
+  "slug": "android-dark-theme-schedule",
+  "domain": "theming",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2019–present",
+  "status": "current",
+  "tags": [
+   "dark-mode",
+   "schedule",
+   "bedtime",
+   "force-dark"
+  ],
+  "relevance": "medium",
+  "path": "theming/android-dark-theme-schedule.md"
+ },
+ {
+  "name": "APCA (Accessible Perceptual Contrast Algorithm)",
+  "slug": "apca",
+  "domain": "theming",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Myndex Research (Andrew Somers)",
+  "years": "2019–present",
+  "status": "research",
+  "tags": [
+   "contrast",
+   "accessibility",
+   "wcag3",
+   "lc",
+   "polarity",
+   "font-size"
+  ],
+  "relevance": "high",
+  "path": "theming/apca.md"
+ },
+ {
+  "name": "Apple Liquid Glass",
+  "slug": "apple-liquid-glass",
+  "domain": "theming",
+  "kind": "feature",
+  "platform": "cross",
+  "vendor": "Apple",
+  "years": "2025–present",
+  "status": "current",
+  "tags": [
+   "glass",
+   "refraction",
+   "lensing",
+   "material",
+   "legibility",
+   "adaptive"
+  ],
+  "relevance": "high",
+  "path": "theming/apple-liquid-glass.md"
+ },
+ {
+  "name": "Apple materials and vibrancy (NSVisualEffectView)",
+  "slug": "apple-vibrancy-materials",
+  "domain": "theming",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2014–present",
+  "status": "current",
+  "tags": [
+   "materials",
+   "blur",
+   "vibrancy",
+   "translucency",
+   "semantic-materials"
+  ],
+  "relevance": "high",
+  "path": "theming/apple-vibrancy-materials.md"
+ },
+ {
+  "name": "Atlassian design tokens and dark mode migration",
+  "slug": "atlassian-tokens",
+  "domain": "theming",
+  "kind": "pattern",
+  "platform": "web",
+  "vendor": "Atlassian",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "tokens",
+   "migration",
+   "lint",
+   "codemod",
+   "dark-mode"
+  ],
+  "relevance": "medium",
+  "path": "theming/atlassian-tokens.md"
+ },
+ {
+  "name": "base16 / tinted-theming",
+  "slug": "base16-tinted-theming",
+  "domain": "theming",
+  "kind": "protocol",
+  "platform": "cross",
+  "vendor": "Chris Kempson; tinted-theming community",
+  "years": "2012–present",
+  "status": "current",
+  "tags": [
+   "scheme",
+   "templates",
+   "16-colours",
+   "base24",
+   "builder"
+  ],
+  "relevance": "medium",
+  "path": "theming/base16-tinted-theming.md"
+ },
+ {
+  "name": "Catppuccin",
+  "slug": "catppuccin",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "cross",
+  "vendor": "Catppuccin community",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "palette",
+   "community",
+   "ports",
+   "flavors",
+   "pastel",
+   "nix"
+  ],
+  "relevance": "medium",
+  "path": "theming/catppuccin.md"
+ },
+ {
+  "name": "W3C Design Tokens Community Group format",
+  "slug": "dtcg-design-tokens",
+  "domain": "theming",
+  "kind": "protocol",
+  "platform": "cross",
+  "vendor": "W3C Design Tokens Community Group",
+  "years": "2019–present",
+  "status": "current",
+  "tags": [
+   "tokens",
+   "json",
+   "interchange",
+   "aliases",
+   "theming",
+   "oklch"
+  ],
+  "relevance": "medium",
+  "path": "theming/dtcg-design-tokens.md"
+ },
+ {
+  "name": "Fluent Acrylic",
+  "slug": "fluent-acrylic",
+  "domain": "theming",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2017–present",
+  "status": "current",
+  "tags": [
+   "material",
+   "blur",
+   "noise",
+   "luminosity",
+   "transient-surfaces"
+  ],
+  "relevance": "high",
+  "path": "theming/fluent-acrylic.md"
+ },
+ {
+  "name": "Fluent Mica",
+  "slug": "fluent-mica",
+  "domain": "theming",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "material",
+   "wallpaper-tint",
+   "opaque",
+   "performance",
+   "fallback"
+  ],
+  "relevance": "high",
+  "path": "theming/fluent-mica.md"
+ },
+ {
+  "name": "GitHub Primer themes (colourblind, dimmed, high contrast)",
+  "slug": "github-primer",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "web",
+  "vendor": "GitHub",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "themes",
+   "colourblind",
+   "high-contrast",
+   "functional-tokens",
+   "primitives"
+  ],
+  "relevance": "high",
+  "path": "theming/github-primer.md"
+ },
+ {
+  "name": "GNOME 47 accent colours",
+  "slug": "gnome-accent-colors",
+  "domain": "theming",
+  "kind": "feature",
+  "platform": "GNOME",
+  "vendor": "GNOME",
+  "years": "2024–present",
+  "status": "current",
+  "tags": [
+   "accent",
+   "gsettings",
+   "portal",
+   "curated-palette"
+  ],
+  "relevance": "high",
+  "path": "theming/gnome-accent-colors.md"
+ },
+ {
+  "name": "GNOME Settings",
+  "slug": "gnome-settings",
+  "domain": "theming",
+  "kind": "product",
+  "platform": "GNOME",
+  "vendor": "GNOME",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "settings-app",
+   "panels",
+   "search",
+   "gsettings",
+   "tweaks"
+  ],
+  "relevance": "medium",
+  "path": "theming/gnome-settings.md"
+ },
+ {
+  "name": "Gruvbox, Nord and fixed community palettes",
+  "slug": "gruvbox-nord-palettes",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "cross",
+  "vendor": "Pavel Pertsev (gruvbox); Arctic Ice Studio (Nord); Ethan Schoonover (Solarized)",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "palette",
+   "retro",
+   "community",
+   "terminal",
+   "fixed-palette"
+  ],
+  "relevance": "medium",
+  "path": "theming/gruvbox-nord-palettes.md"
+ },
+ {
+  "name": "GSettings/dconf and Home Manager dconf.settings",
+  "slug": "gsettings-dconf-home-manager",
+  "domain": "theming",
+  "kind": "pattern",
+  "platform": "GNOME",
+  "vendor": "GNOME; nix-community",
+  "years": "2010–present",
+  "status": "current",
+  "tags": [
+   "declarative",
+   "schema",
+   "defaults",
+   "locks",
+   "nix",
+   "home-manager"
+  ],
+  "relevance": "high",
+  "path": "theming/gsettings-dconf-home-manager.md"
+ },
+ {
+  "name": "The GTK theme era (GTK2 engines to GTK3 CSS)",
+  "slug": "gtk-theme-era",
+  "domain": "theming",
+  "kind": "pattern",
+  "platform": "GNOME",
+  "vendor": "GNOME and theme community",
+  "years": "2002–2021",
+  "status": "discontinued",
+  "tags": [
+   "gtk2",
+   "gtk3",
+   "css",
+   "themes",
+   "gnome-look",
+   "breakage"
+  ],
+  "relevance": "low",
+  "path": "theming/gtk-theme-era.md"
+ },
+ {
+  "name": "HCT colour space (CAM16 hue/chroma + L* tone)",
+  "slug": "hct-cam16",
+  "domain": "theming",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Google (Material Design team)",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "colour-space",
+   "cam16",
+   "cielab",
+   "tone",
+   "contrast",
+   "gamut-mapping"
+  ],
+  "relevance": "medium",
+  "path": "theming/hct-cam16.md"
+ },
+ {
+  "name": "IBM Carbon themes and layering tokens",
+  "slug": "ibm-carbon-themes",
+  "domain": "theming",
+  "kind": "pattern",
+  "platform": "web",
+  "vendor": "IBM",
+  "years": "2018–present",
+  "status": "current",
+  "tags": [
+   "themes",
+   "layering",
+   "layer-01",
+   "gray-scale",
+   "tokens"
+  ],
+  "relevance": "medium",
+  "path": "theming/ibm-carbon-themes.md"
+ },
+ {
+  "name": "KDE Plasma accent from wallpaper and scheme tinting",
+  "slug": "kde-accent-from-wallpaper",
+  "domain": "theming",
+  "kind": "feature",
+  "platform": "KDE",
+  "vendor": "KDE",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "accent",
+   "wallpaper",
+   "tint",
+   "slideshow",
+   "colour-scheme"
+  ],
+  "relevance": "high",
+  "path": "theming/kde-accent-from-wallpaper.md"
+ },
+ {
+  "name": "KDE colour schemes",
+  "slug": "kde-color-schemes",
+  "domain": "theming",
+  "kind": "feature",
+  "platform": "KDE",
+  "vendor": "KDE",
+  "years": "2008–present",
+  "status": "current",
+  "tags": [
+   "color-scheme",
+   "kdeglobals",
+   "color-sets",
+   "qt",
+   "gtk-bridge"
+  ],
+  "relevance": "medium",
+  "path": "theming/kde-color-schemes.md"
+ },
+ {
+  "name": "KDE System Settings",
+  "slug": "kde-system-settings",
+  "domain": "theming",
+  "kind": "product",
+  "platform": "KDE",
+  "vendor": "KDE",
+  "years": "2008–present",
+  "status": "current",
+  "tags": [
+   "settings-app",
+   "kcm",
+   "highlight-changed",
+   "search",
+   "defaults"
+  ],
+  "relevance": "high",
+  "path": "theming/kde-system-settings.md"
+ },
+ {
+  "name": "libadwaita",
+  "slug": "libadwaita",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "GNOME",
+  "vendor": "GNOME",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "gtk4",
+   "style-manager",
+   "named-colors",
+   "css-variables",
+   "dark-mode"
+  ],
+  "relevance": "high",
+  "path": "theming/libadwaita.md"
+ },
+ {
+  "name": "Material 3 contrast levels and Android colour contrast setting",
+  "slug": "m3-contrast-levels",
+  "domain": "theming",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2023–present",
+  "status": "current",
+  "tags": [
+   "contrast",
+   "accessibility",
+   "dynamic-scheme",
+   "high-contrast",
+   "user-setting"
+  ],
+  "relevance": "high",
+  "path": "theming/m3-contrast-levels.md"
+ },
+ {
+  "name": "macOS Auto appearance",
+  "slug": "macos-auto-appearance",
+  "domain": "theming",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2019–present",
+  "status": "current",
+  "tags": [
+   "dark-mode",
+   "auto",
+   "schedule",
+   "night-shift",
+   "deferred-switch"
+  ],
+  "relevance": "high",
+  "path": "theming/macos-auto-appearance.md"
+ },
+ {
+  "name": "macOS/iOS Reduce Transparency and Increase Contrast",
+  "slug": "macos-reduce-transparency-increase-contrast",
+  "domain": "theming",
+  "kind": "feature",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2013–present",
+  "status": "current",
+  "tags": [
+   "accessibility",
+   "contrast",
+   "transparency",
+   "preference",
+   "fallback"
+  ],
+  "relevance": "high",
+  "path": "theming/macos-reduce-transparency-increase-contrast.md"
+ },
+ {
+  "name": "macOS System Settings (Ventura redesign)",
+  "slug": "macos-system-settings",
+  "domain": "theming",
+  "kind": "product",
+  "platform": "macOS",
+  "vendor": "Apple",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "settings-app",
+   "sidebar",
+   "ios-parity",
+   "criticism",
+   "search"
+  ],
+  "relevance": "high",
+  "path": "theming/macos-system-settings.md"
+ },
+ {
+  "name": "material-color-utilities quantize, Score and harmonize",
+  "slug": "material-color-utilities-score",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "cross",
+  "vendor": "Google",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "quantization",
+   "wu",
+   "wsmeans",
+   "score",
+   "harmonize",
+   "wallpaper",
+   "extraction"
+  ],
+  "relevance": "high",
+  "path": "theming/material-color-utilities-score.md"
+ },
+ {
+  "name": "Material You dynamic color",
+  "slug": "material-you-dynamic-color",
+  "domain": "theming",
+  "kind": "feature",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "dynamic-color",
+   "wallpaper",
+   "tonal-palette",
+   "material-3",
+   "accent"
+  ],
+  "relevance": "high",
+  "path": "theming/material-you-dynamic-color.md"
+ },
+ {
+  "name": "matugen",
+  "slug": "matugen",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "cross",
+  "vendor": "InioX",
+  "years": "2023–present",
+  "status": "current",
+  "tags": [
+   "material-you",
+   "wallpaper",
+   "templates",
+   "rust",
+   "base16",
+   "hyprland"
+  ],
+  "relevance": "high",
+  "path": "theming/matugen.md"
+ },
+ {
+  "name": "f.lux, Redshift, Night Shift and GNOME Night Light",
+  "slug": "night-light-lineage",
+  "domain": "theming",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Herf (f.lux); Jon Lund Steffensen (Redshift); Apple; GNOME; Microsoft",
+  "years": "2009–present",
+  "status": "current",
+  "tags": [
+   "colour-temperature",
+   "sun",
+   "gamma",
+   "schedule",
+   "blue-light"
+  ],
+  "relevance": "high",
+  "path": "theming/night-light-lineage.md"
+ },
+ {
+  "name": "Oklab and OKLCH",
+  "slug": "oklab-oklch",
+  "domain": "theming",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Björn Ottosson",
+  "years": "2020–present",
+  "status": "current",
+  "tags": [
+   "colour-space",
+   "perceptual",
+   "css-color-4",
+   "gamut",
+   "interpolation"
+  ],
+  "relevance": "high",
+  "path": "theming/oklab-oklch.md"
+ },
+ {
+  "name": "Open Props",
+  "slug": "open-props",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "web",
+  "vendor": "Adam Argyle",
+  "years": "2021–present",
+  "status": "niche",
+  "tags": [
+   "css-variables",
+   "sub-atomic",
+   "adaptive",
+   "easing",
+   "normalize"
+  ],
+  "relevance": "low",
+  "path": "theming/open-props.md"
+ },
+ {
+  "name": "pywal",
+  "slug": "pywal",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "cross",
+  "vendor": "Dylan Araps",
+  "years": "2017–2024",
+  "status": "discontinued",
+  "tags": [
+   "wallpaper",
+   "palette",
+   "terminal",
+   "ricing",
+   "templates",
+   "imagemagick"
+  ],
+  "relevance": "high",
+  "path": "theming/pywal.md"
+ },
+ {
+  "name": "Qt styles, qt5ct/qt6ct and Kvantum",
+  "slug": "qt-styles-kvantum",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "cross",
+  "vendor": "Qt / community (Pedram Pourang for Kvantum)",
+  "years": "2001–present",
+  "status": "current",
+  "tags": [
+   "qt",
+   "qstyle",
+   "platform-theme",
+   "svg-theme",
+   "consistency"
+  ],
+  "relevance": "low",
+  "path": "theming/qt-styles-kvantum.md"
+ },
+ {
+  "name": "Radix Colors",
+  "slug": "radix-colors",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "web",
+  "vendor": "WorkOS (Radix)",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "12-step-scale",
+   "step-jobs",
+   "dark-mode",
+   "alpha-scales",
+   "custom-palette"
+  ],
+  "relevance": "high",
+  "path": "theming/radix-colors.md"
+ },
+ {
+  "name": "Settings search on Android and ChromeOS",
+  "slug": "settings-search",
+  "domain": "theming",
+  "kind": "pattern",
+  "platform": "Android",
+  "vendor": "Google",
+  "years": "2017–present",
+  "status": "current",
+  "tags": [
+   "search",
+   "indexing",
+   "deep-link",
+   "highlight",
+   "settings-app"
+  ],
+  "relevance": "high",
+  "path": "theming/settings-search.md"
+ },
+ {
+  "name": "Settings sync (Windows, macOS, VS Code, browsers)",
+  "slug": "settings-sync",
+  "domain": "theming",
+  "kind": "pattern",
+  "platform": "cross",
+  "vendor": "Microsoft, Apple, Google, others",
+  "years": "2012–present",
+  "status": "current",
+  "tags": [
+   "sync",
+   "cloud",
+   "portability",
+   "dotfiles",
+   "conflicts"
+  ],
+  "relevance": "low",
+  "path": "theming/settings-sync.md"
+ },
+ {
+  "name": "Shopify Polaris tokens",
+  "slug": "shopify-polaris",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "web",
+  "vendor": "Shopify",
+  "years": "2017–present",
+  "status": "current",
+  "tags": [
+   "tokens",
+   "dark-mode",
+   "deferral",
+   "admin-ui"
+  ],
+  "relevance": "low",
+  "path": "theming/shopify-polaris.md"
+ },
+ {
+  "name": "\"Please don't theme our apps\" open letter",
+  "slug": "stop-theming-my-app",
+  "domain": "theming",
+  "kind": "pattern",
+  "platform": "GNOME",
+  "vendor": "independent GNOME app developers",
+  "years": "2019",
+  "status": "current",
+  "tags": [
+   "theming",
+   "platform-stylesheet",
+   "distro-themes",
+   "controversy"
+  ],
+  "relevance": "medium",
+  "path": "theming/stop-theming-my-app.md"
+ },
+ {
+  "name": "Style Dictionary",
+  "slug": "style-dictionary",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "cross",
+  "vendor": "Amazon (now community, with Tokens Studio)",
+  "years": "2017–present",
+  "status": "current",
+  "tags": [
+   "tokens",
+   "build-system",
+   "transforms",
+   "platforms",
+   "codegen",
+   "tokens-studio"
+  ],
+  "relevance": "medium",
+  "path": "theming/style-dictionary.md"
+ },
+ {
+  "name": "Stylix",
+  "slug": "stylix",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "other",
+  "vendor": "danth / nix-community",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "nixos",
+   "home-manager",
+   "base16",
+   "declarative",
+   "wallpaper",
+   "fonts"
+  ],
+  "relevance": "high",
+  "path": "theming/stylix.md"
+ },
+ {
+  "name": "Tailwind CSS v4 OKLCH palette",
+  "slug": "tailwind-v4-oklch",
+  "domain": "theming",
+  "kind": "feature",
+  "platform": "web",
+  "vendor": "Tailwind Labs",
+  "years": "2025–present",
+  "status": "current",
+  "tags": [
+   "oklch",
+   "p3",
+   "palette",
+   "css-variables",
+   "wide-gamut"
+  ],
+  "relevance": "medium",
+  "path": "theming/tailwind-v4-oklch.md"
+ },
+ {
+  "name": "wallust",
+  "slug": "wallust",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "cross",
+  "vendor": "explosion-mental",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "wallpaper",
+   "palette",
+   "rust",
+   "contrast",
+   "kmeans",
+   "oklab",
+   "templates"
+  ],
+  "relevance": "medium",
+  "path": "theming/wallust.md"
+ },
+ {
+  "name": "Windows automatic accent colour from background",
+  "slug": "windows-accent-from-wallpaper",
+  "domain": "theming",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2015–present",
+  "status": "current",
+  "tags": [
+   "accent",
+   "wallpaper",
+   "extraction",
+   "slideshow"
+  ],
+  "relevance": "medium",
+  "path": "theming/windows-accent-from-wallpaper.md"
+ },
+ {
+  "name": "Auto Dark Mode for Windows",
+  "slug": "windows-auto-dark-mode",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "Windows",
+  "vendor": "Armin Osaj and Samuel Schiegg (AutoDarkMode)",
+  "years": "2018–present",
+  "status": "current",
+  "tags": [
+   "dark-mode",
+   "schedule",
+   "sunset",
+   "wallpaper-switch",
+   "idle",
+   "open-source"
+  ],
+  "relevance": "high",
+  "path": "theming/windows-auto-dark-mode.md"
+ },
+ {
+  "name": "Windows high contrast / contrast themes",
+  "slug": "windows-contrast-themes",
+  "domain": "theming",
+  "kind": "feature",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "1995–present",
+  "status": "current",
+  "tags": [
+   "accessibility",
+   "forced-colors",
+   "system-colors",
+   "high-contrast"
+  ],
+  "relevance": "medium",
+  "path": "theming/windows-contrast-themes.md"
+ },
+ {
+  "name": "Windows Settings vs Control Panel",
+  "slug": "windows-settings-control-panel",
+  "domain": "theming",
+  "kind": "product",
+  "platform": "Windows",
+  "vendor": "Microsoft",
+  "years": "2012–present",
+  "status": "current",
+  "tags": [
+   "settings-app",
+   "migration",
+   "legacy",
+   "split-brain"
+  ],
+  "relevance": "medium",
+  "path": "theming/windows-settings-control-panel.md"
+ },
+ {
+  "name": "wluma",
+  "slug": "wluma",
+  "domain": "theming",
+  "kind": "project",
+  "platform": "Wayland",
+  "vendor": "Maxim Baz",
+  "years": "2021–present",
+  "status": "niche",
+  "tags": [
+   "brightness",
+   "ambient-light",
+   "screen-content",
+   "learning",
+   "wayland"
+  ],
+  "relevance": "medium",
+  "path": "theming/wluma.md"
+ },
+ {
+  "name": "XDG desktop portal appearance settings",
+  "slug": "xdg-portal-appearance",
+  "domain": "theming",
+  "kind": "protocol",
+  "platform": "Wayland",
+  "vendor": "freedesktop.org / Flatpak",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "portal",
+   "color-scheme",
+   "accent-color",
+   "contrast",
+   "reduced-motion",
+   "cross-desktop"
+  ],
+  "relevance": "high",
+  "path": "theming/xdg-portal-appearance.md"
+ },
+ {
+  "name": "AGS and Astal",
+  "slug": "ags-astal",
+  "domain": "wayland",
+  "kind": "project",
+  "platform": "Wayland",
+  "vendor": "Aylur",
+  "years": "2023–present",
+  "status": "current",
+  "tags": [
+   "gjs",
+   "typescript",
+   "jsx",
+   "vala",
+   "services",
+   "gtk4"
+  ],
+  "relevance": "medium",
+  "path": "wayland/ags-astal.md"
+ },
+ {
+  "name": "Caelestia shell",
+  "slug": "caelestia",
+  "domain": "wayland",
+  "kind": "project",
+  "platform": "Wayland",
+  "vendor": "caelestia-dots (Soramane)",
+  "years": "2024–present",
+  "status": "current",
+  "tags": [
+   "quickshell",
+   "morphing",
+   "motion",
+   "hyprland",
+   "dashboard"
+  ],
+  "relevance": "high",
+  "path": "wayland/caelestia.md"
+ },
+ {
+  "name": "fractional-scale, cursor-shape and tearing-control",
+  "slug": "client-fidelity-protocols",
+  "domain": "wayland",
+  "kind": "protocol",
+  "platform": "Wayland",
+  "vendor": "wayland-protocols",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "protocol",
+   "hidpi",
+   "fractional-scaling",
+   "cursor",
+   "tearing",
+   "latency"
+  ],
+  "relevance": "low",
+  "path": "wayland/client-fidelity-protocols.md"
+ },
+ {
+  "name": "wl-clipboard, cliphist, clipse and stash",
+  "slug": "clipboard-managers",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Sergey Bugaev (wl-clipboard); sentriz (cliphist); savedra1 (clipse); NotAShelf (stash)",
+  "years": "2018–present",
+  "status": "current",
+  "tags": [
+   "clipboard",
+   "history",
+   "data-control",
+   "sensitive",
+   "privacy"
+  ],
+  "relevance": "medium",
+  "path": "wayland/clipboard-managers.md"
+ },
+ {
+  "name": "COSMIC (cosmic-comp, cosmic-panel, applets)",
+  "slug": "cosmic",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "System76",
+  "years": "2021–present (Epoch 1 shipped Dec 2025)",
+  "status": "current",
+  "tags": [
+   "desktop",
+   "rust",
+   "smithay",
+   "iced",
+   "autotiling",
+   "applets",
+   "protocols"
+  ],
+  "relevance": "medium",
+  "path": "wayland/cosmic.md"
+ },
+ {
+  "name": "DankMaterialShell",
+  "slug": "dankmaterialshell",
+  "domain": "wayland",
+  "kind": "project",
+  "platform": "Wayland",
+  "vendor": "AvengeMedia",
+  "years": "2025–present",
+  "status": "current",
+  "tags": [
+   "quickshell",
+   "go",
+   "niri",
+   "all-in-one",
+   "material",
+   "plugins"
+  ],
+  "relevance": "high",
+  "path": "wayland/dankmaterialshell.md"
+ },
+ {
+  "name": "dwl",
+  "slug": "dwl",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "djpohly, then the dwl community (Codeberg)",
+  "years": "2020–present",
+  "status": "niche",
+  "tags": [
+   "dwm",
+   "suckless",
+   "patches",
+   "minimal",
+   "wlroots"
+  ],
+  "relevance": "low",
+  "path": "wayland/dwl.md"
+ },
+ {
+  "name": "end-4 dots-hyprland (illogical-impulse)",
+  "slug": "end4-illogical-impulse",
+  "domain": "wayland",
+  "kind": "project",
+  "platform": "Wayland",
+  "vendor": "end-4",
+  "years": "2023–present",
+  "status": "current",
+  "tags": [
+   "dotfiles",
+   "hyprland",
+   "quickshell",
+   "material-you",
+   "sidebars",
+   "ai"
+  ],
+  "relevance": "medium",
+  "path": "wayland/end4-illogical-impulse.md"
+ },
+ {
+  "name": "eww (ElKowar's Wacky Widgets)",
+  "slug": "eww",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "ElKowar",
+  "years": "2020–present",
+  "status": "niche",
+  "tags": [
+   "widgets",
+   "rust",
+   "gtk3",
+   "yuck",
+   "polling",
+   "declarative"
+  ],
+  "relevance": "medium",
+  "path": "wayland/eww.md"
+ },
+ {
+  "name": "ext-background-effect-v1",
+  "slug": "ext-background-effect",
+  "domain": "wayland",
+  "kind": "protocol",
+  "platform": "Wayland",
+  "vendor": "Xaver Hugl (KDE); wayland-protocols",
+  "years": "2024 proposed, merged 2025–26",
+  "status": "current",
+  "tags": [
+   "protocol",
+   "blur",
+   "glass",
+   "effects",
+   "region"
+  ],
+  "relevance": "high",
+  "path": "wayland/ext-background-effect.md"
+ },
+ {
+  "name": "ext-image-copy-capture-v1 and ext-image-capture-source-v1",
+  "slug": "ext-image-copy-capture",
+  "domain": "wayland",
+  "kind": "protocol",
+  "platform": "Wayland",
+  "vendor": "Andri Yngvason and others; wayland-protocols",
+  "years": "2024–present",
+  "status": "current",
+  "tags": [
+   "protocol",
+   "screencopy",
+   "toplevel-capture",
+   "damage",
+   "dmabuf"
+  ],
+  "relevance": "high",
+  "path": "wayland/ext-image-copy-capture.md"
+ },
+ {
+  "name": "ext-session-lock-v1",
+  "slug": "ext-session-lock",
+  "domain": "wayland",
+  "kind": "protocol",
+  "platform": "Wayland",
+  "vendor": "Isaac Freund; wayland-protocols",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "protocol",
+   "lock-screen",
+   "security",
+   "failsafe"
+  ],
+  "relevance": "high",
+  "path": "wayland/ext-session-lock.md"
+ },
+ {
+  "name": "ext-workspace-v1",
+  "slug": "ext-workspace",
+  "domain": "wayland",
+  "kind": "protocol",
+  "platform": "Wayland",
+  "vendor": "wayland-protocols (COSMIC, labwc and KDE contributors)",
+  "years": "2025–present",
+  "status": "current",
+  "tags": [
+   "protocol",
+   "workspaces",
+   "taskbar",
+   "groups"
+  ],
+  "relevance": "high",
+  "path": "wayland/ext-workspace.md"
+ },
+ {
+  "name": "ext-foreign-toplevel-list and wlr-foreign-toplevel-management",
+  "slug": "foreign-toplevel",
+  "domain": "wayland",
+  "kind": "protocol",
+  "platform": "Wayland",
+  "vendor": "wlroots; wayland-protocols",
+  "years": "2019–present",
+  "status": "current",
+  "tags": [
+   "protocol",
+   "taskbar",
+   "window-list",
+   "activate",
+   "close"
+  ],
+  "relevance": "high",
+  "path": "wayland/foreign-toplevel.md"
+ },
+ {
+  "name": "GNOME Shell on Mutter",
+  "slug": "gnome-shell-mutter",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "GNOME",
+  "vendor": "GNOME Foundation",
+  "years": "2011–present",
+  "status": "current",
+  "tags": [
+   "in-process-shell",
+   "gjs",
+   "extensions",
+   "no-layer-shell"
+  ],
+  "relevance": "medium",
+  "path": "wayland/gnome-shell-mutter.md"
+ },
+ {
+  "name": "Forge and Tiling Shell (GNOME tiling extensions)",
+  "slug": "gnome-tiling-extensions",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "GNOME",
+  "vendor": "jmmaranan (Forge); Domenico Ferraro (Tiling Shell)",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "gnome-extension",
+   "tiling",
+   "snap-assistant",
+   "fancyzones",
+   "maintainer"
+  ],
+  "relevance": "low",
+  "path": "wayland/gnome-tiling-extensions.md"
+ },
+ {
+  "name": "Hyprland plugin API and hyprland-plugins",
+  "slug": "hyprland-plugin-api",
+  "domain": "wayland",
+  "kind": "feature",
+  "platform": "Wayland",
+  "vendor": "hyprwm",
+  "years": "2023–present",
+  "status": "current",
+  "tags": [
+   "plugins",
+   "abi",
+   "hyprpm",
+   "hyprexpo",
+   "overview",
+   "fragility"
+  ],
+  "relevance": "medium",
+  "path": "wayland/hyprland-plugin-api.md"
+ },
+ {
+  "name": "Hyprland",
+  "slug": "hyprland",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Vaxry (vaxerski) and hyprwm",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "compositor",
+   "animations",
+   "dynamic-tiling",
+   "ipc",
+   "ecosystem"
+  ],
+  "relevance": "medium",
+  "path": "wayland/hyprland.md"
+ },
+ {
+  "name": "HyprPanel and Wayle",
+  "slug": "hyprpanel-wayle",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Jas Singh (Jas-SinghFSU)",
+  "years": "2024–present (HyprPanel archived 27 Apr 2026)",
+  "status": "discontinued",
+  "tags": [
+   "ags",
+   "burnout",
+   "rewrite",
+   "rust",
+   "gtk4",
+   "relm4"
+  ],
+  "relevance": "high",
+  "path": "wayland/hyprpanel-wayle.md"
+ },
+ {
+  "name": "i3bar protocol, i3status, i3blocks, polybar, lemonbar",
+  "slug": "i3bar-lineage",
+  "domain": "wayland",
+  "kind": "protocol",
+  "platform": "cross",
+  "vendor": "i3 project; community",
+  "years": "2009–present",
+  "status": "current",
+  "tags": [
+   "status-protocol",
+   "json-stream",
+   "polling",
+   "x11",
+   "text-bars"
+  ],
+  "relevance": "medium",
+  "path": "wayland/i3bar-lineage.md"
+ },
+ {
+  "name": "Idle handling (ext-idle-notify, idle-inhibit, swayidle, hypridle)",
+  "slug": "idle-stack",
+  "domain": "wayland",
+  "kind": "pattern",
+  "platform": "Wayland",
+  "vendor": "wayland-protocols; swaywm; hyprwm",
+  "years": "2018–present",
+  "status": "current",
+  "tags": [
+   "protocol",
+   "idle",
+   "inhibit",
+   "logind",
+   "lock",
+   "suspend"
+  ],
+  "relevance": "medium",
+  "path": "wayland/idle-stack.md"
+ },
+ {
+  "name": "Ironbar",
+  "slug": "ironbar",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Jake Stanger",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "bar",
+   "rust",
+   "gtk4",
+   "modules",
+   "ipc"
+  ],
+  "relevance": "high",
+  "path": "wayland/ironbar.md"
+ },
+ {
+  "name": "KWin custom tiling and tiling scripts (Bismuth, Polonium, Karousel)",
+  "slug": "kwin-tiling",
+  "domain": "wayland",
+  "kind": "feature",
+  "platform": "KDE",
+  "vendor": "KDE; script authors",
+  "years": "2020–present",
+  "status": "current",
+  "tags": [
+   "kwin",
+   "tiling",
+   "scripts",
+   "zones",
+   "plasma"
+  ],
+  "relevance": "low",
+  "path": "wayland/kwin-tiling.md"
+ },
+ {
+  "name": "labwc",
+  "slug": "labwc",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Johan Malm and contributors",
+  "years": "2020–present",
+  "status": "current",
+  "tags": [
+   "compositor",
+   "stacking",
+   "openbox",
+   "wlroots",
+   "protocols"
+  ],
+  "relevance": "low",
+  "path": "wayland/labwc.md"
+ },
+ {
+  "name": "wlr-layer-shell",
+  "slug": "layer-shell",
+  "domain": "wayland",
+  "kind": "protocol",
+  "platform": "Wayland",
+  "vendor": "wlroots project (swaywm/wlr-protocols)",
+  "years": "2018–present",
+  "status": "current",
+  "tags": [
+   "protocol",
+   "panels",
+   "anchors",
+   "exclusive-zone",
+   "keyboard-interactivity"
+  ],
+  "relevance": "high",
+  "path": "wayland/layer-shell.md"
+ },
+ {
+  "name": "hyprlock and swaylock-effects",
+  "slug": "lockers",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "hyprwm; mortie (swaylock-effects), later jirutka fork",
+  "years": "2020–present",
+  "status": "current",
+  "tags": [
+   "lock-screen",
+   "blur",
+   "fade-in",
+   "grace-period",
+   "widgets"
+  ],
+  "relevance": "medium",
+  "path": "wayland/lockers.md"
+ },
+ {
+  "name": "mako, dunst and fnott",
+  "slug": "mako-dunst-fnott",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "emersion (mako); dunst project; dnkl (fnott)",
+  "years": "2013–present",
+  "status": "current",
+  "tags": [
+   "notifications",
+   "criteria",
+   "rules",
+   "lightweight"
+  ],
+  "relevance": "medium",
+  "path": "wayland/mako-dunst-fnott.md"
+ },
+ {
+  "name": "Material Shell (to Veshell)",
+  "slug": "material-shell",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "GNOME",
+  "vendor": "PapyElGringo and contributors",
+  "years": "2019–2023 (extension); Veshell ongoing",
+  "status": "discontinued",
+  "tags": [
+   "gnome-extension",
+   "tiling",
+   "workspaces-as-apps",
+   "flutter",
+   "smithay"
+  ],
+  "relevance": "low",
+  "path": "wayland/material-shell.md"
+ },
+ {
+  "name": "Night light on Wayland (wlr-gamma-control, wlsunset, gammastep, hyprsunset)",
+  "slug": "night-light-gamma",
+  "domain": "wayland",
+  "kind": "pattern",
+  "platform": "Wayland",
+  "vendor": "wlroots; Kenny Levinsen (wlsunset); gammastep maintainers; hyprwm",
+  "years": "2019–present",
+  "status": "current",
+  "tags": [
+   "protocol",
+   "gamma",
+   "colour-temperature",
+   "ctm",
+   "exclusive"
+  ],
+  "relevance": "medium",
+  "path": "wayland/night-light-gamma.md"
+ },
+ {
+  "name": "niri",
+  "slug": "niri",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Ivan Molodetskikh (YaLTeR) and contributors",
+  "years": "2023–present",
+  "status": "current",
+  "tags": [
+   "compositor",
+   "scrollable-tiling",
+   "smithay",
+   "rust",
+   "overview",
+   "blur"
+  ],
+  "relevance": "high",
+  "path": "wayland/niri.md"
+ },
+ {
+  "name": "Noctalia shell",
+  "slug": "noctalia",
+  "domain": "wayland",
+  "kind": "project",
+  "platform": "Wayland",
+  "vendor": "noctalia-dev",
+  "years": "2025–present",
+  "status": "current",
+  "tags": [
+   "quickshell",
+   "niri",
+   "fork",
+   "minimal",
+   "lavender"
+  ],
+  "relevance": "medium",
+  "path": "wayland/noctalia.md"
+ },
+ {
+  "name": "nwg-shell",
+  "slug": "nwg-shell",
+  "domain": "wayland",
+  "kind": "project",
+  "platform": "Wayland",
+  "vendor": "Piotr Miller (nwg-piotr)",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "python",
+   "gtk3",
+   "panel",
+   "drawer",
+   "dock",
+   "displays",
+   "settings"
+  ],
+  "relevance": "medium",
+  "path": "wayland/nwg-shell.md"
+ },
+ {
+  "name": "kanshi, shikane and way-displays",
+  "slug": "output-profile-tools",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "emersion (kanshi); hw0lff (shikane); alex-courtis (way-displays)",
+  "years": "2019–present",
+  "status": "current",
+  "tags": [
+   "displays",
+   "profiles",
+   "hotplug",
+   "output-management"
+  ],
+  "relevance": "high",
+  "path": "wayland/output-profile-tools.md"
+ },
+ {
+  "name": "Pop Shell",
+  "slug": "pop-shell",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "GNOME",
+  "vendor": "System76",
+  "years": "2020–2027 (maintenance ends with Pop!_OS 22.04 EOL)",
+  "status": "discontinued",
+  "tags": [
+   "gnome-extension",
+   "auto-tiling",
+   "launcher",
+   "keyboard"
+  ],
+  "relevance": "low",
+  "path": "wayland/pop-shell.md"
+ },
+ {
+  "name": "Fabric and Ignis (Python shell frameworks)",
+  "slug": "python-shell-frameworks",
+  "domain": "wayland",
+  "kind": "project",
+  "platform": "Wayland",
+  "vendor": "Fabric-Development; linkfrg (Ignis)",
+  "years": "2023–present",
+  "status": "niche",
+  "tags": [
+   "python",
+   "pygobject",
+   "gtk3",
+   "gtk4",
+   "services"
+  ],
+  "relevance": "low",
+  "path": "wayland/python-shell-frameworks.md"
+ },
+ {
+  "name": "Qtile",
+  "slug": "qtile",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Qtile community",
+  "years": "2008–present",
+  "status": "niche",
+  "tags": [
+   "python",
+   "tiling",
+   "wm-with-bar",
+   "x11",
+   "wayland"
+  ],
+  "relevance": "low",
+  "path": "wayland/qtile.md"
+ },
+ {
+  "name": "Quickshell",
+  "slug": "quickshell",
+  "domain": "wayland",
+  "kind": "project",
+  "platform": "Wayland",
+  "vendor": "outfoxxed and contributors",
+  "years": "2024–present",
+  "status": "current",
+  "tags": [
+   "qml",
+   "qtquick",
+   "hot-reload",
+   "toolkit",
+   "shells"
+  ],
+  "relevance": "high",
+  "path": "wayland/quickshell.md"
+ },
+ {
+  "name": "Regolith Desktop",
+  "slug": "regolith",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "other",
+  "vendor": "Ken Gilmer and the Regolith team",
+  "years": "2018–present",
+  "status": "niche",
+  "tags": [
+   "i3",
+   "sway",
+   "ubuntu",
+   "gnome-flashback",
+   "curated",
+   "looks"
+  ],
+  "relevance": "low",
+  "path": "wayland/regolith.md"
+ },
+ {
+  "name": "river",
+  "slug": "river",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Isaac Freund",
+  "years": "2020–present",
+  "status": "current",
+  "tags": [
+   "compositor",
+   "zig",
+   "window-management-protocol",
+   "separation"
+  ],
+  "relevance": "medium",
+  "path": "wayland/river.md"
+ },
+ {
+  "name": "grim, slurp, swappy, satty and hyprpicker",
+  "slug": "screenshot-tools",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "emersion (grim, slurp); jtheoof (swappy); gabm (satty); hyprwm",
+  "years": "2018–present",
+  "status": "current",
+  "tags": [
+   "screenshot",
+   "region-select",
+   "annotation",
+   "colour-picker",
+   "composition"
+  ],
+  "relevance": "medium",
+  "path": "wayland/screenshot-tools.md"
+ },
+ {
+  "name": "PaperWM and Karousel (scrollable tiling on GNOME and KDE)",
+  "slug": "scrollable-tiling-extensions",
+  "domain": "wayland",
+  "kind": "pattern",
+  "platform": "GNOME",
+  "vendor": "PaperWM community; Peter Fajdiga (Karousel)",
+  "years": "2017–present",
+  "status": "niche",
+  "tags": [
+   "scrollable-tiling",
+   "paper",
+   "extension",
+   "kwin-script"
+  ],
+  "relevance": "low",
+  "path": "wayland/scrollable-tiling-extensions.md"
+ },
+ {
+  "name": "Sway",
+  "slug": "sway",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Drew DeVault, then Simon Ser and the swaywm community",
+  "years": "2016–present",
+  "status": "current",
+  "tags": [
+   "compositor",
+   "tiling",
+   "i3",
+   "wlroots",
+   "ipc"
+  ],
+  "relevance": "high",
+  "path": "wayland/sway.md"
+ },
+ {
+  "name": "SwayFX (and scenefx)",
+  "slug": "swayfx",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "WillPower3309 and the wlrfx organisation",
+  "years": "2022–present",
+  "status": "current",
+  "tags": [
+   "compositor",
+   "blur",
+   "shadows",
+   "rounded-corners",
+   "scenefx",
+   "fork"
+  ],
+  "relevance": "high",
+  "path": "wayland/swayfx.md"
+ },
+ {
+  "name": "SwayNotificationCenter (swaync)",
+  "slug": "swaync",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Erik Reider",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "notifications",
+   "control-center",
+   "gtk4",
+   "grouping",
+   "inline-reply"
+  ],
+  "relevance": "high",
+  "path": "wayland/swaync.md"
+ },
+ {
+  "name": "Waybar",
+  "slug": "waybar",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Alexis Rouillard (Alexays) and contributors",
+  "years": "2018–present",
+  "status": "current",
+  "tags": [
+   "bar",
+   "gtkmm",
+   "json-config",
+   "css",
+   "modules",
+   "polling"
+  ],
+  "relevance": "high",
+  "path": "wayland/waybar.md"
+ },
+ {
+  "name": "Wayfire",
+  "slug": "wayfire",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Ilia Bozhinov (ammen99) and contributors",
+  "years": "2018–present",
+  "status": "niche",
+  "tags": [
+   "compositor",
+   "compiz",
+   "plugins",
+   "wobbly",
+   "expo",
+   "cube"
+  ],
+  "relevance": "low",
+  "path": "wayland/wayfire.md"
+ },
+ {
+  "name": "wlr-output-management",
+  "slug": "wlr-output-management",
+  "domain": "wayland",
+  "kind": "protocol",
+  "platform": "Wayland",
+  "vendor": "wlroots project",
+  "years": "2019–present",
+  "status": "current",
+  "tags": [
+   "protocol",
+   "displays",
+   "test-apply",
+   "hotplug"
+  ],
+  "relevance": "high",
+  "path": "wayland/wlr-output-management.md"
+ },
+ {
+  "name": "wluma",
+  "slug": "wluma",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Maximilian Bazhenov (max-baz)",
+  "years": "2021–present",
+  "status": "current",
+  "tags": [
+   "brightness",
+   "ambient-light",
+   "screen-contents",
+   "learning",
+   "screencopy"
+  ],
+  "relevance": "medium",
+  "path": "wayland/wluma.md"
+ },
+ {
+  "name": "xdg-activation-v1",
+  "slug": "xdg-activation",
+  "domain": "wayland",
+  "kind": "protocol",
+  "platform": "Wayland",
+  "vendor": "wayland-protocols",
+  "years": "2020–present",
+  "status": "current",
+  "tags": [
+   "protocol",
+   "focus-stealing",
+   "launch",
+   "startup-notification"
+  ],
+  "relevance": "medium",
+  "path": "wayland/xdg-activation.md"
+ },
+ {
+  "name": "yambar and sfwbar",
+  "slug": "yambar-sfwbar",
+  "domain": "wayland",
+  "kind": "product",
+  "platform": "Wayland",
+  "vendor": "Daniel Eklöf (yambar); Lev Babiev (sfwbar)",
+  "years": "2019–present",
+  "status": "niche",
+  "tags": [
+   "bar",
+   "lightweight",
+   "c",
+   "taskbar",
+   "floating"
+  ],
+  "relevance": "low",
+  "path": "wayland/yambar-sfwbar.md"
+ }
+]
