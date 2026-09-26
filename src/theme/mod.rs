@@ -16,6 +16,7 @@
 //! | file | holds |
 //! |---|---|
 //! | `mod.rs` | the stylesheet, [`reload`], [`observe`], [`watch`] |
+//! | `fade.rs` | the colours fading from one set of inputs to the next |
 //! | `inputs.rs` | [`inputs`] and [`shown`]: the one `Inputs` builder |
 //! | `sun.rs` | the sun's elevation, for `auto` (§2.1) |
 //! | `wallpaper.rs` | the wallpaper's hue, for the tint (§2.2) |
@@ -193,6 +194,7 @@ fn rules() -> String {
     }
 }
 
+mod fade;
 mod inputs;
 mod locked;
 mod paint;
@@ -233,7 +235,9 @@ pub fn load_css() {
 }
 
 /// Reparse the stylesheet with the inputs as they are now. Every widget
-/// already on screen restyles itself; nothing is rebuilt.
+/// already on screen restyles itself; nothing is rebuilt. The colours that
+/// changed fade to their new values over `page` (`fade`), when a window is
+/// on screen to fade them on and motion is on.
 ///
 /// Returns whether the inputs had in fact moved.
 pub fn reload() -> bool {
@@ -244,7 +248,20 @@ pub fn reload() -> bool {
     }
     PROVIDER.with(|p| {
         if let Some(provider) = p.borrow().as_ref() {
-            provider.load_from_string(&document(inputs));
+            let clock = std::time::Instant::now();
+            let tokens = crate::tokens::css(inputs);
+            let text = format!("{tokens}\n{}", rules());
+            let built = clock.elapsed();
+            if let Some(before) = before {
+                fade::start(&crate::tokens::css(before), &tokens);
+            }
+            let clock = std::time::Instant::now();
+            provider.load_from_string(&text);
+            log::debug!(
+                "theme: reload: document {:.2} ms, parse {:.2} ms",
+                built.as_secs_f64() * 1000.0,
+                clock.elapsed().as_secs_f64() * 1000.0
+            );
         }
     });
     LOADED.with(|l| *l.borrow_mut() = Some(inputs));

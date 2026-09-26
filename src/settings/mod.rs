@@ -19,6 +19,7 @@ mod bar_pane;
 pub mod cli;
 mod form;
 pub mod glass;
+mod glass_fade;
 mod glass_pane;
 mod idle_pane;
 mod look_pane;

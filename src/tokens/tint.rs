@@ -216,6 +216,28 @@ pub fn cast(c: Rgb, hue: f64) -> Rgb {
     to_rgb(Oklch(l, ch.clamp(CAST.0, CAST.1), hue.rem_euclid(360.0)))
 }
 
+/// The colour `t` of the way from `a` to `b`, in OKLCH: lightness and
+/// chroma straight, hue the shorter way round. A near-grey end has no hue
+/// worth keeping (CSS calls it powerless), so the path takes the other end's
+/// hue and only the chroma grows, rather than sweeping through the circle
+/// from whatever angle rounding left on a grey. Chroma gives way where the
+/// path leaves sRGB, as everywhere else here.
+pub fn blend(a: Rgb, b: Rgb, t: f64) -> Rgb {
+    const POWERLESS: f64 = 0.02;
+    let (x, y) = (Oklch::from(a), Oklch::from(b));
+    let (hx, hy) = match (x.1 < POWERLESS, y.1 < POWERLESS) {
+        (true, false) => (y.2, y.2),
+        (false, true) => (x.2, x.2),
+        _ => (x.2, y.2),
+    };
+    let t = t.clamp(0.0, 1.0);
+    to_rgb(Oklch(
+        x.0 + (y.0 - x.0) * t,
+        x.1 + (y.1 - x.1) * t,
+        (hx + difference(hx, hy) * t).rem_euclid(360.0),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

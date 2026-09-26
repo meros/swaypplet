@@ -59,8 +59,8 @@ night light uses (`gammastep.nix`: 55.6 N, 13.0 E; Nix writes it to
   panel process checks once a minute and at wake from suspend.
 - **A switch never happens in front of you.** When the sun crosses, the
   switch waits for the first of: idle (the same idle hint the lock uses),
-  lock, unlock, or 10 minutes with no swaypplet surface open. It then applies
-  as one step: tokens reloaded, material values sent.
+  lock, unlock, or 10 minutes with no swaypplet surface open. It then fades
+  over `--motion-page` (§2.3).
 - Choosing `dark` or `light` in the pane sets that mode until you choose
   `auto` again.
 
@@ -101,6 +101,45 @@ where a hue does not fit in sRGB.
 There is no second accent token. One is added when a component needs it.
 
 `off` is the untinted token set, byte for byte.
+
+### 2.3 A change of inputs fades
+
+A mode switch, a new tint, a new wallpaper or a Look edit fades from the old
+colours to the new over `--motion-page` (500 ms, standard curve, scaled by
+the Motion setting; instant with Motion off or GTK's reduced motion). The
+first stylesheet a process loads never fades, and nothing fades while no
+window of the process is on screen.
+
+- **The stylesheet** (`src/theme/fade.rs`). The main provider takes the new
+  document at once, so every rule and every token that is not a colour is
+  final from the first frame. A second provider above it holds only the
+  colour tokens that changed (54 of them for a mode switch), starts at the
+  old values and steps them through OKLCH on the frame clock; when it ends it
+  is emptied, which leaves exactly what a reload without a fade shows. A full
+  document is 0.1 ms to generate and 8–19 ms for GTK to parse, too much for
+  every frame; the overlay parses in 0.1–0.6 ms. What each step does cost is
+  GTK restyling every widget (a custom property on `:root` invalidates them
+  all): below a millisecond with the bar alone, enough with the panel's
+  launcher list open that a step slower than 25 ms is followed by a frame
+  with no step, which keeps every other frame free for input.
+- **The glass** (`src/settings/glass_fade.rs`). The material walks from what
+  the compositor has to the new mode's over the same duration and curve, a
+  push every 50 ms, on a thread of its own against the wall clock: it costs
+  the main thread nothing and does not stutter when a GTK frame is slow.
+  Every push goes through that thread in order, so the last value sent is
+  the last value set. Two values do not move along their number: the fill's
+  `none`/−1 sentinels resolve to the key the card paints, and
+  `photochromic` moves by what it does (a ceiling fades out by its strength
+  `1/p`, then a lift grows from zero), because a small positive number is
+  the strongest ceiling and a straight line through it darkened the glass
+  half way to light. A test walks the switch through the glass model and
+  holds the body to getting lighter at every step.
+- **The lock screen** fades its own stylesheet the same way while it is up.
+  Its one-second check and the panel's are not synchronised, so its text can
+  start up to a second before or after the glass.
+
+Cairo drawing (`theme::observe`) is redrawn once, at the start, in the new
+colours: it does not fade.
 
 ## 3. Tokens
 
@@ -371,7 +410,7 @@ and `animation`), and `src/anim.rs` reads the same values.
 | `--motion-exit` | 200 ms | accelerate | something leaving; shorter than its entrance, because waiting for a thing to go is dead time |
 | `--motion-move` | 300 ms | standard | something on screen moving to where it now belongs: a reflow, a reorder, a resize |
 | `--motion-travel` | 400 ms | standard | a whole surface crossing a distance: the switcher strip, a panel sliding in |
-| `--motion-page` | 500 ms | standard | the whole screen changing: switching user, the greeter handing over |
+| `--motion-page` | 500 ms | standard | the whole screen changing: switching user, the greeter handing over, the mode or the tint (§2.3) |
 
 The curves: standard `cubic-bezier(0.2, 0, 0, 1)`, decelerate
 `cubic-bezier(0, 0, 0, 1)`, accelerate `cubic-bezier(0.3, 0, 1, 1)`. The
@@ -426,7 +465,7 @@ the compositor can see its shape; the compositor drops those pixels
 (`fillKey` in `glass.nix`). What the glass shows is the material's own body
 fill. So a mode switch never touches the mask, the key, the mask threshold
 or the lock screen's scrim arithmetic. It changes the tokens and these
-material values, per glass namespace, over IPC:
+material values, per glass namespace, over IPC, fading both (§2.3):
 
 | Value | dark | light | Why |
 |---|---|---|---|

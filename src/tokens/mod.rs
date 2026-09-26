@@ -27,7 +27,7 @@ mod color;
 mod emit;
 mod fixed;
 mod inputs;
-mod material;
+pub(crate) mod material;
 pub mod motion;
 mod scales;
 mod semantic;

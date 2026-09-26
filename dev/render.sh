@@ -380,6 +380,12 @@ for _ in $(seq 1 10); do
   sz=$(stat -c '%s' "$OUT" 2>/dev/null || echo 0)
   if [ "$sz" -gt 6000 ]; then captured=1; break; fi
 done
+# SWPP_MIDRUN: a shell command run after the first capture and before the
+# series below, for a change made while the surface is up. The theme fade:
+#   SWPP_MIDRUN="sed -i s/dark/light/ \$XDG_CONFIG_HOME/swaypplet/settings.json" \
+#     SWAYPPLET_ANIM_SCALE=8 SWPP_SHOTS=24 SWPP_SHOT_GAP=0.25 dev/render.sh --mode panel
+[ -n "${SWPP_MIDRUN:-}" ] && sh -c "$SWPP_MIDRUN"
+
 # A series, for a surface that is meant to move: SWPP_SHOTS more frames,
 # SWPP_SHOT_GAP seconds apart, named after OUT (-1, -2, ...), and the number
 # of pixels that differ between the first and the last. Zero means nothing
