@@ -90,6 +90,7 @@ pub struct Builder<'a> {
     width: Option<i32>,
     height: Option<i32>,
     opaque: bool,
+    resizable: Option<bool>,
     /// `None` until the caller says: a card, or none.
     card: Option<Option<crate::ui::Card>>,
     slide: Option<(gtk4::Orientation, f64)>,
@@ -113,6 +114,7 @@ impl Surface {
             width: None,
             height: None,
             opaque: false,
+            resizable: None,
             card: None,
             slide: None,
             wrap: None,
@@ -290,6 +292,15 @@ impl<'a> Builder<'a> {
         self
     }
 
+    /// Override whether GTK may size the window away from its natural size
+    /// (see `build`). Only for a surface whose size is its default size and
+    /// not its content's: the locker's one-pixel warm-up window, which has no
+    /// content, and must not ask the compositor for a size of zero.
+    pub fn resizable(mut self, resizable: bool) -> Self {
+        self.resizable = Some(resizable);
+        self
+    }
+
     /// A glass card of `kind` on the root, with the transition that owns it.
     pub fn card(mut self, kind: crate::ui::Card) -> Self {
         self.card = Some(Some(kind));
@@ -342,7 +353,7 @@ impl<'a> Builder<'a> {
         let anchored = |e: Edge| self.anchors.iter().any(|&(a, on)| a == e && on);
         let stretched = (anchored(Edge::Left) && anchored(Edge::Right))
             || (anchored(Edge::Top) && anchored(Edge::Bottom));
-        window.set_resizable(stretched);
+        window.set_resizable(self.resizable.unwrap_or(stretched));
         if self.ignore_exclusive_zones {
             window.set_exclusive_zone(-1);
         }

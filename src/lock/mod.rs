@@ -153,22 +153,18 @@ fn warm_and_wait() {
             .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
             .build();
         let _ = app.register(None::<&gtk4::gio::Cancellable>);
-        let config = crate::shell::layer::LayerShellConfig {
-            layer: gtk4_layer_shell::Layer::Background,
-            namespace: crate::shell::Namespace::LockWarm,
-            keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
-            anchors: &[],
-            margins: &[],
-            exclusive: false,
-            default_width: Some(1),
-            default_height: Some(1),
-        };
-        let window = crate::shell::layer::create_layer_window(&app, &config);
+        let surface = crate::shell::Surface::builder(&app, crate::shell::Namespace::LockWarm)
+            .layer(gtk4_layer_shell::Layer::Background)
+            .width(1)
+            .height(1)
+            .resizable(true)
+            .no_card()
+            .build();
         // Invisible on every axis that matters: one pixel, fully transparent,
         // on the background layer, and gone before the main loop ever runs.
-        window.set_opacity(0.0);
-        window.present();
-        window.destroy();
+        surface.window().set_opacity(0.0);
+        surface.window().present();
+        drop(surface);
     }
     stage("warm: done");
 
