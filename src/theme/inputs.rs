@@ -8,12 +8,6 @@ use std::time::{Duration, Instant};
 use crate::settings::schema::{Look, ThemeMode, Tint as Reach};
 use crate::tokens::{Inputs, Mode, Tint};
 
-/// Light mode waits until every surface is on the tokens: a legacy rule
-/// still naming a dark palette colour would sit on light glass. Until then
-/// `auto` and `light` resolve to dark, except through `SWAYPPLET_MODE`,
-/// which the render harness uses to check the light work in progress.
-const LIGHT_READY: bool = false;
-
 /// How long a sun-driven switch may wait for the session to be locked
 /// before it happens anyway (§2.1).
 const PATIENCE: Duration = Duration::from_secs(600);
@@ -132,10 +126,8 @@ pub fn inputs() -> Inputs {
         Ok("dark") => Some(Mode::Dark),
         _ => None,
     };
+    // `SWAYPPLET_MODE` forces a mode: the render harness checks both.
     let mode = forced.unwrap_or_else(|| {
-        if !LIGHT_READY {
-            return Mode::Dark;
-        }
         match look.mode {
             // A choice made in the pane applies at once: the person made it.
             ThemeMode::Dark => Mode::Dark,
