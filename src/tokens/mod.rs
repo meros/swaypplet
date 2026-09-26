@@ -548,7 +548,7 @@ pub const fn space(n: usize) -> i32 {
     if n == 0 { 0 } else { SPACE[n - 1] }
 }
 
-pub const TYPE: [(&str, u32); 7] = [
+pub const TYPE: [(&str, u32); 8] = [
     ("caption", 11),
     ("label", 12),
     ("body", 13),
@@ -556,6 +556,7 @@ pub const TYPE: [(&str, u32); 7] = [
     ("title", 18),
     ("display-sm", 28),
     ("display", 36),
+    ("hero", 96),
 ];
 
 pub const RADIUS: [(&str, u32); 5] = [
@@ -696,6 +697,7 @@ pub fn css(inputs: Inputs) -> String {
     for (name, px) in TYPE {
         put(&format!("type-{name}"), format!("{px}px"));
     }
+    put("w-light", "300".into());
     put("w-regular", "400".into());
     put("w-strong", "600".into());
     put("w-heavy", "700".into());

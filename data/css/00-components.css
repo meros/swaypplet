@@ -22,6 +22,7 @@
 
 /* ── Type ─────────────────────────────────────────────────────────────── */
 
+.ui-hero       { font-size: var(--type-hero);       font-weight: var(--w-light); }
 .ui-display    { font-size: var(--type-display);    font-weight: var(--w-heavy); }
 .ui-display-sm { font-size: var(--type-display-sm); font-weight: var(--w-heavy); }
 .ui-title      { font-size: var(--type-title);      font-weight: var(--w-strong); }

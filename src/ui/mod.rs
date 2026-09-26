@@ -17,6 +17,8 @@ use crate::tokens::space;
 /// The type scale (§3.4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Text {
+    /// The lock screen's clock, and nothing else.
+    Hero,
     Display,
     DisplaySm,
     Title,
@@ -29,6 +31,7 @@ pub enum Text {
 impl Text {
     fn class(self) -> &'static str {
         match self {
+            Text::Hero => "ui-hero",
             Text::Display => "ui-display",
             Text::DisplaySm => "ui-display-sm",
             Text::Title => "ui-title",
@@ -86,6 +89,7 @@ pub fn glyph(l: &gtk4::Label, size: Text, tone: Tone) {
 /// Restyle an existing label onto the scale.
 pub fn set_text_style(l: &gtk4::Label, size: Text, tone: Tone) {
     for c in [
+        "ui-hero",
         "ui-display",
         "ui-display-sm",
         "ui-title",

@@ -282,7 +282,7 @@ impl SurfaceSet {
         // The clock and the date stand on bare wallpaper under the scrim,
         // with no card behind them: their shadow is what gives the glyphs an
         // edge on a bright image, which no text colour can.
-        let clock = ui::text("", ui::Text::Display, ui::Tone::Fg);
+        let clock = ui::text("", ui::Text::Hero, ui::Tone::Fg);
         clock.set_xalign(0.5);
         clock.add_css_class("ui-numeric");
         ui::on_wallpaper(&clock);

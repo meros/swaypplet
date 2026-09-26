@@ -241,11 +241,13 @@ animate custom properties, so transitions name the real properties.
 
 ### 3.4 Type
 
-One unit (px), one family per role, seven sizes, three weights.
+One unit (px), one family per role, seven sizes and a hero, three weights
+and a light one for the hero.
 
 | Token | Size | Weight | Use |
 |---|---|---|---|
-| `--type-display` | 36 | 700 | the clock on the lock screen, the OSD value |
+| `--type-hero` | 96 | 300 | the lock screen's clock, and nothing else |
+| `--type-display` | 36 | 700 | the OSD icon, a big number on a card |
 | `--type-display-sm` | 28 | 700 | a greeting, a big number on a card |
 | `--type-title` | 18 | 600 | a card's title (polkit, a notification's summary) |
 | `--type-title-sm` | 15 | 600 | a section's name, a tile's name |
@@ -253,7 +255,8 @@ One unit (px), one family per role, seven sizes, three weights.
 | `--type-label` | 12 | 400 / 600 | state lines, buttons in dense places, chips |
 | `--type-caption` | 11 | 400 | metadata, timestamps, footnotes |
 
-Weights: `--w-regular` 400, `--w-strong` 600, `--w-heavy` 700.
+Weights: `--w-regular` 400, `--w-strong` 600, `--w-heavy` 700, and
+`--w-light` 300 for the hero size only: at 96 px a heavy face shouts.
 Families: `--font` (Ubuntu Sans Nerd Font, then Ubuntu Sans, Noto Sans,
 sans-serif) and `--mono` (JetBrains Mono Nerd Font, monospace) for keys,
 code and tabular numbers. Numbers that change in place (clock, percentages,
@@ -317,7 +320,7 @@ and `animation`), and `src/anim.rs` reads the same values.
 | `--motion-exit` | 200 ms | accelerate | something leaving; shorter than its entrance, because waiting for a thing to go is dead time |
 | `--motion-move` | 300 ms | standard | something on screen moving to where it now belongs: a reflow, a reorder, a resize |
 | `--motion-travel` | 400 ms | standard | a whole surface crossing a distance: the switcher strip, a panel sliding in |
-| `--motion-page` | 500 ms | standard | the whole screen changing: the lock and greeter crossfades |
+| `--motion-page` | 500 ms | standard | the whole screen changing: switching user, the greeter handing over |
 
 The curves: standard `cubic-bezier(0.2, 0, 0, 1)`, decelerate
 `cubic-bezier(0, 0, 0, 1)`, accelerate `cubic-bezier(0.3, 0, 1, 1)`. The
@@ -327,7 +330,9 @@ several properties with one meaning.
 The Motion setting scales every duration when the tokens are generated
 (full, half, or one frame), so a rule never has to know about it.
 
-**Rules.** An enter pairs with an exit, never with another enter. Colour
+**Rules.** An enter pairs with an exit, never with another enter. The lock
+is an enter and an unlock an exit, not a page: the lock has to be up before
+a lid-close suspend, and waiting to get back to work is dead time. Colour
 and opacity changes of a control are `state`, even when they accompany a
 move. A surface's entrance is `enter` for its content and `travel` for the
 surface itself when it crosses the screen. Attention loops (a pulse, a
@@ -350,6 +355,8 @@ Only these, because no semantic token gives their value:
 | `--track-height` | 6 px | slider and progress tracks |
 | `--knob` | dark `--neutral-12`, light white | the slider and switch knob |
 | `--on-accent-muted` | `--on-accent` at 80 % | the second line on an accent fill, a tile's state under its name |
+| `--fg-on-wallpaper` | `--on-status` (white) | text standing on bare wallpaper under the lock's black scrim (the clock, the date): light in both modes, because that ground only ever darkens |
+| `--surface-key-over-scrim` | the key, pre-compensated | a glass card over the 0.20 scrim (the lock, the greeter), so the pair composites to exactly the key |
 
 ## 4. Glass and the modes
 
