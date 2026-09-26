@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 use gtk4::prelude::*;
 
-use crate::services::notifications::CloseReason;
+use crate::services::notifications::{CloseReason, group};
 use crate::services::notifications::store::{self, NotificationStore};
 use crate::ui;
 use crate::ui::icons;
@@ -153,26 +153,51 @@ fn rebuild_list(
     }
     empty_label.set_visible(false);
 
-    // Group by app_name, show newest first
-    let mut grouped: std::collections::BTreeMap<
-        String,
-        Vec<&crate::services::notifications::Notification>,
-    > = std::collections::BTreeMap::new();
-    for notif in notifications.iter().rev() {
-        grouped
-            .entry(notif.app_name.clone())
-            .or_default()
-            .push(notif);
-    }
-
-    for (app_name, notifs) in &grouped {
-        if !app_name.is_empty() {
-            list_box.append(&ui::heading(app_name));
+    // One entry per sender, the sender with the newest notification first
+    // (`group`): the newest in full, the rest under a disclosure, and a
+    // button that closes the lot. Critical ones stand alone, as on the popups.
+    for g in group::groups(&notifications) {
+        let newest = g.newest();
+        let count = g.items.len();
+        let head = ui::hbox(2);
+        let name = if newest.app_name.is_empty() {
+            "Other".to_string()
+        } else {
+            newest.app_name.clone()
+        };
+        let title = ui::heading(&name);
+        title.set_hexpand(true);
+        title.set_xalign(0.0);
+        head.append(&title);
+        if let Some(words) = group::describe(count, &newest.app_name) {
+            let badge = ui::badge(&count.to_string(), ui::BadgeTone::Neutral);
+            badge.set_valign(gtk4::Align::Center);
+            badge.set_tooltip_text(Some(&words));
+            head.append(&badge);
+            head.update_property(&[gtk4::accessible::Property::Label(&words)]);
+            let close = ui::button_with(
+                ui::Face::Glyph {
+                    glyph: icons::NOTIFICATION_CLEAR,
+                    tooltip: "Dismiss all from this sender",
+                },
+                ui::Kind::Flat,
+                ui::Size::Small,
+            );
+            let ids = g.ids();
+            let store_c = store.clone();
+            close.connect_clicked(move |_| {
+                store::store_close_all_of(&store_c, &ids, CloseReason::Dismissed);
+            });
+            head.append(&close);
         }
-
-        for notif in notifs {
-            let entry = build_entry(notif, store);
-            list_box.append(&entry);
+        list_box.append(&head);
+        list_box.append(&build_entry(newest, store));
+        if count > 1 {
+            let more = ui::disclosure(&format!("{} earlier", count - 1));
+            for notif in &g.items[1..] {
+                more.body.append(&build_entry(notif, store));
+            }
+            list_box.append(&more.root);
         }
     }
 

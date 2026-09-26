@@ -253,9 +253,10 @@ case "$MODE" in
     sleep 1.5
     # The stack's own bugs are stacking bugs, so the set has to mix body
     # lengths: a one-line card next to a three-line one is what showed the
-    # slot heights being wrong. Different -a per card because MAX_PER_APP
-    # caps one sender at three, and oldest first so the newest ends up on top
-    # where the critical card is easiest to read.
+    # slot heights being wrong. Oldest first, so the newest ends up on top.
+    # "CI" sends three, last: one sender is one card
+    # (services/notifications/group.rs), so the top card shows a count of 3,
+    # with the critical card under it.
     # -t 60000 on the ones that would otherwise expire: the server's own
     # timeout scales with body length (timeout_for), so the shortest card —
     # the one that shows a slot height being wrong — is also the first to go,
@@ -269,6 +270,11 @@ case "$MODE" in
     sleep 0.4
     notify-send -u critical -a "Disk" "Root filesystem 96% full" \
       "Only 3.1 GB left on /. Clear the nix store or the next rebuild fails." || true
+    sleep 0.4
+    for n in 1 2 3; do
+      notify-send -t 60000 -a "CI" "Pipeline #41$n failed" "test: 2 of 418 failed on main." || true
+      sleep 0.3
+    done
     sleep 1.2
     ;;
   screenshot)

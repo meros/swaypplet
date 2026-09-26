@@ -10,6 +10,7 @@ use super::menu::card_menu;
 use super::stack::{CARD_WIDTH, State, reflow};
 use super::timers::{pause_timers, resume_timers};
 use crate::anim;
+use crate::services::notifications::group::describe;
 use crate::services::notifications::store::{self, NotificationStore};
 use crate::services::notifications::{CloseReason, ImageSource, Notification, Urgency};
 
@@ -189,6 +190,10 @@ fn is_compact(notif: &Notification) -> bool {
 /// `replaces_id` updates (keeping its z-order and transform); everything
 /// inside — including gesture handlers — is rebuilt with fresh store refs.
 ///
+/// `earlier` is the rest of the sender's group behind this card, newest
+/// first (`services::notifications::group`): counted in the header and
+/// listed under a disclosure. Empty for a card that stands alone.
+///
 /// Returns the age label, if the card has one, so the stack can retitle it on
 /// the minute tick without rebuilding the card underneath the pointer.
 pub(super) fn populate_card(
@@ -196,7 +201,7 @@ pub(super) fn populate_card(
     notif: &Notification,
     store: &Rc<RefCell<NotificationStore>>,
     st: &Rc<RefCell<State>>,
-    overflow: u32,
+    earlier: &[Notification],
 ) -> Option<gtk4::Label> {
     while let Some(child) = card.first_child() {
         card.remove(&child);
@@ -229,7 +234,8 @@ pub(super) fn populate_card(
     // becomes the natural width and can push the card past the window (see
     // reflow). Fill + xalign(0) makes the label span that allocation and
     // ellipsize/wrap there instead of shrinking to the collapsed natural.
-    let age_label_handle = header(notif, overflow).map(|(header, age)| {
+    let count = earlier.len() + 1;
+    let age_label_handle = header(notif, count).map(|(header, age)| {
         vbox.append(&header);
         age
     });
@@ -267,6 +273,10 @@ pub(super) fn populate_card(
         vbox.append(&actions);
     }
 
+    if let Some(list) = earlier_list(earlier, st) {
+        vbox.append(&list);
+    }
+
     hbox.append(&vbox);
 
     if !compact {
@@ -295,7 +305,45 @@ pub(super) fn populate_card(
     row.add_controller(gesture);
 
     card.append(&row);
+    // A screen reader hears the count with the card, not only a number in
+    // its header.
+    let label = match describe(count, &notif.app_name) {
+        Some(group) => format!("{group}. Newest: {}", notif.summary),
+        None => notif.summary.clone(),
+    };
+    card.update_property(&[gtk4::accessible::Property::Label(&label)]);
     age_label_handle
+}
+
+/// The sender's earlier notifications, under a disclosure: a line each,
+/// newest first. The card grows when it opens, so the stack reflows once the
+/// reveal has finished.
+fn earlier_list(earlier: &[Notification], st: &Rc<RefCell<State>>) -> Option<gtk4::Widget> {
+    if earlier.is_empty() {
+        return None;
+    }
+    let d = crate::ui::disclosure(&format!("{} earlier", earlier.len()));
+    let now = std::time::SystemTime::now();
+    for n in earlier {
+        let line = crate::ui::hbox(2);
+        let summary = crate::ui::text(&n.summary, crate::ui::Text::Body, crate::ui::Tone::Muted);
+        summary.set_halign(gtk4::Align::Fill);
+        summary.set_hexpand(true);
+        summary.set_xalign(0.0);
+        summary.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        summary.set_max_width_chars(1);
+        line.append(&summary);
+        let age = crate::ui::text(
+            &age_label(n.timestamp, now).unwrap_or_default(),
+            crate::ui::Text::Caption,
+            crate::ui::Tone::Faint,
+        );
+        line.append(&age);
+        d.body.append(&line);
+    }
+    let st = st.clone();
+    d.revealer.connect_child_revealed_notify(move |_| reflow(&st));
+    Some(d.root.upcast())
 }
 
 /// The picture in the card's leading slot: the notification's own picture
@@ -333,7 +381,7 @@ fn leading_picture(notif: &Notification, wide: Option<&ImageSource>) -> Option<g
 /// channels: the number is the shape, its accent the hue (P3), so a separate
 /// dot would only repeat it. `None` when the card has nothing to put in a
 /// header, and so no header.
-fn header(notif: &Notification, overflow: u32) -> Option<(gtk4::Box, gtk4::Label)> {
+fn header(notif: &Notification, count: usize) -> Option<(gtk4::Box, gtk4::Label)> {
     let header = crate::ui::hbox(2);
     // Urgency leads the header, because a critical card is the one card that
     // never expires (timeout_for) and the word is what says so. It used to be
@@ -373,15 +421,12 @@ fn header(notif: &Notification, overflow: u32) -> Option<(gtk4::Box, gtk4::Label
         header.append(&app_label);
     }
 
-    // How many of this app's cards the stack has had to drop to make room
-    // for this one. Says "there is more of this" without spending a slot.
-    if overflow > 0 {
-        let badge = crate::ui::badge(&format!("+{overflow}"), crate::ui::BadgeTone::Neutral);
+    // How many notifications this sender's card stands for. Says "there is
+    // more of this" without spending a slot per copy.
+    if let Some(words) = describe(count, &notif.app_name) {
+        let badge = crate::ui::badge(&count.to_string(), crate::ui::BadgeTone::Neutral);
         badge.set_valign(gtk4::Align::Center);
-        badge.set_tooltip_text(Some(&format!(
-            "{overflow} more from {} — open the centre to read them",
-            notif.app_name
-        )));
+        badge.set_tooltip_text(Some(&words));
         header.append(&badge);
     }
 
