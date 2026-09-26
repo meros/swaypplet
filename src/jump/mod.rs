@@ -253,8 +253,16 @@ impl Jump {
             let commands = st.commands.clone();
             st.gesture.on(ev, &commands)
         };
+        // An unmap with no switch after it is a cancel: bring the receded
+        // workspace back. Known only once every action is in.
+        let committed = actions.iter().any(|a| matches!(a, Action::Run(_)));
+        let unmapped = actions.iter().any(|a| matches!(a, Action::Unmap));
         for action in actions {
             self.apply(action);
+        }
+        if unmapped && !committed {
+            let origin = self.state.borrow().origin.clone();
+            recede(&origin, RESTORE);
         }
     }
 
@@ -266,6 +274,10 @@ impl Jump {
                 self.window.set_visible(true);
                 self.arm_watchdog();
                 self.start_stream();
+                // Take the workspace you are on out of the way while you
+                // choose (sway's workspace_transform).
+                let origin = self.state.borrow().origin.clone();
+                recede(&origin, RECEDED);
                 // Harness hook: the nested session has no keyboard to let go
                 // of, so `SWAYPPLET_JUMP_RELEASE_MS=<ms>` releases Super that
                 // long after the card maps, down the same path.
@@ -300,10 +312,20 @@ impl Jump {
                 let origin = self.state.borrow().origin.clone();
                 if focused_workspace().is_some_and(|now| now != origin) {
                     log::debug!("jump: cancelled, something else moved us to {origin:?}");
+                    recede(&origin, RESTORE);
                     return;
                 }
                 let handoff = self.state.borrow_mut().handoff.take();
+                // The workspace being left finishes its exit - smaller and
+                // gone - while the chosen one grows out of its thumbnail.
+                // Ahead of the switch, on the same connection, so it is
+                // already leaving when the other arrives.
+                let mut before = Vec::new();
+                if crate::anim::animations_enabled() {
+                    before.push(transform_command(&origin, LEFT));
+                }
                 crate::handoff::run_workspace_switch(
+                    before,
                     handoff.map(|h| h.0),
                     handoff.map(|h| h.1),
                     &command,
@@ -416,6 +438,31 @@ fn read_session() -> Option<Session> {
 }
 
 /// The workspace with focus right now, by name.
+/// How the workspace you are on looks while the switcher is up: a step
+/// back and a little faded. On a commit it goes on to LEFT, smaller still
+/// and gone; a cancel brings it back. Not to zero size: it fades out
+/// before it could get there, the way the card slides are short settles.
+const RECEDED: (f64, f64) = (0.8, 0.75);
+const LEFT: (f64, f64) = (0.6, 0.0);
+const RESTORE: (f64, f64) = (1.0, 1.0);
+
+fn transform_command(workspace: &str, (scale, alpha): (f64, f64)) -> String {
+    format!(
+        "workspace_transform \"{}\" {scale} {alpha}",
+        workspace.replace('"', "\\\"")
+    )
+}
+
+/// Ask sway to draw `workspace` at `look`. Nothing when animations are off,
+/// and nothing happens on a sway without the transform patch: it rejects
+/// the command.
+fn recede(workspace: &str, look: (f64, f64)) {
+    if workspace.is_empty() || !crate::anim::animations_enabled() {
+        return;
+    }
+    crate::sway_ipc::run_commands(vec![transform_command(workspace, look)]);
+}
+
 fn focused_workspace() -> Option<String> {
     let mut conn = crate::sway_ipc::connect().ok()?;
     conn.get_workspaces()

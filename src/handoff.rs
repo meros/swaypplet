@@ -119,8 +119,14 @@ pub fn open_from(widget: &impl IsA<gtk4::Widget>) {
 /// Run `then` (a workspace switch) as a hand-off out of a picture:
 /// `picture` on screen shows the layout area `source`. The hand-off goes
 /// first on the same connection, so sway has it before it switches.
-pub fn run_workspace_switch(picture: Option<Rect>, source: Option<Rect>, then: &str) {
-    let mut cmds = Vec::new();
+/// `before` runs first, on the same connection.
+pub fn run_workspace_switch(
+    before: Vec<String>,
+    picture: Option<Rect>,
+    source: Option<Rect>,
+    then: &str,
+) {
+    let mut cmds = before;
     if let (Some(p), Some(s)) = (picture, source) {
         cmds.push(format!("handoff workspace {} {}", fmt(p), fmt(s)));
     }
