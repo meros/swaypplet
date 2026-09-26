@@ -349,6 +349,9 @@ impl Jump {
                 self.place_ring();
                 self.window.set_visible(true);
                 set_mode(MODE);
+                if let Some(pins) = pin::handle() {
+                    pins.set_held(true);
+                }
                 self.arm_watchdog();
                 {
                     let st = self.state.borrow();
@@ -389,6 +392,9 @@ impl Jump {
                 self.disarm_watchdog();
                 self.window.set_visible(false);
                 set_mode("default");
+                if let Some(pins) = pin::handle() {
+                    pins.set_held(false);
+                }
             }
             Action::Run(command) => {
                 let (names, selected, r) = {
