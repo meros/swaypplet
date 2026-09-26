@@ -63,6 +63,11 @@ pub struct SwayState {
     /// Current binding mode ("default" at rest; "" only before the first
     /// snapshot). The hazard lane shows non-default modes (increment 7).
     pub binding_mode: String,
+    /// How many times sway reloaded its config on this connection. A reload
+    /// puts every layer_effects back to the config's, dropping what this
+    /// process set at runtime (the glass tuning); a change here is the cue
+    /// to set it again.
+    pub reloads: u32,
 }
 
 // ── Connecting ──────────────────────────────────────────────────────────
@@ -339,9 +344,16 @@ fn session(tx: &async_channel::Sender<SwayState>) -> Result<(), swayipc::Error> 
         EventType::Tick,
         EventType::Mode,
     ])?;
+    let mut reloads = 0;
     for event in events {
-        event?;
-        if tx.send_blocking(snapshot(&mut query)?).is_err() {
+        if let swayipc::Event::Workspace(ws) = event?
+            && ws.change == swayipc::WorkspaceChange::Reload
+        {
+            reloads += 1;
+        }
+        let mut state = snapshot(&mut query)?;
+        state.reloads = reloads;
+        if tx.send_blocking(state).is_err() {
             return Ok(());
         }
     }
@@ -358,6 +370,7 @@ fn snapshot(query: &mut Connection) -> Result<SwayState, swayipc::Error> {
         pid_workspaces: index_tree(&tree),
         focused_fullscreen: focused_fullscreen(&tree),
         binding_mode: query.get_binding_state()?,
+        reloads: 0,
     })
 }
 
