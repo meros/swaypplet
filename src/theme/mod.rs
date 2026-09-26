@@ -213,15 +213,13 @@ mod tests {
             ),
         );
 
-        // The accent classes the notification card hands out by number
-        // (`notifications::popup::accent_for`) have to exist, or a sender
-        // silently falls back to @fg_dim and the hue channel is dead.
+        // The categorical classes the notification card hands out by number
+        // (`notifications::popup::accent_for`, through `ui::rail` and
+        // `ui::set_category`) have to exist, or a sender silently falls back to
+        // plain ink and the hue channel is dead.
         let css = super::joined_rules();
         for n in 1..=crate::notifications::popup::ACCENTS {
-            for rule in [
-                format!(".notification-rail.a{n}"),
-                format!(".notification-app-name.a{n}"),
-            ] {
+            for rule in [format!(".ui-rail.cat-{n}"), format!(".ui-cat-{n}")] {
                 assert!(css.contains(&rule), "data/css/ has no `{rule}`");
             }
         }

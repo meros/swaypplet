@@ -800,3 +800,76 @@ pub fn list_row(content: &impl IsA<gtk4::Widget>) -> gtk4::ListBoxRow {
     content.add_css_class("ui-row");
     gtk4::ListBoxRow::builder().child(content).build()
 }
+
+// ── Notification components (added by the notifications migration) ─────
+
+/// A small uppercase label naming what follows: a sender, a task, a group.
+/// `s` is uppercased here, so every overline reads the same.
+pub fn overline(s: &str, tone: Tone) -> gtk4::Label {
+    let l = text(&s.to_uppercase(), Text::Caption, tone);
+    l.add_css_class("ui-overline");
+    l
+}
+
+/// Put an existing label (a badge, a chip) in the overline's tracking.
+pub fn make_overline(l: &gtk4::Label) {
+    l.add_css_class("ui-overline");
+}
+
+/// A thin pill down a card's leading edge, in categorical slot `n`
+/// (1..=`CATEGORIES`), or in the muted text level when there is none.
+pub fn rail(n: Option<usize>) -> gtk4::Box {
+    let r = gtk4::Box::new(Orientation::Vertical, 0);
+    r.add_css_class("ui-rail");
+    r.set_valign(Align::Fill);
+    if let Some(n) = n.filter(|n| (1..=CATEGORIES).contains(n)) {
+        r.add_css_class(&format!("cat-{n}"));
+    }
+    r
+}
+
+/// A deliberate tint over a glass card's key (§4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CardTint {
+    /// Critical: the glass runs warm.
+    Danger,
+    /// Further back in a stack: dimmer.
+    Recessed,
+}
+
+/// Set or clear one tint on a card, leaving the other as it is.
+pub fn set_card_tint(w: &impl IsA<gtk4::Widget>, tint: CardTint, on: bool) {
+    let class = match tint {
+        CardTint::Danger => "danger",
+        CardTint::Recessed => "recessed",
+    };
+    set_class(w, class, on);
+}
+
+/// A row whose state changes in one frame (see `.ui-row.instant`).
+pub fn instant(w: &impl IsA<gtk4::Widget>) {
+    w.add_css_class("instant");
+}
+
+/// The field a surface is for: a row tall, its text a step up.
+pub fn search_entry(input: &impl IsA<gtk4::Widget>) {
+    entry(input);
+    input.add_css_class("large");
+}
+
+/// A neutral count: "there is more of this", not an alert.
+pub fn badge_neutral(text: &str) -> gtk4::Label {
+    let l = badge(text);
+    l.add_css_class("neutral");
+    l
+}
+
+/// Make an existing button a dense one, as `small_button` builds them.
+pub fn make_small(b: &gtk4::Button) {
+    b.add_css_class("small");
+}
+
+/// Breathe: the attention loop for something working in the background.
+pub fn breathing(w: &impl IsA<gtk4::Widget>) {
+    w.add_css_class("ui-breathing");
+}

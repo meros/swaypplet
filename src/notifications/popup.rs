@@ -41,7 +41,7 @@ use super::{CloseReason, Notification, Urgency};
 // ── Stack geometry ──
 const CARD_WIDTH: i32 = 360;
 // Offset of the card column from the screen's top/right corner
-const EDGE_MARGIN: i32 = 12;
+const EDGE_MARGIN: i32 = crate::tokens::space(4);
 // Every card spans the whole column and is placed inside it, so the surface
 // never has to move: layer-shell margins are protocol state and animating a
 // slot by moving the surface would be a configure round trip per frame.
@@ -52,9 +52,7 @@ const WINDOW_HEIGHT: i32 = 720;
 // oldest is evicted.
 const COLLAPSED_TAIL: usize = 2;
 // Vertical gap between fully visible cards
-const GAP: f64 = 8.0;
-// Width of the sender's accent rail down the leading edge of a card's content.
-const RAIL_PX: i32 = 3;
+const GAP: f64 = crate::tokens::space(3) as f64;
 // Collapsed cards peek out below the last full card by this much per level
 const PEEK: f64 = 12.0;
 const PEEK_SCALE_STEP: f64 = 0.05;
@@ -72,9 +70,10 @@ const INLINE_REPLY_KEY: &str = "inline-reply";
 const DRAG_CLAIM_PX: f64 = 8.0;
 const DRAG_DISMISS_PX: f64 = 72.0;
 
-/// How many card accents there are: gruvbox's bright row, less the red the
-/// URGENT chip owns (`data/style.css`, `.notification-rail`).
-pub const ACCENTS: u64 = 6;
+/// How many sender colours there are: the categorical slots of the design
+/// system (`--cat-1` … `--cat-6`, `ui::rail` and `ui::set_category`), none of
+/// them the red the URGENT chip owns.
+pub const ACCENTS: u64 = crate::ui::CATEGORIES as u64;
 
 /// Which accent a sender gets, 1 to [`ACCENTS`], from its name.
 ///
@@ -335,11 +334,16 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     };
     let corner = alerts().corner;
     let surface = GlassSurface::new(&app, config_for(corner), anim::SLIDE_PX, monitor.as_ref());
+    // The design system's card in place of the surface's legacy class: one
+    // key, one radius, one hairline, and the tints `set_critical_class` and
+    // `reflow` lay over the key.
+    surface.pane().remove_css_class("glass-card");
+    crate::ui::card(surface.pane(), crate::ui::Card::Floating);
     surface.pane().add_css_class("notification-popup-content");
     surface.pane().set_size_request(CARD_WIDTH, -1);
     // The surface spans the whole column so the card can be placed inside it
     // without the surface moving, which means the card itself must hug its
-    // content. A pane left to fill would put `.glass-card` over the entire
+    // content. A pane left to fill would put the card over the entire
     // column, and the compositor would frost every bit of it.
     surface.pane().set_valign(gtk4::Align::Start);
     if corner.is_left() {
@@ -349,7 +353,7 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
         surface.pane().set_halign(gtk4::Align::End);
         surface.pane().set_margin_end(EDGE_MARGIN);
     }
-    surface.window().add_css_class("notification-popup");
+    crate::ui::surface(surface.window());
     set_critical_class(surface.pane(), notif);
 
     let overflow = overflow_for(st, &notif.app_name);
@@ -393,8 +397,12 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     // Place before showing, so the card fades in where it belongs rather
     // than sliding into its slot from wherever the last one left off.
     reflow(st);
-    if let Some(card) = st.borrow().cards.last() {
-        card.surface.show();
+    // The surface is cloned out of the borrow before it is shown: showing it
+    // can move keyboard focus into a reply field, whose focus handler pauses
+    // the timers and so borrows the state mutably.
+    let newest = st.borrow().cards.last().map(|c| c.surface.clone());
+    if let Some(surface) = newest {
+        surface.show();
     }
 }
 
@@ -562,11 +570,12 @@ fn reflow(st: &Rc<RefCell<State>>) {
         };
         surface.place_at(slot, ms);
         surface.set_scale(scale);
-        if collapsed {
-            surface.pane().add_css_class("collapsed");
-        } else {
-            surface.pane().remove_css_class("collapsed");
-        }
+        // Cards past the fully-visible band sit behind the stack, dimmer. A
+        // tint over the key rather than widget opacity: each card owns its
+        // surface, and that surface's alpha is the material fade, which this
+        // must not fight. The frost stays: a collapsed card is still glass,
+        // just further back.
+        crate::ui::set_card_tint(surface.pane(), crate::ui::CardTint::Recessed, collapsed);
         surface.clip_input_to_card();
     }
 }
@@ -767,12 +776,21 @@ fn body_is_truncated(body: &str) -> bool {
 
 // ── Card content ──
 
+/// Critical, in the material instead of around it. What this replaced was a
+/// 2 px red border pulsing at 0.7 s over squared-off corners: an error
+/// dialog's language, drawn on top of the glass rather than in it, and the
+/// one thing on screen shouting while the rest of the panel stays calm. The
+/// urgency is three quiet channels now: the glass itself runs warm, its
+/// hairline picks up the same red, and the header carries the word. The
+/// card's radius stays, because a corner only reads as "squarer" beside a
+/// card that isn't, and the shape channel is the chip, which needs nothing
+/// to compare itself against.
 fn set_critical_class(card: &gtk4::Box, notif: &Notification) {
-    if notif.urgency == Urgency::Critical {
-        card.add_css_class("critical");
-    } else {
-        card.remove_css_class("critical");
-    }
+    crate::ui::set_card_tint(
+        card,
+        crate::ui::CardTint::Danger,
+        notif.urgency == Urgency::Critical,
+    );
 }
 
 /// Categories whose notifications are status reports rather than messages:
@@ -830,10 +848,7 @@ fn populate_card(
         card.remove_css_class("compact");
     }
 
-    let hbox = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(10)
-        .build();
+    let hbox = crate::ui::hbox(3);
 
     // A picture wide enough to be a screenshot or a banner goes under the
     // text at full width; anything else is a thumbnail in the leading slot,
@@ -850,21 +865,24 @@ fn populate_card(
         ICON_PX
     };
     if let Some(widget) = leading.and_then(|src| image_widget(src, leading_px)) {
-        widget.add_css_class("notification-icon");
+        // A picture the notification supplied is content, so it gets the
+        // treatment content gets: a rounded, clipped frame. An app icon is
+        // not.
+        let widget = if notif.image.is_some() && wide.is_none() {
+            let frame = crate::ui::thumb();
+            frame.append(&widget);
+            frame.upcast()
+        } else {
+            widget
+        };
         widget.set_valign(gtk4::Align::Start);
-        if notif.image.is_some() && wide.is_none() {
-            widget.add_css_class("thumb");
-        }
         hbox.append(&widget);
     }
 
     // Text content
-    let vbox = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(2)
-        .hexpand(true)
-        .valign(gtk4::Align::Center)
-        .build();
+    let vbox = crate::ui::vbox(1);
+    vbox.set_hexpand(true);
+    vbox.set_valign(gtk4::Align::Center);
 
     // max_width_chars(1) collapses each label's natural width so the card's
     // CARD_WIDTH size request is what drives allocation — a larger cap
@@ -875,47 +893,50 @@ fn populate_card(
     // session this is) ahead of the app name, with the card's age closing it
     // out on the right. One label carries both channels: the number is the
     // shape, its accent the hue (P3), so a separate dot would only repeat it.
-    let header = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(4)
-        .build();
+    let header = crate::ui::hbox(2);
     // Urgency leads the header, because a critical card is the one card that
     // never expires (timeout_for) and the word is what says so. It used to be
     // a red ring around the whole card instead, which is an error dialog's
     // language rather than this panel's and sat on top of the material rather
     // than in it. The chip carries both channels on one label the way the
     // task number does: the fill is the shape, its red the hue (P3), and the
-    // word survives a grayscale filter on its own.
+    // word survives a grayscale filter on its own. Still, not pulsing: a chip
+    // that says "URGENT" in the header does not need motion to be found, and
+    // it costs nothing to leave on screen for as long as a card that never
+    // expires stays there, which an infinite animation does (P7).
     if notif.urgency == Urgency::Critical {
-        let urgent = gtk4::Label::new(Some("URGENT"));
-        urgent.add_css_class("notification-urgent");
+        let urgent = crate::ui::badge("URGENT");
+        crate::ui::make_overline(&urgent);
+        urgent.set_valign(gtk4::Align::Center);
         header.append(&urgent);
     }
+    // Task attribution: the number is the shape channel and its categorical
+    // colour the hue (P3), so one label carries both and a separate dot would
+    // only repeat it. Tasks 1–4 take the first four slots, as the bar does.
     if let Some(task) = notif.task {
-        let num = gtk4::Label::new(Some(&format!("T{task}")));
-        num.add_css_class("notification-task-num");
-        num.add_css_class(&format!("t{task}"));
+        let num = crate::ui::overline(&format!("T{task}"), crate::ui::Tone::Fg);
+        if (1..=4).contains(&task) {
+            crate::ui::set_category(&num, usize::from(task));
+        }
         header.append(&num);
     }
+    // The app name carries the rail's colour, so the header says who sent it
+    // in the same channel the edge does.
     if !notif.app_name.is_empty() {
-        let app_label = gtk4::Label::builder()
-            .label(notif.app_name.to_uppercase())
-            .halign(gtk4::Align::Fill)
-            .xalign(0.0)
-            .hexpand(true)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .max_width_chars(1)
-            .build();
-        app_label.add_css_class("notification-app-name");
-        app_label.add_css_class(&format!("a{}", accent_for(&notif.app_name)));
+        let app_label = crate::ui::overline(&notif.app_name, crate::ui::Tone::Fg);
+        app_label.set_halign(gtk4::Align::Fill);
+        app_label.set_hexpand(true);
+        app_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        app_label.set_max_width_chars(1);
+        crate::ui::set_category(&app_label, usize::from(accent_for(&notif.app_name)));
         header.append(&app_label);
     }
 
     // How many of this app's cards the stack has had to drop to make room
     // for this one. Says "there is more of this" without spending a slot.
     if overflow > 0 {
-        let badge = gtk4::Label::new(Some(&format!("+{overflow}")));
-        badge.add_css_class("notification-overflow");
+        let badge = crate::ui::badge_neutral(&format!("+{overflow}"));
+        badge.set_valign(gtk4::Align::Center);
         badge.set_tooltip_text(Some(&format!(
             "{overflow} more from {} — open the centre to read them",
             notif.app_name
@@ -925,11 +946,14 @@ fn populate_card(
 
     // Age. Built for every card that has a header, empty until the card is a
     // minute old, so the minute tick has something to write into.
-    let age = gtk4::Label::builder()
-        .label(age_label(notif.timestamp, std::time::SystemTime::now()).unwrap_or_default())
-        .halign(gtk4::Align::End)
-        .build();
-    age.add_css_class("notification-age");
+    // Metadata, closing the header opposite the app name, never competing
+    // with the summary.
+    let age = crate::ui::text(
+        &age_label(notif.timestamp, std::time::SystemTime::now()).unwrap_or_default(),
+        crate::ui::Text::Caption,
+        crate::ui::Tone::Faint,
+    );
+    age.set_halign(gtk4::Align::End);
     let age_label_handle = if header.first_child().is_some() {
         header.append(&age);
         vbox.append(&header);
@@ -938,14 +962,10 @@ fn populate_card(
         None
     };
 
-    let summary = gtk4::Label::builder()
-        .label(&notif.summary)
-        .halign(gtk4::Align::Fill)
-        .xalign(0.0)
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .max_width_chars(1)
-        .build();
-    summary.add_css_class("notification-summary");
+    let summary = crate::ui::text(&notif.summary, crate::ui::Text::Title, crate::ui::Tone::Fg);
+    summary.set_halign(gtk4::Align::Fill);
+    summary.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    summary.set_max_width_chars(1);
     vbox.append(&summary);
 
     if !notif.body.is_empty() {
@@ -961,15 +981,15 @@ fn populate_card(
             .lines(3)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
             .build();
-        body.add_css_class("notification-body");
+        // The body is what the card is for, so it reads at full ink: muted
+        // text over a bright backdrop is a card you skip rather than read.
+        crate::ui::set_text_style(&body, crate::ui::Text::Body, crate::ui::Tone::Fg);
         vbox.append(&body);
 
         // The rest of a long body is one click away rather than only in the
         // centre. A button, not a hover reveal (P8).
         if body_is_truncated(&notif.body) {
-            let more = gtk4::Button::builder().label("more").build();
-            more.add_css_class("flat");
-            more.add_css_class("notification-more-btn");
+            let more = crate::ui::small_button("more", crate::ui::Kind::Flat);
             more.set_halign(gtk4::Align::Start);
             let body_c = body.clone();
             let st_c = st.clone();
@@ -998,18 +1018,19 @@ fn populate_card(
     }
 
     if let Some(widget) = wide.and_then(|src| image_widget(src, CARD_WIDTH)) {
-        widget.add_css_class("notification-picture");
-        widget.set_halign(gtk4::Align::Fill);
-        vbox.append(&widget);
+        let frame = crate::ui::thumb();
+        frame.append(&widget);
+        frame.add_css_class("notification-picture");
+        frame.set_halign(gtk4::Align::Fill);
+        vbox.append(&frame);
     }
 
     // Progress bar
     if let Some(progress) = notif.progress {
-        let bar = gtk4::ProgressBar::builder()
-            .fraction(progress as f64 / 100.0)
-            .hexpand(true)
-            .build();
+        let bar = crate::ui::progress(progress as f64 / 100.0);
+        bar.set_hexpand(true);
         bar.add_css_class("notification-progress");
+        crate::ui::breathing(&bar);
         vbox.append(&bar);
     }
 
@@ -1025,6 +1046,7 @@ fn populate_card(
             .placeholder_text(placeholder)
             .hexpand(true)
             .build();
+        crate::ui::entry(&entry);
         entry.add_css_class("notification-reply");
         let id = notif.id;
         let store_c = store.clone();
@@ -1082,10 +1104,7 @@ fn populate_card(
 
     // Action buttons
     if !notif.actions.is_empty() {
-        let actions_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(4)
-            .build();
+        let actions_box = crate::ui::hbox(2);
         actions_box.add_css_class("notification-actions");
 
         for (key, label) in &notif.actions {
@@ -1107,8 +1126,8 @@ fn populate_card(
             } else {
                 btn.set_label(label);
             }
-            btn.add_css_class("flat");
-            btn.add_css_class("notification-action-btn");
+            crate::ui::make_button(&btn, crate::ui::Kind::Secondary);
+            crate::ui::make_small(&btn);
 
             let id = notif.id;
             let store_c = store.clone();
@@ -1137,9 +1156,9 @@ fn populate_card(
     // the card's only trailing control: closing has three ways in already
     // (right-click, middle-click, drag) and none of them costs a widget.
     if !compact {
-        let more_btn = gtk4::Button::builder().label("⋯").build();
-        more_btn.add_css_class("flat");
-        more_btn.add_css_class("notification-menu-btn");
+        let more_btn =
+            crate::ui::glyph_button("⋯", "Snooze, mute, dismiss all", crate::ui::Kind::Flat);
+        crate::ui::make_small(&more_btn);
         more_btn.set_valign(gtk4::Align::Start);
         let menu = card_menu(notif, store, st);
         menu.set_parent(&more_btn);
@@ -1236,18 +1255,16 @@ fn populate_card(
     // The rail and the content, side by side. The gesture rides the row
     // rather than the content, so a click on the rail is a click on the card
     // like any other.
-    let row = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(10)
-        .build();
-    let rail = gtk4::Box::builder()
-        .width_request(RAIL_PX)
-        .valign(gtk4::Align::Fill)
-        .build();
-    rail.add_css_class("notification-rail");
-    if !notif.app_name.is_empty() {
-        rail.add_css_class(&format!("a{}", accent_for(&notif.app_name)));
-    }
+    //
+    // The rail is the sender's colour: which slot is a hash of the app name
+    // (`accent_for`), so senders look different and one sender looks the
+    // same every time. Urgency does not touch the rail: that channel is the
+    // warm glass and the URGENT chip, and a rail that meant severity on some
+    // cards and sender on others would mean neither.
+    let row = crate::ui::hbox(3);
+    let rail = crate::ui::rail(
+        (!notif.app_name.is_empty()).then(|| usize::from(accent_for(&notif.app_name))),
+    );
     hbox.set_hexpand(true);
     row.append(&rail);
     row.append(&hbox);
@@ -1264,17 +1281,14 @@ fn card_menu(
     store: &Rc<RefCell<NotificationStore>>,
     st: &Rc<RefCell<State>>,
 ) -> gtk4::Popover {
-    let list = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(2)
-        .build();
-    let popover = gtk4::Popover::builder().child(&list).build();
-    popover.add_css_class("notification-menu");
-    popover.set_has_arrow(false);
+    // A popup, outside the compositor's layer effects: no glass behind it,
+    // so the menu sits on the solid card.
+    let list = crate::ui::menu();
+    crate::ui::solid_card(&list);
+    let popover = crate::ui::popover(&list, gtk4::PositionType::Bottom);
 
     let item = |label: &str| {
-        let b = gtk4::Button::builder().label(label).build();
-        b.add_css_class("flat");
+        let b = crate::ui::menu_item(label, "", false);
         b.set_halign(gtk4::Align::Fill);
         b
     };

@@ -1,41 +1,12 @@
 /* ── Keybinding sheet: derived from sway's own config (src/keybinds.rs) ──
-   Held-Super overlay. Monospace on the key column only: the keys are a
-   table and must align, the descriptions are prose and should not. */
+   Held-Super overlay. The card, the section headings, the keys and the
+   descriptions are components (ui::card, ui::overline, ui::key, ui::text);
+   this places them. Column, section and row gaps are box and grid spacing
+   in src/keybinds.rs: there is no CSS gap in GTK4. */
 .keybinds-card {
-  padding: 22px 26px;
+  padding: var(--space-6);
 }
-
-/* Column and row spacing are widget properties in GTK4 (`spacing`,
-   `row-spacing`), set in src/keybinds.rs — there is no CSS gap here. */
 
 .keybinds-column {
   min-width: 250px;
-}
-
-.keybinds-section {
-  margin-bottom: 16px;
-}
-
-.keybinds-section:last-child {
-  margin-bottom: 0;
-}
-
-.keybinds-heading {
-  color: @accent;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1.2px;
-  margin-bottom: 5px;
-}
-
-.keybinds-keys {
-  font-family: monospace;
-  font-size: 11px;
-  color: @fg;
-
-}
-
-.keybinds-label {
-  font-size: 11px;
-  color: @fg_dim;
 }

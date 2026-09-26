@@ -1,307 +1,60 @@
-/* ── Notification popups ── */
-.notification-popup {
-    font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
-}
+/* ── Notifications (src/notifications/popup.rs, src/widgets/notifications.rs) ──
+   The popup cards and the centre. Colour, type and shape come from the
+   components (the card and its tints, the rail, the overline, the badge,
+   the menu, the row); this places them. */
 
-/* Cards live on a transparent GtkFixed canvas (positioned via child
-   transforms in popup.rs); everything outside the cards must stay
-   fully alpha-0 so compositor blur clips to the cards
-   (see the window comment). */
-/* The ground is @surface, the same fill every other glass card paints —
-   panel, OSD, launcher, lock card and popup are now one material, frost,
-   bevel and alpha included. (This spent a while at alpha(@bg0, 0.72), a
-   different hue AND a different alpha, which is what made popups read as a
-   separate material.) The trade the 0.72 was bought for is accepted here:
-   over a bright wallpaper the body's contrast is lower than 0.72 gave, but
-   the wallpaper reads through the card the same way it reads through the
-   panel and the launcher. The 0.40 seeding line from theme/glass.nix is
-   cleared by the same 0.10 margin as every other card (see .collapsed
-   below for what happens near it). */
+/* Cards live on transparent layer surfaces, one per card; everything
+   outside the card must stay alpha 0 so the compositor's glass clips to
+   the card (see the window comment in popup.rs). The card is the design
+   system's glass card: it paints the key and nothing else, so a popup is
+   the same material as the panel, the OSD and the launcher, frost and
+   bevel included. The trade is accepted: over a bright wallpaper the body's
+   contrast is lower than a heavier fill gave, but the wallpaper reads
+   through the card the same way it reads through the panel. */
 .notification-popup-content {
-    background-color: @surface;
-    box-shadow: none;
-    padding: 12px 14px;
-}
-
-/* The sender's hue, as a 3 px pill down the leading edge of the content.
-   Inset rather than bled to the card edge: the card's 18 px radius would
-   clip a full-bleed rail into a crescent, and GTK does not clip children to
-   the border radius, so a straight stripe would overhang the corner instead.
-
-   Which of the six accents is a hash of the app name (`accent_for`), so senders look
-   different and one sender looks the same every time. Urgency does not touch
-   the rail — that channel is the warm glass and the URGENT chip, and a rail
-   that meant severity on some cards and sender on others would mean neither. */
-.notification-rail {
-    min-width: 3px;
-    border-radius: 2px;
-    background-color: @fg_dim;
-}
-
-.notification-rail.a1 { background-color: @accent_bright; }
-.notification-rail.a2 { background-color: @accent_bright_2; }
-.notification-rail.a3 { background-color: @accent_bright_3; }
-.notification-rail.a4 { background-color: @accent_bright_4; }
-.notification-rail.a5 { background-color: @accent_bright_5; }
-.notification-rail.a6 { background-color: @accent_bright_6; }
-
-/* Cards past the fully-visible band sit behind the stack, dimmer as they go.
-   A tint change rather than widget opacity: each card owns its surface now,
-   and that surface's alpha is the material fade, which this must not fight.
-   The frost stays — a collapsed card is still glass, just further back.
-
-   Which is what this says and, until now, not what it did: alpha(@surface,
-   0.82) scaled @surface's *alpha*, landing the card on 0.41 — one hundredth
-   above the 0.40 seeding line, with the flat-slab band from theme/glass.nix
-   immediately below it. A collapsed card was one rounding away from losing its
-   bevel entirely. The dimming is in the colour now and the alpha holds
-   @surface's 0.500, so a collapsed card clears the line by the same 0.10 as
-   every other one. #292727 is @surface's colour at the same 0.82. */
-.notification-popup-content.collapsed {
-    background-color: alpha(@card_dim, 0.50);
-    border-color: alpha(@border_strong, 0.7);
-}
-
-/* Critical, in the material instead of around it. What this replaced was a
-   2 px red border pulsing at 0.7 s over squared-off corners: an error
-   dialog's language, drawn on top of the glass rather than in it, and the
-   one thing on screen shouting while the rest of the panel stays calm. The
-   urgency is three quiet channels now — the glass itself runs warm, its
-   hairline picks up the same red at the weight every other card's edge has,
-   and the header carries the word (.notification-urgent). 0.35 on that
-   hairline was chosen against 0.55 and against leaving it neutral, on the
-   render harness: higher reads as an outline again, neutral disconnects the
-   chip from the card it belongs to. The 18 px radius stays, because a corner
-   only reads as "squarer" beside a card that isn't, and P3's shape channel
-   is the chip, which needs nothing to compare itself against.
-
-   The tint holds @surface's 0.50 alpha for the reason .collapsed does: the
-   0.40 seeding line from theme/glass.nix sits right below, and scaling the
-   alpha rather than the colour drops the card into the flat-slab band.
-   #3a2a28 is @surface's #32302f warmed toward @red at the same alpha. */
-.notification-popup-content.critical {
-    background-color: alpha(@card_urgent, 0.50);
-    border-color: alpha(@red, 0.35);
-}
-
-/* The word, where the eye already goes for attribution. Still, not pulsing:
-   the old ring pulsed because a border is all a card edge has to animate,
-   and a chip that says "URGENT" in the header does not need motion to be
-   found. It also costs nothing to leave on screen for as long as a card that
-   never expires stays there, which an infinite animation does (P7).
-
-   Dark type on gruvbox's bright red, not light type on @red: #1d2021 on
-   #fb4934 is 4.8:1 where @fg on @red is 4.0, and this is the smallest type
-   on the card. #fb4934 is the same bright red @danger_tint is mixed from. */
-.notification-urgent {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 1px;
-    color: @bg0_h;
-    background-color: @red_bright;
-    border-radius: 5px;
-    padding: 0 5px;
+    padding: var(--space-4);
 }
 
 /* One-line template for OSD-style toasts (transient, no body, no actions):
    the full card around three words read as an empty box. */
 .notification-popup-content.compact {
-    padding: 8px 12px;
-}
-
-.notification-icon {
-    margin-top: 1px;
-    opacity: 0.9;
-}
-
-/* A picture the notification supplied is content, so it gets the treatment
-   content gets: square-ish, clipped, full opacity. */
-.notification-icon.thumb {
-    border-radius: 6px;
-    opacity: 1;
+    padding: var(--space-3) var(--space-4);
 }
 
 .notification-picture {
-    border-radius: 8px;
-    margin-top: 6px;
+    margin-top: var(--space-2);
 }
 
-/* The card's age, closing the header opposite the app name. Reads as
-   metadata, never competing with the summary. */
-.notification-age {
-    font-size: 11px;
-    color: @fg_dim;
-    opacity: 0.85;
-}
-
-/* "+N more from this app" — a count, deliberately not a stack of cards. */
-.notification-overflow {
-    font-size: 10px;
-    font-weight: 700;
-    color: @fg_dim;
-    background-color: alpha(@fg_dim, 0.15);
-    border-radius: 6px;
-    padding: 0 5px;
-}
-
-/* Inline reply field. Sized to sit under the body without turning the card
-   into a form. */
+/* Inline reply field, under the body without turning the card into a
+   form. */
 .notification-reply {
-    font-size: 13px;
-    min-height: 26px;
-    margin-top: 6px;
-}
-
-.notification-more-btn {
-    font-size: 11px;
-    padding: 0 6px;
-    min-height: 20px;
-    color: @fg_dim;
-}
-
-.notification-more-btn:hover {
-    color: @fg;
-}
-
-.notification-menu-btn {
-    font-size: 12px;
-    padding: 2px;
-    min-width: 24px;
-    min-height: 20px;
-    color: @fg_dim;
-}
-
-.notification-menu-btn:hover {
-    color: @fg;
-}
-
-.notification-menu > contents {
-    padding: 4px;
-}
-
-.notification-menu button {
-    font-size: 12px;
-    padding: 4px 10px;
-    min-height: 24px;
-}
-
-/* The app name carries the rail's hue, so the header says who sent it in the
-   same channel the edge does. @fg_dim stays the fallback for a card with no
-   accent class, which is what an empty app name gets. */
-.notification-app-name {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 1px;
-    color: @fg_dim;
-}
-
-.notification-app-name.a1 { color: @accent_bright; }
-.notification-app-name.a2 { color: @accent_bright_2; }
-.notification-app-name.a3 { color: @accent_bright_3; }
-.notification-app-name.a4 { color: @accent_bright_4; }
-.notification-app-name.a5 { color: @accent_bright_5; }
-.notification-app-name.a6 { color: @accent_bright_6; }
-
-/* Task attribution on background-session stop notifications (vision O2):
-   "T<N>" ahead of the app name, in the same four accents as the
-   bar-decision dot. The number is the shape channel and its accent the hue
-   (P3), so one label carries both and a separate dot would only repeat it. */
-.notification-task-num {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 1px;
-    color: @fg;
-}
-
-.notification-task-num.t1 { color: @accent; }
-.notification-task-num.t2 { color: @accent_secondary; }
-.notification-task-num.t3 { color: @accent_tertiary; }
-.notification-task-num.t4 { color: @accent_quaternary; }
-
-.notification-summary {
-    font-size: 15px;
-    font-weight: 700;
-    color: @fg;
-}
-
-/* The body is what the card is for, so it reads at full ink. @fg_dim put it
-   at 4.48:1 on the old ground over a black desktop and lower over anything
-   brighter, which is a card you skip rather than read. */
-.notification-body {
-    font-size: 13px;
-    color: @fg;
-}
-
-.notification-time {
-    font-size: 11px;
-    color: @fg_dim;
+    margin-top: var(--space-2);
 }
 
 .notification-progress {
-    min-height: 4px;
-    margin-top: 4px;
-}
-
-.notification-progress trough {
-    background-color: alpha(@bg3, 0.5);
-    border-radius: 2px;
-    min-height: 4px;
-}
-
-.notification-progress progress {
-    background-color: @accent;
-    border-radius: 2px;
-    min-height: 4px;
-    animation: media-breathing 2s ease-in-out infinite alternate;
+    margin-top: var(--space-2);
 }
 
 .notification-actions {
-    margin-top: 4px;
+    margin-top: var(--space-2);
 }
 
-.notification-action-btn {
-    font-size: 13px;
-    padding: 2px 8px;
-    min-height: 24px;
+/* ── Notification centre (the panel's Notifications page) ── */
+
+.notification-center-header {
+    padding: 0 var(--space-2) var(--space-2) var(--space-4);
 }
 
-/* The centre's per-row dismiss. Popup cards have no such button: right
-   click, middle click and a drag all close one, and none costs a widget. */
-.notification-dismiss-btn {
-    font-size: 12px;
-    padding: 2px;
-    min-width: 24px;
-    min-height: 24px;
-    color: @fg_dim;
+.notification-group {
+    margin: var(--space-3) 0 var(--space-1) var(--space-4);
 }
 
-.notification-dismiss-btn:hover {
-    color: @red;
+.notification-empty {
+    padding: var(--space-5) 0;
 }
 
-.notification-clear-btn {
-    font-size: 14px;
-    padding: 2px 6px;
-    min-height: 24px;
-    color: @fg_dim;
-}
-
-.notification-clear-btn:hover {
-    color: @red;
-}
-
-/* ── Notification center (panel section) ── */
-.notification-center {
-    /* inherits from .section */
-}
-
+/* An entry carries a wrapped body under its summary, so it takes a row's
+   full vertical padding rather than a one-line row's. */
 .notification-entry {
-    padding: 8px 10px;
-    border-radius: 8px;
-    min-height: 36px;
-    transition: background-color 150ms ease;
-}
-
-.notification-entry:hover {
-    background-color: alpha(white, 0.04);
+    padding: var(--space-3) var(--space-4);
 }

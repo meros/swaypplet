@@ -1,90 +1,9 @@
-/* ── Launcher — matches OSD visual language ── */
-.launcher {
-    font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
-}
-
-.launcher-backdrop {
-    background-color: transparent;
-}
+/* ── Launcher (src/launcher.rs) and dmenu (src/dmenu.rs) ──
+   The glass card, the search field and the result rows are components
+   (ui::card, ui::search_entry / ui::entry, ui::row); this places them. */
 
 .launcher-container {
-    box-shadow: none;
-    padding: 16px;
-}
-
-.launcher-entry {
-    background-color: alpha(@bg0, 0.6);
-    color: @fg;
-    border: 1px solid @border_strong;
-    border-radius: 10px;
-    padding: 10px 14px;
-    font-size: 16px;
-    min-height: 40px;
-    caret-color: @fg;
-}
-
-/* GtkSearchEntry keeps focus on its inner text node, so the entry node only
-   ever matches :focus-within — without it Adwaita's blue focus border wins
-   over ours. Outline and shadow off for the same reason the cards carry no
-   drop shadow: translucent pixels frost under swayfx blur. */
-.launcher-entry:focus,
-.launcher-entry:focus-within {
-    border-color: @accent;
-    outline: none;
-    box-shadow: none;
-}
-
-.launcher-results {
-}
-
-/* No background transition, on purpose. The card's fill is the compositor's
-   fill key (glass.nix `fillKey`): a pixel within 1/255 of it is dropped, and
-   one 3/255 or more away is drawn whole, fill included. A fade from the
-   selected tint back to the card spends most of its frames in between, where
-   the row shows the dark fill under a vanishing accent: a dark ghost of the
-   old row until the last frames fall back inside the key. The selection moves
-   in one frame instead. */
-.launcher-result {
-    padding: 10px 12px;
-    border-radius: 10px;
-}
-
-.launcher-result:hover {
-    background-color: alpha(white, 0.04);
-}
-
-.launcher-result.selected {
-    background-color: alpha(@accent, 0.2);
-}
-
-.launcher-result-icon {
-    font-size: 20px;
-    color: @fg_dim;
-    min-width: 32px;
-}
-
-.launcher-result-icon-img {
-    min-width: 32px;
-}
-
-.launcher-result-name {
-    font-size: 14px;
-    color: @fg;
-}
-
-.launcher-result.selected .launcher-result-name {
-    font-weight: 600;
-}
-
-.launcher-result-sub {
-    font-size: 11px;
-    color: @fg_dim;
-}
-
-.launcher-result-badge {
-    font-size: 9px;
-    color: @fg_dim;
-    opacity: 0.6;
+    padding: var(--space-5);
 }
 
 /* ── dmenu — the piped-list picker (`swaypplet dmenu`) ──
@@ -98,26 +17,13 @@
     min-height: 0;
 }
 
-/* Prompt title. Indented to the rows' text inset (12px) so title and item
-   labels share one left margin. */
+/* Prompt title, indented to the rows' text inset so title and item labels
+   share one left margin. */
 .dmenu .dmenu-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: @fg;
-    margin: 0 0 10px 12px;
+    margin: 0 0 var(--space-3) var(--space-4);
 }
 
-/* The entry is one step down from the launcher's full-screen stage: the card
-   is a short dialog, so the filter field sits closer to row scale. */
-.dmenu .launcher-entry {
-    min-height: 34px;
-    padding: 8px 12px;
-    font-size: 15px;
-}
-
-/* Empty result list — same box as a row, muted, never selectable. */
+/* Empty result list: the same box as a row. */
 .dmenu .dmenu-empty {
-    padding: 10px 12px;
-    font-size: 13px;
-    color: @text_faint;
+    padding: var(--space-3) var(--space-4);
 }

@@ -747,17 +747,13 @@ fn build_card(app: &gtk4::Application, monitor: gdk::Monitor) -> Card {
         .valign(gtk4::Align::Center)
         .build();
 
-    let card = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .build();
-    card.add_css_class("glass-card");
+    crate::ui::surface(&wrapper);
+
+    let card = crate::ui::vbox(0);
+    crate::ui::card(&card, crate::ui::Card::Floating);
     card.add_css_class("keybinds-card");
 
-    let body = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(34)
-        .build();
-    body.add_css_class("keybinds-body");
+    let body = crate::ui::hbox(7);
 
     card.append(&body);
     wrapper.append(&card);
@@ -806,24 +802,15 @@ fn fill(body: &gtk4::Box, sections: &Sheet) {
 }
 
 fn new_column() -> gtk4::Box {
-    let column = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .build();
+    let column = crate::ui::vbox(5);
     column.add_css_class("keybinds-column");
     column
 }
 
 fn section_widget(section: Section, rows: &[Row]) -> gtk4::Box {
-    let group = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .build();
-    group.add_css_class("keybinds-section");
+    let group = crate::ui::vbox(2);
 
-    let heading = gtk4::Label::builder()
-        .label(section.title())
-        .xalign(0.0)
-        .build();
-    heading.add_css_class("keybinds-heading");
+    let heading = crate::ui::overline(section.title(), crate::ui::Tone::Fg);
     group.append(&heading);
 
     // A GtkGrid, not two boxes: the key column has to line up across every
@@ -831,22 +818,19 @@ fn section_widget(section: Section, rows: &[Row]) -> gtk4::Box {
     // The key/label gap is column spacing on the grid, so a long key list
     // pushes its own description instead of widening the whole column.
     let grid = gtk4::Grid::builder()
-        .row_spacing(2)
-        .column_spacing(12)
+        .row_spacing(crate::tokens::space(1))
+        .column_spacing(crate::tokens::space(4))
         .build();
-    grid.add_css_class("keybinds-grid");
 
     for (i, row) in rows.iter().enumerate() {
-        let keys = gtk4::Label::builder().label(&row.keys).xalign(0.0).build();
-        keys.add_css_class("keybinds-keys");
+        // The key is the one monospace thing on the sheet: the keys are a
+        // table and must align, the descriptions are prose and should not.
+        let keys = crate::ui::key(&row.keys);
+        keys.set_halign(gtk4::Align::Start);
 
-        let label = gtk4::Label::builder()
-            .label(&row.label)
-            .xalign(0.0)
-            .hexpand(true)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .build();
-        label.add_css_class("keybinds-label");
+        let label = crate::ui::text(&row.label, crate::ui::Text::Label, crate::ui::Tone::Muted);
+        label.set_hexpand(true);
+        label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
 
         grid.attach(&keys, 0, i as i32, 1, 1);
         grid.attach(&label, 1, i as i32, 1, 1);

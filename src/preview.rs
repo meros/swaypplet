@@ -357,8 +357,8 @@ pub fn run(component: &str) {
                 // The window is filled first and left on screen: a dimmed
                 // capture of an empty desktop is a black rectangle, which is
                 // also what a selector that never mapped looks like.
-                let card = gtk4::Label::new(Some("BEHIND THE SELECTOR"));
-                card.add_css_class("keybinds-heading");
+                let card = crate::ui::overline("Behind the selector", crate::ui::Tone::Fg);
+                card.set_xalign(0.5);
                 card.set_vexpand(true);
                 card.set_hexpand(true);
                 host.append(&card);

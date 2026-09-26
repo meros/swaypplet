@@ -102,23 +102,17 @@ pub struct LauncherView {
 
 impl LauncherView {
     pub fn new() -> Self {
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(0)
-            .build();
+        let root = crate::ui::vbox(0);
         root.add_css_class("launcher-view");
 
         let entry = gtk4::SearchEntry::builder()
             .placeholder_text("Search")
             .hexpand(true)
             .build();
+        crate::ui::search_entry(&entry);
         entry.add_css_class("launcher-entry");
 
-        let results_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(0)
-            .build();
-        results_box.add_css_class("launcher-results");
+        let results_box = crate::ui::vbox(0);
 
         let scroller = gtk4::ScrolledWindow::builder()
             .hscrollbar_policy(gtk4::PolicyType::Never)
@@ -315,7 +309,7 @@ pub struct Launcher {
 impl Launcher {
     pub fn new(app: &gtk4::Application) -> Self {
         let window = layer_shell::create_layer_window(app, &LAUNCHER_CONFIG);
-        window.add_css_class("launcher");
+        crate::ui::surface(&window);
 
         let backdrop = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
@@ -324,18 +318,14 @@ impl Launcher {
             .hexpand(true)
             .vexpand(true)
             .build();
-        backdrop.add_css_class("launcher-backdrop");
 
         let top_spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
         // Size requests come from install_monitor_fit below, which clamps
         // them to the output the launcher opens on.
-        let container = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(0)
-            .halign(gtk4::Align::Center)
-            .build();
-        container.add_css_class("glass-card");
+        let container = crate::ui::vbox(0);
+        container.set_halign(gtk4::Align::Center);
+        crate::ui::card(&container, crate::ui::Card::Floating);
         container.add_css_class("launcher-container");
 
         let view = LauncherView::new();
@@ -740,44 +730,18 @@ fn window_row(
     live: &mut crate::jump::card::Live,
     on_activate: &OnActivate,
 ) -> gtk4::Box {
-    let row = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(12)
-        .build();
-    row.add_css_class("launcher-result");
-    row.add_css_class("launcher-window");
-    if selected {
-        row.add_css_class("selected");
-    }
+    let r = crate::ui::row("", &result.text, &result.subtext);
+    let row = r.root;
+    result_row_style(&row, selected);
     let picture = crate::jump::card::LivePicture::new();
     picture.set_size_request(WINDOW_THUMB_W, WINDOW_THUMB_H);
     picture.add_css_class("launcher-window-picture");
     if let Some(id) = result.identifier.split_whitespace().nth(1) {
         live.add(id.to_string(), picture.clone());
     }
-    row.append(&picture);
-
-    let text_box = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(2)
-        .hexpand(true)
-        .valign(gtk4::Align::Center)
-        .build();
-    let name = gtk4::Label::builder()
-        .label(&result.text)
-        .halign(gtk4::Align::Start)
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .css_classes(["launcher-result-name"])
-        .build();
-    text_box.append(&name);
-    let sub = gtk4::Label::builder()
-        .label(&result.subtext)
-        .halign(gtk4::Align::Start)
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .css_classes(["launcher-result-sub"])
-        .build();
-    text_box.append(&sub);
-    row.append(&text_box);
+    // The window live where the icon would be.
+    r.icon.set_visible(false);
+    row.prepend(&picture);
 
     let gesture = gtk4::GestureClick::new();
     let identifier = result.identifier.clone();
@@ -803,23 +767,16 @@ fn build_result_row(
     query: &str,
     on_activate: &OnActivate,
 ) -> gtk4::Box {
-    let row = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(12)
-        .build();
-    row.add_css_class("launcher-result");
-    if selected {
-        row.add_css_class("selected");
-    }
+    let r = crate::ui::row(
+        provider_icon(&result.provider),
+        &result.text,
+        &result.subtext,
+    );
+    let row = r.root.clone();
+    result_row_style(&row, selected);
+    crate::ui::glyph(&r.icon, crate::ui::Text::Title, crate::ui::Tone::Muted);
 
-    let icon_label = gtk4::Label::builder()
-        .label(provider_icon(&result.provider))
-        .halign(gtk4::Align::Center)
-        .valign(gtk4::Align::Center)
-        .build();
-    icon_label.add_css_class("launcher-result-icon");
-
-    let mut used_themed_icon = false;
+    // The app's own icon in the glyph's place, when the theme has it.
     if !result.icon.is_empty() && !result.icon.contains('/') {
         if let Some(display) = gtk4::gdk::Display::default() {
             let theme = gtk4::IconTheme::for_display(&display);
@@ -828,54 +785,23 @@ fn build_result_row(
                     .icon_name(&result.icon)
                     .pixel_size(24)
                     .build();
-                image.add_css_class("launcher-result-icon-img");
-                row.append(&image);
-                used_themed_icon = true;
+                image.add_css_class("ui-row-icon");
+                r.icon.set_visible(false);
+                row.prepend(&image);
             }
         }
     }
-    if !used_themed_icon {
-        row.append(&icon_label);
-    }
-
-    let text_box = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(2)
-        .hexpand(true)
-        .valign(gtk4::Align::Center)
-        .build();
-
-    let name_label = gtk4::Label::builder()
-        .label(&result.text)
-        .halign(gtk4::Align::Start)
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .build();
-    name_label.add_css_class("launcher-result-name");
-    text_box.append(&name_label);
-
-    if !result.subtext.is_empty() {
-        let sub_label = gtk4::Label::builder()
-            .label(&result.subtext)
-            .halign(gtk4::Align::Start)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .build();
-        sub_label.add_css_class("launcher-result-sub");
-        text_box.append(&sub_label);
-    }
-
-    row.append(&text_box);
 
     // Only badge non-default providers (websearch, calc, …). The dominant
     // "desktopapplications" source is implied by the surface, so badging every
     // row with it is pure visual noise.
     if result.provider != "desktopapplications" {
-        let badge = gtk4::Label::builder()
-            .label(&result.provider)
-            .halign(gtk4::Align::End)
-            .valign(gtk4::Align::Center)
-            .build();
-        badge.add_css_class("launcher-result-badge");
-        row.append(&badge);
+        let badge = crate::ui::text(
+            &result.provider,
+            crate::ui::Text::Caption,
+            crate::ui::Tone::Faint,
+        );
+        r.end.append(&badge);
     }
 
     // Click to activate.
@@ -905,6 +831,15 @@ fn build_result_row(
     row
 }
 
+/// A result row's look: the row component, its selection moving in one frame
+/// (`ui::instant`: the card's fill is the compositor's key, and a fade from
+/// the selected fill back to it spends most of its frames as a dark ghost of
+/// the old row).
+fn result_row_style(row: &gtk4::Box, selected: bool) {
+    crate::ui::instant(row);
+    crate::ui::set_selected(row, selected);
+}
+
 /// Move the `selected` class from row `old` to row `new`, returning the row
 /// that now carries it so the caller can scroll it into view.
 fn update_selection(results_box: &gtk4::Box, old: usize, new: usize) -> Option<gtk4::Widget> {
@@ -913,10 +848,10 @@ fn update_selection(results_box: &gtk4::Box, old: usize, new: usize) -> Option<g
     let mut i = 0;
     while let Some(widget) = child {
         if i == old {
-            widget.remove_css_class("selected");
+            crate::ui::set_selected(&widget, false);
         }
         if i == new {
-            widget.add_css_class("selected");
+            crate::ui::set_selected(&widget, true);
             selected = Some(widget.clone());
         }
         child = widget.next_sibling();

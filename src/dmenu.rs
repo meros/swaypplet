@@ -248,10 +248,9 @@ pub(crate) fn present_picker(
     on_done: impl FnOnce(Option<String>) + 'static,
 ) -> Rc<Picker> {
     let window = layer_shell::create_layer_window(app, &DMENU_CONFIG);
-    window.add_css_class("launcher");
+    crate::ui::surface(&window);
 
     let backdrop = gtk4::Box::builder().hexpand(true).vexpand(true).build();
-    backdrop.add_css_class("launcher-backdrop");
 
     let container = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
@@ -259,9 +258,8 @@ pub(crate) fn present_picker(
         .valign(gtk4::Align::Center)
         .width_request(480)
         .build();
-    // Same chassis as the launcher and the polkit dialog: @surface fill,
-    // radius 18, hairline border (style.css .glass-card).
-    container.add_css_class("glass-card");
+    // Same chassis as the launcher and the polkit dialog: the glass card.
+    crate::ui::card(&container, crate::ui::Card::Floating);
     container.add_css_class("launcher-container");
     container.add_css_class("dmenu");
 
@@ -273,11 +271,13 @@ pub(crate) fn present_picker(
     // The prompt is the card's title rather than entry placeholder text: a
     // placeholder vanishes on the first keystroke, exactly when a caller like
     // `settask` still needs to say what is being typed.
-    let header = gtk4::Label::builder()
-        .label(placeholder.trim().trim_end_matches(':'))
-        .halign(gtk4::Align::Start)
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .build();
+    let header = crate::ui::text(
+        placeholder.trim().trim_end_matches(':'),
+        crate::ui::Text::TitleSm,
+        crate::ui::Tone::Fg,
+    );
+    header.set_halign(gtk4::Align::Start);
+    header.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     header.add_css_class("dmenu-title");
 
     let entry = gtk4::SearchEntry::builder()
@@ -286,12 +286,12 @@ pub(crate) fn present_picker(
         // searches; filtering a local list should track every keystroke.
         .search_delay(0)
         .build();
+    // One step down from the launcher's search field: the card is a short
+    // dialog, so the filter sits at row scale.
+    crate::ui::entry(&entry);
     entry.add_css_class("launcher-entry");
 
-    let results_box = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .build();
-    results_box.add_css_class("launcher-results");
+    let results_box = crate::ui::vbox(0);
 
     let scroller = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
@@ -443,15 +443,17 @@ impl Picker {
         // Nothing matched: say so, and name what Enter will do — the raw
         // query is the reply in that case, which the empty list alone hides.
         if s.visible.is_empty() {
-            let note = gtk4::Label::builder()
-                .label(if query.is_empty() {
+            // Same box as a row, faint, never selectable.
+            let note = crate::ui::text(
+                if query.is_empty() {
                     "No items"
                 } else {
                     "No matches · Enter keeps what you typed"
-                })
-                .halign(gtk4::Align::Start)
-                .ellipsize(gtk4::pango::EllipsizeMode::End)
-                .build();
+                },
+                crate::ui::Text::Body,
+                crate::ui::Tone::Faint,
+            );
+            note.set_ellipsize(gtk4::pango::EllipsizeMode::End);
             note.add_css_class("dmenu-empty");
             self.results_box.append(&note);
         }
@@ -482,10 +484,10 @@ impl Picker {
         let mut pos = 0usize;
         while let Some(widget) = child {
             if pos == old {
-                widget.remove_css_class("selected");
+                crate::ui::set_selected(&widget, false);
             }
             if pos == new {
-                widget.add_css_class("selected");
+                crate::ui::set_selected(&widget, true);
             }
             child = widget.next_sibling();
             pos += 1;
@@ -502,21 +504,11 @@ fn matches(item: &str, query: &str) -> bool {
         .all(|term| item.contains(&term.to_lowercase()))
 }
 
+/// The launcher's row: the row component, its selection moving in one frame
+/// for the same keyed-card reason (`ui::instant`).
 fn build_row(text: &str, selected: bool) -> gtk4::Box {
-    let row = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .build();
-    row.add_css_class("launcher-result");
-    if selected {
-        row.add_css_class("selected");
-    }
-    let name = gtk4::Label::builder()
-        .label(text)
-        .halign(gtk4::Align::Start)
-        .hexpand(true)
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .build();
-    name.add_css_class("launcher-result-name");
-    row.append(&name);
-    row
+    let r = crate::ui::row("", text, "");
+    crate::ui::instant(&r.root);
+    crate::ui::set_selected(&r.root, selected);
+    r.root
 }
