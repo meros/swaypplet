@@ -150,6 +150,7 @@ pub fn run() {
     let store_startup = store.clone();
     app.connect_startup(move |app| {
         theme::load_css();
+        crate::frame_stats::init();
 
         // The settings file into its live copy, before anything that observes
         // it (the bar's clock, the OSD route) is built; then followed, so a

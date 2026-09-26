@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Before a push: the tests, then the frame-time gate (dev/frame-bench.sh).
+#
+# The gate exists because a stutter reached the session on 2026-09-26 with
+# every test green. It boots a nested headless sway (never the session's),
+# so it needs a display-less GPU context and about a minute. Two tries,
+# because one run on a busy machine can be noisy; a real regression fails
+# both.
+#
+# Enable once per clone: git config core.hooksPath .githooks
+# Skip once, knowingly: SWPP_SKIP_GATE=1 git push
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+nix develop -c cargo test --release --quiet 2>&1 | tail -3
+[ "${PIPESTATUS[0]}" -eq 0 ] || { echo "pre-push: tests failed"; exit 1; }
+
+[ -n "${SWPP_SKIP_GATE:-}" ] && { echo "pre-push: frame gate skipped"; exit 0; }
+nix develop -c cargo build --release --quiet || exit 1
+sway_bin="${SWAYPPLET_SWAY:-$(command -v sway)}"
+for try in 1 2; do
+  if timeout 300 dev/frame-bench.sh --bin target/release/swaypplet --sway "$sway_bin" --gate 2>/dev/null | tail -4; then
+    exit 0
+  fi
+  echo "pre-push: frame gate failed (try $try)"
+done
+exit 1

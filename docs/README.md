@@ -28,6 +28,7 @@
 |---|---|
 | [research/liquid-glass.md](research/liquid-glass.md) | The liquid-glass optics the compositor's shader follows |
 | [research/adaptive-glass.md](research/adaptive-glass.md) | Glass that responds to its backdrop, beyond the photochromic term |
+| [research/display-profiles.md](research/display-profiles.md) | Display profiles in the process, replacing kanshi |
 
 ## History
 
@@ -47,6 +48,14 @@ browser.
 | [auth-zoo.html](auth-zoo.html) | Surface alignment and motion across the auth, lock and polkit surfaces |
 | [helm-zoo.html](helm-zoo.html) | Concepts for the panel as a command deck ("helm") |
 | [delight-zoo.html](delight-zoo.html) | Micro-gestures: small motion and feedback details |
+
+## Tools
+
+- `dev/frame-bench.sh`: frame timing for the transitions, per frame, from
+  `SWAYPPLET_FRAME_STATS` (`src/frame_stats.rs`). `--gate` fails over the
+  limits; `.githooks/pre-push` runs it (`git config core.hooksPath .githooks`).
+- `dev/render.sh`, `dev/render-all.sh`: screenshots in a nested sway.
+- `dev/filmstrip.sh`: every frame of one transition, as a contact sheet.
 
 ## Rules for this folder
 
