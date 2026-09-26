@@ -99,7 +99,7 @@ pub fn css(inputs: Inputs) -> String {
     put("on-status", ON_STATUS.css());
     // Text on bare wallpaper: the ink and its halo follow the wallpaper
     // behind it, not the mode (`backdrop.rs`).
-    let ow = on_wallpaper(inputs.backdrop);
+    let ow = on_wallpaper(inputs.backdrop, inputs.mode);
     put("fg-on-wallpaper", ow.ink.css());
     put("halo-on-wallpaper", mixed(ow.halo, ow.halo_alpha));
     put("danger-tint", mixed(st.danger_bg, 0.16));

@@ -20,12 +20,14 @@
 //! and the brightest the region can be, taken as the mean minus and plus
 //! one standard deviation, with and without the lock's scrim darkening it.
 //! Over a bright and busy region the densest halo falls a few points short
-//! ([`BUSY_CLOCK_LC`]); the smaller text's [`SMALL_LC`] holds everywhere.
+//! ([`BUSY_CLOCK_LC`]). In light mode the dark halo has to stay under the
+//! glass mask ([`SHADOW_ALPHAS`]), so light ink there is weaker; the tests
+//! hold the measured floors.
 //!
 //! With no measurement (no sample yet) the answer is the shipped look: light
 //! ink, a black halo at [`HALO_ALPHAS`]`[0]` per layer.
 
-use super::{ON_STATUS, Rgb, apca};
+use super::{Mode, ON_STATUS, Rgb, apca};
 
 /// The luminance behind wallpaper text: the region's mean relative
 /// luminance and its standard deviation, in whole percent, so [`Inputs`]
@@ -44,10 +46,28 @@ pub struct Backdrop {
 /// darkest neutral. Mode independent, like the wallpaper.
 pub const INK_DARK: Rgb = Rgb::hex(0x1d2021);
 
-/// The halo layer alphas, lightest first. Four layers stack to a core of
-/// `1 - (1 - a)^4`: 0.59, 0.76, 0.87, 0.94; half of that reaches a glyph
-/// edge ([`EDGE`]). The first is the shipped scrim alpha.
+/// The compositor's glass mask threshold (`maskThreshold` in the nixos
+/// repo's `theme/glass.nix`, checked by its cross-repo guard): a pixel of a
+/// glass surface whose alpha reaches it is drawn as glass. The halo is part
+/// of the lock's surface, so a halo that reached it became a band of glass
+/// around every glyph, and light glass is milky: white ink on a white smear.
+#[cfg_attr(not(test), allow(dead_code))]
+pub const GLASS_MASK_THRESHOLD: f64 = 0.40;
+
+/// The halo layer alphas when the halo agrees with the mode's glass (a dark
+/// halo in dark mode, a light one in light mode), lightest first. Four
+/// layers stack to a core of `1 - (1 - a)^4`: 0.59, 0.76, 0.87, 0.94, which
+/// passes the mask, so the compositor draws glass there; that glass is the
+/// halo's own colour, so it only deepens it. Half of the core reaches a
+/// glyph edge ([`EDGE`]). The first is the shipped scrim alpha.
 pub const HALO_ALPHAS: [f64; 4] = [0.2, 0.3, 0.4, 0.5];
+
+/// The alphas when the halo disagrees with the mode's glass (a dark halo in
+/// light mode, a light one in dark mode): stacked to 0.19, 0.25, 0.31, 0.36,
+/// under [`GLASS_MASK_THRESHOLD`], so the halo stays a shadow. At the strong
+/// alphas it became a band of the other mode's glass around every glyph:
+/// white ink on a milky smear in light mode.
+pub const SHADOW_ALPHAS: [f64; 4] = [0.05, 0.07, 0.09, 0.105];
 
 /// Tight halo layers stacked under the glyphs (`text.css`).
 const LAYERS: i32 = 4;
@@ -58,8 +78,19 @@ pub const SCRIM_ALPHA: f64 = 0.2;
 /// The clock and the date: body text on the wallpaper.
 pub const CLOCK_LC: f64 = 75.0;
 
+/// What the tests hold each case to, where it falls short of
+/// [`CLOCK_LC`]: dark mode over a calm bright region (dark ink, whose white
+/// halo must stay a shadow there), and light mode over a calm or busy region
+/// (light ink, whose dark halo must). Measured 2026-09-26: 69.4, 61.2, 47.1.
+#[cfg(test)]
+const DARK_CALM_LC: f64 = 69.0;
+#[cfg(test)]
+const LIGHT_CALM_LC: f64 = 61.0;
+#[cfg(test)]
+const LIGHT_BUSY_LC: f64 = 47.0;
+
 /// The switch-user button and the switcher's caption.
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub const SMALL_LC: f64 = 60.0;
 
 /// What the clock is held to over a bright region busier than 10 %: no
@@ -120,24 +151,30 @@ pub fn worst_lc(choice: OnWallpaper, b: Backdrop) -> f64 {
         .fold(f64::INFINITY, f64::min)
 }
 
-/// The ink and halo for text over `backdrop`: the lightest halo that gets
-/// the clock to [`CLOCK_LC`], light ink first at a tie (the shipped look);
-/// past the densest halo, whichever ink does better.
-pub fn on_wallpaper(backdrop: Option<Backdrop>) -> OnWallpaper {
-    let light = |a| OnWallpaper {
+/// The ink and halo for text over `backdrop` in `mode`: the lightest halo
+/// that gets the clock to [`CLOCK_LC`], light ink first at a tie (the
+/// shipped look); past the densest halo, whichever ink does better. Each
+/// ink's halo takes [`HALO_ALPHAS`] when it agrees with the mode's glass
+/// and [`SHADOW_ALPHAS`] when it does not.
+pub fn on_wallpaper(backdrop: Option<Backdrop>, mode: Mode) -> OnWallpaper {
+    let (light_alphas, dark_alphas) = match mode {
+        Mode::Dark => (HALO_ALPHAS, SHADOW_ALPHAS),
+        Mode::Light => (SHADOW_ALPHAS, HALO_ALPHAS),
+    };
+    let light = |i: usize| OnWallpaper {
         ink: ON_STATUS,
         halo: Rgb::BLACK,
-        halo_alpha: a,
+        halo_alpha: light_alphas[i],
     };
-    let dark = |a| OnWallpaper {
+    let dark = |i: usize| OnWallpaper {
         ink: INK_DARK,
         halo: Rgb::WHITE,
-        halo_alpha: a,
+        halo_alpha: dark_alphas[i],
     };
     let Some(b) = backdrop else {
-        return light(HALO_ALPHAS[0]);
+        return light(0);
     };
-    for a in HALO_ALPHAS {
+    for a in 0..HALO_ALPHAS.len() {
         let (l, d) = (light(a), dark(a));
         let (ll, dl) = (worst_lc(l, b), worst_lc(d, b));
         if ll >= CLOCK_LC && ll >= dl - 5.0 {
@@ -150,7 +187,7 @@ pub fn on_wallpaper(backdrop: Option<Backdrop>) -> OnWallpaper {
             return l;
         }
     }
-    let a = HALO_ALPHAS[HALO_ALPHAS.len() - 1];
+    let a = HALO_ALPHAS.len() - 1;
     if worst_lc(light(a), b) >= worst_lc(dark(a), b) {
         light(a)
     } else {
@@ -162,13 +199,38 @@ pub fn on_wallpaper(backdrop: Option<Backdrop>) -> OnWallpaper {
 mod tests {
     use super::*;
 
+    /// A halo that disagrees with the mode's glass stays a shadow: stacked,
+    /// under the glass mask threshold with room for GTK's rounding. And the
+    /// choice never hands out a strong halo of the wrong colour.
+    #[test]
+    fn a_halo_of_the_other_modes_colour_never_becomes_glass() {
+        for a in SHADOW_ALPHAS {
+            let peak = 1.0 - (1.0 - a).powi(LAYERS);
+            assert!(peak < GLASS_MASK_THRESHOLD - 0.02, "{a} stacks to {peak:.3}");
+        }
+        for mode in Mode::ALL {
+            let wrong = match mode {
+                Mode::Dark => Rgb::WHITE,
+                Mode::Light => Rgb::BLACK,
+            };
+            for l in 0..=100 {
+                for s in 0..=30 {
+                    let c = on_wallpaper(Some(at(l, s)), mode);
+                    if c.halo == wrong {
+                        assert!(SHADOW_ALPHAS.contains(&c.halo_alpha), "{mode:?} L{l} S{s}: {c:?}");
+                    }
+                }
+            }
+        }
+    }
+
     fn at(luminance: u8, spread: u8) -> Backdrop {
         Backdrop { luminance, spread }
     }
 
     #[test]
     fn no_measurement_is_the_shipped_look() {
-        let c = on_wallpaper(None);
+        let c = on_wallpaper(None, Mode::Dark);
         assert_eq!(c.ink, ON_STATUS);
         assert_eq!(c.halo, Rgb::BLACK);
         assert!((c.halo_alpha - 0.2).abs() < 1e-9);
@@ -176,10 +238,10 @@ mod tests {
 
     #[test]
     fn a_dark_region_keeps_light_ink_and_a_white_page_gets_dark_ink() {
-        let night = on_wallpaper(Some(at(3, 2)));
+        let night = on_wallpaper(Some(at(3, 2)), Mode::Dark);
         assert_eq!(night.ink, ON_STATUS);
         assert!((night.halo_alpha - HALO_ALPHAS[0]).abs() < 1e-9);
-        let page = on_wallpaper(Some(at(100, 0)));
+        let page = on_wallpaper(Some(at(100, 0)), Mode::Light);
         assert_eq!(page.ink, INK_DARK);
         assert_eq!(page.halo, Rgb::WHITE);
     }
@@ -189,11 +251,11 @@ mod tests {
         for l in (0..=100).step_by(5) {
             let mut last = 0.0;
             for s in (0..=30).step_by(5) {
-                let a = on_wallpaper(Some(at(l, s))).halo_alpha;
+                let a = on_wallpaper(Some(at(l, s)), Mode::Dark).halo_alpha;
                 // Across an ink flip the halo may start over lighter; within
                 // one ink it only grows.
-                let ink = on_wallpaper(Some(at(l, s))).ink;
-                let prev = on_wallpaper(Some(at(l, s.saturating_sub(5)))).ink;
+                let ink = on_wallpaper(Some(at(l, s)), Mode::Dark).ink;
+                let prev = on_wallpaper(Some(at(l, s.saturating_sub(5))), Mode::Dark).ink;
                 if ink == prev {
                     assert!(a >= last - 1e-9, "L{l} S{s}: {a} < {last}");
                 }
@@ -210,14 +272,24 @@ mod tests {
     #[test]
     fn every_region_meets_the_targets() {
         let mut failures = Vec::new();
-        for l in 0..=100 {
+        for (mode, l) in Mode::ALL.into_iter().flat_map(|m| (0..=100).map(move |l| (m, l))) {
             for s in 0..=30 {
                 let b = at(l, s);
-                let c = on_wallpaper(Some(b));
+                let c = on_wallpaper(Some(b), mode);
                 let lc = worst_lc(c, b);
-                let need = if s <= 10 { CLOCK_LC - 1.0 } else { BUSY_CLOCK_LC };
-                if lc < need || lc < SMALL_LC {
-                    failures.push(format!("L{l} S{s}: {c:?} Lc {lc:.1} < {need}"));
+                // Light mode's floors are lower: its dark halo has to stay
+                // under the glass mask (SHADOW_ALPHAS), which leaves light
+                // ink weaker over a dark or busy region. Measured minimums,
+                // held so they cannot slide; the roadmap has the fix (a
+                // plate or a deeper scrim behind the clock in light mode).
+                let need = match (mode, s <= 10) {
+                    (Mode::Dark, true) => DARK_CALM_LC,
+                    (Mode::Dark, false) => BUSY_CLOCK_LC,
+                    (Mode::Light, true) => LIGHT_CALM_LC,
+                    (Mode::Light, false) => LIGHT_BUSY_LC,
+                };
+                if lc < need {
+                    failures.push(format!("{mode:?} L{l} S{s}: {c:?} Lc {lc:.1} < {need}"));
                 }
             }
         }

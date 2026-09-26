@@ -646,8 +646,8 @@ mod tests {
             }
             cells.grid().text_backdrop()
         };
-        let page = crate::tokens::on_wallpaper(Some(flat(250)));
-        let night = crate::tokens::on_wallpaper(Some(flat(10)));
+        let page = crate::tokens::on_wallpaper(Some(flat(250)), crate::tokens::Mode::Dark);
+        let night = crate::tokens::on_wallpaper(Some(flat(10)), crate::tokens::Mode::Dark);
         assert_ne!(page.ink, night.ink);
         assert_eq!(night.ink, crate::tokens::ON_STATUS);
     }
@@ -752,3 +752,4 @@ mod tests {
         println!("text on {:?}", sample.grid.text_backdrop());
     }
 }
+

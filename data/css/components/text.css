@@ -55,8 +55,9 @@
 
    Colour alone cannot make text readable on every image; a halo that moves
    the ground around the glyphs toward the opposite of the ink can. Four
-   tight layers give the glyphs an edge (0.59 core at the lightest), three
-   soft ones make the halo. */
+   tight layers only, and their stacked alpha stays under the compositor's
+   glass mask threshold (backdrop.rs GLASS_MASK_THRESHOLD): a denser halo is
+   drawn as glass, and light glass turned it into a white smear. */
 .ui-on-wallpaper,
 button.ui-btn.ui-on-wallpaper {
     color: var(--fg-on-wallpaper);
@@ -64,10 +65,7 @@ button.ui-btn.ui-on-wallpaper {
         0 1px 3px var(--halo-on-wallpaper),
         0 1px 3px var(--halo-on-wallpaper),
         0 1px 3px var(--halo-on-wallpaper),
-        0 1px 3px var(--halo-on-wallpaper),
-        0 2px 14px var(--halo-on-wallpaper),
-        0 2px 14px var(--halo-on-wallpaper),
-        0 2px 14px var(--halo-on-wallpaper);
+        0 1px 3px var(--halo-on-wallpaper);
 }
 
 /* A caption whose tone changes in place (an error arriving, a success):
