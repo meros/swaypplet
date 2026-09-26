@@ -304,72 +304,6 @@ pub fn run(component: &str) {
             // /etc/swaypplet/glass.json existing on the build host; without
             // one it draws the "no glass configuration" note, which is the
             // other state worth a screenshot.
-            // The jump list, built from a recorded session rather than the
-            // live one, so it renders the same rows every time and needs no
-            // compositor to have been anywhere.
-            "jump" => {
-                let raw = std::fs::read_to_string("tests/fixtures/sessions/typical/tree.json")
-                    .expect("run from the repo root; needs tests/fixtures/");
-                let tree: swayipc::Node = serde_json::from_str(&raw).unwrap();
-                let places = crate::jump::place::mru(&tree);
-                let config = std::fs::read_to_string("tests/fixtures/sessions/typical/config.json")
-                    .ok()
-                    .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
-                    .and_then(|v| v["config"].as_str().map(str::to_string))
-                    .unwrap_or_default();
-                let bindings = crate::keybinds::parse(&config);
-                let focused = places.first().map(|p| p.output.clone()).unwrap_or_default();
-                let apps = |ws: &str| crate::jump::apps_on(&tree, ws);
-                let built = crate::jump::rows::rows(&places, &bindings, &apps, &focused);
-                let scenes: Vec<_> = places
-                    .iter()
-                    .skip(1)
-                    .take(built.len())
-                    .map(|p| crate::jump::scene::scene(&tree, &p.name))
-                    .collect();
-
-                let card = std::rc::Rc::new(crate::jump::card::Card::new(&built, &scenes));
-                card.select(0);
-                // In the session the strip spans the output; a preview window
-                // is only as wide as its content, so give it the width of the
-                // laptop panel (1280 logical).
-                card.root.set_size_request(1280, -1);
-                host.append(&card.root);
-
-                // `SWPP_JUMP_SELECT=n` turns the ring to place n after the
-                // first paint, for a shot of the ring mid-walk.
-                if let Some(n) = std::env::var("SWPP_JUMP_SELECT")
-                    .ok()
-                    .and_then(|v| v.parse::<usize>().ok())
-                {
-                    let card = card.clone();
-                    glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
-                        card.select(n);
-                    });
-                }
-
-                // Fake frames through the real path: every window gets a
-                // gradient with a bar that moves, so a series of shots shows
-                // each picture updating on its own. `SWPP_JUMP_STILL=1` sends
-                // none, which is the icon-only state before first frames.
-                if std::env::var_os("SWPP_JUMP_STILL").is_none() {
-                    let ids = card.window_ids();
-                    let tick = std::cell::Cell::new(0u32);
-                    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-                        let t = tick.get();
-                        tick.set(t + 1);
-                        for (i, id) in ids.iter().enumerate() {
-                            card.frame(crate::jump::live::Frame {
-                                id: id.clone(),
-                                width: 320,
-                                height: 200,
-                                pixels: fake_frame(320, 200, i as u32, t),
-                            });
-                        }
-                        glib::ControlFlow::Continue
-                    });
-                }
-            }
             // `settings` or `settings.<tab>` (look, idle, bar, alerts, glass).
             c if c == "settings" || c.starts_with("settings.") => {
                 let s = Box::leak(Box::new(crate::settings::SettingsSection::new()));
@@ -487,29 +421,4 @@ pub fn run(component: &str) {
     // Run without forwarding our own argv (which contains `--preview <name>`)
     // so GApplication doesn't try to parse it as GTK options.
     app.run_with_args(&["swaypplet"]);
-}
-
-/// A stand-in window frame for the jump preview: premultiplied BGRA, a hue
-/// per window, and a bright bar at a position that moves with `t`.
-fn fake_frame(w: u32, h: u32, window: u32, t: u32) -> Vec<u8> {
-    let hue = (window * 47) % 255;
-    let bar = (t * 6 + window * 40) % h;
-    let mut px = Vec::with_capacity((w * h * 4) as usize);
-    for y in 0..h {
-        for x in 0..w {
-            let on_bar = y.abs_diff(bar) < 6;
-            let shade = (x * 255 / w.max(1)) as u8;
-            let (r, g, b) = if on_bar {
-                (240, 240, 240)
-            } else {
-                (
-                    hue as u8 / 2 + shade / 4,
-                    60 + shade / 3,
-                    255 - hue as u8 / 2,
-                )
-            };
-            px.extend_from_slice(&[b, g, r, 0xff]);
-        }
-    }
-    px
 }
