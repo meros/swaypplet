@@ -1,8 +1,8 @@
 //! Media mark — single dim achromatic ♪ in the right cluster
 //! (docs/BAR_VISION.md, increments 4 and 8).
 //!
-//! Hidden while no player exists, `.paused` dims further when playback is
-//! stopped/paused. No title text and no ambient progress — the mark is
+//! Hidden while no player exists; a stopped or paused player recedes
+//! (`ui::set_receded`). No title text and no ambient progress — the mark is
 //! ambient; prose (art + title/artist) and the play-pause action live in
 //! the click-opened read-layer popover (bar/popover.rs). State comes from
 //! `crate::mpris`, which the players push over D-Bus: nothing is polled,
@@ -16,6 +16,7 @@ use gtk4::prelude::*;
 use super::popover;
 use crate::icons;
 use crate::spawn::spawn_work;
+use crate::ui;
 use crate::widgets::media::{self, MediaState, PlaybackStatus};
 
 /// The mark, its popover and the last known player state — cloned into
@@ -31,11 +32,11 @@ struct Ui {
     state: Rc<RefCell<Option<MediaState>>>,
 }
 
-fn control_button(glyph: &str) -> gtk4::Button {
-    gtk4::Button::builder()
-        .child(&gtk4::Label::new(Some(glyph)))
-        .css_classes(["bar-media-btn"])
-        .build()
+/// A transport key: a mark, muted, ink under the pointer.
+fn control_button(face: &gtk4::Label) -> gtk4::Button {
+    let b = ui::mark(face, false);
+    b.add_css_class("bar-media-btn");
+    b
 }
 
 /// Fire a playerctl transport command off-thread; playerctl blocks on
@@ -58,34 +59,23 @@ pub fn build(mpris: &Rc<crate::mpris::MprisService>) -> gtk4::Box {
     // Art + title/artist open the popover; the transport keys are siblings,
     // not children, because GTK4 gives a Button's clicks to the Button and a
     // nested control would never see them.
-    let art = gtk4::Image::builder()
-        .pixel_size(ART_PX)
-        .css_classes(["bar-media-art"])
-        .build();
+    let art = gtk4::Image::builder().pixel_size(ART_PX).build();
     let text = gtk4::Label::builder()
-        .css_classes(["bar-media-text"])
         .ellipsize(gtk4::pango::EllipsizeMode::End)
         .max_width_chars(24)
         .xalign(0.0)
         .build();
-    let info = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(6)
-        .build();
+    let info = ui::hbox(2);
     info.append(&art);
     info.append(&text);
-    let btn = gtk4::Button::builder()
-        .child(&info)
-        .css_classes(["bar-media-mark"])
-        .build();
+    // The mark is ambient, so it sits a level lower than the transport.
+    let btn = ui::mark(&info, true);
+    btn.add_css_class("bar-media-mark");
 
     let play = gtk4::Label::new(Some(icons::MEDIA_PLAY));
-    let prev_btn = control_button(icons::MEDIA_PREV);
-    let play_btn = gtk4::Button::builder()
-        .child(&play)
-        .css_classes(["bar-media-btn"])
-        .build();
-    let next_btn = control_button(icons::MEDIA_NEXT);
+    let prev_btn = control_button(&gtk4::Label::new(Some(icons::MEDIA_PREV)));
+    let play_btn = control_button(&play);
+    let next_btn = control_button(&gtk4::Label::new(Some(icons::MEDIA_NEXT)));
 
     // Hidden until a player shows up.
     let root = gtk4::Box::builder()
@@ -175,11 +165,8 @@ fn apply(ui: &Ui, state: Option<MediaState>) {
 
     *ui.state.borrow_mut() = state;
     ui.root.set_visible(present);
-    if playing {
-        ui.root.remove_css_class("paused");
-    } else {
-        ui.root.add_css_class("paused");
-    }
+    // A stopped player recedes without disappearing.
+    ui::set_receded(&ui.root, !playing);
     if !present {
         ui.pop.popdown();
     } else if ui.pop.is_visible() {
@@ -210,55 +197,46 @@ fn render(ui: &Ui) {
         // The mark hides without a player; this only covers a race where
         // the popover outlives the state by one event.
         ui.body
-            .append(&popover::line("No player", "bar-popover-empty"));
+            .append(&ui::text("No player", ui::Text::Label, ui::Tone::Muted));
         return;
     };
 
-    let row = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(12)
-        .build();
-    let frame = gtk4::Box::builder()
-        .halign(gtk4::Align::Center)
-        .valign(gtk4::Align::Center)
-        .overflow(gtk4::Overflow::Hidden)
-        .css_classes(["media-art-frame"])
-        .build();
+    let row = ui::hbox(4);
+    let frame = ui::thumb();
+    frame.add_css_class("bar-media-art-frame");
     match ms.art_path() {
         Some(path) => {
             let art = gtk4::Picture::builder()
                 .content_fit(gtk4::ContentFit::Cover)
-                .css_classes(["media-art"])
                 .build();
             art.set_file(Some(&gtk4::gio::File::for_path(&path)));
             frame.append(&art);
         }
         None => {
             let fallback = gtk4::Label::new(Some("󰎆"));
-            fallback.add_css_class("media-art-fallback");
+            ui::glyph(&fallback, ui::Text::DisplaySm, ui::Tone::Muted);
             frame.append(&fallback);
         }
     }
     row.append(&frame);
 
-    let info = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(2)
-        .valign(gtk4::Align::Center)
-        .build();
-    let title = popover::line(
+    let info = ui::vbox(1);
+    info.set_valign(gtk4::Align::Center);
+    let title = ui::text(
         if ms.title.is_empty() {
             "Unknown track"
         } else {
             &ms.title
         },
-        "media-title",
+        ui::Text::Body,
+        ui::Tone::Fg,
     );
+    title.add_css_class("ui-strong");
     title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     title.set_max_width_chars(28);
     info.append(&title);
     if !ms.artist.is_empty() {
-        let artist = popover::line(&ms.artist, "media-artist");
+        let artist = ui::text(&ms.artist, ui::Text::Caption, ui::Tone::Muted);
         artist.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         artist.set_max_width_chars(28);
         info.append(&artist);
@@ -266,15 +244,21 @@ fn render(ui: &Ui) {
     row.append(&info);
     ui.body.append(&row);
 
+    let face = gtk4::Label::new(Some(if ms.status == PlaybackStatus::Playing {
+        icons::MEDIA_PAUSE
+    } else {
+        icons::MEDIA_PLAY
+    }));
+    ui::glyph(&face, ui::Text::DisplaySm, ui::Tone::Fg);
     let play = gtk4::Button::builder()
-        .label(if ms.status == PlaybackStatus::Playing {
-            icons::MEDIA_PAUSE
-        } else {
-            icons::MEDIA_PLAY
-        })
+        .child(&face)
         .halign(gtk4::Align::Center)
-        .css_classes(["media-btn", "media-play-pause"])
+        .tooltip_text("Play or pause")
         .build();
+    ui::make_button(&play, ui::Kind::Flat);
+    play.add_css_class("icon");
+    play.add_css_class("pill");
+    play.add_css_class("bar-media-play");
     play.connect_clicked(|_| send("play-pause"));
     ui.body.append(&play);
 }

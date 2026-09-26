@@ -16,26 +16,33 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::backup::BackupStatusService;
+use crate::backup::{BackupStatusService, Tier};
+use crate::ui;
 
-/// Every class this segment can wear, cleared before the current one goes
-/// on: GTK keeps whatever is not removed, and a segment that went amber
-/// once would otherwise stay amber under the green.
-const CLASSES: [&str; 4] = [
-    "backup-ok",
-    "backup-running",
-    "backup-warn",
-    "backup-unknown",
-];
+/// The glyph's tone per tier. This breaks the battery's rest-is-faint rule
+/// on purpose: the glance this instrument exists for is "the nightly jobs
+/// ran", so success is the resting state and the segment earns its width
+/// by being readable when nothing is wrong. Running is plain ink, a
+/// failed or two-night-old run the warning tone. Unknown is faint, because
+/// a bar with no status files must claim nothing. The fill, the divider
+/// and the ends come from the segment, as for every other instrument.
+fn tone(tier: Tier) -> ui::Tone {
+    match tier {
+        Tier::Ok => ui::Tone::Success,
+        Tier::Running => ui::Tone::Fg,
+        Tier::Stale | Tier::Failed => ui::Tone::Warning,
+        Tier::Unknown => ui::Tone::Faint,
+    }
+}
 
 pub fn build(service: &Rc<BackupStatusService>) -> gtk4::Box {
     let segment = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .css_classes(["bar-backup", "bar-seg"])
         .build();
+    ui::segment(&segment, false);
 
     let glyph = gtk4::Label::new(None);
-    glyph.add_css_class("bar-backup-glyph");
     segment.append(&glyph);
 
     let render = {
@@ -46,10 +53,7 @@ pub fn build(service: &Rc<BackupStatusService>) -> gtk4::Box {
             let snapshot = service.snapshot();
             let tier = snapshot.tier();
             glyph.set_label(tier.icon());
-            for class in CLASSES {
-                segment.remove_css_class(class);
-            }
-            segment.add_css_class(tier.css());
+            ui::set_tone(&glyph, tone(tier));
             segment.set_tooltip_text(Some(&snapshot.tooltip()));
         }
     };

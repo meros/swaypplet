@@ -22,6 +22,7 @@ use gtk4::prelude::*;
 
 use super::popover;
 use crate::anim::{self, SlideBin};
+use crate::ui;
 use crate::widgets::power::{self, BatteryState, ChargeState};
 
 const WARNING_PCT: u8 = 30;
@@ -58,6 +59,8 @@ fn tier(capacity: u8, plugged: bool) -> Tier {
 }
 
 struct Ui {
+    /// Carries the tier's tone; the glyph and the % inherit it.
+    content: gtk4::Box,
     icon: gtk4::Label,
     pct: gtk4::Label,
     pct_reveal: gtk4::Revealer,
@@ -83,15 +86,20 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
         .build();
     let pct_reveal = gtk4::Revealer::builder()
         .transition_type(gtk4::RevealerTransitionType::SlideRight)
-        .transition_duration(200)
+        .transition_duration(crate::tokens::motion::EXPAND.ms as u32)
         .child(&pct)
         .build();
+    // Time estimate beside the glyph (time-to-full charging, time-to-empty
+    // discharging). Faint: the percentage appears only when something is
+    // wrong, the estimate is ambient. power::eta_text withholds it near
+    // full, so this is quiet on mains.
     let eta = gtk4::Label::builder()
         .css_classes(["bar-battery-eta"])
         .build();
+    ui::set_tone(&eta, ui::Tone::Faint);
     let eta_reveal = gtk4::Revealer::builder()
         .transition_type(gtk4::RevealerTransitionType::SlideRight)
-        .transition_duration(200)
+        .transition_duration(crate::tokens::motion::EXPAND.ms as u32)
         .child(&eta)
         .build();
     let content = gtk4::Box::builder()
@@ -100,11 +108,13 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
     content.append(&icon);
     content.append(&pct_reveal);
     content.append(&eta_reveal);
+    ui::set_tone(&content, ui::Tone::Muted);
     let slide = SlideBin::new();
     slide.set_child(&content);
     let root = gtk4::Box::builder()
         .css_classes(["bar-battery", "bar-seg"])
         .build();
+    ui::segment(&root, false);
     root.append(&slide);
 
     // Read layer (vision increment 8): click opens the battery section.
@@ -120,12 +130,17 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
             while let Some(child) = body.first_child() {
                 body.remove(&child);
             }
-            body.append(&popover::line(
+            body.append(&ui::text(
                 &power::battery_summary_text(&bat),
-                "bar-popover-desc",
+                ui::Text::Body,
+                ui::Tone::Fg,
             ));
             if let Some(watts) = power::watts_text(&bat) {
-                body.append(&popover::line(&format!("Draw {watts}"), "bar-popover-meta"));
+                body.append(&ui::text(
+                    &format!("Draw {watts}"),
+                    ui::Text::Caption,
+                    ui::Tone::Muted,
+                ));
             }
             pop.popup();
         });
@@ -133,6 +148,7 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
     }
 
     let ui = Rc::new(Ui {
+        content,
         icon,
         eta,
         eta_reveal,
@@ -190,20 +206,21 @@ fn apply(root: &gtk4::Box, ui: &Ui, bat: &BatteryState) {
         return;
     }
     // Threshold edge: the only place classes (and the % reveal) change.
-    set_class(root, "warning", t == Tier::Warning);
-    set_class(root, "critical", t == Tier::Critical);
+    // A muted glyph at rest, warning-toned at the 30 % edge, the one red
+    // at 15 % (the segment itself turns, so the glyph reads on-status).
+    ui::set_tone(
+        &ui.content,
+        match t {
+            Tier::Rest => ui::Tone::Muted,
+            Tier::Warning => ui::Tone::Warning,
+            Tier::Critical => ui::Tone::Fg,
+        },
+    );
+    ui::set_danger(root, t == Tier::Critical);
     ui.pct_reveal.set_reveal_child(t != Tier::Rest);
     // One onset nudge on entering critical — never on a startup read.
     if t == Tier::Critical && prev.is_some() {
         anim::nudge(&ui.slide);
-    }
-}
-
-fn set_class(widget: &impl IsA<gtk4::Widget>, class: &str, on: bool) {
-    if on {
-        widget.add_css_class(class);
-    } else {
-        widget.remove_css_class(class);
     }
 }
 

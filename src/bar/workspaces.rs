@@ -31,7 +31,7 @@
 //! reinforcement only).
 //!
 //! Task ribbons (docs/BAR_VISION.md, increment 10) live in the bottom
-//! 2 px lane, so selection (top lane) and task state never collide. The
+//! 2 px lane, so selection (a fill step) and task state never collide. The
 //! buttons are fused segments, so per-button borders read as one ribbon
 //! across a task's four workspaces: off = no session, dim solid = the
 //! task is live, task hue = *this* workspace holds a waiting session
@@ -45,16 +45,15 @@ use gtk4::prelude::*;
 
 use crate::sway_ipc::{self, OutputInfo, SwayService, WorkspaceInfo};
 use crate::task_state::{Activity, TaskSnapshot, TaskStateService, task_of_name};
+use crate::ui;
 
-/// Gap between per-screen group pills. Wide enough to read as separate
-/// pills, narrow enough that the strip stays one cluster.
-const GROUP_GAP_PX: i32 = 8;
+/// Marks the pin glyph inside a segment, so `set_pinned` can find it.
+const PIN_MARK_CLASS: &str = "bar-ws-pin-glyph";
 
 // Label tables — mirror users/modules/workspace-config.nix (nixos repo):
-// nums 1–16 are the task grid, rendered "1¹".."4⁴" behind a task-colored
-// dot (`.bar-ws-dot.taskN`; colors live in data/style.css beside the
-// accent-ripple rules), nums 17–38 the generic keyed workspaces. Keep in
-// lockstep with that file.
+// nums 1–16 are the task grid, rendered "1¹".."4⁴" behind a dot in the
+// task's categorical tone (`ui::set_category`), nums 17–38 the generic
+// keyed workspaces. Keep in lockstep with that file.
 //
 // The grid is 4 tasks × 2 screens as of 2026-08-10; the superscript table
 // still runs to four because the `num` spacing (1,2 / 5,6 / 9,10 / 13,14)
@@ -88,12 +87,10 @@ const GENERIC_LABELS: &[(i32, &str)] = &[
 
 pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box {
     // Holder for the per-screen group pills; the fused-segment styling
-    // lives on the groups inside it.
-    let container = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(GROUP_GAP_PX)
-        .css_classes(["bar-ws-groups"])
-        .build();
+    // lives on the groups inside it. The gap is wide enough to read as
+    // separate pills, narrow enough that the strip stays one cluster.
+    let container = ui::hbox(3);
+    container.add_css_class("bar-ws-groups");
 
     let pills: Rc<RefCell<Vec<Pill>>> = Rc::new(RefCell::new(Vec::new()));
     let weak = container.downgrade();
@@ -181,7 +178,7 @@ impl Segment {
             .button
             .child()
             .and_then(|c| c.last_child())
-            .filter(|m| m.has_css_class("bar-ws-pin"))
+            .filter(|m| m.has_css_class(PIN_MARK_CLASS))
         {
             mark.set_visible(pinned);
         }
@@ -234,26 +231,28 @@ fn raise(
     groups
         .iter()
         .map(|group| {
-            let widget = gtk4::Box::builder()
-                .orientation(gtk4::Orientation::Horizontal)
-                .css_classes(["bar-workspaces"])
-                .build();
+            let widget = ui::segmented();
             let segments = group
                 .workspaces
                 .iter()
                 .map(|ws| {
                     // The label, and a pin glyph shown while the workspace
                     // is pinned (jump/pin.rs).
-                    let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 3);
+                    let content = ui::hbox(2);
                     content.append(&label_widget(ws.num, &ws.name));
                     let pin_mark = gtk4::Label::new(Some("\u{f0403}"));
-                    pin_mark.add_css_class("bar-ws-pin");
+                    ui::glyph(&pin_mark, ui::Text::Caption, ui::Tone::Faint);
+                    pin_mark.add_css_class(PIN_MARK_CLASS);
                     pin_mark.set_visible(crate::jump::pin::is_pinned(&ws.name));
                     content.append(&pin_mark);
                     let button = gtk4::Button::builder()
                         .css_classes(["bar-ws"])
                         .child(&content)
                         .build();
+                    // Quiet: an idle label sits muted so the selected
+                    // segment is the only loud element on the left.
+                    ui::segment(&button, true);
+                    ui::ribboned(&button);
                     let cmd = switch_command(ws.num, &ws.name);
                     button.connect_clicked(move |_| sway_ipc::run_command(&cmd));
                     crate::jump::peek::attach(&button, ws.name.clone(), on_screen.clone());
@@ -281,10 +280,7 @@ fn raise(
 fn apply(pills: &[Pill], groups: &[Group], plans: &[TaskRibbon; 4]) {
     for (pill, group) in pills.iter().zip(groups) {
         if pill.active.replace(group.active) != group.active {
-            match group.active {
-                true => pill.widget.add_css_class("active-screen"),
-                false => pill.widget.remove_css_class("active-screen"),
-            }
+            ui::set_receded(&pill.widget, !group.active);
         }
         for (seg, ws) in pill.segments.iter().zip(&group.workspaces) {
             let view = SegView {
@@ -301,39 +297,27 @@ fn apply(pills: &[Pill], groups: &[Group], plans: &[TaskRibbon; 4]) {
     }
 }
 
+/// Selection tiers are achromatic steps of the fill ladder: hue is spoken
+/// for by the dot and the ribbon, which carry task identity, so the cursor
+/// cannot also be a hue without the two colliding. Urgent is the one red.
 fn write_seg(btn: &gtk4::Button, task: Option<usize>, view: SegView) {
-    for class in [
-        "current",
-        "focused",
-        "urgent",
-        "ribbon-working",
-        "ribbon-waiting",
-    ] {
-        btn.remove_css_class(class);
-    }
-    if let Some(task) = task {
-        btn.remove_css_class(&format!("task{task}"));
-    }
-    match view.state {
-        WsState::Unwritten | WsState::Idle => {}
-        WsState::Current => btn.add_css_class("current"),
-        WsState::Focused => {
-            btn.add_css_class("current");
-            btn.add_css_class("focused");
-        }
-    }
-    if view.urgent {
-        btn.add_css_class("urgent");
-    }
-    let Some(task) = task else { return };
-    match view.ribbon {
-        Ribbon::Off => {}
-        Ribbon::Working => btn.add_css_class("ribbon-working"),
-        Ribbon::Waiting => {
-            btn.add_css_class("ribbon-waiting");
-            btn.add_css_class(&format!("task{task}"));
-        }
-    }
+    ui::set_selection(
+        btn,
+        match view.state {
+            WsState::Unwritten | WsState::Idle => ui::Selection::Idle,
+            WsState::Current => ui::Selection::Current,
+            WsState::Focused => ui::Selection::Focused,
+        },
+    );
+    ui::set_danger(btn, view.urgent);
+    ui::set_ribbon(
+        btn,
+        match (task, view.ribbon) {
+            (None, _) | (_, Ribbon::Off) => ui::Ribbon::Off,
+            (Some(_), Ribbon::Working) => ui::Ribbon::Working,
+            (Some(task), Ribbon::Waiting) => ui::Ribbon::Category(task),
+        },
+    );
 }
 
 // ── Pure helpers (unit-tested below) ────────────────────────────────────
@@ -502,19 +486,15 @@ fn sort_workspaces(list: &mut [WorkspaceInfo]) {
     list.sort_by(|a, b| (a.num < 0, a.num, &a.name).cmp(&(b.num < 0, b.num, &b.name)));
 }
 
-/// Button content: task workspaces get a task-colored dot beside the
-/// label, everything else a plain label.
+/// Button content: task workspaces get a dot in the task's categorical
+/// tone beside the label, everything else a plain label.
 fn label_widget(num: i32, name: &str) -> gtk4::Widget {
     let Some((task, text)) = task_label(num) else {
         return gtk4::Label::new(Some(generic_label(num, name))).upcast();
     };
-    let row = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(4)
-        .build();
+    let row = ui::hbox(2);
     let dot = gtk4::Label::new(Some("●"));
-    dot.add_css_class("bar-ws-dot");
-    dot.add_css_class(&format!("task{task}"));
+    ui::set_category(&dot, task);
     row.append(&dot);
     row.append(&gtk4::Label::new(Some(&text)));
     row.upcast()

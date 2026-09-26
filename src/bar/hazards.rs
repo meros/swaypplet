@@ -42,6 +42,7 @@ use gtk4::prelude::*;
 use crate::audio::AudioService;
 use crate::inhibit::{self, Inhibitor};
 use crate::sway_ipc::SwayService;
+use crate::ui;
 
 // ── Widget ──────────────────────────────────────────────────────────────
 
@@ -49,7 +50,6 @@ use crate::sway_ipc::SwayService;
 pub fn build(sway: &Rc<SwayService>, audio: &Rc<AudioService>) -> gtk4::Box {
     let lane = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
-        .css_classes(["bar-hazards"])
         .build();
 
     for which in Inhibitor::ALL {
@@ -75,7 +75,9 @@ pub fn build(sway: &Rc<SwayService>, audio: &Rc<AudioService>) -> gtk4::Box {
 
     let (rec, rec_glyph) = hazard("󰑋");
     rec_glyph.set_tooltip_text(Some("Screen recording in progress"));
-    rec_glyph.add_css_class("bar-hazard-rec");
+    // Recording is the one hazard in red: it is capturing now, and the
+    // owner may want to stop it now.
+    ui::glyph(&rec_glyph, ui::Text::Body, ui::Tone::Danger);
     lane.append(&rec);
 
     crate::screenshot::record::RECORDING_OBSERVED.with(|r| {
@@ -129,16 +131,18 @@ fn armed_mode(mode: &str) -> Option<&str> {
     (!mode.is_empty() && mode != "default").then_some(mode)
 }
 
-/// One appear-only glyph: amber label behind a 200 ms structural
-/// Revealer, collapsed to zero width when its condition is clear.
+/// One appear-only glyph: a warning-toned label (armed, not act-now: red
+/// stays "act now", vision P3) behind a 200 ms structural Revealer,
+/// collapsed to zero width when its condition is clear.
 fn hazard(glyph: &str) -> (gtk4::Revealer, gtk4::Label) {
     let label = gtk4::Label::builder()
         .label(glyph)
         .css_classes(["bar-hazard"])
         .build();
+    ui::glyph(&label, ui::Text::Body, ui::Tone::Warning);
     let revealer = gtk4::Revealer::builder()
         .transition_type(gtk4::RevealerTransitionType::SlideRight)
-        .transition_duration(200)
+        .transition_duration(crate::tokens::motion::EXPAND.ms as u32)
         .reveal_child(false)
         .child(&label)
         .build();
