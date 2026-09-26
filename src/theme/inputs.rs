@@ -5,7 +5,7 @@
 use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
 
-use crate::settings::schema::{ThemeMode, Tint as Reach};
+use crate::settings::schema::{Look, ThemeMode, Tint as Reach};
 use crate::tokens::{Inputs, Mode, Tint};
 
 /// Light mode waits until every surface is on the tokens: a legacy rule
@@ -38,13 +38,15 @@ fn shown_mode() -> Mode {
 /// The inputs with the mode and the tint as they were last resolved rather
 /// than resolved again: see `theme::shown`.
 pub(super) fn shown() -> Inputs {
-    build(SHOWN.with(Cell::get), TINT.with(Cell::get))
+    let look = crate::settings::store::with(|s| s.look());
+    build(&look, SHOWN.with(Cell::get), TINT.with(Cell::get))
 }
 
-/// The one place `Inputs` is made: the Look settings as they are, with a
-/// mode and a tint already resolved.
-fn build(mode: Mode, tint: Tint) -> Inputs {
-    let look = crate::settings::store::with(|s| s.look());
+/// The one place outside tests that an `Inputs` is made: the Look settings,
+/// with a mode and a tint already resolved. [`inputs`] resolves them and
+/// [`shown`] reuses the last resolution; both end here, so the two cannot
+/// map a Look setting differently.
+fn build(look: &Look, mode: Mode, tint: Tint) -> Inputs {
     Inputs {
         mode,
         accent: look.accent,
@@ -145,5 +147,5 @@ pub fn inputs() -> Inputs {
     SHOWN.with(|s| s.set(mode));
     TINT.with(|t| t.set(tint));
     STARTED.with(|s| s.set(true));
-    build(mode, tint)
+    build(&look, mode, tint)
 }

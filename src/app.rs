@@ -175,9 +175,10 @@ pub fn run() {
         // The wallpaper's hue for `look.tint`. This process is the only one
         // that samples it (`theme::wallpaper::follow_settings`, for why);
         // every other one reads the file it leaves behind. Then follow the
-        // theme inputs: the stylesheet, the glass and sway's borders.
+        // theme inputs: the stylesheet, sway's borders, and the glass, which
+        // the theme hands back here because sending it is the settings'.
         crate::theme::wallpaper::follow_settings();
-        theme::watch();
+        theme::watch(crate::settings::glass::apply_saved_for);
 
         // Start D-Bus notification server
         dbus::start_server(store_startup.clone());

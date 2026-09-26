@@ -248,27 +248,29 @@ pub fn observe(cb: impl Fn() + 'static) {
 }
 
 /// Follow the inputs for as long as this process lives, and keep what the
-/// compositor draws from them (the glass material, sway's window borders)
-/// in step.
+/// compositor draws from them in step: sway's window borders here, and the
+/// glass material through `on_material`, called with the inputs now on
+/// screen whenever the material they make has changed (§4). The caller owns
+/// what "send the material" means (`settings::glass`, which sits above the
+/// theme), so the theme does not reach up into the settings to do it.
 ///
 /// One second, the same tick and for the same reason as `settings::watch`:
 /// the wallpaper's hue is a file one process writes and the others read,
 /// and there is no bus between them. A wallpaper change is not a hot path.
-pub fn watch() {
+pub fn watch(on_material: impl Fn(crate::tokens::Inputs) + 'static) {
     locked::follow();
     // The borders are the compositor's and outlive this process, so they are
     // put up at start as well as on every change: a fresh session has the
     // sway config's on them.
     sway::apply_borders(LOADED.with(|l| *l.borrow()).unwrap_or_else(inputs));
-    glib::timeout_add_local(std::time::Duration::from_secs(1), || {
+    glib::timeout_add_local(std::time::Duration::from_secs(1), move || {
         let before = LOADED.with(|l| *l.borrow());
         if reload() {
             let now = LOADED.with(|l| *l.borrow()).unwrap_or_default();
             // The glass follows the mode and, under a full tint, the
-            // neutral (§4). Only the long-lived process watches, so the
-            // material is sent once, not once per process.
+            // neutral (§4).
             if before.map(crate::tokens::material) != Some(crate::tokens::material(now)) {
-                crate::settings::glass::apply_saved();
+                on_material(now);
             }
             sway::apply_borders(now);
         }
