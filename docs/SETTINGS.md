@@ -1,7 +1,7 @@
 # Settings
 
 The settings pane is a page in the Helm card (`:set` in the omnibox, or the
-gear in the flight deck; a bare `:` lists every prefix). Five tabs,
+gear in the flight deck; a bare `:` lists every prefix). Six tabs,
 `src/settings/`:
 
 | tab | edits | sections of `~/.config/swaypplet/settings.json` |
@@ -10,6 +10,7 @@ gear in the flight deck; a bare `:` lists every prefix). Five tabs,
 | Idle & Lock | the idle manager's timers; the night window; walk-away lock; face unlock; what sudo and pkexec may ask for | `idle`, `elevate` |
 | Bar | clock format, segments, OSD placement, key steps, volume boost | `bar`, `keys` |
 | Alerts | popup linger, corner and depth; quiet hours; what a screenshot becomes | `alerts`, `capture` |
+| Launcher | which kinds of result a search lists; ranking by use, and forgetting it | `launcher` |
 | Glass | the liquid-glass material | `~/.config/swaypplet/glass.json` |
 
 `data/settings-defaults.json` is every section at the binary's defaults,
@@ -94,6 +95,10 @@ and Bar tabs is `nix <section>` into the clipboard.
   observer (`services/notifications/quiet.rs`), edge-triggered so a manual DND
   toggle inside the window stands. Capture is read at the moment of the
   shot (`screenshot/deliver.rs`, `screenshot/mod.rs`).
+- **Launcher** is read on every query (`launcher::sources`), so a switch
+  applies to the next key typed. The ranking history is not a setting: it
+  lives in `$XDG_STATE_HOME/swaypplet/launcher-frecency.json`, and Forget
+  history deletes it (docs/LAUNCHER.md).
 - **Keys** are read per press by the OSD; the panel's volume rail takes
   the ceiling when it refreshes.
 - **Wallpaper** is one `output * bg` command over sway IPC.
@@ -151,7 +156,7 @@ switches only ever remove a way in or add a lock.
 ## Trying it without a rebuild
 
 - `dev/render.sh --mode preview:settings.idle` renders one tab
-  (`wallpaper`, `idle`, `bar`, `glass`).
+  (`wallpaper`, `idle`, `bar`, `alerts`, `launcher`, `glass`).
 - `SWAYPPLET_SETTINGS_CONFIG=/path/to/defaults.json` points the system
   layer somewhere else, as `SWAYPPLET_GLASS_CONFIG` does for glass.
 - `journalctl -t swaypplet-idle -f` shows the re-arm as

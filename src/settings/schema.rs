@@ -707,6 +707,71 @@ impl Default for Elevate {
     }
 }
 
+/// What the launcher's results include, and whether it learns.
+///
+/// One switch per kind of result rather than per elephant provider: the
+/// windows switch covers both the running-window rows the launcher finds
+/// itself and elephant's `windows`, the calculator switch both the `=` rows
+/// and elephant's `calc`. `launcher::sources` maps these to providers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Launcher {
+    /// Installed applications.
+    #[serde(default = "yes")]
+    pub apps: bool,
+    /// Open windows: "Go to" rows above an app's result, and Tab on one.
+    #[serde(default = "yes")]
+    pub windows: bool,
+    /// `=` and arithmetic typed bare.
+    #[serde(default = "yes")]
+    pub calculator: bool,
+    /// `>` runs a command in your shell; commands on `PATH` as results.
+    #[serde(default = "yes")]
+    pub commands: bool,
+    /// The clipboard history.
+    #[serde(default = "yes")]
+    pub clipboard: bool,
+    /// The panel's pages and the settings tabs, by name.
+    #[serde(default = "yes")]
+    pub settings: bool,
+    /// Desktop actions and menus that apps publish.
+    #[serde(default = "yes")]
+    pub menus: bool,
+    /// A web search for what was typed.
+    #[serde(default = "yes")]
+    pub web_search: bool,
+    /// Files, by name, as elephant indexes them.
+    #[serde(default)]
+    pub files: bool,
+    /// Browser bookmarks.
+    #[serde(default)]
+    pub bookmarks: bool,
+    /// Emoji and symbols by name.
+    #[serde(default)]
+    pub symbols: bool,
+    /// Rank by what you launch, and show it first with the query empty.
+    #[serde(default = "yes")]
+    pub frecency: bool,
+}
+
+impl Default for Launcher {
+    fn default() -> Self {
+        Launcher {
+            apps: true,
+            windows: true,
+            calculator: true,
+            commands: true,
+            clipboard: true,
+            settings: true,
+            menus: true,
+            web_search: true,
+            files: false,
+            bookmarks: false,
+            symbols: false,
+            frecency: true,
+        }
+    }
+}
+
 // ── The file ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -727,11 +792,13 @@ pub struct Settings {
     pub capture: Option<Capture>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub elevate: Option<Elevate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launcher: Option<Launcher>,
 }
 
 impl Settings {
     /// The section names, in the order the file and the pane list them.
-    pub const SECTIONS: [&'static str; 8] = [
+    pub const SECTIONS: [&'static str; 9] = [
         "wallpaper",
         "look",
         "idle",
@@ -740,12 +807,13 @@ impl Settings {
         "alerts",
         "capture",
         "elevate",
+        "launcher",
     ];
 
     /// The sections with a system layer, which is every one but the
     /// wallpaper: its system default is the sway config's `bg` line.
-    pub const NIX_SECTIONS: [&'static str; 7] = [
-        "look", "idle", "bar", "keys", "alerts", "capture", "elevate",
+    pub const NIX_SECTIONS: [&'static str; 8] = [
+        "look", "idle", "bar", "keys", "alerts", "capture", "elevate", "launcher",
     ];
 
     /// The section in force: the user's, else the system's, else the
@@ -774,6 +842,9 @@ impl Settings {
     pub fn elevate(&self) -> Elevate {
         self.elevate.or(system().elevate).unwrap_or_default()
     }
+    pub fn launcher(&self) -> Launcher {
+        self.launcher.or(system().launcher).unwrap_or_default()
+    }
 
     /// True when nothing is overridden, which is when the file should not
     /// exist.
@@ -792,6 +863,7 @@ impl Settings {
             alerts: Some(self.alerts()),
             capture: Some(self.capture()),
             elevate: Some(self.elevate()),
+            launcher: Some(self.launcher()),
         }
     }
 
@@ -816,6 +888,7 @@ impl Settings {
             alerts: Some(Alerts::default()),
             capture: Some(Capture::default()),
             elevate: Some(Elevate::default()),
+            launcher: Some(Launcher::default()),
         }
     }
 
@@ -962,6 +1035,7 @@ section!(Keys, keys, keys);
 section!(Alerts, alerts, alerts);
 section!(Capture, capture, capture);
 section!(Elevate, elevate, elevate);
+section!(Launcher, launcher, launcher);
 
 /// Every `section` or `section.field` in `value` that the structs do not
 /// have.
@@ -989,6 +1063,23 @@ pub(crate) fn unknown_keys(value: &Value) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_launcher_section_round_trips_and_an_old_file_loads() {
+        let mut s = Settings::default();
+        s.set("launcher.files", Value::Bool(true)).unwrap();
+        s.set("launcher.frecency", Value::Bool(false)).unwrap();
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back, s);
+        let l = back.launcher();
+        assert!(l.files && !l.frecency && l.apps && l.calculator);
+        // A section written before a switch existed takes that switch's
+        // default rather than failing to load.
+        let old: Settings = serde_json::from_str(r#"{"launcher":{"apps":false}}"#).unwrap();
+        let l = old.launcher();
+        assert!(!l.apps && l.windows && !l.files && l.frecency);
+        assert!(s.set("launcher.nope", Value::Bool(true)).is_err());
+    }
 
     #[test]
     fn an_empty_file_is_the_defaults() {

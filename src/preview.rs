@@ -354,7 +354,7 @@ pub fn run(component: &str) {
             // /etc/swaypplet/glass.json existing on the build host; without
             // one it draws the "no glass configuration" note, which is the
             // other state worth a screenshot.
-            // `settings` or `settings.<tab>` (look, idle, bar, alerts, glass).
+            // `settings` or `settings.<tab>` (look, idle, bar, alerts, launcher, glass).
             c if c == "settings" || c.starts_with("settings.") => {
                 let s = Box::leak(Box::new(crate::settings::SettingsSection::new()));
                 if let Some(tab) = c.strip_prefix("settings.") {
