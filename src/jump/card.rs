@@ -1,5 +1,4 @@
-//! The card's widgets: one tile per place, each a live picture of the
-//! workspace over a one-line caption.
+//! Live pictures of workspaces, for the bar's peek and for pins.
 //!
 //! A picture is composed, not captured whole. Every window on the workspace
 //! gets a [`LivePicture`] at the spot `scene.rs` computed, scaled into the
@@ -11,9 +10,6 @@
 //! plain panel. That is also what stays when a capture never arrives, so a
 //! slow client degrades the tile and does not blank it.
 //!
-//! Both the session and the preview harness (`swaypplet --preview jump`) build
-//! the card here, which is what lets a screenshot of the harness stand for
-//! the real thing.
 
 use std::collections::HashMap;
 
@@ -21,11 +17,10 @@ use gtk4::prelude::*;
 use gtk4::{gdk, glib};
 
 use super::live::Frame;
-use super::rows::{self, Row};
 use super::scene::{self, Scene};
 
-/// Every picture a window's frames land on, by window identifier. The card,
-/// the bar's peek and a pinned mirror each keep one, fed by their own
+/// Every picture a window's frames land on, by window identifier. The
+/// bar's peek and a pinned mirror each keep one, fed by their own
 /// `live::Stream`.
 #[derive(Default)]
 pub struct Live {
@@ -105,136 +100,6 @@ impl Live {
     }
 }
 
-pub struct Card {
-    /// The glass card. The caller puts it in its window.
-    pub root: gtk4::Box,
-    ring: super::carousel::Carousel,
-    tiles: Vec<gtk4::Box>,
-    /// Each tile's picture, where in it the scene is drawn (x, y, w, h in
-    /// the picture's coordinates) and the layout area that scene is: what a
-    /// workspace switch hands off to sway to grow out of (`handoff`).
-    pictures: Vec<(gtk4::Widget, Option<(crate::handoff::Rect, crate::handoff::Rect)>)>,
-    /// The pin mark in each tile's caption, shown for a pinned place.
-    marks: Vec<gtk4::Label>,
-    pub live: Live,
-}
-
-impl Card {
-    /// Build the card for `built` rows. `scenes[i]` is row `i`'s workspace,
-    /// `None` when it vanished between the tree read and now.
-    pub fn new(built: &[Row], scenes: &[Option<Scene>]) -> Card {
-        // No card: the places float over the desktop on a transparent strip
-        // as wide as the output.
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .hexpand(true)
-            .valign(gtk4::Align::Center)
-            .build();
-        root.add_css_class("jump-card");
-
-        let ring = super::carousel::Carousel::new();
-        ring.add_css_class("jump-ring");
-        root.append(&ring);
-
-        // What else the keyboard does here: the release that goes is the one
-        // thing everybody finds, and these are not.
-        let hint = gtk4::Label::new(Some("p  pin      esc  stay"));
-        hint.add_css_class("jump-hint");
-        hint.set_size_request(-1, rows::HINT_H);
-        root.append(&hint);
-
-        let mut tiles = Vec::new();
-        let mut marks = Vec::new();
-        let mut pictures = Vec::new();
-        let mut live = Live::default();
-        for (i, row) in built.iter().enumerate() {
-            let scene = scenes.get(i).and_then(Option::as_ref);
-            let (tile, mark, picture) = tile(row, scene, &mut live);
-            let drawn = scene.filter(|s| !s.windows.is_empty()).map(|s| {
-                let (k, dx, dy) =
-                    super::scene::fit(s.width, s.height, rows::PREVIEW_W, rows::PREVIEW_H);
-                (
-                    (dx, dy, f64::from(s.width) * k, f64::from(s.height) * k),
-                    (
-                        f64::from(s.x),
-                        f64::from(s.y),
-                        f64::from(s.width),
-                        f64::from(s.height),
-                    ),
-                )
-            });
-            pictures.push((picture, drawn));
-            marks.push(mark);
-            ring.append(&tile);
-            tiles.push(tile);
-        }
-
-        // The height from the row count, never from the children, and the
-        // width from the output. See rows.rs: this is the contract, and the
-        // tests assert the same call.
-        root.set_size_request(-1, rows::strip_height(built.len()));
-
-        Card {
-            root,
-            ring,
-            tiles,
-            pictures,
-            marks,
-            live,
-        }
-    }
-
-    /// Where place `index`'s picture is on screen and what layout area it
-    /// shows, for a switch there to grow out of it. `None` for an empty place
-    /// or one the screen cannot place.
-    pub fn handoff(&self, index: usize) -> Option<(crate::handoff::Rect, crate::handoff::Rect)> {
-        let (picture, drawn) = self.pictures.get(index)?;
-        let (inner, source) = (*drawn)?;
-        let tile = self.tiles.get(index)?;
-        let window = self.ring.root()?.downcast::<gtk4::Window>().ok()?;
-        // Picture -> tile by allocation, tile -> ring by the ring's own
-        // placement transform, ring -> window by allocation again.
-        let corner = |x: f64, y: f64| -> Option<(f64, f64)> {
-            let p = picture.compute_point(tile, &gtk4::graphene::Point::new(x as f32, y as f32))?;
-            let (rx, ry) = self.ring.place_point(index, p.x(), p.y())?;
-            let q = self
-                .ring
-                .compute_point(&window, &gtk4::graphene::Point::new(rx, ry))?;
-            Some((f64::from(q.x()), f64::from(q.y())))
-        };
-        let (x0, y0) = corner(inner.0, inner.1)?;
-        let (x1, y1) = corner(inner.0 + inner.2, inner.1 + inner.3)?;
-        let picture = crate::handoff::window_to_layout(&window, (x0, y0, x1 - x0, y1 - y0))?;
-        Some((picture, source))
-    }
-
-    pub fn window_ids(&self) -> Vec<String> {
-        self.live.window_ids()
-    }
-
-    pub fn select(&self, index: usize) {
-        for (i, tile) in self.tiles.iter().enumerate() {
-            if i == index {
-                tile.add_css_class("selected");
-            } else {
-                tile.remove_css_class("selected");
-            }
-        }
-        self.ring.turn_to(index);
-    }
-
-    pub fn frame(&self, frame: Frame) {
-        self.live.frame(frame);
-    }
-
-    /// Mark place `index` pinned or not.
-    pub fn set_pinned(&self, index: usize, pinned: bool) {
-        if let Some(mark) = self.marks.get(index) {
-            mark.set_visible(pinned);
-        }
-    }
-}
-
 /// Premultiplied BGRA, tightly packed, as `live::Frame` carries it.
 pub fn texture(width: u32, height: u32, pixels: Vec<u8>) -> gdk::Texture {
     let bytes = glib::Bytes::from_owned(pixels);
@@ -246,24 +111,6 @@ pub fn texture(width: u32, height: u32, pixels: Vec<u8>) -> gdk::Texture {
         (width * 4) as usize,
     )
     .upcast()
-}
-
-/// One tile: the picture over its caption.
-fn tile(
-    row: &Row,
-    scene: Option<&Scene>,
-    live: &mut Live,
-) -> (gtk4::Box, gtk4::Label, gtk4::Widget) {
-    let tile = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .build();
-    tile.add_css_class("jump-tile");
-    tile.set_size_request(rows::TILE_W, rows::TILE_H);
-    let picture = preview(scene, rows::PREVIEW_W, rows::PREVIEW_H, live);
-    tile.append(&picture);
-    let (caption, mark) = caption(row);
-    tile.append(&caption);
-    (tile, mark, picture)
 }
 
 /// A live picture of a workspace in a box of `w` by `h`: every window at
@@ -345,64 +192,6 @@ fn window_slot(app: &str, w: i32, h: i32) -> (gtk4::Overlay, LivePicture) {
     slot.set_child(Some(&panel));
     slot.add_overlay(&pic);
     (slot, pic)
-}
-
-fn caption(row: &Row) -> (gtk4::Box, gtk4::Label) {
-    let b = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(0)
-        .build();
-    b.add_css_class("jump-caption");
-    b.set_size_request(-1, rows::CAPTION_H);
-
-    // No badge when nothing reaches the place directly: an empty badge reads
-    // as a key that exists and is blank.
-    if let Some(key) = row.chord.as_deref() {
-        let chord = gtk4::Label::builder()
-            .label(key)
-            .xalign(0.5)
-            .width_chars(2)
-            .valign(gtk4::Align::Center)
-            .build();
-        chord.add_css_class("jump-chord");
-        b.append(&chord);
-    }
-
-    let label = gtk4::Label::builder()
-        .label(rows::caption_label(row))
-        .xalign(0.0)
-        .valign(gtk4::Align::Center)
-        .build();
-    label.add_css_class("jump-label");
-    b.append(&label);
-
-    let detail = gtk4::Label::builder()
-        .label(&row.detail)
-        .xalign(0.0)
-        .hexpand(true)
-        .valign(gtk4::Align::Center)
-        // Ellipsized, never wrapped: a wrapped name would make one tile
-        // taller than the rest and the card a different height every time.
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .build();
-    detail.add_css_class("jump-detail");
-    b.append(&detail);
-
-    // Shown for a pinned place (`Card::set_pinned`).
-    let mark = gtk4::Label::new(Some("\u{f0403}"));
-    mark.add_css_class("jump-pin-mark");
-    mark.set_visible(false);
-    b.append(&mark);
-
-    if row.other_output {
-        let marker = gtk4::Label::builder()
-            .label("\u{f0379}")
-            .valign(gtk4::Align::Center)
-            .build();
-        marker.add_css_class("jump-output");
-        b.append(&marker);
-    }
-    (b, mark)
 }
 
 fn icon_name(app: &str) -> String {

@@ -4042,33 +4042,34 @@ scale.night-scale highlight {
 }
 
 /* ── Jump (src/jump/) ──
-   Super+Tab: back through the workspaces you came from, one tile each, with a
-   live picture of the workspace over its caption, floating over the desktop
-   with no card behind (carousel.rs). Every size is set in rows.rs from the
-   tile count alone (see there for why); nothing here may set a width or a
-   height, only what is drawn inside them. ── */
-.jump-card {
+   Super+Tab: sway draws the workspaces themselves in a row (row.rs). This
+   surface is transparent over the output and draws only the ring round the
+   middle workspace and the caption under it. ── */
+.jump-surface {
     background: none;
-    padding: 0;
 }
 
-.jump-tile {
-    border-radius: 14px;
-    /* rows.rs: TILE_PAD around the picture, and under the caption. */
-    padding: 8px;
-    transition: background-color 120ms ease-out, box-shadow 120ms ease-out;
+/* Outside the workspace, so it frames the windows and covers none. Fades in
+   as the row opens: the workspaces take the animation's time to get there. */
+.jump-ring {
+    border-radius: 16px;
+    box-shadow: 0 0 0 2px alpha(@accent, 0.9), 0 0 24px alpha(@accent, 0.25);
+    animation: jump-ring-in 220ms ease-out;
 }
 
-/* The ring is an inset shadow, not a border: a border takes space, and the
-   tile's size is rows.rs's to set. */
-.jump-tile.selected {
-    background-color: @accent_tint;
-    box-shadow: inset 0 0 0 2px @accent;
+.jump-ring.pinned {
+    box-shadow: 0 0 0 2px alpha(@accent, 0.9), 0 0 0 5px alpha(@accent, 0.25),
+        0 0 24px alpha(@accent, 0.25);
 }
 
-/* The workspace picture: its windows straight on the card's glass. No
-   ground and no frame, so the workspace is the group its windows make and
-   nothing else; the gaps between them are the glass. */
+@keyframes jump-ring-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* The workspace picture (the bar's peek and pins): its windows straight on
+   the glass. No ground and no frame, so the workspace is the group its
+   windows make and nothing else; the gaps between them are the glass. */
 .jump-preview {
     background: none;
     box-shadow: none;
@@ -4237,14 +4238,6 @@ button.bar-pins-tuck {
     color: @fg_dim;
 }
 
-/* The key hints under the switcher's strip, on the desktop like the
-   captions, so they carry the same shadow. */
-.jump-hint {
-    font-size: 12px;
-    color: alpha(@fg, 0.75);
-    text-shadow: 0 1px 3px alpha(black, 0.85), 0 0 8px alpha(black, 0.6);
-}
-
 .jump-empty {
     font-size: 12px;
     color: @text_faint;
@@ -4283,10 +4276,4 @@ button.bar-pins-tuck {
 .jump-detail {
     font-size: 12px;
     color: @fg_dim;
-}
-
-.jump-output {
-    font-size: 12px;
-    color: @text_faint;
-    margin-left: 4px;
 }

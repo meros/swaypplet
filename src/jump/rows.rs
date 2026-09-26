@@ -1,16 +1,6 @@
-//! One row per place, and the geometry of the card that holds them.
-//!
-//! A "row" is one place on the card. The card draws each as a tile with a live
-//! picture of the workspace over its caption, four tiles to a line.
-//!
-//! Every dimension here is a constant or a function of the row *count*. None
-//! of them is a function of window geometry, window count, title length or a
-//! texture's aspect ratio. That is deliberate and it is the whole fix for the
-//! complaint that killed the old switcher: its grid sized itself from how many
-//! windows existed and how big their thumbnails came back, so the card was a
-//! different shape every time it opened and no two openings could be compared.
-//! A card whose size is `f(rows)` cannot do that, and `card_size` is the
-//! assertion that says so.
+//! One row per place: the workspaces the switcher can go to, each with its
+//! caption (the chord that reaches it, the bar's label, what is on it) and
+//! the command that switches to it.
 
 use crate::bar::workspaces::generic_label;
 use crate::keybinds::Binding;
@@ -19,23 +9,11 @@ use super::place::Place;
 
 // ── Geometry ────────────────────────────────────────────────────────────
 
-/// The workspace picture, 16:10 like the panel. Fixed: a workspace on a
-/// portrait or ultrawide output is letterboxed inside it (`scene::fit`), and
-/// the tile does not change shape for it.
+/// A workspace picture, 16:10 like the panel: the bar's peek draws one this
+/// size. A workspace on a portrait or ultrawide output is letterboxed inside
+/// it (`scene::fit`).
 pub const PREVIEW_W: i32 = 540;
 pub const PREVIEW_H: i32 = 338;
-/// Around the picture, inside the tile's selection ring.
-pub const TILE_PAD: i32 = 8;
-/// The chord, the label and the apps under the picture. One line, ellipsized.
-pub const CAPTION_H: i32 = 40;
-pub const TILE_W: i32 = PREVIEW_W + 2 * TILE_PAD;
-pub const TILE_H: i32 = TILE_PAD + PREVIEW_H + CAPTION_H + TILE_PAD;
-/// The strip the places float in: as wide as the output, and as tall as the
-/// front place plus the room perspective takes above and below it. The side
-/// places are shorter than the front one, so nothing reaches past this.
-pub const STAGE_H: i32 = TILE_H + 32;
-/// The line of key hints under the stage.
-pub const HINT_H: i32 = 24;
 
 /// The list stops here. Nothing is lost by it: every workspace on this machine
 /// is one direct chord away, and the chord column on each row says which. A
@@ -43,19 +21,11 @@ pub const HINT_H: i32 = 24;
 /// not what "back to what I was doing" means.
 pub const MAX_ROWS: usize = 8;
 
-/// The strip's height, from the row count and nothing else: nothing for no
-/// rows, and the one stage for any number. Its width is the output's; the
-/// number of places a side follows from it (`carousel::per_side`), and the
-/// row slides to show the rest. Nothing on it grows to hold more.
-pub fn strip_height(rows: usize) -> i32 {
-    if rows == 0 { 0 } else { STAGE_H + HINT_H }
-}
-
 /// How many rows a ring of `places` produces.
 ///
 /// `places[0]` is where you are and is never drawn, so a ring of one produces
 /// no rows at all - which is what makes `Super+Tab` a silent no-op on a fresh
-/// session rather than a card with nothing in it. `rows` applies the same
+/// session rather than a switcher with nothing in it. `rows` applies the same
 /// rule; this is its statement for the tests.
 #[cfg(test)]
 pub fn row_count(places: usize) -> usize {
@@ -74,7 +44,7 @@ pub struct Row {
     /// What is on it: distinct app names, or "empty".
     pub detail: String,
     pub windows: usize,
-    /// On a screen other than the one the card is drawn on.
+    /// On a screen other than the one the switcher is drawn on.
     pub other_output: bool,
     /// What commit runs.
     pub command: String,
@@ -244,55 +214,12 @@ mod tests {
         Vec::new()
     }
 
-    // ── the geometry class the old switcher got wrong ───────────────────
-
-    #[test]
-    fn the_card_is_a_function_of_row_count_and_nothing_else() {
-        assert_eq!(strip_height(0), 0);
-        for n in 1..=MAX_ROWS {
-            assert_eq!(strip_height(n), TILE_H + 32 + HINT_H);
-        }
-    }
-
-    #[test]
-    fn window_count_cannot_change_the_card() {
-        let many = |_: &str| vec!["a".to_string(); 40];
-        let a = rows(&ring(), &binds(), &no_apps, "eDP-1");
-        let b = rows(&ring(), &binds(), &many, "eDP-1");
-        assert_eq!(strip_height(a.len()), strip_height(b.len()));
-    }
-
-    #[test]
-    fn a_long_name_cannot_change_the_card() {
-        let long = |_: &str| vec!["x".repeat(400)];
-        let a = rows(&ring(), &binds(), &no_apps, "eDP-1");
-        let b = rows(&ring(), &binds(), &long, "eDP-1");
-        assert_eq!(a.len(), b.len());
-        assert_eq!(strip_height(a.len()), strip_height(b.len()));
-    }
-
     #[test]
     fn the_list_is_capped_and_the_head_is_never_a_row() {
         assert_eq!(row_count(1), 0, "one place is a silent no-op");
         assert_eq!(row_count(2), 1);
         assert_eq!(row_count(9), 8);
         assert_eq!(row_count(40), MAX_ROWS);
-        assert_eq!(strip_height(row_count(40)), strip_height(MAX_ROWS));
-    }
-
-    #[test]
-    fn the_card_fits_every_output_it_can_be_drawn_on() {
-        // The smallest real target is the laptop panel, 2560x1600 at scale
-        // 2, so 1280x800 logical; the strip must still leave room for the bar,
-        // and the front place must fit its width.
-        let h = strip_height(MAX_ROWS);
-        for (ow, oh) in [(1280, 800), (1440, 900), (1920, 1200), (2560, 1440)] {
-            assert!(TILE_W <= ow, "the front place does not fit {ow}");
-            assert!(
-                h + 40 <= oh,
-                "strip {h} tall does not clear the bar on {oh}"
-            );
-        }
     }
 
     // ── captions ────────────────────────────────────────────────────────

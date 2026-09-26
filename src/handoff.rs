@@ -1,5 +1,5 @@
 //! Tell sway where a picture of what is about to appear is on screen, so
-//! the window or workspace grows out of it (the swayfx `handoff` command,
+//! the window grows out of it (the swayfx `handoff` command,
 //! nixos patches/swayfx-handoff.patch).
 //!
 //! The command takes layout coordinates, and a widget only knows where it
@@ -73,12 +73,6 @@ fn usable_area(connector: &str) -> Option<Rect> {
     ))
 }
 
-/// A box in `window`'s coordinates, in layout coordinates.
-pub fn window_to_layout(window: &gtk4::Window, r: Rect) -> Option<Rect> {
-    let (ox, oy) = surface_origin(window)?;
-    (r.2 >= 1.0 && r.3 >= 1.0).then_some((ox + r.0, oy + r.1, r.2, r.3))
-}
-
 /// `widget`'s box in layout coordinates, `inner` (x, y, w, h in the widget's
 /// own coordinates) when given, the whole widget otherwise.
 pub fn widget_rect(widget: &impl IsA<gtk4::Widget>, inner: Option<Rect>) -> Option<Rect> {
@@ -114,22 +108,4 @@ pub fn open_from(widget: &impl IsA<gtk4::Widget>) {
     if let Some(r) = widget_rect(widget, None) {
         crate::sway_ipc::run_command(&format!("handoff open {}", fmt(r)));
     }
-}
-
-/// Run `then` (a workspace switch) as a hand-off out of a picture:
-/// `picture` on screen shows the layout area `source`. The hand-off goes
-/// first on the same connection, so sway has it before it switches.
-/// `before` runs first, on the same connection.
-pub fn run_workspace_switch(
-    before: Vec<String>,
-    picture: Option<Rect>,
-    source: Option<Rect>,
-    then: &str,
-) {
-    let mut cmds = before;
-    if let (Some(p), Some(s)) = (picture, source) {
-        cmds.push(format!("handoff workspace {} {}", fmt(p), fmt(s)));
-    }
-    cmds.push(then.to_string());
-    crate::sway_ipc::run_commands(cmds);
 }
