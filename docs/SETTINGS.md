@@ -13,6 +13,10 @@ gear in the flight deck; a bare `:` lists every prefix). Six tabs,
 | Launcher | which kinds of result a search lists; ranking by use, and forgetting it | `launcher` |
 | Glass | the liquid-glass material | `~/.config/swaypplet/glass.json` |
 
+One section has no tab: `displays`, the display profiles, lives in the
+panel's Displays section (save the current layout, apply, raise, delete),
+because a layout is made by arranging the screens, not by filling a form.
+
 `data/settings-defaults.json` is every section at the binary's defaults,
 generated from the structs by a test (`cargo test -- --ignored
 write_settings_defaults`); `the_shipped_defaults_file_matches_the_structs`
@@ -90,6 +94,25 @@ and Bar tabs is `nix <section>` into the clipboard.
   never pays for a 100 ms JPEG decode. The watching process also puts the
   tokens on sway's `client.*` window borders (`src/theme/sway.rs`), so they
   follow the mode and the tint.
+- **Display profiles** (`displays`: `profiles`, a list; each has a `name`
+  and `outputs`, each output a `match` of `name`, `make`, `model`,
+  `serial` as globs, and optionally `enabled`, `mode` `[w, h, mHz]`,
+  `position` `[x, y]`, `scale`, `transform` in sway's spelling, and
+  `adaptive_sync`) are read in this process by `services::displays`, which
+  replaces kanshi over `zwlr_output_manager_v1`. A profile matches when its
+  outputs claim every connected output, each a different one; the most
+  specific match wins (an exact serial over make and model over a
+  connector), the earlier of equals; the profile on screen stays while it
+  still matches. It matches again only when the set of connected outputs
+  changes, when the profiles change, and after `swaymsg reload`. Every
+  configuration is tested before it is applied; one the compositor refuses
+  leaves the outputs as they were and posts a notification. An output no
+  profile names and the compositor left at scale 1 gets a scale from its
+  density (about 110 px per logical inch, in quarter steps). The section is
+  replaced whole by the user's copy, so the first "Save current layout"
+  copies the Nix profiles into the user file, and later Nix edits do not
+  reach that account until Reset. From the command line,
+  `swaypplet settings set displays.profiles '<json list>'`.
 - **Night light** (`night_light`: `enabled`, `schedule` sun | always,
   `night_k` 1700–6500) is read in this process by `services::gamma`, which
   holds the compositor's gamma tables over `zwlr_gamma_control_v1` in place

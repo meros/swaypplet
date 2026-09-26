@@ -20,6 +20,7 @@ Sizes: S is a day or less, M a few days, L a week or more.
 |---|---|---|
 | Colour and material transitions: a mode, tint or wallpaper change fades over `page` (500 ms) instead of cutting | `theme-anim` | [design-system.md §2](design-system.md), [MOTION.md](MOTION.md) |
 | No 1-second polling: the theme follows its files through file monitors | main | |
+| Display profiles in the process, replacing kanshi (`services::displays`); the nixos side still has to move the profiles to `theme/settings.nix` and drop `kanshi.nix` | `displays` | [SETTINGS.md](SETTINGS.md), [research/display-profiles.md](research/display-profiles.md) |
 
 ## Next
 
@@ -90,7 +91,7 @@ out the `tailscale0` interface today.
 | Topic | Status | Detail |
 |---|---|---|
 | Glass that responds to what is behind it | Researched, not scheduled. Photochromic already covers brightness. The one experiment worth running: a busyness term in the shader (4 extra frost taps, under 0.1 ms a frame) that adds frost and body over a busy backdrop and is zero over a flat one, so every contrast test holds. Stop if it shows no visible legibility win. No per-surface readback, no light/dark flip per surface | [research/adaptive-glass.md](research/adaptive-glass.md) |
-| Display profiles in the process (kanshi's replacement) | Researched, design written, not started | [research/display-profiles.md](research/display-profiles.md) |
+| Display profiles in the process (kanshi's replacement) | Built on `displays` (see In progress) | [research/display-profiles.md](research/display-profiles.md) |
 | Liquid glass optics | Reference for the shader's parameters | [research/liquid-glass.md](research/liquid-glass.md) |
 
 ## Rejected

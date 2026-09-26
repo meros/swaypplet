@@ -378,6 +378,9 @@ pub fn run(component: &str) {
                 std::mem::forget(s);
             }
             "display" => {
+                // The profiles come from the service, as in the panel; here
+                // it drives the nested compositor the preview runs in.
+                crate::services::displays::start(store.clone());
                 let s = Box::leak(Box::new(DisplaySection::new()));
                 s.expand_for_page();
                 host.append(s.widget());

@@ -22,6 +22,10 @@ pub const START: &str = "\u{f313}";
 
 // Display / monitor
 pub const DISPLAY: &str = "󰍹";
+/// A display profile: a saved layout of screens.
+pub const DISPLAY_PROFILE: &str = "󰍺";
+/// Move up one place in an ordered list.
+pub const RAISE: &str = "󰁝";
 
 // Media controls
 pub const MEDIA_PREV: &str = "󰒮";
