@@ -2,6 +2,7 @@ mod alpha;
 mod anim;
 mod app;
 mod frame_stats;
+mod watch;
 mod auth_field;
 mod bar;
 #[cfg(test)]

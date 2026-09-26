@@ -286,28 +286,83 @@ pub fn observe(cb: impl Fn() + 'static) {
 /// what "send the material" means (`settings::glass`, which sits above the
 /// theme), so the theme does not reach up into the settings to do it.
 ///
-/// One second, the same tick and for the same reason as `settings::watch`:
-/// the wallpaper's hue is a file one process writes and the others read,
-/// and there is no bus between them. A wallpaper change is not a hot path.
+/// Nothing polls. The inputs move on four events, and each one calls
+/// [`changed`]: the settings (the live copy, which `settings::store::watch`
+/// follows by inotify), the wallpaper's palette (the sampler, in this same
+/// process), the lock state (logind's LockedHint, which a sun switch waits
+/// for), and the sun, checked once a minute and only while the mode is
+/// automatic: the switch band is ±3° of elevation, which the sun takes
+/// about half an hour to cross.
 pub fn watch(on_material: impl Fn(crate::tokens::Inputs) + 'static) {
     locked::follow();
     // The borders are the compositor's and outlive this process, so they are
     // put up at start as well as on every change: a fresh session has the
     // sway config's on them.
     sway::apply_borders(LOADED.with(|l| *l.borrow()).unwrap_or_else(inputs));
-    glib::timeout_add_local(std::time::Duration::from_secs(1), move || {
-        let before = LOADED.with(|l| *l.borrow());
-        if reload() {
-            let now = LOADED.with(|l| *l.borrow()).unwrap_or_default();
-            // The glass follows the mode and, under a full tint, the
-            // neutral (§4).
-            if before.map(crate::tokens::material) != Some(crate::tokens::material(now)) {
-                on_material(now);
+    ON_MATERIAL.with(|m| *m.borrow_mut() = Some(Box::new(on_material)));
+    locked::on_change(changed);
+    crate::settings::store::observe(changed);
+    follow_the_sun(changed);
+}
+
+thread_local! {
+    /// What [`watch`] was given to send the glass material with.
+    static ON_MATERIAL: RefCell<Option<Box<dyn Fn(crate::tokens::Inputs)>>> = const { RefCell::new(None) };
+}
+
+/// Resolve the inputs again and, when they moved, reload the stylesheet and
+/// bring what the compositor draws from them along: the glass material
+/// (§4, only when the material itself moved) and sway's window borders.
+/// Every trigger ends here, so none of them can update the stylesheet and
+/// forget the glass.
+pub fn changed() {
+    let before = LOADED.with(|l| *l.borrow());
+    if !reload() {
+        return;
+    }
+    let now = LOADED.with(|l| *l.borrow()).unwrap_or_default();
+    if before.map(crate::tokens::material) != Some(crate::tokens::material(now)) {
+        ON_MATERIAL.with(|m| {
+            if let Some(send) = m.borrow().as_ref() {
+                send(now);
             }
-            sway::apply_borders(now);
+        });
+    }
+    if ON_MATERIAL.with(|m| m.borrow().is_some()) {
+        sway::apply_borders(now);
+    }
+}
+
+/// Call `check` once a minute while the Look mode is automatic, and not at
+/// all otherwise. The timer is re-armed from the settings, so choosing Dark
+/// or Light stops it.
+fn follow_the_sun(check: fn()) {
+    use crate::settings::store::ThemeMode;
+    let auto = || crate::settings::store::with(|s| s.look().mode) == ThemeMode::Auto;
+    let timer: std::rc::Rc<RefCell<Option<glib::SourceId>>> = std::rc::Rc::default();
+    let arm = {
+        let timer = timer.clone();
+        move || {
+            let on = auto();
+            let mut t = timer.borrow_mut();
+            match (on, t.is_some()) {
+                (true, false) => {
+                    *t = Some(glib::timeout_add_seconds_local(60, move || {
+                        check();
+                        glib::ControlFlow::Continue
+                    }));
+                }
+                (false, true) => {
+                    if let Some(id) = t.take() {
+                        id.remove();
+                    }
+                }
+                _ => {}
+            }
         }
-        glib::ControlFlow::Continue
-    });
+    };
+    arm();
+    crate::settings::store::observe(arm);
 }
 
 /// [`watch`] for the lock screen, from the moment it locks: the stylesheet
@@ -319,12 +374,24 @@ pub fn watch(on_material: impl Fn(crate::tokens::Inputs) + 'static) {
 /// lock (§2.1), which is exactly when the panel moves the glass to the new
 /// mode; a lock screen that kept its old stylesheet then drew dark mode's
 /// white text on light glass. So it reloads here, before the surfaces are
-/// built, and follows every second while it is up. Each tick compares the
-/// inputs and reparses only when they moved.
+/// built, and follows while it is up: the settings file and the
+/// wallpaper's cache line by inotify, and the sun once a minute. Each call
+/// compares the inputs and reparses only when they moved.
 pub fn follow_while_locked() {
     locked::assume_locked();
     reload();
-    glib::timeout_add_local(std::time::Duration::from_secs(1), || {
+    let monitors = crate::watch::files(
+        &[Some(crate::settings::store::path()), wallpaper::cache_file()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
+        || {
+            crate::settings::store::init();
+            reload();
+        },
+    );
+    std::mem::forget(monitors);
+    glib::timeout_add_seconds_local(60, || {
         reload();
         glib::ControlFlow::Continue
     });

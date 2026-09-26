@@ -33,7 +33,6 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use std::time::SystemTime;
 
 use serde_json::Value;
 
@@ -159,43 +158,6 @@ pub fn path() -> PathBuf {
     dir.join("swaypplet").join("settings.json")
 }
 
-/// The file's mtime, or `None` when there is no file. An appearance or a
-/// removal is a change too.
-pub fn mtime() -> Option<SystemTime> {
-    std::fs::metadata(path()).ok()?.modified().ok()
-}
-
-/// The user file followed by mtime, one `stat` per `changed`. Both readers
-/// of the file poll it this way: the idle loop on its own tick
-/// (`idle/mod.rs`), the panel through [`watch`].
-pub struct Watch {
-    last: Option<SystemTime>,
-}
-
-impl Watch {
-    /// Start from the file as it is now, so the first `changed` is a real
-    /// change and not the initial read.
-    pub fn new() -> Watch {
-        Watch { last: mtime() }
-    }
-
-    /// Whether the file moved since the last call.
-    pub fn changed(&mut self) -> bool {
-        let now = mtime();
-        if now == self.last {
-            return false;
-        }
-        self.last = now;
-        true
-    }
-}
-
-impl Default for Watch {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 // ── The panel's live copy ───────────────────────────────────────────────
 //
 // Main thread only, like every widget that reads it. The idle manager never
@@ -213,17 +175,15 @@ pub fn init() {
 }
 
 /// Follow the file for the life of the process: a write by `swaypplet
-/// settings` (or by hand) lands in the live copy within a second. The
-/// panel's own saves move the mtime too, and reload to what is already
-/// live, which `set_if_changed` drops.
+/// settings` (or by hand) lands in the live copy as soon as it is renamed
+/// into place (`crate::watch`, inotify; nothing polls). The panel's own
+/// saves reload to what is already live, which `set_if_changed` drops.
 pub fn watch() {
-    let mut watch = Watch::new();
-    glib::timeout_add_local(std::time::Duration::from_secs(1), move || {
-        if watch.changed() {
-            LIVE.with(|live| live.set_if_changed(Settings::load()));
-        }
-        glib::ControlFlow::Continue
+    let monitors = crate::watch::files(&[path()], || {
+        LIVE.with(|live| live.set_if_changed(Settings::load()));
     });
+    // For the life of the process.
+    std::mem::forget(monitors);
 }
 
 /// A snapshot of the live copy. For one field on a hot path, [`with`]

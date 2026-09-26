@@ -8,6 +8,14 @@ use std::cell::Cell;
 
 thread_local! {
     static LOCKED: Cell<bool> = const { Cell::new(false) };
+    /// Called on the main thread when LockedHint moves.
+    static ON_CHANGE: std::cell::RefCell<Vec<Box<dyn Fn()>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Run `cb` whenever the lock state changes: a sun switch waits for the
+/// lock, so the lock is one of the theme's triggers.
+pub(super) fn on_change(cb: impl Fn() + 'static) {
+    ON_CHANGE.with(|c| c.borrow_mut().push(Box::new(cb)));
 }
 
 pub(super) fn is_locked() -> bool {
@@ -30,7 +38,9 @@ pub(super) fn follow() {
     });
     glib::spawn_future_local(async move {
         while let Ok(locked) = rx.recv().await {
-            LOCKED.with(|l| l.set(locked));
+            if LOCKED.with(|l| l.replace(locked)) != locked {
+                ON_CHANGE.with(|c| c.borrow().iter().for_each(|cb| cb()));
+            }
         }
     });
 }

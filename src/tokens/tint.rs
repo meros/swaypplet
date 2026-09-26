@@ -55,6 +55,7 @@ pub struct Palette {
 
 impl Palette {
     /// One hue for every job: an image with a single usable colour.
+    #[cfg(test)]
     pub const fn single(hue: u16) -> Palette {
         Palette {
             primary: hue,

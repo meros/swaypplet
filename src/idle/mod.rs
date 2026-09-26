@@ -19,10 +19,11 @@
 //!          any input disarms it and re-powers
 //!  1200 s  suspend, only on battery
 //!
-//! The pane is another process, so an edit reaches here as a file: this loop
-//! stats `~/.config/swaypplet/settings.json` once a second (`SETTINGS_POLL`)
-//! and, when its mtime moves, reloads and hands the wayland thread new
-//! timeouts to re-arm with. Zero on any tier is "never".
+//! The pane is another process, so an edit reaches here as a file: an
+//! inotify watch on `~/.config/swaypplet/settings.json` (`crate::watch`)
+//! sends `Ev::SettingsChanged`, and the loop reloads and hands the wayland
+//! thread new timeouts to re-arm with. Zero on any tier is "never". The loop
+//! sleeps until the next event or its nearest deadline; nothing ticks.
 //!
 //! The night window (Idle & Lock tab, `Idle::resolve`) is a second, shorter
 //! set of dim / lock / screen-off tiers for a time range, typically the
@@ -129,6 +130,8 @@ pub enum Ev {
         rc: i32,
     },
     Fatal(String),
+    /// The settings file was written (`crate::watch`, inotify).
+    SettingsChanged,
 }
 
 /// How long to wait for the locker before releasing the sleep inhibitor
@@ -143,10 +146,14 @@ pub enum Ev {
 /// trip.
 const SLEEP_RELEASE_MAX: Duration = Duration::from_secs(4);
 
-/// How often the settings file is stat'd for a change. One `stat` a second
-/// is nothing; the latency it sets is how long an edit in the pane takes to
-/// reach the timers.
-const SETTINGS_POLL: Duration = Duration::from_secs(1);
+/// The instant the next minute of the day starts, when the night window may
+/// open or close. The settings file itself arrives as an event.
+fn next_minute() -> Instant {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64());
+    Instant::now() + Duration::from_secs_f64(60.0 - secs % 60.0 + 0.05)
+}
 
 /// When the locked, idle session's outputs should go off, counted from now.
 ///
@@ -181,8 +188,14 @@ pub fn run() -> ! {
     // below reads `cfg` and never learns that a window exists.
     let mut saved = Settings::load().idle();
     let mut cfg = saved.resolve(store::local_minute_of_day());
-    let mut settings_file = store::Watch::new();
-    let mut next_settings_check = Instant::now() + SETTINGS_POLL;
+    let mut settings_changed = false;
+    let mut next_settings_check = next_minute();
+    {
+        let tx = tx.clone();
+        crate::watch::files_on_thread(vec![store::path()], move || {
+            let _ = tx.send(Ev::SettingsChanged);
+        });
+    }
     let timeouts = wayland::start(tx.clone(), wayland::Timeouts::from(&cfg));
     let logind = logind::start(tx.clone());
 
@@ -307,16 +320,17 @@ pub fn run() -> ! {
             }
         }
 
-        // The settings file and the clock, once a second. A moved mtime is
-        // reloaded whole, and the night window is resolved on every check, so
-        // one comparison covers both causes: an edit in the pane, and the
-        // window opening or closing. A boundary is therefore up to
-        // SETTINGS_POLL late, which is the same latency an edit already had.
-        // The blank duration and the dim level are read from `cfg` at fire
-        // time, so they need no re-arm at all.
-        if Instant::now() >= next_settings_check {
-            next_settings_check = Instant::now() + SETTINGS_POLL;
-            let reloaded = settings_file.changed();
+        // The settings file (an event) and the clock (each minute boundary).
+        // An edit is reloaded whole, and the night window is resolved on
+        // every check, so one comparison covers both causes: an edit in the
+        // pane, and the window opening or closing. The blank duration and
+        // the dim level are read from `cfg` at fire time, so they need no
+        // re-arm at all.
+        if settings_changed || Instant::now() >= next_settings_check {
+            if Instant::now() >= next_settings_check {
+                next_settings_check = next_minute();
+            }
+            let reloaded = std::mem::take(&mut settings_changed);
             if reloaded {
                 saved = Settings::load().idle();
             }
@@ -354,7 +368,13 @@ pub fn run() -> ! {
             }
         }
 
-        let ev = rx.recv_timeout(Duration::from_millis(250));
+        // Asleep until the next event or the nearest deadline: no tick.
+        let deadline = [Some(next_settings_check), sleep_release, blank_at]
+            .into_iter()
+            .flatten()
+            .min()
+            .unwrap_or(next_settings_check);
+        let ev = rx.recv_timeout(deadline.saturating_duration_since(Instant::now()));
 
         // Deadlines fire on every pass, event traffic or not.
         if sleep_release.is_some_and(|d| Instant::now() >= d) {
@@ -621,6 +641,8 @@ pub fn run() -> ! {
                 log::error!("idle: fatal: {msg}");
                 std::process::exit(1);
             }
+            // Handled at the top of the next pass, with the clock.
+            Ev::SettingsChanged => settings_changed = true,
         }
     }
 }

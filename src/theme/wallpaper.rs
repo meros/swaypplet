@@ -342,6 +342,11 @@ fn cache_dir() -> Option<PathBuf> {
     Some(base.join("swaypplet"))
 }
 
+/// The cache line's path, for a process that follows it (the lock screen).
+pub fn cache_file() -> Option<PathBuf> {
+    cache_path()
+}
+
 fn cache_path() -> Option<PathBuf> {
     Some(cache_dir()?.join("wallpaper-source"))
 }
@@ -534,7 +539,7 @@ fn refresh() {
         },
         |changed| {
             if changed {
-                crate::theme::reload();
+                crate::theme::changed();
             }
         },
     );
