@@ -293,6 +293,26 @@ pub fn watch(on_material: impl Fn(crate::tokens::Inputs) + 'static) {
     });
 }
 
+/// [`watch`] for the lock screen, from the moment it locks: the stylesheet
+/// only. The panel sends the glass material and the borders; a second
+/// sender would race it.
+///
+/// The lock process is started ahead of time and parks until the lock, so
+/// its stylesheet is from whenever it started. A sun switch waits for the
+/// lock (§2.1), which is exactly when the panel moves the glass to the new
+/// mode; a lock screen that kept its old stylesheet then drew dark mode's
+/// white text on light glass. So it reloads here, before the surfaces are
+/// built, and follows every second while it is up. Each tick compares the
+/// inputs and reparses only when they moved.
+pub fn follow_while_locked() {
+    locked::assume_locked();
+    reload();
+    glib::timeout_add_local(std::time::Duration::from_secs(1), || {
+        reload();
+        glib::ControlFlow::Continue
+    });
+}
+
 #[cfg(test)]
 mod tests {
     /// The stylesheet, structurally.

@@ -14,6 +14,12 @@ pub(super) fn is_locked() -> bool {
     LOCKED.with(Cell::get)
 }
 
+/// For the lock screen's own process, which is the lock: it has no need to
+/// ask logind, and asking would leave it unlocked until the answer came.
+pub(super) fn assume_locked() {
+    LOCKED.with(|l| l.set(true));
+}
+
 /// Start following LockedHint, for as long as this process lives.
 pub(super) fn follow() {
     let (tx, rx) = async_channel::unbounded::<bool>();

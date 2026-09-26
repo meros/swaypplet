@@ -279,6 +279,10 @@ pub fn run() -> ! {
         warm_and_wait();
     }
 
+    // The mode may have changed while this process was parked, and a sun
+    // switch waits for exactly this moment (`theme::follow_while_locked`).
+    crate::theme::follow_while_locked();
+
     // After the LOCK command, never before it: creating this arms the
     // compositor's backdrop for one lock, and that arming expires.
     let fade = fade::LockFade::new();
