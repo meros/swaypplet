@@ -18,13 +18,7 @@ Sizes: S is a day or less, M a few days, L a week or more.
 
 | Item | Branch | Detail |
 |---|---|---|
-| Glass settings page with controls that mean the same in both modes (clarity, frost, refraction, …) | `glass-pane` | [design-system.md §4](design-system.md) |
 | Colour and material transitions: a mode, tint or wallpaper change fades over `page` (500 ms) instead of cutting | `theme-anim` | [design-system.md §2](design-system.md), [MOTION.md](MOTION.md) |
-| Launcher that learns (frecency), `=` calculator, `>` command, Tab for an app's windows, settings for which sources appear | `launcher` | [SETTINGS.md](SETTINGS.md) |
-| Lock screen text on the wallpaper takes dark or light ink from the wallpaper region behind it | `lock-ink` | [design-system.md](design-system.md) |
-| Notifications grouped per app, one card with a count | `notif-group` | |
-| One workspace-picture component for the bar's peek and the pins, pin from the peek, capped capture | `peek-pin` | |
-| Night light in the process, driven by the theme's sun | `nightlight` | |
 | No 1-second polling: the theme follows its files through file monitors | main | |
 
 ## Next
@@ -51,7 +45,8 @@ motion piece without a home.
 
 ### 2. Display profiles in the process (M), after night light
 
-Night light is in progress (above). The other half retires kanshi: match
+Night light is in the process since 2026-09-26 (`services::gamma`). The
+other half retires kanshi: match
 and apply output profiles in the panel over `zwlr_output_manager_v1`, which
 applies every output in one step and reports success or failure. Sway IPC
 stays for moving workspaces. Profiles live in a `displays` settings section

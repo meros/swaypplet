@@ -13,7 +13,6 @@
 //! state; Wi-Fi and Bluetooth delegate the same way to their own modules.
 
 use std::cell::RefCell;
-use std::process::Command;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -122,11 +121,11 @@ fn night_light_spec() -> TileSpec {
         tooltip_on: "Night Light: active",
         tooltip_off: "Night Light: off",
         action: Arc::new(|on| {
-            run_ok(Command::new("systemctl").args([
-                "--user",
-                if on { "start" } else { "stop" },
-                "gammastep.service",
-            ]))
+            if !crate::services::gamma::available() {
+                return false;
+            }
+            crate::services::gamma::set_enabled(on);
+            true
         }),
         read_state: Arc::new(read_night_state),
         on_state: None,
@@ -268,22 +267,6 @@ fn apply_tile_state(btn: &gtk4::ToggleButton, state: TileState) {
     }
 }
 
-/// Spawn a command, wait for it, return whether it exited successfully. Logs
-/// the failure. Used by the simple on/off tile actions.
-fn run_ok(cmd: &mut Command) -> bool {
-    match cmd.spawn().and_then(|mut c| c.wait()) {
-        Ok(status) => status.success(),
-        Err(e) => {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                log::warn!("command not found: {:?}", cmd.get_program());
-            } else {
-                log::warn!("command {:?} failed: {e}", cmd.get_program());
-            }
-            false
-        }
-    }
-}
-
 // ── State readers (blocking — always called from a background thread) ─────────
 
 fn read_wifi_state() -> TileState {
@@ -309,25 +292,15 @@ fn read_bluetooth_state() -> TileState {
     }
 }
 
+/// The night light is in this process (`services::gamma`): available when
+/// the compositor gave it the gamma tables, on when the setting says so.
 fn read_night_state() -> TileState {
-    match Command::new("systemctl")
-        .args(["--user", "is-active", "gammastep.service"])
-        .output()
-    {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            log::warn!("systemctl not found; Night Light toggle disabled");
-            TileState::Unavailable
-        }
-        Err(e) => {
-            log::warn!("systemctl --user is-active gammastep.service failed: {e}");
-            TileState::Unavailable
-        }
-        Ok(out) => {
-            if String::from_utf8_lossy(&out.stdout).trim() == "active" {
-                TileState::Active
-            } else {
-                TileState::Inactive
-            }
-        }
+    use crate::services::gamma;
+    if !gamma::available() {
+        TileState::Unavailable
+    } else if gamma::enabled() {
+        TileState::Active
+    } else {
+        TileState::Inactive
     }
 }

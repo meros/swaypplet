@@ -175,6 +175,10 @@ pub fn run() {
         crate::theme::wallpaper::follow_settings();
         theme::watch(crate::settings::glass::apply_saved_for);
 
+        // The night light: this process holds the gamma tables, from the
+        // same sun the automatic mode follows.
+        crate::services::gamma::follow_settings();
+
         // Start D-Bus notification server
         dbus::start_server(store_startup.clone());
 

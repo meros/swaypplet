@@ -73,5 +73,10 @@
     "bookmarks": false,
     "symbols": false,
     "frecency": true
+  },
+  "night_light": {
+    "enabled": true,
+    "schedule": "sun",
+    "night_k": 3500
   }
 }
