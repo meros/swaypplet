@@ -32,7 +32,7 @@ pub fn build() -> Option<gtk4::Button> {
     let label = gtk4::Label::new(Some(ICON_PRESENT));
     let btn = gtk4::Button::builder()
         .child(&label)
-        .css_classes(["bar-presence", "bar-seg"])
+        .css_classes(["bar-seg"])
         .build();
     crate::ui::segment(&btn, false);
 
@@ -68,11 +68,14 @@ fn draw(btn: &gtk4::Button, label: &gtk4::Label, present: Option<bool>, attentio
     } else {
         ICON_AWAY
     });
-    if present == Some(true) {
-        btn.remove_css_class("presence-away");
+    // Away is quieter: nobody is at the keyboard, so the mark steps back to
+    // the faint level rather than just changing its glyph.
+    let tone = if present == Some(true) {
+        crate::ui::Tone::Fg
     } else {
-        btn.add_css_class("presence-away");
-    }
+        crate::ui::Tone::Faint
+    };
+    crate::ui::set_tone(btn, tone);
 
     let attention = attention
         .map(|a| format!(", attention {a}"))

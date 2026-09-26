@@ -218,7 +218,6 @@ pub fn run() {
 
         // ── Main panel window ────────────────────────────────────────────────
         let window = layer_shell::create_layer_window(app, &PANEL_CONFIG);
-        window.add_css_class("panel");
 
         // One connection to the sound server for the whole process: the
         // panel section reads it, and (BAR_VISION increment 7) the hazard

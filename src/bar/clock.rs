@@ -31,7 +31,7 @@ pub fn build() -> gtk4::Button {
     label.add_css_class("ui-numeric");
     let btn = gtk4::Button::builder()
         .child(&label)
-        .css_classes(["bar-clock", "bar-seg"])
+        .css_classes(["bar-seg"])
         .build();
     ui::segment(&btn, false);
 

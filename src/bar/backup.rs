@@ -38,7 +38,7 @@ fn tone(tier: Tier) -> ui::Tone {
 pub fn build(service: &Rc<BackupStatusService>) -> gtk4::Box {
     let segment = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
-        .css_classes(["bar-backup", "bar-seg"])
+        .css_classes(["bar-seg"])
         .build();
     ui::segment(&segment, false);
 

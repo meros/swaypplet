@@ -200,7 +200,6 @@ fn build_bar_window(
     // enter.
     let root = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
-        .css_classes(["bar-root"])
         .build();
     crate::ui::surface(&root);
     crate::ui::card(&root, crate::ui::Card::Thin);

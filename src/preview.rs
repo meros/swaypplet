@@ -44,7 +44,6 @@ pub fn run(component: &str) {
                 .default_height(720)
                 .build()
                 .upcast();
-            window.add_css_class("panel");
             let panel = Panel::new(window, store.clone(), crate::audio::AudioService::start());
             panel.window.set_visible(true);
             std::mem::forget(panel);
@@ -286,21 +285,19 @@ pub fn run(component: &str) {
             .default_width(if component.starts_with("settings") { 820 } else { 440 })
             .default_height(600)
             .build();
-        window.add_css_class("panel");
 
         let host = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
-            .spacing(10)
+            .spacing(crate::tokens::space(4))
             .build();
         crate::ui::surface(&host);
         host.add_css_class("startmenu-quick");
-        host.add_css_class("preview-host");
 
         match component.as_str() {
             "tiles" => {
                 let grid = gtk4::Grid::builder()
-                    .row_spacing(8)
-                    .column_spacing(8)
+                    .row_spacing(crate::tokens::space(3))
+                    .column_spacing(crate::tokens::space(3))
                     .column_homogeneous(true)
                     .build();
                 grid.add_css_class("startmenu-tile-grid");

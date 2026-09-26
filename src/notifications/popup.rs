@@ -334,11 +334,9 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     };
     let corner = alerts().corner;
     let surface = GlassSurface::new(&app, config_for(corner), anim::SLIDE_PX, monitor.as_ref());
-    // The design system's card in place of the surface's legacy class: one
-    // key, one radius, one hairline, and the tints `set_critical_class` and
-    // `reflow` lay over the key.
-    surface.pane().remove_css_class("glass-card");
-    crate::ui::card(surface.pane(), crate::ui::Card::Floating);
+    // The surface's pane is already the design system's card: one key, one
+    // radius, one hairline, and the tints `set_critical_class` and `reflow`
+    // lay over the key.
     surface.pane().add_css_class("notification-popup-content");
     surface.pane().set_size_request(CARD_WIDTH, -1);
     // The surface spans the whole column so the card can be placed inside it

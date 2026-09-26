@@ -112,7 +112,7 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
     let slide = SlideBin::new();
     slide.set_child(&content);
     let root = gtk4::Box::builder()
-        .css_classes(["bar-battery", "bar-seg"])
+        .css_classes(["bar-seg"])
         .build();
     ui::segment(&root, false);
     root.append(&slide);
