@@ -658,6 +658,8 @@ pub fn css(inputs: Inputs) -> String {
     put("accent-bg", s.accent_bg.css());
     put("accent-bg-hover", s.accent[9].css());
     put("on-accent", s.on_accent.css());
+    // The second line on an accent fill (a tile's state under its name).
+    put("on-accent-muted", mixed(s.on_accent, 0.8));
     put("accent", s.accent[10].css());
     put("accent-tint", mixed(s.accent[8], 0.16));
 
@@ -722,8 +724,22 @@ pub fn css(inputs: Inputs) -> String {
         );
     }
 
+    // Families (§3.4).
+    put(
+        "font",
+        "\"UbuntuSans Nerd Font\", \"Ubuntu Sans\", \"Noto Sans\", sans-serif".into(),
+    );
+    put(
+        "mono",
+        "\"JetBrainsMono Nerd Font\", \"JetBrains Mono\", monospace".into(),
+    );
+
     // Component tokens (§3.9).
     put("control-height", "30px".into());
+    put("control-height-small", "24px".into());
+    put("field-height", "34px".into());
+    put("chip-height", "26px".into());
+    put("menu-item-height", "32px".into());
     put("row-height", "40px".into());
     put("tile-height", "52px".into());
     put("track-height", "6px".into());

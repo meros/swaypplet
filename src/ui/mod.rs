@@ -323,7 +323,7 @@ pub fn section(icon: &str, title: &str, summary: &str) -> Section {
     body.add_css_class("ui-section-body");
     let revealer = gtk4::Revealer::builder()
         .transition_type(gtk4::RevealerTransitionType::SlideDown)
-        .transition_duration(crate::tokens::DURATION[1].1)
+        .transition_duration(crate::anim::duration(crate::tokens::motion::EXPAND.ms) as u32)
         .child(&body)
         .build();
     root.append(&header);

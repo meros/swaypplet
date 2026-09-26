@@ -14,7 +14,7 @@
 /* ── Base ─────────────────────────────────────────────────────────────── */
 
 .ui-surface {
-    font-family: "UbuntuSans Nerd Font", "Ubuntu Sans", "Noto Sans", sans-serif;
+    font-family: var(--font);
     font-size: var(--type-body);
     font-weight: var(--w-regular);
     color: var(--fg);
@@ -33,7 +33,7 @@
 /* A glyph from the icon font takes a size from the scale but never its
    weight: a bold glyph is a different glyph. */
 .ui-glyph      { font-weight: var(--w-regular); }
-.ui-mono       { font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace; }
+.ui-mono       { font-family: var(--mono); }
 .ui-numeric    { font-feature-settings: "tnum"; }
 
 .ui-muted      { color: var(--fg-muted); }
@@ -87,10 +87,10 @@ button.ui-btn {
     font-weight: var(--w-strong);
     text-shadow: none;
     -gtk-icon-shadow: none;
-    transition: background-color var(--dur-fast) var(--ease-standard),
-                background-image var(--dur-fast) var(--ease-standard),
-                color var(--dur-fast) var(--ease-standard),
-                outline-color var(--dur-fast) var(--ease-standard);
+    transition: background-color var(--motion-state),
+                background-image var(--motion-state),
+                color var(--motion-state),
+                outline-color var(--motion-state);
 }
 
 button.ui-btn:hover {
@@ -143,7 +143,7 @@ button.ui-btn.pill {
 }
 
 button.ui-btn.small {
-    min-height: 24px;
+    min-height: var(--control-height-small);
     padding: 0 var(--space-3);
     font-size: var(--type-label);
 }
@@ -159,8 +159,8 @@ button.ui-btn.small {
     background-image: none;
     box-shadow: none;
     color: var(--fg);
-    transition: background-color var(--dur-fast) var(--ease-standard),
-                background-image var(--dur-fast) var(--ease-standard);
+    transition: background-color var(--motion-state),
+                background-image var(--motion-state);
 }
 
 .ui-row.activatable:hover {
@@ -223,7 +223,7 @@ button.ui-section-header {
     background-image: none;
     box-shadow: none;
     color: var(--fg);
-    transition: background-image var(--dur-fast) var(--ease-standard);
+    transition: background-image var(--motion-state);
 }
 
 button.ui-section-header:hover {
@@ -251,7 +251,7 @@ button.ui-section-header:focus-visible {
 
 .ui-section-chevron {
     color: var(--fg-faint);
-    transition: -gtk-icon-transform var(--dur-standard) var(--ease-standard);
+    transition: -gtk-icon-transform var(--motion-expand);
 }
 
 .ui-section.open .ui-section-chevron {
@@ -284,7 +284,7 @@ button.ui-section-header:focus-visible {
     box-shadow: none;
     color: inherit;
     padding: 0 var(--space-4);
-    transition: background-image var(--dur-fast) var(--ease-standard);
+    transition: background-image var(--motion-state);
 }
 
 .ui-tile button:hover {
@@ -311,8 +311,7 @@ button.ui-section-header:focus-visible {
 }
 
 .ui-tile.on .ui-tile-state {
-    color: inherit;
-    opacity: 0.8;
+    color: var(--on-accent-muted);
 }
 
 .ui-tile button.ui-tile-more {
@@ -360,7 +359,7 @@ scale.ui-slider slider {
     background-color: var(--knob);
     background-image: none;
     box-shadow: 0 1px 3px var(--scrim);
-    transition: transform var(--dur-fast) var(--ease-standard);
+    transition: transform var(--motion-state);
 }
 
 scale.ui-slider:hover slider {
@@ -399,7 +398,7 @@ switch.ui-switch {
     background-image: none;
     box-shadow: none;
     color: var(--fg);
-    transition: background-color var(--dur-fast) var(--ease-standard);
+    transition: background-color var(--motion-state);
 }
 
 switch.ui-switch:checked {
@@ -427,13 +426,17 @@ switch.ui-switch:focus-visible {
 }
 
 switch.ui-switch:disabled {
-    opacity: 0.5;
+    background-color: var(--fill-2);
+}
+
+switch.ui-switch:disabled slider {
+    background-color: var(--fg-disabled);
 }
 
 /* ── Chip, badge, key, status ───────────────────────────────────────── */
 
 .ui-chip {
-    min-height: 26px;
+    min-height: var(--chip-height);
     padding: 0 var(--space-4);
     border: none;
     border-radius: var(--radius-pill);
@@ -476,7 +479,7 @@ button.ui-chip:checked {
     border-radius: var(--radius-control);
     background-color: var(--accent-tint);
     color: var(--accent);
-    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
+    font-family: var(--mono);
     font-size: var(--type-label);
     font-weight: var(--w-strong);
 }
@@ -500,7 +503,7 @@ button.ui-chip:checked {
 
 entry.ui-entry,
 passwordentry.ui-entry {
-    min-height: 34px;
+    min-height: var(--field-height);
     padding: 0 var(--space-4);
     border: none;
     border-radius: var(--radius-control);
@@ -510,7 +513,7 @@ passwordentry.ui-entry {
     color: var(--fg);
     caret-color: var(--accent);
     font-size: var(--type-body);
-    transition: box-shadow var(--dur-fast) var(--ease-standard);
+    transition: box-shadow var(--motion-state);
 }
 
 entry.ui-entry:focus-within,
@@ -552,7 +555,7 @@ passwordentry.ui-entry selection {
 }
 
 button.ui-menu-item {
-    min-height: 32px;
+    min-height: var(--menu-item-height);
     padding: 0 var(--space-3);
     border: none;
     border-radius: var(--radius-control);

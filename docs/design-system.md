@@ -340,11 +340,16 @@ Only these, because no semantic token gives their value:
 
 | Token | Value | Why |
 |---|---|---|
-| `--control-height` | 30 px | buttons, fields, segmented controls |
+| `--control-height` | 30 px | buttons, segmented controls |
+| `--control-height-small` | 24 px | small buttons in dense places (a popover's actions) |
+| `--field-height` | 34 px | text fields: a caret needs more room than a label |
+| `--chip-height` | 26 px | chips |
+| `--menu-item-height` | 32 px | menu items |
 | `--row-height` | 40 px | list rows, so every list has one rhythm |
 | `--tile-height` | 52 px | quick-settings tiles |
 | `--track-height` | 6 px | slider and progress tracks |
 | `--knob` | dark `--neutral-12`, light white | the slider and switch knob |
+| `--on-accent-muted` | `--on-accent` at 80 % | the second line on an accent fill, a tile's state under its name |
 
 ## 4. Glass and the modes
 
@@ -438,9 +443,12 @@ Tests in `src/tokens.rs` and `src/theme.rs`, run by `cargo test`:
    non-looping animation a `--motion-*` token (or `--dur-*` with
    `--ease-*`).
 4. **Contrast** (§5) for every input combination.
-5. **Rust**: no `set_spacing`, `margin_*` or `spacing(...)` with a literal
-   other than those in `tokens::SPACE`; no Cairo colour literals outside
-   `src/tokens.rs`. Checked by a source scan test.
+5. **Rust**: no `set_spacing`, `margin_*` or `spacing(...)` with any
+   non-zero literal (use `tokens::space(n)`, `ui::vbox(n)`, `ui::hbox(n)`);
+   no Cairo colour literals for red, green or blue outside `src/tokens/`;
+   no CSS class added that no rule styles. Checked by `src/design_lint.rs`,
+   which also keeps a ledger of the files not yet migrated: the ledger can
+   only shrink.
 
 ## 8. Migration
 
