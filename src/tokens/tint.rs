@@ -3,7 +3,7 @@
 //! `Look.tint` used to rewrite a legacy named palette after the fact. It is
 //! now one more input the scales are generated from, so the tokens, the
 //! glass body, the Cairo drawing and sway's borders all move together, and
-//! the contrast tests at the bottom of `tokens/mod.rs` hold the tinted token
+//! the contrast tests in `tokens/apca.rs` hold the tinted token
 //! sets to the same targets as the shipped ones.
 //!
 //! What the wallpaper gives is one number: the OKLCH hue of its source colour
@@ -31,6 +31,7 @@
 //! A hue moved at a kept chroma can fall outside sRGB; [`to_rgb`] then gives
 //! up chroma, never lightness, until it fits.
 
+use super::color::oklch_linear;
 use super::{Oklch, Rgb};
 
 /// How far the wallpaper reaches into the tokens, with its hue in whole
@@ -86,7 +87,7 @@ pub fn harmonize(hue: f64, toward: f64, cap: f64) -> f64 {
 /// `o` in sRGB, giving up chroma (never lightness or hue) until it fits.
 pub fn to_rgb(o: Oklch) -> Rgb {
     let fits = |c: f64| {
-        super::oklch_linear(Oklch(o.0, c, o.2))
+        oklch_linear(Oklch(o.0, c, o.2))
             .iter()
             .all(|v| (-1e-4..=1.0 + 1e-4).contains(v))
     };
