@@ -601,10 +601,17 @@ pub fn clear_override() {
 /// been tuned — which is why it is a plain call in `app::run` rather than
 /// something the panel has to remember to do.
 pub fn apply_saved() {
+    apply_saved_for(crate::theme::inputs());
+}
+
+/// [`apply_saved`] for `inputs` already resolved: what `theme::watch` hands
+/// its material callback when the mode, the contrast or a full tint moved
+/// the material, so the replay matches the stylesheet just loaded instead of
+/// resolving the theme a second time.
+pub fn apply_saved_for(inputs: crate::tokens::Inputs) {
     let Some(system) = System::load() else {
         return;
     };
-    let inputs = crate::theme::inputs();
     let saved = load_override();
     let default_look = inputs.mode == crate::tokens::Mode::Dark
         && inputs.contrast == crate::tokens::Contrast::Standard

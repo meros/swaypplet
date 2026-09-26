@@ -4,7 +4,7 @@
 //! degree for this century, which is far below the 6° band the mode switch
 //! uses. No network, no daemon, no ephemeris file.
 
-use super::Mode;
+use crate::tokens::Mode;
 
 /// The sun's elevation above the horizon in degrees, at `lat`/`lon`
 /// (degrees, east positive) and `unix` seconds.

@@ -287,7 +287,7 @@ fn wire(session: &Rc<Session>, index: usize, mode: Mode) {
     let image = sheet.image.clone();
     let buffer = (f64::from(sheet.image.width), f64::from(sheet.image.height));
     // The token colours, in the mode the selector opened in.
-    let paint = crate::ui::paint();
+    let paint = crate::theme::paint();
     sheet.area.set_draw_func(move |_, cr, w, h| {
         let (w, h) = (f64::from(w), f64::from(h));
         // Dim everything, then clear the selection back to fully transparent
@@ -377,7 +377,7 @@ fn wire(session: &Rc<Session>, index: usize, mode: Mode) {
 #[allow(clippy::too_many_arguments)]
 fn draw_color_loupe(
     cr: &cairo::Context,
-    paint: &crate::ui::Paint,
+    paint: &crate::theme::Paint,
     image: &Image,
     (sx, sy): (f64, f64),
     px: f64,
@@ -512,7 +512,7 @@ fn normalized(rect: &Option<Rect>, max_w: f64, max_h: f64) -> Option<Rect> {
 #[allow(clippy::too_many_arguments)]
 fn draw_size_chip(
     cr: &cairo::Context,
-    paint: &crate::ui::Paint,
+    paint: &crate::theme::Paint,
     (sx, sy): (f64, f64),
     x: f64,
     y: f64,
