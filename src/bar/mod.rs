@@ -191,7 +191,7 @@ fn build_bar_window(bar: &BarManager, monitor: &gdk::Monitor) -> (Surface, decis
     // Right cluster order per the vision: media mark, tray, hazard lane,
     // then the instrument track. The Bar tab's Segments group hides the
     // ones it names; the hazard lane and the clock are not optional.
-    right.append(&follow_setting(media::build(mpris), |bar| bar.media));
+    right.append(&follow_setting(media::build(mpris, &audio), |bar| bar.media));
     // Where pinned workspaces live when they are not floating (jump/pin.rs).
     right.append(&pins::build());
     right.append(&follow_setting(tray::build(tray), |bar| bar.tray));

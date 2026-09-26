@@ -30,6 +30,9 @@ struct Ui {
     pop: gtk4::Popover,
     body: gtk4::Box,
     state: Rc<RefCell<Option<MediaState>>>,
+    /// "Play on": the output picker, kept across renders
+    /// (`widgets::audio::output_picker`).
+    outputs: gtk4::Box,
 }
 
 /// A transport key: a mark, muted, ink under the pointer.
@@ -55,7 +58,10 @@ fn send(cmd: &'static str) {
 /// without forcing the row taller.
 const ART_PX: i32 = 18;
 
-pub fn build(mpris: &Rc<crate::services::mpris::MprisService>) -> gtk4::Box {
+pub fn build(
+    mpris: &Rc<crate::services::mpris::MprisService>,
+    audio: &Rc<crate::services::audio::AudioService>,
+) -> gtk4::Box {
     // Art + title/artist open the popover; the transport keys are siblings,
     // not children, because GTK4 gives a Button's clicks to the Button and a
     // nested control would never see them.
@@ -97,6 +103,7 @@ pub fn build(mpris: &Rc<crate::services::mpris::MprisService>) -> gtk4::Box {
         pop,
         body,
         state: Rc::new(RefCell::new(None)),
+        outputs: crate::widgets::audio::output_picker(audio),
     };
 
     // Pushed by the players themselves (services::mpris): no poll, and nothing
@@ -261,4 +268,5 @@ fn render(ui: &Ui) {
     play.add_css_class("bar-media-play");
     play.connect_clicked(|_| send("play-pause"));
     ui.body.append(&play);
+    ui.body.append(&ui.outputs);
 }

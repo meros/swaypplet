@@ -83,6 +83,22 @@ pub struct VolumeState {
     pub muted: bool,
 }
 
+/// What a device is, for its icon and its place in a picker. Read from the
+/// server's own properties (`device.form_factor`, `device.bus`, the active
+/// port's name), never guessed from the description.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum DeviceKind {
+    #[default]
+    Speakers,
+    Headphones,
+    Headset,
+    Hdmi,
+    Bluetooth,
+    Usb,
+    Microphone,
+    Webcam,
+}
+
 /// A sink or a source.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Device {
@@ -98,6 +114,32 @@ pub struct Device {
     /// many; see [`from_level`].
     pub channels: u8,
     pub volume: VolumeState,
+    pub kind: DeviceKind,
+    /// The line under the name: the bus and the port ("Bluetooth",
+    /// "Built-in · Headphones"), empty when there is nothing to add.
+    pub detail: String,
+    /// The card it belongs to, for the profile switch.
+    pub card: Option<u32>,
+    /// False when the active port reports nothing plugged in.
+    pub available: bool,
+}
+
+/// A card's profile: how a Bluetooth device is used (high-quality playback,
+/// or headset with its microphone).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Profile {
+    pub name: String,
+    pub description: String,
+    pub available: bool,
+}
+
+/// A sound card; only Bluetooth cards are kept, since their profile is the
+/// one worth switching on the fly.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Card {
+    pub index: u32,
+    pub profiles: Vec<Profile>,
+    pub active: Option<String>,
 }
 
 /// One application's audio, playing or recording.
@@ -110,6 +152,8 @@ pub struct Stream {
     pub volume: VolumeState,
     /// True for a source output — an application reading the microphone.
     pub recording: bool,
+    /// `application.icon_name`, for the mixer row's icon.
+    pub icon: Option<String>,
 }
 
 /// Everything the panel and the bar read.
@@ -123,6 +167,8 @@ pub struct AudioState {
     pub streams: Vec<Stream>,
     /// Recording streams. Empty is the whole signal the mic indicator needs.
     pub recorders: Vec<Stream>,
+    /// Bluetooth cards, for the profile switch.
+    pub cards: Vec<Card>,
     /// The server answered at least once. False means the section draws its
     /// unavailable banner rather than an empty list pretending to be silence.
     pub connected: bool,
@@ -173,6 +219,77 @@ pub enum Command {
         index: u32,
         level: f64,
     },
+    /// A real mute: the level is kept for when it is unmuted.
+    SetStreamMute {
+        index: u32,
+        mute: bool,
+    },
+    SetCardProfile {
+        card: u32,
+        profile: String,
+    },
+    /// Record the default source's peak level while on, for the input
+    /// meter. The panel turns it on for a bounded test and off again; the
+    /// stream is left out of `recorders`, so the meter never reports itself
+    /// as an application listening.
+    Meter(bool),
+}
+
+/// The name the meter's record stream carries, which is how it is left out
+/// of the recorder list.
+const METER_NAME: &str = "swaypplet level meter";
+
+/// Classify a device from what the server says about it.
+pub fn classify(
+    form_factor: Option<&str>,
+    bus: Option<&str>,
+    port: Option<&str>,
+    input: bool,
+) -> DeviceKind {
+    let port = port.unwrap_or_default().to_ascii_lowercase();
+    let ff = form_factor.unwrap_or_default();
+    if port.contains("hdmi") || port.contains("displayport") || ff == "tv" {
+        return DeviceKind::Hdmi;
+    }
+    if ff == "webcam" {
+        return DeviceKind::Webcam;
+    }
+    if ff == "headset" || ff == "hands-free" || port.contains("headset") {
+        return DeviceKind::Headset;
+    }
+    if ff == "headphone" || port.contains("headphone") {
+        return DeviceKind::Headphones;
+    }
+    if bus == Some("bluetooth") {
+        return DeviceKind::Bluetooth;
+    }
+    if input {
+        return DeviceKind::Microphone;
+    }
+    if bus == Some("usb") {
+        return DeviceKind::Usb;
+    }
+    DeviceKind::Speakers
+}
+
+/// The line under a device's name: where it is ("Bluetooth", "USB",
+/// "Built-in") and which port, when the port says more than the name.
+pub fn detail(bus: Option<&str>, port_description: Option<&str>, name: &str) -> String {
+    let place = match bus {
+        Some("bluetooth") => "Bluetooth",
+        Some("usb") => "USB",
+        Some("pci") | Some("isa") => "Built-in",
+        Some("network") => "Network",
+        _ => "",
+    };
+    let port = port_description
+        .filter(|p| !p.is_empty() && !name.to_lowercase().contains(&p.to_lowercase()));
+    match (place, port) {
+        ("", None) => String::new(),
+        ("", Some(p)) => p.to_string(),
+        (place, None) => place.to_string(),
+        (place, Some(p)) => format!("{place} · {p}"),
+    }
 }
 
 /// The write end of the audio thread's wakeup pipe.
@@ -185,6 +302,8 @@ type Waker = RefCell<UnixStream>;
 
 pub struct AudioService {
     state: Observed<AudioState>,
+    /// The input meter's peak, 0–1, while `Command::Meter(true)` holds.
+    level: Observed<f32>,
     commands: mpsc::Sender<Command>,
     /// `None` only if the pipe could not be made, which costs latency
     /// rather than correctness: commands then wait for the next event.
@@ -196,6 +315,8 @@ impl AudioService {
     /// snapshot arrives when the server answers.
     pub fn start() -> Rc<Self> {
         let (tx, rx) = async_channel::unbounded::<AudioState>();
+        // Bounded: a slow main thread drops meter readings, never queues them.
+        let (level_tx, level_rx) = async_channel::bounded::<f32>(2);
         let (cmd_tx, cmd_rx) = mpsc::channel::<Command>();
 
         // Non-blocking on the read side so draining it in the mainloop
@@ -213,12 +334,13 @@ impl AudioService {
 
         std::thread::Builder::new()
             .name("audio".into())
-            .spawn(move || run(&tx, &cmd_rx, wake_rx.as_ref()))
+            .spawn(move || run(&tx, &level_tx, &cmd_rx, wake_rx.as_ref()))
             .map_err(|e| log::error!("audio: could not start thread: {e}"))
             .ok();
 
         let service = Rc::new(AudioService {
             state: Observed::new(AudioState::default()),
+            level: Observed::new(0.0),
             commands: cmd_tx,
             wake: wake_tx.map(RefCell::new),
         });
@@ -229,8 +351,40 @@ impl AudioService {
                 for_recv.state.set_if_changed(snapshot);
             }
         });
+        let for_level = service.clone();
+        glib::spawn_future_local(async move {
+            while let Ok(peak) = level_rx.recv().await {
+                for_level.level.set_if_changed(peak);
+            }
+        });
 
         service
+    }
+
+    /// A service that never connects: `state` is what it reports, and a
+    /// command is dropped with a log line. For the preview, which must be
+    /// able to show every state without touching the real sound server.
+    pub fn fixture(state: AudioState) -> Rc<Self> {
+        let (commands, _) = mpsc::channel::<Command>();
+        Rc::new(AudioService {
+            state: Observed::new(state),
+            level: Observed::new(0.0),
+            commands,
+            wake: None,
+        })
+    }
+
+    /// Show a meter level, for the preview's fixture.
+    pub fn set_fixture_level(&self, peak: f32) {
+        self.level.set_if_changed(peak);
+    }
+
+    pub fn connect_level(&self, cb: impl Fn() + 'static) {
+        self.level.connect_change(cb);
+    }
+
+    pub fn level(&self) -> f32 {
+        self.level.with(|l| *l)
     }
 
     pub fn connect_change(&self, cb: impl Fn() + 'static) {
@@ -263,13 +417,14 @@ impl AudioService {
 /// Connect, serve, reconnect. Mirrors `sway::ipc::run`.
 fn run(
     tx: &async_channel::Sender<AudioState>,
+    level: &async_channel::Sender<f32>,
     commands: &mpsc::Receiver<Command>,
     wake: Option<&UnixStream>,
 ) {
     let mut backoff = Backoff::new();
     loop {
         let started = std::time::Instant::now();
-        match session(tx, commands, wake) {
+        match session(tx, level, commands, wake) {
             Ok(()) => return, // receiver gone — the process is shutting down
             Err(e) => {
                 // Say so once, so the panel's banner has a reason behind it.
@@ -284,6 +439,7 @@ fn run(
 
 fn session(
     tx: &async_channel::Sender<AudioState>,
+    level: &async_channel::Sender<f32>,
     commands: &mpsc::Receiver<Command>,
     wake: Option<&UnixStream>,
 ) -> Result<(), String> {
@@ -322,6 +478,7 @@ fn session(
                 | InterestMaskSet::SOURCE
                 | InterestMaskSet::SINK_INPUT
                 | InterestMaskSet::SOURCE_OUTPUT
+                | InterestMaskSet::CARD
                 | InterestMaskSet::SERVER,
             |_| {},
         );
@@ -355,6 +512,8 @@ fn session(
         });
 
     let mut last = AudioState::default();
+    // The input meter's stream, while it is on.
+    let mut meter: Option<Rc<RefCell<pulse::stream::Stream>>> = None;
 
     loop {
         // Block only with nothing already pending, on either count.
@@ -380,6 +539,20 @@ fn session(
         // inside `iterate`, so nothing can set it between these two lines.
         woken.set(false);
         let batch = Batch::collect(commands);
+        match batch.meter {
+            Some(true) if meter.is_none() => {
+                let (_, source) = default_names(&mut mainloop, &context)?;
+                if !source.is_empty() {
+                    meter = start_meter(&mut context, &source, level.clone());
+                }
+            }
+            Some(false) => {
+                if let Some(stream) = meter.take() {
+                    let _ = stream.borrow_mut().disconnect();
+                }
+            }
+            _ => {}
+        }
         if !batch.is_empty() {
             apply(&mut mainloop, &mut context, &last, &batch);
             dirty.set(true);
@@ -429,11 +602,30 @@ fn read(mainloop: &mut Mainloop, context: &Context) -> Result<AudioState, String
         let op = introspect.get_sink_info_list(move |result| match result {
             ListResult::Item(info) => {
                 let id = info.name.as_deref().unwrap_or_default().to_string();
+                let name = clean_device_name(info.description.as_deref().unwrap_or(&id));
+                let port = info.active_port.as_deref();
+                let (form_factor, bus) = (
+                    info.proplist.get_str("device.form_factor"),
+                    info.proplist.get_str("device.bus"),
+                );
                 sinks.borrow_mut().push(Device {
                     is_default: id == default,
                     index: info.index,
                     channels: info.volume.len(),
-                    name: clean_device_name(info.description.as_deref().unwrap_or(&id)),
+                    kind: classify(
+                        form_factor.as_deref(),
+                        bus.as_deref(),
+                        port.and_then(|p| p.name.as_deref()),
+                        false,
+                    ),
+                    detail: detail(
+                        bus.as_deref(),
+                        port.and_then(|p| p.description.as_deref()),
+                        &name,
+                    ),
+                    card: info.card,
+                    available: port.is_none_or(|p| p.available != pulse::def::PortAvailable::No),
+                    name,
                     id,
                     volume: VolumeState {
                         volume: to_level(&info.volume),
@@ -461,11 +653,30 @@ fn read(mainloop: &mut Mainloop, context: &Context) -> Result<AudioState, String
                     return;
                 }
                 let id = info.name.as_deref().unwrap_or_default().to_string();
+                let name = clean_device_name(info.description.as_deref().unwrap_or(&id));
+                let port = info.active_port.as_deref();
+                let (form_factor, bus) = (
+                    info.proplist.get_str("device.form_factor"),
+                    info.proplist.get_str("device.bus"),
+                );
                 sources.borrow_mut().push(Device {
                     is_default: id == default,
                     index: info.index,
                     channels: info.volume.len(),
-                    name: clean_device_name(info.description.as_deref().unwrap_or(&id)),
+                    kind: classify(
+                        form_factor.as_deref(),
+                        bus.as_deref(),
+                        port.and_then(|p| p.name.as_deref()),
+                        true,
+                    ),
+                    detail: detail(
+                        bus.as_deref(),
+                        port.and_then(|p| p.description.as_deref()),
+                        &name,
+                    ),
+                    card: info.card,
+                    available: port.is_none_or(|p| p.available != pulse::def::PortAvailable::No),
+                    name,
                     id,
                     volume: VolumeState {
                         volume: to_level(&info.volume),
@@ -493,6 +704,7 @@ fn read(mainloop: &mut Mainloop, context: &Context) -> Result<AudioState, String
                     muted: info.mute,
                 },
                 recording: false,
+                icon: info.proplist.get_str("application.icon_name"),
             }),
             ListResult::End | ListResult::Error => flag.set(true),
         });
@@ -513,7 +725,8 @@ fn read(mainloop: &mut Mainloop, context: &Context) -> Result<AudioState, String
                     .proplist
                     .get_str("media.class")
                     .is_some_and(|c| c.contains("Monitor"));
-                if is_monitor {
+                // Nor is the input meter's own stream (`Command::Meter`).
+                if is_monitor || info.name.as_deref() == Some(METER_NAME) {
                     return;
                 }
                 recorders.borrow_mut().push(Stream {
@@ -525,6 +738,43 @@ fn read(mainloop: &mut Mainloop, context: &Context) -> Result<AudioState, String
                         muted: info.mute,
                     },
                     recording: true,
+                    icon: info.proplist.get_str("application.icon_name"),
+                });
+            }
+            ListResult::End | ListResult::Error => flag.set(true),
+        });
+        wait(mainloop, &op, &done)?;
+    }
+
+    // Bluetooth cards and their profiles, for the switch between
+    // high-quality playback and the headset profile with its microphone.
+    let cards = Rc::new(RefCell::new(Vec::new()));
+    {
+        let cards = cards.clone();
+        let done = Rc::new(std::cell::Cell::new(false));
+        let flag = done.clone();
+        let op = introspect.get_card_info_list(move |result| match result {
+            ListResult::Item(info) => {
+                if info.proplist.get_str("device.bus").as_deref() != Some("bluetooth") {
+                    return;
+                }
+                cards.borrow_mut().push(Card {
+                    index: info.index,
+                    profiles: info
+                        .profiles
+                        .iter()
+                        .filter(|p| p.name.as_deref() != Some("off"))
+                        .map(|p| Profile {
+                            name: p.name.as_deref().unwrap_or_default().to_string(),
+                            description: p.description.as_deref().unwrap_or_default().to_string(),
+                            available: p.available,
+                        })
+                        .collect(),
+                    active: info
+                        .active_profile
+                        .as_ref()
+                        .and_then(|p| p.name.as_deref())
+                        .map(str::to_string),
                 });
             }
             ListResult::End | ListResult::Error => flag.set(true),
@@ -548,6 +798,7 @@ fn read(mainloop: &mut Mainloop, context: &Context) -> Result<AudioState, String
         sources,
         streams: streams.borrow().clone(),
         recorders: recorders.borrow().clone(),
+        cards: cards.borrow().clone(),
         connected: true,
     })
 }
@@ -595,6 +846,10 @@ struct Batch {
     default_source: Option<String>,
     /// Last write per stream wins; a drag emits one per motion event.
     stream_levels: Vec<(u32, f64)>,
+    stream_mutes: Vec<(u32, bool)>,
+    card_profiles: Vec<(u32, String)>,
+    /// The last meter request of the turn.
+    meter: Option<bool>,
 }
 
 impl Batch {
@@ -618,6 +873,17 @@ impl Batch {
                         None => batch.stream_levels.push((index, level)),
                     }
                 }
+                Command::SetStreamMute { index, mute } => {
+                    match batch.stream_mutes.iter_mut().find(|(i, _)| *i == index) {
+                        Some(slot) => slot.1 = mute,
+                        None => batch.stream_mutes.push((index, mute)),
+                    }
+                }
+                Command::SetCardProfile { card, profile } => {
+                    batch.card_profiles.retain(|(c, _)| *c != card);
+                    batch.card_profiles.push((card, profile));
+                }
+                Command::Meter(on) => batch.meter = Some(on),
             }
         }
         batch
@@ -637,6 +903,9 @@ impl Batch {
             && self.default_sink.is_none()
             && self.default_source.is_none()
             && self.stream_levels.is_empty()
+            && self.stream_mutes.is_empty()
+            && self.card_profiles.is_empty()
+            && self.meter.is_none()
     }
 }
 
@@ -709,6 +978,71 @@ fn apply(mainloop: &mut Mainloop, context: &mut Context, last: &AudioState, batc
         };
         introspect.set_sink_input_volume(index, &from_level(level, stream.channels), None);
     }
+    for &(index, mute) in &batch.stream_mutes {
+        introspect.set_sink_input_mute(index, mute, None);
+    }
+    for (card, profile) in &batch.card_profiles {
+        introspect.set_card_profile_by_index(*card, profile, None);
+    }
+}
+
+/// A record stream on `source` that sends its peak level, about 30 times a
+/// second, for the input meter. Peak detection happens in the server, so
+/// what crosses the socket is one float per fragment.
+fn start_meter(
+    context: &mut Context,
+    source: &str,
+    level: async_channel::Sender<f32>,
+) -> Option<Rc<RefCell<pulse::stream::Stream>>> {
+    use pulse::stream::{FlagSet as StreamFlags, PeekResult, Stream as PaStream};
+    let spec = pulse::sample::Spec {
+        format: pulse::sample::Format::FLOAT32NE,
+        channels: 1,
+        rate: 30,
+    };
+    let stream = Rc::new(RefCell::new(PaStream::new(context, METER_NAME, &spec, None)?));
+    let weak = Rc::downgrade(&stream);
+    stream
+        .borrow_mut()
+        .set_read_callback(Some(Box::new(move |_| {
+            let Some(stream) = weak.upgrade() else { return };
+            let Ok(mut stream) = stream.try_borrow_mut() else { return };
+            let mut peak = 0.0f32;
+            loop {
+                let more = match stream.peek() {
+                    Ok(PeekResult::Data(data)) => {
+                        for bytes in data.chunks_exact(4) {
+                            let v = f32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+                            peak = peak.max(v.abs());
+                        }
+                        true
+                    }
+                    Ok(PeekResult::Hole(_)) => true,
+                    _ => false,
+                };
+                if !more || stream.discard().is_err() {
+                    break;
+                }
+            }
+            let _ = level.try_send(peak.min(1.0));
+        })));
+    let attr = pulse::def::BufferAttr {
+        maxlength: u32::MAX,
+        tlength: u32::MAX,
+        prebuf: u32::MAX,
+        minreq: u32::MAX,
+        fragsize: 4,
+    };
+    stream
+        .borrow_mut()
+        .connect_record(
+            Some(source),
+            Some(&attr),
+            StreamFlags::PEAK_DETECT | StreamFlags::ADJUST_LATENCY | StreamFlags::DONT_MOVE,
+        )
+        .map_err(|e| log::warn!("audio: meter on {source}: {e}"))
+        .ok()?;
+    Some(stream)
 }
 
 /// Which sink and source the server currently calls default.
@@ -933,6 +1267,29 @@ mod tests {
     }
 
     #[test]
+    fn devices_are_classified_from_the_servers_own_properties() {
+        use DeviceKind::*;
+        assert_eq!(classify(Some("headphone"), Some("bluetooth"), None, false), Headphones);
+        assert_eq!(classify(Some("headset"), Some("bluetooth"), None, true), Headset);
+        assert_eq!(classify(None, Some("pci"), Some("[Out] HDMI1"), false), Hdmi);
+        assert_eq!(classify(None, Some("pci"), Some("analog-output-headphones"), false), Headphones);
+        assert_eq!(classify(None, Some("pci"), Some("[Out] Speaker"), false), Speakers);
+        assert_eq!(classify(None, Some("usb"), None, false), Usb);
+        assert_eq!(classify(None, Some("bluetooth"), None, false), Bluetooth);
+        assert_eq!(classify(Some("webcam"), Some("usb"), None, true), Webcam);
+        assert_eq!(classify(None, Some("pci"), Some("[In] Mic1"), true), Microphone);
+    }
+
+    #[test]
+    fn the_detail_line_says_where_and_which_port() {
+        assert_eq!(detail(Some("bluetooth"), None, "WH-1000XM5"), "Bluetooth");
+        assert_eq!(detail(Some("pci"), Some("Headphones"), "Speakers"), "Built-in · Headphones");
+        // A port the name already says is not repeated.
+        assert_eq!(detail(Some("pci"), Some("Speaker"), "Speaker"), "Built-in");
+        assert_eq!(detail(None, None, "X"), "");
+    }
+
+    #[test]
     fn the_microphone_indicator_follows_the_recorder_list() {
         let mut state = AudioState::default();
         assert!(!state.microphone_in_use());
@@ -943,6 +1300,7 @@ mod tests {
             name: "Google Chrome".into(),
             volume: VolumeState::default(),
             recording: true,
+            icon: None,
         });
         assert!(state.microphone_in_use());
         assert_eq!(state.recorder_names(), vec!["Google Chrome"]);
@@ -956,6 +1314,7 @@ mod tests {
             name: name.into(),
             volume: VolumeState::default(),
             recording: true,
+            icon: None,
         };
         let state = AudioState {
             recorders: vec![stream("Chrome", 1), stream("Chrome", 2), stream("Zoom", 3)],
@@ -975,7 +1334,8 @@ mod live {
         let (_cmd_tx, cmd_rx) = std::sync::mpsc::channel::<super::Command>();
         let (atx, arx) = async_channel::unbounded();
 
-        std::thread::spawn(move || super::run(&atx, &cmd_rx, None));
+        let (ltx, _lrx) = async_channel::bounded(2);
+        std::thread::spawn(move || super::run(&atx, &ltx, &cmd_rx, None));
         std::thread::spawn(move || {
             let _ = tx.send(arx.recv_blocking());
         });
@@ -1027,7 +1387,8 @@ mod live {
         let (wake_tx, wake_rx) = std::os::unix::net::UnixStream::pair().expect("pipe");
         wake_rx.set_nonblocking(true).expect("nonblocking");
 
-        std::thread::spawn(move || super::run(&atx, &cmd_rx, Some(&wake_rx)));
+        let (ltx, _lrx) = async_channel::bounded(2);
+        std::thread::spawn(move || super::run(&atx, &ltx, &cmd_rx, Some(&wake_rx)));
 
         let first = arx
             .recv_blocking()
