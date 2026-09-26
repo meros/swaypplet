@@ -3,12 +3,14 @@
 //! Tap and release goes back one. Keep Super held and tap again to walk
 //! further, through at most eight places on this output.
 //!
-//! The workspaces themselves are the pictures. While Super is held the one
-//! you are on shrinks to [`row::SCALE`] and moves left, and the one you came
-//! from slides in to the middle at the same size; the next one peeks in from
-//! the right edge. Tab moves the row a place left, Shift+Tab a place right.
+//! The workspaces themselves are the pictures, on a strip. While Super is
+//! held the one you are on shrinks to [`row::SCALE`] and the strip moves a
+//! place left: the one you came from slides in to the middle, opaque, and
+//! the next one peeks in from the right edge. Tab moves the strip a place
+//! left, Shift+Tab a place right, as far back as the one you started on.
 //! Releasing Super grows the middle one to full size and switches to it;
-//! Escape brings back the one you were on. sway draws and animates all of it
+//! with the one you started on in the middle, or on Escape, that one grows
+//! back and nothing switches. sway draws and animates all of it
 //! (`workspace_transform`, nixos patches/swayfx-ws-transform.patch), so the
 //! windows are the real ones, not captured frames, and this process sends
 //! one short command per workspace per step.
@@ -75,13 +77,14 @@ struct State {
     /// The workspaces in the row: `[0]` the one you were on, then one per
     /// entry in `commands`.
     names: Vec<String>,
-    /// Their captions, one per entry in `commands`.
+    /// Their captions, one per entry in `names`.
     rows: Vec<Row>,
     /// The output's geometry, read when the gesture starts.
     row: Option<row::Row>,
     /// Where the output sits in the layout: the surface's origin.
     origin_xy: (f64, f64),
-    cursor: usize,
+    /// The selected position in `names`.
+    selected: usize,
     watchdog: Option<glib::SourceId>,
 }
 
@@ -176,7 +179,7 @@ impl Jump {
                 rows: Vec::new(),
                 row: None,
                 origin_xy: (0.0, 0.0),
-                cursor: 0,
+                selected: 0,
                 watchdog: None,
             }),
         });
@@ -307,10 +310,15 @@ impl Jump {
             .take(built.len() + 1)
             .map(|p| p.name.clone())
             .collect();
-        st.rows = built;
+        st.rows = places
+            .first()
+            .map(|p| rows::row(p, &bindings, &apps, &output))
+            .into_iter()
+            .chain(built)
+            .collect();
         st.row = geometry.map(|(o, a)| row::Row::new(o, a));
         st.origin_xy = geometry.map(|(o, _)| (o.0, o.1)).unwrap_or_default();
-        st.cursor = 0;
+        st.selected = 0;
     }
 
     fn feed(self: &Rc<Self>, ev: Ev) {
@@ -364,8 +372,8 @@ impl Jump {
             Action::Select(i) => {
                 let moved = {
                     let mut st = self.state.borrow_mut();
-                    let moved = st.cursor != i;
-                    st.cursor = i;
+                    let moved = st.selected != i;
+                    st.selected = i;
                     moved
                 };
                 self.show_caption(i);
@@ -383,9 +391,9 @@ impl Jump {
                 set_mode("default");
             }
             Action::Run(command) => {
-                let (names, cursor, r) = {
+                let (names, selected, r) = {
                     let st = self.state.borrow();
-                    (st.names.clone(), st.cursor, st.row)
+                    (st.names.clone(), st.selected, st.row)
                 };
                 let origin = names.first().cloned().unwrap_or_default();
                 // Refuse to move if something already did (a click on the
@@ -405,7 +413,7 @@ impl Jump {
                 let mut cmds = Vec::new();
                 let mut after = None;
                 if let Some(r) = &r {
-                    let (before, grow) = row::commit(r, &names, cursor);
+                    let (before, grow) = row::commit(r, &names, selected);
                     cmds.extend(before.iter().map(|(n, l)| l.command(n)));
                     after = grow.map(|(n, l)| l.command(&n));
                 }
@@ -449,7 +457,7 @@ impl Jump {
         self.chord.set_visible(row.chord.is_some());
         self.label.set_label(rows::caption_label(row));
         self.detail.set_label(&row.detail);
-        let pinned = st.names.get(i + 1).is_some_and(|n| pin::is_pinned(n));
+        let pinned = st.names.get(i).is_some_and(|n| pin::is_pinned(n));
         if pinned {
             self.ring.add_css_class("pinned");
         } else {
@@ -482,14 +490,14 @@ impl Jump {
     }
 
     fn pin_selected(&self) {
-        let (name, cursor) = {
+        let (name, selected) = {
             let st = self.state.borrow();
-            (st.names.get(st.cursor + 1).cloned(), st.cursor)
+            (st.names.get(st.selected).cloned(), st.selected)
         };
         if let (Some(name), Some(pin)) = (name, &*self.pin.borrow()) {
             pin(name);
         }
-        self.show_caption(cursor);
+        self.show_caption(selected);
     }
 }
 

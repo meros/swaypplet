@@ -44,6 +44,8 @@ pub enum Action {
     /// Map the surface, invisible, and take the keyboard.
     Map,
     Unmap,
+    /// Select a position: 0 is the workspace the gesture started on, `i`
+    /// the place whose command is `commands[i - 1]`.
     Select(usize),
     /// Run this sway command. At most one per gesture, always last.
     Run(String),
@@ -52,6 +54,8 @@ pub enum Action {
 #[derive(Debug, Default)]
 pub struct Gesture {
     live: bool,
+    /// The selected position: 0 is where the gesture started, which
+    /// Shift+Tab can walk back to, and committing there goes nowhere.
     cursor: usize,
     /// The command per row, captured when the gesture started. Held rather
     /// than re-read, so a workspace appearing mid-gesture cannot shift what
@@ -87,9 +91,9 @@ impl Gesture {
                     return Vec::new();
                 }
                 self.live = true;
-                self.cursor = 0;
+                self.cursor = 1;
                 self.commands = commands.to_vec();
-                vec![Action::Map, Action::Select(0)]
+                vec![Action::Map, Action::Select(1)]
             }
             // A tap so short the surface never mapped. Nothing is live, so
             // there is nothing to commit and nothing to tidy up.
@@ -100,7 +104,7 @@ impl Gesture {
                 // Clamped, not wrapped. Wrapping past the end lands you back
                 // at the top of a list you were walking away from, which is
                 // never what a held key means.
-                self.cursor = (self.cursor + 1).min(self.commands.len() - 1);
+                self.cursor = (self.cursor + 1).min(self.commands.len());
                 vec![Action::Select(self.cursor)]
             }
             (true, Ev::StepBack) => {
@@ -110,7 +114,13 @@ impl Gesture {
 
             // ── ending ──────────────────────────────────────────────────
             (true, Ev::SuperReleased) | (true, Ev::Watchdog) => {
-                let command = self.commands.get(self.cursor).cloned();
+                // At 0, back where it started: nothing to run, the same end
+                // as Escape.
+                let command = self
+                    .cursor
+                    .checked_sub(1)
+                    .and_then(|i| self.commands.get(i))
+                    .cloned();
                 self.reset();
                 // Unmap first: keyboard focus has to land on the destination,
                 // not on a layer surface that is about to stop existing.
@@ -219,11 +229,19 @@ mod tests {
         for _ in 0..10 {
             g.on(Ev::Step, &c);
         }
-        assert_eq!(g.cursor(), 1, "clamped at the last row, not wrapped");
+        assert_eq!(g.cursor(), 2, "clamped at the last place, not wrapped");
         for _ in 0..10 {
             g.on(Ev::StepBack, &c);
         }
-        assert_eq!(g.cursor(), 0, "never steps past the first row");
+        assert_eq!(g.cursor(), 0, "back to where it started, no further");
+    }
+
+    #[test]
+    fn stepping_back_to_the_start_and_releasing_goes_nowhere() {
+        let a = run(3, &[Ev::Step, Ev::StepBack, Ev::SuperReleased]);
+        assert!(a.contains(&Action::Select(0)));
+        assert!(runs(&a).is_empty());
+        assert!(a.contains(&Action::Unmap));
     }
 
     #[test]
@@ -240,8 +258,8 @@ mod tests {
         g.on(Ev::SuperReleased, &c);
         assert!(!g.is_live());
         let second = g.on(Ev::Step, &c);
-        assert_eq!(second, vec![Action::Map, Action::Select(0)]);
-        assert_eq!(g.cursor(), 0, "a new gesture starts at the first row");
+        assert_eq!(second, vec![Action::Map, Action::Select(1)]);
+        assert_eq!(g.cursor(), 1, "a new gesture starts at the first place");
     }
 
     #[test]
