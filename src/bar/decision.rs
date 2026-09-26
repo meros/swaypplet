@@ -34,9 +34,9 @@ use gtk4::prelude::*;
 use crate::anim;
 use crate::bar::battery::CRITICAL_PCT;
 use crate::bar::board::{chip_label, session_age};
+use crate::power::{self, BatteryState};
 use crate::task_state::{Activity, SessionState, TaskSnapshot, TaskStateService};
 use crate::ui;
-use crate::widgets::power::{self, BatteryState};
 
 /// A revealer opening or closing in place (motion: expand).
 const SWAP_MS: u64 = crate::tokens::motion::EXPAND.ms as u64;

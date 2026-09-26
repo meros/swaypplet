@@ -75,23 +75,6 @@ pub fn signal_icon(strength: u8) -> &'static str {
     }
 }
 
-/// A signal is only coloured when it is a problem: weak is a warning, none
-/// is danger, and anything usable stays in the icon's own tone.
-pub fn signal_tone(strength: u8) -> crate::ui::Tone {
-    match strength {
-        0..=20 => crate::ui::Tone::Danger,
-        21..=40 => crate::ui::Tone::Warning,
-        _ => crate::ui::Tone::Fg,
-    }
-}
-
-/// Draw a network glyph (a row's or the hero's icon) at title size, in the
-/// tone its signal earns.
-pub fn set_signal_glyph(icon: &gtk4::Label, glyph: &str, tone: crate::ui::Tone) {
-    icon.set_label(glyph);
-    crate::ui::glyph(icon, crate::ui::Text::Title, tone);
-}
-
 // ── Data types ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -851,38 +834,6 @@ pub fn get_active_wifi_conn_name() -> Option<String> {
         .into_iter()
         .find(|(_, kind, _)| kind == NM_TYPE_WIFI)
         .map(|(id, _, _)| id)
-}
-
-// ── Shared UI helpers ─────────────────────────────────────────────────────────
-
-/// Apply an `NmResult` to a status label: set text, tone, and visibility.
-pub fn apply_nm_result(status_lbl: &gtk4::Label, result: &NmResult) {
-    use gtk4::prelude::*;
-    match result {
-        NmResult::Success => {
-            status_lbl.set_label("✓");
-            crate::ui::set_text_style(status_lbl, crate::ui::Text::Label, crate::ui::Tone::Success);
-        }
-        NmResult::Failure(msg) => {
-            let display = if msg.is_empty() {
-                "Failed"
-            } else {
-                msg.as_str()
-            };
-            status_lbl.set_label(display);
-            crate::ui::set_text_style(status_lbl, crate::ui::Text::Label, crate::ui::Tone::Danger);
-        }
-    }
-    status_lbl.set_visible(true);
-}
-
-/// Auto-hide a status label after 4 seconds.
-pub fn auto_hide_status(status_lbl: &gtk4::Label) {
-    use gtk4::prelude::*;
-    let status_hide = status_lbl.clone();
-    glib::timeout_add_local_once(std::time::Duration::from_secs(4), move || {
-        status_hide.set_visible(false);
-    });
 }
 
 #[cfg(test)]

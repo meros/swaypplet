@@ -15,9 +15,9 @@ use gtk4::prelude::*;
 
 use super::popover;
 use crate::icons;
+use crate::mpris::{MediaState, PlaybackStatus};
 use crate::spawn::spawn_work;
 use crate::ui;
-use crate::widgets::media::{self, MediaState, PlaybackStatus};
 
 /// The mark, its popover and the last known player state — cloned into
 /// every handler (GTK objects are refcounted, the state cell is shared).
@@ -45,7 +45,7 @@ fn control_button(face: &gtk4::Label) -> gtk4::Button {
 fn send(cmd: &'static str) {
     spawn_work(
         move || {
-            media::playerctl(&[cmd]);
+            crate::mpris::playerctl(&[cmd]);
         },
         |_| {},
     );

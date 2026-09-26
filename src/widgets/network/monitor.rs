@@ -4,8 +4,8 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{Label, ListBox};
 
-use super::NetworkState;
 use super::backend::*;
+use super::{NetworkState, set_signal_glyph, signal_tone};
 
 /// Widget handles needed by the display update helpers.
 pub struct DisplayWidgets {

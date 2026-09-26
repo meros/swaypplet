@@ -755,9 +755,9 @@ fn build_telemetry_ribbon(
     ribbon.add_css_class("helm-telemetry-ribbon");
 
     // 1. Power / Battery pill (dynamic)
-    let (icon_str, label_str) = if let Some(path) = power::find_battery_path() {
-        if let Some(bat) = power::read_battery(&path) {
-            let icon = power::battery_icon(bat.capacity, bat.charging);
+    let (icon_str, label_str) = if let Some(path) = crate::power::find_battery_path() {
+        if let Some(bat) = crate::power::read_battery(&path) {
+            let icon = crate::power::battery_icon(bat.capacity, bat.charging);
             let state_suffix = if bat.charging { " 󱐋" } else { "" };
             (icon, format!("{}%{}", bat.capacity, state_suffix))
         } else {

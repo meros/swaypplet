@@ -31,6 +31,7 @@ mod notifications;
 mod osd;
 mod panel;
 mod polkit;
+mod power;
 mod presence;
 mod preview;
 mod screenshot;

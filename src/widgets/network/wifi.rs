@@ -7,8 +7,8 @@ use gtk4::{
     Spinner,
 };
 
-use super::NetworkState;
 use super::backend::*;
+use super::{NetworkState, apply_nm_result, auto_hide_status, set_signal_glyph, signal_tone};
 use crate::spawn::spawn_work;
 use crate::tokens::space;
 use crate::ui;
