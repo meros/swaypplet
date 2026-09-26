@@ -8,7 +8,15 @@
 //! and it takes only the clicks that land on it.
 //!
 //! What is left here is the choreography: which card sits where, which one
-//! gives way when the stack is full, and when each one expires. The
+//! gives way when the stack is full, and when each one expires.
+//!
+//! One card per sender (`services::notifications::group`). A notification
+//! from a sender that already has a card joins it: the card shows the newest,
+//! counts the rest, and moves to the newest slot, all on the surface it
+//! already has, so a burst is one card updating in place rather than a
+//! column of copies. Dismissing or expiring the card closes the whole group;
+//! a sender withdrawing one member only takes it off the count. Critical
+//! notifications never join a group. The
 //! transitions themselves belong to `anim::Reveal`, and the surface to
 //! `card_surface::CardSurface`.
 //!
@@ -33,6 +41,7 @@ use super::card::{age_label, populate_card, set_critical_class, wants_keyboard};
 use super::card_surface::CardSurface;
 use super::timers::{Timer, cancel_timer, make_timer, pause_timers, resume_timers};
 use crate::anim;
+use crate::services::notifications::group;
 use crate::services::notifications::store::{self, NotificationStore};
 use crate::services::notifications::{CloseReason, Notification};
 use crate::settings::store::{Alerts, Corner};
@@ -56,10 +65,6 @@ const GAP: f64 = crate::tokens::space(3) as f64;
 // Collapsed cards peek out below the last full card by this much per level
 const PEEK: f64 = 12.0;
 const PEEK_SCALE_STEP: f64 = 0.05;
-// How many cards one app may hold at once is the stack depth: one app may
-// fill the cards shown at full size and no more, which still leaves the
-// collapsed tail for everyone else. Past the cap its oldest card gives way
-// to its newest and the overflow is counted on the survivor instead.
 
 /// The Alerts tab, read once per card: a card keeps the corner and the
 /// stack depth it was born with, so a change lands on the next card rather
@@ -80,11 +85,15 @@ fn anchors_for(corner: Corner) -> &'static [Edge] {
 }
 
 pub(super) struct Card {
+    /// The notification the card shows: its group's newest.
     pub(super) id: u32,
     pub(super) surface: CardSurface,
     pub(super) timer: Timer,
-    /// Which app sent it, for the per-app cap.
-    pub(super) app: String,
+    /// The sender it groups under, or `None` for a card that stands alone
+    /// (`group::key`).
+    pub(super) group: Option<String>,
+    /// Every notification the card stands for, oldest first; `id` is last.
+    pub(super) members: Vec<u32>,
     /// The card carries a field that has to be typed into, which is the only
     /// reason its surface ever accepts keyboard focus.
     pub(super) wants_keyboard: bool,
@@ -110,10 +119,6 @@ pub(super) struct State {
     pub(super) cards: Vec<Card>,
     pub(super) store: Rc<RefCell<NotificationStore>>,
     pub(super) hovered: bool,
-    /// Cards an app has had pushed off the stack while it still holds one,
-    /// shown as a count on its newest card. Cleared when the app's last card
-    /// goes, so the number always means "since this run of chatter began".
-    pub(super) overflow: std::collections::HashMap<String, u32>,
     /// The once-a-minute age refresh. Boundary-aimed and alive only while
     /// cards are on screen (P7): a timer that outlives its reason is a
     /// wakeup for nothing.
@@ -146,7 +151,6 @@ impl PopupManager {
             cards: Vec::new(),
             store: store.clone(),
             hovered: false,
-            overflow: std::collections::HashMap::new(),
             age_timer: None,
             sway: None,
         }));
@@ -161,7 +165,7 @@ impl PopupManager {
             let st = state.clone();
             store
                 .borrow_mut()
-                .connect_close(move |id, _reason| dismiss(&st, id));
+                .connect_close(move |id, reason| dismiss(&st, id, reason));
         }
         Self { state }
     }
@@ -179,41 +183,50 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     }
 
     let id = notif.id;
+    let key = group::key(notif);
 
-    // Replacing an existing popup: rebuild its content in place, keeping the
-    // surface so the card does not blink out and back.
-    // populate_card unparents the old children, which can synthesize pointer
-    // crossing events whose handlers borrow the state — run it unborrowed.
-    let existing = {
-        let mut s = st.borrow_mut();
-        let hovered = s.hovered;
-        s.cards
-            .iter_mut()
-            .find(|c| c.id == id && !c.exiting)
-            .map(|card| {
+    // A card already on screen takes this notification in place, keeping its
+    // surface so it does not blink out and back: either the notification it
+    // shows was replaced (`replaces_id`), or its sender sent another one.
+    // A replaced member that the card does not show changes nothing visible.
+    let target = {
+        let s = st.borrow();
+        s.active()
+            .find(|c| c.members.contains(&id) || (key.is_some() && c.group == key))
+            .map(|c| (c.id, c.members.contains(&id) && c.id != id))
+    };
+    match target {
+        Some((_, true)) => return,
+        Some((shown, false)) => {
+            let joined = {
+                let mut s = st.borrow_mut();
+                let hovered = s.hovered;
+                let Some(i) = s.cards.iter().position(|c| c.id == shown && !c.exiting) else {
+                    return;
+                };
+                let mut card = s.cards.remove(i);
+                let joined = group::join(&mut card.members, id);
+                card.id = id;
                 cancel_timer(&mut card.timer);
                 card.timer = make_timer(&store, notif, hovered);
-                card.surface.clone()
-            })
-    };
-    if let Some(surface) = existing {
-        let overflow = overflow_for(st, &notif.app_name);
-        let age = populate_card(surface.pane(), notif, &store, st, overflow);
-        set_critical_class(surface.pane(), notif);
-        if let Some(content) = surface.pane().first_child() {
-            surface.set_content(&content);
-        }
-        {
-            let mut s = st.borrow_mut();
-            if let Some(card) = s.cards.iter_mut().find(|c| c.id == id && !c.exiting) {
-                card.stamp = notif.timestamp;
-                card.age = age;
-                card.wants_keyboard = wants_keyboard(notif);
+                if joined {
+                    // The group's newest just arrived, so the card takes the
+                    // newest slot; reflow moves it there over `move`.
+                    s.cards.push(card);
+                } else {
+                    // An update to what the card shows (a progress tick)
+                    // keeps its place, or the stack would reshuffle per tick.
+                    s.cards.insert(i, card);
+                }
+                joined
+            };
+            refill(st, id, notif);
+            if joined {
+                log::debug!("notifications: {id} joined its sender's card");
             }
+            return;
         }
-        sync_keyboard_mode(st);
-        reflow(st);
-        return;
+        None => {}
     }
 
     // Which screen this card belongs to, decided before anything counts the
@@ -240,27 +253,6 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     // The name is kept only when the surface really was pinned to it, so the
     // grouping below can never disagree with where a card is.
     let output = monitor.as_ref().and(output);
-
-    // The app's own oldest card gives way before anyone else's: a burst from
-    // one sender should cost that sender its slots, not the stack. Counted
-    // across every screen, because this cap is about the sender rather than
-    // about the column.
-    let crowded = {
-        let s = st.borrow();
-        let mine: Vec<u32> = s
-            .active()
-            .filter(|c| c.app == notif.app_name)
-            .map(|c| c.id)
-            .collect();
-        (mine.len() >= usize::from(alerts().stack)).then(|| mine[0])
-    };
-    if let Some(old_id) = crowded {
-        start_exit(st, old_id);
-        *st.borrow_mut()
-            .overflow
-            .entry(notif.app_name.clone())
-            .or_insert(0) += 1;
-    }
 
     // Evict the oldest popup when this screen's column is full (popup only —
     // the notification stays open in the store/history). Per column, for the
@@ -310,8 +302,7 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     }
     set_critical_class(surface.pane(), notif);
 
-    let overflow = overflow_for(st, &notif.app_name);
-    let age = populate_card(surface.pane(), notif, &store, st, overflow);
+    let age = populate_card(surface.pane(), notif, &store, st, &[]);
     if let Some(content) = surface.pane().first_child() {
         surface.set_content(&content);
     }
@@ -336,7 +327,8 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
             id,
             surface,
             timer,
-            app: notif.app_name.clone(),
+            group: key,
+            members: vec![id],
             wants_keyboard: wants_keyboard(notif),
             stamp: notif.timestamp,
             age,
@@ -360,8 +352,50 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     }
 }
 
-fn overflow_for(st: &Rc<RefCell<State>>, app: &str) -> u32 {
-    st.borrow().overflow.get(app).copied().unwrap_or(0)
+/// Rebuild the card showing `id` with `notif`, in place, with its group's
+/// earlier members listed under it.
+///
+/// populate_card unparents the old children, which can synthesize pointer
+/// crossing events whose handlers borrow the state, so it runs unborrowed.
+fn refill(st: &Rc<RefCell<State>>, id: u32, notif: &Notification) {
+    let (surface, members, store) = {
+        let s = st.borrow();
+        let Some(card) = s.active().find(|c| c.id == id) else {
+            return;
+        };
+        (card.surface.clone(), card.members.clone(), s.store.clone())
+    };
+    let earlier = earlier_members(&store, &members, id);
+    let age = populate_card(surface.pane(), notif, &store, st, &earlier);
+    set_critical_class(surface.pane(), notif);
+    if let Some(content) = surface.pane().first_child() {
+        surface.set_content(&content);
+    }
+    {
+        let mut s = st.borrow_mut();
+        if let Some(card) = s.cards.iter_mut().find(|c| c.id == id && !c.exiting) {
+            card.stamp = notif.timestamp;
+            card.age = age;
+            card.wants_keyboard = wants_keyboard(notif);
+        }
+    }
+    sync_keyboard_mode(st);
+    reflow(st);
+}
+
+/// The group's other members still in the store, newest first.
+fn earlier_members(
+    store: &Rc<RefCell<NotificationStore>>,
+    members: &[u32],
+    shown: u32,
+) -> Vec<Notification> {
+    let store = store.borrow();
+    members
+        .iter()
+        .rev()
+        .filter(|m| **m != shown)
+        .filter_map(|m| store.all().iter().find(|n| n.id == *m).cloned())
+        .collect()
 }
 
 /// Keep the header ages honest while cards are on screen.
@@ -391,9 +425,64 @@ fn ensure_age_timer(st: &Rc<RefCell<State>>) {
     st.borrow_mut().age_timer = Some(source);
 }
 
-fn dismiss(st: &Rc<RefCell<State>>, id: u32) {
-    if start_exit(st, id) {
-        reflow(st);
+/// A notification closed. What that means for its card depends on who
+/// closed it and whether the card shows it:
+///
+/// - The shown one, dismissed or expired: the card goes, and the rest of its
+///   group is closed with the same reason, because the card stood for all of
+///   them.
+/// - The shown one, withdrawn by its sender: the card falls back to the
+///   group's next newest, or goes if that was the last.
+/// - A member the card does not show: it comes off the count.
+fn dismiss(st: &Rc<RefCell<State>>, id: u32, reason: CloseReason) {
+    let found = {
+        let s = st.borrow();
+        s.active()
+            .find(|c| c.members.contains(&id))
+            .map(|c| (c.id, c.members.clone()))
+    };
+    let Some((shown, members)) = found else {
+        return;
+    };
+    let rest: Vec<u32> = members.iter().copied().filter(|m| *m != id).collect();
+    {
+        let mut s = st.borrow_mut();
+        if let Some(card) = s.cards.iter_mut().find(|c| c.id == shown && !c.exiting) {
+            card.members.retain(|m| *m != id);
+        }
+    }
+    let whole = matches!(reason, CloseReason::Dismissed | CloseReason::Expired);
+    if id == shown && (whole || rest.is_empty()) {
+        if start_exit(st, id) {
+            reflow(st);
+        }
+        if whole && !rest.is_empty() {
+            // The card is already exiting, so these closes find no card.
+            let store = st.borrow().store.clone();
+            store::store_close_all_of(&store, &rest, reason);
+        }
+        return;
+    }
+    let store = st.borrow().store.clone();
+    let next = if id == shown { rest.last().copied() } else { Some(shown) };
+    let notif = next.and_then(|n| store.borrow().all().iter().find(|x| x.id == n).cloned());
+    match notif {
+        Some(notif) => {
+            {
+                let mut s = st.borrow_mut();
+                if let Some(card) = s.cards.iter_mut().find(|c| c.id == shown && !c.exiting) {
+                    card.id = notif.id;
+                }
+            }
+            refill(st, notif.id, &notif);
+        }
+        // The member to fall back to is not in history (a transient one):
+        // nothing is left to show.
+        None => {
+            if start_exit(st, shown) {
+                reflow(st);
+            }
+        }
     }
 }
 
@@ -431,11 +520,6 @@ fn retire(st: &Rc<RefCell<State>>, id: u32) {
             return;
         };
         s.cards.remove(i);
-        // An app with no cards left starts its next burst from zero. The set
-        // is collected first because `retain` holds the map borrowed while it
-        // runs, and the predicate has to read `cards` on the same struct.
-        let live: std::collections::HashSet<String> = s.active().map(|c| c.app.clone()).collect();
-        s.overflow.retain(|app, _| live.contains(app));
     }
     sync_keyboard_mode(st);
     reflow(st);

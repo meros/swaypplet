@@ -1,4 +1,5 @@
 pub mod dbus;
+pub mod group;
 pub mod quiet;
 pub mod store;
 

@@ -387,6 +387,26 @@ pub fn run(component: &str) {
                 host.append(s.widget());
             }
             "notifications" => {
+                // A sender with a burst and two single ones, so the centre's
+                // grouping (`services::notifications::group`) is on screen.
+                for (app, summary, body) in [
+                    ("CI", "Pipeline #411 failed", "test: 2 of 418 failed on main."),
+                    ("Kalender", "Möte nu — Åsa, Öresund", "Startade 10:45."),
+                    ("CI", "Pipeline #412 failed", "test: 1 of 418 failed on main."),
+                    ("Chat", "Ada Lovelace", "Short one."),
+                    ("CI", "Pipeline #413 passed", "All 418 tests passed."),
+                ] {
+                    crate::services::notifications::store::store_add(
+                        &store,
+                        crate::services::notifications::Notification {
+                            app_name: app.into(),
+                            summary: summary.into(),
+                            body: body.into(),
+                            timestamp: std::time::SystemTime::now(),
+                            ..Default::default()
+                        },
+                    );
+                }
                 let s = Box::leak(Box::new(NotificationsSection::new(store.clone())));
                 s.expand_for_page();
                 host.append(s.widget());

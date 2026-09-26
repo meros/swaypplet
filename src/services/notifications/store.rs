@@ -271,6 +271,28 @@ impl NotificationStore {
         pending
     }
 
+    /// Close several notifications as one: a sender's group, dismissed or
+    /// expired together. Ids that are not open are skipped, as in [`close`].
+    ///
+    /// [`close`]: Self::close
+    pub fn close_all_of(&mut self, ids: &[u32], reason: CloseReason) -> PendingCallbacks {
+        let mut pending = PendingCallbacks::new();
+        let mut any = false;
+        for id in ids {
+            if self.open_ids.remove(id) {
+                any = true;
+                for cb in &self.on_close {
+                    pending.close.push((cb.clone(), *id, reason));
+                }
+            }
+        }
+        if any {
+            self.notifications.retain(|n| !ids.contains(&n.id));
+            self.collect_change(&mut pending);
+        }
+        pending
+    }
+
     /// Remove all notifications from history.
     pub fn clear_all(&mut self) -> PendingCallbacks {
         let ids: Vec<u32> = self.notifications.iter().map(|n| n.id).collect();
@@ -354,6 +376,11 @@ pub fn store_add(store: &StoreRef, notif: Notification) -> u32 {
 
 pub fn store_close(store: &StoreRef, id: u32, reason: CloseReason) {
     let pending = store.borrow_mut().close(id, reason);
+    pending.fire();
+}
+
+pub fn store_close_all_of(store: &StoreRef, ids: &[u32], reason: CloseReason) {
+    let pending = store.borrow_mut().close_all_of(ids, reason);
     pending.fire();
 }
 
