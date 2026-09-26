@@ -5,9 +5,8 @@
 //! and the pin keeps showing it: a build scrolling, a Claude session
 //! thinking, a video.
 //!
-//! A pin is the Super+Tab picture (`card::preview`) on its own small layer
-//! surface, with no frame cap: every frame the compositor renders for a
-//! window reaches it. A pin hides while its workspace is on a screen, since
+//! A pin is a workspace view (`view.rs`, the same card the bar's peek shows)
+//! on its own small layer surface, at the view's frame cap. A pin hides while its workspace is on a screen, since
 //! then the real thing is in sight, and its capture stops with it.
 //!
 //! That rule made pinning silent: you pin the workspace you are on, which is
@@ -34,30 +33,24 @@ use gtk4::prelude::*;
 use gtk4::{gdk, glib};
 use gtk4_layer_shell::{Edge, LayerShell as _};
 
-use super::card::{self, Live};
 use super::live;
 use super::scene::{self, Scene};
+use super::view::{self, PIN_GLYPH, UNPIN_GLYPH, View};
 use crate::shell::{Namespace, Surface, layer};
 use crate::sway::ipc::SwayService;
 
-/// The picture, 16:10.
-const PIN_W: i32 = 400;
-const PIN_H: i32 = 250;
 /// From the screen's corner, clear of the bar.
 const MARGIN_RIGHT: i32 = crate::tokens::space(5);
 const MARGIN_BOTTOM: i32 = 2 * crate::tokens::space(7);
 /// Between stacked pins.
 const GAP: i32 = crate::tokens::space(4);
 /// A pin's full height on screen: the picture, the footer, the padding.
-const PIN_STEP: i32 = PIN_H + 32 + 16 + GAP;
+const PIN_STEP: i32 = view::H + 32 + 16 + GAP;
 /// How long a new pin shows itself before its workspace's own screen hides
 /// it: long enough to see where it lives.
 const INTRODUCE: Duration = Duration::from_millis(1600);
 /// A pin slides in from, and out to, the screen's edge by this much.
 const SLIDE_PX: f64 = 48.0;
-
-const PIN_GLYPH: &str = "\u{f0403}";
-const UNPIN_GLYPH: &str = "\u{f0404}";
 
 // ── Who is pinned, for the bar and the Super+Tab card ───────────────────
 
@@ -114,6 +107,14 @@ fn publish(names: Vec<String>) {
     }
 }
 
+/// Go to `workspace`: what a click on its picture does, pinned or peeked.
+pub fn go(workspace: &str) {
+    crate::sway::ipc::run_command(&format!(
+        "workspace \"{}\"",
+        workspace.replace('\\', "\\\\").replace('"', "\\\"")
+    ));
+}
+
 // ── The pins ────────────────────────────────────────────────────────────
 
 /// What a region pin follows: one window, and the piece of it.
@@ -122,8 +123,6 @@ struct RegionPin {
     id: String,
     con_id: i64,
     crop: live::Crop,
-    /// The window's size at the last rebuild, so a resize rebuilds.
-    size: (i32, i32),
 }
 
 struct Pin {
@@ -138,11 +137,9 @@ struct Pin {
     /// `Some` for a piece of one window rather than a whole workspace.
     region: Option<RegionPin>,
     surface: Surface,
-    /// Where the picture goes; rebuilt when the workspace changes shape.
-    holder: gtk4::Box,
-    live: Rc<RefCell<Live>>,
-    stream: Option<live::Stream>,
-    scene: Option<Scene>,
+    /// The picture and its footer; it rebuilds itself when the workspace
+    /// changes shape.
+    view: View,
     /// Until then the pin shows even though its workspace is on a screen.
     introduce_until: Option<Instant>,
     /// The output its surface is on.
@@ -152,7 +149,7 @@ struct Pin {
 impl Drop for Pin {
     fn drop(&mut self) {
         // The capture before the surface it draws into.
-        self.stream = None;
+        self.view.stop();
     }
 }
 
@@ -206,10 +203,7 @@ impl Pins {
 
     /// Go to a pinned workspace.
     pub fn go(&self, workspace: &str) {
-        crate::sway::ipc::run_command(&format!(
-            "workspace \"{}\"",
-            workspace.replace('\\', "\\\\").replace('"', "\\\"")
-        ));
+        go(workspace);
     }
 
     /// Follow sway: rebuild a pin whose workspace changed shape, and hide
@@ -305,10 +299,7 @@ impl Pins {
             label: label.clone(),
             region: None,
             surface: parts.surface,
-            holder: parts.holder,
-            live: Rc::default(),
-            stream: None,
-            scene: None,
+            view: parts.view,
             introduce_until: Some(Instant::now() + INTRODUCE),
             output: output.clone(),
         });
@@ -341,13 +332,9 @@ impl Pins {
                 id,
                 con_id: region.window.con_id,
                 crop: region.frac,
-                size: (0, 0),
             }),
             surface: parts.surface,
-            holder: parts.holder,
-            live: Rc::default(),
-            stream: None,
-            scene: None,
+            view: parts.view,
             introduce_until: Some(Instant::now() + INTRODUCE),
             output,
         });
@@ -420,6 +407,7 @@ impl Pins {
     /// A click on the picture goes there; right or middle click, or the ×,
     /// unpins.
     fn wire(&self, parts: &Parts, workspace: &str) {
+        let close = parts.view.action("\u{00d7}", "Unpin");
         let workspace = workspace.to_string();
         let click = gtk4::GestureClick::new();
         click.set_button(0);
@@ -432,11 +420,11 @@ impl Pins {
                 _ => {}
             });
         }
-        parts.holder.add_controller(click);
+        parts.view.picture().add_controller(click);
         {
             let this = self.clone();
             let workspace = workspace.clone();
-            parts.close.connect_clicked(move |_| this.unpin(&workspace));
+            close.connect_clicked(move |_| this.unpin(&workspace));
         }
     }
 
@@ -470,13 +458,9 @@ impl Pins {
             let mut inner = self.inner.borrow_mut();
             let pin = &mut inner.pins[i];
             // The old surface goes as the new one comes, its capture first.
-            pin.stream = None;
+            pin.view.stop();
             pin.surface = parts.surface;
-            pin.holder = parts.holder;
-            pin.scene = None;
-            if let Some(region) = &mut pin.region {
-                region.size = (0, 0);
-            }
+            pin.view = parts.view;
             pin.output = Some(output.to_string());
         }
         self.stack();
@@ -593,7 +577,7 @@ enum Found {
 
 /// Hide a pin whose workspace is on a screen.
 fn hide(pin: &mut Pin) {
-    pin.stream = None;
+    pin.view.stop();
     // Only a pin that is shown has anything to hide. A surface `follow` has
     // just rebuilt on another output was never shown, so it was never
     // realized, and Reveal's exit path on it reached for a GDK surface that
@@ -605,97 +589,29 @@ fn hide(pin: &mut Pin) {
     }
 }
 
-/// Show or hide a region pin, and rebuild its picture when its window
-/// changed size.
+/// Show or hide a region pin; its view rebuilds when the window resized.
 fn update_region(pin: &mut Pin, window: &scene::Window, show: bool) {
     if !show {
         hide(pin);
         return;
     }
-    let Some(region) = pin.region.as_mut() else {
+    let Some(region) = pin.region.as_ref() else {
         return;
     };
-    let size = (window.w, window.h);
-    if region.size != size || pin.stream.is_none() {
-        region.size = size;
-        while let Some(child) = pin.holder.first_child() {
-            pin.holder.remove(&child);
-        }
-        // The piece's own shape, fitted into the pin's box.
-        let (_, _, fw, fh) = region.crop;
-        let (pw, ph) = (f64::from(window.w) * fw, f64::from(window.h) * fh);
-        let (s, _, _) = scene::fit(pw.round() as i32, ph.round() as i32, PIN_W, PIN_H);
-        let picture = card::LivePicture::new();
-        picture.set_size_request(
-            ((pw * s).round() as i32).max(8),
-            ((ph * s).round() as i32).max(8),
-        );
-        picture.set_halign(gtk4::Align::Center);
-        pin.holder.append(&picture);
-        *pin.live.borrow_mut() = Live::default();
-        pin.live.borrow_mut().add(region.id.clone(), picture);
-
-        let (tx, rx) = async_channel::unbounded::<live::Frame>();
-        let live = pin.live.clone();
-        glib::spawn_future_local(async move {
-            while let Ok(frame) = rx.recv().await {
-                live.borrow().frame(frame);
-            }
-        });
-        pin.stream = Some(live::Stream::start_region(
-            region.id.clone(),
-            region.crop,
-            (PIN_W * 2) as u32,
-            0,
-            tx,
-        ));
-    }
+    pin.view
+        .show_region(&region.id, region.crop, (window.w, window.h), view::FPS);
     if !pin.surface.is_shown() {
         pin.surface.show();
     }
 }
 
-/// Show or hide a pin, and rebuild its picture when its scene changed.
+/// Show or hide a pin; its view rebuilds when the scene changed.
 fn update(pin: &mut Pin, scene: Option<Scene>, show: bool) {
     if !show {
         hide(pin);
         return;
     }
-    let changed = pin.scene != scene;
-    if changed || pin.stream.is_none() {
-        while let Some(child) = pin.holder.first_child() {
-            pin.holder.remove(&child);
-        }
-        *pin.live.borrow_mut() = Live::default();
-        // The workspace's own shape inside the pin's box, so the card hugs
-        // the picture: a box of fixed proportions letterboxed a 16:9 output
-        // with a band above and below it, which read as uneven margins.
-        let (w, h) = scene.as_ref().map_or((PIN_W, PIN_H), |scene| {
-            let (s, _, _) = scene::fit(scene.width, scene.height, PIN_W, PIN_H);
-            (
-                ((f64::from(scene.width) * s).round() as i32).clamp(8, PIN_W),
-                ((f64::from(scene.height) * s).round() as i32).clamp(8, PIN_H),
-            )
-        });
-        let picture = card::preview(scene.as_ref(), w, h, &mut pin.live.borrow_mut());
-        pin.holder.append(&picture);
-        pin.scene = scene;
-
-        let ids = pin.live.borrow().window_ids();
-        pin.stream = None;
-        if !ids.is_empty() {
-            let (tx, rx) = async_channel::unbounded::<live::Frame>();
-            let live = pin.live.clone();
-            glib::spawn_future_local(async move {
-                while let Ok(frame) = rx.recv().await {
-                    live.borrow().frame(frame);
-                }
-            });
-            // No frame cap: a pin is watched, and is small enough to afford
-            // every frame.
-            pin.stream = Some(live::Stream::start(ids, (PIN_W * 2) as u32, 0, tx));
-        }
-    }
+    pin.view.show_scene(scene, view::FPS);
     if !pin.surface.is_shown() {
         pin.surface.show();
     }
@@ -711,8 +627,7 @@ fn region_label(app: &str, workspace: &str) -> String {
 
 struct Parts {
     surface: Surface,
-    holder: gtk4::Box,
-    close: gtk4::Button,
+    view: View,
 }
 
 fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: &str) -> Parts {
@@ -741,52 +656,9 @@ fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: 
         slide.set_margin_end(MARGIN_RIGHT);
     }
 
-    let content = crate::ui::vbox(2);
+    let view = View::new(label, "click to go \u{00b7} right-click to unpin");
+    frame.append(view.widget());
+    surface.set_content(view.widget());
 
-    // The picture: a click goes there, and the pointer says so.
-    let holder = crate::ui::vbox(0);
-    holder.set_cursor_from_name(Some("pointer"));
-    content.append(&holder);
-
-    // The footer: the workspace, what a click does, and the way out. The
-    // hint and the × are quiet until the pointer is on the pin.
-    let footer = crate::ui::hbox(3);
-    footer.add_css_class("jump-pin-footer");
-    let mark = gtk4::Label::new(Some(PIN_GLYPH));
-    crate::ui::glyph::adopt(&mark, crate::ui::Text::Label, crate::ui::Tone::Muted);
-    footer.append(&mark);
-    let label = crate::ui::text(label, crate::ui::Text::Label, crate::ui::Tone::Muted);
-    crate::ui::set_weight(&label, crate::ui::Weight::Strong);
-    footer.append(&label);
-    let hint = crate::ui::text(
-        "click to go · right-click to unpin",
-        crate::ui::Text::Caption,
-        crate::ui::Tone::Faint,
-    );
-    hint.set_xalign(1.0);
-    hint.set_hexpand(true);
-    hint.add_css_class("jump-pin-hint");
-    footer.append(&hint);
-    let close = crate::ui::button_with(
-        crate::ui::Face::Glyph {
-            glyph: "\u{00d7}",
-            tooltip: "Unpin",
-        },
-        crate::ui::Kind::Flat,
-        crate::ui::Size::Normal,
-    );
-    close.add_css_class("pill");
-    close.add_css_class("small");
-    close.add_css_class("jump-pin-close");
-    footer.append(&close);
-    content.append(&footer);
-
-    frame.append(&content);
-    surface.set_content(&content);
-
-    Parts {
-        surface,
-        holder,
-        close,
-    }
+    Parts { surface, view }
 }

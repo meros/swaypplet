@@ -29,6 +29,7 @@
 //! window. Both were pictures of the workspace; this is the workspace.
 
 pub mod card;
+pub mod feed;
 pub mod gesture;
 pub mod live;
 pub mod pin;
@@ -36,6 +37,7 @@ pub mod place;
 pub mod row;
 pub mod rows;
 pub mod scene;
+pub mod view;
 
 use std::cell::RefCell;
 use std::rc::Rc;

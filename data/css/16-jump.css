@@ -11,7 +11,7 @@
     padding: 0 var(--space-1);
 }
 
-/* The workspace picture (the bar's peek and pins): its windows straight on
+/* The workspace picture (a workspace view, the pins popover): its windows straight on
    the glass. No ground and no frame, so the workspace is the group its
    windows make and nothing else; the gaps between them are the glass. */
 .jump-preview {
@@ -23,41 +23,36 @@
     background-color: transparent;
 }
 
-/* Peek (src/bar/peek.rs): the bar popover chassis around a tile's picture,
-   with no ground of its own either. */
-.jump-peek {
-    padding: var(--space-3);
-}
-
-/* Pins (src/jump/pin.rs): a small glass card in a corner, the picture over
-   a footer. The picture has no ground, like a tile's. The footer says what
-   the pin is and what it does: the mark and the label always, the hint and
-   the × at full strength only while the pointer is on the pin, so a pin
-   you are not touching stays quiet and one you are explains itself. */
-.jump-pin {
-    padding: var(--space-3) var(--space-3) var(--space-2) var(--space-3);
-}
-
-.jump-pin-footer {
+/* The workspace view (src/jump/view.rs), the card content a pin and the
+   bar's peek share: the picture over a footer. The footer says what it is
+   and what it does: the mark and the label always, the hint and the
+   actions at full strength only while the pointer is on the card, so a
+   view you are not touching stays quiet and one you are explains itself. */
+.jump-view-footer {
     padding: 0 var(--space-1);
 }
 
-.jump-pin-hint {
+.jump-view-hint {
     opacity: 0;
     transition: opacity var(--motion-state);
 }
 
-.jump-pin:hover .jump-pin-hint {
+.jump-view:hover .jump-view-hint {
     opacity: 1;
 }
 
-button.jump-pin-close {
+button.jump-view-action {
     opacity: 0.45;
     transition: opacity var(--motion-state);
 }
 
-.jump-pin:hover button.jump-pin-close {
+.jump-view:hover button.jump-view-action {
     opacity: 1;
+}
+
+/* Pins (src/jump/pin.rs): a small glass card in a corner around a view. */
+.jump-pin {
+    padding: var(--space-3) var(--space-3) var(--space-2) var(--space-3);
 }
 
 /* The window picker for screenshots (src/screenshot/window.rs): a glass

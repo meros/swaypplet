@@ -1,4 +1,5 @@
-//! Live pictures of workspaces, for the bar's peek and for pins.
+//! Live pictures of workspaces: the picture itself, for `view.rs` (a pin,
+//! the bar's peek) and the pins popover.
 //!
 //! A picture is composed, not captured whole. Every window on the workspace
 //! gets a [`LivePicture`] at the spot `scene.rs` computed, scaled into the
@@ -19,9 +20,8 @@ use gtk4::{gdk, glib};
 use super::live::Frame;
 use super::scene::{self, Scene};
 
-/// Every picture a window's frames land on, by window identifier. The
-/// bar's peek and a pinned mirror each keep one, fed by their own
-/// `live::Stream`.
+/// Every picture a window's frames land on, by window identifier. Each
+/// workspace view keeps one, fed through `feed.rs`.
 #[derive(Default)]
 pub struct Live {
     pictures: HashMap<String, Vec<LivePicture>>,
@@ -72,15 +72,8 @@ impl Live {
         if !self.pictures.contains_key(&frame.id) {
             return None;
         }
-        let texture = texture(frame.width, frame.height, frame.pixels);
-        self.show(&frame.id, &texture);
-        LAST.with(|l| {
-            let mut last = l.borrow_mut();
-            if last.len() >= LAST_MAX && !last.contains_key(&frame.id) {
-                last.clear();
-            }
-            last.insert(frame.id.clone(), texture.clone());
-        });
+        let (id, texture) = remember(frame);
+        self.show(&id, &texture);
         Some(texture)
     }
 
@@ -98,6 +91,19 @@ impl Live {
             }
         }
     }
+}
+
+/// A frame as a texture, kept as its window's last picture ([`LAST`]).
+pub fn remember(frame: Frame) -> (String, gdk::Texture) {
+    let texture = texture(frame.width, frame.height, frame.pixels);
+    LAST.with(|l| {
+        let mut last = l.borrow_mut();
+        if last.len() >= LAST_MAX && !last.contains_key(&frame.id) {
+            last.clear();
+        }
+        last.insert(frame.id.clone(), texture.clone());
+    });
+    (frame.id, texture)
 }
 
 /// Premultiplied BGRA, tightly packed, as `live::Frame` carries it.

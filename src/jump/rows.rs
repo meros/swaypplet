@@ -9,12 +9,6 @@ use super::place::Place;
 
 // ── Geometry ────────────────────────────────────────────────────────────
 
-/// A workspace picture, 16:10 like the panel: the bar's peek draws one this
-/// size. A workspace on a portrait or ultrawide output is letterboxed inside
-/// it (`scene::fit`).
-pub const PREVIEW_W: i32 = 540;
-pub const PREVIEW_H: i32 = 338;
-
 /// The list stops here. Nothing is lost by it: every workspace on this machine
 /// is one direct chord away, and the chord column on each row says which. A
 /// ninth row would be a place you have not visited in eight switches, which is

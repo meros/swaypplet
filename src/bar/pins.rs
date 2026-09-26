@@ -21,7 +21,7 @@ use gtk4::prelude::*;
 
 use super::popover;
 use crate::jump::card::{self, Live};
-use crate::jump::{live, pin};
+use crate::jump::{feed, pin};
 use crate::ui;
 
 const PIN: &str = "\u{f0403}";
@@ -41,7 +41,7 @@ struct Ui {
     pop: gtk4::Popover,
     body: gtk4::Box,
     live: Rc<RefCell<Live>>,
-    stream: RefCell<Option<live::Stream>>,
+    feed: RefCell<Option<feed::Feed>>,
 }
 
 pub fn build() -> gtk4::Widget {
@@ -71,7 +71,7 @@ pub fn build() -> gtk4::Widget {
         pop: pop.clone(),
         body,
         live: Rc::default(),
-        stream: RefCell::new(None),
+        feed: RefCell::new(None),
     });
 
     {
@@ -84,7 +84,7 @@ pub fn build() -> gtk4::Widget {
     {
         let ui = ui.clone();
         pop.connect_closed(move |_| {
-            ui.stream.replace(None);
+            ui.feed.replace(None);
         });
     }
 
@@ -228,20 +228,7 @@ fn rows(ui: &Rc<Ui>, scenes: &[(String, Option<crate::jump::scene::Scene>)]) {
     ui.body.append(&tuck);
 
     let ids = ui.live.borrow().window_ids();
-    ui.stream.replace(None);
-    if !ids.is_empty() {
-        let (tx, rx) = async_channel::unbounded::<live::Frame>();
-        let live = ui.live.clone();
-        glib::spawn_future_local(async move {
-            while let Ok(frame) = rx.recv().await {
-                live.borrow().frame(frame);
-            }
-        });
-        ui.stream.replace(Some(live::Stream::start(
-            ids,
-            (ROW_W * 2) as u32,
-            ROW_FPS,
-            tx,
-        )));
-    }
+    ui.feed.replace(None);
+    ui.feed
+        .replace(feed::subscribe(ids, None, (ROW_W * 2) as u32, ROW_FPS, &ui.live));
 }
