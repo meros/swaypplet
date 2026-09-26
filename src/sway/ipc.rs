@@ -181,6 +181,29 @@ impl SwayService {
     pub fn snapshot(&self) -> SwayState {
         self.state.with(Clone::clone)
     }
+
+    /// The focused output's connector name, from the last snapshot: the
+    /// output holding the focused workspace. `None` before the first
+    /// snapshot has arrived.
+    pub fn focused_output(&self) -> Option<String> {
+        self.state.with(|s| {
+            s.workspaces
+                .iter()
+                .find(|w| w.focused)
+                .map(|w| w.output.clone())
+        })
+    }
+}
+
+/// The focused output, read from `service` when this process runs one and
+/// it has reported, else by [`focused_output`]'s blocking round trip. The
+/// panel starts a [`SwayService`] only when it hosts the bar, and the
+/// service knows nothing until its first snapshot lands; both cases take the
+/// round trip rather than go without an answer.
+pub fn focused_output_from(service: Option<&SwayService>) -> Option<String> {
+    service
+        .and_then(SwayService::focused_output)
+        .or_else(focused_output)
 }
 
 /// Fire a sway command (workspace switch on bar click, etc.) without
@@ -198,12 +221,7 @@ pub fn run_command(cmd: &str) {
 pub fn run_command_then(cmd: &str, then: impl FnOnce() + 'static) {
     let cmd = cmd.to_string();
     crate::spawn::spawn_work(
-        move || {
-            connect()
-                .and_then(|mut c| c.run_command(&cmd))
-                .and_then(|outcomes| outcomes.into_iter().find(Result::is_err).unwrap_or(Ok(())))
-                .map_err(|e| format!("sway ipc: command `{cmd}` failed: {e}"))
-        },
+        move || run_command_blocking(&cmd),
         |result| {
             if let Err(msg) = result {
                 log::warn!("{msg}");
@@ -240,12 +258,7 @@ pub fn run_commands(cmds: Vec<String>) {
 pub fn run_command_result(cmd: &str, then: impl FnOnce(bool) + 'static) {
     let cmd = cmd.to_string();
     crate::spawn::spawn_work(
-        move || {
-            connect()
-                .and_then(|mut c| c.run_command(&cmd))
-                .and_then(|outcomes| outcomes.into_iter().find(Result::is_err).unwrap_or(Ok(())))
-                .map_err(|e| format!("sway ipc: command `{cmd}` failed: {e}"))
-        },
+        move || run_command_blocking(&cmd),
         |result| {
             if let Err(msg) = &result {
                 log::info!("{msg}");
@@ -255,13 +268,24 @@ pub fn run_command_result(cmd: &str, then: impl FnOnce(bool) + 'static) {
     );
 }
 
+/// One command on a fresh connection, from a worker thread: sway's refusal
+/// of the command is an error like a dead socket is.
+pub fn run_command_blocking(cmd: &str) -> Result<(), String> {
+    connect()
+        .and_then(|mut c| c.run_command(cmd))
+        .and_then(|outcomes| outcomes.into_iter().find(Result::is_err).unwrap_or(Ok(())))
+        .map_err(|e| format!("sway ipc: command `{cmd}` failed: {e}"))
+}
+
 /// The focused output's connector name, or `None` when sway cannot say.
 ///
-/// Blocking, unlike everything else here that runs from the GTK thread: the
-/// popup stack has to pin a card's surface to an output *before* the surface
-/// exists, so the answer cannot arrive later on a worker thread's callback.
-/// One `get_outputs` round trip on a local socket, with the connection kept
-/// between calls so a burst of notifications is not a burst of connects.
+/// Blocking. The popup stack has to pin a card's surface to an output
+/// *before* the surface exists, so the answer cannot arrive later on a worker
+/// thread's callback; in the panel it reads the [`SwayService`] instead
+/// ([`focused_output_from`]), and this round trip is the fallback for a
+/// process without one. One `get_outputs` round trip on a local socket, with
+/// the connection kept between calls so a burst of notifications is not a
+/// burst of connects.
 ///
 /// A dropped socket (sway restarted under us) costs one reconnect and then
 /// gives up for this call. The caller's fallback is to let the compositor

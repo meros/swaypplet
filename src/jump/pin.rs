@@ -253,7 +253,11 @@ impl Pins {
     /// Pin `workspace` on the focused output, or unpin it. Returns whether
     /// it is pinned afterwards.
     pub fn toggle(&self, workspace: String) -> bool {
-        self.toggle_on(workspace, crate::sway::ipc::focused_output())
+        let sway = self.inner.borrow().sway.clone();
+        self.toggle_on(
+            workspace,
+            crate::sway::ipc::focused_output_from(sway.as_deref()),
+        )
     }
 
     fn toggle_on(&self, workspace: String, output: Option<String>) -> bool {

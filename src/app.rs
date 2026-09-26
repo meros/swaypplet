@@ -232,7 +232,7 @@ pub fn run() {
         panel.window.set_visible(false);
 
         // ── Popup manager ────────────────────────────────────────────────────
-        PopupManager::register(app, store_activate.clone());
+        let popups = PopupManager::register(app, store_activate.clone());
         crate::services::notifications::quiet::install(store_activate.clone());
 
         // ── OSD overlay ──────────────────────────────────────────────────────
@@ -279,6 +279,7 @@ pub fn run() {
             });
             let sway = SwayService::start();
             pins.set_sway(sway.clone());
+            popups.set_sway(sway.clone());
             // A `swaymsg reload` puts every layer_effects back to the config,
             // so the glass tuned in the settings pane would last only until
             // the next one. Put it back each time.

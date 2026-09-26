@@ -13,7 +13,8 @@
 //! `surface::GlassSurface`.
 //!
 //! One column per output, not one column. A card is pinned to the focused
-//! output when it is created (`sway::ipc::focused_output`), and both the
+//! output when it is created (`sway::ipc::focused_output_from`: the panel's
+//! `SwayService` when it runs one, else a round trip), and both the
 //! layout and the depth cap are per pinned output. They used to be global
 //! while the surfaces were placed by the compositor: a notification arriving
 //! on the screen you were using pushed the OTHER screen's cards down a slot,
@@ -33,6 +34,7 @@ use crate::layer_shell::LayerShellConfig;
 use crate::services::notifications::ImageSource;
 use crate::settings::store::{Alerts, Corner};
 use crate::surface::GlassSurface;
+use crate::sway::ipc::SwayService;
 
 use crate::services::notifications::store::{self, NotificationStore};
 use crate::services::notifications::{CloseReason, Notification, Urgency};
@@ -180,6 +182,10 @@ struct State {
     /// cards are on screen (P7): a timer that outlives its reason is a
     /// wakeup for nothing.
     age_timer: Option<glib::SourceId>,
+    /// The process's sway model, when it runs one (the panel hosting the
+    /// bar): where the focused output is read from, instead of a blocking
+    /// round trip per notification.
+    sway: Option<Rc<SwayService>>,
 }
 
 impl State {
@@ -191,12 +197,14 @@ impl State {
 /// Manages the popup notification stack at the top-right: newest on top,
 /// up to the Alerts tab's `stack` cards fully expanded, older ones collapsed behind
 /// the last full card with peeking edges.
-pub struct PopupManager;
+pub struct PopupManager {
+    state: Rc<RefCell<State>>,
+}
 
 impl PopupManager {
     /// Wire the stack to the store's callbacks. Nothing is on screen, and no
     /// surface exists, until a notification arrives.
-    pub fn register(app: &gtk4::Application, store: Rc<RefCell<NotificationStore>>) {
+    pub fn register(app: &gtk4::Application, store: Rc<RefCell<NotificationStore>>) -> Self {
         let state = Rc::new(RefCell::new(State {
             app: app.clone(),
             cards: Vec::new(),
@@ -204,6 +212,7 @@ impl PopupManager {
             hovered: false,
             overflow: std::collections::HashMap::new(),
             age_timer: None,
+            sway: None,
         }));
 
         {
@@ -218,6 +227,12 @@ impl PopupManager {
                 .borrow_mut()
                 .connect_close(move |id, _reason| dismiss(&st, id));
         }
+        Self { state }
+    }
+
+    /// Read the focused output from `sway` rather than asking sway per card.
+    pub fn set_sway(&self, sway: Rc<SwayService>) {
+        self.state.borrow_mut().sway = Some(sway);
     }
 }
 
@@ -273,7 +288,8 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     // laid every card out in one column regardless of screen and a
     // notification arriving on one display pushed the other display's cards
     // down. Ask sway, pin the surface, and keep the name for `reflow`.
-    let output = crate::sway::ipc::focused_output();
+    let sway = st.borrow().sway.clone();
+    let output = crate::sway::ipc::focused_output_from(sway.as_deref());
     let monitor = output
         .as_deref()
         .and_then(crate::layer_shell::monitor_by_connector);
