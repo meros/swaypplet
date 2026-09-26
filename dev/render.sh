@@ -313,6 +313,10 @@ case "$MODE" in
     "$BIN" keybinds show >>/tmp/swpp-app.log 2>&1 || true
     ;;
   preview:*)
+    # Previews on a layer surface with the real glass behind them, as the
+    # session shows them (src/preview.rs); SWPP_PREVIEW_LAYER=0 for the old
+    # plain toplevel.
+    [ "${SWPP_PREVIEW_LAYER:-1}" = 1 ] && export SWAYPPLET_PREVIEW_LAYER=1
     "$BIN" --preview "${MODE#preview:}" >/tmp/swpp-app.log 2>&1 &
     # SWPP_SEED_CLIPBOARD=1 puts three selections on the nested session so
     # the clipboard section has rows to draw. It has to happen *after* the

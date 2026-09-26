@@ -281,14 +281,32 @@ pub fn run(component: &str) {
 
         // Single component: wrap its widget in a small window carrying the panel
         // surface classes so it inherits the same styling context.
-        let window = ApplicationWindow::builder()
-            .application(app)
-            // Settings fills the Helm card's width (740 to 1033 px), so its
-            // preview opens at that width: at the 440 single-component default
-            // the tab strip clips and the columns read wrong.
-            .default_width(if component.starts_with("settings") { 820 } else { 440 })
-            .default_height(600)
-            .build();
+        //
+        // Settings fills the Helm card's width (740 to 1033 px), so its
+        // preview opens at that width: at the 440 single-component default
+        // the tab strip clips and the columns read wrong.
+        let width = if component.starts_with("settings") { 820 } else { 440 };
+        // SWAYPPLET_PREVIEW_LAYER=1 (the render harness's default) puts the
+        // component in a panel card on a layer surface, the way the Helm shows
+        // it, so the compositor's glass and the mode's material are behind it.
+        // A plain toplevel has neither, and in light mode its dark text then
+        // sits on nothing.
+        let surface = std::env::var_os("SWAYPPLET_PREVIEW_LAYER").map(|_| {
+            crate::settings::glass::apply_saved();
+            crate::shell::Surface::builder(app, crate::shell::Namespace::Panel)
+                .card(crate::ui::Card::Floating)
+                .width(width)
+                .build()
+        });
+        let window: gtk4::Window = match &surface {
+            Some(surface) => surface.window().clone(),
+            None => ApplicationWindow::builder()
+                .application(app)
+                .default_width(width)
+                .default_height(600)
+                .build()
+                .upcast(),
+        };
 
         let host = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
@@ -446,8 +464,19 @@ pub fn run(component: &str) {
             }
         }
 
-        window.set_child(Some(&host));
-        window.present();
+        match surface {
+            Some(surface) => {
+                crate::ui::pad(&host, 5);
+                surface.card().append(&host);
+                surface.set_content(&host);
+                surface.show();
+                std::mem::forget(surface);
+            }
+            None => {
+                window.set_child(Some(&host));
+                window.present();
+            }
+        }
     });
 
     // Run without forwarding our own argv (which contains `--preview <name>`)

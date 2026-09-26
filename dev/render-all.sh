@@ -153,6 +153,14 @@ capture() {
   done
   [ -n "$dir" ] || { echo "capture: no directory" >&2; exit 2; }
   mkdir -p "$dir/.log" "$dir/.rt"
+  # sway puts its IPC socket in XDG_RUNTIME_DIR (dir/.rt/XXXXXX here), and a
+  # Unix socket path must fit in 108 bytes: a deep DIR makes every render die
+  # with "Socket path won't fit into ipc_sockaddr->sun_path" and no picture.
+  # The socket name itself is about 30 bytes, so the directory gets 70.
+  if [ "$(printf %s "$(cd "$dir" && pwd)/.rt/XXXXXX" | wc -c)" -gt 70 ]; then
+    echo "render-all: $dir is too deep for sway's socket path; use a shorter DIR (e.g. /tmp/qa)" >&2
+    exit 2
+  fi
   local src
   src="$(wallpaper)"
   if [ -n "$src" ]; then
