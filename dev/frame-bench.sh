@@ -76,6 +76,7 @@ cleanup() {
   # The pid file is shared with the live session; put its pid back.
   [ -n "${SAVED_PID:-}" ] && printf '%s' "$SAVED_PID" > "$PIDFILE"
   [ -n "${SWPP_BENCH_KEEP:-}" ] && cp "${STATS:-/dev/null}" "$SWPP_BENCH_KEEP"
+  [ -n "${SWPP_BENCH_APPLOG:-}" ] && cp "$APP" "$SWPP_BENCH_APPLOG"
   rm -f "$CFG" "$LOG" "$APP" "${STATS:-}"
   return 0
 }
