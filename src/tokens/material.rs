@@ -28,11 +28,11 @@ pub fn material(inputs: Inputs) -> Material {
         },
         Mode::Light => Material {
             fill_color: s.neutral[1],
-            fill_alpha: if high { 0.80 } else { 0.65 },
+            fill_alpha: if high { 0.72 } else { 0.50 },
             absorb: if high { 0.20 } else { 0.25 },
-            photochromic: if high { -0.50 } else { -0.40 },
+            photochromic: if high { -0.50 } else { -0.43 },
             edge_light: if high { 0.18 } else { 0.14 },
-            frost: if high { 0.55 } else { 0.45 },
+            frost: if high { 0.45 } else { 0.36 },
         },
     }
 }
