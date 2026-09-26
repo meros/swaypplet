@@ -11,8 +11,8 @@ use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
 use crate::anim;
-use crate::elephant::{self, SearchResult};
 use crate::layer_shell::{self, LayerShellConfig};
+use crate::services::elephant::{self, SearchResult};
 
 const MAX_VISIBLE_RESULTS: usize = 10;
 const DEBOUNCE_MS: u64 = 100;

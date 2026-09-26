@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use super::nm;
+mod nm;
 
 /// How long to wait for a rescan's results before drawing what we have.
 ///

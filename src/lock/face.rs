@@ -32,7 +32,7 @@
 //! A lid *opening* arms an attempt too, and for once that is not the same
 //! argument again. Two cases close the lid without a suspend behind it, and
 //! in both the resume edge above never comes: logind's 30 s holdoff after a
-//! resume, and No Sleep mode (`crate::inhibit`), where inhibiting the lid
+//! resume, and No Sleep mode (`services::inhibit`), where inhibiting the lid
 //! switch is half the point. sway's `bindswitch lid:on` still locks and
 //! blanks in both, so without this the machine sits locked with the lid open
 //! and the one signal that should unlock it never fires. The lid edge is the
@@ -66,7 +66,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use crate::fp::EngineEvent;
-use crate::presence::{self, Event as PresenceEvent, Presence};
+use crate::services::presence::{self, Event as PresenceEvent, Presence};
 
 /// Resume edges from logind, as a channel this thread can drain on its tick.
 ///
@@ -102,7 +102,7 @@ fn watch_resume() -> mpsc::Receiver<()> {
 }
 
 /// Tick for this engine's own deadlines. Presence itself is pushed from
-/// whoever owns the sensor (see `crate::presence`), so this no longer sets
+/// whoever owns the sensor (see `services::presence`), so this no longer sets
 /// a sampling rate — it only decides how soon after arrival an attempt
 /// starts, and how finely `RETRY_AFTER` is honoured.
 const POLL: Duration = Duration::from_millis(250);
@@ -175,7 +175,7 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
     // about three reads a second, and every reader queued behind the others.
     let events = presence::subscribe();
     let resumes = watch_resume();
-    let lid = crate::lid::watch();
+    let lid = crate::services::lid::watch();
     // None until the first reading lands, so the opening state is a starting
     // point rather than an arrival — arming on it would run face unlock
     // against whoever locked the machine a moment ago.

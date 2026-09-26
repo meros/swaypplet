@@ -27,8 +27,10 @@ use gtk4::prelude::*;
 
 use super::popover::TaskPopover;
 use crate::anim::{self, SlideBin};
+use crate::services::task_state::{
+    Activity, SessionState, TaskState, TaskStateService, task_of_name,
+};
 use crate::sway::ipc::SwayService;
-use crate::task_state::{Activity, SessionState, TaskState, TaskStateService, task_of_name};
 use crate::ui;
 
 /// Age chip appears once a wait is no longer a blip.
@@ -579,7 +581,7 @@ mod tests {
         let now = SystemTime::now();
         let with_progress = |acked| {
             let mut s = session(Activity::Working, acked, None, now);
-            s.progress = Some(crate::task_state::Progress {
+            s.progress = Some(crate::services::task_state::Progress {
                 raw: "1/5 ETA ~15m".into(),
                 fraction: Some((1, 5)),
             });

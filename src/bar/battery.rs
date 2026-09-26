@@ -22,7 +22,7 @@ use gtk4::prelude::*;
 
 use super::popover;
 use crate::anim::{self, SlideBin};
-use crate::power::{self, BatteryState, ChargeState};
+use crate::services::power::{self, BatteryState, ChargeState};
 use crate::ui;
 
 const WARNING_PCT: u8 = 30;

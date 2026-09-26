@@ -1,7 +1,6 @@
 pub mod audio;
 pub mod backup;
 pub mod bluetooth;
-pub mod bluez;
 pub mod brightness;
 pub mod clipboard;
 pub mod display;

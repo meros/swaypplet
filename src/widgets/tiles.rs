@@ -9,7 +9,7 @@
 //! A spec is presentation plus two function pointers, and that is the whole
 //! contract: this module knows how to *draw* a toggle and nothing about what
 //! any of them switch. The inhibitor tiles (No Sleep / No Lock) are generated
-//! from [`crate::inhibit`], which owns their wording, their actions and their
+//! from [`crate::services::inhibit`], which owns their wording, their actions and their
 //! state; Wi-Fi and Bluetooth delegate the same way to their own modules.
 
 use std::cell::RefCell;
@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use gtk4::prelude::*;
 
-use crate::inhibit::{self, Inhibitor};
-use crate::notifications::store::NotificationStore;
+use crate::services::inhibit::{self, Inhibitor};
+use crate::services::notifications::store::NotificationStore;
 use crate::spawn;
 
 /// Result of reading an external tool's state. `Unavailable` means the tool
@@ -94,8 +94,8 @@ fn wifi_spec() -> TileSpec {
         tooltip_off: "Wi-Fi: disabled",
         action: Arc::new(|on| {
             matches!(
-                crate::widgets::network::set_wifi_radio(on),
-                crate::widgets::network::NmResult::Success
+                crate::services::network::set_wifi_radio(on),
+                crate::services::network::NmResult::Success
             )
         }),
         read_state: Arc::new(read_wifi_state),
@@ -109,7 +109,7 @@ fn bluetooth_spec() -> TileSpec {
         label: "Bluetooth",
         tooltip_on: "Bluetooth: powered on",
         tooltip_off: "Bluetooth: powered off",
-        action: Arc::new(|on| crate::widgets::bluez::set_powered(on).is_ok()),
+        action: Arc::new(|on| crate::services::bluez::set_powered(on).is_ok()),
         read_state: Arc::new(read_bluetooth_state),
         on_state: None,
     }
@@ -134,7 +134,7 @@ fn night_light_spec() -> TileSpec {
 }
 
 /// One tile per session inhibitor, all of it delegated: wording, action and
-/// reading come from [`crate::inhibit`], and the established state goes back
+/// reading come from [`crate::services::inhibit`], and the established state goes back
 /// there for the bar's hazard lane to observe. Adding a third inhibitor is a
 /// change in that module alone.
 fn inhibitor_spec(which: Inhibitor) -> TileSpec {
@@ -287,10 +287,10 @@ fn run_ok(cmd: &mut Command) -> bool {
 // ── State readers (blocking — always called from a background thread) ─────────
 
 fn read_wifi_state() -> TileState {
-    if !crate::widgets::network::network_manager_available() {
+    if !crate::services::network::network_manager_available() {
         return TileState::Unavailable;
     }
-    if crate::widgets::network::wifi_radio_enabled() {
+    if crate::services::network::wifi_radio_enabled() {
         TileState::Active
     } else {
         TileState::Inactive
@@ -298,7 +298,7 @@ fn read_wifi_state() -> TileState {
 }
 
 fn read_bluetooth_state() -> TileState {
-    let snapshot = crate::widgets::bluez::snapshot();
+    let snapshot = crate::services::bluez::snapshot();
     if !snapshot.available {
         return TileState::Unavailable;
     }

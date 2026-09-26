@@ -70,7 +70,7 @@
 //! set of SWAYPPLET_GLASS_* material numbers as well; the compositor draws the
 //! lock's wallpaper and glass now, and the locker reads neither.
 //!
-//! Inhibitors (panel tiles, `crate::inhibit`) are two standing switches, and
+//! Inhibitors (panel tiles, `services::inhibit`) are two standing switches, and
 //! both are read at fire time rather than being cached here. **No Sleep**
 //! holds a logind lid-switch inhibitor, which stops logind suspending on a
 //! lid close; the suspend tier below reads it too, because "don't sleep with
@@ -97,7 +97,7 @@ use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use crate::presence::{self, Event as PresenceEvent};
+use crate::services::presence::{self, Event as PresenceEvent};
 use crate::settings::store::{self, Idle, Settings};
 
 pub use wayland::Timeout;
@@ -217,7 +217,7 @@ pub fn run() -> ! {
     // the session bus; the bar and the lock screen's face engine listen there
     // rather than reading the device themselves. Reads cost 250-400 ms each
     // and the hardware serves about three a second, so three independent
-    // readers meant all three queued. See `crate::presence`.
+    // readers meant all three queued. See `services::presence`.
     //
     // None on hardware without the sensor, which keeps the timer-only
     // behaviour intact.
@@ -285,9 +285,9 @@ pub fn run() -> ! {
                 outputs.power("presence.back", Power::On);
             } else if !cfg.walk_away_lock {
                 log::info!("presence: user gone — walk-away lock off (setting), not locking");
-            } else if crate::inhibit::NoLock.armed() {
+            } else if crate::services::inhibit::NoLock.armed() {
                 log::info!("presence: user gone — No Lock armed, not locking");
-            } else if crate::inhibit::idle_inhibited() {
+            } else if crate::services::inhibit::idle_inhibited() {
                 // Absence is the one tier the compositor cannot suppress for
                 // us. The timeout tiers ride ext-idle-notify, which honours
                 // idle inhibitors on its own (wayland.rs), so a video player
@@ -398,7 +398,7 @@ pub fn run() -> ! {
                 // Dimming is the first step toward the lock, so No Lock owns
                 // it: a screen that fades while you read it is the same
                 // complaint as one that locks while you read it.
-                if crate::inhibit::NoLock.armed() {
+                if crate::services::inhibit::NoLock.armed() {
                     log::info!("idle.dim: skip (No Lock)");
                 } else {
                     dimmed = true;
@@ -421,7 +421,7 @@ pub fn run() -> ! {
                 // someone the 300 s tier is suppressed and the absence path
                 // owns locking instead; nothing re-arms this tier until input
                 // resumes, which is the intent.
-                if crate::inhibit::NoLock.armed() {
+                if crate::services::inhibit::NoLock.armed() {
                     log::info!("idle.lock: skip (No Lock)");
                 } else if present == Some(true) {
                     log::info!("idle.lock: skip (present)");
@@ -469,7 +469,7 @@ pub fn run() -> ! {
                     log::info!("idle.suspend: session inactive — skip");
                 } else if on_ac() {
                     log::info!("idle.suspend: on AC — skip");
-                } else if crate::inhibit::NoSleep.armed() {
+                } else if crate::services::inhibit::NoSleep.armed() {
                     // No Sleep's inhibitor covers logind's *lid* handling,
                     // and this tier is not logind's. Without this the second
                     // path wins anyway: shut the lid on battery, and twenty

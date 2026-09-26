@@ -1,7 +1,5 @@
-mod backend;
 mod interfaces;
 mod monitor;
-mod nm;
 mod vpn;
 mod wifi;
 
@@ -11,14 +9,9 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, ListBox, Revealer, RevealerTransitionType, Spinner, Switch};
 
+use crate::services::network::*;
 use crate::spawn::spawn_work;
 use crate::ui;
-use backend::*;
-
-// The quick-toggle tile drives the radio without going through this section
-// (widgets/tiles.rs), so the two calls it needs are re-exported here rather
-// than reaching into `backend` from outside the module.
-pub use backend::{NmResult, network_manager_available, set_wifi_radio, wifi_radio_enabled};
 
 // ── Shared UI helpers ─────────────────────────────────────────────────────────
 

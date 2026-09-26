@@ -8,7 +8,7 @@
 //!
 //! Pushed, not polled. This used to read the sensor itself on a 1 Hz timer,
 //! twice a tick for the value and the tooltip, and those reads run on the GTK
-//! main thread for 250–400 ms apiece (see `crate::presence`). A readout was
+//! main thread for 250–400 ms apiece (see `services::presence`). A readout was
 //! parking the main loop for roughly half of every second, and every keypress
 //! that arrived in that window queued behind it. Nothing here touches the
 //! device now; the idle manager owns it and this listens.
@@ -18,7 +18,7 @@
 
 use gtk4::prelude::*;
 
-use crate::presence::{self, Event};
+use crate::services::presence::{self, Event};
 
 // Nerd Font: md-eye / md-eye_off.
 const ICON_PRESENT: &str = "󰈈";

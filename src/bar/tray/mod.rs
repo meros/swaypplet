@@ -10,9 +10,6 @@
 
 mod icon;
 mod menu;
-mod service;
-
-pub use service::TrayService;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -23,7 +20,7 @@ use std::time::Duration;
 use gtk4::{gdk, prelude::*};
 use system_tray::item::{Status, StatusNotifierItem};
 
-use service::TrayItem;
+use crate::services::tray::{TrayItem, TrayService};
 
 /// Layout pushes into an *open* popover are batched — chatty apps fire
 /// menu updates in bursts and a rebuild per event flickers the popover.

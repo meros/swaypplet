@@ -10,7 +10,7 @@ use gtk4::prelude::*;
 use crate::anim;
 use crate::icons;
 use crate::launcher::LauncherView;
-use crate::notifications::store::NotificationStore;
+use crate::services::notifications::store::NotificationStore;
 use crate::settings::SettingsSection;
 use crate::ui::{self, Kind, Text, Tone};
 use crate::widgets::backup::BackupSection;
@@ -158,7 +158,7 @@ impl Panel {
     pub fn new(
         window: gtk4::Window,
         store: Rc<RefCell<NotificationStore>>,
-        audio_service: Rc<crate::audio::AudioService>,
+        audio_service: Rc<crate::services::audio::AudioService>,
     ) -> Self {
         // ── Backdrop (full-screen transparent click-catcher) ────────────────
         let backdrop = ui::vbox(0);
@@ -197,7 +197,7 @@ impl Panel {
         let users = UserSection::new();
         // Its own watcher: the panel outlives no bar process in particular,
         // and the status directory is two small files.
-        let backup = BackupSection::new(&crate::backup::BackupStatusService::start());
+        let backup = BackupSection::new(&crate::services::backup::BackupStatusService::start());
         // Shared with the omnibox router below, which picks a tab by prefix.
         let settings = Rc::new(SettingsSection::new());
 
@@ -755,9 +755,9 @@ fn build_telemetry_ribbon(
     ribbon.add_css_class("helm-telemetry-ribbon");
 
     // 1. Power / Battery pill (dynamic)
-    let (icon_str, label_str) = if let Some(path) = crate::power::find_battery_path() {
-        if let Some(bat) = crate::power::read_battery(&path) {
-            let icon = crate::power::battery_icon(bat.capacity, bat.charging);
+    let (icon_str, label_str) = if let Some(path) = crate::services::power::find_battery_path() {
+        if let Some(bat) = crate::services::power::read_battery(&path) {
+            let icon = crate::services::power::battery_icon(bat.capacity, bat.charging);
             let state_suffix = if bat.charging { " 󱐋" } else { "" };
             (icon, format!("{}%{}", bat.capacity, state_suffix))
         } else {

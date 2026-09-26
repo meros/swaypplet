@@ -13,10 +13,11 @@ use crate::jump::Jump;
 use crate::keybinds::Keybinds;
 use crate::launcher::Launcher;
 use crate::layer_shell::{self, LayerShellConfig};
-use crate::notifications::store::NotificationStore;
-use crate::notifications::{dbus, popup::PopupManager};
+use crate::notifications::popup::PopupManager;
 use crate::osd::{Osd, OsdCommand};
 use crate::panel::Panel;
+use crate::services::notifications::dbus;
+use crate::services::notifications::store::NotificationStore;
 use crate::sway::ipc::SwayService;
 use crate::theme;
 
@@ -224,7 +225,7 @@ pub fn run() {
         // One connection to the sound server for the whole process: the
         // panel section reads it, and (BAR_VISION increment 7) the hazard
         // lane's microphone glyph reads the same snapshot.
-        let audio = crate::audio::AudioService::start();
+        let audio = crate::services::audio::AudioService::start();
 
         let panel = Panel::new(window, store_activate.clone(), audio.clone());
         panel.window.present();
@@ -232,7 +233,7 @@ pub fn run() {
 
         // ── Popup manager ────────────────────────────────────────────────────
         PopupManager::register(app, store_activate.clone());
-        crate::notifications::quiet::install(store_activate.clone());
+        crate::services::notifications::quiet::install(store_activate.clone());
 
         // ── OSD overlay ──────────────────────────────────────────────────────
         let osd = Osd::new(app);
@@ -302,10 +303,13 @@ pub fn run() {
                     .borrow_mut()
                     .set_task_resolver(Box::new(move |pid| {
                         let snap = sway.snapshot();
-                        let ws = crate::task_state::workspace_of_pid(pid, &snap.pid_workspaces)?;
-                        let task = crate::task_state::task_of_name(&ws)?;
+                        let ws = crate::services::task_state::workspace_of_pid(
+                            pid,
+                            &snap.pid_workspaces,
+                        )?;
+                        let task = crate::services::task_state::task_of_name(&ws)?;
                         let visible = snap.workspaces.iter().any(|w| w.name == ws && w.visible);
-                        Some(crate::notifications::store::TaskRef { task, visible })
+                        Some(crate::services::notifications::store::TaskRef { task, visible })
                     }));
             }
             let bar = BarManager::new(app, sway.clone(), audio.clone(), toggle);

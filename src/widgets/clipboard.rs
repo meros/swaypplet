@@ -1,6 +1,6 @@
 //! Clipboard history section.
 //!
-//! The rows come from [`crate::clipboard`], which watches the selection over
+//! The rows come from [`crate::services::clipboard`], which watches the selection over
 //! `ext-data-control-v1` in this process. This used to shell out to
 //! `cliphist list` on every open, against a database no daemon was filling —
 //! see that module's header for what that cost.
@@ -9,8 +9,8 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::clipboard::{ClipboardService, EntryView};
 use crate::icons;
+use crate::services::clipboard::{ClipboardService, EntryView};
 use crate::ui;
 
 // ── ClipboardSection ──────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ impl ClipboardSection {
             clear_btn,
         });
 
-        let service = crate::clipboard::service();
+        let service = crate::services::clipboard::service();
 
         if let Some(svc) = &service {
             {
@@ -128,7 +128,7 @@ impl ClipboardSection {
         // nothing to wait for and nothing to spawn.
         let id = entry.id;
         btn.connect_clicked(move |_| {
-            if let Some(svc) = crate::clipboard::service() {
+            if let Some(svc) = crate::services::clipboard::service() {
                 svc.restore(id);
             }
             w.section.set_open(false);

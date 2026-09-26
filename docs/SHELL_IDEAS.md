@@ -45,7 +45,7 @@ since. The bug and the dependency both go away with `ext-data-control-v1`:
 swaypplet owns the selection watch, keeps its own ring, and sets the selection
 back through its own data source.
 
-Shipped as `src/clipboard.rs`. Notes for later: history is in-memory only, so a
+Shipped as `src/services/clipboard.rs`. Notes for later: history is in-memory only, so a
 panel restart clears it (deliberate for a clipboard, revisit only with a reason);
 text mimes only, images are a follow-up; `x-kde-passwordManagerHint: secret`
 offers are skipped, which is the cross-desktop convention password managers
@@ -187,7 +187,7 @@ panel control rather than a rebuild.
 
 Three migrations, all landed. Thirteen external binaries became ten.
 
-**Audio.** `src/audio.rs` holds one connection to the sound server and pushes
+**Audio.** `src/services/audio.rs` holds one connection to the sound server and pushes
 snapshots into an `Observed`, the shape `sway_ipc` and `clipboard` use. Gone
 with it: the `wpctl status` parser (indentation depth, box-drawing characters,
 an asterisk for the default), a second `wpctl` call per device for its volume,
@@ -206,7 +206,7 @@ The OSD's volume keys stopped spawning anything: the level is computed from
 the snapshot on the GTK thread, so the OSD and the panel slider can no longer
 disagree.
 
-**NetworkManager.** `widgets/network/nm.rs` is the D-Bus layer;
+**NetworkManager.** `services/network/nm.rs` is the D-Bus layer;
 `backend.rs` kept every signature and its bodies became lookups, so the
 741-line section above it did not move. Seventeen `nmcli` spawns are gone, and
 with them the `\:` unescaping every parse had to remember — a network name
@@ -220,7 +220,7 @@ sharing a name can no longer be confused for each other. And a scan with the
 radio off returns "WiFi is off" immediately instead of waiting out the
 timeout to report an empty list.
 
-**BlueZ.** `widgets/bluez.rs`. `GetManagedObjects` answers the whole tree in
+**BlueZ.** `services/bluez.rs`. `GetManagedObjects` answers the whole tree in
 one round trip, where `bluetoothctl` needed one process per device plus two.
 The battery percentage printed as `0x4b (75)` and parsed by finding the
 parentheses is now a typed property on `org.bluez.Battery1`. The worst of it

@@ -17,7 +17,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::backup::{self, BackupStatusService};
+use crate::services::backup::{self, BackupStatusService};
 use crate::spawn::spawn_work;
 use crate::ui;
 
@@ -146,7 +146,12 @@ fn draw(
         _ => target.set_visible(false),
     }
 
-    run_now.set_sensitive(!snapshot.jobs.iter().any(crate::backup::Job::running));
+    run_now.set_sensitive(
+        !snapshot
+            .jobs
+            .iter()
+            .any(crate::services::backup::Job::running),
+    );
 }
 
 /// The verdict's status tone: healthy, attention, or nothing to say yet.

@@ -95,7 +95,7 @@ enum OsdDisplay {
 // ── Action execution + state reading ─────────────────────────────────────────
 
 /// The commands that still need a process spawned. Volume left with the
-/// `wpctl` dependency: it is answered from `crate::audio`'s snapshot on the
+/// `wpctl` dependency: it is answered from `services::audio`'s snapshot on the
 /// GTK thread, which is both faster and the only way the OSD and the panel
 /// slider can agree on what the volume is.
 fn execute_command(cmd: &OsdCommand) -> OsdDisplay {
@@ -408,7 +408,7 @@ pub struct Osd {
     bar_route: Rc<RefCell<Option<BarRoute>>>,
     /// Set once the panel exists. Absent only in the standalone paths that
     /// never send a volume command.
-    audio: Rc<RefCell<Option<Rc<crate::audio::AudioService>>>>,
+    audio: Rc<RefCell<Option<Rc<crate::services::audio::AudioService>>>>,
     showing: Rc<Cell<Showing>>,
     pending: Rc<RefCell<Pending>>,
     /// The rounded percentage and mute currently on the card. A snapshot
@@ -478,7 +478,7 @@ impl Osd {
 
     /// Hand the OSD the sound server connection, so volume keys are answered
     /// from the same snapshot the panel's slider draws.
-    pub fn set_audio(&self, audio: Rc<crate::audio::AudioService>) {
+    pub fn set_audio(&self, audio: Rc<crate::services::audio::AudioService>) {
         *self.audio.borrow_mut() = Some(audio.clone());
         let osd = self.clone();
         audio.connect_change(move || osd.reconcile());
@@ -576,7 +576,7 @@ impl Osd {
     /// number the key press did not produce is worse than showing it a
     /// millisecond early.
     fn volume_key(&self, cmd: &OsdCommand) -> Option<OsdDisplay> {
-        use crate::audio::Command as AudioCommand;
+        use crate::services::audio::Command as AudioCommand;
 
         let audio = self.audio.borrow().clone()?;
         let state = audio.snapshot();

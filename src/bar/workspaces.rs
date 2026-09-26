@@ -43,9 +43,9 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use crate::services::task_state::{Activity, TaskSnapshot, TaskStateService, task_of_name};
 use crate::sway::ipc::{self, OutputInfo, SwayService, WorkspaceInfo};
 use crate::sway::workspace::{generic_label, switch_command, task_label};
-use crate::task_state::{Activity, TaskSnapshot, TaskStateService, task_of_name};
 use crate::ui;
 
 /// Marks the pin glyph inside a segment, so `set_pinned` can find it.
@@ -592,8 +592,8 @@ mod tests {
         assert_eq!(ws_state(&ws(9, "9:t3a")), WsState::Idle);
     }
 
-    fn session(activity: Activity, workspace: &str) -> crate::task_state::SessionState {
-        crate::task_state::SessionState {
+    fn session(activity: Activity, workspace: &str) -> crate::services::task_state::SessionState {
+        crate::services::task_state::SessionState {
             pid: 1,
             desc: "d".into(),
             activity,

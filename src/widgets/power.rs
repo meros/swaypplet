@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::power::{
+use crate::services::power::{
     BatteryState, GovernorProfile, battery_icon, battery_summary_text, find_battery_path,
     read_battery, read_governor,
 };

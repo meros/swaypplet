@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use gtk4::gdk;
 use gtk4::prelude::*;
 
-use crate::notifications::store::{StoreRef, store_add};
-use crate::notifications::{ImageSource, Notification, Urgency};
+use crate::services::notifications::store::{StoreRef, store_add};
+use crate::services::notifications::{ImageSource, Notification, Urgency};
 
 use super::capture::Image;
 

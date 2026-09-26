@@ -76,7 +76,8 @@ pub struct Target {
 /// "Claude Code", names no window, and on this desktop every session is in a
 /// terminal indistinguishable by name from the others. A session that has
 /// ended finds nothing, which falls through to the caller's fallback rather
-/// than to a guess.
+/// than to a guess. `parent` walks the process tree (`/proc`), and is the
+/// caller's so this module needs nothing from the services.
 ///
 /// The tree query is an IPC round trip, so it happens on a worker thread
 /// (`spawn::spawn_work`) rather than under the pointer. A sway that is not
@@ -85,6 +86,7 @@ pub struct Target {
 pub fn focus_source(
     names: Vec<String>,
     claude_pid: Option<i32>,
+    parent: fn(i32) -> Option<i32>,
     done: impl FnOnce(bool) + 'static,
 ) {
     if names.is_empty() && claude_pid.is_none() {
@@ -98,7 +100,7 @@ pub fn focus_source(
                 .map_err(|e| log::warn!("sway ipc: get_tree failed: {e}"))
                 .ok()?;
             match claude_pid {
-                Some(pid) => window_of_pid(&tree, pid, crate::task_state::parent_pid),
+                Some(pid) => window_of_pid(&tree, pid, parent),
                 None => find_named_window(&tree, &names),
             }
         },

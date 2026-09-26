@@ -34,8 +34,8 @@ use gtk4::prelude::*;
 use crate::anim;
 use crate::bar::battery::CRITICAL_PCT;
 use crate::bar::board::{chip_label, session_age};
-use crate::power::{self, BatteryState};
-use crate::task_state::{Activity, SessionState, TaskSnapshot, TaskStateService};
+use crate::services::power::{self, BatteryState};
+use crate::services::task_state::{Activity, SessionState, TaskSnapshot, TaskStateService};
 use crate::ui;
 
 /// A revealer opening or closing in place (motion: expand).

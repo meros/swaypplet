@@ -4,7 +4,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use crate::icons;
-use crate::mpris::{MediaState, PlaybackStatus, playerctl, read_state};
+use crate::services::mpris::{MediaState, PlaybackStatus, playerctl, read_state};
 use crate::spawn::spawn_work;
 use crate::ui;
 

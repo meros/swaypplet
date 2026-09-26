@@ -30,12 +30,12 @@ use gtk4_layer_shell::Edge;
 
 use crate::anim;
 use crate::layer_shell::LayerShellConfig;
-use crate::notifications::ImageSource;
+use crate::services::notifications::ImageSource;
 use crate::settings::store::{Alerts, Corner};
 use crate::surface::GlassSurface;
 
-use super::store::{self, NotificationStore};
-use super::{CloseReason, Notification, Urgency};
+use crate::services::notifications::store::{self, NotificationStore};
+use crate::services::notifications::{CloseReason, Notification, Urgency};
 
 // ── Stack geometry ──
 const CARD_WIDTH: i32 = 360;
@@ -1233,19 +1233,24 @@ fn populate_card(
         }
         gtk4::gdk::BUTTON_PRIMARY => {
             let store_c = store_c.clone();
-            crate::sway::tree::focus_source(names.to_vec(), claude_pid, move |focused| {
-                // Nowhere to jump: the sender's own default action is the
-                // next best answer to "take me to this", and dismissing is
-                // the answer when it offered none.
-                if !focused && has_default {
-                    log::info!("Action invoked: notification {id}, action default");
-                    store::store_action_invoked(&store_c, id, "default");
-                    if resident {
-                        return;
+            crate::sway::tree::focus_source(
+                names.to_vec(),
+                claude_pid,
+                crate::services::task_state::parent_pid,
+                move |focused| {
+                    // Nowhere to jump: the sender's own default action is the
+                    // next best answer to "take me to this", and dismissing is
+                    // the answer when it offered none.
+                    if !focused && has_default {
+                        log::info!("Action invoked: notification {id}, action default");
+                        store::store_action_invoked(&store_c, id, "default");
+                        if resident {
+                            return;
+                        }
                     }
-                }
-                store::store_close(&store_c, id, CloseReason::Dismissed);
-            });
+                    store::store_close(&store_c, id, CloseReason::Dismissed);
+                },
+            );
         }
         _ => {}
     });
@@ -1411,7 +1416,7 @@ fn window_names(notif: &Notification) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::notifications::Notification;
+    use crate::services::notifications::Notification;
 
     #[test]
     fn a_sender_keeps_one_accent_and_senders_spread_across_them() {

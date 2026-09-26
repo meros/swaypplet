@@ -1,15 +1,16 @@
 //! NetworkManager over D-Bus.
 //!
-//! `backend.rs` used to be seventeen `nmcli` invocations, each one a process
-//! spawn whose answer was recovered by splitting terse output on colons — and
-//! `nmcli` escapes colons inside values as `\:`, so every parse also had an
-//! unescape step that had to be remembered. A network name with a colon in it
+//! The network backend (the parent module, once `backend.rs`) used to be
+//! seventeen `nmcli` invocations, each one a process spawn whose answer was
+//! recovered by splitting terse output on colons — and `nmcli` escapes colons
+//! inside values as `\:`, so every parse also had an unescape step that had
+//! to be remembered. A network name with a colon in it
 //! was one forgotten `.replace()` from being a different network.
 //!
 //! NetworkManager's own interface is the same information without the round
 //! trip through text: typed properties, on the bus the daemon already
-//! publishes. This module is the thin layer that reads it; `backend.rs` keeps
-//! its shape and its callers, and its function bodies became lookups.
+//! publishes. This module is the thin layer that reads it; the parent module
+//! kept its shape and its callers, and its function bodies became lookups.
 //!
 //! Blocking on purpose. Every caller already runs on a worker thread through
 //! `spawn::spawn_work`, and the async plumbing would buy nothing but a runtime
@@ -34,7 +35,7 @@ pub const IFACE_AP: &str = "org.freedesktop.NetworkManager.AccessPoint";
 pub const IFACE_IP4: &str = "org.freedesktop.NetworkManager.IP4Config";
 
 /// `NM_DEVICE_TYPE_WIFI`. The other type numbers are named in
-/// `backend::device_type_name`, where they are turned into strings.
+/// `super::device_type_name`, where they are turned into strings.
 pub const DEVICE_TYPE_WIFI: u32 = 2;
 
 /// `NM_DEVICE_STATE_UNMANAGED`. Devices not managed by NetworkManager.

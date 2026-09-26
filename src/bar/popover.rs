@@ -23,10 +23,10 @@ use std::time::{Duration, SystemTime};
 use gtk4::prelude::*;
 
 use super::board::session_age;
+use crate::services::task_state::{Activity, SessionState, TaskState, first_line, state_dir};
 use crate::spawn::spawn_work;
 use crate::sway::ipc;
 use crate::sway::workspace::switch_command;
-use crate::task_state::{Activity, SessionState, TaskState, first_line, state_dir};
 use crate::ui;
 
 /// The shared chassis: a top-anchored popover whose child is the card.
@@ -176,7 +176,7 @@ fn session_row(s: &SessionState, now: SystemTime, skew: Option<SystemTime>) -> g
 fn last_message(pid: i32) -> Option<String> {
     let path = state_dir().join(format!("last-{pid}"));
     let written = std::fs::metadata(&path).and_then(|m| m.modified()).ok()?;
-    if crate::task_state::proc_start_time(pid).is_some_and(|start| written < start) {
+    if crate::services::task_state::proc_start_time(pid).is_some_and(|start| written < start) {
         return None;
     }
     first_line(&path)
@@ -260,7 +260,7 @@ fn fmt_age(age: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task_state::Progress;
+    use crate::services::task_state::Progress;
 
     fn session(activity: Activity, age: Option<Duration>, now: SystemTime) -> SessionState {
         SessionState {

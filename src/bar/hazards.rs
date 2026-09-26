@@ -9,7 +9,7 @@
 //!
 //! Hazards shipping now; failed-units is deferred (severable):
 //! - **Session inhibitors** (No Sleep, No Lock): one glyph each, driven
-//!   off `crate::inhibit`'s observed state. That module owns the
+//!   off `services::inhibit`'s observed state. That module owns the
 //!   readings and the wording; this lane only decides where the glyph
 //!   sits, so a third inhibitor arrives here for free. It is a push
 //!   path rather than a poll: whoever establishes a state publishes it
@@ -19,7 +19,7 @@
 //! - **Binding mode**: non-default sway modes off the existing IPC
 //!   subscription's `mode` event; the mode name lives in the tooltip.
 //! - **Microphone**: something is recording. The sound server pushes this
-//!   (`crate::audio`), so it costs no timer, and its stand-down (P10) is
+//!   (`services::audio`), so it costs no timer, and its stand-down (P10) is
 //!   exactly the recorder list going empty. The tooltip names what is
 //!   listening, which is the question the glyph provokes.
 //!
@@ -28,7 +28,7 @@
 //! in-use broadcast, and `org.freedesktop.portal.Camera` reports only
 //! `IsCameraPresent` while `ScreenCast` exposes methods to *start* a cast
 //! and no way to enumerate live ones. Both are visible in PipeWire's node
-//! graph, which this process cannot reach — see `crate::audio` on the
+//! graph, which this process cannot reach — see `services::audio` on the
 //! bindgen collision that keeps libpipewire out of the build. They are
 //! blocked on that, not on design.
 //!
@@ -39,8 +39,8 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::audio::AudioService;
-use crate::inhibit::{self, Inhibitor};
+use crate::services::audio::AudioService;
+use crate::services::inhibit::{self, Inhibitor};
 use crate::sway::ipc::SwayService;
 use crate::ui;
 

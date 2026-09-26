@@ -5,7 +5,7 @@
 //! (`ui::set_receded`). No title text and no ambient progress — the mark is
 //! ambient; prose (art + title/artist) and the play-pause action live in
 //! the click-opened read-layer popover (bar/popover.rs). State comes from
-//! `crate::mpris`, which the players push over D-Bus: nothing is polled,
+//! `services::mpris`, which the players push over D-Bus: nothing is polled,
 //! and a mark whose state did not change is not touched.
 
 use std::cell::RefCell;
@@ -15,7 +15,7 @@ use gtk4::prelude::*;
 
 use super::popover;
 use crate::icons;
-use crate::mpris::{MediaState, PlaybackStatus};
+use crate::services::mpris::{MediaState, PlaybackStatus};
 use crate::spawn::spawn_work;
 use crate::ui;
 
@@ -41,11 +41,11 @@ fn control_button(face: &gtk4::Label) -> gtk4::Button {
 
 /// Fire a playerctl transport command off-thread; playerctl blocks on
 /// D-Bus, which must not happen on the GTK thread. The player announces
-/// the result itself (crate::mpris), so nothing is read back here.
+/// the result itself (services::mpris), so nothing is read back here.
 fn send(cmd: &'static str) {
     spawn_work(
         move || {
-            crate::mpris::playerctl(&[cmd]);
+            crate::services::mpris::playerctl(&[cmd]);
         },
         |_| {},
     );
@@ -55,7 +55,7 @@ fn send(cmd: &'static str) {
 /// without forcing the row taller.
 const ART_PX: i32 = 18;
 
-pub fn build(mpris: &Rc<crate::mpris::MprisService>) -> gtk4::Box {
+pub fn build(mpris: &Rc<crate::services::mpris::MprisService>) -> gtk4::Box {
     // Art + title/artist open the popover; the transport keys are siblings,
     // not children, because GTK4 gives a Button's clicks to the Button and a
     // nested control would never see them.
@@ -99,7 +99,7 @@ pub fn build(mpris: &Rc<crate::mpris::MprisService>) -> gtk4::Box {
         state: Rc::new(RefCell::new(None)),
     };
 
-    // Pushed by the players themselves (crate::mpris): no poll, and nothing
+    // Pushed by the players themselves (services::mpris): no poll, and nothing
     // runs while nothing changes.
     apply(&ui, mpris.snapshot());
     {

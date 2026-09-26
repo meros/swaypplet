@@ -6,9 +6,9 @@ use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, Spinner};
 
 use crate::icons;
+use crate::services::bluez;
 use crate::spawn::spawn_work;
 use crate::ui;
-use crate::widgets::bluez;
 
 // ── Nerd Font icons ───────────────────────────────────────────────────────────
 const ICON_HEADPHONES: &str = "󰋋";
