@@ -13,12 +13,19 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use crate::icons;
+use crate::ui;
 
 pub fn build(toggle_panel: Rc<dyn Fn()>) -> gtk4::Button {
+    // A segment of its own, the glyph faint: the resting bar carries no
+    // hue and little ink, so colour anywhere is itself the message. The
+    // glyph comes up to ink under the pointer.
+    let glyph = gtk4::Label::new(Some(icons::START));
+    ui::glyph(&glyph, ui::Text::Body, ui::Tone::Faint);
     let btn = gtk4::Button::builder()
-        .label(icons::START)
+        .child(&glyph)
         .css_classes(["bar-start"])
         .build();
+    ui::segment(&btn, false);
     btn.connect_clicked(move |_| toggle_panel());
     btn
 }

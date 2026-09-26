@@ -195,13 +195,15 @@ fn build_bar_window(
     window.set_decorated(false);
 
     // Pane/content split for the enter transition (motion on glass,
-    // anim.rs): `root` carries the frosted .bar-root card so its tint lands
-    // with the frost in one step, while the clusters on it fade over the
-    // full enter.
+    // anim.rs): `root` carries the thin glass card so its tint lands with
+    // the frost in one step, while the clusters on it fade over the full
+    // enter.
     let root = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .css_classes(["bar-root"])
         .build();
+    crate::ui::surface(&root);
+    crate::ui::card(&root, crate::ui::Card::Thin);
 
     // CenterBox, not Box: the center slot must stay screen-centered
     // regardless of how the left/right clusters grow.
@@ -238,10 +240,8 @@ fn build_bar_window(
     // Battery + board + clock fuse into one segmented track (waybar's
     // group/right-track); a batteryless machine skips the segment so the
     // board keeps the rounded left end.
-    let track = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .css_classes(["bar-track"])
-        .build();
+    let track = crate::ui::segmented();
+    track.add_css_class("bar-track");
     if let Some(bat) = battery::build({
         // The decision slot's battery occupant rides this segment's 30 s
         // poll instead of polling on its own.

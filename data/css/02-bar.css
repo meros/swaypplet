@@ -1,688 +1,210 @@
-/* ── Bar: bottom frosted card, one per output (src/bar/) ──
-   Mirrors the waybar card it replaces: @surface fill (swayfx blurs the
-   wallpaper behind the "swaypplet-bar" namespace), hairline border,
-   radius 14. Modules inside the slots use radius 8 (concentric with the
-   card at its ~6px inset). */
-.bar-root {
-    font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
-    font-size: 10pt;
-    background-color: @surface;
-    border: 1px solid @border_subtle;
-    border-radius: 14px;
-    color: @fg;
-}
+/* ── Bar: bottom thin card, one per output (src/bar/) ──
+   A thin glass card (ui::card Thin; the compositor frosts the wallpaper
+   behind the "swaypplet-bar" namespace). Colour, type and shape come from
+   the components (00-components.css): segments, marks, bays, the popover
+   chassis. This file places them.
 
-/* ── Bar left cluster: start button + workspaces (mirrors waybar) ──
-   Pill geometry: bar 38 − 2×5px margin = 28px-tall pills. Unfocused
-   labels sit muted so the focused (accent) segment is the only loud
-   element on the left. */
+   Height budget: the window asks for 38 px, the card's border takes 1 px
+   each side, and every pill sits --space-2 in from the card's inner edge,
+   so a pill is 28 px tall. Nothing in the bar may measure taller than that,
+   or the whole bar grows (bar/mod.rs logs the offender at map time). */
+
+/* ── Left cluster: start button + workspaces ── */
 .bar-start {
-    margin: 5px 4px 5px 5px;
-    padding: 4px 0;
-    min-width: 28px;
-    min-height: 0;
-    background-color: alpha(@bg1, 0.85);
-    border-radius: 8px;
-    /* Dim luminance family (vision increment 6): the resting bar carries
-       no hue — color anywhere is itself the message. */
-    color: alpha(@fg, 0.45);
-    font-weight: bold;
-    transition: background-color 150ms ease, color 150ms ease;
-}
-
-.bar-start:hover {
-    background-color: alpha(@bg2, 0.90);
-    color: @fg;
+    margin: var(--space-2);
+    padding: 0 var(--space-3);
 }
 
 /* One fused pill per screen (src/bar/workspaces.rs group_by_output),
    ordered left-to-right as the monitors stand; the holder carries the
    strip's margin so the gap between pills is the only thing separating
-   them. One screen = one pill = the pre-grouping look. */
+   them. One screen = one pill = the pre-grouping look. The screen without
+   input focus recedes as a whole, the way iTerm2 dims unfocused split
+   panes; the focused step inside it is the second, redundant channel. */
 .bar-ws-groups {
-    margin: 5px 4px;
+    margin: var(--space-2);
 }
 
-/* Segmented track: flat buttons fused into one pill, only the ends round.
-   Each pill is a segmented control over one screen's workspaces, so
-   exactly one segment in it is .current. The screen WITHOUT input focus
-   dims as a whole — container-level, the way iTerm2 dims unfocused split
-   panes and VS Code unfocused editors. Dimming costs no new shape, keeps
-   the pill readable as a keymap, and scales to any number of screens;
-   the .focused step inside it is the second, redundant channel. */
-.bar-workspaces {
-    border-radius: 8px;
-    opacity: 0.62;
-    transition: opacity 150ms ease;
+/* The bottom edge is the task ribbon's 2 px lane; the top padding is the
+   bottom's plus the lane, so the label stays centred. */
+.bar-ws {
+    padding: var(--space-2) var(--space-4) var(--space-1);
 }
 
-.bar-workspaces.active-screen {
-    opacity: 1;
-}
-
-button.bar-ws {
-    margin: 0;
-    /* 2px shaved off the bottom padding for the ribbon lane; the top 4px
-       is the 2px the retired selection cap used to hold, handed back so
-       the label stays centred and the pill keeps the height it always had. */
-    padding: 4px 12px 2px;
-    min-width: 0;
-    min-height: 0;
-    background-color: alpha(@bg1, 0.85);
-    color: @fg_dim;
-    border-radius: 0;
-    /* One lane left: the BOTTOM edge is the task ribbon (which task —
-       vision increment 10), transparent until its state lands. The top
-       edge used to cap the selected workspace with a bright rim, and a
-       rim on an 8px-radius pill wraps its own corners, so the selected
-       pill wore a lit outline. The bar card is bevelled glass that the
-       compositor lights itself, so that outline stacked a second height
-       cue inside the first and both read as fake. Selection is a step on
-       the fill ladder now, which claims no height at all. */
-    border-bottom: 2px solid transparent;
-    transition: background-color 150ms ease, color 150ms ease,
-        border-bottom-color 150ms ease;
-}
-
-button.bar-ws:not(:first-child) {
-    border-left: 1px solid rgba(0, 0, 0, 0.25);
-}
-
-button.bar-ws:first-child {
-    border-top-left-radius: 8px;
-    border-bottom-left-radius: 8px;
-}
-
-button.bar-ws:last-child {
-    border-top-right-radius: 8px;
-    border-bottom-right-radius: 8px;
-}
-
-button.bar-ws:hover {
-    background-color: alpha(@bg2, 0.90);
-    color: @fg;
-}
-
-/* Selection tiers — three rungs of one neutral fill ladder, all
-   achromatic. Hue is spoken for: the dot and the ribbon carry task
-   identity, so the cursor cannot also be a hue without the two colliding
-   (and the vision puts position and numeral first, hue as reinforcement
-   only). Idle is the dark rung, .current — what its screen shows — the
-   middle one, and .current.focused, the screen holding input, the bright
-   one; the rungs sit far enough apart to survive grayscale, which is the
-   job the retired cap used to do. The top rung goes bold as well, so the
-   screen holding input is legible on weight and on luminance. 0.30 is the
-   ceiling on that rung: a cream tint over the glass lifts the fill toward
-   the @fg label sitting on it, and past 0.30 the numeral falls below the
-   3:1 it reads at today. Brightness that costs legibility is not a tier. */
-button.bar-ws.current {
-    background-color: alpha(@fg, 0.14);
-    color: @fg;
-}
-
-button.bar-ws.current.focused {
-    background-color: alpha(@fg, 0.30);
-    color: @fg;
-    font-weight: bold;
-}
-
-/* Static red tier, no keyframe loop: a looping "calm" animation is
-   per-frame wakeups for hours (vision P2 bans it outright). The onset
-   nudge that belongs here waits on an incremental rebuild(), same
-   blocker as occupancy ticks. */
-button.bar-ws.urgent {
-    background-color: @accent_quinary;
-    color: @bg0;
-}
-
-/* Task ribbons: 2px lane under each task group — off = no session, dim
-   solid = working, task hue = waiting. Fused segments make per-button
-   borders read as one ribbon spanning the group. */
-button.bar-ws.ribbon-working { border-bottom-color: alpha(@fg, 0.30); }
-button.bar-ws.ribbon-waiting.task1 { border-bottom-color: @accent; }
-button.bar-ws.ribbon-waiting.task2 { border-bottom-color: @accent_secondary; }
-button.bar-ws.ribbon-waiting.task3 { border-bottom-color: @accent_tertiary; }
-button.bar-ws.ribbon-waiting.task4 { border-bottom-color: @accent_quaternary; }
-
-/* ── Bar center: the decision slot (src/bar/decision.rs) ──
-   Empty at nominal. One occupant behind a Revealer: battery critical
-   (red, act now) or the oldest unacked waiting session (task-hue dot +
-   full description + age chip). Static once revealed (vision P2). */
+/* ── Center: the decision slot (src/bar/decision.rs) ── */
 .bar-decision {
-    margin: 5px 4px;
-    padding: 4px 12px;
-    min-height: 0;
-    background-color: alpha(@bg1, 0.85);
-    border-radius: 8px;
-    color: @fg;
-    transition: background-color 150ms ease, color 150ms ease;
+    margin: var(--space-2);
+    padding: 0 var(--space-4);
 }
 
-/* Battery critical owns the slot in red — the one "act now" color. */
-.bar-decision.critical {
-    background-color: @accent_quinary;
-    color: @bg0;
-}
-
-/* Task-hue dot: hue reinforces identity, the description carries it. */
-.bar-decision-dot.t1 { color: @accent; }
-.bar-decision-dot.t2 { color: @accent_secondary; }
-.bar-decision-dot.t3 { color: @accent_tertiary; }
-.bar-decision-dot.t4 { color: @accent_quaternary; }
-
-/* Waiting age + "+N more wait" suffix. */
-.bar-decision-meta {
-    font-size: 8pt;
-    color: @fg_dim;
-}
-
-.bar-decision.critical .bar-decision-meta {
-    color: @bg0;
-}
-
-/* OSD interjection (the slot's one transient tenant): icon + eased
-   center-anchored hairline + value, 1.5 s decay back to the occupant. */
 .bar-decision-osd-icon {
     min-width: 20px;
 }
 
-/* DrawingArea paints track (25% alpha) and fill from this color. */
-.bar-decision-hairline {
-    color: @accent;
-}
-
 .bar-decision-osd-text {
-    font-size: 9pt;
-    color: @fg_dim;
     min-width: 34px;
 }
 
-/* ── Media mark: single dim achromatic ♪ (src/bar/media.rs) ──
-   Hidden with no player; .paused dims further. No pill, no title — the
-   mark is ambient, detail arrives with its popover. */
-button.bar-media-mark {
-    margin: 5px 2px;
-    padding: 4px 6px;
-    min-width: 0;
-    min-height: 0;
-    background: none;
-    border-radius: 8px;
-    color: alpha(@fg, 0.45);
-    transition: background-color 150ms ease, color 150ms ease, opacity 150ms ease;
-}
+/* ── Right cluster ── */
 
-button.bar-media-mark:hover {
-    background-color: alpha(@bg2, 0.90);
-}
-
-button.bar-media-mark.paused {
-    color: alpha(@fg, 0.22);
-}
-
-/* ── Hazard lane: standing amber conditions (src/bar/hazards.rs) ──
-   The lane itself owns no margins or padding — zero width when healthy;
-   each glyph carries its own spacing inside its Revealer. Amber static:
-   armed, not act-now (red stays "act now", vision P3). */
-.bar-hazard {
-    margin: 5px 2px;
-    padding: 4px 6px;
-    color: @accent_secondary;
-}
-
-.bar-hazard.bar-hazard-rec {
-    color: @red;
-    font-weight: bold;
-}
-
-/* ── Bar right: battery + clock fused into one instrument track ──
-   Same segmented geometry as .bar-workspaces; the 5px right margin keeps
-   the concentric 6px gap at the card corner (waybar's #right-track). */
-.bar-track {
-    margin: 5px 5px 5px 4px;
-    border-radius: 8px;
-}
-
-.bar-track > .bar-seg {
-    margin: 0;
-    /* 2px top padding + the 2px band lane below = the 4px bottom, so text
-       stays vertically centered (waybar's 2px 12px 4px + border-top). */
-    padding: 2px 12px 4px;
-    min-width: 0;
-    min-height: 0;
-    background-color: alpha(@bg1, 0.85);
-    border-radius: 0;
-    /* Reserved lane for the active-task band — transparent until board.rs
-       stamps bar-taskN on the root, so segments never jump. */
-    border-top: 2px solid transparent;
-    color: @fg;
-    transition: background-color 150ms ease, box-shadow 150ms ease, color 150ms ease,
-        border-top-color 150ms ease;
-}
-
-.bar-track > .bar-seg:not(:first-child) {
-    border-left: 1px solid rgba(0, 0, 0, 0.25);
-}
-
-.bar-track > .bar-seg:first-child {
-    border-top-left-radius: 8px;
-    border-bottom-left-radius: 8px;
-}
-
-.bar-track > .bar-seg:last-child {
-    border-top-right-radius: 8px;
-    border-bottom-right-radius: 8px;
-}
-
-/* Clock: dim luminance family — the readout is reference, not signal. */
-button.bar-clock {
-    color: alpha(@fg, 0.45);
-}
-
-button.bar-clock:hover {
-    background-color: alpha(@bg2, 0.90);
-    color: @fg;
-}
-
-/* Battery (vision increment 6): dim gray glyph at rest, bolt included —
-   no %, no hue. Amber + revealed % at the 30 % edge, static red at 15 %
-   (the onset nudge is Rust-side; nothing on the bar loops). battery.rs
-   only applies .warning/.critical off the charger, so no :not(.charging)
-   guards here. */
-.bar-battery {
-    color: alpha(@fg, 0.45);
-}
-
-.bar-battery.warning {
-    color: @accent_secondary;
-}
-
-.bar-battery.critical {
-    background-color: @accent_quinary;
-    color: @bg0;
-}
-
-.bar-battery-pct {
-    margin-left: 4px;
-}
-
-/* Time estimate beside the glyph (time-to-full charging, time-to-empty
-   discharging). Dimmer than the percentage: the percentage appears only
-   when something is wrong, the estimate is ambient. power::eta_text
-   withholds it near full, so this is quiet on mains. */
-.bar-battery-eta {
-    margin-left: 4px;
-    color: alpha(@fg, 0.65);
-}
-
-/* ── Backup segment (src/bar/backup.rs) ──
-   Right track, between presence and the clock. It breaks battery's
-   rest-is-gray rule on purpose: the glance this instrument exists for is
-   "the nightly jobs ran", so green is the resting state and the segment
-   earns its width by being readable when nothing is wrong. Amber reuses the
-   battery's warning hue for a failed or two-night-old run. Unknown is the
-   resting gray, because a bar with no status files must claim nothing. The
-   chip, the divider and the band lane come from .bar-seg, as for every other
-   segment; only the hue is this module's. */
-.bar-backup.backup-ok {
-    color: @accent_bright_5;
-}
-
-.bar-backup.backup-running {
-    color: @accent_bright_3;
-}
-
-.bar-backup.backup-warn {
-    color: @accent_secondary;
-}
-
-.bar-backup.backup-unknown {
-    color: alpha(@fg, 0.45);
-}
-
-/* ── Backup readout (src/widgets/backup.rs, Helm power sheet) ──
-   The same snapshot as the bar segment, spelled out: the verdict chip
-   carries the tier's hue, the rows stay ink so a wall of amber does not
-   shout twice. */
-.backup-verdict {
-    font-size: 11px;
-}
-
-.backup-verdict.backup-ok {
-    color: @accent_bright_5;
-}
-
-.backup-verdict.backup-running {
-    color: @accent_bright_3;
-}
-
-.backup-verdict.backup-warn {
-    color: @accent_secondary;
-}
-
-.backup-verdict.backup-unknown {
-    color: alpha(@fg, 0.55);
-}
-
-.backup-job {
-    color: @fg;
-}
-
-.backup-when {
-    color: alpha(@fg, 0.65);
-    font-size: 11px;
-}
-
-.backup-target {
-    color: alpha(@fg, 0.55);
-    font-size: 11px;
-    margin-top: 2px;
-}
-
-.backup-run {
-    margin-top: 4px;
-}
-
-/* ── Media pill (src/bar/media.rs) ──
-   Expanded 2026-08-12 from the single ♪ mark to art + title/artist + a
-   transport row. `.paused` dims the whole pill, so a stopped player recedes
-   without disappearing. The label ellipsizes at 24 chars; the pill must not
-   be able to push the clock off the bar. */
+/* Media pill (src/bar/media.rs): art + title/artist, then the transport.
+   The label ellipsizes at 24 chars; the pill must not be able to push the
+   clock off the bar. */
 .bar-media {
-    margin-right: 4px;
+    margin-right: var(--space-2);
 }
 
-.bar-media.paused {
-    opacity: 0.55;
-}
-
-.bar-media-art {
-    border-radius: 3px;
-}
-
-.bar-media-text {
-    margin-right: 2px;
+.bar-media-mark {
+    margin: var(--space-2) var(--space-1);
+    padding: 0 var(--space-2);
 }
 
 .bar-media-btn {
-    padding: 0 4px;
-    min-height: 0;
-    min-width: 0;
-    background: none;
-    border: none;
-    box-shadow: none;
-    color: alpha(@fg, 0.75);
+    margin: var(--space-2) 0;
+    padding: 0 var(--space-2);
 }
 
-.bar-media-btn:hover {
-    color: @fg;
+/* Pins mark (src/bar/pins.rs). */
+.bar-pinmark {
+    margin: var(--space-2) var(--space-1);
+    padding: 0 var(--space-3);
 }
 
-/* ── Tray: SNI icon pill left of the instrument track (src/bar/tray/) ──
-   NeedsAttention items only (service-side predicate); the pill is zero
-   width at rest and every visible item carries the attention fill. */
+/* Tray (src/bar/tray/): NeedsAttention items only; zero width at rest. */
 .bar-tray {
-    margin: 5px 4px;
-    padding: 2px 4px;
-    background-color: alpha(@bg1, 0.85);
-    border-radius: 8px;
+    margin: var(--space-2);
+    padding: var(--space-1) var(--space-2);
 }
 
-button.bar-tray-item {
-    margin: 0;
-    padding: 2px 4px;
-    min-width: 0;
-    min-height: 0;
-    background: none;
-    border-radius: 6px;
-    color: @fg;
-    transition: background-color 150ms ease, opacity 150ms ease;
+.bar-tray-item {
+    padding: var(--space-1) var(--space-2);
 }
 
-button.bar-tray-item:hover {
-    background-color: alpha(@bg2, 0.90);
+/* Hazard lane (src/bar/hazards.rs): the lane owns no margins or padding,
+   so it is zero width when healthy; each glyph carries its own spacing
+   inside its Revealer. */
+.bar-hazard {
+    margin: var(--space-2) var(--space-1);
+    padding: 0 var(--space-2);
 }
 
-button.bar-tray-item.needs-attention {
-    background-color: @accent_quinary;
-    color: @bg0;
+/* Battery, board, presence, backup and clock fused into one instrument
+   track; the right margin keeps the concentric gap at the card corner. */
+.bar-track {
+    margin: var(--space-2);
 }
 
-/* ── The board: four-bay cross-task instrument (src/bar/board.rs) ──
-   Replaces the per-output task pill. Position + numeral carry identity,
-   hue reinforces (vision P3): every state stays distinct in grayscale —
-   socket = darkest empty step, working = mid fill, waiting = bright fill,
-   stopped = near-off dot glyph, stale = amber hollow OFF-flag glyph.
-   All states static (P2); escalation is a luminance tier step (owner
-   decision 1), the ack drop is the one 150ms sub-threshold crossfade. */
+.bar-track > .bar-seg {
+    padding: 0 var(--space-4);
+}
+
+.bar-battery-pct,
+.bar-battery-eta {
+    margin-left: var(--space-2);
+}
+
+/* The board (src/bar/board.rs). */
 .bar-track > .bar-seg.bar-board {
-    padding: 2px 5px 4px;
+    padding: 0 var(--space-2);
 }
 
-button.bar-bay {
-    margin: 2px 0;
-    padding: 0 4px;
-    /* a11y floor: >=24px hit target per bay; drawn content >=16px. */
+.bar-bay {
+    margin: var(--space-1) 0;
+    padding: 0 var(--space-2);
+  /* a11y floor: a >= 24 px hit target per bay. */
     min-width: 24px;
-    min-height: 0;
-    background: none;
-    /* Flat on purpose: the bar card is the only thing on this window that
-       has height, and the compositor draws that height itself (bevelled
-       rim + specular highlight on the glass). A bay that carried its own
-       rim or press bevel would stack a second height cue inside the first
-       and both would read as fake, so background-image and box-shadow are
-       pinned off here — that also stops the generic `button:active` inset
-       further down from denting a bay when it is clicked. State speaks
-       through fill and hue, never through depth. */
-    background-image: none;
-    box-shadow: none;
-    /* Reserved, transparent until .stale claims it, so the OFF-flag never
-       shifts the bay's geometry. */
-    border: 1px solid transparent;
-    /* Concentric with the board segment: 8 − the segment's 2px padding. */
-    border-radius: 6px;
-    color: @fg_dim;
-    transition: background-color 150ms ease, color 150ms ease,
-        border-color 150ms ease, box-shadow 150ms ease;
 }
 
-/* No session: the bottom step of the fill ladder, one shade under the
-   segment it sits in. This was a hollow ring until the bar grew a real
-   bevel; a rim on an empty bay then read as a raised edge floating on the
-   glass, so the empty slot is spoken as fill like every other pill. */
-button.bar-bay.socket {
-    background-color: alpha(@bg0, 0.45);
-    color: alpha(@fg, 0.20);
-}
-
-/* Working: filled block, achromatic — busy needs nothing from the owner. */
-button.bar-bay.working {
-    background-color: alpha(@bg3, 0.90);
-    color: @fg_dim;
-}
-
-/* Stopped: near-off dot — slot occupied, session done (owner decision 2). */
-button.bar-bay.stopped {
-    color: alpha(@fg, 0.12);
-}
-
-/* Stale: data invalid, amber hollow OFF-flag — hollow so it never reads
-   as a live filled state, and never as Waiting (P9). */
-button.bar-bay.stale {
-    border-color: @accent_secondary;
-    color: @accent_secondary;
-}
-
-/* Waiting, acked: task hue held at a tint — seen, not yet served. */
-button.bar-bay.t1.waiting { background-color: alpha(@accent, 0.30); color: @fg; }
-button.bar-bay.t2.waiting { background-color: alpha(@accent_secondary, 0.30); color: @fg; }
-button.bar-bay.t3.waiting { background-color: alpha(@accent_tertiary, 0.30); color: @fg; }
-button.bar-bay.t4.waiting { background-color: alpha(@accent_quaternary, 0.30); color: @fg; }
-
-/* Waiting, unacked: full-luminance hue after the onset nudge, then static. */
-button.bar-bay.t1.waiting.unacked { background-color: @accent; color: @bg0; }
-button.bar-bay.t2.waiting.unacked { background-color: @accent_secondary; color: @bg0; }
-button.bar-bay.t3.waiting.unacked { background-color: @accent_tertiary; color: @bg0; }
-button.bar-bay.t4.waiting.unacked { background-color: @accent_quaternary; color: @bg0; }
-
-/* Blocked: halted on a permission prompt, the one state where the session
-   cannot continue without the owner. It rides the unacked fill above,
-   because a second hue tier at bay size would fail the grayscale rule;
-   the separation is the `!` marker (shape first, P3) plus the bold
-   numeral. No overdue step and no acked tier: answering the prompt is
-   the acknowledgment, and it takes two seconds. */
-button.bar-bay.blocked {
-    font-weight: 700;
-}
-
-button.bar-bay.blocked .bar-bay-marker {
-    font-weight: 700;
-}
-
-/* Unacked >=10 min: one static luminance tier step — nothing on the bar
-   ever loops (owner decision 1). The tier step is the whole signal; the
-   halo that used to sit under it is gone, because a blurred glow on the
-   glass card is a height claim and the card's own bevel already makes
-   that claim for everything inside it. */
-button.bar-bay.t1.waiting.unacked.overdue { background-color: shade(@accent, 1.25); }
-button.bar-bay.t2.waiting.unacked.overdue { background-color: shade(@accent_secondary, 1.25); }
-button.bar-bay.t3.waiting.unacked.overdue { background-color: shade(@accent_tertiary, 1.25); }
-button.bar-bay.t4.waiting.unacked.overdue { background-color: shade(@accent_quaternary, 1.25); }
-
-/* Local bay (this output's visible task): hue ring + static width step —
-   workspace hopping is the highest-frequency event, so no animation. The
-   ring is the one box-shadow left inside the bar: zero blur, zero offset,
-   full task hue, so it draws an outline and never a bevel. It is the only
-   hue a socket or stopped bay can carry, which is why it survives the
-   flattening. */
-button.bar-bay.local {
+/* The bay of this screen's task is a step wider as well as ringed:
+   workspace hopping is the highest-frequency event, so no animation. */
+.bar-bay.local {
     min-width: 30px;
 }
 
-button.bar-bay.t1.local { box-shadow: 0 0 0 1px alpha(@accent, 0.85); }
-button.bar-bay.t2.local { box-shadow: 0 0 0 1px alpha(@accent_secondary, 0.85); }
-button.bar-bay.t3.local { box-shadow: 0 0 0 1px alpha(@accent_tertiary, 0.85); }
-button.bar-bay.t4.local { box-shadow: 0 0 0 1px alpha(@accent_quaternary, 0.85); }
-
 .bar-bay-marker {
-    margin-right: 2px;
+    margin-right: var(--space-1);
 }
 
-/* Waiting-age chip: revealed at the 2 min threshold, ticks 1/min while a
-   session waits (boundary-aimed timer in task_state.rs). */
 .bar-bay-chip {
-    margin-left: 3px;
-    font-size: 8pt;
+    margin-left: var(--space-1);
 }
 
-/* Bottom 2px N/M fill (DrawingArea paints with the CSS color). */
-.bar-bay-fill {
-    color: alpha(@fg, 0.55);
-}
-
-/* ── Read-layer popovers: one chassis for bays + marks (src/bar/popover.rs) ──
-   The glass card is the popover child, not the popover node: popup
-   surfaces sit outside swayfx's layer_effects list, so there is no frost
-   behind them and the body swaps the translucent card fill for the raised
-   opaque one (keeping the glass-card radius + border). */
-popover.bar-popover,
-popover.bar-popover > contents {
-    background: none;
-    border: none;
-    box-shadow: none;
-    padding: 0;
-}
-
+/* ── Read-layer popovers (src/bar/popover.rs) ── */
 .bar-popover-body {
-    background-color: @surface_raised;
-    padding: 12px;
+    padding: var(--space-4);
     min-width: 200px;
 }
 
-.bar-popover-title {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 1px;
-    color: @fg_dim;
+/* Pins popover (src/bar/pins.rs). */
+.bar-pinned-row {
+    padding: var(--space-2) 0;
 }
 
-.bar-popover-list,
-.bar-popover-list row {
-    background: transparent;
-    padding: 0;
-    border: none;
-    box-shadow: none;
+/* Media popover: the art at the panel's media size. */
+.bar-media-art-frame,
+.bar-media-art-frame > * {
+    min-width: 56px;
+    min-height: 56px;
 }
 
-/* Session rows: click or Enter focuses the session's workspace. */
-/* No transition: arrow keys move focus through these rows, and a fade over
-   the keyed card fill leaves a dark ghost (see `.launcher-result`). */
-.bar-popover-row {
-    padding: 6px 8px;
-    border-radius: 8px;
+/* Qualified by the card: the icon button's own min size is the control
+   height, and this one is the panel's media size. */
+.bar-popover-body button.bar-media-play {
+    min-width: 48px;
+    min-height: 48px;
 }
 
-.bar-popover-list row:hover .bar-popover-row,
-.bar-popover-list row:focus .bar-popover-row {
-    background-color: alpha(white, 0.05);
+/* ── Backup readout (src/widgets/backup.rs, Helm power sheet) ──
+   Not the bar's: the same snapshot as the bar segment, spelled out, and
+   left here where it has always lived until the Helm's own migration moves
+   it onto the components. The verdict carries the tier's status colour,
+   the rows stay ink so a wall of amber does not shout twice. */
+.backup-verdict {
+    font-size: var(--type-caption);
 }
 
-.bar-popover-desc {
-    font-size: 13px;
-    color: @fg;
+.backup-verdict.backup-ok {
+    color: var(--success);
 }
 
-.bar-popover-meta {
-    font-size: 11px;
-    color: @fg_dim;
+.backup-verdict.backup-running {
+    color: var(--fg);
 }
 
-/* Last assistant message — present once the nixos-side Stop hook writes
-   last-<pid>; absent (and unmissed) until then. */
-.bar-popover-last {
-    font-size: 11px;
-    color: @text_faint;
-    font-style: italic;
+.backup-verdict.backup-warn {
+    color: var(--warning);
 }
 
-.bar-popover-empty {
-    font-size: 12px;
-    color: @fg_dim;
-    font-style: italic;
+.backup-verdict.backup-unknown {
+    color: var(--fg-faint);
 }
 
-button.bar-popover-action {
-    font-size: 12px;
-    padding: 4px 10px;
-    min-height: 28px;
+.backup-job {
+    color: var(--fg);
 }
 
-/* The active-task accent ripple lived here: board.rs stamped bar-task1..4
-   on .bar-root and descendant selectors pushed that hue across the right
-   track's band lane (battery/board/clock). Removed 2026-08-12: task hue
-   belongs on the things that ARE tasks — the workspace pills, their
-   ribbons and the decision dot, all still hued above — not smeared across
-   the status instruments, which report the machine rather than the work.
-   apply_accent in bar/board.rs is the matching no-op. */
+.backup-when {
+    color: var(--fg-muted);
+    font-size: var(--type-caption);
+}
 
-/* Workspace-strip dots (src/bar/workspaces.rs): every numbered workspace
-   1–16 carries its task's accent — same order, defined only here so a
-   palette retune reaches the dots too. */
-.bar-ws-dot.task1 { color: @accent; }
-.bar-ws-dot.task2 { color: @accent_secondary; }
-.bar-ws-dot.task3 { color: @accent_tertiary; }
-.bar-ws-dot.task4 { color: @accent_quaternary; }
+.backup-target {
+    color: var(--fg-faint);
+    font-size: var(--type-caption);
+    margin-top: var(--space-1);
+}
 
-/* The accent ripple deliberately stops at the track band above: it is
-   keyed to this output's LOCAL task, so stamping it on the selected
-   workspace fused two different facts (which task is on this screen, and
-   which workspace holds focus, possibly on the other screen) into one
-   mark. The selection tiers are achromatic for that reason. */
+.backup-run {
+    margin-top: var(--space-2);
+}
 
-/* ── State-driven motion (matches waybar) ──
-   Pure outer glow, no bevel layers. Box-shadow animations replace the
-   element's whole box-shadow each frame, so use them only on shadowless
-   elements; bordered cards animate border-color instead. */
+/* ── Shared keyframes ──
+   Not the bar's either: the panel's media art (03-panel.css) and the
+   notification card (06-notifications.css) breathe with this while a
+   player plays. It lived here and stays until those surfaces move. Pure
+   outer glow; a box-shadow animation replaces the element's whole
+   box-shadow each frame, so use it only on shadowless elements. */
 @keyframes media-breathing {
-    from { box-shadow: 0 0 0 alpha(@accent, 0.0); }
-    to   { box-shadow: 0 0 10px alpha(@accent, 0.40); }
+    from { box-shadow: 0 0 0 transparent; }
+    to   { box-shadow: 0 0 10px var(--accent-tint); }
 }

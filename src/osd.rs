@@ -324,7 +324,11 @@ impl Card {
             .label("")
             .halign(gtk4::Align::Center)
             .build();
-        crate::ui::set_text_style(&indicator_label, crate::ui::Text::TitleSm, crate::ui::Tone::Muted);
+        crate::ui::set_text_style(
+            &indicator_label,
+            crate::ui::Text::TitleSm,
+            crate::ui::Tone::Muted,
+        );
         indicator_label.set_visible(false);
 
         // Content sits on the glass and fades over the full duration; the

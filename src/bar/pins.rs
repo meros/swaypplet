@@ -22,6 +22,7 @@ use gtk4::prelude::*;
 use super::popover;
 use crate::jump::card::{self, Live};
 use crate::jump::{live, pin};
+use crate::ui;
 
 const PIN: &str = "\u{f0403}";
 const PIN_OUTLINE: &str = "\u{f0931}";
@@ -46,18 +47,18 @@ struct Ui {
 pub fn build() -> gtk4::Widget {
     let glyph = gtk4::Label::new(Some(PIN));
     let count = gtk4::Label::new(None);
-    count.add_css_class("bar-pins-count");
-    let inner = gtk4::Box::new(gtk4::Orientation::Horizontal, 3);
+    ui::set_text_style(&count, ui::Text::Caption, ui::Tone::Fg);
+    let inner = ui::hbox(1);
     inner.append(&glyph);
     inner.append(&count);
-    let btn = gtk4::Button::builder()
-        .child(&inner)
-        .css_classes(["bar-pins-mark"])
-        .tooltip_text("Pinned workspaces")
-        .build();
+    // Dim and achromatic like the media mark; a level lower still while the
+    // pins are tucked.
+    let btn = ui::mark(&inner, false);
+    btn.add_css_class("bar-pinmark");
+    btn.set_tooltip_text(Some("Pinned workspaces"));
     let revealer = gtk4::Revealer::builder()
         .transition_type(gtk4::RevealerTransitionType::SlideLeft)
-        .transition_duration(200)
+        .transition_duration(crate::tokens::motion::EXPAND.ms as u32)
         .child(&btn)
         .build();
 
@@ -129,11 +130,7 @@ fn update(ui: &Ui) {
     ui.revealer.set_reveal_child(!pinned.is_empty());
     let tucked = pin::tucked();
     ui.glyph.set_label(if tucked { PIN_OUTLINE } else { PIN });
-    if tucked {
-        ui.btn.add_css_class("tucked");
-    } else {
-        ui.btn.remove_css_class("tucked");
-    }
+    ui::set_class(&ui.btn, "quiet", tucked);
     ui.count.set_visible(pinned.len() > 1);
     ui.count.set_label(&pinned.len().to_string());
 }
@@ -166,24 +163,19 @@ fn rows(ui: &Rc<Ui>, scenes: &[(String, Option<crate::jump::scene::Scene>)]) {
     while let Some(child) = ui.body.first_child() {
         ui.body.remove(&child);
     }
-    let title = gtk4::Label::builder()
-        .label("PINNED")
-        .xalign(0.0)
-        .css_classes(["bar-popover-title"])
-        .build();
-    ui.body.append(&title);
+    ui.body.append(&popover::title("PINNED"));
 
     *ui.live.borrow_mut() = Live::default();
     for (name, scene) in scenes {
-        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
-        row.add_css_class("bar-pins-row");
+        let row = ui::hbox(3);
+        row.add_css_class("bar-pinned-row");
         let picture = card::preview(scene.as_ref(), ROW_W, ROW_H, &mut ui.live.borrow_mut());
         row.append(&picture);
 
-        let side = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
+        let side = ui::vbox(3);
         side.set_valign(gtk4::Align::Center);
-        let label = gtk4::Label::builder()
-            .label(crate::jump::rows::label_for(&crate::jump::place::Place {
+        let label = ui::text(
+            &crate::jump::rows::label_for(&crate::jump::place::Place {
                 num: name
                     .split(':')
                     .next()
@@ -191,15 +183,15 @@ fn rows(ui: &Rc<Ui>, scenes: &[(String, Option<crate::jump::scene::Scene>)]) {
                     .unwrap_or(-1),
                 name: name.clone(),
                 output: String::new(),
-            }))
-            .xalign(0.0)
-            .css_classes(["bar-pins-label"])
-            .build();
+            }),
+            ui::Text::Body,
+            ui::Tone::Fg,
+        );
+        label.add_css_class("ui-strong");
         side.append(&label);
-        let go = gtk4::Button::with_label("Go there");
-        let unpin = gtk4::Button::with_label("Unpin");
+        let go = ui::small_button("Go there", ui::Kind::Secondary);
+        let unpin = ui::small_button("Unpin", ui::Kind::Secondary);
         for (b, action) in [(&go, "go"), (&unpin, "unpin")] {
-            b.add_css_class("bar-pins-action");
             let name = name.clone();
             let pop = ui.pop.clone();
             b.connect_clicked(move |_| {
@@ -219,12 +211,14 @@ fn rows(ui: &Rc<Ui>, scenes: &[(String, Option<crate::jump::scene::Scene>)]) {
     }
 
     let tucked = pin::tucked();
-    let tuck = gtk4::Button::with_label(if tucked {
-        "Show pins on screen"
-    } else {
-        "Tuck pins into the bar"
-    });
-    tuck.add_css_class("bar-pins-tuck");
+    let tuck = ui::small_button(
+        if tucked {
+            "Show pins on screen"
+        } else {
+            "Tuck pins into the bar"
+        },
+        ui::Kind::Secondary,
+    );
     tuck.connect_clicked(move |_| {
         if let Some(pins) = pin::handle() {
             pins.set_tucked(!tucked);

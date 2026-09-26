@@ -199,7 +199,10 @@ impl Neutral {
                 [Rgb::hex(0x1d2021), Rgb::hex(0x32302f), Rgb::hex(0xebdbb2)]
             }
             (Neutral::Gruvbox, Mode::Light) => {
-                [Rgb::hex(0xfbf1c7), Rgb::hex(0xebdbb2), Rgb::hex(0x282828)]
+                // Not gruvbox's own cream (#fbf1c7 / #ebdbb2): as glass that
+                // read as yellowed paper. The same warm hue at a fraction of
+                // the chroma: white glass with a trace of warmth.
+                [Rgb::hex(0xf8f7f4), Rgb::hex(0xebe9e4), Rgb::hex(0x282624)]
             }
             (Neutral::Slate, Mode::Dark) => {
                 [Rgb::hex(0x15181c), Rgb::hex(0x262b31), Rgb::hex(0xe3e8ee)]
@@ -540,9 +543,9 @@ pub fn apca(text: Rgb, bg: Rgb) -> f64 {
 /// `--space-1` … `--space-7`. Box spacing and margins in Rust use these.
 pub const SPACE: [i32; 7] = [2, 4, 8, 12, 16, 24, 32];
 
-/// `--space-n`, 1-based as in the stylesheet.
+/// `--space-n`, 1-based as in the stylesheet; 0 is no space at all.
 pub const fn space(n: usize) -> i32 {
-    SPACE[n - 1]
+    if n == 0 { 0 } else { SPACE[n - 1] }
 }
 
 pub const TYPE: [(&str, u32); 7] = [
@@ -704,13 +707,19 @@ pub fn css(inputs: Inputs) -> String {
     // zero: GTK skips a transition of 0 but the end state must still land.
     let scaled = |ms: f64| (ms * f64::from(inputs.motion) / 100.0).max(1.0).round();
     for (name, ms) in DURATION {
-        put(&format!("dur-{name}"), format!("{}ms", scaled(f64::from(ms))));
+        put(
+            &format!("dur-{name}"),
+            format!("{}ms", scaled(f64::from(ms))),
+        );
     }
     put("ease-standard", motion::STANDARD.css());
     put("ease-decelerate", motion::DECELERATE.css());
     put("ease-accelerate", motion::ACCELERATE.css());
     for m in motion::ALL {
-        put(&format!("motion-{}", m.name), format!("{}ms {}", scaled(m.ms), m.curve.css()));
+        put(
+            &format!("motion-{}", m.name),
+            format!("{}ms {}", scaled(m.ms), m.curve.css()),
+        );
     }
 
     // Component tokens (§3.9).
@@ -755,6 +764,13 @@ mod tests {
     }
 
     const BEHIND: [Rgb; 3] = [Rgb::WHITE, Rgb(0.5, 0.5, 0.5), Rgb::BLACK];
+
+    #[test]
+    fn space_zero_is_nothing() {
+        assert_eq!(space(0), 0);
+        assert_eq!(space(1), 2);
+        assert_eq!(space(7), 32);
+    }
 
     #[test]
     fn oklch_round_trips() {
@@ -944,7 +960,11 @@ mod tests {
             "space-5",
             "radius-card",
             "dur-fast",
-            "ease-standard", "motion-state", "motion-enter", "motion-exit", "motion-travel",
+            "ease-standard",
+            "motion-state",
+            "motion-enter",
+            "motion-exit",
+            "motion-travel",
         ] {
             assert!(css.contains(&format!("  --{name}: ")), "missing --{name}");
         }

@@ -31,13 +31,11 @@ const MENU_DEBOUNCE_MS: u64 = 50;
 
 /// The tray pill for one bar window, following the shared service.
 pub fn build(tray: &Rc<TrayService>) -> gtk4::Box {
-    let container = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .css_classes(["bar-tray"])
-        .spacing(2)
-        // Hidden until an item registers, so the empty pill never renders.
-        .visible(false)
-        .build();
+    let container = crate::ui::hbox(1);
+    crate::ui::segment(&container, false);
+    container.add_css_class("bar-tray");
+    // Hidden until an item registers, so the empty pill never renders.
+    container.set_visible(false);
 
     let items: Rc<RefCell<HashMap<String, ItemUi>>> = Rc::new(RefCell::new(HashMap::new()));
 
@@ -128,13 +126,11 @@ struct ItemUi {
 impl ItemUi {
     fn new(container: &gtk4::Box, tray: &Rc<TrayService>, item: &TrayItem) -> Self {
         let image = gtk4::Image::new();
-        // needs-attention is unconditional: the service predicate already
-        // filtered everything else out.
-        let button = gtk4::Button::builder()
-            .css_classes(["bar-tray-item", "needs-attention"])
-            .has_frame(false)
-            .child(&image)
-            .build();
+        // The attention fill is unconditional: the service predicate
+        // already filtered everything else out.
+        let button = crate::ui::mark(&image, false);
+        crate::ui::set_danger(&button, true);
+        button.add_css_class("bar-tray-item");
         container.append(&button);
 
         let menu: Rc<RefCell<Option<menu::MenuUi>>> = Rc::new(RefCell::new(None));
