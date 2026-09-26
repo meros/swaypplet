@@ -26,11 +26,10 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use gtk4::gdk;
 use gtk4::prelude::*;
-use gtk4::{gdk, gio};
 
-use crate::anim;
-use crate::shell::layer::{self, LayerShellConfig};
+use crate::shell::{Namespace, PerMonitor, Surface};
 use crate::sway::ipc;
 use crate::sway::workspace::generic_label;
 
@@ -529,25 +528,12 @@ fn mod_rank(keys: &str) -> (usize, String) {
 /// The sheet on one output. A layer surface is bound to its `wl_output`, so
 /// a card is built for a monitor and destroyed with it, never moved.
 struct Card {
-    monitor: gdk::Monitor,
-    window: gtk4::Window,
+    surface: Surface,
     body: gtk4::Box,
-    reveal: anim::Reveal,
-}
-
-impl Drop for Card {
-    fn drop(&mut self) {
-        // The alpha handle goes before its `wl_surface` (see
-        // `anim::Reveal::release_alpha`).
-        self.reveal.release_alpha();
-        crate::shell::layer::destroy_window(&self.window);
-    }
 }
 
 pub struct Keybinds {
-    app: gtk4::Application,
-    monitors: gio::ListModel,
-    cards: RefCell<Vec<Card>>,
+    cards: Rc<PerMonitor<Card>>,
     /// What the cards are transitioning toward. Kept here rather than read
     /// off a card, so a monitor plugged in mid-hold joins the others.
     shown: Cell<bool>,
@@ -580,11 +566,8 @@ const COLUMNS: usize = 3;
 
 impl Keybinds {
     pub fn new(app: &gtk4::Application) -> Rc<Self> {
-        let display = gdk::Display::default().expect("no gdk display");
         let this = Rc::new(Keybinds {
-            app: app.clone(),
-            monitors: display.monitors(),
-            cards: RefCell::new(Vec::new()),
+            cards: PerMonitor::new(),
             shown: Cell::new(false),
             loaded: Rc::new(Cell::new(false)),
             pending_show: Rc::new(Cell::new(false)),
@@ -594,44 +577,24 @@ impl Keybinds {
             rows: Rc::new(RefCell::new(Vec::new())),
         });
 
+        // One card per output; a monitor plugged in mid-hold joins the
+        // others.
+        let app = app.clone();
         let weak = Rc::downgrade(&this);
-        this.monitors.connect_items_changed(move |_, _, _, _| {
+        this.cards.watch(move |monitor| {
+            let card = build_card(&app, monitor);
             if let Some(this) = weak.upgrade() {
-                this.sync();
+                if this.loaded.get() {
+                    fill(&card.body, &this.rows.borrow());
+                }
+                if this.shown.get() {
+                    card.surface.show();
+                }
             }
+            card
         });
-        this.sync();
 
         this
-    }
-
-    /// Reconcile the cards against the current monitor list, the same way
-    /// the bar does: drop the card of a monitor that left, build one for a
-    /// monitor that arrived.
-    fn sync(&self) {
-        let current: Vec<gdk::Monitor> = self
-            .monitors
-            .iter::<gdk::Monitor>()
-            .filter_map(Result::ok)
-            .collect();
-
-        self.cards
-            .borrow_mut()
-            .retain(|card| current.contains(&card.monitor));
-
-        for monitor in current {
-            if self.cards.borrow().iter().any(|c| c.monitor == monitor) {
-                continue;
-            }
-            let card = build_card(&self.app, monitor);
-            if self.loaded.get() {
-                fill(&card.body, &self.rows.borrow());
-            }
-            if self.shown.get() {
-                card.reveal.show();
-            }
-            self.cards.borrow_mut().push(card);
-        }
     }
 
     /// Ask for the sheet: Super went down.
@@ -679,9 +642,7 @@ impl Keybinds {
     fn try_reveal(&self) {
         if self.pending_show.get() && self.held.get() && self.loaded.get() {
             self.shown.set(true);
-            for card in self.cards.borrow().iter() {
-                card.reveal.show();
-            }
+            self.cards.for_each(|card| card.surface.show());
         }
     }
 
@@ -694,9 +655,7 @@ impl Keybinds {
             crate::spawn::remove_source(id);
         }
         self.shown.set(false);
-        for card in self.cards.borrow().iter() {
-            card.reveal.hide();
-        }
+        self.cards.for_each(|card| card.surface.hide());
     }
 
     /// For a keyboard-less caller (a click, a script). Skips the hold: an
@@ -718,55 +677,26 @@ impl Keybinds {
 
     fn rebuild(&self) {
         let sections = self.rows.borrow();
-        for card in self.cards.borrow().iter() {
-            fill(&card.body, &sections);
-        }
+        self.cards.for_each(|card| fill(&card.body, &sections));
     }
 }
 
-fn build_card(app: &gtk4::Application, monitor: gdk::Monitor) -> Card {
-    static CONFIG: LayerShellConfig = LayerShellConfig {
-        namespace: crate::shell::Namespace::Keybinds,
-        layer: gtk4_layer_shell::Layer::Overlay,
-        exclusive: false,
-        default_width: None,
-        default_height: None,
-        anchors: &[],
-        margins: &[],
-        // Held-Super is not a focus gesture: the sheet reads and leaves.
-        keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
-    };
-
-    let window = layer::create_layer_window_on(app, &CONFIG, Some(&monitor));
-    window.set_resizable(false);
-    window.set_decorated(false);
-
-    let wrapper = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .halign(gtk4::Align::Center)
-        .valign(gtk4::Align::Center)
+fn build_card(app: &gtk4::Application, monitor: &gdk::Monitor) -> Card {
+    // Unanchored, so centred on its output; and never the keyboard:
+    // held-Super is not a focus gesture, the sheet reads and leaves.
+    let surface = Surface::builder(app, Namespace::Keybinds)
+        .monitor(Some(monitor))
+        .card(crate::ui::Card::Floating)
         .build();
-
-    crate::ui::surface::adopt(&wrapper);
-
-    let card = crate::ui::vbox(0);
-    crate::ui::card::adopt(&card, crate::ui::Card::Floating);
-    card.add_css_class("keybinds-card");
+    surface.root().set_halign(gtk4::Align::Center);
+    surface.root().set_valign(gtk4::Align::Center);
+    surface.card().add_css_class("keybinds-card");
 
     let body = crate::ui::hbox(7);
+    surface.card().append(&body);
+    surface.set_content(&body);
 
-    card.append(&body);
-    wrapper.append(&card);
-    window.set_child(Some(&wrapper));
-
-    let reveal = anim::Reveal::new(&window, &card).content(&body);
-
-    Card {
-        monitor,
-        window,
-        body,
-        reveal,
-    }
+    Card { surface, body }
 }
 
 /// Print the sheet into one card's body, replacing what was there.

@@ -37,7 +37,7 @@ use crate::widgets::{
 /// wants; squeezed onto a laptop panel that row wraps and the card comes down
 /// to around 620. This number only sets how far `install_monitor_fit` is
 /// allowed to clamp it before the rows start giving up space.
-const HELM_CARD_SIZE: crate::launcher::CardSize = crate::launcher::CardSize {
+const HELM_CARD_SIZE: crate::shell::fit::CardSize = crate::shell::fit::CardSize {
     width: 740,
     height: None,
 };
@@ -173,7 +173,7 @@ impl Panel {
 
         // ── Top spacer (positions Helm at the optical foveal sweet spot ~25-28%) ──
         // Height and the card's width both come from
-        // crate::launcher::install_monitor_fit below, against the output the
+        // crate::shell::fit::install_monitor_fit below, against the output the
         // window lands on.
         let top_spacer = ui::vbox(0);
 
@@ -370,7 +370,7 @@ impl Panel {
         // the only thing it gives up: every control keeps its place and its
         // size, the lists just show fewer rows before scrolling.
         let lists = elastic_lists(&launcher, &deck_stack);
-        crate::launcher::install_monitor_fit(
+        crate::shell::fit::install_monitor_fit(
             &window,
             &top_spacer,
             &root,
