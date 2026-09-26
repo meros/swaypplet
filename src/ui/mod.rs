@@ -86,8 +86,19 @@ pub fn glyph(l: &gtk4::Label, size: Text, tone: Tone) {
 /// Restyle an existing label onto the scale.
 pub fn set_text_style(l: &gtk4::Label, size: Text, tone: Tone) {
     for c in [
-        "ui-display", "ui-display-sm", "ui-title", "ui-title-sm", "ui-body", "ui-label", "ui-caption",
-        "ui-muted", "ui-faint", "ui-accent", "ui-success", "ui-warning", "ui-danger",
+        "ui-display",
+        "ui-display-sm",
+        "ui-title",
+        "ui-title-sm",
+        "ui-body",
+        "ui-label",
+        "ui-caption",
+        "ui-muted",
+        "ui-faint",
+        "ui-accent",
+        "ui-success",
+        "ui-warning",
+        "ui-danger",
     ] {
         l.remove_css_class(c);
     }

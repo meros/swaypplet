@@ -94,9 +94,13 @@ anchors.
 
 | Neutral | dark 1 / 3 / 12 | light 1 / 3 / 12 |
 |---|---|---|
-| gruvbox | `#1d2021` / `#32302f` / `#ebdbb2` | `#fbf1c7` / `#ebdbb2` / `#282828` |
+| gruvbox | `#1d2021` / `#32302f` / `#ebdbb2` | `#f8f7f4` / `#ebe9e4` / `#282624` |
 | slate | `#15181c` / `#262b31` / `#e3e8ee` | `#f7f9fb` / `#e6ebf0` / `#1f252b` |
 | pure | `#141414` / `#262626` / `#ebebeb` | `#fafafa` / `#e8e8e8` / `#1f1f1f` |
+
+Gruvbox's light anchors are not its own cream (`#fbf1c7`, `#ebdbb2`): as
+glass that read as yellowed paper. They keep its warm hue at a fraction of
+the chroma, so light mode is white glass with a trace of warmth.
 
 Lightness curve, as the fraction of the way from step 3 to step 12, for
 steps 4–11: `0.05 0.10 0.17 0.26 0.40 0.52 0.66 0.83`. Steps 1–2 sit at

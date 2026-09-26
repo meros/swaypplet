@@ -20,7 +20,7 @@ type SessionRow = (String, u32, String, String, OwnedObjectPath);
     default_service = "org.freedesktop.login1",
     default_path = "/org/freedesktop/login1"
 )]
-trait Manager {
+pub(crate) trait Manager {
     fn inhibit(&self, what: &str, who: &str, why: &str, mode: &str) -> zbus::Result<OwnedFd>;
     fn get_session(&self, session_id: &str) -> zbus::Result<OwnedObjectPath>;
     fn list_sessions(&self) -> zbus::Result<Vec<SessionRow>>;
@@ -32,7 +32,7 @@ trait Manager {
     interface = "org.freedesktop.login1.Session",
     default_service = "org.freedesktop.login1"
 )]
-trait Session {
+pub(crate) trait Session {
     #[zbus(signal)]
     fn lock(&self) -> zbus::Result<()>;
     #[zbus(signal)]
@@ -72,6 +72,29 @@ impl Logind {
     }
 }
 
+/// This user's graphical session on logind.
+///
+/// "auto" resolves to the caller's session or, for processes outside any
+/// session (a user service under user@.service), the user's display
+/// session. Falls back to scanning for our uid's seated session.
+pub(crate) async fn session(
+    conn: &zbus::Connection,
+    manager: &ManagerProxy<'_>,
+) -> zbus::Result<SessionProxy<'static>> {
+    let session_path = match manager.get_session("auto").await {
+        Ok(p) => p,
+        Err(e) => {
+            log::warn!("logind: GetSession(auto) failed ({e}); scanning sessions");
+            find_session(manager).await?
+        }
+    };
+    log::info!("logind: session {}", session_path.as_str());
+    SessionProxy::builder(conn)
+        .path(session_path)?
+        .build()
+        .await
+}
+
 pub fn start(ev: Sender<Ev>) -> Logind {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     crate::spawn::spawn_tokio_thread("idle-logind", async move {
@@ -88,22 +111,7 @@ async fn run(
 ) -> zbus::Result<()> {
     let conn = zbus::Connection::system().await?;
     let manager = ManagerProxy::new(&conn).await?;
-
-    // "auto" resolves to the caller's session or, for processes outside any
-    // session (this is a user service under user@.service), the user's
-    // display session. Fall back to scanning for our uid's seated session.
-    let session_path = match manager.get_session("auto").await {
-        Ok(p) => p,
-        Err(e) => {
-            log::warn!("logind: GetSession(auto) failed ({e}); scanning sessions");
-            find_session(&manager).await?
-        }
-    };
-    log::info!("logind: session {}", session_path.as_str());
-    let session = SessionProxy::builder(&conn)
-        .path(session_path)?
-        .build()
-        .await?;
+    let session = session(&conn, &manager).await?;
 
     let mut inhibitor = Some(take_inhibitor(&manager).await?);
     let mut prepare = manager.receive_prepare_for_sleep().await?;

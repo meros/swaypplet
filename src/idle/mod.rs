@@ -87,7 +87,7 @@
 //! one tier that has to ask (`idle_inhibited`).
 
 mod locker;
-mod logind;
+pub(crate) mod logind;
 mod outputs;
 mod wayland;
 

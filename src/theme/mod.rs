@@ -32,44 +32,50 @@ thread_local! {
 
 /// The rules, one file per surface, in cascade order.
 pub const RULES: &[(&str, &str)] = &[
-    ("00-components.css", include_str!("../data/css/00-components.css")),
-    ("01-base.css", include_str!("../data/css/01-base.css")),
-    ("02-bar.css", include_str!("../data/css/02-bar.css")),
-    ("03-panel.css", include_str!("../data/css/03-panel.css")),
-    ("04-network.css", include_str!("../data/css/04-network.css")),
-    ("05-osd.css", include_str!("../data/css/05-osd.css")),
+    (
+        "00-components.css",
+        include_str!("../../data/css/00-components.css"),
+    ),
+    ("01-base.css", include_str!("../../data/css/01-base.css")),
+    ("02-bar.css", include_str!("../../data/css/02-bar.css")),
+    ("03-panel.css", include_str!("../../data/css/03-panel.css")),
+    (
+        "04-network.css",
+        include_str!("../../data/css/04-network.css"),
+    ),
+    ("05-osd.css", include_str!("../../data/css/05-osd.css")),
     (
         "06-notifications.css",
-        include_str!("../data/css/06-notifications.css"),
+        include_str!("../../data/css/06-notifications.css"),
     ),
     (
         "07-launcher.css",
-        include_str!("../data/css/07-launcher.css"),
+        include_str!("../../data/css/07-launcher.css"),
     ),
-    ("08-auth.css", include_str!("../data/css/08-auth.css")),
-    ("09-helm.css", include_str!("../data/css/09-helm.css")),
-    ("10-lock.css", include_str!("../data/css/10-lock.css")),
+    ("08-auth.css", include_str!("../../data/css/08-auth.css")),
+    ("09-helm.css", include_str!("../../data/css/09-helm.css")),
+    ("10-lock.css", include_str!("../../data/css/10-lock.css")),
     (
         "11-keybinds.css",
-        include_str!("../data/css/11-keybinds.css"),
+        include_str!("../../data/css/11-keybinds.css"),
     ),
     (
         "12-screenshot.css",
-        include_str!("../data/css/12-screenshot.css"),
+        include_str!("../../data/css/12-screenshot.css"),
     ),
     (
         "13-switcher.css",
-        include_str!("../data/css/13-switcher.css"),
+        include_str!("../../data/css/13-switcher.css"),
     ),
     (
         "14-elevation-face.css",
-        include_str!("../data/css/14-elevation-face.css"),
+        include_str!("../../data/css/14-elevation-face.css"),
     ),
     (
         "15-settings.css",
-        include_str!("../data/css/15-settings.css"),
+        include_str!("../../data/css/15-settings.css"),
     ),
-    ("16-jump.css", include_str!("../data/css/16-jump.css")),
+    ("16-jump.css", include_str!("../../data/css/16-jump.css")),
 ];
 
 /// Every rule file joined, as GTK parses them.
@@ -104,69 +110,10 @@ fn rules() -> String {
     }
 }
 
-/// Light mode waits until every surface is on the tokens: a legacy rule
-/// still naming a dark palette colour would sit on light glass. Until then
-/// `auto` and `light` resolve to dark, except through `SWAYPPLET_MODE`,
-/// which the render harness uses to check the light work in progress.
-const LIGHT_READY: bool = false;
+mod inputs;
+mod locked;
 
-thread_local! {
-    /// The mode on screen, for the sun's hysteresis band.
-    static SHOWN: std::cell::Cell<crate::tokens::Mode> =
-        const { std::cell::Cell::new(crate::tokens::Mode::Dark) };
-}
-
-/// Where the sun is computed for: `/etc/swaypplet/theme.json`
-/// (`{"latitude": …, "longitude": …}`, written by Nix from the night light's
-/// location), or `SWAYPPLET_THEME_CONFIG`.
-fn location() -> Option<(f64, f64)> {
-    let path = std::env::var("SWAYPPLET_THEME_CONFIG")
-        .unwrap_or_else(|_| "/etc/swaypplet/theme.json".to_string());
-    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
-    Some((v["latitude"].as_f64()?, v["longitude"].as_f64()?))
-}
-
-/// The theme inputs right now: the Look settings, with `auto` resolved by
-/// the sun (docs/design-system.md §2).
-pub fn inputs() -> crate::tokens::Inputs {
-    use crate::settings::schema::ThemeMode;
-    use crate::tokens::{Inputs, Mode};
-    let look = crate::settings::store::with(|s| s.look());
-    let forced = match std::env::var("SWAYPPLET_MODE").as_deref() {
-        Ok("light") => Some(Mode::Light),
-        Ok("dark") => Some(Mode::Dark),
-        _ => None,
-    };
-    let mode = forced.unwrap_or_else(|| {
-        if !LIGHT_READY {
-            return Mode::Dark;
-        }
-        match look.mode {
-            ThemeMode::Dark => Mode::Dark,
-            ThemeMode::Light => Mode::Light,
-            ThemeMode::Auto => location()
-                .map(|(lat, lon)| {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs_f64())
-                        .unwrap_or(0.0);
-                    crate::tokens::sun::mode(
-                        crate::tokens::sun::elevation(lat, lon, now),
-                        SHOWN.with(std::cell::Cell::get),
-                    )
-                })
-                .unwrap_or(Mode::Dark),
-        }
-    });
-    SHOWN.with(|s| s.set(mode));
-    Inputs {
-        mode,
-        accent: look.accent,
-        neutral: look.neutral,
-        contrast: look.contrast,
-        motion: (look.motion.scale() * 100.0).round() as u8,
-    }
-}
+pub use inputs::inputs;
 
 /// The whole document: tokens, palette, rules.
 fn document(inputs: crate::tokens::Inputs, palette: &str) -> String {
@@ -220,9 +167,10 @@ pub fn reload() -> bool {
 /// the palette is a file one process writes and the others read, and there
 /// is no bus between them. A wallpaper change is not a hot path.
 pub fn watch() {
+    locked::follow();
     glib::timeout_add_local(std::time::Duration::from_secs(1), || {
-        let mode = SHOWN.with(std::cell::Cell::get);
-        if reload() && SHOWN.with(std::cell::Cell::get) != mode {
+        let mode = inputs::shown();
+        if reload() && inputs::shown() != mode {
             // The glass follows the mode (§4). Only this long-lived process
             // watches, so the material is sent once, not once per process.
             crate::settings::glass::apply_saved();
@@ -251,7 +199,7 @@ mod tests {
         for (name, css) in super::RULES {
             structurally_whole(name, css);
         }
-        structurally_whole("data/palette.css", include_str!("../data/palette.css"));
+        structurally_whole("data/palette.css", include_str!("../../data/palette.css"));
         // What GTK actually parses: all of them, joined. A file that is
         // whole on its own and breaks the next one at the seam is the
         // failure a split introduces.
@@ -260,7 +208,7 @@ mod tests {
             "the joined stylesheet",
             &format!(
                 "{tokens}\n{}\n{}",
-                include_str!("../data/palette.css"),
+                include_str!("../../data/palette.css"),
                 super::joined_rules()
             ),
         );
