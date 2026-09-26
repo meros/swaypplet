@@ -4,6 +4,7 @@ use gtk4::prelude::*;
 use gtk4::{Box, Label};
 use serde::Deserialize;
 
+use crate::services::displays;
 use crate::settings::store::{self, NightLight};
 use crate::spawn::spawn_work;
 use crate::ui;
@@ -145,6 +146,76 @@ fn populate_output_list_with_data(list: &Box, outputs: &[OutputInfo]) {
     }
 }
 
+// ── Profiles ──────────────────────────────────────────────────────────────────
+
+/// One profile: what it is to the displays now, and what can be done to it.
+fn profile_row(name: &str, current: bool, fits: bool, first: bool) -> Box {
+    let state = if current {
+        "On screen"
+    } else if fits {
+        "Fits these displays"
+    } else {
+        "For other displays"
+    };
+    let r = ui::row(icons::DISPLAY_PROFILE, name, state);
+    if fits && !current {
+        let apply = ui::button_with(
+            ui::Face::Label("Apply"),
+            ui::Kind::Secondary,
+            ui::Size::Small,
+        );
+        let n = name.to_string();
+        apply.connect_clicked(move |_| displays::apply(&n));
+        r.end.append(&apply);
+    }
+    if !first {
+        let raise = ui::button_with(
+            ui::Face::Glyph {
+                glyph: icons::RAISE,
+                tooltip: "Match before the profile above",
+            },
+            ui::Kind::Flat,
+            ui::Size::Small,
+        );
+        let n = name.to_string();
+        raise.connect_clicked(move |_| displays::raise(&n));
+        r.end.append(&raise);
+    }
+    let delete = ui::button_with(
+        ui::Face::Glyph {
+            glyph: icons::CLOSE,
+            tooltip: "Delete this profile",
+        },
+        ui::Kind::Flat,
+        ui::Size::Small,
+    );
+    let n = name.to_string();
+    delete.connect_clicked(move |_| displays::delete(&n));
+    r.end.append(&delete);
+    r.root
+}
+
+/// Rebuild the profile list from the service's view.
+fn populate_profiles(group: &Box, list: &Box) {
+    while let Some(child) = list.first_child() {
+        list.remove(&child);
+    }
+    let view = displays::view();
+    group.set_visible(view.available);
+    if view.profiles.is_empty() {
+        let empty = ui::row(
+            icons::DISPLAY_PROFILE,
+            "No profiles",
+            "Save this layout to restore it when these displays connect",
+        );
+        list.append(&empty.root);
+    }
+    for (i, (name, fits)) in view.profiles.iter().enumerate() {
+        let current = view.current.as_deref() == Some(name.as_str());
+        list.append(&profile_row(name, current, *fits, i == 0));
+    }
+}
+
 // ── DisplaySection ────────────────────────────────────────────────────────────
 
 pub struct DisplaySection {
@@ -198,8 +269,42 @@ impl DisplaySection {
         }
         night.append(&night_row.root);
 
+        // ── Profiles: kanshi's job (`services::displays`) ─────────────────────
+        let profiles = ui::group(1);
+        profiles.append(&ui::heading("Profiles"));
+        let profile_list = ui::vbox(1);
+        profiles.append(&profile_list);
+        let save = ui::hbox(2);
+        let name = gtk4::Entry::new();
+        name.set_placeholder_text(Some("Profile name"));
+        name.set_hexpand(true);
+        ui::entry::adopt(&name, ui::FieldSize::Normal);
+        let save_btn = ui::button_with(
+            ui::Face::Label("Save current layout"),
+            ui::Kind::Secondary,
+            ui::Size::Small,
+        );
+        {
+            let name_c = name.clone();
+            let save_now = move || {
+                let text = name_c.text();
+                if !text.trim().is_empty() {
+                    displays::save_current(&text);
+                    name_c.set_text("");
+                }
+            };
+            let s = save_now.clone();
+            save_btn.connect_clicked(move |_| s());
+            name.connect_activate(move |_| save_now());
+        }
+        save.append(&name);
+        save.append(&save_btn);
+        profiles.append(&save);
+        populate_profiles(&profiles, &profile_list);
+
         let detail_box = ui::vbox(3);
         detail_box.append(&night);
+        detail_box.append(&profiles);
         detail_box.append(&output_list);
         section.body.append(&detail_box);
 
@@ -207,6 +312,17 @@ impl DisplaySection {
             section,
             output_list,
         };
+
+        {
+            // The outputs or the profiles changed: the list, the rows and the
+            // summary follow. Only on a change; nothing polls.
+            let output_list = display.output_list.clone();
+            let summary = display.section.summary.clone();
+            displays::observe(move || {
+                populate_profiles(&profiles, &profile_list);
+                refresh_outputs(&output_list, &summary);
+            });
+        }
 
         display.refresh();
         display
@@ -217,9 +333,26 @@ impl DisplaySection {
     /// The blocking `swaymsg` call runs on a background thread; the UI is
     /// updated on the GTK main thread once the result arrives.
     pub fn refresh(&self) {
-        let output_list = self.output_list.clone();
-        let summary_text: Label = self.section.summary.clone();
+        refresh_outputs(&self.output_list, &self.section.summary);
+    }
 
+    /// Switch into page mode: the body alone, open at once.
+    pub fn expand_for_page(&self) {
+        self.section.show_as_page();
+    }
+
+    /// Return a reference to the root widget for embedding in the panel.
+    pub fn widget(&self) -> &Box {
+        &self.section.root
+    }
+}
+
+/// Re-query the outputs off the main thread, then rebuild the list and the
+/// summary: the profile on screen, and how many displays.
+fn refresh_outputs(output_list: &Box, summary_text: &Label) {
+    let output_list = output_list.clone();
+    let summary_text = summary_text.clone();
+    {
         spawn_work(get_outputs, move |outputs| {
             populate_output_list_with_data(&output_list, &outputs);
 
@@ -233,17 +366,11 @@ impl DisplaySection {
                     .unwrap_or_default(),
                 n => format!("{n} displays"),
             };
+            let summary = match displays::view().current {
+                Some(profile) => format!("{profile} · {summary}"),
+                None => summary,
+            };
             summary_text.set_label(&summary);
         });
-    }
-
-    /// Switch into page mode: the body alone, open at once.
-    pub fn expand_for_page(&self) {
-        self.section.show_as_page();
-    }
-
-    /// Return a reference to the root widget for embedding in the panel.
-    pub fn widget(&self) -> &Box {
-        &self.section.root
     }
 }

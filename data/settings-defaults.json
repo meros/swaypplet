@@ -78,5 +78,8 @@
     "enabled": true,
     "schedule": "sun",
     "night_k": 3500
+  },
+  "displays": {
+    "profiles": []
   }
 }

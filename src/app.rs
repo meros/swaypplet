@@ -179,6 +179,10 @@ pub fn run() {
         // same sun the automatic mode follows.
         crate::services::gamma::follow_settings();
 
+        // Display profiles: kanshi's job, matched against the outputs the
+        // compositor reports and applied in one step (`services::displays`).
+        crate::services::displays::start(store_startup.clone());
+
         // Start D-Bus notification server
         dbus::start_server(store_startup.clone());
 
@@ -289,6 +293,7 @@ pub fn run() {
                     let reloads = watched.snapshot().reloads;
                     if reloads != last.replace(reloads) {
                         crate::settings::glass::apply_saved();
+                        crate::services::displays::on_reload();
                     }
                 });
             }

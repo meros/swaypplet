@@ -13,6 +13,7 @@ pub mod audio;
 pub mod backup;
 pub mod bluez;
 pub mod clipboard;
+pub mod displays;
 pub mod elephant;
 pub mod gamma;
 pub mod inhibit;

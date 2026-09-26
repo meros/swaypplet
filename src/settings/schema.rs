@@ -825,6 +825,106 @@ impl Default for NightLight {
     }
 }
 
+/// Which connected output a profile output claims (`services::displays`).
+/// Every field given must match, as a glob (`*`, `?`); a field left out
+/// matches anything. An output that does not report a make, model or
+/// serial matches it as `Unknown`, as kanshi does.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct OutputMatch {
+    /// The connector, `eDP-1`, `DP-3`: stable for a built-in panel, not
+    /// for a monitor that moves between ports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub make: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serial: Option<String>,
+}
+
+/// An output's rotation and flip, spelled as sway's `output … transform`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum OutputTransform {
+    #[default]
+    #[serde(rename = "normal")]
+    Normal,
+    #[serde(rename = "90")]
+    R90,
+    #[serde(rename = "180")]
+    R180,
+    #[serde(rename = "270")]
+    R270,
+    #[serde(rename = "flipped")]
+    Flipped,
+    #[serde(rename = "flipped-90")]
+    Flipped90,
+    #[serde(rename = "flipped-180")]
+    Flipped180,
+    #[serde(rename = "flipped-270")]
+    Flipped270,
+}
+
+/// One output of a display profile. A field left out keeps what the output
+/// has, so a profile can say only where a screen goes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DisplayOutput {
+    #[serde(rename = "match")]
+    pub criteria: OutputMatch,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Width, height and refresh in mHz: `[3840, 2160, 60000]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<[u32; 3]>,
+    /// The top-left corner in the layout, logical pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[i32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform: Option<OutputTransform>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adaptive_sync: Option<bool>,
+}
+
+/// A named layout for one set of connected outputs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DisplayProfile {
+    pub name: String,
+    #[serde(default)]
+    pub outputs: Vec<DisplayOutput>,
+}
+
+/// Display profiles, kanshi's job in the panel (`services::displays`): the
+/// first profile, in this order, whose outputs claim every connected output
+/// is applied when the outputs change, and the one applied stays while it
+/// still matches. No profile matching leaves the outputs as they are.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct Displays {
+    #[serde(default)]
+    pub profiles: Vec<DisplayProfile>,
+}
+
+impl Displays {
+    /// Drop what cannot be applied: a scale outside what sway accepts, an
+    /// empty name, a profile with no outputs.
+    fn sanitized(self) -> Displays {
+        Displays {
+            profiles: self
+                .profiles
+                .into_iter()
+                .filter(|p| !p.name.trim().is_empty() && !p.outputs.is_empty())
+                .map(|mut p| {
+                    for o in &mut p.outputs {
+                        o.scale = o.scale.filter(|s| s.is_finite()).map(|s| s.clamp(0.25, 8.0));
+                    }
+                    p
+                })
+                .collect(),
+        }
+    }
+}
+
 // ── The file ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -847,12 +947,15 @@ pub struct Settings {
     pub elevate: Option<Elevate>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launcher: Option<Launcher>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub night_light: Option<NightLight>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub displays: Option<Displays>,
 }
 
 impl Settings {
     /// The section names, in the order the file and the pane list them.
-    pub const SECTIONS: [&'static str; 10] = [
+    pub const SECTIONS: [&'static str; 11] = [
         "wallpaper",
         "look",
         "idle",
@@ -863,11 +966,12 @@ impl Settings {
         "elevate",
         "launcher",
         "night_light",
+        "displays",
     ];
 
     /// The sections with a system layer, which is every one but the
     /// wallpaper: its system default is the sway config's `bg` line.
-    pub const NIX_SECTIONS: [&'static str; 9] = [
+    pub const NIX_SECTIONS: [&'static str; 10] = [
         "look",
         "idle",
         "bar",
@@ -877,6 +981,7 @@ impl Settings {
         "elevate",
         "launcher",
         "night_light",
+        "displays",
     ];
 
     /// The section in force: the user's, else the system's, else the
@@ -913,6 +1018,12 @@ impl Settings {
             .or(system().night_light)
             .unwrap_or_default()
     }
+    pub fn displays(&self) -> Displays {
+        self.displays
+            .clone()
+            .or_else(|| system().displays.clone())
+            .unwrap_or_default()
+    }
 
     /// True when nothing is overridden, which is when the file should not
     /// exist.
@@ -933,6 +1044,7 @@ impl Settings {
             elevate: Some(self.elevate()),
             launcher: Some(self.launcher()),
             night_light: Some(self.night_light()),
+            displays: Some(self.displays()),
         }
     }
 
@@ -959,6 +1071,7 @@ impl Settings {
             elevate: Some(Elevate::default()),
             launcher: Some(Launcher::default()),
             night_light: Some(NightLight::default()),
+            displays: Some(Displays::default()),
         }
     }
 
@@ -970,6 +1083,7 @@ impl Settings {
             keys: self.keys.map(Keys::sanitized),
             alerts: self.alerts.map(Alerts::sanitized),
             night_light: self.night_light.map(NightLight::sanitized),
+            displays: self.displays.map(Displays::sanitized),
             ..self
         }
     }
@@ -1011,11 +1125,29 @@ impl Settings {
                 known.join(", ")
             ));
         }
-        let mut all = serde_json::to_value(self.effective()).map_err(|e| e.to_string())?;
-        let mut obj = all[section].as_object().cloned().unwrap_or_default();
-        obj.insert(field.to_string(), value);
-        all[section] = Value::Object(obj);
-        let next: Settings = serde_json::from_value(all).map_err(|e| format!("`{key}`: {e}"))?;
+        let all = serde_json::to_value(self.effective()).map_err(|e| e.to_string())?;
+        let with = |value: Value| {
+            let mut all = all.clone();
+            let mut obj = all[section].as_object().cloned().unwrap_or_default();
+            obj.insert(field.to_string(), value);
+            all[section] = Value::Object(obj);
+            serde_json::from_value::<Settings>(all)
+        };
+        // The command line hands every value over as a string unless it is a
+        // number or a boolean. A field that takes a list or an object
+        // (`displays.profiles`) gets the string read as JSON, and only then:
+        // a path that happens to be valid JSON stays a path.
+        let next = match with(value.clone()) {
+            Ok(next) => next,
+            Err(e) => match value
+                .as_str()
+                .and_then(|s| serde_json::from_str::<Value>(s).ok())
+                .filter(|v| v.is_array() || v.is_object())
+            {
+                Some(parsed) => with(parsed).map_err(|e| format!("`{key}`: {e}"))?,
+                None => return Err(format!("`{key}`: {e}")),
+            },
+        };
         let next = next.sanitized();
         // Only the section named moves; the rest of `next` is the effective
         // copy, which must not become an override.
@@ -1108,6 +1240,7 @@ section!(Capture, capture, capture);
 section!(Elevate, elevate, elevate);
 section!(Launcher, launcher, launcher);
 section!(NightLight, night_light, night_light);
+section!(Displays, displays, displays);
 
 /// Every `section` or `section.field` in `value` that the structs do not
 /// have.
@@ -1167,6 +1300,43 @@ mod tests {
         assert_eq!(s.look(), Look::default());
         assert_eq!(s.elevate(), Elevate::default());
         assert_eq!(s.night_light(), NightLight::default());
+    }
+
+    #[test]
+    fn a_list_from_the_command_line_sets_the_profiles() {
+        let mut s = Settings::default();
+        let raw = r#"[{"name": "desk", "outputs": [{"match": {"name": "eDP-1"}}]}]"#;
+        s.set("displays.profiles", Value::String(raw.into())).unwrap();
+        assert_eq!(s.displays().profiles[0].name, "desk");
+        // A string field keeps a JSON-looking string as the string it is.
+        s.set("wallpaper.path", Value::String("[1]".into())).ok();
+        assert!(s.set("displays.profiles", Value::String("desk".into())).is_err());
+    }
+
+    #[test]
+    fn the_displays_section_round_trips_in_kanshis_terms() {
+        let text = r#"{"displays": {"profiles": [
+            {"name": "desk", "outputs": [
+                {"match": {"name": "eDP-1"}, "mode": [2880, 1800, 60000],
+                 "position": [2560, 149], "scale": 2.0},
+                {"match": {"make": "NON", "model": "28H2U"}, "scale": 1.5,
+                 "transform": "90"}]},
+            {"name": "", "outputs": [{"match": {}}]},
+            {"name": "empty"}]}}"#;
+        let s: Settings = serde_json::from_str(text).unwrap();
+        let s = s.sanitized();
+        let d = s.displays();
+        // The nameless and the outputless profiles cannot be applied.
+        assert_eq!(d.profiles.len(), 1);
+        let p = &d.profiles[0];
+        assert_eq!(p.outputs[0].criteria.name.as_deref(), Some("eDP-1"));
+        assert!(p.outputs[0].enabled);
+        assert_eq!(p.outputs[1].transform, Some(OutputTransform::R90));
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back, s);
+        // An unset field is left out of the file, not written as null.
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("null"), "{json}");
     }
 
     #[test]
