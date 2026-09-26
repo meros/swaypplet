@@ -1750,3 +1750,296 @@ entry.ui-entry.large {
 progressbar.ui-breathing progress {
     animation: ui-breathing 2s ease-in-out infinite alternate;
 }
+
+/* ── Dense slider (added by the helm/settings migration) ──
+   The slider for a column of twenty: the same track, a smaller knob and
+   less air. The knob's negative margin centres it on the track, so the
+   horizontal padding has to absorb its overhang. */
+
+scale.ui-slider.dense {
+    padding: var(--space-2) var(--space-3);
+    min-height: 8px;
+}
+
+scale.ui-slider.dense slider {
+    min-width: 14px;
+    min-height: 14px;
+    margin: calc(-1 * var(--space-2));
+}
+
+/* ── Picked thumbnail (added by the helm/settings migration) ──
+   A picture you choose. The frame is the whole selection cue: no tick, no
+   overlay, because the picture is the thing being chosen and anything drawn
+   over it hides part of that. */
+
+button.ui-pick-thumb {
+    padding: 0;
+    min-width: 0;
+    min-height: 0;
+    border: 2px solid var(--border-subtle);
+    border-radius: var(--radius-tile);
+    background-color: var(--fill-2);
+    background-image: none;
+    box-shadow: none;
+    transition: border-color var(--motion-state);
+}
+
+button.ui-pick-thumb picture {
+    border-radius: var(--radius-control);
+}
+
+button.ui-pick-thumb:hover {
+    border-color: var(--focus-ring);
+}
+
+button.ui-pick-thumb.selected {
+    border-color: var(--accent-bg);
+}
+
+button.ui-pick-thumb:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+/* ── Choice grid (added by the helm/settings migration) ──
+   A flow box of tiles where one is picked: the pointer's tile takes the
+   hover overlay, the picked one the accent tint and a ring. */
+
+flowbox.ui-choice-grid > flowboxchild {
+    padding: var(--space-3);
+    border-radius: var(--radius-tile);
+    outline: none;
+    transition:
+        background-color var(--motion-state),
+        background-image var(--motion-state);
+}
+
+flowbox.ui-choice-grid > flowboxchild:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+flowbox.ui-choice-grid > flowboxchild:selected {
+    background-color: var(--accent-tint);
+    box-shadow: inset 0 0 0 2px var(--accent-bg);
+}
+
+/* ── Pill group (added by the helm/settings migration) ──
+   Controls that belong together on one pill-shaped fill: an icon button and
+   the slider it opens the details of. The same fill and height as a pill
+   button beside it. */
+
+.ui-pill-group {
+    min-height: var(--control-height);
+    padding: 0 var(--space-3) 0 var(--space-1);
+    border-radius: var(--radius-pill);
+    background-color: var(--fill-2);
+    color: var(--fg);
+}
+
+/* ── Swatch (added by the helm/settings migration) ──
+   A colour you pick, drawn by its child; the button carries only the ring
+   that says which one is picked. */
+
+button.ui-swatch {
+    min-width: 26px;
+    min-height: 26px;
+    padding: 0;
+    border: 2px solid transparent;
+    border-radius: var(--radius-pill);
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    transition: border-color var(--motion-state);
+}
+
+button.ui-swatch:hover {
+    border-color: var(--border-strong);
+}
+
+button.ui-swatch:checked {
+    border-color: var(--fg);
+}
+
+button.ui-swatch:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+/* ── Vertical separator (added by the helm/settings migration) ──
+   The separator of a toolbar, between runs of controls. */
+
+.ui-separator.vertical {
+    min-width: 1px;
+    min-height: 0;
+    margin: var(--space-1) var(--space-3);
+}
+
+/* ── Window, toolbar, canvas (added by the helm/settings migration) ──
+   A normal window rather than glass, for an editor you sit in: a solid
+   ground, a toolbar a fill above it, and a canvas a shade below it for the
+   thing being edited to letterbox against. */
+
+.ui-window {
+    background-color: var(--surface-raised);
+}
+
+.ui-toolbar {
+    background-color: var(--fill-1);
+}
+
+.ui-canvas {
+    background-color: var(--scrim);
+}
+
+/* ── Ring (added by the helm/settings migration) ──
+   An accent ring round something the compositor draws, which the shell can
+   frame but not fill: the selected workspace in the Super+Tab row. A second,
+   quieter band says it is pinned. Fades in with the row. */
+
+.ui-ring {
+    border-radius: var(--radius-card);
+    box-shadow:
+        0 0 0 2px var(--accent-bg),
+        0 0 24px var(--accent-tint);
+    animation: ui-ring-in var(--motion-enter);
+}
+
+.ui-ring.pinned {
+    box-shadow:
+        0 0 0 2px var(--accent-bg),
+        0 0 0 5px var(--accent-tint),
+        0 0 24px var(--accent-tint);
+}
+
+@keyframes ui-ring-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+/* ── Placeholder (added by the helm/settings migration) ──
+   Where a picture will be before its first frame: a solid ground and the
+   app's icon in the muted tone. */
+
+.ui-placeholder {
+    background-color: var(--surface-raised);
+    color: var(--fg-muted);
+}
+
+/* ── Toggle button (added by the helm/settings migration) ──
+   A flat button that stays down, a tool in a toolbar: at rest it is only
+   its glyph, and the one that is down takes the accent, because which tool
+   is active is the single most important thing the bar says. */
+
+button.ui-btn.flat:checked {
+    background-color: var(--accent-bg);
+    color: var(--on-accent);
+}
+
+/* ── Dropdown list (added by the helm/settings migration) ──
+   A dropdown's list: a small solid sheet, the same raised fill as a solid
+   card (a popup has no glass behind it). Other popovers are `ui::popover`
+   around a `ui::solid_card`. */
+
+dropdown.ui-dropdown popover > contents {
+    padding: var(--space-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-tile);
+    background-color: var(--surface-raised);
+    background-image: none;
+    box-shadow: var(--shadow-solid);
+    color: var(--fg);
+}
+
+dropdown.ui-dropdown popover > arrow {
+    border: 1px solid var(--border-subtle);
+    background-color: var(--surface-raised);
+}
+
+dropdown.ui-dropdown popover listview {
+    background: none;
+}
+
+dropdown.ui-dropdown popover listview > row {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-control);
+    background-color: transparent;
+    background-image: none;
+    color: var(--fg);
+    font-size: var(--type-body);
+    transition: background-image var(--motion-state);
+}
+
+dropdown.ui-dropdown popover listview > row:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+dropdown.ui-dropdown popover listview > row:selected {
+    background-color: var(--fill-2);
+}
+
+/* ── Check (added by the helm/settings migration) ──
+   A check box and its label. Accent means on, as on a switch. */
+
+checkbutton.ui-check {
+    color: var(--fg);
+    font-size: var(--type-label);
+}
+
+checkbutton.ui-check check {
+    min-width: 14px;
+    min-height: 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-control);
+    background-color: var(--fill-1);
+    background-image: none;
+    box-shadow: none;
+    color: var(--on-accent);
+    transition: background-color var(--motion-state), background-image var(--motion-state);
+}
+
+checkbutton.ui-check check:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+checkbutton.ui-check check:checked {
+    border-color: transparent;
+    background-color: var(--accent-bg);
+}
+
+checkbutton.ui-check:focus-visible check {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+/* ── Lifted (added by the helm/settings migration) ──
+   A picture lifted off what is behind it by a shadow: a window drawn over
+   the desktop or the glass, never a card (glass needs no shadow, §3.7). */
+
+.ui-lifted {
+    box-shadow: var(--shadow-solid);
+}
+
+/* ── Armed (added by the helm/settings migration) ──
+   A destructive button after its first press, waiting for the second: the
+   danger fill, breathing, so the one thing on screen that will act on the
+   next click says so. The pulse is an attention loop and keeps its own
+   period (§3.8). */
+
+button.ui-btn.armed {
+    background-color: var(--danger-bg);
+    color: var(--on-status);
+    animation: ui-armed-pulse 800ms ease-in-out infinite alternate;
+}
+
+button.ui-btn.armed > label {
+    color: inherit;
+}
+
+@keyframes ui-armed-pulse {
+    from { opacity: 0.7; }
+    to { opacity: 1; }
+}

@@ -1235,3 +1235,159 @@ pub fn make_small(b: &gtk4::Button) {
 pub fn breathing(w: &impl IsA<gtk4::Widget>) {
     w.add_css_class("ui-breathing");
 }
+
+// ── Added by the helm/settings migration ────────────────────────────────
+
+/// The slider for a dense column of them: a smaller knob, less air.
+pub fn dense_slider(s: &gtk4::Scale) {
+    s.add_css_class("ui-slider");
+    s.add_css_class("dense");
+}
+
+/// A dropdown over `choices`, control-sized.
+pub fn dropdown_of(choices: &[&str]) -> gtk4::DropDown {
+    let d = gtk4::DropDown::from_strings(choices);
+    dropdown(&d);
+    d
+}
+
+/// A toggle whose face is a glyph from the icon font, at title-sm size.
+pub fn toggle_glyph_button(glyph: &str, tooltip: &str, kind: Kind) -> gtk4::ToggleButton {
+    let face = gtk4::Label::new(Some(glyph));
+    self::glyph(&face, Text::TitleSm, Tone::Fg);
+    let b = gtk4::ToggleButton::new();
+    b.set_child(Some(&face));
+    style_button(b.upcast_ref(), kind);
+    b.add_css_class("icon");
+    b.set_tooltip_text(Some(tooltip));
+    b
+}
+
+/// A chip that stays selected: one of a group of tabs or filters.
+pub fn toggle_chip(label: &str) -> gtk4::ToggleButton {
+    let b = gtk4::ToggleButton::with_label(label);
+    b.add_css_class("ui-chip");
+    b
+}
+
+/// A picture you choose; `set_selected` frames the chosen one.
+pub fn pick_thumb(child: &impl IsA<gtk4::Widget>) -> gtk4::Button {
+    let b = gtk4::Button::new();
+    b.add_css_class("ui-pick-thumb");
+    b.set_child(Some(child));
+    b
+}
+
+/// A flow box whose children are picked: hover overlay, selected ring.
+pub fn choice_grid(g: &gtk4::FlowBox) {
+    g.add_css_class("ui-choice-grid");
+}
+
+/// Controls that belong together on one pill-shaped fill.
+pub fn pill_group(step: usize) -> gtk4::Box {
+    let b = hbox(step);
+    b.add_css_class("ui-pill-group");
+    b
+}
+
+/// A colour you pick, drawn by `child`; the button carries the ring.
+pub fn swatch(child: &impl IsA<gtk4::Widget>) -> gtk4::ToggleButton {
+    let b = gtk4::ToggleButton::new();
+    b.add_css_class("ui-swatch");
+    b.set_child(Some(child));
+    b
+}
+
+/// The separator between runs of controls in a toolbar.
+pub fn vseparator() -> gtk4::Box {
+    let s = gtk4::Box::new(Orientation::Vertical, 0);
+    s.add_css_class("ui-separator");
+    s.add_css_class("vertical");
+    s
+}
+
+/// A normal, solid window rather than glass: an editor you sit in. Goes on
+/// the window's root child; the window node itself stays transparent.
+pub fn solid_window(w: &impl IsA<gtk4::Widget>) {
+    surface(w);
+    w.add_css_class("ui-window");
+}
+
+/// A fill above the window's ground, for a toolbar.
+pub fn toolbar(step: usize) -> gtk4::Box {
+    let b = hbox(step);
+    b.add_css_class("ui-toolbar");
+    b
+}
+
+/// A shade below the window's ground, for content to letterbox against.
+pub fn canvas(w: &impl IsA<gtk4::Widget>) {
+    w.add_css_class("ui-canvas");
+}
+
+/// An accent ring round something the shell frames but does not draw.
+pub fn ring() -> gtk4::Box {
+    let b = gtk4::Box::new(Orientation::Horizontal, 0);
+    b.add_css_class("ui-ring");
+    b
+}
+
+/// Where a picture will be before its first frame.
+pub fn placeholder(w: &impl IsA<gtk4::Widget>) {
+    w.add_css_class("ui-placeholder");
+}
+
+// ── Cairo colours ───────────────────────────────────────────────────────
+
+/// The token colours for code that paints with Cairo, from the same
+/// generator and the same inputs as the stylesheet on screen
+/// (`theme::shown`), so a drawn mark and a styled widget cannot disagree and
+/// both follow the mode. Nothing reads a colour back out of the CSS. Read it
+/// when a surface opens rather than per frame: it is a settings read.
+#[derive(Clone, Copy, Debug)]
+pub struct Paint {
+    /// `--fg`.
+    pub fg: crate::tokens::Rgb,
+    /// The darkest ground (`--neutral-1`), for a chip drawn over a picture.
+    pub ground: crate::tokens::Rgb,
+    /// `--accent-bg`: the accent as a line or a fill.
+    pub accent: crate::tokens::Rgb,
+    pub status: crate::tokens::Status,
+    /// `--cat-n`: the readable tone per categorical slot.
+    pub categorical: [crate::tokens::Rgb; 6],
+}
+
+pub fn paint() -> Paint {
+    use crate::tokens;
+    let inputs = crate::theme::shown();
+    let s = tokens::scales(inputs);
+    Paint {
+        fg: s.neutral[11],
+        ground: s.neutral[0],
+        accent: s.accent_bg,
+        status: tokens::status(inputs.mode),
+        categorical: tokens::categorical(inputs.mode).map(|(text, _)| text),
+    }
+}
+
+/// Set `c` as the Cairo source, at `alpha`.
+pub fn set_source(cr: &gtk4::cairo::Context, c: crate::tokens::Rgb, alpha: f64) {
+    cr.set_source_rgba(c.0, c.1, c.2, alpha);
+}
+
+/// A check box with its label; accent when checked.
+pub fn check(label: &str) -> gtk4::CheckButton {
+    let c = gtk4::CheckButton::with_label(label);
+    c.add_css_class("ui-check");
+    c
+}
+
+/// A picture lifted off what is behind it by a shadow.
+pub fn lifted(w: &impl IsA<gtk4::Widget>) {
+    w.add_css_class("ui-lifted");
+}
+
+/// Arm a destructive button for its confirming second press, or disarm it.
+pub fn set_armed(b: &impl IsA<gtk4::Widget>, armed: bool) {
+    set_class(b, "armed", armed);
+}

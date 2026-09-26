@@ -64,10 +64,6 @@ pub const RULES: &[(&str, &str)] = &[
         include_str!("../../data/css/12-screenshot.css"),
     ),
     (
-        "13-switcher.css",
-        include_str!("../../data/css/13-switcher.css"),
-    ),
-    (
         "14-elevation-face.css",
         include_str!("../../data/css/14-elevation-face.css"),
     ),
@@ -114,6 +110,22 @@ mod inputs;
 mod locked;
 
 pub use inputs::inputs;
+
+/// The inputs the stylesheet on screen was generated from, the mode as it
+/// was last resolved rather than resolved again. For Cairo drawing, which
+/// has to match the CSS beside it; and it leaves `SHOWN` alone, which the
+/// watch reads to tell a mode switch from a palette change, so a repaint
+/// between two ticks cannot swallow the glass's switch.
+pub fn shown() -> crate::tokens::Inputs {
+    let look = crate::settings::store::with(|s| s.look());
+    crate::tokens::Inputs {
+        mode: inputs::shown(),
+        accent: look.accent,
+        neutral: look.neutral,
+        contrast: look.contrast,
+        motion: (look.motion.scale() * 100.0).round() as u8,
+    }
+}
 
 /// The whole document: tokens, palette, rules.
 fn document(inputs: crate::tokens::Inputs, palette: &str) -> String {

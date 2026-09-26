@@ -20,18 +20,18 @@ use gtk4::prelude::*;
 
 use super::capture::Image;
 
-/// Colours a mark can be, in the order they appear in the palette.
+/// Colours a mark can be, in the order they appear in the palette: red,
+/// yellow, green, blue and the text colour.
 ///
-/// Gruvbox, like the rest of the shell, except that these are the *bright*
-/// variants: a mark has to survive being drawn on top of an arbitrary
-/// screenshot, which the muted UI palette does not reliably do.
-const PALETTE: [(f64, f64, f64); 5] = [
-    (0.984, 0.286, 0.204), // red
-    (0.980, 0.741, 0.184), // yellow
-    (0.721, 0.733, 0.149), // green
-    (0.514, 0.647, 0.596), // blue
-    (0.922, 0.859, 0.698), // fg
-];
+/// From the tokens, like the rest of the shell, and the readable tones of
+/// them (`--danger`, `--cat-n`, `--fg`), not the fills: a mark has to
+/// survive being drawn on top of an arbitrary screenshot, which the muted
+/// fills do not reliably do. Read once per editor, in the mode it opened in.
+fn palette() -> [(f64, f64, f64); 5] {
+    let paint = crate::ui::paint();
+    let [_, yellow, blue, _, green, _] = paint.categorical;
+    [paint.status.danger, yellow, green, blue, paint.fg].map(|c| (c.0, c.1, c.2))
+}
 
 const STROKE_WIDTH: f64 = 3.0;
 
@@ -66,6 +66,7 @@ struct Editor {
     live: RefCell<Option<Stroke>>,
     tool: std::cell::Cell<Tool>,
     colour: std::cell::Cell<usize>,
+    palette: [(f64, f64, f64); 5],
     area: gtk4::DrawingArea,
     window: gtk4::Window,
 }
@@ -79,14 +80,13 @@ pub fn open(app: &gtk4::Application, image: Image, done: impl Fn(Image) + 'stati
         .default_width(1100)
         .default_height(760)
         .build();
-    window.add_css_class("panel");
-    window.add_css_class("annotate-window");
-
+    // Checkerboard-free: a screenshot is opaque, so the canvas only ever
+    // needs somewhere neutral to letterbox against.
     let area = gtk4::DrawingArea::builder()
         .hexpand(true)
         .vexpand(true)
         .build();
-    area.add_css_class("annotate-canvas");
+    crate::ui::canvas(&area);
 
     let editor = Rc::new(Editor {
         image,
@@ -94,13 +94,13 @@ pub fn open(app: &gtk4::Application, image: Image, done: impl Fn(Image) + 'stati
         live: RefCell::new(None),
         tool: std::cell::Cell::new(Tool::Box_),
         colour: std::cell::Cell::new(0),
+        palette: palette(),
         area: area.clone(),
         window: window.clone(),
     });
 
-    let root = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .build();
+    let root = crate::ui::vbox(0);
+    crate::ui::solid_window(&root);
     root.append(&toolbar(&editor, done));
     root.append(&area);
     window.set_child(Some(&root));
@@ -110,10 +110,7 @@ pub fn open(app: &gtk4::Application, image: Image, done: impl Fn(Image) + 'stati
 }
 
 fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
-    let bar = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(6)
-        .build();
+    let bar = crate::ui::toolbar(2);
     bar.add_css_class("annotate-toolbar");
 
     // Tools are a radio group: exactly one is active, and which one is the
@@ -126,9 +123,7 @@ fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
         (Tool::Highlight, "󰚄", "Highlight (H)"),
         (Tool::Pixelate, "󰸉", "Pixelate (X)"),
     ] {
-        let btn = gtk4::ToggleButton::builder().label(icon).build();
-        btn.set_tooltip_text(Some(name));
-        btn.add_css_class("annotate-tool");
+        let btn = crate::ui::toggle_glyph_button(icon, name, crate::ui::Kind::Flat);
         match &first {
             Some(group) => btn.set_group(Some(group)),
             None => first = Some(btn.clone()),
@@ -146,7 +141,7 @@ fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
     bar.append(&separator());
 
     let mut swatch_group: Option<gtk4::ToggleButton> = None;
-    for (index, colour) in PALETTE.iter().enumerate() {
+    for (index, colour) in editor.palette.iter().enumerate() {
         // The swatch is drawn, not styled. A per-widget CSS provider loses to
         // the display-wide stylesheet at the same priority, which is how the
         // first attempt produced five identical grey buttons.
@@ -163,8 +158,8 @@ fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
             let _ = cr.fill();
         });
 
-        let btn = gtk4::ToggleButton::builder().child(&dot).build();
-        btn.add_css_class("annotate-swatch");
+        let btn = crate::ui::swatch(&dot);
+        btn.set_valign(gtk4::Align::Center);
         match &swatch_group {
             Some(group) => btn.set_group(Some(group)),
             None => swatch_group = Some(btn.clone()),
@@ -181,20 +176,19 @@ fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
 
     bar.append(&separator());
 
-    let undo = gtk4::Button::with_label("Undo");
-    undo.add_css_class("annotate-action");
+    let undo = crate::ui::button("Undo", crate::ui::Kind::Secondary);
     let editor_c = editor.clone();
     undo.connect_clicked(move |_| editor_c.undo());
     bar.append(&undo);
 
     // The right-hand pair: the toolbar's left half changes the drawing, its
     // right half ends the session.
-    let spacer = gtk4::Box::builder().hexpand(true).build();
+    let spacer = crate::ui::hbox(0);
+    spacer.set_hexpand(true);
     bar.append(&spacer);
 
-    let keep = gtk4::Button::with_label("Copy & save");
-    keep.add_css_class("annotate-action");
-    keep.add_css_class("suggested-action");
+    // The one primary action on the bar (§1.2).
+    let keep = crate::ui::button("Copy & save", crate::ui::Kind::Primary);
     let editor_c = editor.clone();
     keep.connect_clicked(move |_| {
         done(editor_c.export());
@@ -202,8 +196,7 @@ fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
     });
     bar.append(&keep);
 
-    let discard = gtk4::Button::with_label("Discard edits");
-    discard.add_css_class("annotate-action");
+    let discard = crate::ui::button("Discard edits", crate::ui::Kind::Secondary);
     let editor_c = editor.clone();
     discard.connect_clicked(move |_| editor_c.window.close());
     bar.append(&discard);
@@ -211,10 +204,8 @@ fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
     bar
 }
 
-fn separator() -> gtk4::Separator {
-    let sep = gtk4::Separator::new(gtk4::Orientation::Vertical);
-    sep.add_css_class("annotate-separator");
-    sep
+fn separator() -> gtk4::Box {
+    crate::ui::vseparator()
 }
 
 impl Editor {
@@ -234,7 +225,7 @@ impl Editor {
             start_c.set(p);
             *this.live.borrow_mut() = Some(Stroke {
                 tool: this.tool.get(),
-                colour: PALETTE[this.colour.get()],
+                colour: this.palette[this.colour.get()],
                 points: vec![p],
             });
             this.area.queue_draw();

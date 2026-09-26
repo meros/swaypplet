@@ -1,12 +1,16 @@
-//! The rows the settings tabs are built from, so the four of them read as one
-//! pane: the same label gutter, the same hint placement, the same footer.
+//! The rows the settings tabs are built from, so the five of them read as
+//! one pane: the same label gutter, the same hint placement, the same
+//! footer. Thin wrappers over the components (`crate::ui`), which carry the
+//! colour, type and shape; `data/css/15-settings.css` only places things.
 //!
 //! Hints live in tooltips per row; only a group carries a visible one. The
-//! pane is dense on purpose (see `data/style.css`, "Settings pane").
+//! pane is dense on purpose (see `data/css/15-settings.css`).
 
 use std::path::Path;
 
 use gtk4::prelude::*;
+
+use crate::ui::{self as c, Kind, Text, Tone};
 
 /// What a wrapping label is allowed to ASK for, in characters.
 ///
@@ -19,44 +23,66 @@ use gtk4::prelude::*;
 /// the line as before.
 pub const HINT_CHARS: i32 = 64;
 
-/// A titled run of rows.
+/// A tab's column of groups.
+pub fn pane() -> gtk4::Box {
+    let root = c::vbox(4);
+    root.set_hexpand(true);
+    root
+}
+
+/// A titled run of rows: a group fill, its name, and the one visible hint.
 pub fn section_box(title: &str, hint: &str) -> gtk4::Box {
-    let container = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(4)
-        .hexpand(true)
-        .build();
+    let container = c::group(1);
+    container.set_hexpand(true);
     container.add_css_class("settings-group");
+    container.append(&c::overline(title, c::Tone::Muted));
 
-    let heading = gtk4::Label::builder().label(title).xalign(0.0).build();
-    heading.add_css_class("settings-group-title");
-    container.append(&heading);
-
-    let sub = gtk4::Label::builder()
-        .label(hint)
-        .xalign(0.0)
-        .wrap(true)
-        .max_width_chars(HINT_CHARS)
-        .build();
+    let sub = hint_label(hint);
     sub.add_css_class("settings-group-hint");
     container.append(&sub);
 
     container
 }
 
+/// Running text under a group's name or in a status line: faint, wrapping,
+/// capped at [`HINT_CHARS`].
+fn hint_label(text: &str) -> gtk4::Label {
+    let l = c::text(text, Text::Caption, Tone::Faint);
+    l.set_wrap(true);
+    l.set_max_width_chars(HINT_CHARS);
+    l
+}
+
 /// The label in a row's gutter.
-fn row_label(label: &str) -> gtk4::Label {
-    let name = gtk4::Label::builder().label(label).xalign(0.0).build();
+pub fn row_label(label: &str) -> gtk4::Label {
+    let name = c::text(label, Text::Label, Tone::Fg);
     name.add_css_class("settings-row-label");
     name
 }
 
+/// The value beside a rail: fixed width, tabular, so the number does not
+/// shove the rail as it grows a digit.
+pub fn value_label() -> gtk4::Label {
+    let value = c::text("", Text::Caption, Tone::Muted);
+    value.add_css_class("ui-mono");
+    value.add_css_class("ui-numeric");
+    value.set_xalign(1.0);
+    value.set_width_chars(6);
+    value
+}
+
+/// A rail for a dense column of them.
+pub fn scale(min: f64, max: f64, step: f64) -> gtk4::Scale {
+    let scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, min, max, step);
+    scale.set_draw_value(false);
+    scale.set_hexpand(true);
+    c::dense_slider(&scale);
+    scale
+}
+
 /// An empty row, for the helpers below to fill.
-fn row() -> gtk4::Box {
-    let row = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(10)
-        .build();
+pub fn row() -> gtk4::Box {
+    let row = c::hbox(3);
     row.add_css_class("settings-row");
     row
 }
@@ -82,18 +108,20 @@ pub fn switch_row(label: &str, hint: &str, active: bool) -> (gtk4::Box, gtk4::Sw
     name.set_hexpand(true);
     row.append(&name);
 
-    let switch = gtk4::Switch::builder()
-        .active(active)
-        .valign(gtk4::Align::Center)
-        .build();
+    let switch = c::switch();
+    switch.set_active(active);
     row.append(&switch);
     (row, switch)
 }
 
+/// A dropdown over `choices`, the pane's height.
+pub fn dropdown(choices: &[&str]) -> gtk4::DropDown {
+    c::dropdown_of(choices)
+}
+
 /// A label and a dropdown over `choices`.
 pub fn dropdown_row(label: &str, hint: &str, choices: &[&str]) -> (gtk4::Box, gtk4::DropDown) {
-    let dropdown = gtk4::DropDown::from_strings(choices);
-    dropdown.add_css_class("settings-dropdown");
+    let dropdown = dropdown(choices);
     let row = kind_row(label, &dropdown);
     row.set_tooltip_text(Some(hint));
     (row, dropdown)
@@ -115,17 +143,9 @@ pub fn scale_row(
     row.set_tooltip_text(Some(hint));
     row.append(&row_label(label));
 
-    let scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, min, max, step);
-    scale.set_draw_value(false);
-    scale.set_hexpand(true);
-    scale.add_css_class("settings-scale");
-
-    let value = gtk4::Label::builder()
-        .label(show(min))
-        .xalign(1.0)
-        .width_chars(6)
-        .build();
-    value.add_css_class("settings-row-value");
+    let scale = scale(min, max, step);
+    let value = value_label();
+    value.set_text(&show(min));
     {
         let value = value.clone();
         scale.connect_value_changed(move |s| {
@@ -139,64 +159,40 @@ pub fn scale_row(
     (row, scale)
 }
 
-/// A row that opens a run of rows under it, closed to begin with.
-///
-/// For the half of a tab that is a workbench rather than a setting: the
-/// panel is where a choice is made in one press, and a column of thirty
-/// sliders in front of that choice buries it. What is behind the disclosure
-/// is not hidden, it is second.
-///
-/// The same shape as the network section's "Advanced & Other Connections"
-/// (`widgets/network/mod.rs`), which predates this and still carries its own
-/// copy — it cannot reach this module.
-pub fn disclosure(label: &'static str) -> (gtk4::Button, gtk4::Revealer) {
-    let button = gtk4::Button::builder()
-        .label(format!("▸ {label}"))
-        .halign(gtk4::Align::Start)
-        .build();
-    button.add_css_class("section-expander");
+/// A button in a group of presets.
+pub fn preset_button(label: &str) -> gtk4::Button {
+    c::button(label, Kind::Secondary)
+}
 
-    let revealer = gtk4::Revealer::builder()
-        .transition_type(gtk4::RevealerTransitionType::SlideDown)
-        .transition_duration(200)
-        .reveal_child(false)
-        .build();
+/// The line saying where a tab's values currently come from.
+pub fn status_label() -> gtk4::Label {
+    let status = hint_label("");
+    status
+}
 
-    {
-        let revealer = revealer.clone();
-        button.connect_clicked(move |b| {
-            let open = revealer.reveals_child();
-            revealer.set_reveal_child(!open);
-            b.set_label(&format!("{} {label}", if open { "▸" } else { "▾" }));
-        });
-    }
-    (button, revealer)
+/// Where the values come from: `system` is faint, an override plain. The one
+/// piece of state the screen behind the pane does not show.
+pub fn mark_source(status: &gtk4::Label, system: bool) {
+    c::set_text_style(
+        status,
+        Text::Caption,
+        if system { Tone::Faint } else { Tone::Muted },
+    );
 }
 
 /// The strip under a tab: its action buttons, and a line saying where the
 /// values currently come from.
 pub fn footer(buttons: &[&gtk4::Button]) -> (gtk4::Box, gtk4::Label) {
-    let footer = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(8)
-        .build();
+    let footer = c::vbox(3);
     footer.add_css_class("settings-footer");
 
-    let row = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(8)
-        .build();
+    let row = c::hbox(3);
     for button in buttons {
         row.append(*button);
     }
     footer.append(&row);
 
-    let status = gtk4::Label::builder()
-        .xalign(0.0)
-        .wrap(true)
-        .max_width_chars(HINT_CHARS)
-        .build();
-    status.add_css_class("settings-status");
+    let status = status_label();
     footer.append(&status);
 
     (footer, status)
@@ -243,26 +239,23 @@ pub fn copy_nix_button(
 }
 
 pub fn action_button(label: &str, hint: &str) -> gtk4::Button {
-    let button = gtk4::Button::with_label(label);
-    button.add_css_class("settings-action");
+    let button = c::button(label, Kind::Secondary);
     button.set_tooltip_text(Some(hint));
     button
 }
 
 /// Where a tab's values come from: the defaults, or the settings file.
-/// `faint` at the default, plain once there is an override — the one piece
-/// of state the screen behind the pane does not show.
+/// Faint at the default, plain once there is an override (`mark_source`).
 pub fn set_source(status: &gtk4::Label, overridden: bool, default_text: &str) {
     if overridden {
         status.set_text(&format!(
             "Custom — saved to {}",
             pretty_path(&super::store::path())
         ));
-        status.remove_css_class("settings-status-system");
     } else {
         status.set_text(default_text);
-        status.add_css_class("settings-status-system");
     }
+    mark_source(status, !overridden);
 }
 
 /// `~/.config/…` rather than the whole home path, which is noise in a label.

@@ -44,10 +44,10 @@ use crate::sway_ipc::SwayService;
 const PIN_W: i32 = 400;
 const PIN_H: i32 = 250;
 /// From the screen's corner, clear of the bar.
-const MARGIN_RIGHT: i32 = 16;
-const MARGIN_BOTTOM: i32 = 64;
+const MARGIN_RIGHT: i32 = crate::tokens::space(5);
+const MARGIN_BOTTOM: i32 = 2 * crate::tokens::space(7);
 /// Between stacked pins.
-const GAP: i32 = 12;
+const GAP: i32 = crate::tokens::space(4);
 /// A pin's full height on screen: the picture, the footer, the padding.
 const PIN_STEP: i32 = PIN_H + 32 + 16 + GAP;
 /// How long a new pin shows itself before its workspace's own screen hides
@@ -760,43 +760,40 @@ fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: 
     window.set_resizable(false);
     window.set_decorated(false);
 
-    let frame = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(6)
-        .build();
-    frame.add_css_class("glass-card");
+    let frame = crate::ui::vbox(2);
+    crate::ui::surface(&frame);
+    crate::ui::card(&frame, crate::ui::Card::Floating);
     frame.add_css_class("jump-pin");
 
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
+    let content = crate::ui::vbox(2);
 
     // The picture: a click goes there, and the pointer says so.
-    let holder = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    holder.add_css_class("jump-pin-picture");
+    let holder = crate::ui::vbox(0);
     holder.set_cursor_from_name(Some("pointer"));
     content.append(&holder);
 
     // The footer: the workspace, what a click does, and the way out. The
     // hint and the × are quiet until the pointer is on the pin.
-    let footer = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    let footer = crate::ui::hbox(3);
     footer.add_css_class("jump-pin-footer");
     let mark = gtk4::Label::new(Some(PIN_GLYPH));
-    mark.add_css_class("jump-pin-mark");
+    crate::ui::glyph(&mark, crate::ui::Text::Label, crate::ui::Tone::Muted);
     footer.append(&mark);
-    let label = gtk4::Label::builder().label(label).xalign(0.0).build();
-    label.add_css_class("jump-pin-label");
+    let label = crate::ui::text(label, crate::ui::Text::Label, crate::ui::Tone::Muted);
+    label.add_css_class("ui-strong");
     footer.append(&label);
-    let hint = gtk4::Label::builder()
-        .label("click to go · right-click to unpin")
-        .xalign(1.0)
-        .hexpand(true)
-        .build();
+    let hint = crate::ui::text(
+        "click to go · right-click to unpin",
+        crate::ui::Text::Caption,
+        crate::ui::Tone::Faint,
+    );
+    hint.set_xalign(1.0);
+    hint.set_hexpand(true);
     hint.add_css_class("jump-pin-hint");
     footer.append(&hint);
-    let close = gtk4::Button::builder()
-        .label("\u{00d7}")
-        .tooltip_text("Unpin")
-        .build();
-    close.add_css_class("flat");
+    let close = crate::ui::glyph_button("\u{00d7}", "Unpin", crate::ui::Kind::Flat);
+    close.add_css_class("pill");
+    close.add_css_class("small");
     close.add_css_class("jump-pin-close");
     footer.append(&close);
     content.append(&footer);

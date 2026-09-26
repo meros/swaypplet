@@ -735,7 +735,7 @@ fn window_row(
     result_row_style(&row, selected);
     let picture = crate::jump::card::LivePicture::new();
     picture.set_size_request(WINDOW_THUMB_W, WINDOW_THUMB_H);
-    picture.add_css_class("launcher-window-picture");
+    crate::ui::set_class(&picture, "ui-thumb", true);
     if let Some(id) = result.identifier.split_whitespace().nth(1) {
         live.add(id.to_string(), picture.clone());
     }

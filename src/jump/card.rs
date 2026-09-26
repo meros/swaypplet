@@ -154,7 +154,7 @@ pub fn preview(scene: Option<&Scene>, w: i32, h: i32, live: &mut Live) -> gtk4::
         }
         _ => {
             let empty = gtk4::Label::new(Some("empty"));
-            empty.add_css_class("jump-empty");
+            crate::ui::set_text_style(&empty, crate::ui::Text::Label, crate::ui::Tone::Faint);
             empty.set_size_request(w, h);
             fixed.put(&empty, 0.0, 0.0);
         }
@@ -174,7 +174,8 @@ fn place_in((x, y, ww, wh): (f64, f64, f64, f64), w: i32, h: i32) -> (i32, i32, 
 
 /// A window's spot: the app icon on a panel, with the live picture over it.
 fn window_slot(app: &str, w: i32, h: i32) -> (gtk4::Overlay, LivePicture) {
-    let panel = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    let panel = crate::ui::vbox(0);
+    crate::ui::placeholder(&panel);
     panel.add_css_class("jump-window-panel");
     panel.set_size_request(w, h);
     let icon = gtk4::Image::from_icon_name(&icon_name(app));
@@ -189,6 +190,8 @@ fn window_slot(app: &str, w: i32, h: i32) -> (gtk4::Overlay, LivePicture) {
     // Square, not clipped to rounded corners: see `preview`.
     let slot = gtk4::Overlay::new();
     slot.add_css_class("jump-window");
+    // The shadow is what lifts a picture off the desktop behind it.
+    crate::ui::lifted(&slot);
     slot.set_child(Some(&panel));
     slot.add_overlay(&pic);
     (slot, pic)

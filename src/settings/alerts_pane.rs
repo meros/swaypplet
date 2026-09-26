@@ -115,10 +115,7 @@ pub struct AlertsPane {
 
 impl AlertsPane {
     pub fn new() -> Self {
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(14)
-            .build();
+        let root = ui::pane();
 
         let settings = store::current();
         let alerts = settings.alerts();
@@ -176,6 +173,7 @@ impl AlertsPane {
             .placeholder_text("~/Pictures/Screenshots")
             .text(&capture.folder)
             .build();
+        crate::ui::entry(&folder);
         let folder_row = ui::kind_row("Folder", &folder);
         folder_row.set_tooltip_text(Some(
             "Where shots are saved. Empty is ~/Pictures/Screenshots; a ~ is your home.",

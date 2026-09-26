@@ -12,6 +12,7 @@ use crate::icons;
 use crate::launcher::LauncherView;
 use crate::notifications::store::NotificationStore;
 use crate::settings::SettingsSection;
+use crate::ui::{self, Kind, Text, Tone};
 use crate::widgets::backup::BackupSection;
 use crate::widgets::{
     audio::AudioSection,
@@ -159,34 +160,28 @@ impl Panel {
         store: Rc<RefCell<NotificationStore>>,
         audio_service: Rc<crate::audio::AudioService>,
     ) -> Self {
-        window.add_css_class("startmenu");
-        window.add_css_class("helm-window");
-
         // ── Backdrop (full-screen transparent click-catcher) ────────────────
-        let backdrop = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .halign(gtk4::Align::Fill)
-            .valign(gtk4::Align::Fill)
-            .hexpand(true)
-            .vexpand(true)
-            .build();
-        backdrop.add_css_class("startmenu-backdrop");
-        backdrop.add_css_class("helm-backdrop");
+        let backdrop = ui::vbox(0);
+        backdrop.set_halign(gtk4::Align::Fill);
+        backdrop.set_valign(gtk4::Align::Fill);
+        backdrop.set_hexpand(true);
+        backdrop.set_vexpand(true);
+        // The design system's base type and colour. On the window's child,
+        // not the window: the GTK theme's `window.background` outranks a
+        // class on the window node and would keep its own text colour.
+        ui::surface(&backdrop);
 
         // ── Top spacer (positions Helm at the optical foveal sweet spot ~25-28%) ──
         // Height and the card's width both come from
         // crate::launcher::install_monitor_fit below, against the output the
         // window lands on.
-        let top_spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        let top_spacer = ui::vbox(0);
 
         // ── Root container (the floating glass Helm card) ─────────────────────
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .halign(gtk4::Align::Center)
-            .valign(gtk4::Align::Start)
-            .build();
-        root.add_css_class("glass-card");
-        root.add_css_class("startmenu-root");
+        let root = ui::vbox(0);
+        root.set_halign(gtk4::Align::Center);
+        root.set_valign(gtk4::Align::Start);
+        ui::card(&root, ui::Card::Floating);
         root.add_css_class("helm-card");
 
         // ── Build sections ───────────────────────────────────────────────────
@@ -219,16 +214,14 @@ impl Panel {
         // ── Deck stack (Launcher stage ↔ In-place utility sub-sheets) ─────────
         let deck_stack = gtk4::Stack::builder()
             .transition_type(gtk4::StackTransitionType::Crossfade)
-            .transition_duration(150)
+            .transition_duration(anim::duration(crate::tokens::motion::EXPAND.ms) as u32)
             .vexpand(true)
             .build();
         deck_stack.add_css_class("helm-deck-stack");
 
         // Page 1: Default Elephant launcher stage
-        let launcher_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .vexpand(true)
-            .build();
+        let launcher_box = ui::vbox(0);
+        launcher_box.set_vexpand(true);
         launcher_box.add_css_class("helm-launcher-stage");
         launcher_box.append(launcher.widget());
         deck_stack.add_named(&launcher_box, Some("launcher"));
@@ -284,7 +277,7 @@ impl Panel {
         // Page 6: System Power Diagnostics & Users
         {
             let ret = return_to_search.clone();
-            let power_container = crate::ui::vbox(4);
+            let power_container = ui::vbox(4);
             power_container.append(power.widget());
             power_container.append(users.widget());
             power_container.append(backup.widget());
@@ -356,10 +349,7 @@ impl Panel {
         let flight_deck = build_flight_deck(&window, &store, &mut tile_pairs, &deck_stack);
 
         // ── Assemble Content ─────────────────────────────────────────────────
-        let content = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(0)
-            .build();
+        let content = ui::vbox(0);
         content.append(&telemetry_ribbon);
         content.append(&deck_stack);
         content.append(&flight_deck);
@@ -573,18 +563,16 @@ fn elastic_lists(
 /// Every prefix the omnibox knows, one row per page, from the same tables
 /// the router reads.
 fn build_prefix_list() -> gtk4::Box {
-    let list = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(2)
-        .build();
+    let list = ui::vbox(1);
     list.add_css_class("prefix-list");
 
-    let hint = gtk4::Label::builder()
-        .label("Type one of these after the colon to open its page. Anything else searches.")
-        .xalign(0.0)
-        .wrap(true)
-        .build();
-    hint.add_css_class("settings-group-hint");
+    let hint = ui::text(
+        "Type one of these after the colon to open its page. Anything else searches.",
+        Text::Caption,
+        Tone::Faint,
+    );
+    hint.set_wrap(true);
+    hint.add_css_class("prefix-hint");
     list.append(&hint);
 
     let rows: Vec<(String, String)> = ROUTES
@@ -597,24 +585,17 @@ fn build_prefix_list() -> gtk4::Box {
         )))
         .collect();
     for (prefixes, title) in rows {
-        let row = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(12)
-            .build();
+        let row = ui::hbox(4);
         row.add_css_class("prefix-row");
-        let keys = gtk4::Label::builder()
-            .label(&prefixes)
-            .xalign(0.0)
-            .width_chars(26)
-            .wrap(true)
-            .build();
-        keys.add_css_class("prefix-keys");
-        let page = gtk4::Label::builder()
-            .label(&title)
-            .xalign(0.0)
-            .hexpand(true)
-            .build();
-        page.add_css_class("prefix-page");
+        // What you type, in the mono keys are set in; the page it opens
+        // beside it, a level quieter.
+        let keys = ui::text(&prefixes, Text::Label, Tone::Fg);
+        keys.add_css_class("ui-mono");
+        keys.set_width_chars(26);
+        keys.set_max_width_chars(26);
+        keys.set_wrap(true);
+        let page = ui::text(&title, Text::Body, Tone::Muted);
+        page.set_hexpand(true);
         row.append(&keys);
         row.append(&page);
         list.append(&row);
@@ -638,44 +619,32 @@ fn build_subsheet_with_tabs(
     content: &impl IsA<gtk4::Widget>,
     on_back: impl Fn() + 'static,
 ) -> gtk4::Box {
-    let container = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(8)
-        .build();
+    let container = ui::vbox(3);
     container.add_css_class("helm-subsheet");
 
-    let header = gtk4::Box::builder()
-        .orientation(if tabs.is_some() {
-            gtk4::Orientation::Vertical
-        } else {
-            gtk4::Orientation::Horizontal
-        })
-        .spacing(if tabs.is_some() { 6 } else { 10 })
-        .build();
+    let header = if tabs.is_some() {
+        ui::vbox(3)
+    } else {
+        ui::hbox(3)
+    };
     header.add_css_class("subsheet-header");
 
     let top_row = if tabs.is_some() {
-        let row = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(10)
-            .build();
+        let row = ui::hbox(3);
         header.append(&row);
         row
     } else {
         header.clone()
     };
 
-    let back_btn = gtk4::Button::builder().label("← Back (Esc)").build();
-    back_btn.add_css_class("subsheet-back-btn");
+    let back_btn = ui::small_button("← Back (Esc)", Kind::Secondary);
+    back_btn.set_valign(gtk4::Align::Center);
     back_btn.connect_clicked(move |_| on_back());
     top_row.append(&back_btn);
 
-    let title_lbl = gtk4::Label::builder()
-        .label(&format!("{icon}  {title}"))
-        .hexpand(true)
-        .halign(gtk4::Align::Start)
-        .build();
-    title_lbl.add_css_class("subsheet-title");
+    let title_lbl = ui::text(&format!("{icon}  {title}"), Text::TitleSm, Tone::Fg);
+    title_lbl.set_hexpand(true);
+    title_lbl.set_halign(gtk4::Align::Start);
     top_row.append(&title_lbl);
 
     if let Some(tabs) = tabs {
@@ -696,10 +665,75 @@ fn build_subsheet_with_tabs(
         .max_content_height(420)
         .child(content)
         .build();
-    scroller.add_css_class("subsheet-scroller");
     container.append(&scroller);
 
     container
+}
+
+/// Flip the deck between `page` and the launcher, and say whether it is now
+/// on `page`.
+fn flip(stack: &gtk4::Stack, page: &str) -> bool {
+    if stack.visible_child_name().as_deref() == Some(page) {
+        stack.set_visible_child_name("launcher");
+        false
+    } else {
+        stack.set_visible_child_name(page);
+        true
+    }
+}
+
+/// A ribbon pill: a pill button with a glyph and a word, which flips the
+/// deck to `page`. The glyph is muted, not coloured: colour on the ribbon
+/// would claim a status none of these pills reports.
+fn ribbon_pill(icon: &str, label: &str, stack: &gtk4::Stack, page: &'static str) -> gtk4::Button {
+    let line = ui::hbox(2);
+    let glyph = gtk4::Label::new(Some(icon));
+    ui::glyph(&glyph, Text::TitleSm, Tone::Muted);
+    line.append(&glyph);
+    line.append(&ui::text(label, Text::Label, Tone::Fg));
+    let pill = gtk4::Button::builder().child(&line).build();
+    ui::make_button(&pill, Kind::Secondary);
+    pill.add_css_class("pill");
+    let stack = stack.clone();
+    pill.connect_clicked(move |_| {
+        flip(&stack, page);
+    });
+    pill
+}
+
+/// A ribbon pill holding a slider, and the glyph button in front of it that
+/// flips the deck to the slider's page.
+fn ribbon_slider(
+    icon: &str,
+    tooltip: &str,
+    scale: &gtk4::Scale,
+    stack: &gtk4::Stack,
+    page: &'static str,
+) -> gtk4::Box {
+    let pill = ui::pill_group(2);
+    let btn = ui::glyph_button(icon, tooltip, Kind::Flat);
+    btn.add_css_class("pill");
+    btn.set_valign(gtk4::Align::Center);
+    {
+        let stack = stack.clone();
+        btn.connect_clicked(move |_| {
+            flip(&stack, page);
+        });
+    }
+    pill.append(&btn);
+
+    scale.set_draw_value(false);
+    scale.set_hexpand(true);
+    // A floor, not a size: the scale expands to fill the ribbon wherever
+    // there is room, so lowering it only decides how much the ribbon can give
+    // up on a narrow output. A slider is the right thing to squeeze first,
+    // because it stays usable at any width while a label has to be cut.
+    scale.set_width_request(44);
+    if scale.parent().is_some() {
+        scale.unparent();
+    }
+    pill.append(scale);
+    pill
 }
 
 fn build_telemetry_ribbon(
@@ -709,21 +743,11 @@ fn build_telemetry_ribbon(
     store: &Rc<RefCell<NotificationStore>>,
     network: &NetworkSection,
 ) -> gtk4::Box {
-    let ribbon = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(6)
-        .hexpand(true)
-        .build();
+    let ribbon = ui::hbox(2);
+    ribbon.set_hexpand(true);
     ribbon.add_css_class("helm-telemetry-ribbon");
 
     // 1. Power / Battery pill (dynamic)
-    let pill_power = gtk4::Button::builder().build();
-    pill_power.add_css_class("telemetry-pill");
-    let power_box = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(6)
-        .build();
-
     let (icon_str, label_str) = if let Some(path) = power::find_battery_path() {
         if let Some(bat) = power::read_battery(&path) {
             let icon = power::battery_icon(bat.capacity, bat.charging);
@@ -735,121 +759,33 @@ fn build_telemetry_ribbon(
     } else {
         ("󰁹", "AC".to_string())
     };
-
-    let power_icon = gtk4::Label::builder().label(icon_str).build();
-    power_icon.add_css_class("pill-icon-green");
-    let power_lbl = gtk4::Label::builder().label(&label_str).build();
-    power_box.append(&power_icon);
-    power_box.append(&power_lbl);
-    pill_power.set_child(Some(&power_box));
-    {
-        let stack_c = deck_stack.clone();
-        pill_power.connect_clicked(move |_| {
-            if stack_c.visible_child_name().as_deref() == Some("power") {
-                stack_c.set_visible_child_name("launcher");
-            } else {
-                stack_c.set_visible_child_name("power");
-            }
-        });
-    }
-    ribbon.append(&pill_power);
+    ribbon.append(&ribbon_pill(icon_str, &label_str, deck_stack, "power"));
 
     // 2. Audio Volume scrubber pill (click icon to open audio devices & mixer)
-    let pill_audio = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(4)
-        .build();
-    pill_audio.add_css_class("telemetry-pill");
-    pill_audio.add_css_class("telemetry-pill-interactive");
-
-    let audio_btn = gtk4::Button::builder()
-        .child(&gtk4::Label::new(Some(icons::SPEAKER_HIGH)))
-        .tooltip_text("Open Audio Devices & Mixer (:audio)")
-        .build();
-    audio_btn.add_css_class("telemetry-icon-sub-btn");
-    {
-        let stack_c = deck_stack.clone();
-        audio_btn.connect_clicked(move |_| {
-            if stack_c.visible_child_name().as_deref() == Some("audio") {
-                stack_c.set_visible_child_name("launcher");
-            } else {
-                stack_c.set_visible_child_name("audio");
-            }
-        });
-    }
-    pill_audio.append(&audio_btn);
-
-    let scale = audio.output_volume_scale();
-    scale.set_draw_value(false);
-    scale.set_hexpand(true);
-    // A floor, not a size: the scale expands to fill the ribbon wherever
-    // there is room, so lowering it only decides how much the ribbon can give
-    // up on a narrow output. A slider is the right thing to squeeze first,
-    // because it stays usable at any width while a label has to be cut.
-    scale.set_width_request(44);
-    if scale.parent().is_some() {
-        scale.unparent();
-    }
-    pill_audio.append(&scale);
-    ribbon.append(&pill_audio);
+    ribbon.append(&ribbon_slider(
+        icons::SPEAKER_HIGH,
+        "Open Audio Devices & Mixer (:audio)",
+        &audio.output_volume_scale(),
+        deck_stack,
+        "audio",
+    ));
 
     // 3. Brightness scrubber pill (click icon to open display settings)
-    let pill_bright = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(4)
-        .build();
-    pill_bright.add_css_class("telemetry-pill");
-    pill_bright.add_css_class("telemetry-pill-interactive");
+    ribbon.append(&ribbon_slider(
+        icons::BRIGHTNESS,
+        "Open Display & Monitors (:disp)",
+        &brightness.brightness_scale(),
+        deck_stack,
+        "displays",
+    ));
 
-    let bright_btn = gtk4::Button::builder()
-        .child(&gtk4::Label::new(Some(icons::BRIGHTNESS)))
-        .tooltip_text("Open Display & Monitors (:disp)")
-        .build();
-    bright_btn.add_css_class("telemetry-icon-sub-btn");
-    {
-        let stack_c = deck_stack.clone();
-        bright_btn.connect_clicked(move |_| {
-            if stack_c.visible_child_name().as_deref() == Some("displays") {
-                stack_c.set_visible_child_name("launcher");
-            } else {
-                stack_c.set_visible_child_name("displays");
-            }
-        });
-    }
-    pill_bright.append(&bright_btn);
-
-    let b_scale = brightness.brightness_scale();
-    b_scale.set_draw_value(false);
-    b_scale.set_hexpand(true);
-    // Same floor as the volume scale above, and for the same reason.
-    b_scale.set_width_request(44);
-    if b_scale.parent().is_some() {
-        b_scale.unparent();
-    }
-    pill_bright.append(&b_scale);
-    ribbon.append(&pill_bright);
-
-    // 4. Wi-Fi Pill
-    let pill_wifi = gtk4::Button::builder().build();
-    pill_wifi.add_css_class("telemetry-pill");
-    let wifi_box = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(6)
-        .build();
-    let wifi_icon = gtk4::Label::builder().label("󰤨").build();
-    wifi_icon.add_css_class("pill-icon-blue");
-    let wifi_lbl = gtk4::Label::builder().label("Wi-Fi").build();
-    wifi_box.append(&wifi_icon);
-    wifi_box.append(&wifi_lbl);
-    pill_wifi.set_child(Some(&wifi_box));
+    // 4. Wi-Fi Pill: opening the page also starts a scan.
+    let pill_wifi = ribbon_pill("󰤨", "Wi-Fi", deck_stack, "wifi");
     {
         let stack_c = deck_stack.clone();
         let net_c = network.clone();
         pill_wifi.connect_clicked(move |_| {
             if stack_c.visible_child_name().as_deref() == Some("wifi") {
-                stack_c.set_visible_child_name("launcher");
-            } else {
-                stack_c.set_visible_child_name("wifi");
                 net_c.trigger_scan();
             }
         });
@@ -857,85 +793,19 @@ fn build_telemetry_ribbon(
     ribbon.append(&pill_wifi);
 
     // 5. Bluetooth Pill
-    let pill_bt = gtk4::Button::builder().build();
-    pill_bt.add_css_class("telemetry-pill");
-    let bt_box = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(6)
-        .build();
-    let bt_icon = gtk4::Label::builder().label("󰂯").build();
-    bt_icon.add_css_class("pill-icon-blue");
-    let bt_lbl = gtk4::Label::builder().label("Bluetooth").build();
-    bt_box.append(&bt_icon);
-    bt_box.append(&bt_lbl);
-    pill_bt.set_child(Some(&bt_box));
-    {
-        let stack_c = deck_stack.clone();
-        pill_bt.connect_clicked(move |_| {
-            if stack_c.visible_child_name().as_deref() == Some("bluetooth") {
-                stack_c.set_visible_child_name("launcher");
-            } else {
-                stack_c.set_visible_child_name("bluetooth");
-            }
-        });
-    }
-    ribbon.append(&pill_bt);
+    ribbon.append(&ribbon_pill("󰂯", "Bluetooth", deck_stack, "bluetooth"));
 
     // 6. Displays Pill
-    let pill_disp = gtk4::Button::builder().build();
-    pill_disp.add_css_class("telemetry-pill");
-    let disp_box = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(6)
-        .build();
-    let disp_icon = gtk4::Label::builder().label("󰍹").build();
-    disp_icon.add_css_class("pill-icon-yellow");
-    let disp_lbl = gtk4::Label::builder().label("Displays").build();
-    disp_box.append(&disp_icon);
-    disp_box.append(&disp_lbl);
-    pill_disp.set_child(Some(&disp_box));
-    {
-        let stack_c = deck_stack.clone();
-        pill_disp.connect_clicked(move |_| {
-            if stack_c.visible_child_name().as_deref() == Some("displays") {
-                stack_c.set_visible_child_name("launcher");
-            } else {
-                stack_c.set_visible_child_name("displays");
-            }
-        });
-    }
-    ribbon.append(&pill_disp);
+    ribbon.append(&ribbon_pill("󰍹", "Displays", deck_stack, "displays"));
 
     // 7. Notifications Pill
-    let pill_notif = gtk4::Button::builder().build();
-    pill_notif.add_css_class("telemetry-pill");
-    let notif_box = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(4)
-        .build();
-    let notif_icon = gtk4::Label::builder().label("󰂚").build();
-    notif_icon.add_css_class("pill-icon-red");
     let notif_count = store.borrow().all().len();
-    let notif_count_str = if notif_count > 0 {
-        format!("{notif_count}")
-    } else {
-        "0".to_string()
-    };
-    let notif_lbl = gtk4::Label::builder().label(&notif_count_str).build();
-    notif_box.append(&notif_icon);
-    notif_box.append(&notif_lbl);
-    pill_notif.set_child(Some(&notif_box));
-    {
-        let stack_c = deck_stack.clone();
-        pill_notif.connect_clicked(move |_| {
-            if stack_c.visible_child_name().as_deref() == Some("notifications") {
-                stack_c.set_visible_child_name("launcher");
-            } else {
-                stack_c.set_visible_child_name("notifications");
-            }
-        });
-    }
-    ribbon.append(&pill_notif);
+    ribbon.append(&ribbon_pill(
+        "󰂚",
+        &notif_count.to_string(),
+        deck_stack,
+        "notifications",
+    ));
 
     ribbon
 }
@@ -946,11 +816,8 @@ fn build_flight_deck(
     tile_pairs: &mut Vec<(gtk4::ToggleButton, tiles::TileSpec)>,
     deck_stack: &gtk4::Stack,
 ) -> gtk4::Box {
-    let deck = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(8)
-        .hexpand(true)
-        .build();
+    let deck = ui::hbox(3);
+    deck.set_hexpand(true);
     deck.add_css_class("helm-action-deck");
 
     // Flight switches (Left group).
@@ -970,8 +837,8 @@ fn build_flight_deck(
         .orientation(gtk4::Orientation::Horizontal)
         .selection_mode(gtk4::SelectionMode::None)
         .min_children_per_line(1)
-        .row_spacing(6)
-        .column_spacing(6)
+        .row_spacing(crate::tokens::space(3) as u32)
+        .column_spacing(crate::tokens::space(3) as u32)
         .halign(gtk4::Align::Start)
         .build();
     left_group.add_css_class("deck-switches");
@@ -1012,37 +879,21 @@ fn build_flight_deck(
     }));
 
     // Clipboard Drawer
-    let clip_btn = gtk4::Button::builder()
-        .child(&gtk4::Label::new(Some("󰅍")))
-        .build();
-    clip_btn.add_css_class("rail-btn");
-    clip_btn.set_tooltip_text(Some("Clipboard history"));
+    let clip_btn = deck_button("󰅍", "Clipboard history");
     {
         let stack_c = deck_stack.clone();
         clip_btn.connect_clicked(move |_| {
-            if stack_c.visible_child_name().as_deref() == Some("clipboard") {
-                stack_c.set_visible_child_name("launcher");
-            } else {
-                stack_c.set_visible_child_name("clipboard");
-            }
+            flip(&stack_c, "clipboard");
         });
     }
     left_group.append(&clip_btn);
 
     // Settings
-    let settings_btn = gtk4::Button::builder()
-        .child(&gtk4::Label::new(Some("󰒓")))
-        .build();
-    settings_btn.add_css_class("rail-btn");
-    settings_btn.set_tooltip_text(Some("Settings"));
+    let settings_btn = deck_button("󰒓", "Settings");
     {
         let stack_c = deck_stack.clone();
         settings_btn.connect_clicked(move |_| {
-            if stack_c.visible_child_name().as_deref() == Some("settings") {
-                stack_c.set_visible_child_name("launcher");
-            } else {
-                stack_c.set_visible_child_name("settings");
-            }
+            flip(&stack_c, "settings");
         });
     }
     left_group.append(&settings_btn);
@@ -1055,7 +906,8 @@ fn build_flight_deck(
     deck.append(&left_group);
 
     // Spacer
-    let spacer = gtk4::Box::builder().hexpand(true).build();
+    let spacer = ui::hbox(0);
+    spacer.set_hexpand(true);
     deck.append(&spacer);
 
     // Session cluster (Right group). Centred rather than filling, because
@@ -1068,6 +920,20 @@ fn build_flight_deck(
     deck
 }
 
+/// A deck button: a glyph at title size on a component button.
+fn deck_button(icon: &str, tooltip: &str) -> gtk4::Button {
+    let glyph = gtk4::Label::new(Some(icon));
+    ui::glyph(&glyph, Text::Title, Tone::Fg);
+    let btn = gtk4::Button::builder()
+        .child(&glyph)
+        .tooltip_text(tooltip)
+        .build();
+    ui::make_button(&btn, Kind::Secondary);
+    btn.add_css_class("icon");
+    btn.add_css_class("deck-btn");
+    btn
+}
+
 /// A rail icon button that hides the menu instantly (no exit wipe — the
 /// action may capture the screen), then runs `action`. The stale reveal
 /// state this leaves behind is healed by `Panel::toggle`.
@@ -1077,11 +943,7 @@ fn rail_action(
     window: &gtk4::Window,
     action: impl Fn() + 'static,
 ) -> gtk4::Button {
-    let btn = gtk4::Button::builder()
-        .child(&gtk4::Label::new(Some(icon)))
-        .build();
-    btn.add_css_class("rail-btn");
-    btn.set_tooltip_text(Some(tooltip));
+    let btn = deck_button(icon, tooltip);
     let window_c = window.clone();
     btn.connect_clicked(move |_| {
         window_c.set_visible(false);

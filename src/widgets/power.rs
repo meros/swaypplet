@@ -616,21 +616,30 @@ pub fn build_session_row() -> gtk4::Box {
     row
 }
 
-/// One icon-only rail button: a glyph child + tooltip, `.rail-btn` styling
-/// (plus `.rail-btn-danger` for destructive actions).
+/// One icon-only button on the Helm's action deck: the same glyph button
+/// as the deck's own (panel.rs), the glyph in the danger tone for the
+/// destructive actions.
 fn rail_btn(icon: &str, tooltip: &str, danger: bool) -> gtk4::Button {
     let lbl = gtk4::Label::new(Some(icon));
+    ui::glyph(
+        &lbl,
+        ui::Text::Title,
+        if danger {
+            ui::Tone::Danger
+        } else {
+            ui::Tone::Fg
+        },
+    );
     let btn = gtk4::Button::builder().child(&lbl).build();
-    btn.add_css_class("rail-btn");
-    if danger {
-        btn.add_css_class("rail-btn-danger");
-    }
+    ui::make_button(&btn, ui::Kind::Secondary);
+    btn.add_css_class("icon");
+    btn.add_css_class("deck-btn");
     btn.set_tooltip_text(Some(tooltip));
     btn
 }
 
 /// Arm a two-click confirmation on `btn`: the first click starts a 3 s window
-/// (`.confirming` pulse + "Click again…" tooltip); a second click inside the
+/// (the armed pulse + "Click again…" tooltip); a second click inside the
 /// window runs `exec`. The window auto-clears after 3 s.
 fn wire_confirm<F: Fn() + 'static>(btn: &gtk4::Button, verb: &'static str, exec: F) {
     let pending = Rc::new(Cell::new(false));
@@ -640,14 +649,14 @@ fn wire_confirm<F: Fn() + 'static>(btn: &gtk4::Button, verb: &'static str, exec:
             return;
         }
         pending.set(true);
-        b.add_css_class("confirming");
+        ui::set_armed(b, true);
         b.set_tooltip_text(Some(&format!("Click again to {}", verb.to_lowercase())));
 
         let pending_c = pending.clone();
         let b_c = b.clone();
         glib::timeout_add_seconds_local(3, move || {
             pending_c.set(false);
-            b_c.remove_css_class("confirming");
+            ui::set_armed(&b_c, false);
             b_c.set_tooltip_text(Some(verb));
             glib::ControlFlow::Break
         });

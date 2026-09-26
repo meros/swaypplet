@@ -137,25 +137,32 @@ impl Jump {
         window.add_css_class("jump-surface");
 
         let stage = gtk4::Fixed::new();
-        let ring = gtk4::Box::builder().css_classes(["jump-ring"]).build();
+        // Base type and colour on the child: the theme's `window.background`
+        // outranks a class on the window node.
+        crate::ui::surface(&stage);
+        // Outside the workspace, so it frames the windows and covers none.
+        // It fades in as the row opens: the workspaces take the animation's
+        // time to get there.
+        let ring = crate::ui::ring();
         ring.set_can_target(false);
-        let chord = gtk4::Label::builder().css_classes(["jump-chord"]).build();
-        let label = gtk4::Label::builder().css_classes(["jump-label"]).build();
-        let detail = gtk4::Label::builder()
-            .css_classes(["jump-detail"])
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .build();
+        // The key that reaches this place without this surface: the part of
+        // the caption worth learning.
+        let chord = crate::ui::key("");
+        // Straight on the wallpaper, so the words carry their own contrast.
+        let label = crate::ui::text("", crate::ui::Text::TitleSm, crate::ui::Tone::Fg);
+        crate::ui::on_wallpaper(&label);
+        let detail = crate::ui::text("", crate::ui::Text::Label, crate::ui::Tone::Fg);
+        crate::ui::on_wallpaper(&detail);
+        detail.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         // Centred under the middle workspace: the outer box is as wide as
         // the workspace (`place_ring`), the line itself only as wide as it is.
-        let line = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .halign(gtk4::Align::Center)
-            .css_classes(["jump-caption"])
-            .build();
+        let line = crate::ui::hbox(3);
+        line.set_halign(gtk4::Align::Center);
+        line.add_css_class("jump-caption");
         line.append(&chord);
         line.append(&label);
         line.append(&detail);
-        let caption = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        let caption = crate::ui::hbox(0);
         caption.append(&line);
         line.set_hexpand(true);
         caption.set_can_target(false);
@@ -445,13 +452,15 @@ impl Jump {
         let (x, y, w, h) = r.middle();
         let (x, y) = (x - ox, y - oy);
         // The ring sits just outside the workspace, so it frames the windows
-        // and covers none of them.
-        const OUT: f64 = 6.0;
+        // and covers none of them. Its radius is the card's, concentric with
+        // the workspace's corners this far inside it.
+        const OUT: f64 = crate::tokens::space(3) as f64;
         self.ring
             .set_size_request((w + 2.0 * OUT) as i32, (h + 2.0 * OUT) as i32);
         self.stage.move_(&self.ring, x - OUT, y - OUT);
         self.caption.set_size_request(w as i32, -1);
-        self.stage.move_(&self.caption, x, y + h + 14.0);
+        self.stage
+            .move_(&self.caption, x, y + h + f64::from(crate::tokens::space(4)));
         self.ring.set_visible(true);
         self.caption.set_visible(true);
     }

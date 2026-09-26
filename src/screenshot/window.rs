@@ -77,20 +77,13 @@ fn show(app: &gtk4::Application, windows: Vec<(scene::Window, String, String)>, 
     let window = layer_shell::create_layer_window(app, &CONFIG);
     window.set_decorated(false);
 
-    let card = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(10)
-        .halign(gtk4::Align::Center)
-        .valign(gtk4::Align::Center)
-        .build();
-    card.add_css_class("glass-card");
+    let card = crate::ui::vbox(3);
+    card.set_halign(gtk4::Align::Center);
+    card.set_valign(gtk4::Align::Center);
+    crate::ui::surface(&card);
+    crate::ui::card(&card, crate::ui::Card::Floating);
     card.add_css_class("window-picker");
-    let title = gtk4::Label::builder()
-        .label("SCREENSHOT A WINDOW")
-        .xalign(0.0)
-        .css_classes(["window-picker-title"])
-        .build();
-    card.append(&title);
+    card.append(&crate::ui::overline("Screenshot a window", crate::ui::Tone::Muted));
 
     let grid = gtk4::FlowBox::builder()
         .max_children_per_line(COLUMNS)
@@ -101,10 +94,10 @@ fn show(app: &gtk4::Application, windows: Vec<(scene::Window, String, String)>, 
         .selection_mode(gtk4::SelectionMode::Single)
         .activate_on_single_click(true)
         .homogeneous(true)
-        .row_spacing(10)
-        .column_spacing(10)
+        .row_spacing(crate::tokens::space(3) as u32)
+        .column_spacing(crate::tokens::space(3) as u32)
         .build();
-    grid.add_css_class("window-picker-grid");
+    crate::ui::choice_grid(&grid);
     let scroller = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .propagate_natural_height(true)
@@ -192,8 +185,7 @@ fn show(app: &gtk4::Application, windows: Vec<(scene::Window, String, String)>, 
 
 /// One window's tile: its live picture over its title and where it is.
 fn tile(win: &scene::Window, workspace: &str, name: &str, id: &str, live: &mut Live) -> gtk4::Box {
-    let b = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
-    b.add_css_class("window-picker-tile");
+    let b = crate::ui::vbox(2);
 
     let (s, _, _) = scene::fit(win.w, win.h, TILE_W, TILE_H);
     let picture = LivePicture::new();
@@ -204,28 +196,28 @@ fn tile(win: &scene::Window, workspace: &str, name: &str, id: &str, live: &mut L
     picture.set_halign(gtk4::Align::Center);
     picture.set_valign(gtk4::Align::Center);
     // The box keeps every tile one size whatever the window's shape.
-    let frame = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    let frame = crate::ui::vbox(0);
     frame.set_size_request(TILE_W, TILE_H);
     frame.append(&picture);
     picture.set_vexpand(true);
     b.append(&frame);
     live.add(id.to_string(), picture);
 
-    let title = gtk4::Label::builder()
-        .label(if name.is_empty() { &win.app } else { name })
-        .xalign(0.0)
-        .max_width_chars(28)
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .css_classes(["window-picker-name"])
-        .build();
+    let title = crate::ui::text(
+        if name.is_empty() { &win.app } else { name },
+        crate::ui::Text::Body,
+        crate::ui::Tone::Fg,
+    );
+    title.set_max_width_chars(28);
+    title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     b.append(&title);
-    let place = gtk4::Label::builder()
-        .label(format!("{} \u{00b7} {}", win.app, workspace))
-        .xalign(0.0)
-        .max_width_chars(28)
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .css_classes(["window-picker-place"])
-        .build();
+    let place = crate::ui::text(
+        &format!("{} \u{00b7} {}", win.app, workspace),
+        crate::ui::Text::Caption,
+        crate::ui::Tone::Muted,
+    );
+    place.set_max_width_chars(28);
+    place.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     b.append(&place);
     b
 }

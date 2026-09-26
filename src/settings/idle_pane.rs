@@ -121,21 +121,20 @@ fn time_row(
 ) -> (gtk4::Box, gtk4::DropDown, gtk4::DropDown, Vec<u8>) {
     let hours: Vec<String> = (0..24).map(|h| format!("{h:02}")).collect();
     let hours: Vec<&str> = hours.iter().map(String::as_str).collect();
-    let hour = gtk4::DropDown::from_strings(&hours);
-    hour.add_css_class("settings-dropdown");
+    let hour = ui::dropdown(&hours);
 
     let rungs = minute_rungs(minute);
     let labels: Vec<String> = rungs.iter().map(|m| format!("{m:02}")).collect();
     let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let minutes = gtk4::DropDown::from_strings(&labels);
-    minutes.add_css_class("settings-dropdown");
+    let minutes = ui::dropdown(&labels);
 
-    let clock = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(6)
-        .build();
+    let clock = crate::ui::hbox(2);
     clock.append(&hour);
-    clock.append(&gtk4::Label::new(Some(":")));
+    clock.append(&crate::ui::text(
+        ":",
+        crate::ui::Text::Body,
+        crate::ui::Tone::Fg,
+    ));
     clock.append(&minutes);
 
     let row = kind_row(label, &clock);
@@ -308,10 +307,7 @@ pub struct IdlePane {
 
 impl IdlePane {
     pub fn new() -> Self {
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(14)
-            .build();
+        let root = ui::pane();
 
         let group = section_box(
             "Idle timers",
@@ -352,10 +348,7 @@ impl IdlePane {
         );
         night_group.append(&night_row);
 
-        let night_body = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(4)
-            .build();
+        let night_body = crate::ui::vbox(1);
         let (opens_row, opens_h, opens_m, opens_rungs) = time_row(
             "Window opens",
             "Local time. A window whose end is at or before its start crosses midnight, so 21:00 to 07:00 is the evening and the night.",

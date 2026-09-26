@@ -93,11 +93,8 @@ pub struct SettingsSection {
 
 impl SettingsSection {
     pub fn new() -> Self {
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(10)
-            .hexpand(true)
-            .build();
+        let root = crate::ui::vbox(3);
+        root.set_hexpand(true);
         root.add_css_class("settings-pane");
 
         let look = look_pane::LookPane::new();
@@ -108,7 +105,7 @@ impl SettingsSection {
 
         let stack = gtk4::Stack::builder()
             .transition_type(gtk4::StackTransitionType::Crossfade)
-            .transition_duration(120)
+            .transition_duration(crate::anim::duration(crate::tokens::motion::EXPAND.ms) as u32)
             .vhomogeneous(false)
             .hexpand(true)
             .build();
@@ -118,21 +115,17 @@ impl SettingsSection {
         stack.add_named(alerts.widget(), Some("alerts"));
         stack.add_named(glass.widget(), Some("glass"));
 
-        // Toggle buttons in one group rather than a StackSwitcher, so the
-        // strip takes the pane's own chrome instead of the theme's tab bar.
-        // The strip sits at the header level of the settings subsheet so it
-        // never scrolls away.
-        let strip = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(6)
-            .build();
+        // Chips in one toggle group rather than a StackSwitcher, so the
+        // strip takes the design system's selection (the accent on the
+        // chosen one) instead of the theme's tab bar. The strip sits at the
+        // header level of the settings subsheet so it never scrolls away.
+        let strip = crate::ui::hbox(3);
         strip.add_css_class("settings-tabs");
         strip.set_halign(gtk4::Align::Center);
         let mut tabs = Vec::new();
         let mut first: Option<gtk4::ToggleButton> = None;
         for tab in &TABS {
-            let button = gtk4::ToggleButton::with_label(tab.title);
-            button.add_css_class("settings-tab");
+            let button = crate::ui::toggle_chip(tab.title);
             if let Some(first) = &first {
                 button.set_group(Some(first));
             } else {

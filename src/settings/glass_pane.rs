@@ -552,12 +552,11 @@ impl State {
                 "Overridden — saved to {}",
                 pretty_path(&glass::override_path())
             ));
-            self.status.remove_css_class("settings-status-system");
         } else {
             self.status
                 .set_text("System default, as the sway config ships it");
-            self.status.add_css_class("settings-status-system");
         }
+        ui::mark_source(&self.status, !modified);
     }
 }
 
@@ -570,11 +569,7 @@ pub struct GlassPane {
 
 impl GlassPane {
     pub fn new() -> Self {
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(14)
-            .build();
-        root.add_css_class("settings-pane");
+        let root = ui::pane();
 
         let Some(system) = System::load() else {
             root.append(&unconfigured_note());
@@ -592,17 +587,10 @@ impl GlassPane {
         // for what an uncapped one does to the whole tab's width). This tab
         // builds its own status rather than taking `ui::footer`'s, because it
         // also carries the Undo button.
-        let status = gtk4::Label::builder()
-            .xalign(0.0)
-            .wrap(true)
-            .max_width_chars(ui::HINT_CHARS)
-            .build();
-        status.add_css_class("settings-status");
+        let status = ui::status_label();
 
-        let undo_btn = gtk4::Button::with_label("Undo");
-        undo_btn.add_css_class("settings-action");
+        let undo_btn = ui::action_button("Undo", "Revert the last tuning or preset change.");
         undo_btn.set_sensitive(false);
-        undo_btn.set_tooltip_text(Some("Revert the last tuning or preset change."));
 
         let state = Rc::new(State {
             system,
@@ -631,7 +619,7 @@ impl GlassPane {
         // should be is a bench, and a bench in front of the presets meant
         // the tab opened on a column of sliders and the choice most people
         // want was below the fold.
-        let (expander, revealer) = ui::disclosure("Tune the material");
+        let tune = crate::ui::disclosure("Tune the material");
         // Built on the first open, not now. A collapsed GtkRevealer still
         // measures its child across the other axis, and twenty-nine slider
         // rows gave GTK an answer it could not reconcile — "min width of 898
@@ -641,19 +629,16 @@ impl GlassPane {
         // never open it.
         {
             let state = state.clone();
-            let revealer = revealer.clone();
-            expander.connect_clicked(move |_| {
-                if revealer.child().is_some() {
+            let body = tune.body.clone();
+            tune.button.connect_clicked(move |_| {
+                if body.first_child().is_some() {
                     return;
                 }
-                let bench = gtk4::Box::builder()
-                    .orientation(gtk4::Orientation::Vertical)
-                    .spacing(10)
-                    .build();
+                let bench = crate::ui::vbox(3);
                 for group in GROUPS {
                     bench.append(&build_group(&state, group));
                 }
-                revealer.set_child(Some(&bench));
+                body.append(&bench);
                 // The bench's sync closures just joined `state.sync` after
                 // the one call to `sync_controls` in `new` — every knob built
                 // here defaulted to GTK's own 0 and stays there until the
@@ -662,8 +647,7 @@ impl GlassPane {
                 state.sync_controls();
             });
         }
-        root.append(&expander);
-        root.append(&revealer);
+        root.append(&tune.root);
 
         root.append(&build_footer(&state, &status, &undo_btn));
 
@@ -695,30 +679,26 @@ impl GlassPane {
 
 /// What the pane says on a host that does not configure glass.
 fn unconfigured_note() -> gtk4::Box {
-    let note = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(6)
-        .build();
+    let note = crate::ui::group(2);
     note.add_css_class("settings-empty");
 
-    let title = gtk4::Label::builder()
-        .label("No glass configuration on this host")
-        .xalign(0.0)
-        .build();
-    title.add_css_class("settings-empty-title");
+    let title = crate::ui::text(
+        "No glass configuration on this host",
+        crate::ui::Text::Body,
+        crate::ui::Tone::Fg,
+    );
+    title.add_css_class("ui-strong");
 
-    let body = gtk4::Label::builder()
-        .label(
-            "The material and the surfaces it applies to come from \
-             /etc/swaypplet/glass.json, written by the NixOS side \
-             (users/modules/theme/glass-config.nix). Without it there is no \
-             baseline to edit against.",
-        )
-        .xalign(0.0)
-        .wrap(true)
-        .max_width_chars(ui::HINT_CHARS)
-        .build();
-    body.add_css_class("settings-empty-body");
+    let body = crate::ui::text(
+        "The material and the surfaces it applies to come from \
+         /etc/swaypplet/glass.json, written by the NixOS side \
+         (users/modules/theme/glass-config.nix). Without it there is no \
+         baseline to edit against.",
+        crate::ui::Text::Caption,
+        crate::ui::Tone::Muted,
+    );
+    body.set_wrap(true);
+    body.set_max_width_chars(ui::HINT_CHARS);
 
     note.append(&title);
     note.append(&body);
@@ -738,8 +718,8 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
     // took the 898 and the whole tab hung off the right of the card. The
     // number of presets is known and small, so nothing here needs to reflow.
     let row = gtk4::Grid::builder()
-        .row_spacing(6)
-        .column_spacing(6)
+        .row_spacing(crate::tokens::space(2))
+        .column_spacing(crate::tokens::space(2))
         .column_homogeneous(true)
         .build();
     row.add_css_class("settings-presets");
@@ -749,8 +729,7 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
         slot += 1;
     };
 
-    let system_btn = gtk4::Button::with_label("System");
-    system_btn.add_css_class("settings-preset-btn");
+    let system_btn = ui::preset_button("System");
     system_btn.set_tooltip_text(Some(
         "The material users/modules/theme/glass.nix ships. Also what Reset returns to.",
     ));
@@ -764,8 +743,7 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
     place(&system_btn);
 
     for p in &preset::ALL {
-        let btn = gtk4::Button::with_label(p.name);
-        btn.add_css_class("settings-preset-btn");
+        let btn = ui::preset_button(p.name);
         btn.set_tooltip_text(Some(p.hint));
         let state = state.clone();
         // A preset is a material, and it resets the geometry with it: keeping
@@ -796,8 +774,7 @@ fn build_kinds(state: &Rc<State>) -> gtk4::Box {
     );
 
     let surface_labels: Vec<&str> = SurfaceKind::ALL.iter().map(|k| k.label()).collect();
-    let surface = gtk4::DropDown::from_strings(&surface_labels);
-    surface.add_css_class("settings-dropdown");
+    let surface = ui::dropdown(&surface_labels);
     {
         let state = state.clone();
         surface.connect_selected_notify(move |d| {
@@ -826,8 +803,7 @@ fn build_kinds(state: &Rc<State>) -> gtk4::Box {
     group.append(&kind_row("Surface", &surface));
 
     let grain_labels: Vec<&str> = GrainKind::ALL.iter().map(|k| k.label()).collect();
-    let grain = gtk4::DropDown::from_strings(&grain_labels);
-    grain.add_css_class("settings-dropdown");
+    let grain = ui::dropdown(&grain_labels);
     {
         let state = state.clone();
         grain.connect_selected_notify(move |d| {
@@ -876,22 +852,17 @@ fn build_group(state: &Rc<State>, group: &'static Group) -> gtk4::Box {
 /// the colour button or the alpha slider takes that half over on its own, and
 /// the check follows - so what they are really for is the way back.
 fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
-    let button = gtk4::Button::builder()
-        .has_frame(false)
-        .css_classes(["settings-preset-btn"])
-        .build();
+    let button = gtk4::Button::new();
+    crate::ui::make_button(&button, crate::ui::Kind::Secondary);
 
-    let swatch_box = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(8)
-        .build();
+    let swatch_box = crate::ui::hbox(3);
 
     let swatch = gtk4::DrawingArea::builder()
         .content_width(28)
         .content_height(16)
         .build();
 
-    let current_rgb = Rc::new(Cell::new((0.196, 0.188, 0.184)));
+    let current_rgb = Rc::new(Cell::new(card_default_rgb()));
     {
         let current_rgb = current_rgb.clone();
         swatch.set_draw_func(move |_, cr, _w, _h| {
@@ -901,36 +872,28 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
         });
     }
 
-    let hex_label = gtk4::Label::builder()
-        .label("card default")
-        .css_classes(["settings-row-value"])
-        .build();
+    let hex_label = crate::ui::text(
+        "card default",
+        crate::ui::Text::Caption,
+        crate::ui::Tone::Muted,
+    );
+    hex_label.add_css_class("ui-mono");
 
     swatch_box.append(&swatch);
     swatch_box.append(&hex_label);
     button.set_child(Some(&swatch_box));
 
-    let popover = gtk4::Popover::builder()
-        .position(gtk4::PositionType::Bottom)
-        .has_arrow(true)
-        .build();
+    // The popover draws nothing itself; the card inside it is solid, since
+    // a popup has no glass behind it.
+    let pop_card = crate::ui::vbox(0);
+    crate::ui::solid_card(&pop_card);
+    let pop_body = crate::ui::vbox(3);
+    crate::ui::pad(&pop_body, 4);
+    pop_card.append(&pop_body);
+    let popover = crate::ui::popover(&pop_card, gtk4::PositionType::Bottom);
     popover.set_parent(&button);
 
-    let pop_body = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(8)
-        .margin_start(10)
-        .margin_end(10)
-        .margin_top(10)
-        .margin_bottom(10)
-        .build();
-
-    let pal_label = gtk4::Label::builder()
-        .label("PALETTE SWATCHES")
-        .xalign(0.0)
-        .css_classes(["settings-group-title"])
-        .build();
-    pop_body.append(&pal_label);
+    pop_body.append(&crate::ui::overline("Palette swatches", crate::ui::Tone::Muted));
 
     let pal_grid = gtk4::FlowBox::builder()
         .max_children_per_line(6)
@@ -938,6 +901,9 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
         .css_classes(["settings-presets"])
         .build();
 
+    // Material values, not the shell's colours: what the compositor fills the
+    // glass with, written to the override file as they stand, so they stay
+    // the same whatever the tokens do.
     let swatches = [
         ("#32302f", "Gruvbox Soft"),
         ("#1d2021", "Gruvbox Dark"),
@@ -954,27 +920,20 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
     ];
 
     let hex_entry = gtk4::Entry::builder()
-        .text("#32302f")
+        .text(crate::tokens::SURFACE_KEY.0.css())
         .max_length(7)
         .width_chars(8)
-        .css_classes(["settings-row-value"])
         .build();
+    crate::ui::entry(&hex_entry);
+    hex_entry.add_css_class("ui-mono");
 
-    let r_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 255.0, 1.0);
-    r_scale.set_hexpand(true);
-    r_scale.add_css_class("settings-scale");
-    let g_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 255.0, 1.0);
-    g_scale.set_hexpand(true);
-    g_scale.add_css_class("settings-scale");
-    let b_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 255.0, 1.0);
-    b_scale.set_hexpand(true);
-    b_scale.add_css_class("settings-scale");
+    let r_scale = ui::scale(0.0, 255.0, 1.0);
+    let g_scale = ui::scale(0.0, 255.0, 1.0);
+    let b_scale = ui::scale(0.0, 255.0, 1.0);
 
     for (hex, name) in swatches {
-        let btn = gtk4::Button::builder()
-            .tooltip_text(name)
-            .css_classes(["settings-preset-btn"])
-            .build();
+        let btn = gtk4::Button::builder().tooltip_text(name).build();
+        crate::ui::make_button(&btn, crate::ui::Kind::Secondary);
         let swatch_da = gtk4::DrawingArea::builder()
             .content_width(20)
             .content_height(14)
@@ -1006,21 +965,12 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
     }
     pop_body.append(&pal_grid);
 
-    let rgb_box = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(4)
-        .build();
+    let rgb_box = crate::ui::vbox(2);
 
     let make_channel_row = |name: &str, scale: &gtk4::Scale| -> gtk4::Box {
-        let row = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(8)
-            .build();
-        let lbl = gtk4::Label::builder()
-            .label(name)
-            .width_chars(2)
-            .css_classes(["settings-row-label"])
-            .build();
+        let row = crate::ui::hbox(3);
+        let lbl = ui::row_label(name);
+        lbl.set_width_chars(2);
         row.append(&lbl);
         row.append(scale);
         row
@@ -1031,19 +981,11 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
     rgb_box.append(&make_channel_row("B", &b_scale));
     pop_body.append(&rgb_box);
 
-    let hex_row = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(8)
-        .build();
-    let hex_lbl = gtk4::Label::builder()
-        .label("Hex:")
-        .css_classes(["settings-row-label"])
-        .build();
+    let hex_row = crate::ui::hbox(3);
+    let hex_lbl = ui::row_label("Hex:");
     hex_row.append(&hex_lbl);
     hex_row.append(&hex_entry);
     pop_body.append(&hex_row);
-
-    popover.set_child(Some(&pop_body));
 
     {
         let popover = popover.clone();
@@ -1104,7 +1046,7 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
         });
     }
 
-    let own_color = gtk4::CheckButton::with_label("Card's own colour");
+    let own_color = crate::ui::check("Card's own colour");
     own_color.set_tooltip_text(Some(
         "Take the fill's colour from swaypplet's stylesheet, as the material did before this knob existed.",
     ));
@@ -1124,7 +1066,7 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
         });
     }
 
-    let own_alpha = gtk4::CheckButton::with_label("Card's own alpha");
+    let own_alpha = crate::ui::check("Card's own alpha");
     own_alpha.set_tooltip_text(Some(
         "Take the fill's alpha from swaypplet's stylesheet. Unchecked, the slider below is authoritative and 0 is clear glass.",
     ));
@@ -1171,7 +1113,7 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
                 g_scale.set_value(g * 255.0);
                 b_scale.set_value(b * 255.0);
             } else {
-                current_rgb.set((0.196, 0.188, 0.184)); // default @surface (#32302f)
+                current_rgb.set(card_default_rgb());
                 swatch.queue_draw();
                 hex_label.set_text("card default");
             }
@@ -1183,12 +1125,15 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
     container.append(&own_alpha);
 }
 
+/// What the card fills itself with when the material does not say: the
+/// surface key (`--surface-key`), which is what "card's own colour" means.
+fn card_default_rgb() -> (f64, f64, f64) {
+    let c = crate::tokens::SURFACE_KEY.0;
+    (c.0, c.1, c.2)
+}
+
 fn build_knob(state: &Rc<State>, knob: &'static Knob) -> gtk4::Box {
-    let row = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(10)
-        .build();
-    row.add_css_class("settings-row");
+    let row = ui::row();
     row.set_tooltip_text(Some(knob.hint));
     if let Some(live_when) = knob.live_when {
         let row = row.clone();
@@ -1198,22 +1143,10 @@ fn build_knob(state: &Rc<State>, knob: &'static Knob) -> gtk4::Box {
             .push(Box::new(move |t| row.set_sensitive(live_when(t))));
     }
 
-    let name = gtk4::Label::builder().label(knob.label).xalign(0.0).build();
-    name.add_css_class("settings-row-label");
-    row.append(&name);
+    row.append(&ui::row_label(knob.label));
 
-    let scale =
-        gtk4::Scale::with_range(gtk4::Orientation::Horizontal, knob.min, knob.max, knob.step);
-    scale.set_draw_value(false);
-    scale.set_hexpand(true);
-    scale.add_css_class("settings-scale");
-
-    let value = gtk4::Label::builder()
-        .label("")
-        .xalign(1.0)
-        .width_chars(6)
-        .build();
-    value.add_css_class("settings-row-value");
+    let scale = ui::scale(knob.min, knob.max, knob.step);
+    let value = ui::value_label();
 
     {
         let state = state.clone();

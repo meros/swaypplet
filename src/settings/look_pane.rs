@@ -1,11 +1,14 @@
 //! The Look tab: the wallpaper, the colours it produces, and how much the
 //! shell moves.
 //!
-//! Three sections on one tab, `wallpaper` and two halves of `look`, with one
-//! footer. The wallpaper half is a picker over `wallpaper.rs`, which owns
-//! setting and reading it back; the theme half is one dropdown over
-//! `crate::palette` with the palette it derived drawn beside it; the motion
-//! half is one dropdown, read per animation by `anim::duration`.
+//! Two sections on one tab, `wallpaper` and `look`, in four groups with one
+//! footer. The wallpaper group is a picker over `wallpaper.rs`, which owns
+//! setting and reading it back; the appearance group is the design system's
+//! four inputs (mode, accent, neutral, contrast; docs/design-system.md §2),
+//! which `theme::watch` turns into the stylesheet within a second; the theme
+//! colour group is one dropdown over `crate::palette` with the palette it
+//! derived drawn beside it; the motion group is one dropdown, read per
+//! animation by `anim::duration` and scaled into the motion tokens.
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -15,9 +18,11 @@ use gtk4::gdk;
 use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::prelude::*;
 
+use super::schema::ThemeMode;
 use super::store::{self, Look, Motion, Tint, Wallpaper, WallpaperMode};
 use super::ui::{self, dropdown_row, section_box};
 use super::wallpaper::{apply, candidates, candidates_dir, system_default};
+use crate::tokens::{Accent, Contrast, Neutral};
 
 /// Thumbnail size, in logical pixels. 16:9, four to a row in the card.
 const THUMB_W: i32 = 132;
@@ -76,8 +81,9 @@ const STRIP: [&str; 8] = [
 ];
 
 const STRIP_H: i32 = 22;
-const STRIP_GAP: f64 = 4.0;
-const STRIP_RADIUS: f64 = 5.0;
+const STRIP_GAP: f64 = crate::tokens::space(2) as f64;
+/// `--radius-control`: a chip's corners.
+const STRIP_RADIUS: f64 = crate::tokens::RADIUS[0].1 as f64;
 
 /// A strip of the palette in force, repainted whenever `palette::observe`
 /// says it moved. It reads `palette::current` at draw time rather than
@@ -135,6 +141,60 @@ fn rounded_rect(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f6
     cr.close_path();
 }
 
+// ── Appearance ──────────────────────────────────────────────────────────
+
+fn accent_name(a: Accent) -> &'static str {
+    match a {
+        Accent::Aqua => "Aqua",
+        Accent::Yellow => "Yellow",
+        Accent::Blue => "Blue",
+        Accent::Purple => "Purple",
+        Accent::Orange => "Orange",
+        Accent::Red => "Red",
+    }
+}
+
+fn neutral_label(n: Neutral) -> &'static str {
+    match n {
+        Neutral::Gruvbox => "Gruvbox — warm",
+        Neutral::Slate => "Slate — cool",
+        Neutral::Pure => "Pure — grey",
+    }
+}
+
+fn contrast_label(c: Contrast) -> &'static str {
+    match c {
+        Contrast::Standard => "Standard",
+        Contrast::High => "High",
+    }
+}
+
+/// One accent to pick: a dot in `--accent-bg` as the tokens would generate
+/// it with this accent and every other input as it is on screen, so dark
+/// mode shows the bright tone and light mode the deep one (and a hue that
+/// steps down a shade to carry its label shows that shade), as the accent
+/// would actually look.
+fn accent_swatch(accent: Accent) -> (gtk4::ToggleButton, gtk4::DrawingArea) {
+    let dot = gtk4::DrawingArea::builder()
+        .content_width(16)
+        .content_height(16)
+        .build();
+    dot.set_draw_func(move |_, cr, w, h| {
+        let tone = crate::tokens::scales(crate::tokens::Inputs {
+            accent,
+            ..crate::theme::shown()
+        })
+        .accent_bg;
+        let (w, h) = (f64::from(w), f64::from(h));
+        crate::ui::set_source(cr, tone, 1.0);
+        cr.arc(w / 2.0, h / 2.0, w.min(h) / 2.0, 0.0, std::f64::consts::TAU);
+        let _ = cr.fill();
+    });
+    let button = crate::ui::swatch(&dot);
+    button.set_tooltip_text(Some(accent_name(accent)));
+    (button, dot)
+}
+
 // ── The tab ─────────────────────────────────────────────────────────────
 
 struct State {
@@ -142,6 +202,12 @@ struct State {
     /// One thumbnail per path the grid shows, in grid order.
     thumbs: RefCell<Vec<(PathBuf, gtk4::Button)>>,
     mode: gtk4::DropDown,
+    theme_mode: gtk4::DropDown,
+    /// One swatch per accent, and the dot it draws, to repaint when the mode
+    /// on screen moves.
+    accents: Vec<(Accent, gtk4::ToggleButton, gtk4::DrawingArea)>,
+    neutral: gtk4::DropDown,
+    contrast: gtk4::DropDown,
     motion: gtk4::DropDown,
     launch_zoom: gtk4::Switch,
     tint: gtk4::DropDown,
@@ -203,6 +269,17 @@ impl State {
         let shown = self.shown();
         let settings = store::current();
         let overridden = settings.wallpaper.is_some() || settings.look.is_some();
+        let look = settings.look();
+        let theme_mode = ThemeMode::ALL.iter().position(|m| *m == look.mode);
+        self.theme_mode.set_selected(theme_mode.unwrap_or(0) as u32);
+        for (accent, button, dot) in &self.accents {
+            button.set_active(*accent == look.accent);
+            dot.queue_draw();
+        }
+        let neutral = Neutral::ALL.iter().position(|n| *n == look.neutral);
+        self.neutral.set_selected(neutral.unwrap_or(0) as u32);
+        let contrast = Contrast::ALL.iter().position(|c| *c == look.contrast);
+        self.contrast.set_selected(contrast.unwrap_or(0) as u32);
         let motion = Motion::ALL
             .iter()
             .position(|m| *m == settings.look().motion);
@@ -216,11 +293,7 @@ impl State {
         self.strip.queue_draw();
         for (path, button) in self.thumbs.borrow().iter() {
             let selected = shown.as_ref().is_some_and(|w| w.path == *path);
-            if selected {
-                button.add_css_class("selected");
-            } else {
-                button.remove_css_class("selected");
-            }
+            crate::ui::set_selected(button, selected);
         }
         if let Some(w) = &shown {
             let index = WallpaperMode::ALL.iter().position(|m| *m == w.mode);
@@ -229,7 +302,7 @@ impl State {
         ui::set_source(
             &self.status,
             overridden,
-            "System default: the sway config's wallpaper, full motion",
+            "System default: the sway config's wallpaper, auto mode in aqua on gruvbox, full motion",
         );
         self.updating.set(false);
     }
@@ -266,15 +339,6 @@ impl State {
     }
 
     fn add_thumb(self: &Rc<Self>, path: PathBuf) {
-        let button = gtk4::Button::builder()
-            .has_frame(false)
-            .css_classes(["settings-wallpaper-thumb"])
-            .tooltip_text(
-                path.file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default(),
-            )
-            .build();
         let picture = gtk4::Picture::builder()
             .content_fit(gtk4::ContentFit::Cover)
             .width_request(THUMB_W)
@@ -282,7 +346,12 @@ impl State {
             .hexpand(true)
             .halign(gtk4::Align::Fill)
             .build();
-        button.set_child(Some(&picture));
+        let button = crate::ui::pick_thumb(&picture);
+        button.set_tooltip_text(
+            path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .as_deref(),
+        );
         {
             let this = self.clone();
             let path = path.clone();
@@ -319,11 +388,7 @@ pub struct LookPane {
 
 impl LookPane {
     pub fn new() -> Self {
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(14)
-            .hexpand(true)
-            .build();
+        let root = ui::pane();
 
         let group = section_box(
             "Wallpaper",
@@ -337,12 +402,11 @@ impl LookPane {
             // down to 3 or 2 when squeezed onto narrower displays.
             .min_children_per_line(2)
             .max_children_per_line(4)
-            .row_spacing(6)
-            .column_spacing(6)
+            .row_spacing(crate::tokens::space(2) as u32)
+            .column_spacing(crate::tokens::space(2) as u32)
             .homogeneous(true)
             .build();
         grid.add_css_class("settings-presets");
-        grid.add_css_class("settings-wallpaper-grid");
         group.append(&grid);
 
         let mode_labels: Vec<&str> = WallpaperMode::ALL.iter().map(|m| m.label()).collect();
@@ -352,6 +416,50 @@ impl LookPane {
             &mode_labels,
         );
         group.append(&mode_row);
+
+        let appearance = section_box(
+            "Appearance",
+            "The design system's four inputs. Every surface follows within a second.",
+        );
+        let mode_labels: Vec<&str> = ThemeMode::ALL.iter().map(|m| m.label()).collect();
+        let (theme_mode_row, theme_mode) = dropdown_row(
+            "Mode",
+            "Dark, light, or by the sun at this machine's location: light from 3° above the horizon, dark from 3° below.",
+            &mode_labels,
+        );
+        appearance.append(&theme_mode_row);
+        let swatches = crate::ui::hbox(2);
+        swatches.set_halign(gtk4::Align::Start);
+        let mut accents = Vec::new();
+        let mut first: Option<gtk4::ToggleButton> = None;
+        for accent in Accent::ALL {
+            let (button, dot) = accent_swatch(accent);
+            match &first {
+                Some(group) => button.set_group(Some(group)),
+                None => first = Some(button.clone()),
+            }
+            swatches.append(&button);
+            accents.push((accent, button, dot));
+        }
+        let accent_row = ui::kind_row("Accent", &swatches);
+        accent_row.set_tooltip_text(Some(
+            "The one colour that means on, selected, or the primary action.",
+        ));
+        appearance.append(&accent_row);
+        let neutral_labels: Vec<&str> = Neutral::ALL.iter().map(|n| neutral_label(*n)).collect();
+        let (neutral_row, neutral) = dropdown_row(
+            "Neutral",
+            "The greys the glass, the text and the lines are drawn from.",
+            &neutral_labels,
+        );
+        appearance.append(&neutral_row);
+        let contrast_labels: Vec<&str> = Contrast::ALL.iter().map(|c| contrast_label(*c)).collect();
+        let (contrast_row, contrast) = dropdown_row(
+            "Contrast",
+            "High lifts the quieter text levels and the lines, and gives the glass more body.",
+            &contrast_labels,
+        );
+        appearance.append(&contrast_row);
 
         let theme = section_box(
             "Theme colour",
@@ -408,6 +516,10 @@ impl LookPane {
             grid: grid.clone(),
             thumbs: RefCell::new(Vec::new()),
             mode: mode.clone(),
+            theme_mode: theme_mode.clone(),
+            accents,
+            neutral: neutral.clone(),
+            contrast: contrast.clone(),
             motion: motion.clone(),
             launch_zoom: launch_zoom.clone(),
             tint: tint.clone(),
@@ -478,6 +590,64 @@ impl LookPane {
         }
         {
             let state = state.clone();
+            theme_mode.connect_selected_notify(move |d| {
+                if state.updating.get() {
+                    return;
+                }
+                let Some(mode) = ThemeMode::ALL.get(d.selected() as usize).copied() else {
+                    return;
+                };
+                store::edit::<Look>(|l| l.mode = mode);
+                state.sync();
+                // The stylesheet follows on `theme::watch`'s next tick; the
+                // dots show the accents in whichever mode that lands on.
+                let state = state.clone();
+                glib::timeout_add_local_once(std::time::Duration::from_millis(1200), move || {
+                    for (_, _, dot) in &state.accents {
+                        dot.queue_draw();
+                    }
+                });
+            });
+        }
+        for (accent, button, _) in &state.accents {
+            let state = state.clone();
+            let accent = *accent;
+            button.connect_toggled(move |b| {
+                if state.updating.get() || !b.is_active() {
+                    return;
+                }
+                store::edit::<Look>(|l| l.accent = accent);
+                state.sync();
+            });
+        }
+        {
+            let state = state.clone();
+            neutral.connect_selected_notify(move |d| {
+                if state.updating.get() {
+                    return;
+                }
+                let Some(neutral) = Neutral::ALL.get(d.selected() as usize).copied() else {
+                    return;
+                };
+                store::edit::<Look>(|l| l.neutral = neutral);
+                state.sync();
+            });
+        }
+        {
+            let state = state.clone();
+            contrast.connect_selected_notify(move |d| {
+                if state.updating.get() {
+                    return;
+                }
+                let Some(contrast) = Contrast::ALL.get(d.selected() as usize).copied() else {
+                    return;
+                };
+                store::edit::<Look>(|l| l.contrast = contrast);
+                state.sync();
+            });
+        }
+        {
+            let state = state.clone();
             motion.connect_selected_notify(move |d| {
                 if state.updating.get() {
                     return;
@@ -524,6 +694,7 @@ impl LookPane {
         }
 
         root.append(&group);
+        root.append(&appearance);
         root.append(&theme);
         root.append(&look);
         root.append(&footer);

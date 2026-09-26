@@ -287,12 +287,12 @@ pub fn run(component: &str) {
             .default_height(600)
             .build();
         window.add_css_class("panel");
-        window.add_css_class("startmenu");
 
         let host = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(10)
             .build();
+        crate::ui::surface(&host);
         host.add_css_class("startmenu-quick");
         host.add_css_class("preview-host");
 

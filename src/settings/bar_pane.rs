@@ -162,10 +162,7 @@ pub struct BarPane {
 
 impl BarPane {
     pub fn new() -> Self {
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(14)
-            .build();
+        let root = ui::pane();
 
         let settings = store::current();
         let bar = settings.bar();
