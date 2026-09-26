@@ -1,5 +1,9 @@
 {
   "look": {
+    "mode": "auto",
+    "accent": "aqua",
+    "neutral": "gruvbox",
+    "contrast": "standard",
     "motion": "full",
     "tint": "off",
     "launch_zoom": false

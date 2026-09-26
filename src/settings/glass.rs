@@ -560,14 +560,45 @@ pub fn clear_override() {
 /// been tuned — which is why it is a plain call in `app::run` rather than
 /// something the panel has to remember to do.
 pub fn apply_saved() {
-    let (Some(system), Some(tuning)) = (System::load(), load_override()) else {
+    let Some(system) = System::load() else {
         return;
     };
-    log::info!(
-        "glass: replaying override from {}",
-        override_path().display()
-    );
-    system.apply(&tuning);
+    let inputs = crate::theme::inputs();
+    let saved = load_override();
+    let default_look = inputs.mode == crate::tokens::Mode::Dark
+        && inputs.contrast == crate::tokens::Contrast::Standard;
+    if saved.is_none() && default_look {
+        // The sway config already carries exactly this.
+        return;
+    }
+    if saved.is_some() {
+        log::info!(
+            "glass: replaying override from {}",
+            override_path().display()
+        );
+    }
+    let tuning = saved.unwrap_or_else(|| Tuning::system(&system));
+    system.apply(&for_mode(tuning, inputs));
+}
+
+/// The material as the theme's mode tunes it (docs/design-system.md §4).
+/// Dark at standard contrast is the tuned material itself, pane edits
+/// included; dark at high contrast and light replace the six values the
+/// mode owns and leave the rest of the material alone.
+pub fn for_mode(mut tuning: Tuning, inputs: crate::tokens::Inputs) -> Tuning {
+    if inputs.mode == crate::tokens::Mode::Dark
+        && inputs.contrast == crate::tokens::Contrast::Standard
+    {
+        return tuning;
+    }
+    let m = crate::tokens::material(inputs);
+    tuning.material.fill_color = m.fill_color.css();
+    tuning.material.fill_alpha = m.fill_alpha;
+    tuning.material.absorb = m.absorb;
+    tuning.material.photochromic = m.photochromic;
+    tuning.material.edge_light = m.edge_light;
+    tuning.material.frost = m.frost;
+    tuning
 }
 
 // ── Export ──────────────────────────────────────────────────────────────

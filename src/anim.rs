@@ -45,12 +45,11 @@ use std::rc::Rc;
 use gtk4::{glib, graphene, prelude::*, subclass::prelude::*};
 use gtk4_layer_shell::LayerShell;
 
-/// Anything leaving. Shorter than an entrance on purpose — waiting for a
-/// thing to go is dead time, where an entrance is the thing being waited for.
-pub const EXIT_MS: f64 = 200.0;
-/// Anything arriving, and anything reflowing between two on-screen states.
-pub const ENTER_MS: f64 = 300.0;
-pub const MOVE_MS: f64 = 300.0;
+/// The motion tokens (docs/design-system.md §3.8), as the stylesheet gets
+/// them: `crate::tokens::motion` is the one place these are decided.
+pub const EXIT_MS: f64 = crate::tokens::motion::EXIT.ms;
+pub const ENTER_MS: f64 = crate::tokens::motion::ENTER.ms;
+pub const MOVE_MS: f64 = crate::tokens::motion::MOVE.ms;
 // The scale's other three tiers — micro (150ms), emphasis (400ms) and dwell
 // (500ms) — have no Rust consumer. Micro is below the threshold where a
 // hand-driven tick is worth its wakeups, and the other two are only ever
@@ -126,17 +125,20 @@ fn cubic_bezier(x1: f64, y1: f64, x2: f64, y2: f64, t: f64) -> f64 {
 
 /// Between two on-screen states: reflow, colour, a value settling.
 pub fn standard(t: f64) -> f64 {
-    cubic_bezier(0.2, 0.0, 0.0, 1.0, t)
+    let c = crate::tokens::motion::STANDARD;
+    cubic_bezier(c.0, c.1, c.2, c.3, t)
 }
 
 /// Arriving. Starts at speed and settles.
 pub fn decelerate(t: f64) -> f64 {
-    cubic_bezier(0.0, 0.0, 0.0, 1.0, t)
+    let c = crate::tokens::motion::DECELERATE;
+    cubic_bezier(c.0, c.1, c.2, c.3, t)
 }
 
 /// Leaving. Gathers speed and goes.
 pub fn accelerate(t: f64) -> f64 {
-    cubic_bezier(0.3, 0.0, 1.0, 1.0, t)
+    let c = crate::tokens::motion::ACCELERATE;
+    cubic_bezier(c.0, c.1, c.2, c.3, t)
 }
 
 /// The one place an animation length is decided, so reduced motion and the
