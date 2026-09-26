@@ -277,6 +277,19 @@ pub fn run() {
             });
             let sway = SwayService::start();
             pins.set_sway(sway.clone());
+            // A `swaymsg reload` puts every layer_effects back to the config,
+            // so the glass tuned in the settings pane would last only until
+            // the next one. Put it back each time.
+            {
+                let last = std::cell::Cell::new(0);
+                let watched = sway.clone();
+                sway.connect_change(move || {
+                    let reloads = watched.snapshot().reloads;
+                    if reloads != last.replace(reloads) {
+                        crate::settings::glass::apply_saved();
+                    }
+                });
+            }
             // Stop-notification policy (vision O2): the store resolves a
             // notification's claude-pid hint to task + visibility here,
             // where the sway model lives — same /proc parent-chain hop and
