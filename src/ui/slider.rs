@@ -97,6 +97,10 @@ pub fn switch_row(title: &str, subtitle: &str) -> (Row, gtk4::Switch) {
 }
 
 /// A check box with its label; accent when checked.
+///
+/// A component of the system with no surface using it since the Glass
+/// tab lost its fill checks; kept, with its stylesheet, for the next one.
+#[allow(dead_code)]
 pub fn check(label: &str) -> gtk4::CheckButton {
     let c = gtk4::CheckButton::with_label(label);
     c.add_css_class("ui-check");

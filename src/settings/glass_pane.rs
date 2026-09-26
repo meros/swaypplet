@@ -1,9 +1,17 @@
 //! The Glass tab of the settings pane: the liquid-glass material, edited
 //! against the card it is drawn on.
 //!
+//! Every control here means the same in dark and light (docs/design-system.md
+//! §4). The mode owns six values (fill colour and alpha, absorb,
+//! photochromic, edge light, frost) and sets them in `glass::for_mode`; the
+//! tab moves them only relative to the mode, with Clarity and Frost. The
+//! rest is one material in both modes: the profile and grain, refraction,
+//! dispersion, the highlight and the bevel. The esoteric numbers (samples,
+//! energy compensation, the thin-film and wave effects) stay as shipped and
+//! have no slider: `glass.nix` is the bench for those.
+//!
 //! It edits the compositor live rather than on OK. A material is not a value
-//! you can predict from its numbers — `glass.nix` is mostly the record of
-//! sweeping one knob and looking — so the pane's job is to put the slider
+//! you can predict from its numbers, so the pane's job is to put the slider
 //! under the thing it changes. The card being tuned is the card the sliders
 //! are on, which is why this is a page in the panel and not a window of its
 //! own.
@@ -38,7 +46,7 @@ const SAVE_DEBOUNCE_MS: u64 = 800;
 
 // ── Knobs ───────────────────────────────────────────────────────────────
 
-/// One numeric material property, and how to show it.
+/// One numeric property of the tuning, and how to show it.
 struct Knob {
     label: &'static str,
     hint: &'static str,
@@ -48,10 +56,9 @@ struct Knob {
     decimals: usize,
     get: fn(&Tuning) -> f64,
     set: fn(&mut Tuning, f64),
-    /// When this knob has anything to say. `None` is always, which is every
-    /// knob but the two that describe the grain's frame: an isotropic pattern
-    /// has no orientation to turn, and a slider that silently does nothing is
-    /// worse than one that says so by going grey.
+    /// When this knob has anything to say. `None` is always; the grain's
+    /// knobs go grey with no grain, since a slider that silently does
+    /// nothing is worse than one that says so.
     live_when: Option<fn(&Tuning) -> bool>,
 }
 
@@ -60,374 +67,101 @@ struct Knob {
 /// otherwise have to hold by name.
 type Sync = Box<dyn Fn(&Tuning)>;
 
-/// A titled run of knobs, and anything in the section that is not one.
-struct Group {
-    title: &'static str,
-    hint: &'static str,
-    knobs: &'static [Knob],
-    /// Rows appended above the knobs, for a property a slider cannot carry.
-    /// Only the fill has one, and only because a colour is not a number.
-    extra: Option<fn(&Rc<State>, &gtk4::Box)>,
-}
+/// The material's sliders, each the same move in both modes. Ranges are
+/// what the shader still draws something at; Clarity's ends are safe by
+/// construction (`tokens::material_at` keeps the text readable).
+static MATERIAL: &[Knob] = &[
+    Knob {
+        label: "Clarity",
+        hint: "How much of the backdrop shows through. 0 is the mode's own body; the text stays readable at either end.",
+        min: -1.0,
+        max: 1.0,
+        step: 0.05,
+        decimals: 2,
+        get: |t| t.clarity,
+        set: |t, v| t.clarity = v,
+        live_when: None,
+    },
+    Knob {
+        label: "Frost",
+        hint: "Blur of the backdrop, as a multiple of the mode's own.",
+        min: 0.0,
+        max: 3.0,
+        step: 0.05,
+        decimals: 2,
+        get: |t| t.frost_scale,
+        set: |t, v| t.frost_scale = v,
+        live_when: None,
+    },
+    Knob {
+        label: "Refraction",
+        hint: "Index of the slab. 1.5 is soda-lime glass; 1.0 bends nothing.",
+        min: 1.0,
+        max: 2.0,
+        step: 0.01,
+        decimals: 2,
+        get: |t| t.material.refraction,
+        set: |t, v| t.material.refraction = v,
+        live_when: None,
+    },
+    Knob {
+        label: "Dispersion",
+        hint: "Channel split through the bevel. Small on purpose: text sits on these surfaces.",
+        min: 0.0,
+        max: 0.05,
+        step: 0.001,
+        decimals: 3,
+        get: |t| t.material.dispersion,
+        set: |t, v| t.material.dispersion = v,
+        live_when: None,
+    },
+    Knob {
+        label: "Highlight",
+        hint: "The directional highlight on the top of the card.",
+        min: 0.0,
+        max: 1.0,
+        step: 0.01,
+        decimals: 2,
+        get: |t| t.material.specular,
+        set: |t, v| t.material.specular = v,
+        live_when: None,
+    },
+    Knob {
+        label: "Bevel",
+        hint: "Multiplies the bevel's width and depth on every surface, so the slope the light bends on scales with it.",
+        min: 0.25,
+        max: 3.0,
+        step: 0.05,
+        decimals: 2,
+        get: |t| t.bezel_scale,
+        set: |t, v| t.bezel_scale = v,
+        live_when: None,
+    },
+];
 
-/// Ranges are what the shader will accept and still draw something, not what
-/// is tasteful — the point of a live pane is that taste is decided by looking.
-/// The exception is anything whose bad value is not "ugly" but "gone": see the
-/// `glass` module header for why `mask_threshold` has no knob at all.
-static GROUPS: &[Group] = &[
-    Group {
-        title: "Optics & Surface",
-        hint: "Microfacet refraction, dispersion and scattering. Roughness controls transmission frost, specular lobe and reflection blur together.",
-        knobs: &[
-            Knob {
-                label: "Roughness",
-                hint: "Primary microfacet roughness. 0 is mirror-wet, 1 is fully frosted.",
-                min: 0.0,
-                max: 1.0,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.roughness,
-                set: |t, v| t.material.roughness = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Refraction",
-                hint: "Index of the slab. 1.5 is soda-lime glass; 1.0 bends nothing.",
-                min: 1.0,
-                max: 2.0,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.refraction,
-                set: |t, v| t.material.refraction = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Dispersion",
-                hint: "Channel split through the bevel. Small on purpose: text sits on these surfaces.",
-                min: 0.0,
-                max: 0.05,
-                step: 0.001,
-                decimals: 3,
-                get: |t| t.material.dispersion,
-                set: |t, v| t.material.dispersion = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Lensing",
-                hint: "How far the bevel displaces what is behind it.",
-                min: 0.0,
-                max: 1.0,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.lensing,
-                set: |t, v| t.material.lensing = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Reflection",
-                hint: "Weight on the Fresnel term. 1.0 is physical.",
-                min: 0.0,
-                max: 4.0,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.reflection,
-                set: |t, v| t.material.reflection = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Frost",
-                hint: "Override the scatter Roughness would have derived. Zero lets the physics decide.",
-                min: 0.0,
-                max: 1.0,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.frost,
-                set: |t, v| t.material.frost = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Frost radius",
-                hint: "How far scattering spreads at full roughness, in pixels.",
-                min: 0.0,
-                max: 64.0,
-                step: 1.0,
-                decimals: 0,
-                get: |t| t.material.frost_radius,
-                set: |t, v| t.material.frost_radius = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Reflect blur",
-                hint: "Override the reflection blur Roughness would have derived. Zero lets the physics decide.",
-                min: 0.0,
-                max: 1.0,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.reflect_blur,
-                set: |t, v| t.material.reflect_blur = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Samples",
-                hint: "Spectral dispersion taps per fragment (1..8). More is smoother.",
-                min: 1.0,
-                max: 8.0,
-                step: 1.0,
-                decimals: 0,
-                get: |t| t.material.samples,
-                set: |t, v| t.material.samples = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Energy comp",
-                hint: "Multi-scatter energy preservation. 1 preserves brightness; 0 is single-scatter.",
-                min: 0.0,
-                max: 1.0,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.energy_comp,
-                set: |t, v| t.material.energy_comp = v,
-                live_when: None,
-            },
-        ],
-        extra: None,
+/// The grain's two numbers, under the grain dropdown they belong to.
+static GRAIN: &[Knob] = &[
+    Knob {
+        label: "Grain size",
+        hint: "Cell, flute or wave pitch in pixels.",
+        min: 4.0,
+        max: 96.0,
+        step: 1.0,
+        decimals: 0,
+        get: |t| t.material.grain_scale,
+        set: |t, v| t.material.grain_scale = v,
+        live_when: Some(|t| t.material.grain != GrainKind::None),
     },
-    Group {
-        title: "Tone & Density",
-        hint: "Absorption and tinting: Beer-Lambert volume attenuation, photochromic glare compression, and card body fill.",
-        knobs: &[
-            Knob {
-                label: "Absorb",
-                hint: "Beer-Lambert volumetric darkening through the thickness.",
-                min: 0.0,
-                max: 4.0,
-                step: 0.05,
-                decimals: 2,
-                get: |t| t.material.absorb,
-                set: |t, v| t.material.absorb = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Absorb floor",
-                hint: "Minimum transmission through thin rim boundaries.",
-                min: 0.0,
-                max: 0.5,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.absorb_floor,
-                set: |t, v| t.material.absorb_floor = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Photochromic",
-                hint: "Adaptive tone ceiling so bright backdrops compress smoothly.",
-                min: 0.0,
-                max: 1.0,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.photochromic,
-                set: |t, v| t.material.photochromic = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Haze",
-                hint: "Turbidity: how much of the result is scattered light rather than image.",
-                min: 0.0,
-                max: 0.5,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.haze,
-                set: |t, v| t.material.haze = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Fill alpha",
-                hint: "Body tint opacity. 0 is clear glass, 1 is solid tint.",
-                min: 0.0,
-                max: 1.0,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.fill_alpha.max(0.0),
-                set: |t, v| t.material.fill_alpha = v,
-                live_when: None,
-            },
-        ],
-        extra: Some(build_fill_controls),
-    },
-    Group {
-        title: "Highlights & Artsy Effects",
-        hint: "Additive highlights, thin-film iridescence, neon rim glow, fluidic surface waves, and dithering.",
-        knobs: &[
-            Knob {
-                label: "Specular",
-                hint: "Blinn-Phong directional highlight intensity.",
-                min: 0.0,
-                max: 1.0,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.specular,
-                set: |t, v| t.material.specular = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Shine",
-                hint: "Override specular exponent (2/a² − 2). Zero lets Roughness decide.",
-                min: 0.0,
-                max: 256.0,
-                step: 1.0,
-                decimals: 0,
-                get: |t| t.material.shine,
-                set: |t, v| t.material.shine = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Edge light",
-                hint: "Rim glow just inside the boundary.",
-                min: 0.0,
-                max: 0.5,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.edge_light,
-                set: |t, v| t.material.edge_light = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Iridescence",
-                hint: "Thin-film interference: soap bubble / pearl / oil-slick sheen on bevels.",
-                min: 0.0,
-                max: 1.0,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.iridescence,
-                set: |t, v| t.material.iridescence = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Edge glow",
-                hint: "Bioluminescent / neon rim emission trapped along the bevel.",
-                min: 0.0,
-                max: 2.0,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.edge_glow,
-                set: |t, v| t.material.edge_glow = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Wave amplitude",
-                hint: "Fluidic wave ripples and caustic surface displacement.",
-                min: 0.0,
-                max: 2.0,
-                step: 0.01,
-                decimals: 2,
-                get: |t| t.material.wave_amplitude,
-                set: |t, v| t.material.wave_amplitude = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Noise",
-                hint: "Spatial dither to eliminate gradient banding.",
-                min: 0.0,
-                max: 0.05,
-                step: 0.001,
-                decimals: 3,
-                get: |t| t.material.noise,
-                set: |t, v| t.material.noise = v,
-                live_when: None,
-            },
-        ],
-        extra: None,
-    },
-    Group {
-        title: "Geometry",
-        hint: "Slab bevel width, thickness, and crest rounding across all surfaces.",
-        knobs: &[
-            Knob {
-                label: "Bevel scale",
-                hint: "Multiplies bezel and thickness for all four classes.",
-                min: 0.25,
-                max: 3.0,
-                step: 0.05,
-                decimals: 2,
-                get: |t| t.bezel_scale,
-                set: |t, v| t.bezel_scale = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Thickness ratio",
-                hint: "Thickness as a multiple of the scaled bezel (0 keeps class ratio).",
-                min: 0.0,
-                max: 8.0,
-                step: 0.1,
-                decimals: 1,
-                get: |t| t.thickness_ratio,
-                set: |t, v| t.thickness_ratio = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Crest radius",
-                hint: "Scales how wide the crest rounds where edges compete.",
-                min: 0.25,
-                max: 3.0,
-                step: 0.05,
-                decimals: 2,
-                get: |t| t.crest_scale,
-                set: |t, v| t.crest_scale = v,
-                live_when: None,
-            },
-        ],
-        extra: None,
-    },
-    Group {
-        title: "Surface Grain",
-        hint: "Resolvable surface relief structures (fluting, peened dimples, hammered, cathedral).",
-        knobs: &[
-            Knob {
-                label: "Grain scale",
-                hint: "Cell, flute or wave pitch in pixels.",
-                min: 4.0,
-                max: 96.0,
-                step: 1.0,
-                decimals: 0,
-                get: |t| t.material.grain_scale,
-                set: |t, v| t.material.grain_scale = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Grain strength",
-                hint: "Peak lateral displacement in pixels.",
-                min: 0.0,
-                max: 8.0,
-                step: 0.1,
-                decimals: 1,
-                get: |t| t.material.grain_strength,
-                set: |t, v| t.material.grain_strength = v,
-                live_when: None,
-            },
-            Knob {
-                label: "Grain angle",
-                hint: "Rotation in degrees clockwise for directional flutes.",
-                min: 0.0,
-                max: 180.0,
-                step: 1.0,
-                decimals: 0,
-                get: |t| t.material.grain_angle,
-                set: |t, v| t.material.grain_angle = v,
-                live_when: Some(|t| t.material.grain.is_directional()),
-            },
-            Knob {
-                label: "Grain aspect",
-                hint: "Anisotropic stretch factor along the pattern's axis.",
-                min: 0.25,
-                max: 4.0,
-                step: 0.05,
-                decimals: 2,
-                get: |t| t.material.grain_aspect,
-                set: |t, v| t.material.grain_aspect = v,
-                live_when: None,
-            },
-        ],
-        extra: None,
+    Knob {
+        label: "Grain strength",
+        hint: "Peak lateral displacement in pixels.",
+        min: 0.0,
+        max: 8.0,
+        step: 0.1,
+        decimals: 1,
+        get: |t| t.material.grain_strength,
+        set: |t, v| t.material.grain_strength = v,
+        live_when: Some(|t| t.material.grain != GrainKind::None),
     },
 ];
 
@@ -525,7 +259,10 @@ impl State {
             std::time::Duration::from_millis(APPLY_DEBOUNCE_MS),
             move || {
                 this.apply_timer.replace(None);
-                this.system.apply(&this.tuning.borrow());
+                // Through the mode, like every other path to the
+                // compositor: the raw tuning carries the dark material.
+                let tuning = glass::for_mode(this.tuning.borrow().clone(), crate::theme::shown());
+                this.system.apply(&tuning);
             },
         );
         self.apply_timer.replace(Some(id));
@@ -614,40 +351,14 @@ impl GlassPane {
         root.append(&build_presets(&state));
         root.append(&build_kinds(&state));
 
-        // The twenty-nine knobs go behind one row. Picking a preset and a
-        // profile is the settings pane's job; deciding what dispersion
-        // should be is a bench, and a bench in front of the presets meant
-        // the tab opened on a column of sliders and the choice most people
-        // want was below the fold.
-        let tune = crate::ui::disclosure("Tune the material");
-        // Built on the first open, not now. A collapsed GtkRevealer still
-        // measures its child across the other axis, and twenty-nine slider
-        // rows gave GTK an answer it could not reconcile — "min width of 898
-        // for height of 581, but min height of 581 for width of 572" — after
-        // which it took 898 and the tab hung off the card. Empty until
-        // asked, it also saves building those rows for the sessions that
-        // never open it.
-        {
-            let state = state.clone();
-            let body = tune.body.clone();
-            tune.header.connect_clicked(move |_| {
-                if body.first_child().is_some() {
-                    return;
-                }
-                let bench = crate::ui::vbox(3);
-                for group in GROUPS {
-                    bench.append(&build_group(&state, group));
-                }
-                body.append(&bench);
-                // The bench's sync closures just joined `state.sync` after
-                // the one call to `sync_controls` in `new` — every knob built
-                // here defaulted to GTK's own 0 and stays there until the
-                // next edit runs the whole list. Run it once now so the
-                // sliders open on the tuning they represent.
-                state.sync_controls();
-            });
+        let material = section_box(
+            "Material",
+            "The same in dark and light. Clarity and Frost move the mode's own body; the rest is the glass itself.",
+        );
+        for knob in MATERIAL {
+            material.append(&build_knob(&state, knob));
         }
-        root.append(&tune.root);
+        root.append(&material);
 
         root.append(&build_footer(&state, &status, &undo_btn));
 
@@ -708,7 +419,7 @@ fn unconfigured_note() -> gtk4::Box {
 fn build_presets(state: &Rc<State>) -> gtk4::Box {
     let group = section_box(
         "Presets",
-        "The shipped material, and other coherent physical glass presets (click any to preview).",
+        "The shipped material, and other coherent glass. Each one means the same in dark and light.",
     );
 
     // A grid of three columns rather than a FlowBox, because a FlowBox is a
@@ -746,18 +457,10 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
         let btn = form::preset_button(p.name);
         btn.set_tooltip_text(Some(p.hint));
         let state = state.clone();
-        // A preset is a material, and it resets the geometry with it: keeping
+        // A preset is a whole tuning, geometry and clarity included: keeping
         // a bevel scale from whatever was being tried before would make the
         // same preset land differently depending on what preceded it.
-        btn.connect_clicked(move |_| {
-            state.replace(
-                Tuning {
-                    material: p.material(),
-                    ..Tuning::system(&state.system)
-                },
-                true,
-            )
-        });
+        btn.connect_clicked(move |_| state.replace(p.tuning(), true));
         place(&btn);
     }
 
@@ -825,314 +528,11 @@ fn build_kinds(state: &Rc<State>) -> gtk4::Box {
         }));
     }
     group.append(&kind_row("Grain", &grain));
+    for knob in GRAIN {
+        group.append(&build_knob(state, knob));
+    }
 
     group
-}
-
-fn build_group(state: &Rc<State>, group: &'static Group) -> gtk4::Box {
-    let container = section_box(group.title, group.hint);
-    // Above the knobs, because the fill's colour is the question its alpha is
-    // an answer about: reading "card's own / #32302f / 0.50" downward is the
-    // sentence, and the reverse order is not.
-    if let Some(extra) = group.extra {
-        extra(state, &container);
-    }
-    for knob in group.knobs {
-        container.append(&build_knob(state, knob));
-    }
-    container
-}
-
-/// The fill's colour, and the two checks that hand either half of the fill
-/// back to the card.
-///
-/// Two rather than one, because the halves are independent: a tint over the
-/// card's own alpha and the card's own colour at an alpha of your choosing are
-/// both things to want. Neither check is the only way to set its half - moving
-/// the colour button or the alpha slider takes that half over on its own, and
-/// the check follows - so what they are really for is the way back.
-fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
-    let button = gtk4::Button::new();
-    crate::ui::button::adopt(&button, crate::ui::Kind::Secondary, crate::ui::Size::Normal);
-
-    let swatch_box = crate::ui::hbox(3);
-
-    let swatch = gtk4::DrawingArea::builder()
-        .content_width(28)
-        .content_height(16)
-        .build();
-
-    let current_rgb = Rc::new(Cell::new(card_default_rgb()));
-    {
-        let current_rgb = current_rgb.clone();
-        swatch.set_draw_func(move |_, cr, _w, _h| {
-            let (r, g, b) = current_rgb.get();
-            cr.set_source_rgb(r, g, b);
-            let _ = cr.paint();
-        });
-    }
-
-    let hex_label = crate::ui::text(
-        "card default",
-        crate::ui::Text::Caption,
-        crate::ui::Tone::Muted,
-    );
-    crate::ui::set_mono(&hex_label, true);
-
-    swatch_box.append(&swatch);
-    swatch_box.append(&hex_label);
-    button.set_child(Some(&swatch_box));
-
-    // The popover draws nothing itself; the card inside it is solid, since
-    // a popup has no glass behind it.
-    let pop_card = crate::ui::vbox(0);
-    crate::ui::card::adopt(&pop_card, crate::ui::Card::Solid);
-    let pop_body = crate::ui::vbox(3);
-    crate::ui::pad(&pop_body, 4);
-    pop_card.append(&pop_body);
-    let popover = crate::ui::popover(&pop_card, gtk4::PositionType::Bottom);
-    popover.set_parent(&button);
-
-    pop_body.append(&crate::ui::overline(
-        "Palette swatches",
-        crate::ui::Tone::Muted,
-    ));
-
-    let pal_grid = gtk4::FlowBox::builder()
-        .max_children_per_line(6)
-        .selection_mode(gtk4::SelectionMode::None)
-        .css_classes(["settings-presets"])
-        .build();
-
-    // Material values, not the shell's colours: what the compositor fills the
-    // glass with, written to the override file as they stand, so they stay
-    // the same whatever the tokens do.
-    let swatches = [
-        ("#32302f", "Gruvbox Soft"),
-        ("#1d2021", "Gruvbox Dark"),
-        ("#282828", "Dark Neutral"),
-        ("#689d6a", "Aqua / Teal"),
-        ("#458588", "Blue"),
-        ("#b8bb26", "Green"),
-        ("#fabd2f", "Yellow"),
-        ("#fe8019", "Orange"),
-        ("#fb4934", "Red"),
-        ("#d3869b", "Purple"),
-        ("#70c0ba", "Ice Cyan"),
-        ("#ebdbb2", "Light Cream"),
-    ];
-
-    let hex_entry = gtk4::Entry::builder()
-        .text(crate::tokens::SURFACE_KEY.0.css())
-        .max_length(7)
-        .width_chars(8)
-        .build();
-    crate::ui::entry::adopt(&hex_entry, crate::ui::FieldSize::Normal);
-    crate::ui::set_mono(&hex_entry, true);
-
-    let r_scale = form::scale(0.0, 255.0, 1.0);
-    let g_scale = form::scale(0.0, 255.0, 1.0);
-    let b_scale = form::scale(0.0, 255.0, 1.0);
-
-    for (hex, name) in swatches {
-        let btn = gtk4::Button::builder().tooltip_text(name).build();
-        crate::ui::button::adopt(&btn, crate::ui::Kind::Secondary, crate::ui::Size::Normal);
-        let swatch_da = gtk4::DrawingArea::builder()
-            .content_width(20)
-            .content_height(14)
-            .build();
-        let v = u32::from_str_radix(&hex[1..], 16).unwrap_or(0);
-        let (sr, sg, sb) = (
-            ((v >> 16) & 0xff) as f64 / 255.0,
-            ((v >> 8) & 0xff) as f64 / 255.0,
-            (v & 0xff) as f64 / 255.0,
-        );
-        swatch_da.set_draw_func(move |_, cr, _, _| {
-            cr.set_source_rgb(sr, sg, sb);
-            let _ = cr.paint();
-        });
-        btn.set_child(Some(&swatch_da));
-
-        {
-            let state = state.clone();
-            btn.connect_clicked(move |_| {
-                state
-                    .tuning
-                    .borrow_mut()
-                    .material
-                    .set_fill_rgb(Some((sr, sg, sb)));
-                state.edited();
-            });
-        }
-        pal_grid.append(&btn);
-    }
-    pop_body.append(&pal_grid);
-
-    let rgb_box = crate::ui::vbox(2);
-
-    let make_channel_row = |name: &str, scale: &gtk4::Scale| -> gtk4::Box {
-        let row = crate::ui::hbox(3);
-        let lbl = form::row_label(name);
-        lbl.set_width_chars(2);
-        row.append(&lbl);
-        row.append(scale);
-        row
-    };
-
-    rgb_box.append(&make_channel_row("R", &r_scale));
-    rgb_box.append(&make_channel_row("G", &g_scale));
-    rgb_box.append(&make_channel_row("B", &b_scale));
-    pop_body.append(&rgb_box);
-
-    let hex_row = crate::ui::hbox(3);
-    let hex_lbl = form::row_label("Hex:");
-    hex_row.append(&hex_lbl);
-    hex_row.append(&hex_entry);
-    pop_body.append(&hex_row);
-
-    {
-        let popover = popover.clone();
-        button.connect_clicked(move |_| {
-            popover.popup();
-        });
-    }
-
-    {
-        let state = state.clone();
-        let rs = r_scale.clone();
-        let gs = g_scale.clone();
-        let bs = b_scale.clone();
-        let update_from_scales = move || {
-            if state.updating.get() {
-                return;
-            }
-            let r = rs.value() / 255.0;
-            let g = gs.value() / 255.0;
-            let b = bs.value() / 255.0;
-            state
-                .tuning
-                .borrow_mut()
-                .material
-                .set_fill_rgb(Some((r, g, b)));
-            state.edited();
-        };
-
-        let u1 = update_from_scales.clone();
-        r_scale.connect_value_changed(move |_| u1());
-        let u2 = update_from_scales.clone();
-        g_scale.connect_value_changed(move |_| u2());
-        let u3 = update_from_scales.clone();
-        b_scale.connect_value_changed(move |_| u3());
-    }
-
-    {
-        let state = state.clone();
-        hex_entry.connect_text_notify(move |e| {
-            if state.updating.get() {
-                return;
-            }
-            let text = e.text();
-            let hex = text.strip_prefix('#').unwrap_or(&text);
-            if hex.len() == 6
-                && let Ok(v) = u32::from_str_radix(hex, 16)
-            {
-                let r = ((v >> 16) & 0xff) as f64 / 255.0;
-                let g = ((v >> 8) & 0xff) as f64 / 255.0;
-                let b = (v & 0xff) as f64 / 255.0;
-                state
-                    .tuning
-                    .borrow_mut()
-                    .material
-                    .set_fill_rgb(Some((r, g, b)));
-                state.edited();
-            }
-        });
-    }
-
-    let own_color = crate::ui::check("Card's own colour");
-    own_color.set_tooltip_text(Some(
-        "Take the fill's colour from swaypplet's stylesheet, as the material did before this knob existed.",
-    ));
-    {
-        let state = state.clone();
-        own_color.connect_toggled(move |c| {
-            if state.updating.get() {
-                return;
-            }
-            if c.is_active() {
-                state.tuning.borrow_mut().material.set_fill_rgb(None);
-                state.edited();
-            }
-            // Unchecking on its own says nothing about which colour is wanted,
-            // and the button beside it is already showing one. Picking from it
-            // is what turns the override on, and that clears this.
-        });
-    }
-
-    let own_alpha = crate::ui::check("Card's own alpha");
-    own_alpha.set_tooltip_text(Some(
-        "Take the fill's alpha from swaypplet's stylesheet. Unchecked, the slider below is authoritative and 0 is clear glass.",
-    ));
-    {
-        let state = state.clone();
-        own_alpha.connect_toggled(move |c| {
-            if state.updating.get() {
-                return;
-            }
-            if c.is_active() {
-                state.tuning.borrow_mut().material.fill_alpha = -1.0;
-                state.edited();
-            }
-        });
-    }
-
-    {
-        let swatch = swatch.clone();
-        let hex_label = hex_label.clone();
-        let hex_entry = hex_entry.clone();
-        let r_scale = r_scale.clone();
-        let g_scale = g_scale.clone();
-        let b_scale = b_scale.clone();
-        let own_color = own_color.clone();
-        let own_alpha = own_alpha.clone();
-        let current_rgb = current_rgb.clone();
-
-        state.sync.borrow_mut().push(Box::new(move |t| {
-            let rgb = t.material.fill_rgb();
-            own_color.set_active(rgb.is_none());
-            own_alpha.set_active(t.material.fill_alpha < 0.0);
-            if let Some((r, g, b)) = rgb {
-                current_rgb.set((r, g, b));
-                swatch.queue_draw();
-                let hex = format!(
-                    "#{:02x}{:02x}{:02x}",
-                    (r * 255.0).round() as u8,
-                    (g * 255.0).round() as u8,
-                    (b * 255.0).round() as u8
-                );
-                hex_label.set_text(&hex);
-                hex_entry.set_text(&hex);
-                r_scale.set_value(r * 255.0);
-                g_scale.set_value(g * 255.0);
-                b_scale.set_value(b * 255.0);
-            } else {
-                current_rgb.set(card_default_rgb());
-                swatch.queue_draw();
-                hex_label.set_text("card default");
-            }
-        }));
-    }
-
-    container.append(&kind_row("Fill colour", &button));
-    container.append(&own_color);
-    container.append(&own_alpha);
-}
-
-/// What the card fills itself with when the material does not say: the
-/// surface key (`--surface-key`), which is what "card's own colour" means.
-fn card_default_rgb() -> (f64, f64, f64) {
-    let c = crate::tokens::SURFACE_KEY.0;
-    (c.0, c.1, c.2)
 }
 
 fn build_knob(state: &Rc<State>, knob: &'static Knob) -> gtk4::Box {
@@ -1223,20 +623,33 @@ fn build_footer(state: &Rc<State>, status: &gtk4::Label, undo_btn: &gtk4::Button
 mod tests {
     use super::*;
 
-    /// A tuning built on one preset, with the geometry left where the system
-    /// config would have put it.
-    fn probe() -> Tuning {
-        Tuning {
-            material: preset::plain(),
-            bezel_scale: 1.0,
-            thickness_ratio: 0.0,
-            crest_scale: 1.0,
-        }
+    /// Every knob on the tab.
+    fn knobs() -> impl Iterator<Item = &'static Knob> {
+        MATERIAL.iter().chain(GRAIN)
     }
 
-    /// Every knob, flattened out of the groups.
-    fn knobs() -> impl Iterator<Item = &'static Knob> {
-        GROUPS.iter().flat_map(|g| g.knobs)
+    /// What a knob's setter moves, named, so two knobs on one number show.
+    fn moved(a: &Tuning, b: &Tuning) -> Vec<&'static str> {
+        let mut changed: Vec<&str> = a
+            .material
+            .numbers()
+            .iter()
+            .zip(b.material.numbers().iter())
+            .filter(|((_, x), (_, y))| x != y)
+            .map(|((name, _), _)| *name)
+            .collect();
+        for (name, x, y) in [
+            ("bezel_scale", a.bezel_scale, b.bezel_scale),
+            ("thickness_ratio", a.thickness_ratio, b.thickness_ratio),
+            ("crest_scale", a.crest_scale, b.crest_scale),
+            ("clarity", a.clarity, b.clarity),
+            ("frost_scale", a.frost_scale, b.frost_scale),
+        ] {
+            if x != y {
+                changed.push(name);
+            }
+        }
+        changed
     }
 
     #[test]
@@ -1245,10 +658,7 @@ mod tests {
         // clamps, so the pane would show a different material than the one it
         // just pushed at the compositor.
         for p in &preset::ALL {
-            let t = Tuning {
-                material: p.material(),
-                ..probe()
-            };
+            let t = p.tuning();
             for knob in knobs() {
                 let v = (knob.get)(&t);
                 assert!(
@@ -1264,46 +674,41 @@ mod tests {
     }
 
     #[test]
-    fn every_numeric_field_has_exactly_one_knob() {
-        // The knob table and `Tuning` are edited in different places; a field
-        // with no knob is invisible in the pane and a field with two is two
-        // sliders fighting over one number. Identify a knob by what its setter
-        // moves — the twenty material numbers, plus the two geometry ones that
-        // are not in `Material` at all.
-        let base = probe();
+    fn each_knob_moves_one_number_and_no_two_share_one() {
+        let base = preset::ALL[0].tuning();
         let mut seen = Vec::new();
         for knob in knobs() {
             let mut t = base.clone();
             (knob.set)(&mut t, (knob.get)(&base) + knob.step);
-
-            let mut changed: Vec<&str> = base
-                .material
-                .numbers()
-                .iter()
-                .zip(t.material.numbers().iter())
-                .filter(|((_, a), (_, b))| a != b)
-                .map(|((name, _), _)| *name)
-                .collect();
-            if t.bezel_scale != base.bezel_scale {
-                changed.push("bezel_scale");
-            }
-            if t.thickness_ratio != base.thickness_ratio {
-                changed.push("thickness_ratio");
-            }
-            if t.crest_scale != base.crest_scale {
-                changed.push("crest_scale");
-            }
+            let changed = moved(&base, &t);
             assert_eq!(changed.len(), 1, "{} moved {changed:?}", knob.label);
+            assert!(!seen.contains(&changed[0]), "two knobs on {}", changed[0]);
             seen.push(changed[0]);
         }
+    }
 
-        seen.sort_unstable();
-        let mut all: Vec<&str> = base.material.numbers().iter().map(|(n, _)| *n).collect();
-        all.push("bezel_scale");
-        all.push("thickness_ratio");
-        all.push("crest_scale");
-        all.sort_unstable();
-        assert_eq!(seen, all, "knob table and Tuning disagree");
+    /// The tab never offers a raw handle on what the mode owns: those go
+    /// through Clarity and Frost, the same move in both modes.
+    #[test]
+    fn no_knob_sets_what_the_mode_owns() {
+        let base = preset::ALL[0].tuning();
+        for knob in knobs() {
+            let mut t = base.clone();
+            (knob.set)(&mut t, (knob.get)(&base) + knob.step);
+            for owned in [
+                "absorb",
+                "photochromic",
+                "edge_light",
+                "frost",
+                "fill_alpha",
+            ] {
+                assert!(
+                    !moved(&base, &t).contains(&owned),
+                    "{} sets {owned}",
+                    knob.label
+                );
+            }
+        }
     }
 
     #[test]
@@ -1325,10 +730,10 @@ mod tests {
     }
 
     #[test]
-    fn the_geometry_knobs_start_where_the_system_config_does() {
-        // Both defaults have to be the identity, or opening the pane would
+    fn the_geometry_starts_where_the_system_config_does() {
+        // The defaults have to be the identity, or opening the pane would
         // move the geometry before anything was touched.
-        let t = probe();
+        let t = preset::ALL[0].tuning();
         let shipped = glass::Geometry {
             bezel: 10.0,
             thickness: 39.0,

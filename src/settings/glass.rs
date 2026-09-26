@@ -147,18 +147,6 @@ impl GrainKind {
             GrainKind::Cathedral => "Cathedral — hand-rolled",
         }
     }
-
-    /// Whether the pattern has an orientation worth turning.
-    ///
-    /// The three directional ones do; the rest are isotropic by construction,
-    /// so a rotation control over them is a slider that changes nothing. The
-    /// pane hides it rather than offering it and hoping nobody tries.
-    pub fn is_directional(self) -> bool {
-        matches!(
-            self,
-            GrainKind::Reeded | GrainKind::CrossReed | GrainKind::Prismatic
-        )
-    }
 }
 
 /// Every `liquid_glass_*` value that describes the material rather than the
@@ -245,41 +233,6 @@ fn isotropic() -> f64 {
     1.0
 }
 
-impl Material {
-    /// The fill colour as the compositor wants it, or `None` when the card
-    /// decides. Anything unparseable is treated as unset rather than as an
-    /// error: this value reaches here from a file a human may have edited,
-    /// and the card's own colour is always a safe answer.
-    pub fn fill_rgb(&self) -> Option<(f64, f64, f64)> {
-        let hex = self
-            .fill_color
-            .strip_prefix('#')
-            .unwrap_or(&self.fill_color);
-        if hex.len() != 6 {
-            return None;
-        }
-        let v = u32::from_str_radix(hex, 16).ok()?;
-        Some((
-            ((v >> 16) & 0xff) as f64 / 255.0,
-            ((v >> 8) & 0xff) as f64 / 255.0,
-            (v & 0xff) as f64 / 255.0,
-        ))
-    }
-
-    /// Set it from a colour, or clear it back to the card's own.
-    pub fn set_fill_rgb(&mut self, rgb: Option<(f64, f64, f64)>) {
-        self.fill_color = match rgb {
-            Some((r, g, b)) => format!(
-                "#{:02x}{:02x}{:02x}",
-                (r.clamp(0.0, 1.0) * 255.0).round() as u8,
-                (g.clamp(0.0, 1.0) * 255.0).round() as u8,
-                (b.clamp(0.0, 1.0) * 255.0).round() as u8
-            ),
-            None => unset_color(),
-        };
-    }
-}
-
 /// The material plus what the pane is allowed to do to a surface's geometry.
 ///
 /// Geometry is not material — `glass.nix` gives each class of surface its own
@@ -311,6 +264,15 @@ pub struct Tuning {
     /// system config ships.
     #[serde(default = "unit")]
     pub crest_scale: f64,
+    /// How much of the backdrop shows through, relative to the mode: 0 is
+    /// the mode's own body fill, +1 thins it, −1 thickens it
+    /// (`tokens::material_at`, which also keeps the text readable). The one
+    /// move on the six values the mode owns, and the same move in both.
+    #[serde(default)]
+    pub clarity: f64,
+    /// Multiplies the mode's frost. 1 is what the mode ships.
+    #[serde(default = "unit")]
+    pub frost_scale: f64,
 }
 
 fn unit() -> f64 {
@@ -325,6 +287,8 @@ impl Tuning {
             bezel_scale: 1.0,
             thickness_ratio: 0.0,
             crest_scale: 1.0,
+            clarity: 0.0,
+            frost_scale: 1.0,
         }
     }
 
@@ -631,26 +595,23 @@ pub fn apply_saved_for(inputs: crate::tokens::Inputs) {
 }
 
 /// The material as the theme's mode tunes it (docs/design-system.md §4).
-/// Dark at standard contrast is the tuned material itself, pane edits
-/// included, with only the body fill following a full tint's cast (§2.2);
-/// dark at high contrast and light replace the six values the mode owns and
-/// leave the rest of the material alone.
+///
+/// The mode owns six values (fill colour and alpha, absorb, photochromic,
+/// edge light, frost) and always sets them, dark at standard contrast
+/// included, so a tuning made in one mode means the same thing in the
+/// other. What the tuning adds is relative: `clarity` moves the body fill
+/// (`tokens::material_at`), `frost_scale` multiplies the mode's frost.
+/// Everything else in the material (profile, refraction, dispersion,
+/// highlight, grain, geometry) is one material in both modes and passes
+/// through as tuned.
 pub fn for_mode(mut tuning: Tuning, inputs: crate::tokens::Inputs) -> Tuning {
-    let m = crate::tokens::material(inputs);
-    if inputs.mode == crate::tokens::Mode::Dark
-        && inputs.contrast == crate::tokens::Contrast::Standard
-    {
-        if inputs.tint.casts_neutral() {
-            tuning.material.fill_color = m.fill_color.css();
-        }
-        return tuning;
-    }
+    let m = crate::tokens::material_at(inputs, tuning.clarity);
     tuning.material.fill_color = m.fill_color.css();
     tuning.material.fill_alpha = m.fill_alpha;
     tuning.material.absorb = m.absorb;
     tuning.material.photochromic = m.photochromic;
     tuning.material.edge_light = m.edge_light;
-    tuning.material.frost = m.frost;
+    tuning.material.frost = m.frost * tuning.frost_scale.max(0.0);
     tuning
 }
 
@@ -719,6 +680,15 @@ impl Tuning {
     /// stays one pasteable block.
     pub fn as_nix(&self, system: &System) -> String {
         let mut out = self.material.as_nix();
+        if self.clarity != 0.0 || self.frost_scale != 1.0 {
+            let _ = write!(
+                out,
+                "\n# Clarity {} and frost \u{d7}{} are moves on the mode's own values, \
+                 which glass.nix does not carry; tokens/material.rs owns those.\n",
+                trim_float(self.clarity),
+                trim_float(self.frost_scale)
+            );
+        }
         if self.bezel_scale == 1.0 && self.thickness_ratio == 0.0 && self.crest_scale == 1.0 {
             return out;
         }
@@ -933,21 +903,6 @@ mod tests {
     }
 
     #[test]
-    fn only_the_patterns_with_an_orientation_are_directional() {
-        // The angle knob is greyed out for the rest. An isotropic pattern
-        // gaining a rotation control is a slider that changes nothing, which
-        // reads as a broken knob rather than as an inapplicable one.
-        assert!(GrainKind::Reeded.is_directional());
-        assert!(GrainKind::CrossReed.is_directional());
-        assert!(GrainKind::Prismatic.is_directional());
-        assert!(!GrainKind::None.is_directional());
-        assert!(!GrainKind::Seeded.is_directional());
-        assert!(!GrainKind::Hammered.is_directional());
-        assert!(!GrainKind::Rippled.is_directional());
-        assert!(!GrainKind::Cathedral.is_directional());
-    }
-
-    #[test]
     fn scaling_the_bevel_moves_both_numbers_together() {
         // The whole reason this is one knob and not two: it is the slope the
         // light bends on, so a scale that changed only one of them would be
@@ -965,6 +920,8 @@ mod tests {
                 bezel_scale: 1.0,
                 thickness_ratio: 0.0,
                 crest_scale: 1.0,
+                clarity: 0.0,
+                frost_scale: 1.0,
             }
         };
         let g = t.geometry(shipped);
@@ -985,6 +942,8 @@ mod tests {
             bezel_scale: 1.5,
             thickness_ratio: 2.0,
             crest_scale: 1.0,
+            clarity: 0.0,
+            frost_scale: 1.0,
         };
         let g = t.geometry(shipped);
         assert_eq!(g.bezel, 15.0);
@@ -1021,6 +980,8 @@ mod tests {
             bezel_scale: 1.35,
             thickness_ratio: 4.2,
             crest_scale: 1.0,
+            clarity: 0.0,
+            frost_scale: 1.0,
         };
         let json = serde_json::to_vec_pretty(&before).unwrap();
         let after: Tuning = serde_json::from_slice(&json).unwrap();

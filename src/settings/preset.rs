@@ -28,18 +28,36 @@
 //! stopping, and `every_preset_is_visibly_a_different_material` is what keeps
 //! them apart.
 
-use super::glass::{GrainKind, Material, SurfaceKind};
+use super::glass::{GrainKind, Material, SurfaceKind, Tuning};
 
 /// A named material, and one line on what it is for.
 pub struct Preset {
     pub name: &'static str,
     pub hint: &'static str,
     build: fn() -> Material,
+    /// The body, as the moves a tuning may make on the mode's own values
+    /// (`Tuning::clarity`, `Tuning::frost_scale`). A preset cannot set the
+    /// fill, absorb, photochromic, edge light or frost itself: the mode owns
+    /// those, so a smoked preset is a dense clarity rather than an absorb.
+    pub clarity: f64,
+    pub frost_scale: f64,
 }
 
 impl Preset {
     pub fn material(&self) -> Material {
         (self.build)()
+    }
+
+    /// The preset as a whole tuning, on the shipped geometry.
+    pub fn tuning(&self) -> Tuning {
+        Tuning {
+            material: self.material(),
+            bezel_scale: 1.0,
+            thickness_ratio: 0.0,
+            crest_scale: 1.0,
+            clarity: self.clarity,
+            frost_scale: self.frost_scale,
+        }
     }
 }
 
@@ -105,7 +123,6 @@ fn base() -> Material {
 /// is what tells the shader to derive them.
 fn derived() -> Material {
     Material {
-        frost: 0.0,
         shine: 0.0,
         reflect_blur: 0.0,
         ..base()
@@ -116,11 +133,18 @@ pub static ALL: [Preset; 7] = [
     // ── The shipped material, and the two nearest ways off it ────────
     Preset {
         name: "Bubble",
+        clarity: 0.0,
+        frost_scale: 1.0,
         hint: "The material this desktop ships: a wet lens, tight highlight, the wallpaper still readable through it.",
         build: base,
     },
     Preset {
         name: "Liquid",
+        // The clearest the text allows. Every other preset here smokes or
+        // frosts the backdrop; this one transmits it, which is the whole
+        // material: the wallpaper through the card, the event at the rim.
+        clarity: 0.8,
+        frost_scale: 0.3,
         hint: "Optical glass: near-zero absorption, airy transmission, and a bright specular rim.",
         build: || Material {
             roughness: 0.01,
@@ -129,18 +153,11 @@ pub static ALL: [Preset; 7] = [
             dispersion: 0.008,
             lensing: 0.24,
             frost_radius: 4.0,
-            // Near nothing. Every other preset here smokes or frosts the
-            // backdrop; this one transmits it, which is the whole material —
-            // a card the wallpaper shows through at its own brightness, with
-            // the event at the rim.
-            absorb: 0.02,
             absorb_floor: 0.0,
-            photochromic: 0.0,
             // A whisper of forward scatter, so the card has a body over a
             // busy wallpaper without going milky.
             haze: 0.015,
             specular: 0.28,
-            edge_light: 0.28,
             grain: GrainKind::None,
             grain_strength: 0.0,
             ..derived()
@@ -148,6 +165,8 @@ pub static ALL: [Preset; 7] = [
     },
     Preset {
         name: "Sheet",
+        clarity: 0.3,
+        frost_scale: 0.5,
         hint: "Plate glass. Flat through the middle, and all of the event at the rim.",
         build: || Material {
             roughness: 0.03,
@@ -162,11 +181,8 @@ pub static ALL: [Preset; 7] = [
             refraction: 1.52,
             lensing: 0.10,
             frost_radius: 6.0,
-            absorb: 0.8,
             absorb_floor: 0.06,
-            photochromic: 0.24,
             specular: 0.22,
-            edge_light: 0.16,
             grain: GrainKind::None,
             grain_strength: 0.0,
             ..derived()
@@ -175,6 +191,8 @@ pub static ALL: [Preset; 7] = [
     // ── Scattered ────────────────────────────────────────────────────
     Preset {
         name: "Frosted",
+        clarity: 0.0,
+        frost_scale: 2.5,
         hint: "The wet lens taken all the way into the frost. Fine texture goes, the backdrop's colour stays.",
         build: || Material {
             roughness: 0.80,
@@ -185,13 +203,11 @@ pub static ALL: [Preset; 7] = [
             dispersion: 0.004,
             lensing: 0.22,
             frost_radius: 30.0,
-            absorb: 2.0,
             absorb_floor: 0.14,
             haze: 0.06,
             // The lobe is broad at this roughness, so most of the shipped
             // highlight is still a lit top rather than a patch.
             specular: 0.08,
-            edge_light: 0.08,
             grain: GrainKind::Rippled,
             grain_scale: 18.0,
             grain_strength: 1.0,
@@ -200,6 +216,10 @@ pub static ALL: [Preset; 7] = [
     },
     Preset {
         name: "Smoked",
+        // Dense, where it used to be an absorb of 2.9: the mode owns the
+        // absorb now, and a dense body is the same look in both modes.
+        clarity: -0.8,
+        frost_scale: 2.0,
         hint: "Deep and turbid: mostly scattered light rather than an image. The dark end of the frost.",
         build: || Material {
             roughness: 0.62,
@@ -207,15 +227,9 @@ pub static ALL: [Preset; 7] = [
             dispersion: 0.004,
             lensing: 0.20,
             frost_radius: 26.0,
-            absorb: 2.9,
             absorb_floor: 0.09,
-            // Near the floor, unlike everything else here. The ceiling exists
-            // to stop a white desktop coming through too bright, and at this
-            // absorption there is no white desktop coming through.
-            photochromic: 0.10,
             haze: 0.16,
             specular: 0.07,
-            edge_light: 0.06,
             grain: GrainKind::Rippled,
             // Coarser than `Frosted` at a lower roughness, which is what
             // separates them by more than darkness: this one you can resolve
@@ -228,6 +242,8 @@ pub static ALL: [Preset; 7] = [
     // ── Resolved grain ───────────────────────────────────────────────
     Preset {
         name: "Crystal",
+        clarity: 0.2,
+        frost_scale: 1.0,
         hint: "Sharp, dispersive, lit. A show piece — text sits on it less comfortably.",
         build: || Material {
             roughness: 0.16,
@@ -235,12 +251,9 @@ pub static ALL: [Preset; 7] = [
             dispersion: 0.012,
             lensing: 0.36,
             frost_radius: 16.0,
-            absorb: 1.5,
             absorb_floor: 0.14,
-            photochromic: 0.16,
             haze: 0.03,
             specular: 0.26,
-            edge_light: 0.18,
             // The same seeded pattern the shipped material carries, four
             // times the depth and two and a half times the pitch: this is
             // what `Bubble`'s grain looks like when you are meant to see it.
@@ -252,6 +265,8 @@ pub static ALL: [Preset; 7] = [
     },
     Preset {
         name: "Reeded",
+        clarity: 0.0,
+        frost_scale: 1.0,
         hint: "Art-deco flutes: parallel cylindrical lenses, each carrying its own strip of the backdrop.",
         build: || Material {
             roughness: 0.22,
@@ -259,12 +274,9 @@ pub static ALL: [Preset; 7] = [
             dispersion: 0.005,
             lensing: 0.28,
             frost_radius: 18.0,
-            absorb: 1.7,
             absorb_floor: 0.14,
-            photochromic: 0.14,
             haze: 0.04,
             specular: 0.18,
-            edge_light: 0.11,
             // One of the four patterned presets this row used to carry. The
             // other three — cross-reed, hammered, cathedral — differ from
             // this one in the pitch and the axis count of the same idea, and
@@ -316,30 +328,48 @@ mod tests {
 
     #[test]
     fn only_the_shipped_material_splits_the_distribution() {
-        // `frost`, `shine` and `reflect_blur` at zero mean "derive from
-        // roughness". A preset that sets one is describing a material whose
-        // transmission, specular lobe and reflection blur disagree about how
-        // rough the surface is.
+        // `shine` and `reflect_blur` at zero mean "derive from roughness". A
+        // preset that sets one is describing a material whose specular lobe
+        // and reflection blur disagree about how rough the surface is.
         //
         // `Bubble` is the exception because the shipped material is: it holds
-        // `frost` and `reflect_blur` a few multiples above what `roughness
-        // 0.01` derives, so the surface is mirror-smooth and its transmission
-        // is not quite (theme/glass.nix in the nixos repo says why, at
-        // length). This preset exists to be that material, so it has to carry
-        // the exception with it — and nothing else here may.
+        // `reflect_blur` above what `roughness 0.01` derives (theme/glass.nix
+        // in the nixos repo says why). `frost` is no longer in this rule: the
+        // mode owns it, and a preset moves it with `frost_scale`.
         for p in &ALL {
             let m = p.material();
             assert_eq!(m.shine, 0.0, "{} sets shine", p.name);
             if p.name == "Bubble" {
-                assert_eq!(m.frost, 0.33, "Bubble no longer matches theme/glass.nix");
                 assert_eq!(
                     m.reflect_blur, 0.06,
                     "Bubble no longer matches theme/glass.nix"
                 );
             } else {
-                assert_eq!(m.frost, 0.0, "{} sets frost", p.name);
                 assert_eq!(m.reflect_blur, 0.0, "{} sets reflect_blur", p.name);
             }
+        }
+    }
+
+    /// No preset carries a value of its own for the six the mode owns: they
+    /// would be overwritten in `glass::for_mode` anyway, and a preset that
+    /// looked like it set them would lie about what the button does.
+    #[test]
+    fn no_preset_sets_what_the_mode_owns() {
+        let b = base();
+        for p in &ALL {
+            let m = p.material();
+            assert_eq!(
+                (m.absorb, m.photochromic, m.edge_light, m.frost),
+                (b.absorb, b.photochromic, b.edge_light, b.frost),
+                "{}",
+                p.name
+            );
+            assert_eq!(
+                (m.fill_color.as_str(), m.fill_alpha),
+                ("none", -1.0),
+                "{}",
+                p.name
+            );
         }
     }
 
@@ -350,14 +380,18 @@ mod tests {
         // after trying the rest.
         assert_eq!(ALL[0].name, "Bubble");
         assert_eq!(ALL[0].material(), base());
+        assert_eq!((ALL[0].clarity, ALL[0].frost_scale), (0.0, 1.0));
     }
 
-    /// The look-defining fields, in the sense that moving one changes what a
+    /// The look-defining fields (the mode-owned ones excepted: no preset
+    /// sets them), in the sense that moving one changes what a
     /// card looks like rather than how it is arrived at. `samples`,
     /// `energy_comp`, the grain frame and the fill pair are all absent: they
     /// are cost, normalisation, orientation and colour, and two presets that
     /// differed only there would be the same material twice.
-    fn differences(a: &Material, b: &Material) -> Vec<&'static str> {
+    fn differences(a: &Preset, b: &Preset) -> Vec<&'static str> {
+        let (pa, pb) = (a, b);
+        let (a, b) = (&pa.material(), &pb.material());
         let mut moved = Vec::new();
         let mut f = |name, x: f64, y: f64| {
             if (x - y).abs() > 1e-9 {
@@ -369,14 +403,13 @@ mod tests {
         f("dispersion", a.dispersion, b.dispersion);
         f("lensing", a.lensing, b.lensing);
         f("frost_radius", a.frost_radius, b.frost_radius);
-        f("absorb", a.absorb, b.absorb);
         f("absorb_floor", a.absorb_floor, b.absorb_floor);
-        f("photochromic", a.photochromic, b.photochromic);
         f("haze", a.haze, b.haze);
         f("specular", a.specular, b.specular);
-        f("edge_light", a.edge_light, b.edge_light);
         f("grain_scale", a.grain_scale, b.grain_scale);
         f("grain_strength", a.grain_strength, b.grain_strength);
+        f("clarity", pa.clarity, pb.clarity);
+        f("frost_scale", pa.frost_scale, pb.frost_scale);
         if a.surface != b.surface {
             moved.push("surface");
         }
@@ -399,7 +432,7 @@ mod tests {
         // `grain_strength` alone.
         for (i, a) in ALL.iter().enumerate() {
             for b in &ALL[i + 1..] {
-                let moved = differences(&a.material(), &b.material());
+                let moved = differences(a, b);
                 assert!(
                     moved.len() >= 3,
                     "{} and {} differ only in {moved:?} — same material, two buttons",
@@ -466,12 +499,7 @@ mod tests {
         let dir = std::env::var("SWPP_PRESET_OUT")
             .expect("set SWPP_PRESET_OUT to the directory to write into");
         for p in &ALL {
-            let tuning = super::super::glass::Tuning {
-                material: p.material(),
-                bezel_scale: 1.0,
-                thickness_ratio: 0.0,
-                crest_scale: 1.0,
-            };
+            let tuning = p.tuning();
             let path = std::path::Path::new(&dir).join(format!("{}.json", p.name.to_lowercase()));
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(&path, serde_json::to_string_pretty(&tuning).unwrap()).unwrap();
