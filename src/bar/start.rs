@@ -12,8 +12,8 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::icons;
 use crate::ui;
+use crate::ui::icons;
 
 pub fn build(toggle_panel: Rc<dyn Fn()>) -> gtk4::Button {
     // A segment of its own, the glyph faint: the resting bar carries no

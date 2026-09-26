@@ -14,8 +14,8 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use crate::audio::{AudioService, AudioState, Command, Device, Stream, VolumeState};
-use crate::icons;
 use crate::ui;
+use crate::ui::icons;
 
 fn volume_icon(state: &VolumeState, is_mic: bool) -> &'static str {
     icons::volume_icon(state.volume, state.muted, is_mic)

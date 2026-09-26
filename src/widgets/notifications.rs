@@ -4,10 +4,10 @@ use std::time::SystemTime;
 
 use gtk4::prelude::*;
 
-use crate::icons;
 use crate::notifications::CloseReason;
 use crate::notifications::store::{self, NotificationStore};
 use crate::ui;
+use crate::ui::icons;
 
 pub struct NotificationsSection {
     section: Rc<ui::Section>,

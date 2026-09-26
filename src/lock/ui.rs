@@ -14,9 +14,9 @@ use gtk4::prelude::*;
 
 use crate::anim::animations_enabled;
 use crate::auth_field::{AuthField, Caption, Tone};
-use crate::icons;
 use crate::switch_user;
 use crate::ui;
+use crate::ui::icons;
 
 /// Data for one user chip. Sourced from [`crate::switch_user::list`] when
 /// available (avatar + presence), otherwise just a name.
@@ -46,6 +46,12 @@ impl UserChip {
 
 /// Avatar diameter for greeter chips.
 const CHIP_AVATAR_SIZE: i32 = 36;
+
+/// What the commit pixel paints when it only needs *a* commit, never a
+/// visible pixel: drawn at 1–2/255 alpha so GSK sees a changed node and
+/// nobody sees anything. Black is the scrim's colour, so even that one
+/// 255th adds nothing the scrim under it does not already.
+const INVISIBLE_INK: crate::tokens::Rgb = crate::tokens::Rgb::BLACK;
 
 /// How long [`SurfaceSet::begin_handoff`] runs before the caller actually
 /// switches: the picker's exit (`--motion-exit`, the same token the chips
@@ -270,7 +276,7 @@ impl SurfaceSet {
                 // Two alphas one 255th apart: different enough that GSK sees
                 // a changed node and damages it, far too close to be seen.
                 let a = f64::from(1 + phase.get() % 2) / 255.0;
-                let ink = ui::INVISIBLE_INK;
+                let ink = INVISIBLE_INK;
                 cr.set_source_rgba(ink.0, ink.1, ink.2, a);
                 let _ = cr.paint();
             });

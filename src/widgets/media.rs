@@ -4,9 +4,9 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::icons;
 use crate::spawn::spawn_work;
 use crate::ui;
+use crate::ui::icons;
 
 // ── Backend ───────────────────────────────────────────────────────────────────
 

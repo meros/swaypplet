@@ -4,9 +4,9 @@ use gtk4::prelude::*;
 use gtk4::{Box, Label};
 use serde::Deserialize;
 
-use crate::icons;
 use crate::spawn::spawn_work;
 use crate::ui;
+use crate::ui::icons;
 
 // ── Data types ────────────────────────────────────────────────────────────────
 

@@ -4,8 +4,8 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::icons;
 use crate::ui;
+use crate::ui::icons;
 
 // ── brightnessctl helpers ─────────────────────────────────────────────────────
 

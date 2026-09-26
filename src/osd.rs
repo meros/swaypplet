@@ -19,7 +19,7 @@ fn keys() -> crate::settings::store::Keys {
     crate::settings::store::with(|s| s.keys())
 }
 
-use crate::icons;
+use crate::ui::icons;
 
 // ── Commands ─────────────────────────────────────────────────────────────────
 

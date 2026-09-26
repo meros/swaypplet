@@ -10,11 +10,11 @@
 
 use gtk4::prelude::*;
 
-use crate::avatar::avatar;
-use crate::icons;
 use crate::spawn::spawn_work;
 use crate::switch_user::{self, SwitchUser};
 use crate::ui;
+use crate::ui::avatar;
+use crate::ui::icons;
 use crate::widgets::power::hide_panel_for_widget;
 
 /// Avatar diameter for panel rows.

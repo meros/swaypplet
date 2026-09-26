@@ -8,10 +8,10 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use crate::anim;
-use crate::icons;
 use crate::launcher::LauncherView;
 use crate::notifications::store::NotificationStore;
 use crate::settings::SettingsSection;
+use crate::ui::icons;
 use crate::ui::{self, Kind, Text, Tone};
 use crate::widgets::backup::BackupSection;
 use crate::widgets::{

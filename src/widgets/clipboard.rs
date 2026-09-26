@@ -10,8 +10,8 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use crate::clipboard::{ClipboardService, EntryView};
-use crate::icons;
 use crate::ui;
+use crate::ui::icons;
 
 // ── ClipboardSection ──────────────────────────────────────────────────────────
 

@@ -14,9 +14,9 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use super::popover;
-use crate::icons;
 use crate::spawn::spawn_work;
 use crate::ui;
+use crate::ui::icons;
 use crate::widgets::media::{self, MediaState, PlaybackStatus};
 
 /// The mark, its popover and the last known player state — cloned into
