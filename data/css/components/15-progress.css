@@ -1,0 +1,18 @@
+/* ── Progress ───────────────────────────────────────────────────────── */
+
+progressbar.ui-progress trough {
+    min-height: var(--track-height);
+    border: none;
+    border-radius: var(--radius-pill);
+    background-color: var(--fill-3);
+    background-image: none;
+    box-shadow: none;
+}
+
+progressbar.ui-progress progress {
+    min-height: var(--track-height);
+    border: none;
+    border-radius: var(--radius-pill);
+    background-color: var(--accent-bg);
+    background-image: none;
+}

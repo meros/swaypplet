@@ -1,0 +1,54 @@
+/* ── Section: a collapsible group header and its body ───────────────── */
+
+.ui-section {
+    background-color: var(--fill-1);
+    border-radius: var(--radius-tile);
+}
+
+button.ui-section-header {
+    min-height: var(--row-height);
+    padding: 0 var(--space-4);
+    border: none;
+    border-radius: var(--radius-tile);
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg);
+    transition: background-image var(--motion-state);
+}
+
+button.ui-section-header:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+button.ui-section-header:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+button.ui-section-header:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+.ui-section-title {
+    font-size: var(--type-title-sm);
+    font-weight: var(--w-strong);
+}
+
+.ui-section-summary {
+    font-size: var(--type-label);
+    color: var(--fg-muted);
+}
+
+.ui-section-chevron {
+    color: var(--fg-faint);
+    transition: -gtk-icon-transform var(--motion-expand);
+}
+
+.ui-section.open .ui-section-chevron {
+    -gtk-icon-transform: rotate(90deg);
+}
+
+.ui-section-body {
+    padding: 0 var(--space-2) var(--space-2) var(--space-2);
+}

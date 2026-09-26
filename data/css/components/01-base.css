@@ -1,0 +1,32 @@
+/* ── Base ─────────────────────────────────────────────────────────────── */
+
+/* ── Base: every window swaypplet opens ──────────────────────────────────
+   Transparent, so the compositor alpha-blends it: a glass card is drawn by
+   the compositor behind the client, and anything opaque here would cover
+   it. No drop shadows on a window either: blur_ignore_transparent skips
+   only pixels with alpha exactly 0, so a shadow overhanging the apron
+   around a card would be frosted into a halo the size of the window.
+
+   Every window also starts on the design system's type and ink, so a
+   surface that forgets ui::surface still reads as swaypplet rather than
+   as GTK's defaults. */
+window, window.background, window.csd, decoration {
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    border: none;
+    font-family: var(--font);
+    font-size: var(--type-body);
+    color: var(--fg);
+}
+
+scrolledwindow, viewport {
+    background-color: transparent;
+}
+
+.ui-surface {
+    font-family: var(--font);
+    font-size: var(--type-body);
+    font-weight: var(--w-regular);
+    color: var(--fg);
+}

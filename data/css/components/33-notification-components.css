@@ -1,0 +1,88 @@
+/* ── Notification components (added by the notifications migration) ──────
+   The looks the notification cards, the launcher and the keybinding sheet
+   need and no component above gives: the overline, the categorical rail,
+   the card tints, rows whose state moves in one frame, the search field
+   and the breathing loop. Categorical text is the bar's `.ui-cat-n`, a
+   picture its `.ui-thumb`, the card menu its popover and solid card. */
+
+/* A small uppercase label that names what follows: a sender, a task, a
+   group, a sheet's section. Tracked out because caps at caption size run
+   together otherwise. The caller uppercases the text. */
+.ui-overline {
+    font-size: var(--type-caption);
+    font-weight: var(--w-strong);
+    letter-spacing: 1px;
+}
+
+/* A sender's identity as a thin pill down a card's leading edge. Inset
+   rather than bled to the card edge: the card's radius would clip a
+   full-bleed rail into a crescent, and GTK does not clip children to the
+   border radius, so a straight stripe would overhang the corner instead.
+   With no slot it falls back to the muted text level. */
+.ui-rail {
+    min-width: 3px;
+    border-radius: var(--radius-pill);
+    background-color: var(--fg-muted);
+}
+
+.ui-rail.cat-1 { background-color: var(--cat-1); }
+.ui-rail.cat-2 { background-color: var(--cat-2); }
+.ui-rail.cat-3 { background-color: var(--cat-3); }
+.ui-rail.cat-4 { background-color: var(--cat-4); }
+.ui-rail.cat-5 { background-color: var(--cat-5); }
+.ui-rail.cat-6 { background-color: var(--cat-6); }
+
+/* A deliberate tint on a glass card. The card's background-color stays the
+   key (§4) and the tint is a fill drawn over it, as a background-image: the
+   compositor un-mixes the key and draws the tint over the material, so the
+   glass itself carries the state in either mode. Never a different colour
+   in the key's place: the compositor takes that for the key and draws
+   nothing. The alpha only rises (the key's 0.50 plus the tint), so the card
+   stays clear of the seeding line (glass.nix `maskThreshold`).
+
+   .danger: a critical notification. The glass runs warm, and the hairline
+   picks up the same red at the weight every card edge has.
+   .recessed: a card further back in a stack, dimmer. A fill, not the bar's
+   `.ui-receded` opacity: each card owns its surface, and that surface's
+   alpha is the material's fade, which an opacity here would fight. */
+.ui-card.danger {
+    background-image: linear-gradient(var(--danger-tint), var(--danger-tint));
+    border-color: var(--danger-tint);
+}
+
+.ui-card.recessed {
+    background-image: linear-gradient(var(--scrim), var(--scrim));
+    border-color: var(--border-subtle);
+}
+
+/* A row whose state must change in one frame, for rows that are plain
+   boxes rather than a `.ui-list` (which has no transition for the same
+   reason): a background that fades spends most of its frames a few 255ths
+   off the key, where the compositor draws a dark ghost of the old row. The
+   launcher's selection moves this way. */
+.ui-row.instant {
+    transition: none;
+}
+
+/* The field a surface is for (the launcher's search): a row tall, and its
+   text a step up from the body so what you type is what you read first. */
+entry.ui-entry.large {
+    min-height: var(--row-height);
+    font-size: var(--type-title-sm);
+}
+
+/* Breathing: an attention loop for something working in the background (a
+   notification's progress, the player's art). A soft glow in the accent's
+   tint, in and out. A loop, so it names its own period (§3.8); on a
+   progress bar it breathes on the filled part. The animation replaces the
+   element's whole box-shadow each frame, so it goes only on elements that
+   have none. */
+@keyframes ui-breathing {
+    from { box-shadow: 0 0 0 transparent; }
+    to   { box-shadow: 0 0 10px var(--accent-tint); }
+}
+
+.ui-breathing:not(progressbar),
+progressbar.ui-breathing progress {
+    animation: ui-breathing 2s ease-in-out infinite alternate;
+}

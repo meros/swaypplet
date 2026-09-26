@@ -1,0 +1,42 @@
+/* ── Menu ───────────────────────────────────────────────────────────── */
+
+.ui-menu {
+    padding: var(--space-2);
+    border-radius: var(--radius-tile);
+}
+
+button.ui-menu-item {
+    min-height: var(--menu-item-height);
+    padding: 0 var(--space-3);
+    border: none;
+    border-radius: var(--radius-control);
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg);
+    font-size: var(--type-body);
+    font-weight: var(--w-regular);
+}
+
+button.ui-menu-item:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+button.ui-menu-item:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+button.ui-menu-item.danger {
+    color: var(--danger);
+}
+
+.ui-menu-accel {
+    font-size: var(--type-caption);
+    color: var(--fg-faint);
+}
+
+.ui-separator {
+    min-height: 1px;
+    margin: var(--space-2) var(--space-3);
+    background-color: var(--border-subtle);
+}

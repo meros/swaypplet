@@ -1,0 +1,9 @@
+/* ── Toggle button (added by the helm/settings migration) ──
+   A flat button that stays down, a tool in a toolbar: at rest it is only
+   its glyph, and the one that is down takes the accent, because which tool
+   is active is the single most important thing the bar says. */
+
+button.ui-btn.flat:checked {
+    background-color: var(--accent-bg);
+    color: var(--on-accent);
+}

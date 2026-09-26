@@ -1,0 +1,6 @@
+/* ── Group: a fill inside a card (never glass on glass) ─────────────── */
+
+.ui-group {
+    background-color: var(--fill-1);
+    border-radius: var(--radius-tile);
+}

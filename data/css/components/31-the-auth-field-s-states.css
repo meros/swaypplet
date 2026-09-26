@@ -1,0 +1,44 @@
+/* ── The auth field's states (ui::set_field_state) ──
+   What the field says about the methods behind it, in pixels it already
+   owns (its hairline and its ring), so no state moves the card. */
+
+/* Armed: a reader is accepting a finger. The field breathes, because the
+   largest piece of moving accent on the card is what the affordance needs
+   to survive being folded into the entry. An attention loop: its own
+   period. */
+@keyframes ui-field-armed {
+    0%, 100% { box-shadow: inset 0 0 0 1px var(--border-strong), 0 0 0 2px var(--accent-tint); }
+    50%      { box-shadow: inset 0 0 0 1px var(--accent-bg), 0 0 0 2px var(--focus-ring); }
+}
+
+.ui-field.armed entry.ui-entry,
+.ui-field.armed passwordentry.ui-entry {
+    animation: ui-field-armed 2s ease-in-out infinite;
+}
+
+/* Busy: PAM is checking. A steady accent hairline and no pulse: a
+   field-scale signal, where greying the whole card would read as a fault. */
+.ui-field.busy entry.ui-entry,
+.ui-field.busy passwordentry.ui-entry {
+    animation: none;
+    box-shadow: inset 0 0 0 1px var(--accent-bg);
+}
+
+/* Rejected: one flash of the danger colour that fades back to the field's
+   own look, alongside the card's shake. Paint only, so it composes with the
+   shake instead of fighting it for the frame. A one-shot verdict that has to
+   be seen next to the shake, so the scale's longest length. */
+@keyframes ui-field-reject {
+    from { box-shadow: inset 0 0 0 1px var(--danger); background-color: var(--danger-tint); }
+}
+
+.ui-field.reject entry.ui-entry,
+.ui-field.reject passwordentry.ui-entry {
+    animation: ui-field-reject var(--dur-long) var(--ease-decelerate);
+}
+
+/* A caption whose tone changes in place (an error arriving, a success):
+   the colour moves as a state. */
+.ui-live-caption {
+    transition: color var(--motion-state);
+}

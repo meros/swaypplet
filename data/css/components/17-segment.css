@@ -1,0 +1,132 @@
+/* ── Segment: a fill on thin glass; fused into a track, only the ends round.
+   One segmented control per track: its segments are mutually exclusive
+   (a screen's workspaces) or side by side (the instruments). The text
+   tone lives on the content, not the segment, so every segment in a track
+   carries the same fill (the fills are mixes of currentColor). */
+
+.ui-segmented {
+    border-radius: var(--radius-tile);
+    transition: opacity var(--motion-state);
+}
+
+.ui-segment {
+    min-width: 0;
+    min-height: 0;
+    border: none;
+    border-radius: var(--radius-tile);
+    background-color: var(--fill-1);
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg);
+    font-weight: var(--w-regular);
+    transition: background-color var(--motion-state),
+                background-image var(--motion-state),
+                color var(--motion-state),
+                border-color var(--motion-state);
+}
+
+.ui-segmented > .ui-segment {
+    border-radius: 0;
+}
+
+.ui-segmented > .ui-segment:not(:first-child) {
+    border-left: 1px solid var(--border-subtle);
+}
+
+.ui-segmented > .ui-segment:first-child {
+    border-top-left-radius: var(--radius-tile);
+    border-bottom-left-radius: var(--radius-tile);
+}
+
+.ui-segmented > .ui-segment:last-child {
+    border-top-right-radius: var(--radius-tile);
+    border-bottom-right-radius: var(--radius-tile);
+}
+
+/* Quiet: the label sits muted until it is the selection or under the
+   pointer, so the selection is the only loud thing in the track. */
+.ui-segment.quiet {
+    color: var(--fg-muted);
+}
+
+button.ui-segment:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+    color: var(--fg);
+}
+
+/* The state is the overlay; the fill under it stays the segment's own,
+   whatever a generic button:hover or :active elsewhere says. */
+button.ui-segment:hover,
+button.ui-segment:active {
+    background-color: var(--fill-1);
+    box-shadow: none;
+}
+
+button.ui-segment.current:hover,
+button.ui-segment.current:active {
+    background-color: var(--fill-3);
+}
+
+button.ui-segment:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+button.ui-segment:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+/* A quiet readout on a segment or a mark comes up to ink under the
+   pointer. */
+button.ui-segment:hover .ui-muted,
+button.ui-segment:hover .ui-faint,
+button.ui-mark:hover .ui-muted,
+button.ui-mark:hover .ui-faint {
+    color: var(--fg);
+}
+
+/* Selection is a step on the fill ladder, achromatic: hue is spoken for by
+   task identity (the categorical tones). `current` is what a screen shows;
+   `focused` is current on the screen holding input, the fill doubled
+   (two layers of --fill-3, about 30 %) and the label strong. */
+.ui-segment.current {
+    background-color: var(--fill-3);
+    color: var(--fg);
+}
+
+.ui-segment.current.focused {
+    background-image: linear-gradient(var(--fill-3), var(--fill-3));
+    font-weight: var(--w-strong);
+}
+
+button.ui-segment.current.focused:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover)),
+                      linear-gradient(var(--fill-3), var(--fill-3));
+}
+
+/* Act now: the one red. Text on it is --on-status, and so is any muted or
+   faint text inside, which would otherwise go grey on red. */
+.ui-segment.danger,
+button.ui-segment.danger:hover,
+button.ui-segment.danger:active {
+    background-color: var(--danger-bg);
+    color: var(--on-status);
+}
+
+.ui-segment.danger .ui-muted,
+.ui-segment.danger .ui-faint {
+    color: inherit;
+}
+
+/* The ribbon lane: a 2 px bottom edge, transparent until a state lands, so
+   a segment never changes height. Working is a line; waiting is the task's
+   categorical tone. */
+.ui-segment.ribboned {
+    border-bottom: 2px solid transparent;
+}
+
+.ui-segment.ribbon-working { border-bottom-color: var(--border-strong); }
+.ui-segment.ribbon-cat-1   { border-bottom-color: var(--cat-1); }
+.ui-segment.ribbon-cat-2   { border-bottom-color: var(--cat-2); }
+.ui-segment.ribbon-cat-3   { border-bottom-color: var(--cat-3); }
+.ui-segment.ribbon-cat-4   { border-bottom-color: var(--cat-4); }

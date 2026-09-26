@@ -1,0 +1,188 @@
+/* ── The face indicator (ui::face_pill, ui::face_ring) ──
+   A ring with a face in it: it glances while the camera looks, stills and
+   meets your eye when it has found you, smiles on a match, frowns on a miss,
+   and closes its eyes when no usable frame arrives. Every state is paint on
+   a fixed box; nothing changes an allocation. The pill is thin glass.
+
+   Colours say the state and nothing else: accent while looking and found
+   (the one thing to look at), success on a match, danger on a miss, warning
+   when it is too dark to see. */
+.ui-face-ring {
+    border: 2px solid var(--border-strong);
+    border-radius: var(--radius-pill);
+    min-width: 18px;
+    min-height: 18px;
+}
+
+.ui-face-eye {
+    background-color: var(--fg);
+    border-radius: var(--radius-pill);
+    opacity: 0.85;
+}
+
+.ui-face-mouth {
+    border-bottom: 2px solid var(--fg);
+    border-radius: 0 0 var(--radius-control) var(--radius-control);
+    opacity: 0.85;
+}
+
+/* Looking: the eyes glance left and right and the mouth is a flat line.
+   Searching, not progress: nobody knows how long finding a face takes. */
+.ui-face-ring.looking {
+    border-color: var(--border-strong);
+    border-top-color: var(--accent);
+}
+.ui-face-ring.looking .ui-face-eye {
+    animation: ui-face-glance 2.6s ease-in-out infinite;
+}
+.ui-face-ring.looking .ui-face-mouth {
+    /* Full thickness: at 22 px a half-height line is a smudge, not a mouth. */
+    border-radius: 0;
+}
+
+/* Dark: no motion at all, because nothing is being searched. The eyes close:
+   it cannot see. */
+.ui-face-ring.dark {
+    border-color: var(--border-subtle);
+    border-top-color: var(--warning);
+}
+.ui-face-ring.dark .ui-face-eye { transform: scaleY(0.25); opacity: 0.6; }
+.ui-face-ring.dark .ui-face-mouth { border-radius: 0; opacity: 0.6; }
+
+/* Found: the glance stops and the eyes meet yours. The stop is the signal to
+   hold still. */
+.ui-face-ring.found {
+    border-color: var(--accent);
+    animation: ui-face-ring-pulse 0.9s ease-in-out infinite;
+}
+.ui-face-ring.found .ui-face-eye {
+    background-color: var(--accent);
+    opacity: 1;
+    animation: ui-face-blink 3.2s ease-in-out infinite;
+}
+.ui-face-ring.found .ui-face-mouth { border-color: var(--accent); }
+
+/* Recognised: it smiles. A tint behind, not a fill: the smile is drawn in
+   the same colour and needs the dark behind it to read. */
+.ui-face-ring.ok {
+    border-color: var(--success);
+    background-color: var(--success-tint);
+    animation: ui-face-ring-ok var(--motion-enter);
+}
+.ui-face-ring.ok .ui-face-eye {
+    background-color: var(--success);
+    opacity: 1;
+    transform: scaleY(0.45);
+}
+.ui-face-ring.ok .ui-face-mouth {
+    border-color: var(--success);
+    border-bottom-width: 2px;
+    border-radius: 0 0 var(--radius-tile) var(--radius-tile);
+    transform: scaleY(1.35);
+    animation: ui-face-smile var(--motion-enter);
+}
+
+/* Not recognised: a frown and a shake, not a cross. It retries on its own,
+   so it reads as "that didn't work", not as a verdict. */
+.ui-face-ring.fail {
+    border-color: var(--danger);
+    /* A one-shot shake: attention, which no motion token names, so the
+       scale's length and curve rather than a meaning. */
+    animation: ui-face-ring-fail var(--dur-emphasis) var(--ease-standard);
+}
+.ui-face-ring.fail .ui-face-eye { background-color: var(--danger); opacity: 1; }
+.ui-face-ring.fail .ui-face-mouth {
+    border-color: var(--danger);
+    /* The same arc turned over and dropped under the eyes. Translate first:
+       after the rotation it would move the mouth up instead. */
+    transform: translateY(3px) rotate(180deg);
+}
+
+/* Motion. The verdicts arrive (the smile, the punch, the pill's glow are one
+   --motion-enter, so they land together, and lock::face_settle() holds the
+   unlock for the same token). The glance, the blink, the found pulse, the
+   attention breath are attention loops: rhythms rather than transitions, so
+   they keep their own periods, chosen against a heartbeat rather than
+   against the scale (docs/design-system.md §3.8). */
+@keyframes ui-face-glance {
+    0%, 18%   { transform: translateX(0); }
+    30%, 45%  { transform: translateX(-2px); }
+    58%, 73%  { transform: translateX(2px); }
+    85%, 100% { transform: translateX(0); }
+}
+
+@keyframes ui-face-blink {
+    0%, 92%, 100% { transform: scaleY(1); }
+    96%           { transform: scaleY(0.15); }
+}
+
+@keyframes ui-face-smile {
+    from { transform: scaleY(0.5); }
+    to   { transform: scaleY(1.35); }
+}
+
+@keyframes ui-face-ring-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.55; }
+}
+
+/* An elastic punch that settles, the length of face_settle() in
+   src/lock/mod.rs so it lands with the unlock. The glow is a tint, under the compositor's
+   discard line, so it never frosts into a halo. */
+@keyframes ui-face-ring-ok {
+    0%   { transform: scale(0.6); opacity: 0.3; }
+    55%  { transform: scale(1.18); opacity: 1; box-shadow: 0 0 16px var(--success-tint); }
+    100% { transform: scale(1.0); opacity: 1; box-shadow: 0 0 0 transparent; }
+}
+
+@keyframes ui-face-ring-fail {
+    0%, 100% { transform: translateX(0); }
+    25%      { transform: translateX(-4px); }
+    75%      { transform: translateX(4px); }
+}
+
+/* The pill. Its entrance rides on a wrapper (.ui-face-enter), never on the
+   pill: `animation` is one property, and the state classes below rewrite it,
+   so an entrance here would replay on every looking → found edge. */
+.ui-face-enter {
+    animation: ui-face-arrive var(--motion-enter);
+}
+
+/* Upward, toward the camera: motion leads the gaze. A transform, never a
+   margin, so the arrival costs no layout. */
+@keyframes ui-face-arrive {
+    from { opacity: 0; transform: translateY(18px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Looking: breathe the border exactly twice and stop. Twice catches the
+   periphery once; an indefinite pulse becomes a strobe the user resents. The
+   border, not a glow: pixels the pill owns, one property on one node. */
+.ui-face-pill.looking {
+    animation: ui-face-attention 1.6s ease-in-out 2;
+}
+
+@keyframes ui-face-attention {
+    0%, 100% { border-color: var(--border-strong); }
+    50%      { border-color: var(--accent); }
+}
+
+/* Too dark: the one state worth a steadier, warmer pull, because holding
+   still will not fix it and checking the light will. The one box-shadow on
+   the pill, and it survives on purpose: its peak alpha (the tint, 0.16) is
+   below the compositor's discard line (0.28), so it stays backdrop and never
+   becomes glass. Without it "too dark" would be pixel-identical to neutral. */
+.ui-face-pill.dark {
+    box-shadow: 0 0 22px 3px var(--warning-tint);
+}
+
+/* A match glows once and stops, on the pill's own border and fill. The end
+   is left to the pill's own values, so it settles on whichever key it
+   paints (the plain one, or the one over a scrim). */
+.ui-face-pill.ok {
+    animation: ui-face-pill-ok var(--motion-enter);
+}
+
+@keyframes ui-face-pill-ok {
+    from { border-color: var(--success-bg); background-color: var(--success-tint); }
+}

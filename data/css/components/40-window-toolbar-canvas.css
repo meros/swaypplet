@@ -1,0 +1,16 @@
+/* ── Window, toolbar, canvas (added by the helm/settings migration) ──
+   A normal window rather than glass, for an editor you sit in: a solid
+   ground, a toolbar a fill above it, and a canvas a shade below it for the
+   thing being edited to letterbox against. */
+
+.ui-window {
+    background-color: var(--surface-raised);
+}
+
+.ui-toolbar {
+    background-color: var(--fill-1);
+}
+
+.ui-canvas {
+    background-color: var(--scrim);
+}

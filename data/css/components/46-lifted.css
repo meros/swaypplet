@@ -1,0 +1,7 @@
+/* ── Lifted (added by the helm/settings migration) ──
+   A picture lifted off what is behind it by a shadow: a window drawn over
+   the desktop or the glass, never a card (glass needs no shadow, §3.7). */
+
+.ui-lifted {
+    box-shadow: var(--shadow-solid);
+}

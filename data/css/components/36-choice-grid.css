@@ -1,0 +1,21 @@
+/* ── Choice grid (added by the helm/settings migration) ──
+   A flow box of tiles where one is picked: the pointer's tile takes the
+   hover overlay, the picked one the accent tint and a ring. */
+
+flowbox.ui-choice-grid > flowboxchild {
+    padding: var(--space-3);
+    border-radius: var(--radius-tile);
+    outline: none;
+    transition:
+        background-color var(--motion-state),
+        background-image var(--motion-state);
+}
+
+flowbox.ui-choice-grid > flowboxchild:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+flowbox.ui-choice-grid > flowboxchild:selected {
+    background-color: var(--accent-tint);
+    box-shadow: inset 0 0 0 2px var(--accent-bg);
+}

@@ -1,0 +1,20 @@
+/* ── Armed (added by the helm/settings migration) ──
+   A destructive button after its first press, waiting for the second: the
+   danger fill, breathing, so the one thing on screen that will act on the
+   next click says so. The pulse is an attention loop and keeps its own
+   period (§3.8). */
+
+button.ui-btn.armed {
+    background-color: var(--danger-bg);
+    color: var(--on-status);
+    animation: ui-armed-pulse 800ms ease-in-out infinite alternate;
+}
+
+button.ui-btn.armed > label {
+    color: inherit;
+}
+
+@keyframes ui-armed-pulse {
+    from { opacity: 0.7; }
+    to { opacity: 1; }
+}

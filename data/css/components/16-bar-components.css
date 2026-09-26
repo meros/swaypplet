@@ -1,0 +1,26 @@
+/* ── Bar components (added by the bar migration) ─────────────────────────
+   The looks the bar (src/bar/) needs and no component above gives: a
+   segmented track, quiet marks, the task bays, the categorical tones, a
+   meter a DrawingArea paints from, and the popover chassis. The bar's own
+   file only places these. */
+
+/* Categorical tones: identity only (§3.2), never state. */
+.ui-cat-1 { color: var(--cat-1); }
+.ui-cat-2 { color: var(--cat-2); }
+.ui-cat-3 { color: var(--cat-3); }
+.ui-cat-4 { color: var(--cat-4); }
+.ui-cat-5 { color: var(--cat-5); }
+.ui-cat-6 { color: var(--cat-6); }
+
+/* A group or a mark that steps back as a whole (the screen without input,
+   a paused player). Opacity, not a colour, so everything inside keeps its
+   own tone and the step reads the same over any backdrop. */
+.ui-receded {
+    opacity: 0.6;
+}
+
+/* A Cairo-drawn meter (a hairline, a bay's progress) takes its fill from
+   this colour, so the meter is the slider's accent without a literal. */
+.ui-meter {
+    color: var(--accent-bg);
+}

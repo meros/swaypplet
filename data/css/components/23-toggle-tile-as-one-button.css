@@ -1,0 +1,39 @@
+/* ── Toggle tile as one button (added by the panel migration) ──────────
+   The tile itself is the toggle, so the states sit on it rather than on a
+   button inside. Sizes stay on .ui-tile, where a surface may place it. */
+
+.ui-tile-toggle {
+    padding: 0 var(--space-4);
+    border: none;
+    background-image: none;
+    box-shadow: none;
+    outline: 0 solid transparent;
+    transition: background-color var(--motion-state),
+                background-image var(--motion-state),
+                color var(--motion-state),
+                opacity var(--motion-state);
+}
+
+button.ui-tile-toggle:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+button.ui-tile-toggle:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+button.ui-tile-toggle:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+button.ui-tile-toggle:disabled {
+    background-color: var(--fill-2);
+    background-image: none;
+    color: var(--fg-disabled);
+}
+
+/* Waiting on the tool the tile drives. */
+.ui-tile-toggle.loading {
+    opacity: 0.6;
+}

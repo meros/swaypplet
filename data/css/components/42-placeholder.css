@@ -1,0 +1,8 @@
+/* ── Placeholder (added by the helm/settings migration) ──
+   Where a picture will be before its first frame: a solid ground and the
+   app's icon in the muted tone. */
+
+.ui-placeholder {
+    background-color: var(--surface-raised);
+    color: var(--fg-muted);
+}

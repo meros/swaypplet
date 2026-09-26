@@ -1,0 +1,41 @@
+/* ── Dropdown list (added by the helm/settings migration) ──
+   A dropdown's list: a small solid sheet, the same raised fill as a solid
+   card (a popup has no glass behind it). Other popovers are `ui::popover`
+   around a `ui::solid_card`. */
+
+dropdown.ui-dropdown popover > contents {
+    padding: var(--space-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-tile);
+    background-color: var(--surface-raised);
+    background-image: none;
+    box-shadow: var(--shadow-solid);
+    color: var(--fg);
+}
+
+dropdown.ui-dropdown popover > arrow {
+    border: 1px solid var(--border-subtle);
+    background-color: var(--surface-raised);
+}
+
+dropdown.ui-dropdown popover listview {
+    background: none;
+}
+
+dropdown.ui-dropdown popover listview > row {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-control);
+    background-color: transparent;
+    background-image: none;
+    color: var(--fg);
+    font-size: var(--type-body);
+    transition: background-image var(--motion-state);
+}
+
+dropdown.ui-dropdown popover listview > row:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+dropdown.ui-dropdown popover listview > row:selected {
+    background-color: var(--fill-2);
+}

@@ -1,0 +1,15 @@
+/* ── Dense slider (added by the helm/settings migration) ──
+   The slider for a column of twenty: the same track, a smaller knob and
+   less air. The knob's negative margin centres it on the track, so the
+   horizontal padding has to absorb its overhang. */
+
+scale.ui-slider.dense {
+    padding: var(--space-2) var(--space-3);
+    min-height: 8px;
+}
+
+scale.ui-slider.dense slider {
+    min-width: 14px;
+    min-height: 14px;
+    margin: calc(-1 * var(--space-2));
+}

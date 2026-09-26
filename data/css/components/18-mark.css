@@ -1,0 +1,46 @@
+/* ── Mark: a quiet glyph button straight on thin glass, no fill at rest. */
+
+button.ui-mark {
+    min-width: 0;
+    min-height: 0;
+    border: none;
+    border-radius: var(--radius-control);
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg-muted);
+    font-weight: var(--w-regular);
+    transition: background-color var(--motion-state),
+                background-image var(--motion-state),
+                color var(--motion-state);
+}
+
+button.ui-mark.quiet {
+    color: var(--fg-faint);
+}
+
+button.ui-mark:hover {
+    background-color: transparent;
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+    box-shadow: none;
+    color: var(--fg);
+}
+
+button.ui-mark:active {
+    background-color: transparent;
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+    box-shadow: none;
+}
+
+button.ui-mark:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+/* An item that wants you now (a tray icon in NeedsAttention). */
+button.ui-mark.danger,
+button.ui-mark.danger:hover,
+button.ui-mark.danger:active {
+    background-color: var(--danger-bg);
+    color: var(--on-status);
+}

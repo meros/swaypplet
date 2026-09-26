@@ -7,14 +7,14 @@
 //! | `colour-literal`  | hex, `rgb()`/`rgba()`/`hsl()`…, named colours (`white` …)    | all CSS |
 //! | `colour-function` | `alpha()`, `shade()`, `mix()`, `lighter()`, `darker()`, `color-mix()` | all CSS |
 //! | `at-name`         | `@name` colour references and `@define-color`                | all CSS |
-//! | `token`           | `var(--x)` naming nothing the generator emits; a custom property defined outside the generator and `00-components.css` | all CSS |
+//! | `token`           | `var(--x)` naming nothing the generator emits; a custom property defined outside the generator and the components (`data/css/components/`) | all CSS |
 //! | `primitive`       | `var(--neutral-N)` / `var(--accent-N)`                       | all CSS |
 //! | `font-size`       | a `font-size` (or `font`) that is not `var(--type-*)`        | all CSS |
 //! | `font-weight`     | a `font-weight` that is not `var(--w-*)`                     | all CSS |
 //! | `radius`          | a corner radius that is not `var(--radius-*)` or `0`         | all CSS |
 //! | `space`           | padding, margin, border-spacing off the `--space-*` scale    | all CSS |
 //! | `motion`          | a transition or animation off `--motion-*` / `--dur-*`+`--ease-*` | all CSS |
-//! | `surface-look`    | colour, type, shape or state motion in a surface's own file  | CSS except 00-components.css |
+//! | `surface-look`    | colour, type, shape or state motion in a surface's own file  | CSS outside `data/css/components/` |
 //! | `rust-space`      | a box spacing or widget margin that is a non-zero literal    | Rust |
 //! | `rust-colour`     | a Cairo / `gdk::RGBA` colour from numeric literals            | Rust |
 //! | `rust-class`      | a CSS class added in Rust that no stylesheet styles          | Rust |
@@ -130,7 +130,7 @@ impl Rule {
                 "there is no named palette any more (the tokens replaced it): map `@name` to its token with the table in §9"
             }
             Token => {
-                "only tokens the generator emits (src/tokens/mod.rs `css`) and component-local properties in 00-components.css; a new value is a new token in the spec first"
+                "only tokens the generator emits (src/tokens/mod.rs `css`) and component-local properties in data/css/components/; a new value is a new token in the spec first"
             }
             Primitive => {
                 "primitives are private to the generator: use the semantic token for the step's job (§3.1, §3.2)"
@@ -147,7 +147,7 @@ impl Rule {
                 "`var(--motion-*)` by meaning (§3.8), or `var(--dur-*) var(--ease-*)`; only a repeating @keyframes loop names its own period"
             }
             SurfaceLook => {
-                "a surface's file only places things; colour, type, shape and state belong to a component in 00-components.css + src/ui/ (§6, §9 step 2)"
+                "a surface's file only places things; colour, type, shape and state belong to a component in data/css/components/ + src/ui/ (§6, §9 step 2)"
             }
             RustSpace => {
                 "`ui::vbox(n)` / `ui::hbox(n)` / `ui::pad(w, n)` or `tokens::space(n)` (§3.5)"
@@ -185,7 +185,8 @@ pub const LEDGER: &[(&str, &[(Rule, usize)])] = &[
 
 // ── Allowances ──────────────────────────────────────────────────────────
 
-/// Values in 00-components.css that sit off the space scale on purpose.
+/// Values in the components' stylesheets that sit off the space scale on
+/// purpose.
 /// Each is geometry of a knob against its track, not spacing between
 /// things, so no space token is its value. (file-less: components only.)
 const COMPONENT_SPACE_EXCEPTIONS: &[(&str, &str, &str, &str)] = &[
@@ -637,6 +638,13 @@ fn space_part_ok(p: &str) -> bool {
         .all(|c| c.is_ascii_digit() || " .+-*/()".contains(c))
 }
 
+/// A component's stylesheet (`data/css/components/*.css`), where colour,
+/// type, shape and component-local properties belong; every other file is a
+/// surface's.
+fn is_component(name: &str) -> bool {
+    name.starts_with("components/")
+}
+
 fn css_violations() -> Vec<Violation> {
     let tokens = emitted_tokens();
     let sheets: Vec<(&str, Sheet)> = crate::theme::RULES
@@ -647,10 +655,10 @@ fn css_violations() -> Vec<Violation> {
         .iter()
         .flat_map(|(_, s)| s.keyframes.iter().map(String::as_str))
         .collect();
-    // Component-local custom properties: defined in 00-components.css.
+    // Component-local custom properties: defined in a component's file.
     let local: BTreeSet<String> = sheets
         .iter()
-        .filter(|(n, _)| *n == "00-components.css")
+        .filter(|(n, _)| is_component(n))
         .flat_map(|(_, s)| s.decls.iter())
         .filter_map(|d| d.prop.strip_prefix("--").map(str::to_string))
         .collect();
@@ -658,7 +666,7 @@ fn css_violations() -> Vec<Violation> {
     let mut out = Vec::new();
     for (name, sheet) in &sheets {
         let file = format!("data/css/{name}");
-        let components = *name == "00-components.css";
+        let components = is_component(name);
         let mut push = |line: usize, rule: Rule, text: String, why: String| {
             out.push(Violation {
                 file: file.clone(),
@@ -742,7 +750,7 @@ fn css_violations() -> Vec<Violation> {
                     Token,
                     shown.clone(),
                     format!(
-                        "defines the custom property --{defined} outside the generator and 00-components.css"
+                        "defines the custom property --{defined} outside the generator and the components"
                     ),
                 );
             }
@@ -1460,7 +1468,7 @@ fn css_colours_come_from_tokens() {
 }
 
 /// §7.2: every `var(--x)` is a token the generator emits (or a
-/// component-local property of 00-components.css); never a primitive.
+/// component-local property of a component's stylesheet); never a primitive.
 #[test]
 fn css_names_only_semantic_tokens() {
     check(Rule::CSS_TOKENS);
@@ -1514,11 +1522,12 @@ fn the_ledger_names_real_files() {
 /// says: the components, the OSD, and the builders.
 #[test]
 fn migrated_surfaces_are_clean() {
-    for file in [
-        "data/css/00-components.css",
-        "data/css/05-osd.css",
-        "src/osd.rs",
-    ] {
+    let components = crate::theme::RULES
+        .iter()
+        .filter(|(n, _)| is_component(n))
+        .map(|(n, _)| format!("data/css/{n}"));
+    for file in components.chain(["data/css/05-osd.css".into(), "src/osd.rs".into()]) {
+        let file = file.as_str();
         let vs: Vec<&Violation> = all_violations().iter().filter(|v| v.file == file).collect();
         assert!(
             vs.is_empty(),

@@ -1,0 +1,12 @@
+/* ── Pill group (added by the helm/settings migration) ──
+   Controls that belong together on one pill-shaped fill: an icon button and
+   the slider it opens the details of. The same fill and height as a pill
+   button beside it. */
+
+.ui-pill-group {
+    min-height: var(--control-height);
+    padding: 0 var(--space-3) 0 var(--space-1);
+    border-radius: var(--radius-pill);
+    background-color: var(--fill-2);
+    color: var(--fg);
+}
