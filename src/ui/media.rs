@@ -1,8 +1,14 @@
 //! Pictures: the thumbnail frame, the picked thumbnail, the choice grid,
 //! the swatch, the ring, the placeholder and the lifted picture.
+//!
+//! `ui::thumb()`, `ui::thumb::adopt(&picture)`, `ui::pick_thumb(child)`,
+//! `ui::choice_grid::adopt(&flowbox)`, `ui::swatch(child)`, `ui::ring()`,
+//! `ui::placeholder::adopt(&w)`, `ui::lifted::adopt(&w)`; `ui::set_pinned`.
 
 use gtk4::prelude::*;
 use gtk4::{Align, Orientation};
+
+use super::class::toggle;
 
 /// A rounded frame for an image, filled while it has none.
 pub fn thumb() -> gtk4::Box {
@@ -11,8 +17,17 @@ pub fn thumb() -> gtk4::Box {
         .valign(Align::Center)
         .overflow(gtk4::Overflow::Hidden)
         .build();
-    b.add_css_class("ui-thumb");
+    thumb::adopt(&b);
     b
+}
+
+pub mod thumb {
+    use gtk4::prelude::*;
+
+    /// The thumbnail's frame on a picture the caller built.
+    pub fn adopt(w: &impl IsA<gtk4::Widget>) {
+        w.add_css_class("ui-thumb");
+    }
 }
 
 /// A picture you choose; `set_selected` frames the chosen one.
@@ -23,9 +38,13 @@ pub fn pick_thumb(child: &impl IsA<gtk4::Widget>) -> gtk4::Button {
     b
 }
 
-/// A flow box whose children are picked: hover overlay, selected ring.
-pub fn choice_grid(g: &gtk4::FlowBox) {
-    g.add_css_class("ui-choice-grid");
+pub mod choice_grid {
+    use gtk4::prelude::*;
+
+    /// A flow box whose children are picked: hover overlay, selected ring.
+    pub fn adopt(g: &gtk4::FlowBox) {
+        g.add_css_class("ui-choice-grid");
+    }
 }
 
 /// A colour you pick, drawn by `child`; the button carries the ring.
@@ -43,12 +62,25 @@ pub fn ring() -> gtk4::Box {
     b
 }
 
-/// Where a picture will be before its first frame.
-pub fn placeholder(w: &impl IsA<gtk4::Widget>) {
-    w.add_css_class("ui-placeholder");
+/// A ring round something pinned: a second, quieter band.
+pub fn set_pinned(ring: &impl IsA<gtk4::Widget>, pinned: bool) {
+    toggle(ring, "pinned", pinned);
 }
 
-/// A picture lifted off what is behind it by a shadow.
-pub fn lifted(w: &impl IsA<gtk4::Widget>) {
-    w.add_css_class("ui-lifted");
+pub mod placeholder {
+    use gtk4::prelude::*;
+
+    /// Where a picture will be before its first frame.
+    pub fn adopt(w: &impl IsA<gtk4::Widget>) {
+        w.add_css_class("ui-placeholder");
+    }
+}
+
+pub mod lifted {
+    use gtk4::prelude::*;
+
+    /// A picture lifted off what is behind it by a shadow.
+    pub fn adopt(w: &impl IsA<gtk4::Widget>) {
+        w.add_css_class("ui-lifted");
+    }
 }

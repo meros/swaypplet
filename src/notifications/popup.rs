@@ -351,7 +351,7 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
         surface.pane().set_halign(gtk4::Align::End);
         surface.pane().set_margin_end(EDGE_MARGIN);
     }
-    crate::ui::surface(surface.pane());
+    crate::ui::surface::adopt(surface.pane());
     set_critical_class(surface.pane(), notif);
 
     let overflow = overflow_for(st, &notif.app_name);
@@ -903,8 +903,8 @@ fn populate_card(
     // it costs nothing to leave on screen for as long as a card that never
     // expires stays there, which an infinite animation does (P7).
     if notif.urgency == Urgency::Critical {
-        let urgent = crate::ui::badge("URGENT");
-        crate::ui::make_overline(&urgent);
+        let urgent = crate::ui::badge("URGENT", crate::ui::BadgeTone::Alert);
+        crate::ui::overline::adopt(&urgent);
         urgent.set_valign(gtk4::Align::Center);
         header.append(&urgent);
     }
@@ -933,7 +933,7 @@ fn populate_card(
     // How many of this app's cards the stack has had to drop to make room
     // for this one. Says "there is more of this" without spending a slot.
     if overflow > 0 {
-        let badge = crate::ui::badge_neutral(&format!("+{overflow}"));
+        let badge = crate::ui::badge(&format!("+{overflow}"), crate::ui::BadgeTone::Neutral);
         badge.set_valign(gtk4::Align::Center);
         badge.set_tooltip_text(Some(&format!(
             "{overflow} more from {} — open the centre to read them",
@@ -987,7 +987,11 @@ fn populate_card(
         // The rest of a long body is one click away rather than only in the
         // centre. A button, not a hover reveal (P8).
         if body_is_truncated(&notif.body) {
-            let more = crate::ui::small_button("more", crate::ui::Kind::Flat);
+            let more = crate::ui::button_with(
+                crate::ui::Face::Label("more"),
+                crate::ui::Kind::Flat,
+                crate::ui::Size::Small,
+            );
             more.set_halign(gtk4::Align::Start);
             let body_c = body.clone();
             let st_c = st.clone();
@@ -1028,7 +1032,7 @@ fn populate_card(
         let bar = crate::ui::progress(progress as f64 / 100.0);
         bar.set_hexpand(true);
         bar.add_css_class("notification-progress");
-        crate::ui::breathing(&bar);
+        crate::ui::set_breathing(&bar, true);
         vbox.append(&bar);
     }
 
@@ -1044,7 +1048,7 @@ fn populate_card(
             .placeholder_text(placeholder)
             .hexpand(true)
             .build();
-        crate::ui::entry(&entry);
+        crate::ui::entry::adopt(&entry, crate::ui::FieldSize::Normal);
         entry.add_css_class("notification-reply");
         let id = notif.id;
         let store_c = store.clone();
@@ -1124,8 +1128,7 @@ fn populate_card(
             } else {
                 btn.set_label(label);
             }
-            crate::ui::make_button(&btn, crate::ui::Kind::Secondary);
-            crate::ui::make_small(&btn);
+            crate::ui::button::adopt(&btn, crate::ui::Kind::Secondary, crate::ui::Size::Small);
 
             let id = notif.id;
             let store_c = store.clone();
@@ -1154,9 +1157,14 @@ fn populate_card(
     // the card's only trailing control: closing has three ways in already
     // (right-click, middle-click, drag) and none of them costs a widget.
     if !compact {
-        let more_btn =
-            crate::ui::glyph_button("⋯", "Snooze, mute, dismiss all", crate::ui::Kind::Flat);
-        crate::ui::make_small(&more_btn);
+        let more_btn = crate::ui::button_with(
+            crate::ui::Face::Glyph {
+                glyph: "⋯",
+                tooltip: "Snooze, mute, dismiss all",
+            },
+            crate::ui::Kind::Flat,
+            crate::ui::Size::Small,
+        );
         more_btn.set_valign(gtk4::Align::Start);
         let menu = card_menu(notif, store, st);
         menu.set_parent(&more_btn);
@@ -1282,7 +1290,7 @@ fn card_menu(
     // A popup, outside the compositor's layer effects: no glass behind it,
     // so the menu sits on the solid card.
     let list = crate::ui::menu();
-    crate::ui::solid_card(&list);
+    crate::ui::card::adopt(&list, crate::ui::Card::Solid);
     let popover = crate::ui::popover(&list, gtk4::PositionType::Bottom);
 
     let item = |label: &str| {

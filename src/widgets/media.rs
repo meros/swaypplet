@@ -204,7 +204,7 @@ impl MediaSection {
             .vexpand(true)
             .visible(true)
             .build();
-        ui::glyph(&art_fallback, ui::Text::DisplaySm, ui::Tone::Muted);
+        ui::glyph::adopt(&art_fallback, ui::Text::DisplaySm, ui::Tone::Muted);
 
         art_frame.append(&art_image);
         art_frame.append(&art_fallback);
@@ -216,7 +216,7 @@ impl MediaSection {
         info_box.set_valign(gtk4::Align::Center);
 
         let title_label = ui::text("", ui::Text::Body, ui::Tone::Fg);
-        title_label.add_css_class("ui-strong");
+        crate::ui::set_weight(&title_label, crate::ui::Weight::Strong);
         title_label.set_hexpand(true);
         title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         title_label.set_max_width_chars(28);
@@ -238,7 +238,7 @@ impl MediaSection {
         progress_bar.set_hexpand(true);
 
         let time_label = ui::text("", ui::Text::Caption, ui::Tone::Faint);
-        time_label.add_css_class("ui-numeric");
+        crate::ui::set_numeric(&time_label, true);
         time_label.set_halign(gtk4::Align::End);
         time_label.set_visible(false);
 
@@ -251,20 +251,40 @@ impl MediaSection {
         controls.set_halign(gtk4::Align::Center);
         controls.add_css_class("media-section-controls");
 
-        let prev_btn = ui::glyph_button(icons::MEDIA_PREV, "Previous", ui::Kind::Flat);
+        let prev_btn = ui::button_with(
+            ui::Face::Glyph {
+                glyph: icons::MEDIA_PREV,
+                tooltip: "Previous",
+            },
+            ui::Kind::Flat,
+            ui::Size::Normal,
+        );
         prev_btn.add_css_class("pill");
 
-        let play_pause_btn =
-            ui::glyph_button(icons::MEDIA_PLAY, "Play or pause", ui::Kind::Secondary);
+        let play_pause_btn = ui::button_with(
+            ui::Face::Glyph {
+                glyph: icons::MEDIA_PLAY,
+                tooltip: "Play or pause",
+            },
+            ui::Kind::Secondary,
+            ui::Size::Normal,
+        );
         play_pause_btn.add_css_class("pill");
 
-        let next_btn = ui::glyph_button(icons::MEDIA_NEXT, "Next", ui::Kind::Flat);
+        let next_btn = ui::button_with(
+            ui::Face::Glyph {
+                glyph: icons::MEDIA_NEXT,
+                tooltip: "Next",
+            },
+            ui::Kind::Flat,
+            ui::Size::Normal,
+        );
         next_btn.add_css_class("pill");
 
         // The transport glyphs read at title size, not the button's body size.
         for b in [&prev_btn, &play_pause_btn, &next_btn] {
             if let Some(l) = b.child().and_downcast::<gtk4::Label>() {
-                ui::glyph(&l, ui::Text::Title, ui::Tone::Fg);
+                ui::glyph::adopt(&l, ui::Text::Title, ui::Tone::Fg);
             }
         }
         controls.append(&prev_btn);
@@ -493,10 +513,10 @@ impl MediaSection {
                 // Play/pause: the one primary action while something plays.
                 if ms.status == PlaybackStatus::Playing {
                     w.play_pause_btn.set_label(icons::MEDIA_PAUSE);
-                    w.play_pause_btn.add_css_class("primary");
+                    ui::set_button_kind(&w.play_pause_btn, ui::Kind::Primary);
                 } else {
                     w.play_pause_btn.set_label(icons::MEDIA_PLAY);
-                    w.play_pause_btn.remove_css_class("primary");
+                    ui::set_button_kind(&w.play_pause_btn, ui::Kind::Secondary);
                 }
             }
         }

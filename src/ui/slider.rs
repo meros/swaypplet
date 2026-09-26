@@ -1,9 +1,36 @@
 //! Slider, switch and check: controls that hold a value.
+//!
+//! `ui::slider_row(..)`, `ui::slider::adopt(&scale, Density)`,
+//! `ui::switch()`, `ui::switch_row(..)`, `ui::check(label)`;
+//! `ui::set_over_range` at runtime.
 
 use gtk4::prelude::*;
 use gtk4::{Align, Orientation};
 
-use super::*;
+use super::class::toggle;
+use super::{Face, Kind, Row, Size, button_with, hbox, row};
+
+/// How much room a slider takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Density {
+    /// A slider that owns its row: the full knob.
+    Normal,
+    /// One of a dense column of them: a smaller knob, less air.
+    Dense,
+}
+
+/// Style a scale the caller built as the component slider.
+pub fn adopt(s: &gtk4::Scale, density: Density) {
+    s.add_css_class("ui-slider");
+    if density == Density::Dense {
+        s.add_css_class("dense");
+    }
+}
+
+/// Past the normal range (volume over 100 %): the fill turns warning.
+pub fn set_over_range(s: &gtk4::Scale, over: bool) {
+    toggle(s, "over", over);
+}
 
 pub struct SliderRow {
     pub root: gtk4::Box,
@@ -19,7 +46,7 @@ pub fn slider_row(icon: &str, min: f64, max: f64, step: f64) -> SliderRow {
     let icon_l = gtk4::Label::new(Some(icon));
     icon_l.add_css_class("ui-slider-icon");
     let scale = gtk4::Scale::with_range(Orientation::Horizontal, min, max, step);
-    scale.add_css_class("ui-slider");
+    adopt(&scale, Density::Normal);
     scale.set_hexpand(true);
     scale.set_draw_value(false);
     let value = gtk4::Label::new(None);
@@ -36,6 +63,24 @@ pub fn slider_row(icon: &str, min: f64, max: f64, step: f64) -> SliderRow {
     }
 }
 
+impl SliderRow {
+    /// Turn the row's icon into a flat button (mute, say). The glyph stays
+    /// the row's icon label, so callers keep setting it there.
+    pub fn icon_button(&self, tooltip: &str) -> gtk4::Button {
+        self.root.remove(&self.icon);
+        let b = button_with(
+            Face::Icon {
+                child: self.icon.upcast_ref(),
+                tooltip,
+            },
+            Kind::Flat,
+            Size::Normal,
+        );
+        self.root.prepend(&b);
+        b
+    }
+}
+
 pub fn switch() -> gtk4::Switch {
     let s = gtk4::Switch::new();
     s.add_css_class("ui-switch");
@@ -49,17 +94,6 @@ pub fn switch_row(title: &str, subtitle: &str) -> (Row, gtk4::Switch) {
     let s = switch();
     r.end.append(&s);
     (r, s)
-}
-
-/// Make a scale the component slider (the Helm ribbon's own).
-pub fn slider(s: &gtk4::Scale) {
-    s.add_css_class("ui-slider");
-}
-
-/// The slider for a dense column of them: a smaller knob, less air.
-pub fn dense_slider(s: &gtk4::Scale) {
-    s.add_css_class("ui-slider");
-    s.add_css_class("dense");
 }
 
 /// A check box with its label; accent when checked.

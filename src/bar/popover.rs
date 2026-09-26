@@ -36,7 +36,7 @@ use crate::ui;
 /// border, the raised fill).
 pub fn chassis(parent: &impl IsA<gtk4::Widget>) -> (gtk4::Popover, gtk4::Box) {
     let body = ui::vbox(3);
-    ui::solid_card(&body);
+    ui::card::adopt(&body, ui::Card::Solid);
     body.add_css_class("bar-popover-body");
     let popover = ui::popover(&body, gtk4::PositionType::Top);
     popover.set_parent(parent);
@@ -54,7 +54,7 @@ pub fn chassis(parent: &impl IsA<gtk4::Widget>) -> (gtk4::Popover, gtk4::Box) {
 /// A popover's heading: small, strong, muted, above what it names.
 pub fn title(text: &str) -> gtk4::Label {
     let l = ui::text(text, ui::Text::Caption, ui::Tone::Muted);
-    l.add_css_class("ui-strong");
+    crate::ui::set_weight(&l, crate::ui::Weight::Strong);
     l
 }
 
@@ -128,7 +128,7 @@ impl TaskPopover {
 
         let actions = ui::hbox(3);
         for (label, cmd) in [("Find", "task-find"), ("Rename", "task-rename")] {
-            let btn = ui::small_button(label, ui::Kind::Secondary);
+            let btn = ui::button_with(ui::Face::Label(label), ui::Kind::Secondary, ui::Size::Small);
             let popover = self.inner.popover.clone();
             btn.connect_clicked(move |_| {
                 popover.popdown();

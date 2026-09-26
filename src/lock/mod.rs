@@ -558,7 +558,8 @@ pub fn run() -> ! {
                                 if unlocking.replace(true) {
                                     return glib::ControlFlow::Break;
                                 }
-                                surfaces.show_face(true, "ok", "Recognised you");
+                                surfaces
+                                    .show_face(Some(crate::ui::FaceState::Ok), "Recognised you");
                                 surfaces.flash_success();
                                 let end_lock = end_lock.clone();
                                 glib::timeout_add_local_once(face_settle(), move || {
@@ -567,22 +568,22 @@ pub fn run() -> ! {
                                 return glib::ControlFlow::Break;
                             }
                             EngineEvent::Progress(p) => {
-                                surfaces.show_face(true, p.ring(), p.text());
+                                surfaces.show_face(Some(p.ring()), p.text());
                             }
                             EngineEvent::Hint(hint) => {
                                 log::info!("face: {hint}");
-                                surfaces.show_face(true, "fail", &hint);
+                                surfaces.show_face(Some(crate::ui::FaceState::Fail), &hint);
                                 // Clear it rather than leaving a stale
                                 // failure on screen between attempts.
                                 let surfaces = surfaces.clone();
                                 glib::timeout_add_local_once(
                                     Duration::from_millis(2200),
-                                    move || surfaces.show_face(false, "", ""),
+                                    move || surfaces.show_face(None, ""),
                                 );
                             }
                             EngineEvent::Unavailable(why) => {
                                 log::info!("face: {why}");
-                                surfaces.show_face(false, "", "");
+                                surfaces.show_face(None, "");
                             }
                             EngineEvent::Ready => {}
                         }

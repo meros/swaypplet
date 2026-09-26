@@ -56,7 +56,7 @@ pub fn rebuild_iface_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
                 switch_c.set_sensitive(false);
                 spinner_c.set_visible(true);
                 spinner_c.start();
-                ui::set_class(&row_c, "busy", true);
+                ui::set_busy(&row_c, true);
 
                 let device_bg = device.clone();
                 let state_poll = state_c.clone();
@@ -75,7 +75,7 @@ pub fn rebuild_iface_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
                     move |result| {
                         spinner_poll.stop();
                         spinner_poll.set_visible(false);
-                        ui::set_class(&row_poll, "busy", false);
+                        ui::set_busy(&row_poll, false);
                         match result {
                             NmResult::Success => {
                                 let interfaces = get_network_interfaces();

@@ -234,7 +234,7 @@ impl SurfaceSet {
         internal: bool,
     ) -> gtk4::Widget {
         let overlay = gtk4::Overlay::new();
-        ui::surface(&overlay);
+        ui::surface::adopt(&overlay);
 
         // The scrim, and nothing else full-screen. On both surfaces this
         // builds, the wallpaper under it and the glass behind the card are the
@@ -292,12 +292,12 @@ impl SurfaceSet {
         // edge on a bright image, which no text colour can.
         let clock = ui::text("", ui::Text::Hero, ui::Tone::Fg);
         clock.set_xalign(0.5);
-        clock.add_css_class("ui-numeric");
-        ui::on_wallpaper(&clock);
+        crate::ui::set_numeric(&clock, true);
+        ui::on_wallpaper::adopt(&clock);
         let date = ui::text("", ui::Text::Title, ui::Tone::Fg);
         date.set_xalign(0.5);
         date.add_css_class("lock-date");
-        ui::on_wallpaper(&date);
+        ui::on_wallpaper::adopt(&date);
 
         // spacing 0: every gap below is an explicit margin in 10-lock.css,
         // because the gaps are deliberately unequal and a GtkBox has exactly
@@ -311,7 +311,7 @@ impl SurfaceSet {
         // ramped its sigma in; the compositor owns that now, and it has the
         // material up before this surface's first frame rather than a few
         // frames after it.
-        ui::card_over_scrim(&card);
+        ui::card::adopt(&card, ui::Card::OverScrim);
         card.add_css_class("lock-card");
 
         if self.crossfade.get() {
@@ -442,7 +442,7 @@ impl SurfaceSet {
             ring: face_ring,
             label: face_label,
         } = ui::face_pill(22);
-        ui::card_over_scrim(&face_pill);
+        ui::card::adopt(&face_pill, ui::Card::OverScrim);
         face_pill.add_css_class("face-pill");
         face_pill.set_visible(false);
 
@@ -728,11 +728,14 @@ impl SurfaceSet {
             // when the VT cut lands.
             s.card.add_css_class("lock-handoff");
             for (name, chip) in &s.user_chips {
-                chip.add_css_class(if Some(name.as_str()) == picked {
-                    "picked"
-                } else {
-                    "dropped"
-                });
+                ui::set_handoff(
+                    chip,
+                    Some(if Some(name.as_str()) == picked {
+                        ui::Handoff::Picked
+                    } else {
+                        ui::Handoff::Dropped
+                    }),
+                );
             }
             // Nothing typed from here on lands anywhere useful.
             s.entry.set_sensitive(false);
@@ -755,8 +758,7 @@ impl SurfaceSet {
         for s in self.inner.borrow().iter() {
             s.card.remove_css_class("lock-handoff");
             for (_, chip) in &s.user_chips {
-                chip.remove_css_class("picked");
-                chip.remove_css_class("dropped");
+                ui::set_handoff(chip, None);
             }
             s.entry.set_sensitive(true);
             if let Some(ue) = &s.user_entry {
@@ -783,7 +785,7 @@ impl SurfaceSet {
     /// Auth accepted — green flash while the unlock request goes out.
     pub fn flash_success(&self) {
         for s in self.inner.borrow().iter() {
-            ui::set_class(&s.card, "success", true);
+            ui::set_success(&s.card, true);
             s.entry.set_sensitive(false);
         }
     }
@@ -797,7 +799,8 @@ impl SurfaceSet {
     /// no other, so a pill on an external monitor asks the user to look away
     /// from the sensor reading their face. On a machine with no internal
     /// panel there is nothing to prefer, so every surface gets it.
-    pub fn show_face(&self, visible: bool, state: &str, label: &str) {
+    pub fn show_face(&self, state: Option<ui::FaceState>, label: &str) {
+        let visible = state.is_some();
         let surfaces = self.inner.borrow();
         let has_internal = surfaces.iter().any(|s| s.internal);
         for s in surfaces.iter() {
@@ -808,17 +811,17 @@ impl SurfaceSet {
             let arriving = visible && !s.face_pill.is_visible();
             s.face_pill.set_visible(visible);
             if !visible {
-                ui::set_class(&s.face_wrap, "ui-face-enter", false);
+                ui::set_face_enter(&s.face_wrap, false);
                 continue;
             }
             if arriving {
                 // Re-added on the next main-loop turn so the style actually
                 // recomputes between removal and addition; adding it back in
                 // the same frame would not restart the animation.
-                ui::set_class(&s.face_wrap, "ui-face-enter", false);
+                ui::set_face_enter(&s.face_wrap, false);
                 let wrap = s.face_wrap.clone();
                 glib::idle_add_local_once(move || {
-                    ui::set_class(&wrap, "ui-face-enter", true);
+                    ui::set_face_enter(&wrap, true);
                 });
             }
             s.face_label.set_label(label);
@@ -906,7 +909,7 @@ fn avatar_chip(user: &str, icon: Option<&str>, logged_in: bool, active: bool) ->
     content.append(&ui::avatar(user, icon, CHIP_AVATAR_SIZE, logged_in));
     content.append(&gtk4::Label::new(Some(user)));
 
-    let chip = ui::chip_with(&content);
+    let chip = ui::chip(ui::Face::Child(content.upcast_ref()));
     ui::set_selected(&chip, active);
     chip
 }
@@ -932,7 +935,7 @@ fn build_switch_button(set: &SurfaceSet) -> gtk4::Button {
         &format!("{}  Switch user", icons::SWITCH_USER),
         ui::Kind::Flat,
     );
-    ui::on_wallpaper(&btn);
+    ui::on_wallpaper::adopt(&btn);
     btn.add_css_class("lock-switch-user");
     btn.set_halign(gtk4::Align::Center);
     let set = set.clone();

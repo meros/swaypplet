@@ -1,15 +1,48 @@
 //! The face indicator: a face in a ring, in a thin glass pill.
+//!
+//! `ui::face_ring(size)`, `ui::face_pill(size)`; `ui::set_face_state`,
+//! `ui::set_face_enter` at runtime.
 
 use gtk4::Align;
 use gtk4::prelude::*;
 
-use super::class::swap;
-use super::*;
+use super::class::{swap, toggle};
+use super::{Card, Text, Tone, card, hbox, text, vbox};
 
-/// Every state the face can be in. Enumerated rather than derived, because
-/// swapping to a new state means clearing the old ones and GTK cannot be
-/// asked which is set.
-pub const FACE_STATES: [&str; 5] = ["looking", "dark", "found", "ok", "fail"];
+/// Every state the face can be in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FaceState {
+    /// The camera is looking: the eyes glance.
+    Looking,
+    /// No usable frame: the eyes close.
+    Dark,
+    /// A face is in view: the eyes meet yours.
+    Found,
+    /// Recognised: it smiles.
+    Ok,
+    /// Not recognised: a frown and a shake.
+    Fail,
+}
+
+impl FaceState {
+    pub const ALL: [FaceState; 5] = [
+        FaceState::Looking,
+        FaceState::Dark,
+        FaceState::Found,
+        FaceState::Ok,
+        FaceState::Fail,
+    ];
+
+    fn class(self) -> &'static str {
+        match self {
+            FaceState::Looking => "looking",
+            FaceState::Dark => "dark",
+            FaceState::Found => "found",
+            FaceState::Ok => "ok",
+            FaceState::Fail => "fail",
+        }
+    }
+}
 
 /// The face in a ring. It is a face, not a spinner: a ring said "something is
 /// happening", a face says what. Three boxes placed by hand in a `Fixed` so
@@ -56,7 +89,7 @@ pub fn face_ring(size: i32) -> gtk4::Box {
 /// The face indicator: a thin glass pill holding the ring and a line of
 /// words, inside a wrapper that carries the entrance.
 pub struct FacePill {
-    /// Carries the entrance (`ui-face-enter`, toggled with `set_class`), so
+    /// Carries the entrance ([`set_face_enter`]), so
     /// a state change on the pill cannot replay it.
     pub wrap: gtk4::Box,
     pub pill: gtk4::Box,
@@ -68,7 +101,7 @@ pub fn face_pill(ring_size: i32) -> FacePill {
     let pill = hbox(4);
     pill.set_halign(Align::Center);
     pill.set_valign(Align::Start);
-    card(&pill, Card::Thin);
+    card::adopt(&pill, Card::Thin);
     pill.add_css_class("ui-face-pill");
     let ring = face_ring(ring_size);
     let label = text("", Text::Body, Tone::Fg);
@@ -88,19 +121,25 @@ pub fn face_pill(ring_size: i32) -> FacePill {
     }
 }
 
-/// Put the ring (and the pill, if given) into `state`, one of
-/// [`FACE_STATES`]. Empty clears without setting anything, which is what a
-/// hidden indicator wants: a stale class on a hidden widget makes the next
-/// show start mid-animation in the previous state.
+/// Put the ring (and the pill, if given) into `state`. `None` clears
+/// without setting anything, which is what a hidden indicator wants: a
+/// stale class on a hidden widget makes the next show start mid-animation
+/// in the previous state.
 ///
 /// The pill carries the state as well as the ring because three states say
-/// something the ring cannot: `dark` and `ok` recolour the pill, `looking`
+/// something the ring cannot: `Dark` and `Ok` recolour the pill, `Looking`
 /// breathes its border. The ring keeps the face's motion and the verdict
 /// keyframes, so the two never animate one property on nested nodes.
-pub fn set_face_state(ring: &gtk4::Box, pill: Option<&gtk4::Box>, state: &str) {
-    let one = (!state.is_empty()).then_some(state);
-    swap(ring, FACE_STATES, one);
+pub fn set_face_state(ring: &gtk4::Box, pill: Option<&gtk4::Box>, state: Option<FaceState>) {
+    let one = state.map(FaceState::class);
+    swap(ring, FaceState::ALL.map(FaceState::class), one);
     if let Some(pill) = pill {
-        swap(pill, FACE_STATES, one);
+        swap(pill, FaceState::ALL.map(FaceState::class), one);
     }
+}
+
+/// Play the pill's entrance on the wrapper that carries it. Clear it and
+/// set it again on a later frame to replay it.
+pub fn set_face_enter(wrap: &impl IsA<gtk4::Widget>, entering: bool) {
+    toggle(wrap, "ui-face-enter", entering);
 }

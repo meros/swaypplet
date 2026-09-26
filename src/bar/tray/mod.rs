@@ -32,7 +32,7 @@ const MENU_DEBOUNCE_MS: u64 = 50;
 /// The tray pill for one bar window, following the shared service.
 pub fn build(tray: &Rc<TrayService>) -> gtk4::Box {
     let container = crate::ui::hbox(1);
-    crate::ui::segment(&container, false);
+    crate::ui::segment::adopt(&container, false);
     container.add_css_class("bar-tray");
     // Hidden until an item registers, so the empty pill never renders.
     container.set_visible(false);

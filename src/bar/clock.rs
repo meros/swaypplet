@@ -28,12 +28,12 @@ pub fn build() -> gtk4::Button {
     // width as they tick.
     let label = gtk4::Label::new(None);
     ui::set_tone(&label, ui::Tone::Muted);
-    label.add_css_class("ui-numeric");
+    crate::ui::set_numeric(&label, true);
     let btn = gtk4::Button::builder()
         .child(&label)
         .css_classes(["bar-seg"])
         .build();
-    ui::segment(&btn, false);
+    ui::segment::adopt(&btn, false);
 
     let show_date = Rc::new(Cell::new(false));
 

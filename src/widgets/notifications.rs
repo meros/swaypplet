@@ -20,7 +20,7 @@ pub struct NotificationsSection {
 impl NotificationsSection {
     pub fn new(store: Rc<RefCell<NotificationStore>>) -> Self {
         let section = Rc::new(ui::section(icons::NOTIFICATION, "Notifications", "None"));
-        ui::glyph(&section.icon, ui::Text::Title, ui::Tone::Fg);
+        ui::glyph::adopt(&section.icon, ui::Text::Title, ui::Tone::Fg);
 
         // Header row: title + clear all button
         let header = ui::hbox(3);
@@ -28,7 +28,14 @@ impl NotificationsSection {
         let title = ui::heading("Notifications");
         title.set_hexpand(true);
 
-        let clear_btn = ui::glyph_button(icons::NOTIFICATION_CLEAR, "Clear all", ui::Kind::Flat);
+        let clear_btn = ui::button_with(
+            ui::Face::Glyph {
+                glyph: icons::NOTIFICATION_CLEAR,
+                tooltip: "Clear all",
+            },
+            ui::Kind::Flat,
+            ui::Size::Normal,
+        );
 
         let store_clear = store.clone();
         clear_btn.connect_clicked(move |_| {
@@ -218,7 +225,7 @@ fn build_entry(
     if let Some(progress) = notif.progress {
         let bar = ui::progress(progress as f64 / 100.0);
         bar.set_hexpand(true);
-        ui::breathing(&bar);
+        ui::set_breathing(&bar, true);
         texts.append(&bar);
     }
 
@@ -234,7 +241,7 @@ fn build_entry(
             // "default" is what clicking the notification itself means; in a
             // list of rows there is no such gesture to hang it on, so it gets
             // a button like any other.
-            let btn = ui::small_button(label, ui::Kind::Secondary);
+            let btn = ui::button_with(ui::Face::Label(label), ui::Kind::Secondary, ui::Size::Small);
 
             let id = notif.id;
             let key_c = key.clone();
@@ -252,7 +259,14 @@ fn build_entry(
     }
 
     // Dismiss button
-    let dismiss_btn = ui::glyph_button(icons::CLOSE, "Dismiss", ui::Kind::Flat);
+    let dismiss_btn = ui::button_with(
+        ui::Face::Glyph {
+            glyph: icons::CLOSE,
+            tooltip: "Dismiss",
+        },
+        ui::Kind::Flat,
+        ui::Size::Normal,
+    );
 
     let id = notif.id;
     let store_c = store.clone();

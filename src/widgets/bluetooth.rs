@@ -166,7 +166,7 @@ pub struct BluetoothSection {
 impl BluetoothSection {
     pub fn new() -> Rc<Self> {
         let section = ui::section(ICON_BLUETOOTH, "Bluetooth", "");
-        ui::glyph(&section.icon, ui::Text::Title, ui::Tone::Fg);
+        ui::glyph::adopt(&section.icon, ui::Text::Title, ui::Tone::Fg);
 
         // ── Connected devices list ────────────────────────────────────────────
         let connected_list = ui::vbox(1);
@@ -179,7 +179,11 @@ impl BluetoothSection {
         let scan_row = ui::hbox(3);
         scan_row.add_css_class("section-toolbar");
 
-        let scan_btn = ui::small_button("Scan", ui::Kind::Secondary);
+        let scan_btn = ui::button_with(
+            ui::Face::Label("Scan"),
+            ui::Kind::Secondary,
+            ui::Size::Small,
+        );
 
         let scan_spinner = Spinner::new();
         scan_spinner.set_visible(false);
@@ -415,9 +419,20 @@ fn make_connected_row(dev: &BtDevice, parent_list: &Box) -> Box {
     let spinner = Spinner::new();
     spinner.set_visible(false);
 
-    let disconnect_btn = ui::small_button("Disconnect", ui::Kind::Secondary);
+    let disconnect_btn = ui::button_with(
+        ui::Face::Label("Disconnect"),
+        ui::Kind::Secondary,
+        ui::Size::Small,
+    );
 
-    let forget_btn = ui::glyph_button("×", "Forget", ui::Kind::Flat);
+    let forget_btn = ui::button_with(
+        ui::Face::Glyph {
+            glyph: "×",
+            tooltip: "Forget",
+        },
+        ui::Kind::Flat,
+        ui::Size::Normal,
+    );
 
     // ── Disconnect handler ────────────────────────────────────────────────────
     {
@@ -494,9 +509,20 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
     let spinner = Spinner::new();
     spinner.set_visible(false);
 
-    let connect_btn = ui::small_button("Connect", ui::Kind::Secondary);
+    let connect_btn = ui::button_with(
+        ui::Face::Label("Connect"),
+        ui::Kind::Secondary,
+        ui::Size::Small,
+    );
 
-    let forget_btn = ui::glyph_button("×", "Forget", ui::Kind::Flat);
+    let forget_btn = ui::button_with(
+        ui::Face::Glyph {
+            glyph: "×",
+            tooltip: "Forget",
+        },
+        ui::Kind::Flat,
+        ui::Size::Normal,
+    );
 
     // ── Connect handler ───────────────────────────────────────────────────────
     {

@@ -2,7 +2,7 @@
 
 use gtk4::prelude::*;
 
-use super::*;
+use super::{hbox, vbox};
 
 pub fn menu() -> gtk4::Box {
     let b = vbox(0);

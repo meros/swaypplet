@@ -152,8 +152,8 @@ fn draw(
 /// The verdict's status tone: healthy, attention, or nothing to say yet.
 fn status(tier: backup::Tier) -> ui::Status {
     match tier {
-        backup::Tier::Ok => ui::Status::Ok,
-        backup::Tier::Stale | backup::Tier::Failed => ui::Status::Warn,
+        backup::Tier::Ok => ui::Status::Success,
+        backup::Tier::Stale | backup::Tier::Failed => ui::Status::Warning,
         backup::Tier::Running | backup::Tier::Unknown => ui::Status::Neutral,
     }
 }

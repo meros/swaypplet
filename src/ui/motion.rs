@@ -1,7 +1,12 @@
 //! Transitions and loops that go through `anim::duration`, so Look → Motion
 //! and reduced motion reach every one (design lint `motion-bypass`).
+//!
+//! `ui::revealer(transition, motion)`, `ui::page_stack(transition,
+//! motion)`; `ui::set_breathing` at runtime.
 
 use gtk4::prelude::*;
+
+use super::class::toggle;
 
 /// A GTK transition length for a motion token, through `anim::ms`, so a
 /// revealer or a stack follows Look → Motion and reduced motion like every
@@ -32,7 +37,8 @@ pub fn page_stack(
         .build()
 }
 
-/// Breathe: the attention loop for something working in the background.
-pub fn breathing(w: &impl IsA<gtk4::Widget>) {
-    w.add_css_class("ui-breathing");
+/// Breathe: the attention loop for something working in the background
+/// (a notification's progress, the player's art).
+pub fn set_breathing(w: &impl IsA<gtk4::Widget>, breathing: bool) {
+    toggle(w, "ui-breathing", breathing);
 }

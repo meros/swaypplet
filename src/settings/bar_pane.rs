@@ -15,8 +15,8 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use super::form::{self, dropdown_row, scale_row, section_box, switch_row};
 use super::store::{self, Bar, Keys};
-use super::ui::{self, dropdown_row, scale_row, section_box, switch_row};
 
 /// Where a volume or brightness press draws, in the order the dropdown
 /// lists them.
@@ -146,7 +146,7 @@ impl State {
         self.brightness_step
             .set_value(f64::from(keys.brightness_step));
         self.boost.set_active(keys.volume_boost);
-        ui::set_source(
+        form::set_source(
             &self.status,
             settings.bar.is_some() || settings.keys.is_some(),
             &describe(&bar, &keys),
@@ -162,7 +162,7 @@ pub struct BarPane {
 
 impl BarPane {
     pub fn new() -> Self {
-        let root = ui::pane();
+        let root = form::pane();
 
         let settings = store::current();
         let bar = settings.bar();
@@ -225,12 +225,12 @@ impl BarPane {
         );
         keys_group.append(&row_boost);
 
-        let reset = ui::action_button(
+        let reset = form::action_button(
             "Reset to system",
             "Put the system's choices back and drop the bar and keys sections from the settings file.",
         );
-        let (footer, status) = ui::footer(&[&reset]);
-        let copy = ui::copy_nix_button(
+        let (footer, status) = form::footer(&[&reset]);
+        let copy = form::copy_nix_button(
             &status,
             "The bar and keys sections as theme/settings.nix holds them, for promoting a keeper into the Nix side by hand.",
             || {

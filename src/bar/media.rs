@@ -214,7 +214,7 @@ fn render(ui: &Ui) {
         }
         None => {
             let fallback = gtk4::Label::new(Some("󰎆"));
-            ui::glyph(&fallback, ui::Text::DisplaySm, ui::Tone::Muted);
+            ui::glyph::adopt(&fallback, ui::Text::DisplaySm, ui::Tone::Muted);
             frame.append(&fallback);
         }
     }
@@ -231,7 +231,7 @@ fn render(ui: &Ui) {
         ui::Text::Body,
         ui::Tone::Fg,
     );
-    title.add_css_class("ui-strong");
+    crate::ui::set_weight(&title, crate::ui::Weight::Strong);
     title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     title.set_max_width_chars(28);
     info.append(&title);
@@ -249,13 +249,13 @@ fn render(ui: &Ui) {
     } else {
         icons::MEDIA_PLAY
     }));
-    ui::glyph(&face, ui::Text::DisplaySm, ui::Tone::Fg);
+    ui::glyph::adopt(&face, ui::Text::DisplaySm, ui::Tone::Fg);
     let play = gtk4::Button::builder()
         .child(&face)
         .halign(gtk4::Align::Center)
         .tooltip_text("Play or pause")
         .build();
-    ui::make_button(&play, ui::Kind::Flat);
+    ui::button::adopt(&play, ui::Kind::Flat, ui::Size::Normal);
     play.add_css_class("icon");
     play.add_css_class("pill");
     play.add_css_class("bar-media-play");

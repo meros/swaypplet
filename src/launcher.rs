@@ -109,7 +109,7 @@ impl LauncherView {
             .placeholder_text("Search")
             .hexpand(true)
             .build();
-        crate::ui::search_entry(&entry);
+        crate::ui::entry::adopt(&entry, crate::ui::FieldSize::Large);
         entry.add_css_class("launcher-entry");
 
         let results_box = crate::ui::vbox(0);
@@ -324,7 +324,7 @@ impl Launcher {
         // them to the output the launcher opens on.
         let container = crate::ui::vbox(0);
         container.set_halign(gtk4::Align::Center);
-        crate::ui::card(&container, crate::ui::Card::Floating);
+        crate::ui::card::adopt(&container, crate::ui::Card::Floating);
         container.add_css_class("launcher-container");
 
         let view = LauncherView::new();
@@ -332,7 +332,7 @@ impl Launcher {
 
         backdrop.append(&top_spacer);
         backdrop.append(&container);
-        crate::ui::surface(&backdrop);
+        crate::ui::surface::adopt(&backdrop);
         window.set_child(Some(&backdrop));
 
         install_monitor_fit(&window, &top_spacer, &container, LAUNCHER_CARD_SIZE, None);
@@ -735,7 +735,7 @@ fn window_row(
     result_row_style(&row, selected);
     let picture = crate::jump::card::LivePicture::new();
     picture.set_size_request(WINDOW_THUMB_W, WINDOW_THUMB_H);
-    crate::ui::set_class(&picture, "ui-thumb", true);
+    crate::ui::thumb::adopt(&picture);
     if let Some(id) = result.identifier.split_whitespace().nth(1) {
         live.add(id.to_string(), picture.clone());
     }
@@ -774,7 +774,7 @@ fn build_result_row(
     );
     let row = r.root.clone();
     result_row_style(&row, selected);
-    crate::ui::glyph(&r.icon, crate::ui::Text::Title, crate::ui::Tone::Muted);
+    crate::ui::glyph::adopt(&r.icon, crate::ui::Text::Title, crate::ui::Tone::Muted);
 
     // The app's own icon in the glyph's place, when the theme has it.
     if !result.icon.is_empty() && !result.icon.contains('/') {
@@ -785,9 +785,7 @@ fn build_result_row(
                     .icon_name(&result.icon)
                     .pixel_size(24)
                     .build();
-                image.add_css_class("ui-row-icon");
-                r.icon.set_visible(false);
-                row.prepend(&image);
+                r.set_icon_image(&image);
             }
         }
     }
@@ -836,7 +834,7 @@ fn build_result_row(
 /// the selected fill back to it spends most of its frames as a dark ghost of
 /// the old row).
 fn result_row_style(row: &gtk4::Box, selected: bool) {
-    crate::ui::instant(row);
+    crate::ui::set_instant(row, true);
     crate::ui::set_selected(row, selected);
 }
 

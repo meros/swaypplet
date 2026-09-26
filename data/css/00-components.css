@@ -469,9 +469,9 @@ button.ui-chip:checked {
     font-weight: var(--w-strong);
 }
 
-.ui-status.ok      { color: var(--success); }
-.ui-status.warn    { color: var(--warning); }
-.ui-status.bad     { color: var(--danger); }
+.ui-status.success { color: var(--success); }
+.ui-status.warning { color: var(--warning); }
+.ui-status.danger  { color: var(--danger); }
 .ui-status.neutral { color: var(--fg-muted); }
 
 /* ── Field ──────────────────────────────────────────────────────────── */
@@ -1022,8 +1022,8 @@ button.ui-tile-toggle:disabled {
 }
 
 /* ── Slider marks and over-range (added by the panel migration) ────────
-   `ui::set_class(scale, "over", …)`: past the normal range (volume over
-   100 %), the fill turns warning. */
+   `ui::set_over_range`: past the normal range (volume over 100 %), the
+   fill turns warning. */
 
 scale.ui-slider marks label {
     font-size: var(--type-caption);
@@ -1048,13 +1048,12 @@ scale.ui-slider.over fill {
 /* ── Progress with a status (added by the panel migration) ──────────────
    A level that is also a verdict: charging, low. */
 
-progressbar.ui-progress.ok progress   { background-color: var(--success-bg); }
-progressbar.ui-progress.warn progress { background-color: var(--warning-bg); }
-progressbar.ui-progress.bad progress  { background-color: var(--danger-bg); }
+progressbar.ui-progress.success progress { background-color: var(--success-bg); }
+progressbar.ui-progress.warning progress { background-color: var(--warning-bg); }
+progressbar.ui-progress.danger progress  { background-color: var(--danger-bg); }
 
 /* ── Busy row (added by the panel migration) ───────────────────────────
-   `ui::set_class(row, "busy", …)`: a row waiting on something it asked
-   for. */
+   `ui::set_busy`: a row waiting on something it asked for. */
 
 .ui-row.busy {
     opacity: 0.6;

@@ -162,14 +162,14 @@ pub fn build_tile(spec: &TileSpec) -> gtk4::ToggleButton {
         set_tooltip(&btn_h, target, tooltip_on, tooltip_off);
         log::info!("tile[{label}]: toggle requested — target {target}");
 
-        btn_h.add_css_class("loading");
+        crate::ui::set_loading(&btn_h, true);
         let btn_done = btn_h.clone();
         let action = spec.action.clone();
         let on_state = spec.on_state.clone();
         spawn::spawn_work(
             move || action(target),
             move |success| {
-                btn_done.remove_css_class("loading");
+                crate::ui::set_loading(&btn_done, false);
                 if success {
                     log::info!("tile[{label}]: now {target}");
                     // Established, not optimistic: a failed toggle never

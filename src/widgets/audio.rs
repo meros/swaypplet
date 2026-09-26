@@ -51,9 +51,8 @@ impl VolumeRow {
             150.0,
             1.0,
         );
-        ui::glyph(&r.icon, ui::Text::Title, ui::Tone::Fg);
-        let icon_btn =
-            ui::slider_icon_button(&r, if is_mic { "Mute input" } else { "Mute output" });
+        ui::glyph::adopt(&r.icon, ui::Text::Title, ui::Tone::Fg);
+        let icon_btn = r.icon_button(if is_mic { "Mute input" } else { "Mute output" });
         r.scale.add_mark(0.0, gtk4::PositionType::Bottom, None);
         r.scale.add_mark(50.0, gtk4::PositionType::Bottom, None);
         r.scale
@@ -78,7 +77,7 @@ impl VolumeRow {
         self.pct_label.set_text(&pct_text(state.volume));
 
         // Visual cue for over-amplification (> 100 %).
-        ui::set_class(&self.scale, "over", state.volume > 1.0);
+        ui::set_over_range(&self.scale, state.volume > 1.0);
     }
 }
 
@@ -161,7 +160,7 @@ pub struct AudioSection {
 impl AudioSection {
     pub fn new(audio: Rc<AudioService>) -> Self {
         let section = ui::section(icons::SPEAKER_HIGH, "Audio", "—");
-        ui::glyph(&section.icon, ui::Text::Title, ui::Tone::Fg);
+        ui::glyph::adopt(&section.icon, ui::Text::Title, ui::Tone::Fg);
         let detail_box = &section.body;
 
         // ── Unavailable banner (hidden by default) ───────────────────────────
@@ -286,7 +285,7 @@ impl AudioSection {
 
                 // Update percentage label and overamp style immediately.
                 w2.sink_row.pct_label.set_text(&pct_text(vol_fraction));
-                ui::set_class(&w2.sink_row.scale, "over", vol_fraction > 1.0);
+                ui::set_over_range(&w2.sink_row.scale, vol_fraction > 1.0);
             });
         }
 
@@ -311,7 +310,7 @@ impl AudioSection {
                 audio.send(Command::SetSourceVolume(vol_fraction));
 
                 w2.source_row.pct_label.set_text(&pct_text(vol_fraction));
-                ui::set_class(&w2.source_row.scale, "over", vol_fraction > 1.0);
+                ui::set_over_range(&w2.source_row.scale, vol_fraction > 1.0);
             });
         }
     }
@@ -404,7 +403,7 @@ impl AudioSection {
 
         for stream in streams {
             let r = ui::slider_row(volume_icon(&stream.volume, false), 0.0, 150.0, 1.0);
-            let mute_btn = ui::slider_icon_button(&r, "Mute");
+            let mute_btn = r.icon_button("Mute");
             // Muted says so in the danger tone, the one place a stream row
             // carries colour.
             let tone = if stream.volume.muted {
@@ -412,7 +411,7 @@ impl AudioSection {
             } else {
                 ui::Tone::Fg
             };
-            ui::glyph(&r.icon, ui::Text::Title, tone);
+            ui::glyph::adopt(&r.icon, ui::Text::Title, tone);
             {
                 // Per-stream mute has no command of its own: the server takes
                 // a volume of zero the same way, and one fewer command is one
@@ -436,7 +435,7 @@ impl AudioSection {
             r.root.insert_child_after(&name, Some(&mute_btn));
 
             let scale = r.scale.clone();
-            ui::set_class(&scale, "over", stream.volume.volume > 1.0);
+            ui::set_over_range(&scale, stream.volume.volume > 1.0);
 
             let pct_label = r.value.clone();
             pct_label.set_text(&pct_text(stream.volume.volume));
@@ -451,7 +450,7 @@ impl AudioSection {
                     let frac = scale.value() / 100.0;
                     audio.send(Command::SetStreamVolume { index, level: frac });
                     pct2.set_text(&pct_text(frac));
-                    ui::set_class(scale, "over", frac > 1.0);
+                    ui::set_over_range(scale, frac > 1.0);
                 });
             }
 

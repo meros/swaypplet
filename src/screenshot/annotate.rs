@@ -86,7 +86,7 @@ pub fn open(app: &gtk4::Application, image: Image, done: impl Fn(Image) + 'stati
         .hexpand(true)
         .vexpand(true)
         .build();
-    crate::ui::canvas(&area);
+    crate::ui::canvas::adopt(&area);
 
     let editor = Rc::new(Editor {
         image,
@@ -100,7 +100,7 @@ pub fn open(app: &gtk4::Application, image: Image, done: impl Fn(Image) + 'stati
     });
 
     let root = crate::ui::vbox(0);
-    crate::ui::solid_window(&root);
+    crate::ui::window::adopt(&root);
     root.append(&toolbar(&editor, done));
     root.append(&area);
     window.set_child(Some(&root));
@@ -123,7 +123,16 @@ fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
         (Tool::Highlight, "󰚄", "Highlight (H)"),
         (Tool::Pixelate, "󰸉", "Pixelate (X)"),
     ] {
-        let btn = crate::ui::toggle_glyph_button(icon, name, crate::ui::Kind::Flat);
+        let face = crate::ui::text(icon, crate::ui::Text::TitleSm, crate::ui::Tone::Fg);
+        crate::ui::glyph::adopt(&face, crate::ui::Text::TitleSm, crate::ui::Tone::Fg);
+        let btn = crate::ui::toggle_button(
+            crate::ui::Face::Icon {
+                child: face.upcast_ref(),
+                tooltip: name,
+            },
+            crate::ui::Kind::Flat,
+            crate::ui::Size::Normal,
+        );
         match &first {
             Some(group) => btn.set_group(Some(group)),
             None => first = Some(btn.clone()),
@@ -205,7 +214,7 @@ fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
 }
 
 fn separator() -> gtk4::Box {
-    crate::ui::vseparator()
+    crate::ui::separator(gtk4::Orientation::Vertical)
 }
 
 impl Editor {

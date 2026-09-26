@@ -747,10 +747,10 @@ fn build_card(app: &gtk4::Application, monitor: gdk::Monitor) -> Card {
         .valign(gtk4::Align::Center)
         .build();
 
-    crate::ui::surface(&wrapper);
+    crate::ui::surface::adopt(&wrapper);
 
     let card = crate::ui::vbox(0);
-    crate::ui::card(&card, crate::ui::Card::Floating);
+    crate::ui::card::adopt(&card, crate::ui::Card::Floating);
     card.add_css_class("keybinds-card");
 
     let body = crate::ui::hbox(7);

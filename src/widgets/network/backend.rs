@@ -89,7 +89,7 @@ pub fn signal_tone(strength: u8) -> crate::ui::Tone {
 /// tone its signal earns.
 pub fn set_signal_glyph(icon: &gtk4::Label, glyph: &str, tone: crate::ui::Tone) {
     icon.set_label(glyph);
-    crate::ui::glyph(icon, crate::ui::Text::Title, tone);
+    crate::ui::glyph::adopt(icon, crate::ui::Text::Title, tone);
 }
 
 // ── Data types ────────────────────────────────────────────────────────────────

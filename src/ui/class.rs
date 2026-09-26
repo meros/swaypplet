@@ -5,7 +5,7 @@
 use gtk4::prelude::*;
 
 /// Add `class` when `on`, remove it otherwise.
-pub fn toggle(w: &impl IsA<gtk4::Widget>, class: &str, on: bool) {
+pub(super) fn toggle(w: &impl IsA<gtk4::Widget>, class: &str, on: bool) {
     if on {
         w.add_css_class(class);
     } else {
@@ -15,7 +15,7 @@ pub fn toggle(w: &impl IsA<gtk4::Widget>, class: &str, on: bool) {
 
 /// Clear every class of a family and set `one` of them (or none). GTK
 /// cannot be asked which of a family is set, so the family is named whole.
-pub fn swap<'a>(
+pub(super) fn swap<'a>(
     w: &impl IsA<gtk4::Widget>,
     family: impl IntoIterator<Item = &'a str>,
     one: Option<&str>,
@@ -28,9 +28,4 @@ pub fn swap<'a>(
     if let Some(c) = one {
         w.add_css_class(c);
     }
-}
-
-/// Toggle a component modifier class.
-pub fn set_class(w: &impl IsA<gtk4::Widget>, class: &str, on: bool) {
-    toggle(w, class, on);
 }

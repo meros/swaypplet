@@ -169,7 +169,7 @@ impl Panel {
         // The design system's base type and colour. On the window's child,
         // not the window: the GTK theme's `window.background` outranks a
         // class on the window node and would keep its own text colour.
-        ui::surface(&backdrop);
+        ui::surface::adopt(&backdrop);
 
         // ── Top spacer (positions Helm at the optical foveal sweet spot ~25-28%) ──
         // Height and the card's width both come from
@@ -181,7 +181,7 @@ impl Panel {
         let root = ui::vbox(0);
         root.set_halign(gtk4::Align::Center);
         root.set_valign(gtk4::Align::Start);
-        ui::card(&root, ui::Card::Floating);
+        ui::card::adopt(&root, ui::Card::Floating);
         root.add_css_class("helm-card");
 
         // ── Build sections ───────────────────────────────────────────────────
@@ -590,7 +590,7 @@ fn build_prefix_list() -> gtk4::Box {
         // What you type, in the mono keys are set in; the page it opens
         // beside it, a level quieter.
         let keys = ui::text(&prefixes, Text::Label, Tone::Fg);
-        keys.add_css_class("ui-mono");
+        crate::ui::set_mono(&keys, true);
         keys.set_width_chars(26);
         keys.set_max_width_chars(26);
         keys.set_wrap(true);
@@ -637,7 +637,11 @@ fn build_subsheet_with_tabs(
         header.clone()
     };
 
-    let back_btn = ui::small_button("← Back (Esc)", Kind::Secondary);
+    let back_btn = ui::button_with(
+        ui::Face::Label("← Back (Esc)"),
+        Kind::Secondary,
+        ui::Size::Small,
+    );
     back_btn.set_valign(gtk4::Align::Center);
     back_btn.connect_clicked(move |_| on_back());
     top_row.append(&back_btn);
@@ -688,11 +692,14 @@ fn flip(stack: &gtk4::Stack, page: &str) -> bool {
 fn ribbon_pill(icon: &str, label: &str, stack: &gtk4::Stack, page: &'static str) -> gtk4::Button {
     let line = ui::hbox(2);
     let glyph = gtk4::Label::new(Some(icon));
-    ui::glyph(&glyph, Text::TitleSm, Tone::Muted);
+    ui::glyph::adopt(&glyph, Text::TitleSm, Tone::Muted);
     line.append(&glyph);
     line.append(&ui::text(label, Text::Label, Tone::Fg));
-    let pill = gtk4::Button::builder().child(&line).build();
-    ui::make_button(&pill, Kind::Secondary);
+    let pill = ui::button_with(
+        ui::Face::Child(line.upcast_ref()),
+        Kind::Secondary,
+        ui::Size::Normal,
+    );
     pill.add_css_class("pill");
     let stack = stack.clone();
     pill.connect_clicked(move |_| {
@@ -718,7 +725,14 @@ fn ribbon_slider(
     page: &'static str,
 ) -> gtk4::Box {
     let pill = ui::pill_group(2);
-    let btn = ui::glyph_button(icon, tooltip, Kind::Flat);
+    let btn = ui::button_with(
+        ui::Face::Glyph {
+            glyph: icon,
+            tooltip: tooltip,
+        },
+        Kind::Flat,
+        ui::Size::Normal,
+    );
     btn.add_css_class("pill");
     btn.set_valign(gtk4::Align::Center);
     {
@@ -730,7 +744,7 @@ fn ribbon_slider(
     pill.append(&btn);
 
     let scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, Some(adjustment));
-    ui::slider(&scale);
+    ui::slider::adopt(&scale, ui::Density::Normal);
     scale.set_draw_value(false);
     scale.set_hexpand(true);
     scale.set_valign(gtk4::Align::Center);
@@ -930,13 +944,15 @@ fn build_flight_deck(
 /// A deck button: a glyph at title size on a component button.
 fn deck_button(icon: &str, tooltip: &str) -> gtk4::Button {
     let glyph = gtk4::Label::new(Some(icon));
-    ui::glyph(&glyph, Text::Title, Tone::Fg);
-    let btn = gtk4::Button::builder()
-        .child(&glyph)
-        .tooltip_text(tooltip)
-        .build();
-    ui::make_button(&btn, Kind::Secondary);
-    btn.add_css_class("icon");
+    ui::glyph::adopt(&glyph, Text::Title, Tone::Fg);
+    let btn = ui::button_with(
+        ui::Face::Icon {
+            child: glyph.upcast_ref(),
+            tooltip,
+        },
+        Kind::Secondary,
+        ui::Size::Normal,
+    );
     btn.add_css_class("deck-btn");
     btn
 }

@@ -80,8 +80,8 @@ fn show(app: &gtk4::Application, windows: Vec<(scene::Window, String, String)>, 
     let card = crate::ui::vbox(3);
     card.set_halign(gtk4::Align::Center);
     card.set_valign(gtk4::Align::Center);
-    crate::ui::surface(&card);
-    crate::ui::card(&card, crate::ui::Card::Floating);
+    crate::ui::surface::adopt(&card);
+    crate::ui::card::adopt(&card, crate::ui::Card::Floating);
     card.add_css_class("window-picker");
     card.append(&crate::ui::overline("Screenshot a window", crate::ui::Tone::Muted));
 
@@ -97,7 +97,7 @@ fn show(app: &gtk4::Application, windows: Vec<(scene::Window, String, String)>, 
         .row_spacing(crate::tokens::space(3) as u32)
         .column_spacing(crate::tokens::space(3) as u32)
         .build();
-    crate::ui::choice_grid(&grid);
+    crate::ui::choice_grid::adopt(&grid);
     let scroller = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .propagate_natural_height(true)

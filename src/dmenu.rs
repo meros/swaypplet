@@ -258,7 +258,7 @@ pub(crate) fn present_picker(
         .width_request(480)
         .build();
     // Same chassis as the launcher and the polkit dialog: the glass card.
-    crate::ui::card(&container, crate::ui::Card::Floating);
+    crate::ui::card::adopt(&container, crate::ui::Card::Floating);
     container.add_css_class("launcher-container");
     container.add_css_class("dmenu");
 
@@ -287,7 +287,7 @@ pub(crate) fn present_picker(
         .build();
     // One step down from the launcher's search field: the card is a short
     // dialog, so the filter sits at row scale.
-    crate::ui::entry(&entry);
+    crate::ui::entry::adopt(&entry, crate::ui::FieldSize::Normal);
     entry.add_css_class("launcher-entry");
 
     let results_box = crate::ui::vbox(0);
@@ -308,7 +308,7 @@ pub(crate) fn present_picker(
     let overlay = gtk4::Overlay::new();
     overlay.set_child(Some(&backdrop));
     overlay.add_overlay(&container);
-    crate::ui::surface(&overlay);
+    crate::ui::surface::adopt(&overlay);
     window.set_child(Some(&overlay));
 
     let picker = Rc::new(Picker {
@@ -508,7 +508,7 @@ fn matches(item: &str, query: &str) -> bool {
 /// for the same keyed-card reason (`ui::instant`).
 fn build_row(text: &str, selected: bool) -> gtk4::Box {
     let r = crate::ui::row("", text, "");
-    crate::ui::instant(&r.root);
+    crate::ui::set_instant(&r.root, true);
     crate::ui::set_selected(&r.root, selected);
     r.root
 }

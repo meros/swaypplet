@@ -423,7 +423,7 @@ impl PowerSection {
         };
 
         let section = ui::section(&initial_icon, "Power", &initial_text);
-        ui::glyph(&section.icon, ui::Text::Title, ui::Tone::Fg);
+        ui::glyph::adopt(&section.icon, ui::Text::Title, ui::Tone::Fg);
         let summary_icon = section.icon.clone();
         let summary_text = section.summary.clone();
 
@@ -543,9 +543,9 @@ impl PowerSection {
 /// anything between is just a level.
 fn charge_status(bat: &BatteryState) -> Option<ui::Status> {
     if bat.charging {
-        Some(ui::Status::Ok)
+        Some(ui::Status::Success)
     } else if bat.capacity < 20 {
-        Some(ui::Status::Bad)
+        Some(ui::Status::Danger)
     } else {
         None
     }
@@ -621,7 +621,7 @@ pub fn build_session_row() -> gtk4::Box {
 /// destructive actions.
 fn rail_btn(icon: &str, tooltip: &str, danger: bool) -> gtk4::Button {
     let lbl = gtk4::Label::new(Some(icon));
-    ui::glyph(
+    ui::glyph::adopt(
         &lbl,
         ui::Text::Title,
         if danger {
@@ -630,11 +630,15 @@ fn rail_btn(icon: &str, tooltip: &str, danger: bool) -> gtk4::Button {
             ui::Tone::Fg
         },
     );
-    let btn = gtk4::Button::builder().child(&lbl).build();
-    ui::make_button(&btn, ui::Kind::Secondary);
-    btn.add_css_class("icon");
+    let btn = ui::button_with(
+        ui::Face::Icon {
+            child: lbl.upcast_ref(),
+            tooltip,
+        },
+        ui::Kind::Secondary,
+        ui::Size::Normal,
+    );
     btn.add_css_class("deck-btn");
-    btn.set_tooltip_text(Some(tooltip));
     btn
 }
 

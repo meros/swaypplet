@@ -45,11 +45,11 @@ pub struct BrightnessSection {
 impl BrightnessSection {
     pub fn new() -> Self {
         let section = ui::section(icons::BRIGHTNESS, "Brightness", "0%");
-        ui::glyph(&section.icon, ui::Text::Title, ui::Tone::Fg);
+        ui::glyph::adopt(&section.icon, ui::Text::Title, ui::Tone::Fg);
 
         // ── Brightness row (inside the section body) ──────────────────────────
         let row = ui::slider_row(icons::BRIGHTNESS, 1.0, 100.0, 1.0);
-        ui::glyph(&row.icon, ui::Text::Title, ui::Tone::Fg);
+        ui::glyph::adopt(&row.icon, ui::Text::Title, ui::Tone::Fg);
         let scale = row.scale.clone();
         // Same rail furniture as the volume scale (widgets/audio.rs): quarter
         // ticks plus one labelled reference. Both scales are hoisted into the

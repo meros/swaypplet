@@ -31,7 +31,7 @@ pub struct ClipboardSection {
 impl ClipboardSection {
     pub fn new() -> Self {
         let section = ui::section(icons::CLIPBOARD, "Clipboard", "");
-        ui::glyph(&section.icon, ui::Text::Title, ui::Tone::Fg);
+        ui::glyph::adopt(&section.icon, ui::Text::Title, ui::Tone::Fg);
 
         let detail_box = ui::vbox(2);
         section.body.append(&detail_box);

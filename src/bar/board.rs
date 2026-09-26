@@ -212,7 +212,7 @@ pub fn build(
     let board = ui::hbox(1);
     board.add_css_class("bar-board");
     board.add_css_class("bar-seg");
-    ui::segment(&board, false);
+    ui::segment::adopt(&board, false);
     let bays: Vec<Bay> = (1..=4).map(Bay::new).collect();
     for (i, bay) in bays.iter().enumerate() {
         board.append(&bay.button);

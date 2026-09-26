@@ -40,7 +40,7 @@ pub fn build(service: &Rc<BackupStatusService>) -> gtk4::Box {
         .orientation(gtk4::Orientation::Horizontal)
         .css_classes(["bar-seg"])
         .build();
-    ui::segment(&segment, false);
+    ui::segment::adopt(&segment, false);
 
     let glyph = gtk4::Label::new(None);
     segment.append(&glyph);

@@ -139,7 +139,7 @@ impl Jump {
         let stage = gtk4::Fixed::new();
         // Base type and colour on the child: the theme's `window.background`
         // outranks a class on the window node.
-        crate::ui::surface(&stage);
+        crate::ui::surface::adopt(&stage);
         // Outside the workspace, so it frames the windows and covers none.
         // It fades in as the row opens: the workspaces take the animation's
         // time to get there.
@@ -150,9 +150,9 @@ impl Jump {
         let chord = crate::ui::key("");
         // Straight on the wallpaper, so the words carry their own contrast.
         let label = crate::ui::text("", crate::ui::Text::TitleSm, crate::ui::Tone::Fg);
-        crate::ui::on_wallpaper(&label);
+        crate::ui::on_wallpaper::adopt(&label);
         let detail = crate::ui::text("", crate::ui::Text::Label, crate::ui::Tone::Fg);
-        crate::ui::on_wallpaper(&detail);
+        crate::ui::on_wallpaper::adopt(&detail);
         detail.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         // Centred under the middle workspace: the outer box is as wide as
         // the workspace (`place_ring`), the line itself only as wide as it is.
@@ -473,11 +473,7 @@ impl Jump {
         self.label.set_label(rows::caption_label(row));
         self.detail.set_label(&row.detail);
         let pinned = st.names.get(i).is_some_and(|n| pin::is_pinned(n));
-        if pinned {
-            self.ring.add_css_class("pinned");
-        } else {
-            self.ring.remove_css_class("pinned");
-        }
+        crate::ui::set_pinned(&self.ring, pinned);
     }
 
     fn arm_watchdog(self: &Rc<Self>) {

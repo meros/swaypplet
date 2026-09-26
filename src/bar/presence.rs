@@ -34,7 +34,7 @@ pub fn build() -> Option<gtk4::Button> {
         .child(&label)
         .css_classes(["bar-seg"])
         .build();
-    crate::ui::segment(&btn, false);
+    crate::ui::segment::adopt(&btn, false);
 
     let events = presence::subscribe();
 

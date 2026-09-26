@@ -26,8 +26,7 @@ pub fn rebuild_vpn_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
         // A connected VPN is the selected row.
         ui::set_selected(&r.root, vpn.active);
 
-        let badge_lbl = ui::badge(&vpn.vpn_type);
-        badge_lbl.add_css_class("neutral");
+        let badge_lbl = ui::badge(&vpn.vpn_type, ui::BadgeTone::Neutral);
 
         let spinner = Spinner::new();
         spinner.set_visible(false);
@@ -36,7 +35,11 @@ pub fn rebuild_vpn_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
         status_lbl.set_visible(false);
 
         let btn_label = if vpn.active { "Disconnect" } else { "Connect" };
-        let action_btn = ui::small_button(btn_label, ui::Kind::Secondary);
+        let action_btn = ui::button_with(
+            ui::Face::Label(btn_label),
+            ui::Kind::Secondary,
+            ui::Size::Small,
+        );
 
         {
             let name_clone = vpn.name.clone();

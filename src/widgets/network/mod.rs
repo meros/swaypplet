@@ -112,7 +112,7 @@ impl NetworkSection {
         // its own fill and the sub-sheet is the ground, with groups used
         // semantically inside.
         let section = Rc::new(ui::section(ICON_DISCONNECTED, "Wi-Fi", "Disconnected"));
-        ui::glyph(&section.icon, ui::Text::Title, ui::Tone::Fg);
+        ui::glyph::adopt(&section.icon, ui::Text::Title, ui::Tone::Fg);
         let summary_icon = section.icon.clone();
         let summary_text = section.summary.clone();
 
@@ -135,7 +135,7 @@ impl NetworkSection {
         let (radio, wifi_switch) = ui::switch_row("Wi-Fi", "Enabled");
         radio.icon.set_label(ICON_SIGNAL_EXCELLENT);
         radio.icon.set_visible(true);
-        ui::glyph(&radio.icon, ui::Text::Title, ui::Tone::Fg);
+        ui::glyph::adopt(&radio.icon, ui::Text::Title, ui::Tone::Fg);
         wifi_switch.set_sensitive(false);
         let header_subtitle = radio.subtitle.clone();
         radio_row.append(&radio.root);
@@ -150,10 +150,10 @@ impl NetworkSection {
         wifi_disabled_box.set_visible(false);
 
         let disabled_icon = gtk4::Label::new(Some(ICON_DISCONNECTED));
-        ui::glyph(&disabled_icon, ui::Text::DisplaySm, ui::Tone::Muted);
+        ui::glyph::adopt(&disabled_icon, ui::Text::DisplaySm, ui::Tone::Muted);
 
         let disabled_title = ui::text("Wi-Fi is turned off", ui::Text::Body, ui::Tone::Fg);
-        disabled_title.add_css_class("ui-strong");
+        crate::ui::set_weight(&disabled_title, crate::ui::Weight::Strong);
         disabled_title.set_xalign(0.5);
 
         let disabled_subtitle = ui::text(
@@ -178,7 +178,7 @@ impl NetworkSection {
         hero_card.set_visible(false);
 
         let hero = ui::row(ICON_DISCONNECTED, "", "");
-        ui::glyph(&hero.icon, ui::Text::Title, ui::Tone::Fg);
+        ui::glyph::adopt(&hero.icon, ui::Text::Title, ui::Tone::Fg);
         let current_icon_label = hero.icon.clone();
         let current_ssid_label = hero.title.clone();
 
@@ -195,10 +195,18 @@ impl NetworkSection {
         let current_spinner = Spinner::new();
         current_spinner.set_visible(false);
 
-        let current_disconnect_btn = ui::small_button("Disconnect", ui::Kind::Secondary);
+        let current_disconnect_btn = ui::button_with(
+            ui::Face::Label("Disconnect"),
+            ui::Kind::Secondary,
+            ui::Size::Small,
+        );
         current_disconnect_btn.set_visible(false);
 
-        let details_toggle_btn = ui::small_button("Details ▸", ui::Kind::Flat);
+        let details_toggle_btn = ui::button_with(
+            ui::Face::Label("Details ▸"),
+            ui::Kind::Flat,
+            ui::Size::Small,
+        );
 
         hero.end.append(&current_spinner);
         hero.end.append(&current_disconnect_btn);
@@ -213,7 +221,11 @@ impl NetworkSection {
         connectivity_label.set_hexpand(true);
         connectivity_label.set_visible(false);
 
-        let portal_btn = ui::small_button("Open portal", ui::Kind::Primary);
+        let portal_btn = ui::button_with(
+            ui::Face::Label("Open portal"),
+            ui::Kind::Primary,
+            ui::Size::Small,
+        );
         portal_btn.set_visible(false);
         portal_btn.connect_clicked(|_| {
             let _ = std::process::Command::new("xdg-open")
@@ -232,14 +244,14 @@ impl NetworkSection {
         );
 
         let details_tray = ui::vbox(2);
-        details_tray.append(&ui::separator());
+        details_tray.append(&ui::separator(gtk4::Orientation::Horizontal));
 
         let ip_box = ui::vbox(1);
         ip_box.add_css_class("network-hero-line");
 
         let ip_line = || {
             let l = ui::text("", ui::Text::Caption, ui::Tone::Faint);
-            l.add_css_class("ui-mono");
+            crate::ui::set_mono(&l, true);
             l.set_visible(false);
             l
         };
@@ -300,7 +312,7 @@ impl NetworkSection {
             .placeholder_text("Search networks…")
             .hexpand(true)
             .build();
-        ui::entry(&search_entry);
+        ui::entry::adopt(&search_entry, ui::FieldSize::Normal);
 
         let scan_spinner = Spinner::new();
         scan_spinner.set_visible(false);

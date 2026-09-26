@@ -19,6 +19,7 @@
 //! | `rust-colour`     | a Cairo / `gdk::RGBA` colour from numeric literals            | Rust |
 //! | `rust-class`      | a CSS class added in Rust that no stylesheet styles          | Rust |
 //! | `surface-on-window` | `ui::surface` / `ui::solid_window` given a window rather than its root child | Rust |
+//! | `rust-ui-class`   | a `"ui-…"` string literal: a component class named outside its component | Rust |
 //! | `motion-bypass`   | a motion token's `.ms` read, or a `transition_duration` set, outside `anim::ms` / `ui::revealer` | Rust except src/anim.rs |
 //!
 //! Every CSS rule reads the files in [`crate::theme::RULES`] with comments
@@ -75,6 +76,7 @@ pub enum Rule {
     RustClass,
     MotionBypass,
     SurfaceOnWindow,
+    RustUiClass,
 }
 
 use Rule::*;
@@ -90,6 +92,7 @@ impl Rule {
         RustClass,
         MotionBypass,
         SurfaceOnWindow,
+        RustUiClass,
     ];
 
     fn id(self) -> &'static str {
@@ -110,6 +113,7 @@ impl Rule {
             RustClass => "rust-class",
             MotionBypass => "motion-bypass",
             SurfaceOnWindow => "surface-on-window",
+            RustUiClass => "rust-ui-class",
         }
     }
 
@@ -153,6 +157,9 @@ impl Rule {
             }
             RustClass => {
                 "the class is styled nowhere in data/css/: a typo, or a dead class; use a ui::* component or style it"
+            }
+            RustUiClass => {
+                "a component's classes are its own: call the component (`ui::set_weight`, `ui::set_busy`, `ui::entry::adopt` …), or give it the setter it lacks in src/ui/"
             }
             SurfaceOnWindow => {
                 "put `ui::surface` on the window's root child: `window.background` outranks `.ui-surface` on the window node, so the class does nothing there"
@@ -1236,6 +1243,17 @@ fn rust_violations() -> Vec<Violation> {
             }
         }
 
+        // A component class spelled outside the component.
+        for (at, _) in code.match_indices("\"ui-") {
+            let end = code[at + 1..].find('"').map_or(code.len(), |e| at + e + 2);
+            push(
+                at,
+                RustUiClass,
+                collapse(&code[at..end]),
+                "a component class named outside src/ui/".into(),
+            );
+        }
+
         // Classes.
         for needle in ["add_css_class(", ".css_classes(", "set_css_classes("] {
             for (at, args) in calls(&code, needle) {
@@ -1615,6 +1633,7 @@ fn print_the_ledger() {
         RustClass,
         MotionBypass,
         SurfaceOnWindow,
+        RustUiClass,
     ]);
     let mut s = String::new();
     for (file, by_rule) in &found {

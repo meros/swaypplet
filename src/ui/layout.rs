@@ -28,9 +28,14 @@ pub fn pad(w: &impl IsA<gtk4::Widget>, step: usize) {
     w.set_margin_end(p);
 }
 
-pub fn separator() -> gtk4::Box {
-    let s = gtk4::Box::new(Orientation::Horizontal, 0);
+/// A hairline: `Horizontal` between rows, `Vertical` between runs of
+/// controls in a toolbar.
+pub fn separator(line: Orientation) -> gtk4::Box {
+    let s = gtk4::Box::new(line, 0);
     s.add_css_class("ui-separator");
+    if line == Orientation::Vertical {
+        s.add_css_class("vertical");
+    }
     s
 }
 
@@ -39,14 +44,6 @@ pub fn pill_group(step: usize) -> gtk4::Box {
     let b = hbox(step);
     b.add_css_class("ui-pill-group");
     b
-}
-
-/// The separator between runs of controls in a toolbar.
-pub fn vseparator() -> gtk4::Box {
-    let s = gtk4::Box::new(Orientation::Vertical, 0);
-    s.add_css_class("ui-separator");
-    s.add_css_class("vertical");
-    s
 }
 
 /// A fill above the window's ground, for a toolbar.

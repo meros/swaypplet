@@ -18,9 +18,9 @@ use gtk4::gdk;
 use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::prelude::*;
 
+use super::form::{self, dropdown_row, section_box};
 use super::schema::ThemeMode;
 use super::store::{self, Look, Motion, Tint, Wallpaper, WallpaperMode};
-use super::ui::{self, dropdown_row, section_box};
 use super::wallpaper::{apply, candidates, candidates_dir, system_default};
 use crate::tokens::{Accent, Contrast, Neutral};
 
@@ -282,7 +282,7 @@ impl State {
             let index = WallpaperMode::ALL.iter().position(|m| *m == w.mode);
             self.mode.set_selected(index.unwrap_or(0) as u32);
         }
-        ui::set_source(
+        form::set_source(
             &self.status,
             overridden,
             "System default: the sway config's wallpaper, auto mode in aqua on gruvbox, full motion",
@@ -371,7 +371,7 @@ pub struct LookPane {
 
 impl LookPane {
     pub fn new() -> Self {
-        let root = ui::pane();
+        let root = form::pane();
 
         let group = section_box(
             "Wallpaper",
@@ -424,7 +424,7 @@ impl LookPane {
             swatches.append(&button);
             accents.push((accent, button, dot));
         }
-        let accent_row = ui::kind_row("Accent", &swatches);
+        let accent_row = form::kind_row("Accent", &swatches);
         accent_row.set_tooltip_text(Some(
             "The one colour that means on, selected, or the primary action.",
         ));
@@ -474,27 +474,27 @@ impl LookPane {
             &motion_labels,
         );
         look.append(&motion_row);
-        let (zoom_row, launch_zoom) = ui::switch_row(
+        let (zoom_row, launch_zoom) = form::switch_row(
             "Launch zoom",
             "An app you start from the launcher grows out of its row. Needs the swayfx handoff patch.",
             false,
         );
         look.append(&zoom_row);
 
-        let browse = ui::action_button(
+        let browse = form::action_button(
             "Browse…",
             &format!(
                 "Pick an image from anywhere. The grid shows {}.",
                 candidates_dir()
-                    .map(|d| ui::pretty_path(&d))
+                    .map(|d| form::pretty_path(&d))
                     .unwrap_or_else(|| "~/Pictures/wallpapers".into())
             ),
         );
-        let reset = ui::action_button(
+        let reset = form::action_button(
             "Reset to system",
             "Put the sway config's wallpaper back, and the system's theme colour and motion.",
         );
-        let (footer, status) = ui::footer(&[&browse, &reset]);
+        let (footer, status) = form::footer(&[&browse, &reset]);
 
         let state = Rc::new(State {
             grid: grid.clone(),

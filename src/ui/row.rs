@@ -1,4 +1,7 @@
 //! The list row, the pressable row, and the list that holds them.
+//!
+//! `ui::row(..)`, `ui::row_button(..)`, `ui::list()`, `ui::list_row(..)`;
+//! `ui::set_selected`, `ui::set_instant`, `ui::set_busy` at runtime.
 
 use gtk4::Align;
 use gtk4::prelude::*;
@@ -51,6 +54,15 @@ pub fn row(icon: &str, title: &str, subtitle: &str) -> Row {
     }
 }
 
+impl Row {
+    /// A picture (an app's own icon) in the glyph's place.
+    pub fn set_icon_image(&self, image: &gtk4::Image) {
+        image.add_css_class("ui-row-icon");
+        self.icon.set_visible(false);
+        self.root.prepend(image);
+    }
+}
+
 /// A row you can press: the row inside a flat button.
 pub fn row_button(icon: &str, title: &str, subtitle: &str) -> (gtk4::Button, Row) {
     let r = row(icon, title, subtitle);
@@ -82,7 +94,13 @@ pub fn list_row(content: &impl IsA<gtk4::Widget>) -> gtk4::ListBoxRow {
     gtk4::ListBoxRow::builder().child(content).build()
 }
 
-/// A row whose state changes in one frame (see `.ui-row.instant`).
-pub fn instant(w: &impl IsA<gtk4::Widget>) {
-    w.add_css_class("instant");
+/// A row whose selection moves in one frame (see `.ui-row.instant`): a
+/// row on a keyed card that a fade would leave a ghost of.
+pub fn set_instant(w: &impl IsA<gtk4::Widget>, instant: bool) {
+    toggle(w, "instant", instant);
+}
+
+/// A row waiting on something it asked for: it dims until the answer.
+pub fn set_busy(w: &impl IsA<gtk4::Widget>, busy: bool) {
+    toggle(w, "busy", busy);
 }

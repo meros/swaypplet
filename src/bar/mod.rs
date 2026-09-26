@@ -201,8 +201,8 @@ fn build_bar_window(
     let root = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .build();
-    crate::ui::surface(&root);
-    crate::ui::card(&root, crate::ui::Card::Thin);
+    crate::ui::surface::adopt(&root);
+    crate::ui::card::adopt(&root, crate::ui::Card::Thin);
 
     // CenterBox, not Box: the center slot must stay screen-centered
     // regardless of how the left/right clusters grow.

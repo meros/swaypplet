@@ -162,9 +162,11 @@ pub fn run(component: &str) {
                         set.set_fp_armed(true);
                         set.fp_hint("Remove and try again");
                     }
-                    "face" => set.show_face(true, "looking", "Looking for you"),
-                    "face-ok" => set.show_face(true, "ok", "Recognised you"),
-                    "face-fail" => set.show_face(true, "fail", "Didn't recognise you"),
+                    "face" => set.show_face(Some(crate::ui::FaceState::Looking), "Looking for you"),
+                    "face-ok" => set.show_face(Some(crate::ui::FaceState::Ok), "Recognised you"),
+                    "face-fail" => {
+                        set.show_face(Some(crate::ui::FaceState::Fail), "Didn't recognise you")
+                    }
                     "error" => set.set_status(
                         "Wrong password (3 attempts)",
                         crate::lock::ui::StatusKind::Error,
@@ -297,7 +299,7 @@ pub fn run(component: &str) {
             .orientation(gtk4::Orientation::Vertical)
             .spacing(crate::tokens::space(4))
             .build();
-        crate::ui::surface(&host);
+        crate::ui::surface::adopt(&host);
         host.add_css_class("startmenu-quick");
 
         match component.as_str() {

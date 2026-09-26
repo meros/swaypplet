@@ -80,7 +80,8 @@ pub fn rebuild_wifi_list(
             } else {
                 format!("Show all ({})", total)
             };
-            let more_btn = ui::small_button(&btn_label, ui::Kind::Flat);
+            let more_btn =
+                ui::button_with(ui::Face::Label(&btn_label), ui::Kind::Flat, ui::Size::Small);
             more_btn.set_halign(gtk4::Align::Center);
 
             let state_c = state.clone();
@@ -125,8 +126,7 @@ fn build_wifi_row(
     let row_box = r.root.clone();
 
     if let Some(freq) = network.freq_mhz {
-        let band_lbl = ui::badge(freq_band_short(freq));
-        band_lbl.add_css_class("neutral");
+        let band_lbl = ui::badge(freq_band_short(freq), ui::BadgeTone::Neutral);
         r.end.append(&band_lbl);
     }
 
@@ -150,7 +150,11 @@ fn build_wifi_row(
         let status_lbl = ui::text("", ui::Text::Label, ui::Tone::Faint);
         status_lbl.set_visible(false);
 
-        let disconnect_btn = ui::small_button("Disconnect", ui::Kind::Secondary);
+        let disconnect_btn = ui::button_with(
+            ui::Face::Label("Disconnect"),
+            ui::Kind::Secondary,
+            ui::Size::Small,
+        );
 
         btn_row.append(&spinner);
         btn_row.append(&status_lbl);
@@ -174,14 +178,19 @@ fn build_wifi_row(
         let status_lbl = ui::text("", ui::Text::Label, ui::Tone::Faint);
         status_lbl.set_visible(false);
 
-        let forget_btn = ui::small_button("Forget", ui::Kind::Flat);
+        let forget_btn =
+            ui::button_with(ui::Face::Label("Forget"), ui::Kind::Flat, ui::Size::Small);
         wire_forget(
             &Busy::new(&forget_btn, &spinner, &status_lbl),
             network.ssid.clone(),
             on_change.clone(),
         );
 
-        let connect_btn = ui::small_button("Connect", ui::Kind::Secondary);
+        let connect_btn = ui::button_with(
+            ui::Face::Label("Connect"),
+            ui::Kind::Secondary,
+            ui::Size::Small,
+        );
         wire_connect_known(
             &Busy::new(&connect_btn, &spinner, &status_lbl),
             network.ssid.clone(),
@@ -209,7 +218,11 @@ fn build_wifi_row(
         let btn_row = ui::hbox(2);
         btn_row.set_halign(gtk4::Align::End);
 
-        let toggle_btn = ui::small_button("Connect", ui::Kind::Secondary);
+        let toggle_btn = ui::button_with(
+            ui::Face::Label("Connect"),
+            ui::Kind::Secondary,
+            ui::Size::Small,
+        );
         btn_row.append(&toggle_btn);
         r.end.append(&btn_row);
 
@@ -232,9 +245,9 @@ fn build_wifi_row(
             .placeholder_text("Password")
             .show_peek_icon(true)
             .build();
-        ui::entry(&pw_entry);
+        ui::entry::adopt(&pw_entry, ui::FieldSize::Normal);
 
-        let join_btn = ui::small_button("Join", ui::Kind::Primary);
+        let join_btn = ui::button_with(ui::Face::Label("Join"), ui::Kind::Primary, ui::Size::Small);
 
         pw_row.append(&pw_entry);
         pw_row.append(&join_btn);
@@ -299,7 +312,11 @@ fn build_wifi_row(
         let status_lbl = ui::text("", ui::Text::Label, ui::Tone::Faint);
         status_lbl.set_visible(false);
 
-        let connect_btn = ui::small_button("Connect", ui::Kind::Secondary);
+        let connect_btn = ui::button_with(
+            ui::Face::Label("Connect"),
+            ui::Kind::Secondary,
+            ui::Size::Small,
+        );
 
         btn_row.append(&spinner);
         btn_row.append(&status_lbl);
@@ -352,14 +369,14 @@ fn build_hidden_network_row(
         .placeholder_text("Network name (SSID)")
         .hexpand(true)
         .build();
-    ui::entry(&ssid_entry);
+    ui::entry::adopt(&ssid_entry, ui::FieldSize::Normal);
 
     let pw_entry = PasswordEntry::builder()
         .placeholder_text("Password (leave empty for open)")
         .show_peek_icon(true)
         .hexpand(true)
         .build();
-    ui::entry(&pw_entry);
+    ui::entry::adopt(&pw_entry, ui::FieldSize::Normal);
 
     let btn_row = ui::hbox(2);
     btn_row.set_halign(gtk4::Align::End);
@@ -370,7 +387,11 @@ fn build_hidden_network_row(
     let status_lbl = ui::text("", ui::Text::Label, ui::Tone::Faint);
     status_lbl.set_visible(false);
 
-    let connect_btn = ui::small_button("Connect", ui::Kind::Secondary);
+    let connect_btn = ui::button_with(
+        ui::Face::Label("Connect"),
+        ui::Kind::Secondary,
+        ui::Size::Small,
+    );
 
     btn_row.append(&spinner);
     btn_row.append(&status_lbl);
@@ -395,7 +416,11 @@ fn build_hidden_network_row(
         );
     }
 
-    let toggle_btn = ui::small_button("Connect to hidden network", ui::Kind::Flat);
+    let toggle_btn = ui::button_with(
+        ui::Face::Label("Connect to hidden network"),
+        ui::Kind::Flat,
+        ui::Size::Small,
+    );
     toggle_btn.set_halign(gtk4::Align::Center);
     {
         let rev_c = hidden_revealer.clone();

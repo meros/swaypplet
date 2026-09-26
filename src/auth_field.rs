@@ -188,7 +188,7 @@ impl Caption {
             .build();
         label.add_css_class("auth-caption");
         crate::ui::set_text_style(&label, crate::ui::Text::Label, crate::ui::Tone::Faint);
-        crate::ui::live_caption(&label);
+        crate::ui::live_caption::adopt(&label);
         Self {
             label,
             resting: Default::default(),
@@ -304,7 +304,14 @@ impl Caption {
     fn paint_markup(&self, markup: &str, tone: Tone) {
         let (level, strong) = tone.style();
         crate::ui::set_text_style(&self.label, crate::ui::Text::Label, level);
-        crate::ui::set_class(&self.label, "ui-strong", strong);
+        crate::ui::set_weight(
+            &self.label,
+            if strong {
+                crate::ui::Weight::Strong
+            } else {
+                crate::ui::Weight::Regular
+            },
+        );
         self.label.set_markup(markup);
     }
 }

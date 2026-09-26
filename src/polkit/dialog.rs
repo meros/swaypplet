@@ -184,7 +184,7 @@ impl PolkitDialog {
             .hexpand(true)
             .vexpand(true)
             .build();
-        ui::surface(&backdrop);
+        ui::surface::adopt(&backdrop);
 
         // Centring wrapper
         let center = gtk4::Box::builder()
@@ -198,7 +198,7 @@ impl PolkitDialog {
         // ── The card ─────────────────────────────────────────────────
         let card = ui::vbox(0);
         card.set_width_request(400);
-        ui::card(&card, ui::Card::Floating);
+        ui::card::adopt(&card, ui::Card::Floating);
         card.add_css_class("polkit-container");
 
         // Icon (image first, fallback nerd-font label).
@@ -212,7 +212,7 @@ impl PolkitDialog {
         icon_box.add_css_class("polkit-icon-box");
         let icon_image = gtk4::Image::builder().pixel_size(44).visible(false).build();
         let icon_label = gtk4::Label::new(Some("\u{f0483}"));
-        ui::glyph(&icon_label, ui::Text::Display, ui::Tone::Faint);
+        ui::glyph::adopt(&icon_label, ui::Text::Display, ui::Tone::Faint);
         icon_label.add_css_class("polkit-icon-glyph");
         icon_box.append(&icon_image);
         icon_box.append(&icon_label);
@@ -244,7 +244,7 @@ impl PolkitDialog {
         // monospace because it is a command, recessed because it is evidence
         // rather than instruction.
         let face_command = ui::text("", ui::Text::Body, ui::Tone::Fg);
-        ui::mono(&face_command);
+        ui::set_mono(&face_command, true);
         face_command.set_halign(gtk4::Align::Start);
         face_command.set_wrap(true);
         face_command.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
@@ -278,16 +278,20 @@ impl PolkitDialog {
         identity_row.set_visible(false);
         identity_row.add_css_class("polkit-identity-row");
         let identity_lbl = ui::text("Run as", ui::Text::Caption, ui::Tone::Muted);
-        ui::set_class(&identity_lbl, "ui-strong", true);
+        ui::set_weight(&identity_lbl, ui::Weight::Strong);
         let identity_combo = gtk4::DropDown::builder().hexpand(true).build();
-        ui::dropdown(&identity_combo);
+        ui::dropdown::adopt(&identity_combo);
         identity_row.append(&identity_lbl);
         identity_row.append(&identity_combo);
 
         let caption = Caption::new(46);
 
         // ── Details revealer (action_id, vendor, command, pid) ────────
-        let details_toggle = ui::small_button("\u{f0142}  Details", ui::Kind::Flat);
+        let details_toggle = ui::button_with(
+            ui::Face::Label("\u{f0142}  Details"),
+            ui::Kind::Flat,
+            ui::Size::Small,
+        );
         details_toggle.set_halign(gtk4::Align::Start);
         details_toggle.add_css_class("polkit-details-toggle");
         let details_revealer = ui::revealer(
@@ -295,7 +299,7 @@ impl PolkitDialog {
             crate::tokens::motion::EXPAND,
         );
         let details_label = ui::text("", ui::Text::Caption, ui::Tone::Muted);
-        ui::mono(&details_label);
+        ui::set_mono(&details_label, true);
         details_label.set_justify(gtk4::Justification::Left);
         details_label.set_wrap(true);
         details_label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
@@ -521,7 +525,7 @@ impl PolkitDialog {
         self.password_entry.set_placeholder_text(Some("Password"));
         self.set_status("", StatusKind::Info);
         self.card.remove_css_class("polkit-shake");
-        ui::set_class(&self.card, "success", false);
+        ui::set_success(&self.card, false);
         self.field.set_busy(false);
         self.field.set_fp_armed(false);
         self.caps.set(caps_lock_on());
@@ -705,13 +709,13 @@ impl PolkitDialog {
     /// are and simply stop asking: the pulse comes off, and what they last
     /// reported stands as the record of which method actually worked.
     pub fn flash_success(&self) {
-        ui::set_class(&self.card, "success", true);
+        ui::set_success(&self.card, true);
         self.icon_image.set_visible(false);
         self.icon_label.set_visible(true);
         self.icon_label.set_label(ICON_OK);
         // Authenticated: the one moment the ornament is worth looking at, so
         // it takes the accent and a settle (`.polkit-icon-ok`).
-        ui::glyph(&self.icon_label, ui::Text::Display, ui::Tone::Accent);
+        ui::glyph::adopt(&self.icon_label, ui::Text::Display, ui::Tone::Accent);
         self.icon_label.add_css_class("polkit-icon-ok");
         // The pulse comes off; the marks stay lit as the record of which
         // method actually worked.
@@ -743,7 +747,7 @@ impl PolkitDialog {
 
     fn set_icon(&self, icon_name: &str, action_id: &str) {
         self.icon_label.remove_css_class("polkit-icon-ok");
-        ui::glyph(&self.icon_label, ui::Text::Display, ui::Tone::Faint);
+        ui::glyph::adopt(&self.icon_label, ui::Text::Display, ui::Tone::Faint);
         // Try the icon name from polkit first.
         if !icon_name.is_empty() {
             let display = gtk4::prelude::WidgetExt::display(&self.icon_image);

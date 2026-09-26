@@ -11,8 +11,8 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use super::form::{self, dropdown_row, scale_row, section_box, switch_row};
 use super::store::{self, After, Alerts, Capture, Corner, Linger};
-use super::ui::{self, dropdown_row, scale_row, section_box, switch_row};
 
 fn describe(alerts: &Alerts, capture: &Capture) -> String {
     format!(
@@ -99,7 +99,7 @@ impl State {
         self.after
             .set_selected(pos(After::ALL.iter().position(|a| *a == capture.after)));
         self.annotate.set_active(capture.annotate);
-        ui::set_source(
+        form::set_source(
             &self.status,
             settings.alerts.is_some() || settings.capture.is_some(),
             &describe(&alerts, &capture),
@@ -115,7 +115,7 @@ pub struct AlertsPane {
 
 impl AlertsPane {
     pub fn new() -> Self {
-        let root = ui::pane();
+        let root = form::pane();
 
         let settings = store::current();
         let alerts = settings.alerts();
@@ -173,8 +173,8 @@ impl AlertsPane {
             .placeholder_text("~/Pictures/Screenshots")
             .text(&capture.folder)
             .build();
-        crate::ui::entry(&folder);
-        let folder_row = ui::kind_row("Folder", &folder);
+        crate::ui::entry::adopt(&folder, crate::ui::FieldSize::Normal);
+        let folder_row = form::kind_row("Folder", &folder);
         folder_row.set_tooltip_text(Some(
             "Where shots are saved. Empty is ~/Pictures/Screenshots; a ~ is your home.",
         ));
@@ -193,12 +193,12 @@ impl AlertsPane {
         );
         capture_group.append(&row_annotate);
 
-        let reset = ui::action_button(
+        let reset = form::action_button(
             "Reset to system",
             "Put the system's choices back and drop the alerts and capture sections from the settings file.",
         );
-        let (footer, status) = ui::footer(&[&reset]);
-        let copy = ui::copy_nix_button(
+        let (footer, status) = form::footer(&[&reset]);
+        let copy = form::copy_nix_button(
             &status,
             "The alerts and capture sections as theme/settings.nix holds them.",
             || {

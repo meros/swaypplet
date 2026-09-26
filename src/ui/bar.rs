@@ -1,5 +1,10 @@
 //! The bar's components: categorical tones, the segmented track and its
 //! segments, marks, the task bays, the meter, the rail, and the receded group.
+//!
+//! `ui::segmented()`, `ui::segment::adopt(&w, quiet)`, `ui::mark(child,
+//! quiet)`, `ui::mark::adopt(&b, quiet)`, `ui::bay(child, task)`,
+//! `ui::bay_chip()`, `ui::meter::adopt(&area)`, `ui::rail(slot)`; the
+//! `set_*` below at runtime.
 
 use gtk4::prelude::*;
 use gtk4::{Align, Orientation};
@@ -21,9 +26,13 @@ pub fn set_receded(w: &impl IsA<gtk4::Widget>, receded: bool) {
     toggle(w, "ui-receded", receded);
 }
 
-/// A Cairo-drawn meter: its `color()` is the accent fill.
-pub fn meter(area: &gtk4::DrawingArea) {
-    area.add_css_class("ui-meter");
+pub mod meter {
+    use gtk4::prelude::*;
+
+    /// A Cairo-drawn meter: its `color()` is the accent fill.
+    pub fn adopt(area: &gtk4::DrawingArea) {
+        area.add_css_class("ui-meter");
+    }
 }
 
 /// A track of fused segments; only its ends round. No gap: the segments
@@ -34,10 +43,20 @@ pub fn segmented() -> gtk4::Box {
     b
 }
 
-/// Make `w` a segment. `quiet` keeps its label muted until it is selected
-/// or under the pointer.
-pub fn segment(w: &impl IsA<gtk4::Widget>, quiet: bool) {
-    w.add_css_class("ui-segment");
+pub mod segment {
+    use gtk4::prelude::*;
+
+    /// Make `w` a segment. `quiet` keeps its label muted until it is
+    /// selected or under the pointer.
+    pub fn adopt(w: &impl IsA<gtk4::Widget>, quiet: bool) {
+        w.add_css_class("ui-segment");
+        super::set_quiet(w, quiet);
+    }
+}
+
+/// A segment's or a mark's label one level down (muted, or faint on a
+/// mark) until the pointer or the selection brings it up.
+pub fn set_quiet(w: &impl IsA<gtk4::Widget>, quiet: bool) {
     toggle(w, "quiet", quiet);
 }
 
@@ -71,12 +90,11 @@ pub enum Ribbon {
     Category(usize),
 }
 
-/// Give a segment its 2 px ribbon lane, transparent until set.
-pub fn ribboned(w: &impl IsA<gtk4::Widget>) {
-    w.add_css_class("ribboned");
-}
-
+/// What a segment's 2 px ribbon lane says. The first call gives the segment
+/// its lane, transparent at `Off`, so set it once when the segment is built
+/// and its height never changes after.
 pub fn set_ribbon(w: &impl IsA<gtk4::Widget>, r: Ribbon) {
+    w.add_css_class("ribboned");
     toggle(w, "ribbon-working", r == Ribbon::Working);
     for n in 1..=4 {
         toggle(w, &format!("ribbon-cat-{n}"), r == Ribbon::Category(n));
@@ -87,13 +105,18 @@ pub fn set_ribbon(w: &impl IsA<gtk4::Widget>, r: Ribbon) {
 /// under the pointer. `quiet` sits it one level lower, at faint.
 pub fn mark(child: &impl IsA<gtk4::Widget>, quiet: bool) -> gtk4::Button {
     let b = gtk4::Button::builder().child(child).build();
-    make_mark(&b, quiet);
+    mark::adopt(&b, quiet);
     b
 }
 
-pub fn make_mark(b: &gtk4::Button, quiet: bool) {
-    b.add_css_class("ui-mark");
-    toggle(b, "quiet", quiet);
+pub mod mark {
+    use gtk4::prelude::*;
+
+    /// Make a button the caller built a mark.
+    pub fn adopt(b: &(impl IsA<gtk4::Button> + IsA<gtk4::Widget>), quiet: bool) {
+        b.add_css_class("ui-mark");
+        super::set_quiet(b, quiet);
+    }
 }
 
 /// One task's slot on the board; `task` (1..=4) picks its tone.

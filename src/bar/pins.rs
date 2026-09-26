@@ -130,7 +130,7 @@ fn update(ui: &Ui) {
     ui.revealer.set_reveal_child(!pinned.is_empty());
     let tucked = pin::tucked();
     ui.glyph.set_label(if tucked { PIN_OUTLINE } else { PIN });
-    ui::set_class(&ui.btn, "quiet", tucked);
+    ui::set_quiet(&ui.btn, tucked);
     ui.count.set_visible(pinned.len() > 1);
     ui.count.set_label(&pinned.len().to_string());
 }
@@ -187,10 +187,18 @@ fn rows(ui: &Rc<Ui>, scenes: &[(String, Option<crate::jump::scene::Scene>)]) {
             ui::Text::Body,
             ui::Tone::Fg,
         );
-        label.add_css_class("ui-strong");
+        crate::ui::set_weight(&label, crate::ui::Weight::Strong);
         side.append(&label);
-        let go = ui::small_button("Go there", ui::Kind::Secondary);
-        let unpin = ui::small_button("Unpin", ui::Kind::Secondary);
+        let go = ui::button_with(
+            ui::Face::Label("Go there"),
+            ui::Kind::Secondary,
+            ui::Size::Small,
+        );
+        let unpin = ui::button_with(
+            ui::Face::Label("Unpin"),
+            ui::Kind::Secondary,
+            ui::Size::Small,
+        );
         for (b, action) in [(&go, "go"), (&unpin, "unpin")] {
             let name = name.clone();
             let pop = ui.pop.clone();
@@ -211,13 +219,14 @@ fn rows(ui: &Rc<Ui>, scenes: &[(String, Option<crate::jump::scene::Scene>)]) {
     }
 
     let tucked = pin::tucked();
-    let tuck = ui::small_button(
-        if tucked {
+    let tuck = ui::button_with(
+        ui::Face::Label(if tucked {
             "Show pins on screen"
         } else {
             "Tuck pins into the bar"
-        },
+        }),
         ui::Kind::Secondary,
+        ui::Size::Small,
     );
     tuck.connect_clicked(move |_| {
         if let Some(pins) = pin::handle() {

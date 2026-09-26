@@ -912,7 +912,7 @@ fn end_session(state: &Rc<RefCell<PolkitState>>, outcome: AuthOutcome) {
     // A `Sudo` or `FaceOnly` link is closed on drop; pam_race's own end/hangup
     // is the authority on the terminal side.
 
-    state.borrow().cue.set(false, "", "");
+    state.borrow().cue.set(None, "");
     dialog.hide();
 
     pop_queue(state);

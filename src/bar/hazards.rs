@@ -77,7 +77,7 @@ pub fn build(sway: &Rc<SwayService>, audio: &Rc<AudioService>) -> gtk4::Box {
     rec_glyph.set_tooltip_text(Some("Screen recording in progress"));
     // Recording is the one hazard in red: it is capturing now, and the
     // owner may want to stop it now.
-    ui::glyph(&rec_glyph, ui::Text::Body, ui::Tone::Danger);
+    ui::glyph::adopt(&rec_glyph, ui::Text::Body, ui::Tone::Danger);
     lane.append(&rec);
 
     crate::screenshot::record::RECORDING_OBSERVED.with(|r| {
@@ -139,7 +139,7 @@ fn hazard(glyph: &str) -> (gtk4::Revealer, gtk4::Label) {
         .label(glyph)
         .css_classes(["bar-hazard"])
         .build();
-    ui::glyph(&label, ui::Text::Body, ui::Tone::Warning);
+    ui::glyph::adopt(&label, ui::Text::Body, ui::Tone::Warning);
     let revealer = ui::revealer(
         gtk4::RevealerTransitionType::SlideRight,
         crate::tokens::motion::EXPAND,

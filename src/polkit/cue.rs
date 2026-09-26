@@ -90,7 +90,7 @@ impl Cue {
         // surface resize on every animation frame.
         strip.set_halign(gtk4::Align::Fill);
         strip.set_height_request(180);
-        crate::ui::surface(&strip);
+        crate::ui::surface::adopt(&strip);
         window.set_child(Some(&strip));
 
         Cue {
@@ -114,8 +114,8 @@ impl Cue {
     /// arrival from the top — which is the behaviour wanted. The cue has to
     /// arrive to be seen peripherally; a pill that was already there is a
     /// pill the user's eye has already filtered out.
-    pub fn set(&self, visible: bool, state: &str, text: &str) {
-        if !visible {
+    pub fn set(&self, state: Option<crate::ui::FaceState>, text: &str) {
+        if state.is_none() {
             self.window.set_visible(false);
             return;
         }
@@ -138,11 +138,11 @@ impl Cue {
         // so starting the entrance from here would spend its first frames
         // racing surface allocation -- which is visible, and always as a
         // stutter at exactly the moment the cue is trying to catch the eye.
-        crate::ui::set_class(&self.strip, "ui-face-enter", false);
+        crate::ui::set_face_enter(&self.strip, false);
         self.window.set_visible(true);
         let strip = self.strip.clone();
         self.window.add_tick_callback(move |window, _| {
-            crate::ui::set_class(&strip, "ui-face-enter", true);
+            crate::ui::set_face_enter(&strip, true);
             // Re-applied here as well as below: the region is a property of
             // the GdkSurface, which does not exist until the window maps, and
             // the strip spans the whole width of the output. An unset region

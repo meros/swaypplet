@@ -283,7 +283,7 @@ impl Card {
             .valign(gtk4::Align::Center)
             .build();
         wrapper.add_css_class("osd-wrapper");
-        crate::ui::surface(&wrapper);
+        crate::ui::surface::adopt(&wrapper);
 
         // Vertical layout: icon → bar → percentage
         let outer = gtk4::Box::builder()
@@ -291,7 +291,7 @@ impl Card {
             .spacing(0)
             .halign(gtk4::Align::Center)
             .build();
-        crate::ui::card(&outer, crate::ui::Card::Thin);
+        crate::ui::card::adopt(&outer, crate::ui::Card::Thin);
         outer.add_css_class("osd-container");
 
         let icon_label = gtk4::Label::builder()
@@ -301,20 +301,20 @@ impl Card {
             .xalign(0.5)
             .build();
         icon_label.add_css_class("osd-icon");
-        crate::ui::glyph(&icon_label, crate::ui::Text::Display, crate::ui::Tone::Fg);
+        crate::ui::glyph::adopt(&icon_label, crate::ui::Text::Display, crate::ui::Tone::Fg);
 
         // Bar mode: bar + percentage below
         let bar_box = crate::ui::vbox(3);
 
         let bar = gtk4::ProgressBar::builder().hexpand(true).build();
-        crate::ui::make_progress(&bar);
+        crate::ui::progress::adopt(&bar);
 
         let text_label = gtk4::Label::builder()
             .label("")
             .halign(gtk4::Align::Center)
             .build();
         crate::ui::set_text_style(&text_label, crate::ui::Text::Title, crate::ui::Tone::Fg);
-        text_label.add_css_class("ui-numeric");
+        crate::ui::set_numeric(&text_label, true);
 
         bar_box.append(&bar);
         bar_box.append(&text_label);

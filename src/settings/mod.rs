@@ -17,6 +17,7 @@
 mod alerts_pane;
 mod bar_pane;
 pub mod cli;
+mod form;
 pub mod glass;
 mod glass_pane;
 mod idle_pane;
@@ -24,7 +25,6 @@ mod look_pane;
 pub mod preset;
 pub mod schema;
 pub mod store;
-mod ui;
 pub mod wallpaper;
 
 use gtk4::prelude::*;

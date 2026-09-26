@@ -198,16 +198,26 @@ fn announce(state: &Rc<RefCell<PolkitState>>, req: Request) {
     if let Some(m) = methods {
         dialog.set_methods(m);
     }
-    report(state, "looking", "Looking for you", "Look at the camera");
+    report(
+        state,
+        crate::ui::FaceState::Looking,
+        "Looking for you",
+        "Look at the camera",
+    );
 }
 
 /// Say what the camera is doing: on the cue by the lens when it is on, else
 /// on the card's caption. The cue's wording is the instruction, the card's
 /// is the report, so a user reading peripherally is told what to do.
-fn report(state: &Rc<RefCell<PolkitState>>, ring: &str, card_text: &str, cue_text: &str) {
+fn report(
+    state: &Rc<RefCell<PolkitState>>,
+    ring: crate::ui::FaceState,
+    card_text: &str,
+    cue_text: &str,
+) {
     let dialog = state.borrow().dialog.clone();
     if elevate_settings().cue {
-        state.borrow().cue.set(true, ring, cue_text);
+        state.borrow().cue.set(Some(ring), cue_text);
     } else {
         dialog.hint(card_text);
     }
@@ -241,7 +251,10 @@ fn confirm(state: &Rc<RefCell<PolkitState>>, req: Request) {
         StatusKind::Info,
     );
     dialog.arm_allow();
-    state.borrow().cue.set(true, "ok", "Recognised you");
+    state
+        .borrow()
+        .cue
+        .set(Some(crate::ui::FaceState::Ok), "Recognised you");
 }
 
 /// The attempt ended on faced's side, by any route. Drop the camera from the
@@ -266,7 +279,7 @@ fn cancel(state: &Rc<RefCell<PolkitState>>, req: Request) {
         (matches!(active.backing, Backing::FaceOnly), active.methods)
     };
     let dialog = state.borrow().dialog.clone();
-    state.borrow().cue.set(false, "", "");
+    state.borrow().cue.set(None, "");
     dialog.set_methods(methods);
 
     // Name what happened, in the lock screen's words, for the outcomes the

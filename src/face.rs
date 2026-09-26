@@ -287,14 +287,14 @@ pub enum Progress {
 }
 
 impl Progress {
-    /// The ring class this state renders as. Note `Face` is `found`: the
-    /// engine names what it is doing, the stylesheet names what it looks
-    /// like, and they are not the same word.
-    pub fn ring(self) -> &'static str {
+    /// The face indicator state this renders as. Note `Face` is `Found`:
+    /// the engine names what it is doing, the indicator what it looks like,
+    /// and they are not the same word.
+    pub fn ring(self) -> crate::ui::FaceState {
         match self {
-            Progress::Looking => "looking",
-            Progress::Dark => "dark",
-            Progress::Face => "found",
+            Progress::Looking => crate::ui::FaceState::Looking,
+            Progress::Dark => crate::ui::FaceState::Dark,
+            Progress::Face => crate::ui::FaceState::Found,
         }
     }
 

@@ -21,11 +21,11 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use super::form::{self, Durations, dropdown_row, kind_row, scale_row, section_box, switch_row};
 use super::store::{self, Elevate, Idle};
-use super::ui::{self, Durations, dropdown_row, kind_row, scale_row, section_box, switch_row};
 
 /// The rungs each dropdown offers. The saved value is added if it is not
-/// one of them (`ui::Durations`).
+/// one of them (`form::Durations`).
 const DIM_LADDER: &[u32] = &[0, 30, 60, 120, 180, 240, 300, 600, 900];
 const LOCK_LADDER: &[u32] = &[0, 60, 120, 300, 600, 900, 1800, 3600];
 const BLANK_LADDER: &[u32] = &[0, 60, 120, 300, 600, 900, 1800, 3600];
@@ -100,7 +100,7 @@ const NIGHT_TIMERS: [Timer; 3] = [
 ];
 
 /// The minute rungs a clock dropdown offers, five apart, plus whatever the
-/// file says. Same reasoning as `ui::Durations`: a minute typed by hand
+/// file says. Same reasoning as `form::Durations`: a minute typed by hand
 /// (`"night_from_m": 37`) shows itself rather than being snapped away.
 fn minute_rungs(current: u8) -> Vec<u8> {
     let mut rungs: Vec<u8> = (0..60).step_by(5).map(|m| m as u8).collect();
@@ -121,12 +121,12 @@ fn time_row(
 ) -> (gtk4::Box, gtk4::DropDown, gtk4::DropDown, Vec<u8>) {
     let hours: Vec<String> = (0..24).map(|h| format!("{h:02}")).collect();
     let hours: Vec<&str> = hours.iter().map(String::as_str).collect();
-    let hour = ui::dropdown(&hours);
+    let hour = form::dropdown(&hours);
 
     let rungs = minute_rungs(minute);
     let labels: Vec<String> = rungs.iter().map(|m| format!("{m:02}")).collect();
     let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let minutes = ui::dropdown(&labels);
+    let minutes = form::dropdown(&labels);
 
     let clock = crate::ui::hbox(2);
     clock.append(&hour);
@@ -147,11 +147,11 @@ fn time_row(
 fn describe(idle: &Idle) -> String {
     let mut text = format!(
         "System default: dim {} at {}%, lock {}, screen off {} into the lock, suspend {} on battery",
-        ui::duration_label(idle.dim_after_s).to_lowercase(),
+        form::duration_label(idle.dim_after_s).to_lowercase(),
         idle.dim_level,
-        ui::duration_label(idle.lock_after_s).to_lowercase(),
-        ui::duration_label(idle.blank_after_s).to_lowercase(),
-        ui::duration_label(idle.suspend_after_s).to_lowercase(),
+        form::duration_label(idle.lock_after_s).to_lowercase(),
+        form::duration_label(idle.blank_after_s).to_lowercase(),
+        form::duration_label(idle.suspend_after_s).to_lowercase(),
     );
     if idle.night {
         text.push_str(&format!(
@@ -160,9 +160,9 @@ fn describe(idle: &Idle) -> String {
             idle.night_from_m,
             idle.night_to_h,
             idle.night_to_m,
-            ui::duration_label(idle.night_dim_after_s).to_lowercase(),
-            ui::duration_label(idle.night_lock_after_s).to_lowercase(),
-            ui::duration_label(idle.night_blank_after_s).to_lowercase(),
+            form::duration_label(idle.night_dim_after_s).to_lowercase(),
+            form::duration_label(idle.night_lock_after_s).to_lowercase(),
+            form::duration_label(idle.night_blank_after_s).to_lowercase(),
         ));
     }
     text
@@ -291,7 +291,7 @@ impl State {
         for (toggle, switch) in ELEVATE.iter().zip(&self.elevate) {
             switch.set_active((toggle.get)(&elevate));
         }
-        ui::set_source(
+        form::set_source(
             &self.status,
             settings.idle.is_some() || settings.elevate.is_some(),
             &describe(&idle),
@@ -307,7 +307,7 @@ pub struct IdlePane {
 
 impl IdlePane {
     pub fn new() -> Self {
-        let root = ui::pane();
+        let root = form::pane();
 
         let group = section_box(
             "Idle timers",
@@ -405,12 +405,12 @@ impl IdlePane {
             elevate.push(switch);
         }
 
-        let reset = ui::action_button(
+        let reset = form::action_button(
             "Reset to system",
             "Put the system's timers and access switches back and drop both sections from the settings file.",
         );
-        let (footer, status) = ui::footer(&[&reset]);
-        let copy = ui::copy_nix_button(
+        let (footer, status) = form::footer(&[&reset]);
+        let copy = form::copy_nix_button(
             &status,
             "The timers as the `idle` attrset of theme/settings.nix, for promoting a keeper into the Nix side by hand.",
             || store::current().section_as_nix("idle"),

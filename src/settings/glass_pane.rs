@@ -20,9 +20,9 @@ use std::rc::Rc;
 use gtk4::glib;
 use gtk4::prelude::*;
 
+use super::form::{self, kind_row, pretty_path, section_box};
 use super::glass::{self, GrainKind, SurfaceKind, System, Tuning};
 use super::preset;
-use super::ui::{self, kind_row, pretty_path, section_box};
 
 /// How long after the last slider motion the compositor is told.
 ///
@@ -556,7 +556,7 @@ impl State {
             self.status
                 .set_text("System default, as the sway config ships it");
         }
-        ui::mark_source(&self.status, !modified);
+        form::mark_source(&self.status, !modified);
     }
 }
 
@@ -569,7 +569,7 @@ pub struct GlassPane {
 
 impl GlassPane {
     pub fn new() -> Self {
-        let root = ui::pane();
+        let root = form::pane();
 
         let Some(system) = System::load() else {
             root.append(&unconfigured_note());
@@ -583,13 +583,13 @@ impl GlassPane {
         let modified = saved.is_some();
         let tuning = saved.unwrap_or_else(|| Tuning::system(&system));
 
-        // Capped like every other wrapping label in the pane (`ui::HINT_CHARS`,
+        // Capped like every other wrapping label in the pane (`form::HINT_CHARS`,
         // for what an uncapped one does to the whole tab's width). This tab
-        // builds its own status rather than taking `ui::footer`'s, because it
+        // builds its own status rather than taking `form::footer`'s, because it
         // also carries the Undo button.
-        let status = ui::status_label();
+        let status = form::status_label();
 
-        let undo_btn = ui::action_button("Undo", "Revert the last tuning or preset change.");
+        let undo_btn = form::action_button("Undo", "Revert the last tuning or preset change.");
         undo_btn.set_sensitive(false);
 
         let state = Rc::new(State {
@@ -630,7 +630,7 @@ impl GlassPane {
         {
             let state = state.clone();
             let body = tune.body.clone();
-            tune.button.connect_clicked(move |_| {
+            tune.header.connect_clicked(move |_| {
                 if body.first_child().is_some() {
                     return;
                 }
@@ -687,7 +687,7 @@ fn unconfigured_note() -> gtk4::Box {
         crate::ui::Text::Body,
         crate::ui::Tone::Fg,
     );
-    title.add_css_class("ui-strong");
+    crate::ui::set_weight(&title, crate::ui::Weight::Strong);
 
     let body = crate::ui::text(
         "The material and the surfaces it applies to come from \
@@ -698,7 +698,7 @@ fn unconfigured_note() -> gtk4::Box {
         crate::ui::Tone::Muted,
     );
     body.set_wrap(true);
-    body.set_max_width_chars(ui::HINT_CHARS);
+    body.set_max_width_chars(form::HINT_CHARS);
 
     note.append(&title);
     note.append(&body);
@@ -729,7 +729,7 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
         slot += 1;
     };
 
-    let system_btn = ui::preset_button("System");
+    let system_btn = form::preset_button("System");
     system_btn.set_tooltip_text(Some(
         "The material users/modules/theme/glass.nix ships. Also what Reset returns to.",
     ));
@@ -743,7 +743,7 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
     place(&system_btn);
 
     for p in &preset::ALL {
-        let btn = ui::preset_button(p.name);
+        let btn = form::preset_button(p.name);
         btn.set_tooltip_text(Some(p.hint));
         let state = state.clone();
         // A preset is a material, and it resets the geometry with it: keeping
@@ -774,7 +774,7 @@ fn build_kinds(state: &Rc<State>) -> gtk4::Box {
     );
 
     let surface_labels: Vec<&str> = SurfaceKind::ALL.iter().map(|k| k.label()).collect();
-    let surface = ui::dropdown(&surface_labels);
+    let surface = form::dropdown(&surface_labels);
     {
         let state = state.clone();
         surface.connect_selected_notify(move |d| {
@@ -803,7 +803,7 @@ fn build_kinds(state: &Rc<State>) -> gtk4::Box {
     group.append(&kind_row("Surface", &surface));
 
     let grain_labels: Vec<&str> = GrainKind::ALL.iter().map(|k| k.label()).collect();
-    let grain = ui::dropdown(&grain_labels);
+    let grain = form::dropdown(&grain_labels);
     {
         let state = state.clone();
         grain.connect_selected_notify(move |d| {
@@ -853,7 +853,7 @@ fn build_group(state: &Rc<State>, group: &'static Group) -> gtk4::Box {
 /// the check follows - so what they are really for is the way back.
 fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
     let button = gtk4::Button::new();
-    crate::ui::make_button(&button, crate::ui::Kind::Secondary);
+    crate::ui::button::adopt(&button, crate::ui::Kind::Secondary, crate::ui::Size::Normal);
 
     let swatch_box = crate::ui::hbox(3);
 
@@ -877,7 +877,7 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
         crate::ui::Text::Caption,
         crate::ui::Tone::Muted,
     );
-    hex_label.add_css_class("ui-mono");
+    crate::ui::set_mono(&hex_label, true);
 
     swatch_box.append(&swatch);
     swatch_box.append(&hex_label);
@@ -886,14 +886,17 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
     // The popover draws nothing itself; the card inside it is solid, since
     // a popup has no glass behind it.
     let pop_card = crate::ui::vbox(0);
-    crate::ui::solid_card(&pop_card);
+    crate::ui::card::adopt(&pop_card, crate::ui::Card::Solid);
     let pop_body = crate::ui::vbox(3);
     crate::ui::pad(&pop_body, 4);
     pop_card.append(&pop_body);
     let popover = crate::ui::popover(&pop_card, gtk4::PositionType::Bottom);
     popover.set_parent(&button);
 
-    pop_body.append(&crate::ui::overline("Palette swatches", crate::ui::Tone::Muted));
+    pop_body.append(&crate::ui::overline(
+        "Palette swatches",
+        crate::ui::Tone::Muted,
+    ));
 
     let pal_grid = gtk4::FlowBox::builder()
         .max_children_per_line(6)
@@ -924,16 +927,16 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
         .max_length(7)
         .width_chars(8)
         .build();
-    crate::ui::entry(&hex_entry);
-    hex_entry.add_css_class("ui-mono");
+    crate::ui::entry::adopt(&hex_entry, crate::ui::FieldSize::Normal);
+    crate::ui::set_mono(&hex_entry, true);
 
-    let r_scale = ui::scale(0.0, 255.0, 1.0);
-    let g_scale = ui::scale(0.0, 255.0, 1.0);
-    let b_scale = ui::scale(0.0, 255.0, 1.0);
+    let r_scale = form::scale(0.0, 255.0, 1.0);
+    let g_scale = form::scale(0.0, 255.0, 1.0);
+    let b_scale = form::scale(0.0, 255.0, 1.0);
 
     for (hex, name) in swatches {
         let btn = gtk4::Button::builder().tooltip_text(name).build();
-        crate::ui::make_button(&btn, crate::ui::Kind::Secondary);
+        crate::ui::button::adopt(&btn, crate::ui::Kind::Secondary, crate::ui::Size::Normal);
         let swatch_da = gtk4::DrawingArea::builder()
             .content_width(20)
             .content_height(14)
@@ -969,7 +972,7 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
 
     let make_channel_row = |name: &str, scale: &gtk4::Scale| -> gtk4::Box {
         let row = crate::ui::hbox(3);
-        let lbl = ui::row_label(name);
+        let lbl = form::row_label(name);
         lbl.set_width_chars(2);
         row.append(&lbl);
         row.append(scale);
@@ -982,7 +985,7 @@ fn build_fill_controls(state: &Rc<State>, container: &gtk4::Box) {
     pop_body.append(&rgb_box);
 
     let hex_row = crate::ui::hbox(3);
-    let hex_lbl = ui::row_label("Hex:");
+    let hex_lbl = form::row_label("Hex:");
     hex_row.append(&hex_lbl);
     hex_row.append(&hex_entry);
     pop_body.append(&hex_row);
@@ -1133,7 +1136,7 @@ fn card_default_rgb() -> (f64, f64, f64) {
 }
 
 fn build_knob(state: &Rc<State>, knob: &'static Knob) -> gtk4::Box {
-    let row = ui::row();
+    let row = form::row();
     row.set_tooltip_text(Some(knob.hint));
     if let Some(live_when) = knob.live_when {
         let row = row.clone();
@@ -1143,10 +1146,10 @@ fn build_knob(state: &Rc<State>, knob: &'static Knob) -> gtk4::Box {
             .push(Box::new(move |t| row.set_sensitive(live_when(t))));
     }
 
-    row.append(&ui::row_label(knob.label));
+    row.append(&form::row_label(knob.label));
 
-    let scale = ui::scale(knob.min, knob.max, knob.step);
-    let value = ui::value_label();
+    let scale = form::scale(knob.min, knob.max, knob.step);
+    let value = form::value_label();
 
     {
         let state = state.clone();
@@ -1189,7 +1192,7 @@ fn build_knob(state: &Rc<State>, knob: &'static Knob) -> gtk4::Box {
 /// The glass footer keeps its own status label (the pane's `State` holds
 /// it), so the shared footer's is swapped for it.
 fn build_footer(state: &Rc<State>, status: &gtk4::Label, undo_btn: &gtk4::Button) -> gtk4::Box {
-    let reset = super::ui::action_button(
+    let reset = super::form::action_button(
         "Reset to system",
         "Put the shipped material back and delete the override file.",
     );
@@ -1200,7 +1203,7 @@ fn build_footer(state: &Rc<State>, status: &gtk4::Label, undo_btn: &gtk4::Button
             state.replace(tuning, false);
         });
     }
-    let copy = super::ui::copy_button(
+    let copy = super::form::copy_button(
         status,
         "The material as a glass.nix attrset body, for promoting a keeper into the Nix side by hand.",
         "Copied — paste into material = { … } in theme/glass.nix",
@@ -1210,7 +1213,7 @@ fn build_footer(state: &Rc<State>, status: &gtk4::Label, undo_btn: &gtk4::Button
         },
     );
 
-    let (footer, shared_status) = super::ui::footer(&[undo_btn, &reset, &copy]);
+    let (footer, shared_status) = super::form::footer(&[undo_btn, &reset, &copy]);
     footer.remove(&shared_status);
     footer.append(status);
     footer

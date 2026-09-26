@@ -241,7 +241,7 @@ fn raise(
                     let content = ui::hbox(2);
                     content.append(&label_widget(ws.num, &ws.name));
                     let pin_mark = gtk4::Label::new(Some("\u{f0403}"));
-                    ui::glyph(&pin_mark, ui::Text::Caption, ui::Tone::Faint);
+                    ui::glyph::adopt(&pin_mark, ui::Text::Caption, ui::Tone::Faint);
                     pin_mark.add_css_class(PIN_MARK_CLASS);
                     pin_mark.set_visible(crate::jump::pin::is_pinned(&ws.name));
                     content.append(&pin_mark);
@@ -251,8 +251,8 @@ fn raise(
                         .build();
                     // Quiet: an idle label sits muted so the selected
                     // segment is the only loud element on the left.
-                    ui::segment(&button, true);
-                    ui::ribboned(&button);
+                    ui::segment::adopt(&button, true);
+                    ui::set_ribbon(&button, ui::Ribbon::Off);
                     let cmd = switch_command(ws.num, &ws.name);
                     button.connect_clicked(move |_| sway_ipc::run_command(&cmd));
                     crate::jump::peek::attach(&button, ws.name.clone(), on_screen.clone());

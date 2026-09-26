@@ -78,7 +78,11 @@ fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) 
     // Disable button is suppressed when it would turn off the last active display.
     let can_disable = output.active && active_count > 1;
     let btn_label = if output.active { "Disable" } else { "Enable" };
-    let toggle_btn = ui::small_button(btn_label, ui::Kind::Secondary);
+    let toggle_btn = ui::button_with(
+        ui::Face::Label(btn_label),
+        ui::Kind::Secondary,
+        ui::Size::Small,
+    );
     if !can_disable && output.active {
         // Last active display: prevent disabling.
         toggle_btn.set_sensitive(false);
@@ -150,7 +154,7 @@ pub struct DisplaySection {
 impl DisplaySection {
     pub fn new() -> Self {
         let section = ui::section(icons::DISPLAY, "Displays", "");
-        ui::glyph(&section.icon, ui::Text::Title, ui::Tone::Fg);
+        ui::glyph::adopt(&section.icon, ui::Text::Title, ui::Tone::Fg);
         let output_list = ui::vbox(1);
 
         // ── Night light warmth, above the outputs ─────────────────────────────
@@ -158,7 +162,7 @@ impl DisplaySection {
         night.add_css_class("display-night");
         night.append(&ui::heading("Night Light Warmth"));
         let night_row = ui::slider_row("󰖔", 2000.0, 6500.0, 100.0);
-        ui::glyph(&night_row.icon, ui::Text::Title, ui::Tone::Fg);
+        ui::glyph::adopt(&night_row.icon, ui::Text::Title, ui::Tone::Fg);
         night_row.scale.adjustment().set_page_increment(500.0);
         night_row.scale.set_value(3500.0);
         night_row.value.set_label("3500K");

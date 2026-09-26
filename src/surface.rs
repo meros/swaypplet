@@ -111,7 +111,7 @@ impl GlassSurface {
         let pane = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .build();
-        crate::ui::card(&pane, crate::ui::Card::Floating);
+        crate::ui::card::adopt(&pane, crate::ui::Card::Floating);
 
         // Two bins, one axis each: the outer one is the card's slot in its
         // column, the inner one is its entrance. Nested so neither

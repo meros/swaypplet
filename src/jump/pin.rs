@@ -761,8 +761,8 @@ fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: 
     window.set_decorated(false);
 
     let frame = crate::ui::vbox(2);
-    crate::ui::surface(&frame);
-    crate::ui::card(&frame, crate::ui::Card::Floating);
+    crate::ui::surface::adopt(&frame);
+    crate::ui::card::adopt(&frame, crate::ui::Card::Floating);
     frame.add_css_class("jump-pin");
 
     let content = crate::ui::vbox(2);
@@ -777,10 +777,10 @@ fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: 
     let footer = crate::ui::hbox(3);
     footer.add_css_class("jump-pin-footer");
     let mark = gtk4::Label::new(Some(PIN_GLYPH));
-    crate::ui::glyph(&mark, crate::ui::Text::Label, crate::ui::Tone::Muted);
+    crate::ui::glyph::adopt(&mark, crate::ui::Text::Label, crate::ui::Tone::Muted);
     footer.append(&mark);
     let label = crate::ui::text(label, crate::ui::Text::Label, crate::ui::Tone::Muted);
-    label.add_css_class("ui-strong");
+    crate::ui::set_weight(&label, crate::ui::Weight::Strong);
     footer.append(&label);
     let hint = crate::ui::text(
         "click to go · right-click to unpin",
@@ -791,7 +791,14 @@ fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: 
     hint.set_hexpand(true);
     hint.add_css_class("jump-pin-hint");
     footer.append(&hint);
-    let close = crate::ui::glyph_button("\u{00d7}", "Unpin", crate::ui::Kind::Flat);
+    let close = crate::ui::button_with(
+        crate::ui::Face::Glyph {
+            glyph: "\u{00d7}",
+            tooltip: "Unpin",
+        },
+        crate::ui::Kind::Flat,
+        crate::ui::Size::Normal,
+    );
     close.add_css_class("pill");
     close.add_css_class("small");
     close.add_css_class("jump-pin-close");

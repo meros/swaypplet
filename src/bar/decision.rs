@@ -199,7 +199,7 @@ impl DecisionSlot {
         let meta = gtk4::Label::builder().visible(false).build();
         ui::set_text_style(&meta, ui::Text::Caption, ui::Tone::Muted);
         let root = ui::hbox(3);
-        ui::segment(&root, false);
+        ui::segment::adopt(&root, false);
         root.add_css_class("bar-decision");
         root.append(&dot);
         root.append(&text);
@@ -215,7 +215,7 @@ impl DecisionSlot {
             .css_classes(["bar-decision-osd-text"])
             .build();
         ui::set_text_style(&osd_text, ui::Text::Label, ui::Tone::Muted);
-        osd_text.add_css_class("ui-numeric");
+        crate::ui::set_numeric(&osd_text, true);
         let hair_shown: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
         let hairline = gtk4::DrawingArea::builder()
             .content_width(HAIRLINE_WIDTH)
@@ -224,7 +224,7 @@ impl DecisionSlot {
             .build();
         // The draw func paints the track (a quarter of it) and the fill
         // from the meter's colour, the accent.
-        ui::meter(&hairline);
+        ui::meter::adopt(&hairline);
         {
             let shown = hair_shown.clone();
             hairline.set_draw_func(move |area, cr, w, h| {
@@ -258,7 +258,7 @@ impl DecisionSlot {
             });
         }
         let osd_page = ui::hbox(3);
-        ui::segment(&osd_page, false);
+        ui::segment::adopt(&osd_page, false);
         osd_page.add_css_class("bar-decision");
         osd_page.append(&osd_icon);
         osd_page.append(&hairline);

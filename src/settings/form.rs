@@ -1,6 +1,6 @@
 //! The rows the settings tabs are built from, so the five of them read as
 //! one pane: the same label gutter, the same hint placement, the same
-//! footer. Thin wrappers over the components (`crate::ui`), which carry the
+//! footer. Built only from the components (`crate::ui`), which carry the
 //! colour, type and shape; `data/css/15-settings.css` only places things.
 //!
 //! Hints live in tooltips per row; only a group carries a visible one. The
@@ -10,7 +10,7 @@ use std::path::Path;
 
 use gtk4::prelude::*;
 
-use crate::ui::{self as c, Kind, Text, Tone};
+use crate::ui::{self, Kind, Text, Tone};
 
 /// What a wrapping label is allowed to ASK for, in characters.
 ///
@@ -25,17 +25,17 @@ pub const HINT_CHARS: i32 = 64;
 
 /// A tab's column of groups.
 pub fn pane() -> gtk4::Box {
-    let root = c::vbox(4);
+    let root = ui::vbox(4);
     root.set_hexpand(true);
     root
 }
 
 /// A titled run of rows: a group fill, its name, and the one visible hint.
 pub fn section_box(title: &str, hint: &str) -> gtk4::Box {
-    let container = c::group(1);
+    let container = ui::group(1);
     container.set_hexpand(true);
     container.add_css_class("settings-group");
-    container.append(&c::overline(title, c::Tone::Muted));
+    container.append(&ui::overline(title, ui::Tone::Muted));
 
     let sub = hint_label(hint);
     sub.add_css_class("settings-group-hint");
@@ -47,7 +47,7 @@ pub fn section_box(title: &str, hint: &str) -> gtk4::Box {
 /// Running text under a group's name or in a status line: faint, wrapping,
 /// capped at [`HINT_CHARS`].
 fn hint_label(text: &str) -> gtk4::Label {
-    let l = c::text(text, Text::Caption, Tone::Faint);
+    let l = ui::text(text, Text::Caption, Tone::Faint);
     l.set_wrap(true);
     l.set_max_width_chars(HINT_CHARS);
     l
@@ -55,7 +55,7 @@ fn hint_label(text: &str) -> gtk4::Label {
 
 /// The label in a row's gutter.
 pub fn row_label(label: &str) -> gtk4::Label {
-    let name = c::text(label, Text::Label, Tone::Fg);
+    let name = ui::text(label, Text::Label, Tone::Fg);
     name.add_css_class("settings-row-label");
     name
 }
@@ -63,9 +63,9 @@ pub fn row_label(label: &str) -> gtk4::Label {
 /// The value beside a rail: fixed width, tabular, so the number does not
 /// shove the rail as it grows a digit.
 pub fn value_label() -> gtk4::Label {
-    let value = c::text("", Text::Caption, Tone::Muted);
-    value.add_css_class("ui-mono");
-    value.add_css_class("ui-numeric");
+    let value = ui::text("", Text::Caption, Tone::Muted);
+    ui::set_mono(&value, true);
+    ui::set_numeric(&value, true);
     value.set_xalign(1.0);
     value.set_width_chars(6);
     value
@@ -76,13 +76,13 @@ pub fn scale(min: f64, max: f64, step: f64) -> gtk4::Scale {
     let scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, min, max, step);
     scale.set_draw_value(false);
     scale.set_hexpand(true);
-    c::dense_slider(&scale);
+    ui::slider::adopt(&scale, ui::Density::Dense);
     scale
 }
 
 /// An empty row, for the helpers below to fill.
 pub fn row() -> gtk4::Box {
-    let row = c::hbox(3);
+    let row = ui::hbox(3);
     row.add_css_class("settings-row");
     row
 }
@@ -108,7 +108,7 @@ pub fn switch_row(label: &str, hint: &str, active: bool) -> (gtk4::Box, gtk4::Sw
     name.set_hexpand(true);
     row.append(&name);
 
-    let switch = c::switch();
+    let switch = ui::switch();
     switch.set_active(active);
     row.append(&switch);
     (row, switch)
@@ -116,7 +116,7 @@ pub fn switch_row(label: &str, hint: &str, active: bool) -> (gtk4::Box, gtk4::Sw
 
 /// A dropdown over `choices`, the pane's height.
 pub fn dropdown(choices: &[&str]) -> gtk4::DropDown {
-    c::dropdown_of(choices)
+    ui::dropdown(choices)
 }
 
 /// A label and a dropdown over `choices`.
@@ -161,7 +161,7 @@ pub fn scale_row(
 
 /// A button in a group of presets.
 pub fn preset_button(label: &str) -> gtk4::Button {
-    c::button(label, Kind::Secondary)
+    ui::button(label, Kind::Secondary)
 }
 
 /// The line saying where a tab's values currently come from.
@@ -173,7 +173,7 @@ pub fn status_label() -> gtk4::Label {
 /// Where the values come from: `system` is faint, an override plain. The one
 /// piece of state the screen behind the pane does not show.
 pub fn mark_source(status: &gtk4::Label, system: bool) {
-    c::set_text_style(
+    ui::set_text_style(
         status,
         Text::Caption,
         if system { Tone::Faint } else { Tone::Muted },
@@ -183,10 +183,10 @@ pub fn mark_source(status: &gtk4::Label, system: bool) {
 /// The strip under a tab: its action buttons, and a line saying where the
 /// values currently come from.
 pub fn footer(buttons: &[&gtk4::Button]) -> (gtk4::Box, gtk4::Label) {
-    let footer = c::vbox(3);
+    let footer = ui::vbox(3);
     footer.add_css_class("settings-footer");
 
-    let row = c::hbox(3);
+    let row = ui::hbox(3);
     for button in buttons {
         row.append(*button);
     }
@@ -239,7 +239,7 @@ pub fn copy_nix_button(
 }
 
 pub fn action_button(label: &str, hint: &str) -> gtk4::Button {
-    let button = c::button(label, Kind::Secondary);
+    let button = ui::button(label, Kind::Secondary);
     button.set_tooltip_text(Some(hint));
     button
 }
