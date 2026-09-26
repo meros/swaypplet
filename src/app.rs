@@ -379,6 +379,10 @@ pub fn run() {
             if let Some(ref jump) = st.jump {
                 match args.get(2).map(String::as_str) {
                     Some("step-back") => jump.step_back(),
+                    // From sway's `swaypplet-jump` mode, which holds
+                    // `Super+Escape` and `Super+p` while the card is up.
+                    Some("cancel") => jump.cancel(),
+                    Some("pin") => jump.pin(),
                     _ => jump.step(),
                 }
             }
