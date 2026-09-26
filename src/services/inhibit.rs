@@ -141,6 +141,16 @@ impl Inhibitor {
         }
     }
 
+    /// When a timed inhibitor lifts ("14:30"), from its unit's description;
+    /// `None` for one armed until turned off, or not armed. Blocking.
+    pub fn until(self) -> Option<String> {
+        let out = Command::new("systemctl")
+            .args(["--user", "show", "--property=Description", "--value", self.unit()])
+            .output()
+            .ok()?;
+        parse_until(&String::from_utf8_lossy(&out.stdout))
+    }
+
     /// [`read`](Self::read) as a policy answer: an authority we cannot reach
     /// is not an armed inhibitor.
     ///
@@ -155,14 +165,42 @@ impl Inhibitor {
     /// Flip the inhibitor and report whether the authority now agrees.
     /// Blocking; call from a background thread.
     pub fn arm(self, on: bool) -> bool {
+        self.arm_for(on, None)
+    }
+
+    /// [`arm`](Self::arm), for `minutes` when given: the unit's own process
+    /// sleeps that long and exits, so the inhibitor lifts by itself with no
+    /// timer in this process, and a restart of the panel cannot lose it.
+    /// The end time goes into the unit's description, which is where
+    /// [`until`](Self::until) reads it back.
+    pub fn arm_for(self, on: bool, minutes: Option<u32>) -> bool {
         if on {
+            // Re-arming with a new duration replaces the old unit.
+            if self.read() == Some(true) {
+                run(
+                    self.scope(),
+                    Command::new("systemctl").args(["--user", "stop", self.unit()]),
+                );
+            }
+            let (sleep, until) = match minutes {
+                Some(m) => {
+                    let end = gtk4::glib::DateTime::now_local()
+                        .ok()
+                        .and_then(|t| t.add_minutes(m as i32).ok())
+                        .and_then(|t| t.format("%H:%M").ok())
+                        .map(|s| format!(" until {s}"))
+                        .unwrap_or_default();
+                    ((m * 60).to_string(), end)
+                }
+                None => ("infinity".to_string(), String::new()),
+            };
             let args: Vec<String> = vec![
                 "--user".into(),
                 "--quiet".into(),
                 "--collect".into(),
                 format!("--unit={}", self.unit()),
                 format!(
-                    "--description=swaypplet {} ({} inhibitor)",
+                    "--description=swaypplet {} ({} inhibitor){until}",
                     self.label(),
                     self.what()
                 ),
@@ -172,7 +210,7 @@ impl Inhibitor {
                 format!("--why={} mode", self.label()),
                 "--mode=block".into(),
                 "sleep".into(),
-                "infinity".into(),
+                sleep,
             ];
             run(self.scope(), Command::new("systemd-run").args(&args));
         } else {
@@ -192,6 +230,12 @@ impl Inhibitor {
         }
         established == Some(on)
     }
+}
+
+/// The "until HH:MM" a timed arm wrote into the unit's description.
+fn parse_until(description: &str) -> Option<String> {
+    let t = description.trim().rsplit_once(" until ")?.1;
+    (t.len() == 5 && t.as_bytes()[2] == b':').then(|| t.to_string())
 }
 
 // ── Established state, for the GTK side ─────────────────────────────────
@@ -342,6 +386,16 @@ fn run(scope: &str, cmd: &mut Command) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_timed_arm_reads_back_its_end() {
+        assert_eq!(
+            parse_until("swaypplet No Sleep (handle-lid-switch inhibitor) until 14:30").as_deref(),
+            Some("14:30")
+        );
+        assert_eq!(parse_until("swaypplet No Sleep (handle-lid-switch inhibitor)"), None);
+        assert_eq!(parse_until(""), None);
+    }
 
     #[test]
     fn every_inhibitor_indexes_its_own_state_cell() {

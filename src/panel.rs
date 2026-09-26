@@ -118,7 +118,9 @@ struct Sections {
     backup: BackupSection,
     settings: Rc<SettingsSection>,
     /// Quick-strip toggle tiles (Night Light, Caffeine, etc.)
-    tiles: RefCell<Vec<(gtk4::ToggleButton, tiles::TileSpec)>>,
+    tiles: RefCell<Vec<TileEntry>>,
+    /// The DND tile and the store it shows, for its status on open.
+    dnd: RefCell<Option<(ui::SplitTile, Rc<RefCell<NotificationStore>>)>>,
 }
 
 impl Sections {
@@ -135,8 +137,16 @@ impl Sections {
         self.users.refresh();
         self.backup.refresh();
         self.settings.refresh();
-        for (btn, spec) in self.tiles.borrow().iter() {
+        for (btn, spec, status) in self.tiles.borrow().iter() {
             tiles::init_tile_state(btn, spec);
+            if let Some(status) = status {
+                tiles::refresh_status(status, spec);
+            }
+        }
+        if let Some((dnd, store)) = self.dnd.borrow().as_ref() {
+            let on = store.borrow().is_dnd();
+            dnd.toggle.set_active(on);
+            ui::set_tile_status(dnd, &tiles::dnd_status(on));
         }
     }
 }
@@ -352,8 +362,10 @@ impl Panel {
         // ── Bottom Action Flight Deck ─────────────────────────────────────────
         // Each deck tile is kept beside its spec so `refresh` can re-read it
         // when the menu opens.
-        let mut tile_pairs: Vec<(gtk4::ToggleButton, tiles::TileSpec)> = Vec::new();
-        let flight_deck = build_flight_deck(&window, &store, &mut tile_pairs, &deck_stack);
+        let mut tile_pairs: Vec<TileEntry> = Vec::new();
+        let mut dnd_tile = None;
+        let flight_deck =
+            build_flight_deck(&window, &store, &mut tile_pairs, &mut dnd_tile, &deck_stack);
 
         // ── Assemble Content ─────────────────────────────────────────────────
         let content = ui::vbox(0);
@@ -463,6 +475,7 @@ impl Panel {
             backup,
             settings,
             tiles: RefCell::new(tile_pairs),
+            dnd: RefCell::new(dnd_tile.map(|t| (t, store.clone()))),
         });
 
         Self {
@@ -669,6 +682,31 @@ fn build_subsheet_with_tabs(
 
 /// Flip the deck between `page` and the launcher, and say whether it is now
 /// on `page`.
+/// One deck tile the panel re-reads on open: its toggle, its spec, and its
+/// status line when it has one.
+type TileEntry = (gtk4::ToggleButton, tiles::TileSpec, Option<gtk4::Label>);
+
+/// The inhibitor a deck spec switches, if it is one.
+fn inhibitor_of(spec: &tiles::TileSpec) -> Option<crate::services::inhibit::Inhibitor> {
+    crate::services::inhibit::Inhibitor::ALL
+        .into_iter()
+        .find(|w| w.label() == spec.label)
+}
+
+/// Put a built split tile on the deck and in the refresh list.
+fn push_tile(
+    tile: ui::SplitTile,
+    spec: tiles::TileSpec,
+    tile_pairs: &mut Vec<TileEntry>,
+    group: &gtk4::FlowBox,
+) {
+    tiles::init_tile_state(&tile.toggle, &spec);
+    tiles::refresh_status(&tile.status, &spec);
+    tile.root.add_css_class("deck-tile-btn");
+    group.append(&tile.root);
+    tile_pairs.push((tile.toggle, spec, Some(tile.status)));
+}
+
 fn flip(stack: &gtk4::Stack, page: &str) -> bool {
     if stack.visible_child_name().as_deref() == Some(page) {
         stack.set_visible_child_name("launcher");
@@ -827,7 +865,8 @@ fn build_telemetry_ribbon(
 fn build_flight_deck(
     window: &gtk4::Window,
     store: &Rc<RefCell<NotificationStore>>,
-    tile_pairs: &mut Vec<(gtk4::ToggleButton, tiles::TileSpec)>,
+    tile_pairs: &mut Vec<TileEntry>,
+    dnd_tile: &mut Option<ui::SplitTile>,
     deck_stack: &gtk4::Stack,
 ) -> gtk4::Box {
     let deck = ui::hbox(3);
@@ -857,19 +896,53 @@ fn build_flight_deck(
         .build();
     left_group.add_css_class("deck-switches");
 
-    // Night Light + the session inhibitors, in the order tiles.rs gives them.
+    // Night Light + the session inhibitors, in the order tiles.rs gives
+    // them, as split tiles: the body toggles, the chevron opens the detail
+    // (the display page; a duration for the inhibitors), and the line under
+    // the name says why the tile is in its state.
     for spec in tiles::deck_specs() {
-        let btn = tiles::build_tile(&spec);
-        tiles::init_tile_state(&btn, &spec);
-        btn.add_css_class("deck-tile-btn");
-        tile_pairs.push((btn.clone(), spec));
-        left_group.append(&btn);
+        let detail: Box<dyn Fn(&gtk4::Button)> = match inhibitor_of(&spec) {
+            Some(which) => {
+                let entry: Rc<RefCell<Option<(gtk4::ToggleButton, gtk4::Label)>>> = Rc::default();
+                let tile = {
+                    let entry = entry.clone();
+                    let spec_c = spec.clone();
+                    tiles::build_split(&spec, move |anchor| {
+                        let entry = entry.clone();
+                        let spec_c = spec_c.clone();
+                        tiles::duration_menu(anchor, which, move |ok| {
+                            if let (true, Some((toggle, status))) = (ok, entry.borrow().as_ref()) {
+                                toggle.set_active(true);
+                                tiles::refresh_status(status, &spec_c);
+                            }
+                        });
+                    })
+                };
+                *entry.borrow_mut() = Some((tile.toggle.clone(), tile.status.clone()));
+                push_tile(tile, spec, tile_pairs, &left_group);
+                continue;
+            }
+            None => {
+                let stack_c = deck_stack.clone();
+                Box::new(move |_: &gtk4::Button| {
+                    flip(&stack_c, "displays");
+                })
+            }
+        };
+        let tile = tiles::build_split(&spec, detail);
+        push_tile(tile, spec, tile_pairs, &left_group);
     }
 
-    // DND
-    let dnd_btn = tiles::build_dnd_tile(store.clone());
-    dnd_btn.add_css_class("deck-tile-btn");
-    left_group.append(&dnd_btn);
+    // DND: the chevron opens the notification centre.
+    let dnd = {
+        let stack_c = deck_stack.clone();
+        tiles::build_dnd_split(store.clone(), move |_| {
+            flip(&stack_c, "notifications");
+        })
+    };
+    dnd.root.add_css_class("deck-tile-btn");
+    left_group.append(&dnd.root);
+    *dnd_tile = Some(dnd);
 
     // Screenshot Region
     left_group.append(&rail_action("󰄀", "Screenshot region", window, {

@@ -77,7 +77,7 @@ pub use text::{
     Text, Tone, Weight, glyph, heading, live_caption, on_wallpaper, overline, set_mono,
     set_numeric, set_text_style, set_tone, set_weight, text,
 };
-pub use tile::{set_loading, tile_toggle};
+pub use tile::{SplitTile, set_loading, set_tile_status, tile_split, tile_toggle};
 
 // ── Cairo ───────────────────────────────────────────────────────────────
 
