@@ -66,7 +66,6 @@ pub fn run(component: &str) {
                 .default_height(800)
                 .build()
                 .upcast();
-            window.add_css_class("lock");
             let set = crate::lock::ui::SurfaceSet::new();
             // Greeter-mode preview: SWAYPPLET_GREET_USERS=meros,melvin adds
             // the user chips + username row on top of the lock card.

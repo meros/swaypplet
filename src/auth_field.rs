@@ -76,22 +76,16 @@ pub enum Tone {
 }
 
 impl Tone {
-    fn class(self) -> &'static str {
+    /// The caption's resting level is faint: it is a caption. An error and a
+    /// success are status, in their status colour and strong.
+    fn style(self) -> (crate::ui::Tone, bool) {
         match self {
-            Tone::Info => "auth-caption-info",
-            Tone::Error => "auth-caption-error",
-            Tone::Success => "auth-caption-success",
+            Tone::Info => (crate::ui::Tone::Faint, false),
+            Tone::Error => (crate::ui::Tone::Danger, true),
+            Tone::Success => (crate::ui::Tone::Success, true),
         }
     }
 }
-
-const TONE_CLASSES: [&str; 5] = [
-    "auth-caption-info",
-    "auth-caption-error",
-    "auth-caption-success",
-    "auth-caption-fp",
-    "auth-caption-caps",
-];
 
 /// The field: one bordered box holding the face ring, an entry, and nothing
 /// else.
@@ -108,8 +102,10 @@ const TONE_CLASSES: [&str; 5] = [
 /// a failed attempt to a lit glyph.
 ///
 /// Every state this shows is a paint property. Nothing in here is ever
-/// `set_visible`, and the box's height is a constant of its CSS — `min-height`
-/// plus padding plus border — so no state can move it.
+/// `set_visible`, and the box's height is a constant of the field
+/// component's CSS, so no state can move it. The field component's help line
+/// is never used: [`Caption`] is this field's help, and unlike the
+/// component's it is reserved from the first frame.
 #[derive(Clone)]
 pub struct AuthField {
     root: gtk4::Box,
@@ -120,20 +116,10 @@ impl AuthField {
     /// greeter's username row is a plain `Entry` and everything else is a
     /// `PasswordEntry`; the chrome around them is identical either way.
     pub fn new(input: &impl IsA<gtk4::Widget>) -> Self {
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(0)
-            .hexpand(true)
-            .build();
-        root.add_css_class("auth-field");
-
-        let input = input.as_ref();
-        input.add_css_class("auth-input");
-        input.set_hexpand(true);
-
-        root.append(input);
-
-        Self { root }
+        input.as_ref().set_hexpand(true);
+        let field = crate::ui::field("", input, "");
+        field.root.set_hexpand(true);
+        Self { root: field.root }
     }
 
     pub fn widget(&self) -> &gtk4::Box {
@@ -144,22 +130,23 @@ impl AuthField {
     /// pulse; never touches the allocation. What the reader is *for* is said
     /// in the caption, which can use words.
     pub fn set_fp_armed(&self, armed: bool) {
-        toggle(&self.root, "auth-fp-armed", armed);
+        crate::ui::set_field_state(&self.root, crate::ui::FieldState::Armed, armed);
     }
 
     /// PAM is working. A border and a word, not a card-wide dimming: greying
     /// the whole card for a field-scale event reads as a fault on a card this
     /// small.
     pub fn set_busy(&self, busy: bool) {
-        toggle(&self.root, "auth-busy", busy);
+        crate::ui::set_field_state(&self.root, crate::ui::FieldState::Busy, busy);
     }
 
     /// Rejected. A paint-only flash on the field, alongside the card's shake.
     pub fn flash_reject(&self) {
+        use crate::ui::{FieldState, set_field_state};
         let root = self.root.clone();
-        root.remove_css_class("auth-reject");
+        set_field_state(&root, FieldState::Reject, false);
         glib::idle_add_local_once(move || {
-            root.add_css_class("auth-reject");
+            set_field_state(&root, FieldState::Reject, true);
         });
     }
 }
@@ -200,6 +187,8 @@ impl Caption {
             .valign(gtk4::Align::Start)
             .build();
         label.add_css_class("auth-caption");
+        crate::ui::set_text_style(&label, crate::ui::Text::Label, crate::ui::Tone::Faint);
+        crate::ui::live_caption(&label);
         Self {
             label,
             resting: Default::default(),
@@ -221,7 +210,7 @@ impl Caption {
         }
         *self.resting.borrow_mut() = text.to_string();
         if self.shown.get() == Rank::Resting {
-            self.paint(text, Tone::Info, "");
+            self.paint(text, Tone::Info);
         }
     }
 
@@ -232,7 +221,7 @@ impl Caption {
     /// face hint are the same kind of thing and never need to outrank each
     /// other.
     pub fn hint(&self, text: &str) {
-        self.transient(Rank::Hint, text, Tone::Info, "auth-caption-fp");
+        self.transient(Rank::Hint, text, Tone::Info);
     }
 
     /// Caps Lock just changed. The words hold for [`DWELL`] and then give the
@@ -243,7 +232,7 @@ impl Caption {
     /// matters is [`Caption::status`], which composes the warning onto a
     /// rejection.
     pub fn caps_edge(&self) {
-        self.transient(Rank::Caps, CAPS_TEXT, Tone::Info, "auth-caption-caps");
+        self.transient(Rank::Caps, CAPS_TEXT, Tone::Info);
     }
 
     /// A status from PAM, greetd or the surface itself. Holds until cleared —
@@ -266,7 +255,7 @@ impl Caption {
         };
         self.epoch.set(self.epoch.get().wrapping_add(1));
         self.shown.set(Rank::Status);
-        self.paint_markup(&markup, tone, "");
+        self.paint_markup(&markup, tone);
         // The full text stays reachable when two lines were not enough.
         self.label
             .set_tooltip_text((text.len() > 80).then_some(text));
@@ -281,7 +270,7 @@ impl Caption {
         self.shown.set(Rank::Resting);
         self.label.set_tooltip_text(None);
         let resting = self.resting.borrow().clone();
-        self.paint(&resting, Tone::Info, "");
+        self.paint(&resting, Tone::Info);
     }
 
     /// Clear a status. Named for the caller's benefit: this is the keypress
@@ -290,14 +279,14 @@ impl Caption {
         self.clear(Rank::Status);
     }
 
-    fn transient(&self, rank: Rank, text: &str, tone: Tone, extra: &str) {
+    fn transient(&self, rank: Rank, text: &str, tone: Tone) {
         if self.shown.get() > rank {
             return;
         }
         self.epoch.set(self.epoch.get().wrapping_add(1));
         let epoch = self.epoch.get();
         self.shown.set(rank);
-        self.paint(text, tone, extra);
+        self.paint(text, tone);
 
         let this = self.clone();
         glib::timeout_add_local_once(DWELL, move || {
@@ -308,31 +297,14 @@ impl Caption {
         });
     }
 
-    fn paint(&self, text: &str, tone: Tone, extra: &str) {
-        self.paint_markup(&glib::markup_escape_text(text), tone, extra);
+    fn paint(&self, text: &str, tone: Tone) {
+        self.paint_markup(&glib::markup_escape_text(text), tone);
     }
 
-    fn paint_markup(&self, markup: &str, tone: Tone, extra: &str) {
-        let want = if extra.is_empty() {
-            tone.class()
-        } else {
-            extra
-        };
-        for c in TONE_CLASSES {
-            if c != want {
-                self.label.remove_css_class(c);
-            }
-        }
-        self.label.add_css_class(want);
+    fn paint_markup(&self, markup: &str, tone: Tone) {
+        let (level, strong) = tone.style();
+        crate::ui::set_text_style(&self.label, crate::ui::Text::Label, level);
+        crate::ui::set_class(&self.label, "ui-strong", strong);
         self.label.set_markup(markup);
-    }
-}
-
-fn toggle(w: &impl IsA<gtk4::Widget>, class: &str, on: bool) {
-    let w = w.as_ref();
-    if on {
-        w.add_css_class(class);
-    } else {
-        w.remove_css_class(class);
     }
 }

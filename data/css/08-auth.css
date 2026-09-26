@@ -1,99 +1,38 @@
 /* ════════════════════════════════════════════════════════════════════
-   Auth surfaces — the polkit modal and the lock screen share one visual
-   language: flat @surface card, single accent, restrained motion. The
-   card shows one clear action at a time (fingerprint pill OR password
-   entry, driven by PAM). Shared rules are grouped here; the blocks
-   below keep only what is unique to each surface.
+   Auth surfaces (src/polkit/dialog.rs, src/lock/ui.rs, src/auth_field.rs).
+   The polkit card and the lock card share one language: one card, one
+   field, one sentence under it, one primary action. Colour, type and shape
+   come from the components (00-components.css); this file places things,
+   and keeps the motion that is the auth surfaces' own.
    ════════════════════════════════════════════════════════════════════ */
 
-.polkit,
-.lock {
-    font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
-}
-
-.polkit-backdrop {
-    /* Transparent like the launcher/osd aprons: swayfx blurs the
-       swaypplet-polkit layer with blur_ignore_transparent, so an alpha-0
-       backdrop clips the frost to the card instead of frosting the whole
-       screen (a 0.5 black scrim reads as opaque and blurs everything). */
-    background-color: transparent;
-}
-
-/* ════════════════════════════════════════════════════════════════════
-   MOTION. Full scale and reasoning: docs/MOTION.md.
-
-   Curves — Material 3's standard set, evaluated identically in src/anim.rs
-   so a card driven from Rust and a label driven from here move together:
-     standard    cubic-bezier(0.2, 0, 0, 1)   between two on-screen states
-     decelerate  cubic-bezier(0, 0, 0, 1)     arriving
-     accelerate  cubic-bezier(0.3, 0, 1, 1)   leaving
-
-   Durations:
-     150ms  micro     colour, opacity, a mark lighting up
-     200ms  exit      anything leaving
-     300ms  enter     anything arriving, and anything reflowing
-     400ms  emphasis  a one-shot that has to be noticed
-     500ms  dwell     a flourish that has to stay readable
-
-   Exits are shorter than entrances deliberately. Ambient loops (pulses,
-   spinners, breathing glows) are rhythms rather than transitions and are
-   NOT on this ladder; their periods are chosen against a heartbeat.
-
-   There are no variables for any of this — GTK4 CSS has @define-color and
-   nothing else — so the values below are literals and the only thing keeping
-   them honest is dev/motion-census.sh. Run it after touching a duration.
-   ════════════════════════════════════════════════════════════════════ */
-
-/* The polkit card takes @surface from .glass-card like every other floating
-   surface; only its padding is shared with the lock card below, because the
-   two carry the same kind of content — a title, a field, a reserved caption
-   line — and should breathe the same way. */
+/* ── The polkit card ──
+   The same breathing as the lock card below, because the two carry the same
+   kind of content: a title, a field, a reserved caption. The bottom is one
+   step lighter on purpose: the caption's reserved second line sits directly
+   above it, so the optical margin down there is the padding plus whatever
+   the caption did not use. */
 .polkit-container {
-    padding: 24px 26px 20px 26px;
+    padding: var(--space-6) var(--space-6) var(--space-5) var(--space-6);
 }
 
-/* The polkit dialog is NOT in the rule below, and the reason is the whole point of
-   it. 0.375 is only correct with .lock-scrim underneath; .polkit-backdrop is
-   transparent, so a polkit card painted at 0.375 has a surface alpha of 0.375
-   and sits inside the band theme/glass.nix reserves for nothing at all — the
-   material draws at close to full strength but the flood seeds nothing, so the
-   card gets a flat slab with no bevel and no rim. That is what made the pkexec
-   modal look like a different material from everything around it. */
+/* ── The lock and greeter card ──
+   Its fill is `ui::card_over_scrim`: pre-compensated for the scrim under it
+   so the two layers land on the compositor's key. The polkit card has no
+   scrim under it, which is why it is a plain card. */
 .lock-card {
-    /* Lighter than the @surface every other glass card uses, because this one
-       is not the only thing between the eye and the material: .lock-scrim is
-       under it. 0.20 scrim then 0.375 card composites to 0.500, which is what
-       @surface gives, so the lock card clears the compositor's seeding line by
-       the same margin as every other card. Change the scrim and this has to
-       move with it, and check the result against the table in
-       users/modules/theme/glass.nix rather than against either number alone.
-
-       The colour is pre-compensated for the black underneath, which the alpha
-       arithmetic above does not do on its own. Composited, the scrim
-       contributes 0.20 x (1 - 0.375) = 0.125 of black to a 0.500 result, so a
-       card painted #32302f here lands on 0.75 x #32302f = #262423 — a quarter
-       darker than the @surface every other card carries, which is not what
-       "the same material" means. #43403f is #32302f x 0.5/0.375, so the
-       premultiplied sum comes back to #32302f at alpha 0.500 exactly. This
-       went unnoticed while `absorb` was 2.0 and every card was dark; it does
-       not survive a clear material. */
-    background-color: alpha(@glass_match, 0.375);
-    /* Bottom lighter than top on purpose: the caption's reserved second line
-       sits directly above this edge, so the optical margin down there is the
-       padding plus whatever the caption did not use. 20 against 24 makes the
-       two read as equal. */
-    padding: 24px 26px 20px 26px;
+    padding: var(--space-6) var(--space-6) var(--space-5) var(--space-6);
 }
 
-/* Gaps between the card's rows. The box carries spacing 0 and every gap is
-   declared here, because they are deliberately unequal: 10 binds the greeter's
-   username to the password under it, 18 separates the picker as a different
-   kind of decision, and 16 above the switch-user button against the caption's
-   6 is a 2.7:1 group ratio, so the button reads as its own register rather
-   than as a fourth item in one loose list. */
-.lock-chip-row     { margin-bottom: 18px; }
-.auth-field-user   { margin-bottom: 10px; }
-.lock-switch-user  { margin-top: 20px; }
+/* Gaps between the lock card's rows. The box carries spacing 0 and every gap
+   is declared here, because they are deliberately unequal: the tightest binds
+   the greeter's username to the password under it, a wider one separates the
+   picker as a different kind of decision, and the switch-user button below
+   the card sits a group away from the caption, so it reads as its own
+   register rather than as a fourth item in one loose list. */
+.lock-chip-row     { margin-bottom: var(--space-5); }
+.auth-field-user   { margin-bottom: var(--space-3); }
+.lock-switch-user  { margin-top: var(--space-5); }
 
 /* ── The caption ──
    Two reserved lines that are never empty. Top-aligned so a one-line message
@@ -106,350 +45,55 @@
    min-height is a floor, not a cap. Bare, two lines measure ~32 and fit. The
    cap is lines(2) + ellipsize on the label. */
 .auth-caption {
-    font-size: 12px;
     min-height: 34px;
-    margin: 6px 13px 0 13px;
-    color: alpha(@fg, 0.55);
-    font-weight: 400;
-    transition: color 150ms cubic-bezier(0.2, 0, 0, 1);
+    margin: var(--space-2) var(--space-4) 0 var(--space-4);
 }
 
-/* ── The field ──
-   Carries all chrome: background, border, focus, pulse, reject.
-   Reduced input node inside is transparent and borderless. */
-.auth-field {
-    min-height: 38px;
-    padding: 10px 14px;
-    background-color: alpha(@bg0_h, 0.85);
-    border: 1px solid @border_strong;
-    border-radius: 10px;
-    transition: border-color 150ms ease, background-color 150ms ease;
-}
-
-.auth-field:focus-within {
-    background-color: alpha(@bg0_h, 0.95);
-    border-color: alpha(@fg, 0.40);
-}
-
-.auth-input {
-    min-height: 0;
-    padding: 0;
-    margin: 0;
-    background: transparent;
-    border: none;
-    outline: none;
-    box-shadow: none;
-    color: @fg;
-    font-size: 14px;
-}
-
-.auth-input text {
-    min-height: 0;
-    background: transparent;
-    color: @fg;
-}
-
-.auth-input placeholder {
-    color: @text_faint;
-}
-
-.auth-caption-error   { color: @red;     font-weight: 600; }
-.auth-caption-success { color: @accent;  font-weight: 600; }
-
-/* Calmer pulse: breathe the border only, no jarring fill jump. Now driven by
-   .auth-field.auth-fp-armed, so it is the field that breathes rather than a
-   pill inside it. */
-@keyframes auth-fp-pulse {
-    0%, 100% { border-color: alpha(@accent, 0.28); }
-    50%      { border-color: alpha(@accent, 0.72); }
-}
-
-/* ── User chips. The same row on the greeter and on the lock screen: pick a
-   face, land in that person's session. Only the plumbing behind the click
-   differs, and that is not the picker's problem to advertise. ── */
-.lock-user-chip {
-    background-color: alpha(@bg0, 0.7);
-    color: @fg_dim;
-    border: 1px solid @border_strong;
-    border-radius: 999px;
-    padding: 8px 20px;
-    font-size: 14px;
-    font-weight: 600;
-    outline: none;
-    box-shadow: none;
-    transition: border-color 150ms ease, background-color 150ms ease,
-        color 150ms ease;
-}
-
-.lock-user-chip:hover {
-    background-color: alpha(@bg0, 0.85);
-    color: @fg;
-}
-
-.lock-user-chip.active {
-    border-color: @accent;
-    background-color: alpha(@bg0, 0.92);
-    color: @fg;
-}
-
-/* ── Handoff: the beat between picking a face and landing in that session.
-   The picked chip blooms while the rest of the card dissolves back to bare
-   wallpaper; the surface on the far side of the VT fades its card up from
-   the same frame (auth-card-enter below). The cut lands inside one move.
-
-   Easing is M3's emphasized curve — a hard start and a long settle, which
-   is what makes a 300ms exit read as deliberate rather than merely slow.
-   The `transform` scale is the topping: where GTK ignores it the outline
-   bloom and the dissolve still carry the beat on their own. ── */
-@keyframes auth-handoff-bloom {
-    0%   { outline-width: 2px; outline-color: @accent; }
-    55%  { outline-width: 7px; outline-color: alpha(@accent, 0.55); }
-    100% { outline-width: 7px; outline-color: alpha(@accent, 0); }
-}
-
-.lock-user-chip.picked {
-    border-color: @accent;
-    background-color: alpha(@accent, 0.18);
-    color: @fg;
-    transform: scale(1.06);
-    transition: transform 300ms cubic-bezier(0.2, 0, 0, 1),
-        background-color 150ms cubic-bezier(0.2, 0, 0, 1),
-        border-color 150ms cubic-bezier(0.2, 0, 0, 1);
-}
-
-.lock-user-chip.picked .user-avatar {
-    outline: 2px solid @accent;
-    outline-offset: 1px;
-    animation: auth-handoff-bloom 300ms cubic-bezier(0.2, 0, 0, 1) forwards;
-}
-
-/* Everyone you didn't pick steps back first (~50ms ahead of the card), so
-   the eye is left holding one face when the screen goes. */
-.lock-user-chip.dropped {
+/* ── The handoff: the beat between picking a face and landing in that
+   session. The chip's bloom and dissolve are the chip component's
+   (.ui-chip.picked, .ui-chip.dropped); the card's part is here. Everything
+   the user did not pick leaves as one exit, inside lock::ui::HANDOFF (the
+   same token), so the eye is left holding one face when the screen goes. The
+   surface on the far side of the VT fades its card up from the same frame
+   (auth-card-enter below). An exit, paired with that enter. ── */
+.lock-card.lock-handoff .ui-field,
+.lock-card.lock-handoff .auth-caption {
     opacity: 0;
-    transform: scale(0.94);
-    transition: opacity 150ms cubic-bezier(0.3, 0, 1, 1),
-        transform 150ms cubic-bezier(0.3, 0, 1, 1);
-}
-
-.lock-card.lock-handoff .auth-field,
-.lock-card.lock-handoff .auth-caption,
-.lock-card.lock-handoff .lock-switch-user {
-    opacity: 0;
-    transition: opacity 200ms cubic-bezier(0.3, 0, 1, 1) 50ms;
+    transition: opacity var(--motion-exit);
 }
 
 .lock-card.lock-handoff {
-    transition: opacity 300ms cubic-bezier(0.3, 0, 1, 1) 100ms;
+    transition: opacity var(--motion-exit);
     opacity: 0;
 }
 
 /* Arriving from the other side of the cut: the card fades up out of the
-   wallpaper rather than popping in fully formed. Same curve, same story.
-   Deliberately not on `.lock-shake` / `.lock-success`, whose own
-   animations must win. */
+   wallpaper rather than popping in fully formed. Deliberately not on
+   `.lock-shake`, whose own animation must win. */
 @keyframes auth-card-enter {
     from { opacity: 0; transform: translateY(14px); }
     to   { opacity: 1; transform: translateY(0); }
 }
 
 .lock-card {
-    animation: auth-card-enter 300ms cubic-bezier(0, 0, 0, 1);
+    animation: auth-card-enter var(--motion-enter);
 }
 
-/* ── Round avatar + presence dot (greeter chips, lock strip, users panel) ── */
-.user-avatar.active {
-    /* outline, not border: a border would shrink the avatar's draw area */
-    outline: 2px solid @accent;
-    outline-offset: 1px;
+/* The compositor cross-fades the whole lock surface (lock/fade.rs), which
+   already carries the entrance. Stacking the card's own fade on top makes its
+   opacity css x surface, so the card visibly lags the wallpaper under it.
+   Above .lock-shake, which has equal specificity and must still win.
+
+   The polkit card's shake used to be grouped into this rule by a stray
+   comma, which set `animation: none` on it: the polkit card never shook. It
+   has its own rule below now. */
+.lock-crossfade .lock-card {
+    animation: none;
 }
 
-.user-dot {
-    min-width: 9px;
-    min-height: 9px;
-    border-radius: 999px;
-    background-color: @green;
-    border: 2px solid @bg0;
-}
-
-/* ── Switch user (lock, unobtrusive secondary action) ──
-   The same shadow as .lock-date, for the same reason: this button hangs below
-   the card on bare wallpaper with nothing behind it, and it is now the lock
-   screen's whole switching affordance rather than a fallback shown when the
-   picker found nobody. Unobtrusive is a colour decision (@fg_dim, @fg on
-   hover); being unreadable over a bright or busy image is not one, and colour
-   cannot fix that here — the shadow is what gives the glyphs an edge. */
-.lock-switch-user {
-    background: none;
-    color: @fg_dim;
-    border: none;
-    outline: none;
-    box-shadow: none;
-    padding: 4px 10px;
-    font-size: 13px;
-    font-weight: 500;
-    text-shadow:
-        0 1px 3px alpha(black, 0.85),
-        0 2px 14px alpha(black, 0.7);
-    transition: color 150ms ease;
-}
-
-.lock-switch-user:hover {
-    color: @fg;
-}
-
-/* ── The polkit card's gaps ──
-   The content box carries spacing 0 and every gap is declared here, for the
-   same reason the lock card's are: they are deliberately unequal. A uniform
-   14 px between every row said the title and the message were exactly as
-   related as the message and the input, which is the one thing that is not
-   true on this card — the first pair is one sentence in two registers, the
-   second is the explanation and the thing being explained. The field ended up
-   crowded against the text above it and the whole card read as a list rather
-   than as three groups.
-
-   The ladder: 8 under the icon, 6 inside the title/message pair, 20 to break
-   into the input, 6 back out to its caption (declared on .auth-caption, which
-   the lock card shares), then 14 and 16 for the two rows that are about the
-   card rather than about the question. The 6:20 ratio either side of the
-   field is what does the grouping work; the rest is rhythm.
-
-   Every gap below is declared on the element that owns it, in that element's
-   own rule, rather than gathered here: a margin sitting apart from the box it
-   moves is a margin nobody finds when they change the box. This block holds
-   only the one gap with no other home. */
-.polkit-icon-box { margin-bottom: 8px; }
-
-/* ── Title and message ──
-   Neither carried a rule until now, so both inherited GTK's default label
-   colour and default size: the title came out no larger than the sentence
-   under it and dimmer than it, which is backwards for the one line that says
-   what the card is. The card also floats over arbitrary content — a terminal,
-   a bright page — with only frost between it and them, so neither line can
-   rely on the background being dark enough to carry a low-contrast grey.
-
-   One step of hierarchy and no more. This is the card's only heading, and
-   much past 1.1rem it starts competing with the buttons for the eye. */
-.polkit-title {
-    font-size: 1.1rem;
-    font-weight: 700;
-    color: @fg;
-    /* Tight to the message: the two are one sentence in two registers. */
-    margin-bottom: 6px;
-}
-
-/* Full contrast as well, because this is the sentence naming what is about to
-   run as root — the one thing on the card that has to be read before it is
-   answered. Dimming it would style the stakes as an aside. */
-.polkit-message {
-    font-size: 0.95rem;
-    color: alpha(@fg, 0.92);
-    /* And loose to the field. This is the break between the explanation and
-       the thing being explained, and it is the gap that was missing: at the
-       uniform 14 the input sat crowded under the sentence about it. */
-    margin-bottom: 20px;
-}
-
-/* ── Identity picker ── */
-/* Under the caption, and only on a card with somebody else to run as. */
-.polkit-identity-row {
-    margin-top: 10px;
-}
-
-.polkit-identity-label {
-    font-size: 11px;
-    font-weight: 600;
-    color: @fg_dim;
-    letter-spacing: 0.5px;
-}
-
-.polkit-identity-combo {
-    background-color: alpha(@bg0, 0.6);
-    border-radius: 8px;
-    border: 1px solid @border_strong;
-    padding: 4px 8px;
-    color: @fg;
-}
-
-/* ── Details disclosure ── */
-.polkit-details-toggle {
-    background: transparent;
-    border: none;
-    box-shadow: none;
-    color: @fg_dim;
-    font-size: 11px;
-    padding: 3px 4px;
-    min-height: 0;
-    /* First of the two rows that are about the card rather than about the
-       question. Small, because the caption above it already contributes the
-       slack: it reserves two lines and usually says one, and on the lock card
-       that leftover falls against the bottom padding and reads as margin.
-       Here there are three more rows underneath, so it reads as a hole
-       instead, and the declared gap has to be the remainder rather than the
-       whole thing. */
-    margin-top: 8px;
-}
-
-.polkit-details-toggle:hover {
-    color: @fg;
-    background: transparent;
-}
-
-.polkit-details {
-    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
-    font-size: 11px;
-    color: @fg_dim;
-    background-color: alpha(@bg0, 0.5);
-    border-radius: 8px;
-    padding: 10px 12px;
-    margin-top: 2px;
-}
-
-/* ── Action buttons ── */
-.polkit-actions {
-    /* The card's last row and its only commitment; it gets the widest gap on
-       the card so the eye lands on it rather than reading into it. */
-    margin-top: 16px;
-}
-
-/* Cancel: quiet ghost button. */
-.polkit-cancel {
-    background-color: transparent;
-    color: @fg_dim;
-    border: 1px solid @border_strong;
-    border-radius: 10px;
-    padding: 9px 18px;
-    font-weight: 500;
-    transition: background-color 150ms ease, color 150ms ease;
-}
-
-.polkit-cancel:hover {
-    background-color: alpha(@bg2, 0.5);
-    color: @fg;
-}
-
-/* Authenticate: flat solid accent, no gradient/inset skeuomorphism. */
-.polkit-auth-btn {
-    background-color: @accent;
-    background-image: none;
-    color: @bg0_h;
-    border: none;
-    border-radius: 10px;
-    padding: 9px 20px;
-    font-weight: 600;
-    box-shadow: none;
-    transition: background-color 150ms ease;
-}
-
-.polkit-auth-btn:hover {
-    background-color: shade(@accent, 1.1);
-}
-
-.polkit-auth-btn:disabled {
-    opacity: 0.45;
-}
-
-/* ── Shake on error (paint-only transform; zero layout passes) ── */
+/* ── Shake on error (paint-only transform; zero layout passes) ──
+   A one-shot: attention, which no motion token names, so it takes the
+   scale's length and curve rather than a meaning (§3.8). */
 @keyframes auth-shake {
     0%, 100% { transform: translateX(0); }
     15%      { transform: translateX(-7px); }
@@ -459,55 +103,58 @@
     75%      { transform: translateX(-2px); }
 }
 
-.polkit-container.polkit-shake,
-/* The compositor cross-fades the whole lock surface (lock/fade.rs), which
-   already carries the entrance. Stacking the card's own fade on top makes its
-   opacity css x surface, so the card visibly lags the wallpaper under it.
-   Deliberately above .lock-shake / .lock-success, which have equal
-   specificity and must still win. */
-.lock-crossfade .lock-card {
-    animation: none;
+.lock-card.lock-shake,
+.polkit-container.polkit-shake {
+    animation: auth-shake var(--dur-spatial) var(--ease-standard);
 }
 
-.lock-card.lock-shake {
-    animation: auth-shake 400ms cubic-bezier(.36,.07,.19,.97);
+/* ── The polkit card's gaps ──
+   The content box carries spacing 0 and every gap is declared on the element
+   that owns it, because they are deliberately unequal. The title and the
+   message are one sentence in two registers; the message and the field are
+   the explanation and the thing being explained. A uniform gap said the two
+   pairs were equally related, crowded the field against the sentence about
+   it, and made the card read as a list rather than as three groups.
+
+   The ladder: a step under the icon, the tightest step inside the title and
+   message pair, the widest break into the field, the tightest back out to
+   its caption (declared on .auth-caption, which the lock card shares), then
+   small steps for the rows that are about the card rather than about the
+   question, and a group's gap before the buttons. */
+.polkit-icon-box { margin-bottom: var(--space-3); }
+.polkit-title    { margin-bottom: var(--space-2); }
+.polkit-message  { margin-bottom: var(--space-6); }
+
+/* Under the caption, and only on a card with somebody else to run as. */
+.polkit-identity-row {
+    margin-top: var(--space-3);
 }
 
-/* ── Success: accent tint while the dialog dismisses / session unlocks ── */
-/* Approval is stated, not celebrated.
-   This used to wash the whole card in alpha(@accent, 0.12) on top of an
-   accent border. On a 400px card over a blurred surface that reads as an
-   alarm, and it spends on a routine success the emphasis that ought to be
-   left for a refusal. The border alone is enough to say the card has
-   changed state; the icon below says what the state is. */
-.polkit-container.polkit-success,
-.lock-card.lock-success {
-    border-color: alpha(@accent, 0.85);
-    transition: border-color 200ms ease;
+/* First of the two rows that are about the card rather than about the
+   question. Small, because the caption above it already contributes the
+   slack: it reserves two lines and usually says one. */
+.polkit-details-toggle {
+    margin-top: var(--space-3);
 }
 
-/* The approval itself lands on the icon, which is already the card's focal
-   point and already occupies its space -- so nothing below it moves. A short
-   settle rather than a flash: it plays while the dialog is already closing,
-   so it must never read as something to wait for. */
-/* ── The card's one ornament ──
-   A shield, and the only thing on the card that is not a word or a control.
-   It had no rule either, so it painted at the default label size and colour:
-   a small dark smudge above the title, doing the opposite of announcing what
-   this card is. The geometry the card was designed to (docs/AUTH_CARD.md)
-   budgets 48 px for this row, so it is sized to fill that rather than to be
-   noticed — dimmer than the title beneath it, because it says the same thing
-   with less precision and must not outrank it. */
-.polkit-icon-glyph {
-    font-size: 32px;
-    color: alpha(@fg, 0.45);
+.polkit-details {
+    padding: var(--space-3) var(--space-4);
+    margin-top: var(--space-1);
 }
 
-/* Authenticated. The one moment the ornament is worth looking at, so it takes
-   the accent, an elastic overshoot, and a subtle focal bloom. */
+/* The card's last row and its only commitment; a group's gap, so the eye
+   lands on it rather than reading into it. */
+.polkit-actions {
+    margin-top: var(--space-5);
+}
+
+/* ── The icon's approval ──
+   The verdict arriving, so an enter. A short settle rather than a flash: it
+   plays while the dialog is already closing, so it must never read as
+   something to wait for. It lands on the icon, which already occupies its
+   space, so nothing below it moves. */
 .polkit-icon-glyph.polkit-icon-ok {
-    color: @accent;
-    animation: polkit-icon-ok 400ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    animation: polkit-icon-ok var(--motion-enter);
 }
 
 @keyframes polkit-icon-ok {

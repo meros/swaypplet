@@ -18,6 +18,7 @@ use gtk4_layer_shell::Edge;
 
 use crate::auth_field::{AuthField, Caption, Tone};
 use crate::layer_shell::{self, LayerShellConfig};
+use crate::ui;
 
 use super::agent::ResolvedIdentity;
 
@@ -166,10 +167,16 @@ pub struct PolkitDialog {
 impl PolkitDialog {
     pub fn new(app: &gtk4::Application) -> Rc<Self> {
         let window = layer_shell::create_layer_window(app, &POLKIT_CONFIG);
-        window.add_css_class("polkit");
         window.set_visible(false);
 
         // ── Backdrop fills the whole screen; click anywhere → cancel ──
+        //
+        // Transparent, like the launcher and OSD aprons, and deliberately not
+        // a scrim: the compositor discards alpha-0 pixels, so the glass clips
+        // to the card instead of frosting the whole screen. It is also why
+        // this card is not `ui::card_over_scrim`: with nothing under it, a
+        // card painted at the lock's 0.375 lands in the band glass.nix
+        // reserves for nothing, a flat slab with no bevel and no rim.
         let backdrop = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .halign(gtk4::Align::Fill)
@@ -177,7 +184,7 @@ impl PolkitDialog {
             .hexpand(true)
             .vexpand(true)
             .build();
-        backdrop.add_css_class("polkit-backdrop");
+        ui::surface(&backdrop);
 
         // Centring wrapper
         let center = gtk4::Box::builder()
@@ -189,40 +196,43 @@ impl PolkitDialog {
             .build();
 
         // ── The card ─────────────────────────────────────────────────
-        let card = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(0)
-            .width_request(400)
-            .build();
-        card.add_css_class("glass-card");
+        let card = ui::vbox(0);
+        card.set_width_request(400);
+        ui::card(&card, ui::Card::Floating);
         card.add_css_class("polkit-container");
 
-        // Icon (image first, fallback nerd-font label)
-        let icon_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .halign(gtk4::Align::Center)
-            .build();
+        // Icon (image first, fallback nerd-font label).
+        //
+        // The card's one ornament, and the only thing on it that is not a
+        // word or a control. Sized to the 48 px row docs/AUTH_CARD.md budgets
+        // for it, and faint: it says what the title says with less precision
+        // and must not outrank it.
+        let icon_box = ui::vbox(0);
+        icon_box.set_halign(gtk4::Align::Center);
         icon_box.add_css_class("polkit-icon-box");
         let icon_image = gtk4::Image::builder().pixel_size(44).visible(false).build();
-        icon_image.add_css_class("polkit-icon");
-        let icon_label = gtk4::Label::builder().label("\u{f0483}").build();
+        let icon_label = gtk4::Label::new(Some("\u{f0483}"));
+        ui::glyph(&icon_label, ui::Text::Display, ui::Tone::Faint);
         icon_label.add_css_class("polkit-icon-glyph");
         icon_box.append(&icon_image);
         icon_box.append(&icon_label);
 
-        let title_label = gtk4::Label::builder()
-            .label("Authentication Required")
-            .halign(gtk4::Align::Center)
-            .build();
+        // The card's only heading, one step up and no more: much larger and
+        // it competes with the buttons for the eye.
+        let title_label = ui::text("Authentication Required", ui::Text::Title, ui::Tone::Fg);
+        title_label.set_halign(gtk4::Align::Center);
         title_label.add_css_class("polkit-title");
 
-        let message_label = gtk4::Label::builder()
-            .halign(gtk4::Align::Center)
-            .justify(gtk4::Justification::Center)
-            .wrap(true)
-            .wrap_mode(gtk4::pango::WrapMode::WordChar)
-            .max_width_chars(48)
-            .build();
+        // Full contrast: this is the sentence naming what is about to run as
+        // root, the one thing on the card that has to be read before it is
+        // answered. Dimming it would style the stakes as an aside.
+        let message_label = ui::text("", ui::Text::Body, ui::Tone::Fg);
+        message_label.set_halign(gtk4::Align::Center);
+        message_label.set_xalign(0.5);
+        message_label.set_justify(gtk4::Justification::Center);
+        message_label.set_wrap(true);
+        message_label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+        message_label.set_max_width_chars(48);
         message_label.add_css_class("polkit-message");
 
         // ── The command, for requests polkit never described ──────────
@@ -233,26 +243,24 @@ impl PolkitDialog {
         // user made from one they did not, so it gets a well of its own:
         // monospace because it is a command, recessed because it is evidence
         // rather than instruction.
-        let face_command = gtk4::Label::builder()
-            .halign(gtk4::Align::Start)
-            .wrap(true)
-            .wrap_mode(gtk4::pango::WrapMode::WordChar)
-            .max_width_chars(48)
-            .selectable(true)
-            .build();
-        face_command.add_css_class("face-confirm-command");
-        let face_well = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .visible(false)
-            .build();
+        let face_command = ui::text("", ui::Text::Body, ui::Tone::Fg);
+        ui::mono(&face_command);
+        face_command.set_halign(gtk4::Align::Start);
+        face_command.set_wrap(true);
+        face_command.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+        face_command.set_max_width_chars(48);
+        face_command.set_selectable(true);
+        let face_well = ui::well();
+        face_well.set_visible(false);
         face_well.add_css_class("face-confirm-well");
         face_well.append(&face_command);
 
-        let face_consequence = gtk4::Label::builder()
-            .label("Runs as root")
-            .halign(gtk4::Align::Center)
-            .visible(false)
-            .build();
+        // Stated, not shouted. The escalation is the reason to think, but
+        // colouring it as a warning on every legitimate sudo would spend the
+        // alarm on nothing and leave none for when it matters.
+        let face_consequence = ui::text("Runs as root", ui::Text::Label, ui::Tone::Muted);
+        face_consequence.set_halign(gtk4::Align::Center);
+        face_consequence.set_visible(false);
         face_consequence.add_css_class("face-confirm-consequence");
 
         // ── Password entry (the fallback) ─────────────────────────────
@@ -266,43 +274,38 @@ impl PolkitDialog {
         let field = AuthField::new(&password_entry);
 
         // ── Identity picker (hidden when only one identity) ───────────
-        let identity_row = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(10)
-            .visible(false)
-            .build();
+        let identity_row = ui::hbox(3);
+        identity_row.set_visible(false);
         identity_row.add_css_class("polkit-identity-row");
-        let identity_lbl = gtk4::Label::builder().label("Run as").build();
-        identity_lbl.add_css_class("polkit-identity-label");
+        let identity_lbl = ui::text("Run as", ui::Text::Caption, ui::Tone::Muted);
+        ui::set_class(&identity_lbl, "ui-strong", true);
         let identity_combo = gtk4::DropDown::builder().hexpand(true).build();
-        identity_combo.add_css_class("polkit-identity-combo");
+        ui::dropdown(&identity_combo);
         identity_row.append(&identity_lbl);
         identity_row.append(&identity_combo);
 
         let caption = Caption::new(46);
 
         // ── Details revealer (action_id, vendor, command, pid) ────────
-        let details_toggle = gtk4::Button::builder()
-            .label("\u{f0142}  Details")
-            .has_frame(false)
-            .halign(gtk4::Align::Start)
-            .build();
+        let details_toggle = ui::small_button("\u{f0142}  Details", ui::Kind::Flat);
+        details_toggle.set_halign(gtk4::Align::Start);
         details_toggle.add_css_class("polkit-details-toggle");
         let details_revealer = gtk4::Revealer::builder()
             .transition_type(gtk4::RevealerTransitionType::SlideDown)
-            .transition_duration(200)
+            .transition_duration(crate::tokens::motion::EXPAND.ms as u32)
             .reveal_child(false)
             .build();
-        let details_label = gtk4::Label::builder()
-            .halign(gtk4::Align::Start)
-            .justify(gtk4::Justification::Left)
-            .wrap(true)
-            .wrap_mode(gtk4::pango::WrapMode::WordChar)
-            .max_width_chars(56)
-            .selectable(true)
-            .build();
-        details_label.add_css_class("polkit-details");
-        details_revealer.set_child(Some(&details_label));
+        let details_label = ui::text("", ui::Text::Caption, ui::Tone::Muted);
+        ui::mono(&details_label);
+        details_label.set_justify(gtk4::Justification::Left);
+        details_label.set_wrap(true);
+        details_label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+        details_label.set_max_width_chars(56);
+        details_label.set_selectable(true);
+        let details_well = ui::well();
+        details_well.add_css_class("polkit-details");
+        details_well.append(&details_label);
+        details_revealer.set_child(Some(&details_well));
         {
             let revealer = details_revealer.clone();
             let toggle = details_toggle.clone();
@@ -318,17 +321,12 @@ impl PolkitDialog {
         }
 
         // ── Action buttons ───────────────────────────────────────────
-        let actions = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(10)
-            .halign(gtk4::Align::End)
-            .build();
+        let actions = ui::hbox(3);
+        actions.set_halign(gtk4::Align::End);
         actions.add_css_class("polkit-actions");
-        let cancel_btn = gtk4::Button::builder().label("Cancel").build();
-        cancel_btn.add_css_class("polkit-cancel");
-        let auth_btn = gtk4::Button::builder().label("Authenticate").build();
-        auth_btn.add_css_class("polkit-auth-btn");
-        auth_btn.add_css_class("suggested-action");
+        let cancel_btn = ui::button("Cancel", ui::Kind::Secondary);
+        // The card's one primary action (principle 2).
+        let auth_btn = ui::button("Authenticate", ui::Kind::Primary);
         actions.append(&cancel_btn);
         actions.append(&auth_btn);
 
@@ -342,11 +340,8 @@ impl PolkitDialog {
         // so separating both by 14 px said they were equally related and left
         // the field looking crowded against the sentence that explains it.
         // The lock card has worked this way for a while; this brings the two
-        // onto the same model. See the gap block in data/style.css.
-        let content = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(0)
-            .build();
+        // onto the same model. See the gap ladder in data/css/08-auth.css.
+        let content = ui::vbox(0);
         content.append(&icon_box);
         content.append(&title_label);
         content.append(&message_label);
@@ -527,8 +522,7 @@ impl PolkitDialog {
         self.password_entry.set_placeholder_text(Some("Password"));
         self.set_status("", StatusKind::Info);
         self.card.remove_css_class("polkit-shake");
-        self.card.remove_css_class("polkit-success");
-        self.card.remove_css_class("polkit-verifying");
+        ui::set_class(&self.card, "success", false);
         self.field.set_busy(false);
         self.field.set_fp_armed(false);
         self.caps.set(caps_lock_on());
@@ -712,14 +706,17 @@ impl PolkitDialog {
     /// are and simply stop asking: the pulse comes off, and what they last
     /// reported stands as the record of which method actually worked.
     pub fn flash_success(&self) {
-        self.card.add_css_class("polkit-success");
+        ui::set_class(&self.card, "success", true);
         self.icon_image.set_visible(false);
         self.icon_label.set_visible(true);
         self.icon_label.set_label(ICON_OK);
+        // Authenticated: the one moment the ornament is worth looking at, so
+        // it takes the accent and a settle (`.polkit-icon-ok`).
+        ui::glyph(&self.icon_label, ui::Text::Display, ui::Tone::Accent);
         self.icon_label.add_css_class("polkit-icon-ok");
         // The pulse comes off; the marks stay lit as the record of which
         // method actually worked.
-        self.field.widget().remove_css_class("auth-fp-armed");
+        self.field.set_fp_armed(false);
     }
 
     pub fn lock_inputs(&self) {
@@ -747,6 +744,7 @@ impl PolkitDialog {
 
     fn set_icon(&self, icon_name: &str, action_id: &str) {
         self.icon_label.remove_css_class("polkit-icon-ok");
+        ui::glyph(&self.icon_label, ui::Text::Display, ui::Tone::Faint);
         // Try the icon name from polkit first.
         if !icon_name.is_empty() {
             let display = gtk4::prelude::WidgetExt::display(&self.icon_image);
