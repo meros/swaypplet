@@ -13,7 +13,6 @@ pub struct NotificationsSection {
     section: Rc<ui::Section>,
     list_box: gtk4::Box,
     empty_label: gtk4::Label,
-    list_scroller: gtk4::ScrolledWindow,
     store: Rc<RefCell<NotificationStore>>,
 }
 
@@ -68,7 +67,6 @@ impl NotificationsSection {
             section,
             list_box,
             empty_label,
-            list_scroller: scroll.clone(),
             store: store.clone(),
         };
 
@@ -106,13 +104,6 @@ impl NotificationsSection {
 
     pub fn widget(&self) -> &gtk4::Box {
         &self.section.root
-    }
-
-    /// Cap the internal list scroller. Embedding contexts (start menu) use
-    /// this instead of wrapping the section in a second ScrolledWindow —
-    /// nested scrollers fight over scroll events and clip each other.
-    pub fn set_list_max_height(&self, px: i32) {
-        self.list_scroller.set_max_content_height(px);
     }
 
     fn rebuild(&self) {

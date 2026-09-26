@@ -485,7 +485,7 @@ fn boot_time() -> Option<SystemTime> {
 /// mainstream kernel, asked for rather than assumed.
 fn clock_ticks() -> Option<u64> {
     let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
-    (hz > 0).then(|| hz as u64)
+    (hz > 0).then_some(hz as u64)
 }
 
 /// Split out from [`proc_start_time`] so the arithmetic is testable

@@ -166,8 +166,8 @@ pub fn preset_button(label: &str) -> gtk4::Button {
 
 /// The line saying where a tab's values currently come from.
 pub fn status_label() -> gtk4::Label {
-    let status = hint_label("");
-    status
+    
+    hint_label("")
 }
 
 /// Where the values come from: `system` is faint, an override plain. The one

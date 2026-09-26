@@ -711,7 +711,7 @@ fn ribbon_slider(
     let btn = ui::button_with(
         ui::Face::Glyph {
             glyph: icon,
-            tooltip: tooltip,
+            tooltip,
         },
         Kind::Flat,
         ui::Size::Normal,
@@ -958,6 +958,28 @@ fn rail_action(
     btn
 }
 
+/// Hand a shot to `screenshot`, which owns the whole flow.
+///
+/// The panel is dismissed first, and not because it would be untidy in the
+/// picture: the selector freezes the screen, so a panel still mapped would be
+/// frozen into it and then covered by the selector showing that frozen copy.
+fn shot(
+    window: &gtk4::Window,
+    store: &Rc<RefCell<NotificationStore>>,
+    shot: crate::screenshot::Shot,
+) {
+    let Some(app) = window.application() else {
+        return;
+    };
+    window.set_visible(false);
+    let store = store.clone();
+    // One frame for the unmap to reach the compositor before the capture
+    // does. Anything shorter races the surface the capture must not contain.
+    glib::timeout_add_local_once(std::time::Duration::from_millis(120), move || {
+        crate::screenshot::take(&app, &store, shot);
+    });
+}
+
 // ── Footer action implementations ─────────────────────────────────────────────
 
 #[cfg(test)]
@@ -993,26 +1015,4 @@ mod tests {
             }
         }
     }
-}
-
-/// Hand a shot to `screenshot`, which owns the whole flow.
-///
-/// The panel is dismissed first, and not because it would be untidy in the
-/// picture: the selector freezes the screen, so a panel still mapped would be
-/// frozen into it and then covered by the selector showing that frozen copy.
-fn shot(
-    window: &gtk4::Window,
-    store: &Rc<RefCell<NotificationStore>>,
-    shot: crate::screenshot::Shot,
-) {
-    let Some(app) = window.application() else {
-        return;
-    };
-    window.set_visible(false);
-    let store = store.clone();
-    // One frame for the unmap to reach the compositor before the capture
-    // does. Anything shorter races the surface the capture must not contain.
-    glib::timeout_add_local_once(std::time::Duration::from_millis(120), move || {
-        crate::screenshot::take(&app, &store, shot);
-    });
 }

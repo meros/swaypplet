@@ -239,11 +239,10 @@ fn charge_status(bat: &BatteryState) -> Option<ui::Status> {
 /// Walk up the widget hierarchy to find the containing `gtk4::Window` and
 /// hide it. Used by Lock and Suspend to close the panel before acting.
 pub(crate) fn hide_panel_for_widget(widget: &gtk4::Widget) {
-    if let Some(root) = widget.root() {
-        if let Ok(window) = root.downcast::<gtk4::Window>() {
+    if let Some(root) = widget.root()
+        && let Ok(window) = root.downcast::<gtk4::Window>() {
             window.set_visible(false);
         }
-    }
 }
 
 fn format_governor_info(gov: &GovernorProfile) -> String {

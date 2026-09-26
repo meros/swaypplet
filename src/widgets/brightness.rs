@@ -103,7 +103,7 @@ impl BrightnessSection {
         let summary_text = self.section.summary.clone();
 
         crate::spawn::spawn_work(
-            || read_brightness(),
+            read_brightness,
             move |pct_opt| {
                 if let Some(pct) = pct_opt {
                     *updating.borrow_mut() = true;

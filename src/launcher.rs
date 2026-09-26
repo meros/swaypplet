@@ -757,8 +757,8 @@ fn build_result_row(
     crate::ui::glyph::adopt(&r.icon, crate::ui::Text::Title, crate::ui::Tone::Muted);
 
     // The app's own icon in the glyph's place, when the theme has it.
-    if !result.icon.is_empty() && !result.icon.contains('/') {
-        if let Some(display) = gtk4::gdk::Display::default() {
+    if !result.icon.is_empty() && !result.icon.contains('/')
+        && let Some(display) = gtk4::gdk::Display::default() {
             let theme = gtk4::IconTheme::for_display(&display);
             if theme.has_icon(&result.icon) {
                 let image = gtk4::Image::builder()
@@ -768,7 +768,6 @@ fn build_result_row(
                 r.set_icon_image(&image);
             }
         }
-    }
 
     // Only badge non-default providers (websearch, calc, …). The dominant
     // "desktopapplications" source is implied by the surface, so badging every

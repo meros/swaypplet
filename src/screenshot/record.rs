@@ -14,7 +14,7 @@ use crate::services::notifications::store::{StoreRef, store_add};
 use crate::services::notifications::{Notification, Urgency};
 
 thread_local! {
-    static ACTIVE_RECORDING: RefCell<Option<RecordingState>> = RefCell::new(None);
+    static ACTIVE_RECORDING: RefCell<Option<RecordingState>> = const { RefCell::new(None) };
     /// Published recording state (true = actively recording).
     pub static RECORDING_OBSERVED: Observed<bool> = Observed::new(false);
 }
@@ -22,7 +22,6 @@ thread_local! {
 struct RecordingState {
     child: Child,
     path: PathBuf,
-    start_time: glib::DateTime,
 }
 
 /// Where video recordings land.
@@ -83,12 +82,10 @@ pub fn start(app: &gtk4::Application, store: &StoreRef) {
         // wf-recorder takes -g "x,y WxH" or captures output directly
         match cmd.spawn() {
             Ok(child) => {
-                let start_time = glib::DateTime::now_local().unwrap();
                 ACTIVE_RECORDING.with(|r| {
                     *r.borrow_mut() = Some(RecordingState {
                         child,
                         path: path.clone(),
-                        start_time,
                     });
                 });
                 RECORDING_OBSERVED.with(|r| r.set_if_changed(true));

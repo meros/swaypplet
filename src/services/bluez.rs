@@ -109,7 +109,7 @@ pub fn snapshot() -> Snapshot {
         return snapshot;
     }
 
-    for (_, interfaces) in objects.iter() {
+    for interfaces in objects.values() {
         let Some(device) = interfaces.get(IFACE_DEVICE) else {
             continue;
         };

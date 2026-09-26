@@ -272,12 +272,11 @@ impl Editor {
         let keys = gtk4::EventControllerKey::new();
         let this = self.clone();
         keys.connect_key_pressed(move |_, key, _, state| {
-            if state.contains(gdk::ModifierType::CONTROL_MASK) {
-                if key == gdk::Key::z {
+            if state.contains(gdk::ModifierType::CONTROL_MASK)
+                && key == gdk::Key::z {
                     this.undo();
                     return glib::Propagation::Stop;
                 }
-            }
             match key {
                 gdk::Key::b | gdk::Key::B => {
                     this.tool.set(Tool::Box_);

@@ -134,8 +134,8 @@ pub fn query(
                 let mut payload = vec![0u8; length as usize];
                 stream.read_exact(&mut payload)?;
 
-                if let Ok(resp) = QueryResponse::parse_from_bytes(&payload) {
-                    if resp.item.is_some() {
+                if let Ok(resp) = QueryResponse::parse_from_bytes(&payload)
+                    && resp.item.is_some() {
                         let item = resp.item.unwrap();
                         results.push(SearchResult {
                             identifier: item.identifier,
@@ -147,7 +147,6 @@ pub fn query(
                             actions: item.actions,
                         });
                     }
-                }
             }
             _ => {
                 // Unknown status — skip the payload

@@ -110,11 +110,7 @@ pub(crate) fn read_state() -> Option<MediaState> {
 /// - `file:///path` → `/path`
 /// - Other URLs are ignored (would need HTTP fetch + cache)
 fn resolve_art_path(url: &str) -> Option<String> {
-    if let Some(path) = url.strip_prefix("file://") {
-        Some(path.to_string())
-    } else {
-        None
-    }
+    url.strip_prefix("file://").map(|path| path.to_string())
 }
 
 const PREFIX: &str = "org.mpris.MediaPlayer2.";

@@ -531,15 +531,14 @@ fn handle_event(
     // the UI already shows the new user, so starting the old session would
     // open A's desktop under B's name. The person at the keyboard wins; the
     // completed auth is discarded.
-    if let Some(user) = s.switch_pending.take() {
-        if matches!(ev, ipc::Ev::AuthMessage { .. } | ipc::Ev::SessionReady) {
+    if let Some(user) = s.switch_pending.take()
+        && matches!(ev, ipc::Ev::AuthMessage { .. } | ipc::Ev::SessionReady) {
             s.prompt_open = false;
             s.canceling = true;
             s.recreate_user = Some(user);
             s.send(ipc::Req::Cancel);
             return;
         }
-    }
     match ev {
         ipc::Ev::AuthMessage { kind, text } => {
             if s.canceling {

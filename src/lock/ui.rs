@@ -625,11 +625,10 @@ impl SurfaceSet {
         *self.user_field.borrow_mut() = Some(user.to_string());
         *self.active_user.borrow_mut() = user.to_string();
         for s in self.inner.borrow().iter() {
-            if let Some(ue) = &s.user_entry {
-                if ue.text() != user {
+            if let Some(ue) = &s.user_entry
+                && ue.text() != user {
                     ue.set_text(user);
                 }
-            }
             for (name, chip) in &s.user_chips {
                 ui::set_selected(chip, name == user);
             }

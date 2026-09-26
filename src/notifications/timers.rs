@@ -77,8 +77,8 @@ pub(super) fn pause_timers(st: &Rc<RefCell<State>>) {
     s.hovered = true;
     let now = Instant::now();
     for card in &mut s.cards {
-        if matches!(card.timer, Timer::Running { .. }) {
-            if let Timer::Running { source, deadline } =
+        if matches!(card.timer, Timer::Running { .. })
+            && let Timer::Running { source, deadline } =
                 std::mem::replace(&mut card.timer, Timer::None)
             {
                 crate::spawn::remove_source(source);
@@ -86,7 +86,6 @@ pub(super) fn pause_timers(st: &Rc<RefCell<State>>) {
                     remaining: deadline.saturating_duration_since(now),
                 };
             }
-        }
     }
 }
 

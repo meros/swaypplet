@@ -1047,7 +1047,7 @@ fn component_scope_violations() -> Vec<Violation> {
         let src = strip_css_comments(css);
         for sel_list in parse(css).selectors {
             let line = src
-                .find(&*sel_list.split(',').next().unwrap_or_default())
+                .find(sel_list.split(',').next().unwrap_or_default())
                 .map_or(1, |i| src[..i].bytes().filter(|&c| c == b'\n').count() + 1);
             for sel in items(&sel_list) {
                 if sel == ":root" {
