@@ -2,19 +2,14 @@
 //!
 //! One provider, one document, in this order: the design tokens
 //! (`crate::tokens`, generated from the theme inputs; docs/design-system.md),
-//! `data/palette.css` (the `@define-color` names the rules still use while
-//! they move onto the tokens), then the rules, one file per surface in
-//! `data/css/`, joined in the order of [`RULES`]. The order is the cascade:
-//! the files are contiguous pieces of what was one stylesheet.
-//!
-//! The palette and the rules are one provider on purpose. They cannot be two providers. GTK4 resolves `@define-color`
-//! per provider at parse time, so a second provider that redefines @accent
-//! recolours nothing the first one already parsed — which is why the
-//! wallpaper-derived palette (`crate::palette`) is swapped in *here*, in
-//! front of the rules, rather than layered over them.
+//! then the rules, one file per surface in `data/css/`, joined in the order
+//! of [`RULES`]. The order is the cascade: the files are contiguous pieces of
+//! what was one stylesheet.
 //!
 //! [`load_css`] runs in all eight processes that draw something. Only the
-//! long-lived ones ([`watch`]) follow the palette after startup.
+//! long-lived ones ([`watch`]) follow the inputs after startup: the Look
+//! settings, the sun, and the wallpaper's hue (`wallpaper`), which the panel
+//! samples and every process reads.
 
 use std::cell::RefCell;
 
@@ -22,12 +17,14 @@ use gdk4::Display;
 use gtk4::CssProvider;
 
 thread_local! {
-    /// The provider this process installed, so a palette change can reparse
+    /// The provider this process installed, so an input change can reparse
     /// into it instead of stacking a second one on the display.
     static PROVIDER: RefCell<Option<CssProvider>> = const { RefCell::new(None) };
-    /// The palette last parsed, so the watch can tell a real change from a
-    /// cache file that was rewritten with the same contents.
-    static LOADED: RefCell<String> = const { RefCell::new(String::new()) };
+    /// The inputs last parsed, so the watch can tell a real change from a
+    /// tick where nothing moved.
+    static LOADED: RefCell<Option<crate::tokens::Inputs>> = const { RefCell::new(None) };
+    /// Called after every reload that changed the stylesheet.
+    static WATCHERS: RefCell<Vec<Box<dyn Fn()>>> = const { RefCell::new(Vec::new()) };
 }
 
 /// The rules, one file per surface, in cascade order.
@@ -107,42 +104,31 @@ fn rules() -> String {
 
 mod inputs;
 mod locked;
+mod sway;
+pub mod wallpaper;
 
 pub use inputs::inputs;
 
-/// The inputs the stylesheet on screen was generated from, the mode as it
-/// was last resolved rather than resolved again. For Cairo drawing, which
-/// has to match the CSS beside it; and it leaves `SHOWN` alone, which the
-/// watch reads to tell a mode switch from a palette change, so a repaint
-/// between two ticks cannot swallow the glass's switch.
+/// The inputs the stylesheet on screen was generated from: the Look
+/// settings with the mode and the tint as they were last resolved rather
+/// than resolved again. For Cairo drawing, which has to match the CSS beside
+/// it, and which must neither move the sun's pending switch nor read the
+/// wallpaper cache on every draw.
 pub fn shown() -> crate::tokens::Inputs {
-    let look = crate::settings::store::with(|s| s.look());
-    crate::tokens::Inputs {
-        mode: inputs::shown(),
-        accent: look.accent,
-        neutral: look.neutral,
-        contrast: look.contrast,
-        motion: (look.motion.scale() * 100.0).round() as u8,
-    }
+    inputs::shown()
 }
 
-/// The whole document: tokens, palette, rules.
-fn document(inputs: crate::tokens::Inputs, palette: &str) -> String {
+/// The whole document: tokens, then rules.
+fn document(inputs: crate::tokens::Inputs) -> String {
     let tokens = crate::tokens::css(inputs);
-    format!("{tokens}\n{palette}\n{}", rules())
-}
-
-/// What was last parsed: the palette and the theme inputs.
-fn key(inputs: crate::tokens::Inputs, palette: &str) -> String {
-    format!("{inputs:?}\n{palette}")
+    format!("{tokens}\n{}", rules())
 }
 
 pub fn load_css() {
     let provider = CssProvider::new();
-    let palette = crate::palette::current();
     let inputs = inputs();
-    provider.load_from_string(&document(inputs, &palette));
-    LOADED.with(|l| *l.borrow_mut() = key(inputs, &palette));
+    provider.load_from_string(&document(inputs));
+    LOADED.with(|l| *l.borrow_mut() = Some(inputs));
 
     gtk4::style_context_add_provider_for_display(
         &Display::default().expect("Could not get default display"),
@@ -152,39 +138,60 @@ pub fn load_css() {
     PROVIDER.with(|p| *p.borrow_mut() = Some(provider));
 }
 
-/// Reparse the stylesheet with whatever palette is current. Every widget
+/// Reparse the stylesheet with the inputs as they are now. Every widget
 /// already on screen restyles itself; nothing is rebuilt.
 ///
-/// Returns whether the palette had in fact moved.
+/// Returns whether the inputs had in fact moved.
 pub fn reload() -> bool {
-    let palette = crate::palette::current();
     let inputs = inputs();
-    let k = key(inputs, &palette);
-    if LOADED.with(|l| *l.borrow() == k) {
+    let before = LOADED.with(|l| *l.borrow());
+    if before == Some(inputs) {
         return false;
     }
     PROVIDER.with(|p| {
         if let Some(provider) = p.borrow().as_ref() {
-            provider.load_from_string(&document(inputs, &palette));
+            provider.load_from_string(&document(inputs));
         }
     });
-    LOADED.with(|l| *l.borrow_mut() = k);
+    LOADED.with(|l| *l.borrow_mut() = Some(inputs));
+    WATCHERS.with(|w| {
+        for cb in w.borrow().iter() {
+            cb();
+        }
+    });
     true
 }
 
-/// Follow the palette for as long as this process lives.
+/// Run `cb` after every reload that changed the stylesheet, for Cairo
+/// drawing that shows the tokens (the Look tab's scales, its accent dots).
+pub fn observe(cb: impl Fn() + 'static) {
+    WATCHERS.with(|w| w.borrow_mut().push(Box::new(cb)));
+}
+
+/// Follow the inputs for as long as this process lives, and keep what the
+/// compositor draws from them (the glass material, sway's window borders)
+/// in step.
 ///
 /// One second, the same tick and for the same reason as `settings::watch`:
-/// the palette is a file one process writes and the others read, and there
-/// is no bus between them. A wallpaper change is not a hot path.
+/// the wallpaper's hue is a file one process writes and the others read,
+/// and there is no bus between them. A wallpaper change is not a hot path.
 pub fn watch() {
     locked::follow();
+    // The borders are the compositor's and outlive this process, so they are
+    // put up at start as well as on every change: a fresh session has the
+    // sway config's on them.
+    sway::apply_borders(LOADED.with(|l| *l.borrow()).unwrap_or_else(inputs));
     glib::timeout_add_local(std::time::Duration::from_secs(1), || {
-        let mode = inputs::shown();
-        if reload() && inputs::shown() != mode {
-            // The glass follows the mode (§4). Only this long-lived process
-            // watches, so the material is sent once, not once per process.
-            crate::settings::glass::apply_saved();
+        let before = LOADED.with(|l| *l.borrow());
+        if reload() {
+            let now = LOADED.with(|l| *l.borrow()).unwrap_or_default();
+            // The glass follows the mode and, under a full tint, the
+            // neutral (§4). Only the long-lived process watches, so the
+            // material is sent once, not once per process.
+            if before.map(crate::tokens::material) != Some(crate::tokens::material(now)) {
+                crate::settings::glass::apply_saved();
+            }
+            sway::apply_borders(now);
         }
         glib::ControlFlow::Continue
     });
@@ -210,18 +217,13 @@ mod tests {
         for (name, css) in super::RULES {
             structurally_whole(name, css);
         }
-        structurally_whole("data/palette.css", include_str!("../../data/palette.css"));
         // What GTK actually parses: all of them, joined. A file that is
         // whole on its own and breaks the next one at the seam is the
         // failure a split introduces.
         let tokens = crate::tokens::css(crate::tokens::Inputs::default());
         structurally_whole(
             "the joined stylesheet",
-            &format!(
-                "{tokens}\n{}\n{}",
-                include_str!("../../data/palette.css"),
-                super::joined_rules()
-            ),
+            &format!("{tokens}\n{}", super::joined_rules()),
         );
 
         // The categorical classes the notification card hands out by number
@@ -293,8 +295,8 @@ mod tests {
         assert_eq!(depth, 0, "{name}: {depth} block(s) left open");
     }
 
-    /// A hex value inside a rule is a colour the wallpaper cannot reach: the
-    /// derived palette rewrites definitions, so a literal in a rule stays
+    /// A hex value inside a rule is a colour the inputs cannot reach: the
+    /// tokens move with the mode and the tint, so a literal in a rule stays
     /// gruvbox while everything around it moves. One went in as
     /// `alpha(#32302f, 0.72)` on the notification card and took the card's
     /// ground out of the theme; this is why that class of edit now fails.

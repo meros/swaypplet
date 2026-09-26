@@ -2,8 +2,9 @@
 
 **Every surface swaypplet draws takes its colour, type, space, shape and
 motion from one set of tokens, and its widgets from one set of components.**
-The tokens are generated from four inputs (mode, accent, neutral, contrast);
-nothing else in the stylesheet or the code picks a colour or a size. This
+The tokens are generated from five inputs (mode, accent, neutral, contrast,
+and the wallpaper tint); nothing else in the stylesheet or the code picks a
+colour or a size. This
 file is the source of truth: `data/tokens.css`, `src/tokens.rs`, `src/ui/`
 and the lint tests implement it, and a change to any of them starts here.
 
@@ -36,10 +37,7 @@ before it are summarised in the zoo, `docs/design-system-zoo.html`.
 | accent | a named pair (see §3.2) | `aqua` | settings: Look → Accent |
 | neutral | `gruvbox`, `slate`, `pure` | `gruvbox` | settings: Look → Neutral |
 | contrast | `standard`, `high` | `standard` | settings: Look → Contrast; `prefers-contrast: more` forces `high` |
-
-The existing wallpaper **tint** (`Look.tint`: off, accents, full) stays: it
-rotates the hue of the generated accent (and, at `full`, the neutral) the
-way `src/palette.rs` does today, after generation and before emission.
+| tint | `off`, `accents`, `full`, with the wallpaper's hue | `off` | settings: Look → Theme colour (§2.2) |
 
 Nix ships the defaults in `theme/settings.nix`; the settings pane changes
 them per user. `src/tokens.rs` turns them into `tokens.css` on every change.
@@ -62,6 +60,31 @@ night light uses (`gammastep.nix`: 55.6 N, 13.0 E; Nix writes it to
   as one step: tokens reloaded, material values sent.
 - Choosing `dark` or `light` in the pane sets that mode until you choose
   `auto` again.
+
+### 2.2 The wallpaper tint
+
+The tint is an input like the others: the generator builds the scales from
+it, so the stylesheet, the glass body, Cairo drawing and sway's window
+borders all move together, and §5 tests the tinted sets. The one value it
+needs from outside the settings is the wallpaper's **hue**: the OKLCH hue of
+the image's source colour (Material's quantizer and `Score`), in whole
+degrees. The panel samples it (`src/theme/wallpaper.rs`) into
+`$XDG_CACHE_HOME/swaypplet/wallpaper-source`, and every process reads that
+line. A wallpaper with no usable colour, or one not sampled yet, leaves the
+tint off. `src/tokens/tint.rs` holds the rule.
+
+Every rule keeps each colour's **lightness**, because lightness is what the
+contrast is made of; only hue moves, and chroma gives way (never lightness)
+where a hue does not fit in sRGB.
+
+| Family | `accents` and `full` | Why |
+|---|---|---|
+| accent | every step takes the wallpaper's hue, keeping its lightness and chroma | the accent input still sets how loud it is; the wallpaper sets which colour |
+| categorical | all six turn by the one angle that puts slot 1 on the wallpaper's hue | rigid, so they stay as far apart as gruvbox put them; anchored on slot 1, not on the accent input, so an app's colour does not depend on the accent picked |
+| status | each turns toward the wallpaper's hue by at most 12° | red stays red: 12° keeps it out of orange |
+| neutral | `full` only: the three anchors take the wallpaper's hue at a chroma held within 0.010–0.025 | a cast, not a colour; a grey preset gets one too, and the glass body (`fill_color`) follows |
+
+`off` is the untinted token set, byte for byte.
 
 ## 3. Tokens
 
@@ -127,7 +150,8 @@ light), whichever reaches the higher APCA Lc on step 9. If neither reaches
 60, `--accent-bg` steps down to step 8, where white does: gruvbox's dark
 yellow carries Lc 54 either way. Decided per accent, as Radix does per hue.
 
-**Status** is not generated; it is a fixed set per mode, from gruvbox:
+**Status** is not generated; it is a fixed set per mode, from gruvbox
+(harmonised toward the wallpaper under a tint, §2.2):
 
 | | dark text / fill | light text / fill |
 |---|---|---|
@@ -144,6 +168,7 @@ and a fill: dark mode uses gruvbox's bright tones to read and its neutral
 tones to fill; light mode its deep tones for both. The readable tone is
 then lifted to an OKLCH lightness of at least 0.80 (dark) or deepened to at
 most 0.50 (light), hue and chroma kept, so it clears Lc 45 on the glass.
+Under a tint the six turn together (§2.2).
 
 | Slot | dark text / fill | light text / fill |
 |---|---|---|
@@ -408,8 +433,10 @@ reaches Lc 62 there, 71 at high contrast):
 | `--on-accent` on `--accent-bg` | 60 |
 | `--on-status` on each status fill | 60 |
 
-`src/tokens.rs` tests all of them for all 144 input combinations (2 modes,
-6 accents, 3 neutrals, 2 contrasts). A token set that fails does not ship.
+`src/tokens/mod.rs` tests all of them for all 144 untinted input
+combinations (2 modes, 6 accents, 3 neutrals, 2 contrasts), and each of
+those again under `accents` and `full` at every 5° of wallpaper hue: 20,880
+token sets. A token set that fails does not ship.
 
 ## 6. Components
 

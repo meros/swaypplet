@@ -566,7 +566,8 @@ pub fn apply_saved() {
     let inputs = crate::theme::inputs();
     let saved = load_override();
     let default_look = inputs.mode == crate::tokens::Mode::Dark
-        && inputs.contrast == crate::tokens::Contrast::Standard;
+        && inputs.contrast == crate::tokens::Contrast::Standard
+        && !inputs.tint.casts_neutral();
     if saved.is_none() && default_look {
         // The sway config already carries exactly this.
         return;
@@ -583,15 +584,19 @@ pub fn apply_saved() {
 
 /// The material as the theme's mode tunes it (docs/design-system.md §4).
 /// Dark at standard contrast is the tuned material itself, pane edits
-/// included; dark at high contrast and light replace the six values the
-/// mode owns and leave the rest of the material alone.
+/// included, with only the body fill following a full tint's cast (§2.2);
+/// dark at high contrast and light replace the six values the mode owns and
+/// leave the rest of the material alone.
 pub fn for_mode(mut tuning: Tuning, inputs: crate::tokens::Inputs) -> Tuning {
+    let m = crate::tokens::material(inputs);
     if inputs.mode == crate::tokens::Mode::Dark
         && inputs.contrast == crate::tokens::Contrast::Standard
     {
+        if inputs.tint.casts_neutral() {
+            tuning.material.fill_color = m.fill_color.css();
+        }
         return tuning;
     }
-    let m = crate::tokens::material(inputs);
     tuning.material.fill_color = m.fill_color.css();
     tuning.material.fill_alpha = m.fill_alpha;
     tuning.material.absorb = m.absorb;

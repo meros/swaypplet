@@ -27,7 +27,6 @@ mod lock;
 mod mpris;
 mod notifications;
 mod osd;
-mod palette;
 mod panel;
 mod polkit;
 mod presence;

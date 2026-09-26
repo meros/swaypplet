@@ -79,16 +79,16 @@ and Bar tabs is `nix <section>` into the clipboard.
 - **Look**: the wallpaper is one `output * bg` command over sway IPC;
   motion is read per animation (`anim::duration`), in every process that
   animates, which is why `lock::run` and `bar::run` call `store::init` too.
-- **Tint** (`look.tint`, off | accents | full) is the one setting that is
-  not read where it is used. The panel derives a palette from the wallpaper
-  (`src/palette.rs`) and writes `$XDG_CACHE_HOME/swaypplet/palette.css`;
-  every process reads that file at `theme::load_css` and the long-lived ones
-  follow it on `theme::watch`'s tick. The file's presence is the setting —
-  turning the tint off deletes it — so a reader needs neither the settings
-  nor an IPC round trip to know what colour anything is, which is what keeps
-  a 100 ms JPEG decode out of the lock screen's startup. The panel also
-  pushes the derived accents at sway's `client.*` window borders, and puts
-  the config's own colours back when the tint goes off.
+- **Tint** (`look.tint`, off | accents | full) is a token input
+  (docs/design-system.md §2.2). The one part of it that is not a setting,
+  the wallpaper's hue, is sampled by the panel alone
+  (`src/theme/wallpaper.rs`) into
+  `$XDG_CACHE_HOME/swaypplet/wallpaper-source`; every process reads that
+  one line in `theme::inputs`, and the long-lived ones follow it on
+  `theme::watch`'s tick. A bare file read, so the lock screen's startup
+  never pays for a 100 ms JPEG decode. The watching process also puts the
+  tokens on sway's `client.*` window borders (`src/theme/sway.rs`), so they
+  follow the mode and the tint.
 - **Alerts**: a popup reads linger, corner and depth as it is created and
   keeps them (`notifications/popup.rs`); quiet hours is a 30 s tick plus an
   observer (`notifications/quiet.rs`), edge-triggered so a manual DND

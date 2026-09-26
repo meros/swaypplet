@@ -33,6 +33,13 @@ pub fn run(component: &str) {
         .build();
 
     app.connect_activate(move |app| {
+        // SWAYPPLET_PREVIEW_SETTINGS=1 reads the settings file first (the
+        // render harness's SWPP_SETTINGS=1, with an XDG_CONFIG_HOME of its
+        // own), so a preview shows the Look inputs it names (a tint, an
+        // accent) rather than the binary's defaults.
+        if std::env::var_os("SWAYPPLET_PREVIEW_SETTINGS").is_some() {
+            crate::settings::store::init();
+        }
         theme::load_css();
         let store = Rc::new(RefCell::new(NotificationStore::new()));
 

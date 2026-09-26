@@ -8,9 +8,9 @@ implements it, `data/style.css` declares it, and both point here.
 
 `src/anim.rs` has documented a three-duration scale since it was written, and
 the Rust-driven surfaces obeyed it. The stylesheet drifted anyway, because
-GTK4 CSS has no custom properties — `@define-color` is colours only — so every
-duration is a bare literal and nothing stops a new one appearing. A census
-before this change:
+it then had no variables for anything but colours, so every duration was a
+bare literal and nothing stopped a new one appearing. A census before this
+change:
 
 - **Durations:** 150 ms (×53, the intended micro tier), then 160, 180, 200,
   240, 280, 300, 320, 350, 380, 420, 550 and 900, most of them used once.

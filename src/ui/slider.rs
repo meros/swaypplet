@@ -51,6 +51,11 @@ pub fn switch_row(title: &str, subtitle: &str) -> (Row, gtk4::Switch) {
     (r, s)
 }
 
+/// Make a scale the component slider (the Helm ribbon's own).
+pub fn slider(s: &gtk4::Scale) {
+    s.add_css_class("ui-slider");
+}
+
 /// The slider for a dense column of them: a smaller knob, less air.
 pub fn dense_slider(s: &gtk4::Scale) {
     s.add_css_class("ui-slider");

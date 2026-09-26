@@ -362,16 +362,15 @@ impl Motion {
 
 /// How much of the theme the wallpaper colours.
 ///
-/// The palette is derived rather than replaced: each colour keeps its tone
-/// and its chroma and only its hue moves, so the contrast the stylesheet was
-/// measured with survives whatever is on the desktop. `src/palette.rs` has
-/// the rule and the proof.
+/// A token input (docs/design-system.md §2.2): each colour keeps its
+/// lightness and only its hue moves, so the contrast the tokens are tested
+/// at survives whatever is on the desktop. `src/tokens/tint.rs` has the
+/// rule, and the contrast tests in `src/tokens/mod.rs` the proof.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Tint {
-    /// The shipped gruvbox palette, and sway's borders as the config set
-    /// them. The default: a theme that follows the wallpaper is a taste, and
-    /// a taste is opted into.
+    /// The shipped tokens. The default: a theme that follows the wallpaper
+    /// is a taste, and a taste is opted into.
     #[default]
     Off,
     /// The accents follow the wallpaper; the greys stay gruvbox.
@@ -385,7 +384,7 @@ impl Tint {
 
     pub fn label(self) -> &'static str {
         match self {
-            Tint::Off => "Off — the shipped palette",
+            Tint::Off => "Off — the shipped colours",
             Tint::Accents => "Accents — hues from the wallpaper",
             Tint::Full => "Full — surfaces tinted too",
         }

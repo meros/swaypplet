@@ -1,4 +1,4 @@
-//! The design tokens, generated from four inputs (docs/design-system.md).
+//! The design tokens, generated from the theme inputs (docs/design-system.md).
 //!
 //! Every colour swaypplet shows comes from here: two 12-step scales per mode
 //! (neutral and accent), a fixed status set, and the semantic tier the
@@ -9,7 +9,9 @@
 //! The scales are built in OKLCH. Neutral is interpolated between three
 //! anchors per preset and mode, so a preset keeps its exact identity (the
 //! gruvbox ground `#32302f`, its text `#ebdbb2`); accent is a pair per name,
-//! the bright gruvbox tone for dark and the deep one for light.
+//! the bright gruvbox tone for dark and the deep one for light. The
+//! wallpaper tint is one more input (`tint`, docs/design-system.md §2.2):
+//! it moves hues and never lightness.
 //!
 //! The contrast requirements of §5 are tests at the bottom: every text token
 //! over the glass body, computed through the material the way
@@ -17,6 +19,9 @@
 
 pub mod motion;
 pub mod sun;
+pub mod tint;
+
+pub use tint::Tint;
 
 use std::fmt::Write as _;
 
@@ -92,17 +97,22 @@ impl From<Rgb> for Oklch {
     }
 }
 
+/// `o` in linear sRGB, unclamped: a channel outside 0..1 is out of gamut.
+fn oklch_linear(Oklch(l, c, h): Oklch) -> [f64; 3] {
+    let (a, b) = (c * h.to_radians().cos(), c * h.to_radians().sin());
+    let l_ = (l + 0.396_337_777_4 * a + 0.215_803_757_3 * b).powi(3);
+    let m_ = (l - 0.105_561_345_8 * a - 0.063_854_172_8 * b).powi(3);
+    let s_ = (l - 0.089_484_177_5 * a - 1.291_485_548 * b).powi(3);
+    [
+        4.076_741_662_1 * l_ - 3.307_711_591_3 * m_ + 0.230_969_929_2 * s_,
+        -1.268_438_004_6 * l_ + 2.609_757_401_1 * m_ - 0.341_319_396_5 * s_,
+        -0.004_196_086_3 * l_ - 0.703_418_614_7 * m_ + 1.707_614_701 * s_,
+    ]
+}
+
 impl From<Oklch> for Rgb {
-    fn from(Oklch(l, c, h): Oklch) -> Rgb {
-        let (a, b) = (c * h.to_radians().cos(), c * h.to_radians().sin());
-        let l_ = (l + 0.396_337_777_4 * a + 0.215_803_757_3 * b).powi(3);
-        let m_ = (l - 0.105_561_345_8 * a - 0.063_854_172_8 * b).powi(3);
-        let s_ = (l - 0.089_484_177_5 * a - 1.291_485_548 * b).powi(3);
-        Rgb::from_linear([
-            4.076_741_662_1 * l_ - 3.307_711_591_3 * m_ + 0.230_969_929_2 * s_,
-            -1.268_438_004_6 * l_ + 2.609_757_401_1 * m_ - 0.341_319_396_5 * s_,
-            -0.004_196_086_3 * l_ - 0.703_418_614_7 * m_ + 1.707_614_701 * s_,
-        ])
+    fn from(o: Oklch) -> Rgb {
+        Rgb::from_linear(oklch_linear(o))
     }
 }
 
@@ -228,6 +238,8 @@ pub struct Inputs {
     pub contrast: Contrast,
     /// The Motion setting as a percentage of every duration: 100, 50 or 0.
     pub motion: u8,
+    /// The wallpaper's hue and how far it reaches (§2.2).
+    pub tint: Tint,
 }
 
 impl Default for Inputs {
@@ -238,6 +250,7 @@ impl Default for Inputs {
             neutral: Neutral::Gruvbox,
             contrast: Contrast::Standard,
             motion: 100,
+            tint: Tint::Off,
         }
     }
 }
@@ -258,7 +271,13 @@ pub struct Scales {
 }
 
 pub fn scales(inputs: Inputs) -> Scales {
-    let [a1, a3, a12] = inputs.neutral.anchors(inputs.mode).map(Oklch::from);
+    let hue = inputs.tint.hue();
+    let anchors = inputs.neutral.anchors(inputs.mode);
+    let anchors = match hue {
+        Some(h) if inputs.tint.casts_neutral() => anchors.map(|c| tint::cast(c, h)),
+        _ => anchors,
+    };
+    let [a1, a3, a12] = anchors.map(Oklch::from);
     let mut n = [a1; 12];
     n[1] = mix(a1, a3, 0.5);
     n[2] = a3;
@@ -273,7 +292,20 @@ pub fn scales(inputs: Inputs) -> Scales {
         Mode::Dark => dark,
         Mode::Light => light,
     };
+    // Tinted, the accent is the wallpaper's hue at the pair's own lightness
+    // and chroma (§2.2).
+    let input = hue.map_or(input, |h| tint::with_hue(input, h));
     let Oklch(al, ac, ah) = Oklch::from(input);
+    // A moved hue can leave sRGB at a kept chroma; tinted steps give up
+    // chroma to fit. Untinted ones clip as they always have, so `Tint::Off`
+    // is the shipped token set byte for byte.
+    let rgb = |o: Oklch| {
+        if hue.is_some() {
+            tint::to_rgb(o)
+        } else {
+            o.into()
+        }
+    };
     let mut accent = [input; 12];
     for (i, slot) in accent.iter_mut().enumerate() {
         *slot = match i {
@@ -283,7 +315,7 @@ pub fn scales(inputs: Inputs) -> Scales {
                     Mode::Dark => (al + 0.05).min(0.9),
                     Mode::Light => (al - 0.05).max(0.2),
                 };
-                Oklch(l, ac, ah).into()
+                rgb(Oklch(l, ac, ah))
             }
             10 | 11 => {
                 let l = match (inputs.mode, i) {
@@ -293,11 +325,11 @@ pub fn scales(inputs: Inputs) -> Scales {
                     (Mode::Light, _) => 0.30,
                 };
                 let c = ac.min(0.10) * if i == 11 { 0.5 } else { 1.0 };
-                Oklch(l, c, ah).into()
+                rgb(Oklch(l, c, ah))
             }
             _ => {
                 let l = n[i].0;
-                Oklch(l, ac.min(0.02 + 0.012 * i as f64), ah).into()
+                rgb(Oklch(l, ac.min(0.02 + 0.012 * i as f64), ah))
             }
         };
     }
@@ -336,7 +368,25 @@ pub struct Status {
     pub danger_bg: Rgb,
 }
 
-pub fn status(mode: Mode) -> Status {
+/// The status set for `inputs`: the shipped one per mode, harmonised toward
+/// the wallpaper by at most `tint::STATUS_CAP` under a tint.
+pub fn status(inputs: Inputs) -> Status {
+    let st = shipped_status(inputs.mode);
+    let Some(h) = inputs.tint.hue() else {
+        return st;
+    };
+    let t = |c: Rgb| tint::harmonized(c, h);
+    Status {
+        success: t(st.success),
+        success_bg: t(st.success_bg),
+        warning: t(st.warning),
+        warning_bg: t(st.warning_bg),
+        danger: t(st.danger),
+        danger_bg: t(st.danger_bg),
+    }
+}
+
+fn shipped_status(mode: Mode) -> Status {
     match mode {
         Mode::Dark => Status {
             success: Rgb::hex(0x8ec07c),
@@ -366,18 +416,33 @@ pub const ON_STATUS: Rgb = Rgb::WHITE;
 /// Identity colours: which task a workspace belongs to (t1–t4), which app a
 /// notification came from (a1–a6). Never state, never decoration. Per slot:
 /// the readable tone (text, dots, rails) and the fill (solid chips).
-pub fn categorical(mode: Mode) -> [(Rgb, Rgb); 6] {
+///
+/// Under a tint all six turn by the one angle that puts slot 1 on the
+/// wallpaper's hue, so they stay as far apart as they were (§2.2).
+pub fn categorical(inputs: Inputs) -> [(Rgb, Rgb); 6] {
+    let mode = inputs.mode;
+    let tinted = inputs.tint.hue().is_some();
     // The readable tone is lifted (dark) or deepened (light) to a lightness
-    // that clears Lc 45 on the glass, keeping the gruvbox hue and chroma.
+    // that clears Lc 45 on the glass, keeping the gruvbox hue and chroma
+    // (tinted, giving up chroma rather than clipping; see `scales`).
     let legible = |c: Rgb| {
         let Oklch(l, ch, h) = Oklch::from(c);
         let l = match mode {
             Mode::Dark => l.max(0.80),
             Mode::Light => l.min(0.50),
         };
-        Rgb::from(Oklch(l, ch, h))
+        let o = Oklch(l, ch, h);
+        if tinted { tint::to_rgb(o) } else { o.into() }
     };
-    raw_categorical(mode).map(|(t, f)| (legible(t), f))
+    let raw = raw_categorical(mode);
+    let raw = match inputs.tint.hue() {
+        Some(h) => {
+            let delta = tint::difference(Oklch::from(raw[0].1).2, h);
+            raw.map(|(t, f)| (tint::rotated(t, delta), tint::rotated(f, delta)))
+        }
+        None => raw,
+    };
+    raw.map(|(t, f)| (legible(t), f))
 }
 
 fn raw_categorical(mode: Mode) -> [(Rgb, Rgb); 6] {
@@ -593,7 +658,7 @@ fn mixed(color: Rgb, share: f64) -> String {
 /// the semantic tier. The rules in `data/style.css` use only the latter.
 pub fn css(inputs: Inputs) -> String {
     let s = scales(inputs);
-    let st = status(inputs.mode);
+    let st = status(inputs);
     let lv = levels(inputs.mode, inputs.contrast);
     let m = material(inputs);
     let fg = s.neutral[11];
@@ -677,7 +742,7 @@ pub fn css(inputs: Inputs) -> String {
     put("success-tint", mixed(st.success_bg, 0.16));
 
     // Categorical: identity only (§3.2).
-    for (i, (text, fill)) in categorical(inputs.mode).iter().enumerate() {
+    for (i, (text, fill)) in categorical(inputs).iter().enumerate() {
         put(&format!("cat-{}", i + 1), text.css());
         put(&format!("cat-{}-bg", i + 1), fill.css());
         put(&format!("cat-{}-tint", i + 1), mixed(*fill, 0.30));
@@ -761,19 +826,42 @@ pub fn css(inputs: Inputs) -> String {
 mod tests {
     use super::*;
 
+    /// The wallpaper hues the tinted tests run at: every 5° round the
+    /// circle. The tint is whole degrees, so every hue it can take is one
+    /// edit away from exhaustive (`(0..360)`), which passes too; 5° keeps a
+    /// debug build's run short.
+    fn hues() -> impl Iterator<Item = u16> {
+        (0..72).map(|i| i * 5)
+    }
+
+    /// Off, and both reaches at every hue of [`hues`].
+    fn every_tint() -> Vec<Tint> {
+        let mut v = vec![Tint::Off];
+        for h in hues() {
+            v.push(Tint::Accents(h));
+            v.push(Tint::Full(h));
+        }
+        v
+    }
+
+    /// Every combination of the inputs that decide a colour: 144 untinted
+    /// (2 modes, 6 accents, 3 neutrals, 2 contrasts), each at every tint.
     fn every_input() -> Vec<Inputs> {
         let mut v = Vec::new();
         for mode in Mode::ALL {
             for accent in Accent::ALL {
                 for neutral in Neutral::ALL {
                     for contrast in Contrast::ALL {
-                        v.push(Inputs {
-                            mode,
-                            accent,
-                            neutral,
-                            contrast,
-                            motion: 100,
-                        });
+                        for tint in every_tint() {
+                            v.push(Inputs {
+                                mode,
+                                accent,
+                                neutral,
+                                contrast,
+                                motion: 100,
+                                tint,
+                            });
+                        }
                     }
                 }
             }
@@ -882,8 +970,8 @@ mod tests {
                 failures.push(format!("{inputs:?} on-accent: Lc {lc:.0}"));
             }
         }
-        for mode in Mode::ALL {
-            let st = status(mode);
+        for inputs in every_input() {
+            let st = status(inputs);
             for (name, bg) in [
                 ("success", st.success_bg),
                 ("warning", st.warning_bg),
@@ -891,7 +979,7 @@ mod tests {
             ] {
                 let lc = apca(ON_STATUS, bg).abs();
                 if lc < 60.0 {
-                    failures.push(format!("{mode:?} on-status on {name}: Lc {lc:.0}"));
+                    failures.push(format!("{inputs:?} on-status on {name}: Lc {lc:.0}"));
                 }
             }
         }
@@ -908,31 +996,28 @@ mod tests {
     #[test]
     fn categorical_colours_read_on_the_glass() {
         let mut failures = Vec::new();
-        for mode in Mode::ALL {
-            for contrast in Contrast::ALL {
-                let inputs = Inputs {
-                    mode,
-                    contrast,
-                    ..Inputs::default()
-                };
-                let m = material(inputs);
-                for behind in [Rgb(0.5, 0.5, 0.5), Rgb::BLACK] {
-                    let ground = glass_body(behind, &m);
-                    for (i, (text, fill)) in categorical(mode).iter().enumerate() {
-                        let lc = apca(*text, ground).abs();
-                        if lc < 45.0 {
-                            failures.push(format!(
-                                "{mode:?} {contrast:?} cat-{} over {}: Lc {lc:.0}",
-                                i + 1,
-                                behind.css()
-                            ));
-                        }
-                        let on = apca(Rgb::WHITE, *fill)
-                            .abs()
-                            .max(apca(scales(inputs).neutral[0], *fill).abs());
-                        if on < 45.0 {
-                            failures.push(format!("{mode:?} cat-{}-bg label: Lc {on:.0}", i + 1));
-                        }
+        // The accent does not reach the categorical set; the neutral does,
+        // through the glass body.
+        for inputs in every_input()
+            .into_iter()
+            .filter(|i| i.accent == Accent::Aqua)
+        {
+            let m = material(inputs);
+            let ink = scales(inputs).neutral[0];
+            for behind in [Rgb(0.5, 0.5, 0.5), Rgb::BLACK] {
+                let ground = glass_body(behind, &m);
+                for (i, (text, fill)) in categorical(inputs).iter().enumerate() {
+                    let lc = apca(*text, ground).abs();
+                    if lc < 45.0 {
+                        failures.push(format!(
+                            "{inputs:?} cat-{} over {}: Lc {lc:.0}",
+                            i + 1,
+                            behind.css()
+                        ));
+                    }
+                    let on = apca(Rgb::WHITE, *fill).abs().max(apca(ink, *fill).abs());
+                    if on < 45.0 {
+                        failures.push(format!("{inputs:?} cat-{}-bg label: Lc {on:.0}", i + 1));
                     }
                 }
             }
@@ -943,6 +1028,127 @@ mod tests {
             failures.len(),
             failures.join("\n")
         );
+    }
+
+    fn hue_of(c: Rgb) -> f64 {
+        Oklch::from(c).2
+    }
+
+    /// §2.2: the accent is the wallpaper's colour, and keeps the lightness
+    /// its contrast was measured at.
+    #[test]
+    fn a_tinted_accent_takes_the_wallpapers_hue() {
+        for inputs in every_input() {
+            let Some(h) = inputs.tint.hue() else { continue };
+            let untinted = scales(Inputs {
+                tint: Tint::Off,
+                ..inputs
+            });
+            let s = scales(inputs);
+            let (was, now) = (Oklch::from(untinted.accent[8]), Oklch::from(s.accent[8]));
+            assert!(
+                tint::difference(now.2, h).abs() < 2.0,
+                "{inputs:?}: accent-9 at hue {:.1}",
+                now.2
+            );
+            assert!(
+                (was.0 - now.0).abs() < 0.01,
+                "{inputs:?}: {was:?} -> {now:?}"
+            );
+        }
+    }
+
+    /// Red is a word, not a decoration: a status colour turns toward the
+    /// wallpaper by at most the cap, whatever the hue.
+    #[test]
+    fn status_stays_what_it_says() {
+        for mode in Mode::ALL {
+            let shipped = shipped_status(mode);
+            for tint in every_tint() {
+                let st = status(Inputs {
+                    mode,
+                    tint,
+                    ..Inputs::default()
+                });
+                for (name, a, b) in [
+                    ("success", shipped.success, st.success),
+                    ("success-bg", shipped.success_bg, st.success_bg),
+                    ("warning", shipped.warning, st.warning),
+                    ("warning-bg", shipped.warning_bg, st.warning_bg),
+                    ("danger", shipped.danger, st.danger),
+                    ("danger-bg", shipped.danger_bg, st.danger_bg),
+                ] {
+                    let moved = tint::difference(hue_of(a), hue_of(b)).abs();
+                    assert!(
+                        moved <= tint::STATUS_CAP + 1.0,
+                        "{mode:?} {tint:?}: {name} turned {moved:.1}°"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The categorical colours are a channel: one app, one colour. A tint
+    /// turns them together, so they stay as far apart as gruvbox put them.
+    #[test]
+    fn the_categorical_hues_stay_apart() {
+        let closest = |set: [(Rgb, Rgb); 6]| {
+            let hues = set.map(|(_, fill)| hue_of(fill));
+            let mut min: f64 = 360.0;
+            for (i, a) in hues.iter().enumerate() {
+                for b in &hues[i + 1..] {
+                    min = min.min(tint::difference(*a, *b).abs());
+                }
+            }
+            min
+        };
+        for mode in Mode::ALL {
+            let at = |tint| {
+                categorical(Inputs {
+                    mode,
+                    tint,
+                    ..Inputs::default()
+                })
+            };
+            let floor = closest(at(Tint::Off));
+            for tint in every_tint() {
+                let got = closest(at(tint));
+                assert!(
+                    got >= floor - 2.0,
+                    "{mode:?} {tint:?}: two categorical hues {got:.1}° apart, shipped {floor:.1}°"
+                );
+            }
+        }
+    }
+
+    /// Accents leaves the greys exactly alone; Full casts them toward the
+    /// wallpaper at their own lightness.
+    #[test]
+    fn only_full_reaches_the_neutrals() {
+        for inputs in every_input() {
+            let off = scales(Inputs {
+                tint: Tint::Off,
+                ..inputs
+            });
+            let s = scales(inputs);
+            match inputs.tint {
+                Tint::Off => {}
+                Tint::Accents(_) => assert_eq!(s.neutral, off.neutral, "{inputs:?}"),
+                Tint::Full(h) => {
+                    for (a, b) in off.neutral.iter().zip(&s.neutral) {
+                        let (a, b) = (Oklch::from(*a), Oklch::from(*b));
+                        assert!((a.0 - b.0).abs() < 0.01, "{inputs:?}: {a:?} -> {b:?}");
+                        assert!(b.1 <= tint::CAST.1 + 0.002, "{inputs:?}: {b:?}");
+                    }
+                    let ground = Oklch::from(s.neutral[2]);
+                    assert!(
+                        tint::difference(ground.2, f64::from(h)).abs() < 3.0,
+                        "{inputs:?}: the ground is at hue {:.1}",
+                        ground.2
+                    );
+                }
+            }
+        }
     }
 
     #[test]
