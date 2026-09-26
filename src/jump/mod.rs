@@ -59,6 +59,17 @@ const FRAME_RATE: u32 = 20;
 /// anything, and short enough that a lost release does not strand the grab.
 const WATCHDOG_MS: u64 = 6_000;
 
+/// The sway binding mode that is active while the card is up. The keys you
+/// press here are pressed with Super still held, and sway runs its own
+/// bindings before any client sees a key: `Super+Escape` closed the focused
+/// window and `Super+p` went to workspace p. The mode (users/modules/sway.nix
+/// in the nixos repo) binds both to `swaypplet-jump cancel` and
+/// `swaypplet-jump pin`, and `Escape` in it always goes back to the default
+/// mode, so a panel that dies with the card up cannot strand the keyboard.
+/// On a sway config without the mode, sway rejects the command and nothing
+/// changes.
+const MODE: &str = "swaypplet-jump";
+
 struct State {
     gesture: Gesture,
     /// Commands per row, captured at gesture start.
@@ -108,9 +119,10 @@ impl Jump {
             margins: &[],
             // Exclusive, unlike the keybind sheet: this surface has to see the
             // modifier come up, and that only arrives at whoever holds the
-            // keyboard. sway still evaluates its own bindings first, so
-            // `Super+Tab` keeps reaching us and every other chord keeps
-            // working while the card is up.
+            // keyboard. sway still evaluates its own bindings first, which
+            // is why the card puts sway in [`MODE`] while it is up: that
+            // mode's bindings are `Super+Tab`, `Escape` and `p`, with or
+            // without Super, and every other key reaches this surface.
             keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
         };
 
@@ -194,6 +206,18 @@ impl Jump {
         self.feed(Ev::Step);
     }
 
+    /// `Escape` or `Super+Escape` while the card is up.
+    pub fn cancel(self: &Rc<Self>) {
+        self.feed(Ev::Escape);
+    }
+
+    /// `p` or `Super+p` while the card is up.
+    pub fn pin(self: &Rc<Self>) {
+        if self.state.borrow().gesture.is_live() {
+            self.pin_selected();
+        }
+    }
+
     /// `Super+Shift+Tab`.
     pub fn step_back(self: &Rc<Self>) {
         self.feed(Ev::StepBack);
@@ -272,6 +296,7 @@ impl Jump {
                 // No material: the places float over the desktop, and glass
                 // on a strip as wide as the output would be a card again.
                 self.window.set_visible(true);
+                set_mode(MODE);
                 self.arm_watchdog();
                 self.start_stream();
                 // Take the workspace you are on out of the way while you
@@ -303,6 +328,7 @@ impl Jump {
                 self.stream.replace(None);
                 self.disarm_watchdog();
                 self.window.set_visible(false);
+                set_mode("default");
             }
             Action::Run(command) => {
                 // Refuse to move if something already did. `Super+g` while the
@@ -461,6 +487,20 @@ fn recede(workspace: &str, look: (f64, f64)) {
         return;
     }
     crate::sway_ipc::run_commands(vec![transform_command(workspace, look)]);
+}
+
+/// Synchronous, unlike the other commands here. Each asynchronous command
+/// runs on its own thread, so a tap that maps and unmaps within a few
+/// milliseconds could reach sway as `default` first and leave the keyboard
+/// in the switcher's mode. One round trip on a unix socket is well under a
+/// millisecond.
+fn set_mode(mode: &str) {
+    let done = crate::sway_ipc::connect()
+        .map_err(|e| e.to_string())
+        .and_then(|mut c| c.run_command(format!("mode {mode}")).map_err(|e| e.to_string()));
+    if let Err(e) = done {
+        log::debug!("jump: mode {mode}: {e}");
+    }
 }
 
 fn focused_workspace() -> Option<String> {
