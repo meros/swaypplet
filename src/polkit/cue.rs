@@ -27,36 +27,12 @@
 //! would be one more thing between Enter and the Allow button.
 
 use gtk4::prelude::*;
-use gtk4_layer_shell::{Edge, KeyboardMode, Layer};
+use gtk4_layer_shell::Edge;
 
-use crate::shell::layer::{self, LayerShellConfig, create_layer_window};
-
-static CUE_CONFIG: LayerShellConfig = LayerShellConfig {
-    namespace: crate::shell::Namespace::FaceCue,
-    layer: Layer::Overlay,
-    exclusive: false,
-    default_width: None,
-    // Explicit, so the surface never asks the compositor to choose. A layer
-    // surface that requests zero on an unanchored axis gets the whole output,
-    // and a full-screen surface above the card with a live input region would
-    // swallow every click aimed at it.
-    default_height: Some(180),
-    // Top strip, full width. The pill centres itself inside it, under the
-    // lens.
-    // Left and right anchored too, so the surface spans the output and its
-    // geometry never depends on the pill inside it. A surface that resized
-    // with its content renegotiated size mid-animation, and clipped
-    // `.ui-face-pill.dark`'s glow -- 22px of blur at 3px spread, which reaches
-    // well past the pill's own box.
-    anchors: &[(Edge::Top, true), (Edge::Left, true), (Edge::Right, true)],
-    margins: &[],
-    // Never takes the keyboard. The card owns every key that matters, and a
-    // grab here would silently steal the Enter meant for the Allow button.
-    keyboard_mode: KeyboardMode::None,
-};
+use crate::shell::{Namespace, Surface, layer};
 
 pub struct Cue {
-    window: gtk4::Window,
+    surface: Surface,
     /// Carries the entrance animation, so a state change on the pill cannot
     /// replay it. See `.ui-face-enter` in data/css/components/face.css.
     strip: gtk4::Box,
@@ -67,7 +43,28 @@ pub struct Cue {
 
 impl Cue {
     pub fn new(app: &gtk4::Application) -> Self {
-        let window = create_layer_window(app, &CUE_CONFIG);
+        let surface = Surface::builder(app, Namespace::FaceCue)
+            // Top strip, full width, the pill centred in it under the lens.
+            // Left and right anchored too, so the surface spans the output
+            // and its geometry never depends on the pill inside it: a
+            // surface that resized with its content renegotiated size
+            // mid-animation, and clipped `.ui-face-pill.dark`'s glow (22px
+            // of blur at 3px spread, well past the pill's own box).
+            .anchor(&[Edge::Top, Edge::Left, Edge::Right])
+            // Explicit, so the surface never asks the compositor to choose:
+            // zero on an unanchored axis gets the whole output, and a
+            // full-screen surface above the card with a live input region
+            // would swallow every click aimed at it.
+            .height(180)
+            // Never the keyboard (the default): the card owns every key
+            // that matters, and a grab here would silently steal the Enter
+            // meant for the Allow button.
+            //
+            // No card: the pill is the whole of it, and it arrives by its
+            // own CSS entrance rather than a Reveal.
+            .no_card()
+            .build();
+        let window = surface.window().clone();
         window.set_visible(false);
         // Re-applied on every map: the region lives on the GdkSurface, which
         // is created at map and re-laid-out on output changes.
@@ -90,11 +87,10 @@ impl Cue {
         // surface resize on every animation frame.
         strip.set_halign(gtk4::Align::Fill);
         strip.set_height_request(180);
-        crate::ui::surface::adopt(&strip);
-        window.set_child(Some(&strip));
+        surface.root().append(&strip);
 
         Cue {
-            window,
+            surface,
             strip,
             pill,
             ring,
@@ -116,12 +112,12 @@ impl Cue {
     /// pill the user's eye has already filtered out.
     pub fn set(&self, state: Option<crate::ui::FaceState>, text: &str) {
         if state.is_none() {
-            self.window.set_visible(false);
+            self.surface.window().set_visible(false);
             return;
         }
         crate::ui::set_face_state(&self.ring, Some(&self.pill), state);
         self.label.set_label(text);
-        if self.window.is_visible() {
+        if self.surface.window().is_visible() {
             // Already up: this is a state change, not an arrival. Touching the
             // entrance here is what made the pill jump on every frame state.
             return;
@@ -131,7 +127,7 @@ impl Cue {
         // forgotten. Set while hidden, which is the only time layer-shell
         // will take it.
         if let Some(monitor) = layer::internal_monitor() {
-            gtk4_layer_shell::LayerShell::set_monitor(&self.window, Some(&monitor));
+            gtk4_layer_shell::LayerShell::set_monitor(self.surface.window(), Some(&monitor));
         }
         // Map first, animate on the next frame the compositor gives us. The
         // frame clock does not tick until the surface is mapped and drawing,
@@ -139,9 +135,9 @@ impl Cue {
         // racing surface allocation -- which is visible, and always as a
         // stutter at exactly the moment the cue is trying to catch the eye.
         crate::ui::set_face_enter(&self.strip, false);
-        self.window.set_visible(true);
+        self.surface.window().set_visible(true);
         let strip = self.strip.clone();
-        self.window.add_tick_callback(move |window, _| {
+        self.surface.window().add_tick_callback(move |window, _| {
             crate::ui::set_face_enter(&strip, true);
             // Re-applied here as well as below: the region is a property of
             // the GdkSurface, which does not exist until the window maps, and
