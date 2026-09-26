@@ -84,11 +84,11 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
     let pct = gtk4::Label::builder()
         .css_classes(["bar-battery-pct"])
         .build();
-    let pct_reveal = gtk4::Revealer::builder()
-        .transition_type(gtk4::RevealerTransitionType::SlideRight)
-        .transition_duration(crate::tokens::motion::EXPAND.ms as u32)
-        .child(&pct)
-        .build();
+    let pct_reveal = ui::revealer(
+        gtk4::RevealerTransitionType::SlideRight,
+        crate::tokens::motion::EXPAND,
+    );
+    pct_reveal.set_child(Some(&pct));
     // Time estimate beside the glyph (time-to-full charging, time-to-empty
     // discharging). Faint: the percentage appears only when something is
     // wrong, the estimate is ambient. power::eta_text withholds it near
@@ -97,11 +97,11 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
         .css_classes(["bar-battery-eta"])
         .build();
     ui::set_tone(&eta, ui::Tone::Faint);
-    let eta_reveal = gtk4::Revealer::builder()
-        .transition_type(gtk4::RevealerTransitionType::SlideRight)
-        .transition_duration(crate::tokens::motion::EXPAND.ms as u32)
-        .child(&eta)
-        .build();
+    let eta_reveal = ui::revealer(
+        gtk4::RevealerTransitionType::SlideRight,
+        crate::tokens::motion::EXPAND,
+    );
+    eta_reveal.set_child(Some(&eta));
     let content = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .build();
@@ -111,9 +111,7 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
     ui::set_tone(&content, ui::Tone::Muted);
     let slide = SlideBin::new();
     slide.set_child(&content);
-    let root = gtk4::Box::builder()
-        .css_classes(["bar-seg"])
-        .build();
+    let root = gtk4::Box::builder().css_classes(["bar-seg"]).build();
     ui::segment(&root, false);
     root.append(&slide);
 

@@ -140,12 +140,11 @@ fn hazard(glyph: &str) -> (gtk4::Revealer, gtk4::Label) {
         .css_classes(["bar-hazard"])
         .build();
     ui::glyph(&label, ui::Text::Body, ui::Tone::Warning);
-    let revealer = gtk4::Revealer::builder()
-        .transition_type(gtk4::RevealerTransitionType::SlideRight)
-        .transition_duration(crate::tokens::motion::EXPAND.ms as u32)
-        .reveal_child(false)
-        .child(&label)
-        .build();
+    let revealer = ui::revealer(
+        gtk4::RevealerTransitionType::SlideRight,
+        crate::tokens::motion::EXPAND,
+    );
+    revealer.set_child(Some(&label));
     (revealer, label)
 }
 

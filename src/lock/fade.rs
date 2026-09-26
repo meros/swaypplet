@@ -30,7 +30,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 
 use crate::alpha::SurfaceAlpha;
-use crate::anim::duration;
+
 use crate::tokens::motion::{ENTER, EXIT};
 
 /// Ramp tick. Faster than any refresh rate this machine has, so the value
@@ -349,7 +349,7 @@ impl LockFade {
         let hold = self.frames_ms(WARMUP_FRAMES, WARMUP_MIN_MS, WARMUP_MAX_MS);
         // The lock arriving: an entrance. Not `page`: the lock has to be up
         // before a lid-close suspend, so it may not be slower than before.
-        let span = duration(ENTER.ms);
+        let span = crate::anim::ms(ENTER);
         let start = Instant::now();
         let cadence = RefCell::new(Some(Cadence::start(self)));
         let this = self.clone();
@@ -420,7 +420,7 @@ impl LockFade {
         let hold = self.frames_ms(WAKE_HOLD_FRAMES, WAKE_HOLD_MIN_MS, WAKE_HOLD_MAX_MS);
         // Unlocking: an exit, the short direction. Waiting to get back to
         // work is dead time.
-        let span = duration(EXIT.ms);
+        let span = crate::anim::ms(EXIT);
         let start = Instant::now();
         let cadence = RefCell::new(Some(Cadence::start(self)));
         let this = self.clone();
@@ -558,7 +558,7 @@ impl Cadence {
 /// the compositor stretches with the client, no second variable and no
 /// session restart.
 fn arm_compositor() -> bool {
-    let deadline = (duration(ENTER.ms) * 3.0 + 400.0).clamp(800.0, 60_000.0) as i64;
+    let deadline = (crate::anim::ms(ENTER) * 3.0 + 400.0).clamp(800.0, 60_000.0) as i64;
     let result = crate::sway_ipc::connect()
         .and_then(|mut c| c.run_command(format!("lock_fade on {deadline}")));
     match result {

@@ -38,8 +38,6 @@ use crate::task_state::{Activity, SessionState, TaskSnapshot, TaskStateService};
 use crate::ui;
 use crate::widgets::power::{self, BatteryState};
 
-/// A revealer opening or closing in place (motion: expand).
-const SWAP_MS: u64 = crate::tokens::motion::EXPAND.ms as u64;
 /// settask caps descriptions at 40 chars; the slot shows all of them
 /// (vision P5's one sanctioned exception) but never more.
 const DESC_MAX_CHARS: i32 = 40;
@@ -47,7 +45,6 @@ const DESC_MAX_CHARS: i32 = 40;
 /// OSD interjection: decay after the last keypress (matches the center
 /// card's `OSD_TIMEOUT_MS`) and the per-press hairline ease.
 const OSD_DECAY_MS: u64 = 1500;
-const OSD_EASE_MS: f64 = crate::tokens::motion::STATE.ms;
 const HAIRLINE_WIDTH: i32 = 64;
 
 // ── View model ──────────────────────────────────────────────────────────
@@ -270,11 +267,11 @@ impl DecisionSlot {
         // The interjection overlays the occupant without destroying it: a
         // Stack keeps both pages alive and crossfades at the 150 ms
         // sub-threshold scale.
-        let stack = gtk4::Stack::builder()
-            .transition_type(gtk4::StackTransitionType::Crossfade)
-            .transition_duration(crate::tokens::motion::STATE.ms as u32)
-            .hhomogeneous(false)
-            .build();
+        let stack = ui::page_stack(
+            gtk4::StackTransitionType::Crossfade,
+            crate::tokens::motion::STATE,
+        );
+        stack.set_hhomogeneous(false);
         stack.add_child(&root);
         stack.add_child(&osd_page);
 
@@ -282,12 +279,11 @@ impl DecisionSlot {
         // child, so its width change moves nothing beside it, and the
         // horizontal unfurl only drew attention to the OSD pill
         // assembling itself. Opacity in, opacity out.
-        let revealer = gtk4::Revealer::builder()
-            .transition_type(gtk4::RevealerTransitionType::Crossfade)
-            .transition_duration(SWAP_MS as u32)
-            .reveal_child(false)
-            .child(&stack)
-            .build();
+        let revealer = ui::revealer(
+            gtk4::RevealerTransitionType::Crossfade,
+            crate::tokens::motion::EXPAND,
+        );
+        revealer.set_child(Some(&stack));
 
         let slot = Self {
             inner: Rc::new(Inner {
@@ -423,8 +419,9 @@ impl DecisionSlot {
         let shown = inner.hair_shown.clone();
         let tick = inner.hair_tick.clone();
         let id = inner.hairline.add_tick_callback(move |area, _| {
-            let t =
-                (((glib::monotonic_time() - start) as f64 / 1000.0) / OSD_EASE_MS).clamp(0.0, 1.0);
+            let t = (((glib::monotonic_time() - start) as f64 / 1000.0)
+                / anim::ms(crate::tokens::motion::STATE))
+            .clamp(0.0, 1.0);
             shown.set(from + (target - from) * anim::standard(t));
             area.queue_draw();
             if t >= 1.0 {
@@ -452,11 +449,9 @@ impl DecisionSlot {
         }
         inner.swapping.set(true);
         inner.revealer.set_reveal_child(false);
-        let delay = if anim::animations_enabled() {
-            SWAP_MS
-        } else {
-            0
-        };
+        // The revealer's own length (motion: expand), as this session plays
+        // it: Look → Motion and reduced motion shorten both together.
+        let delay = anim::ms(crate::tokens::motion::EXPAND) as u64;
         let slot = self.clone();
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
             slot.inner.swapping.set(false);

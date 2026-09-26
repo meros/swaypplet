@@ -18,6 +18,7 @@
 //! | `rust-space`      | a box spacing or widget margin that is a non-zero literal    | Rust |
 //! | `rust-colour`     | a Cairo / `gdk::RGBA` colour from numeric literals            | Rust |
 //! | `rust-class`      | a CSS class added in Rust that no stylesheet styles          | Rust |
+//! | `motion-bypass`   | a motion token's `.ms` read, or a `transition_duration` set, outside `anim::ms` / `ui::revealer` | Rust except src/anim.rs |
 //!
 //! Every CSS rule reads the files in [`crate::theme::RULES`] with comments
 //! removed (a comment may cite the colour a token was derived from). The
@@ -71,6 +72,7 @@ pub enum Rule {
     RustSpace,
     RustColour,
     RustClass,
+    MotionBypass,
 }
 
 use Rule::*;
@@ -80,7 +82,7 @@ impl Rule {
     const CSS_TOKENS: &[Rule] = &[Token, Primitive];
     const CSS_SCALES: &[Rule] = &[FontSize, FontWeight, Radius, Space, Motion];
     const CSS_HYGIENE: &[Rule] = &[SurfaceLook];
-    const RUST: &[Rule] = &[RustSpace, RustColour, RustClass];
+    const RUST: &[Rule] = &[RustSpace, RustColour, RustClass, MotionBypass];
 
     fn id(self) -> &'static str {
         match self {
@@ -98,6 +100,7 @@ impl Rule {
             RustSpace => "rust-space",
             RustColour => "rust-colour",
             RustClass => "rust-class",
+            MotionBypass => "motion-bypass",
         }
     }
 
@@ -141,6 +144,9 @@ impl Rule {
             }
             RustClass => {
                 "the class is styled nowhere in data/css/: a typo, or a dead class; use a ui::* component or style it"
+            }
+            MotionBypass => {
+                "`ui::revealer(transition, motion)` / `ui::page_stack(..)` for a GTK transition, `anim::ms(motion)` / `anim::span(motion)` for a length: they go through `anim::duration`, so Look → Motion and reduced motion reach them"
             }
         }
     }
@@ -1182,6 +1188,26 @@ fn rust_violations() -> Vec<Violation> {
             }
         }
 
+        // Motion that skips `anim::duration` (Look → Motion, reduced motion).
+        if !file.ends_with("src/anim.rs") {
+            for (at, args) in calls(&code, "transition_duration(") {
+                push(
+                    at,
+                    MotionBypass,
+                    snippet(at, args, "transition_duration("),
+                    "a GTK transition length set by hand".into(),
+                );
+            }
+            for at in motion_token_ms(&code) {
+                push(
+                    at,
+                    MotionBypass,
+                    collapse(&code[at..(at + 24).min(code.len())]),
+                    "a motion token's raw length".into(),
+                );
+            }
+        }
+
         // Classes.
         for needle in ["add_css_class(", ".css_classes(", "set_css_classes("] {
             for (at, args) in calls(&code, needle) {
@@ -1199,6 +1225,32 @@ fn rust_violations() -> Vec<Violation> {
                     }
                 }
             }
+        }
+    }
+    out
+}
+
+/// Offsets of every `<TOKEN>.ms` where TOKEN is a motion token's constant
+/// (`EXPAND.ms`, `motion::ENTER.ms`): its length before the session's scale.
+fn motion_token_ms(code: &str) -> Vec<usize> {
+    let names: Vec<String> = crate::tokens::motion::ALL
+        .iter()
+        .map(|m| m.name.to_ascii_uppercase())
+        .collect();
+    let mut out = Vec::new();
+    for (at, _) in code.match_indices(".ms") {
+        if code[at + 3..].chars().next().is_some_and(is_ident) {
+            continue;
+        }
+        let head = &code[..at];
+        let start = head
+            .char_indices()
+            .rev()
+            .take_while(|(_, c)| is_ident(*c))
+            .last()
+            .map_or(at, |(i, _)| i);
+        if names.iter().any(|n| *n == head[start..]) {
+            out.push(start);
         }
     }
     out
@@ -1493,6 +1545,10 @@ fn the_linter_catches_what_it_should() {
     );
     assert_eq!(calls(&code, ".spacing(").len(), 0);
     assert_eq!(calls(&code, "set_spacing(").len(), 1);
+    assert_eq!(
+        motion_token_ms("a(motion::EXPAND.ms as u32); ENTER.ms; x.msg; EXPANDED.ms").len(),
+        2
+    );
 }
 
 /// Prints [`LEDGER`] as the code stands. Run after migrating a surface to
@@ -1515,6 +1571,7 @@ fn print_the_ledger() {
         RustSpace,
         RustColour,
         RustClass,
+        MotionBypass,
     ]);
     let mut s = String::new();
     for (file, by_rule) in &found {

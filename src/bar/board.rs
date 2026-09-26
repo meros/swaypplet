@@ -309,11 +309,11 @@ impl Bay {
         // while a session waits (boundary-aimed timer in task_state.rs).
         let chip = ui::bay_chip();
         chip.add_css_class("bar-bay-chip");
-        let chip_reveal = gtk4::Revealer::builder()
-            .transition_type(gtk4::RevealerTransitionType::Crossfade)
-            .transition_duration(crate::tokens::motion::EXPAND.ms as u32)
-            .child(&chip)
-            .build();
+        let chip_reveal = ui::revealer(
+            gtk4::RevealerTransitionType::Crossfade,
+            crate::tokens::motion::EXPAND,
+        );
+        chip_reveal.set_child(Some(&chip));
         let content = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .halign(gtk4::Align::Center)

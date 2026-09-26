@@ -52,7 +52,9 @@ use ui::{StatusKind, SurfaceSet};
 /// for it is the whole gesture as far as the eye is concerned. The face
 /// channel is already polled every 200 ms, so this is under two ticks and is
 /// not what governs how fast an unlock feels.
-const FACE_SETTLE: Duration = Duration::from_millis(crate::tokens::motion::ENTER.ms as u64);
+fn face_settle() -> Duration {
+    crate::anim::span(crate::tokens::motion::ENTER)
+}
 
 /// Startup timing, in milliseconds since `run()` was entered.
 ///
@@ -307,7 +309,7 @@ pub fn run() -> ! {
     // One unlock, whoever gets there first. `unlock()` consumes the
     // session-lock object, so calling it twice is a protocol error that takes
     // the locker down with it. Password, fingerprint and face all reach it,
-    // and the face path now waits FACE_SETTLE before it calls, which is long
+    // and the face path now waits face_settle() before it calls, which is long
     // enough for a fingerprint touch or an Enter already queued in the entry
     // to arrive and unlock the same session again.
     let unlocking = Rc::new(Cell::new(false));
@@ -550,7 +552,7 @@ pub fn run() -> ! {
                                 // going away, so the one moment the indicator
                                 // had something to say was the one moment it
                                 // could not be read. The hold is the shortest
-                                // thing that fixes that (see FACE_SETTLE);
+                                // thing that fixes that (see face_settle);
                                 // long enough to see, short enough that the
                                 // attempt still reads as instant.
                                 if unlocking.replace(true) {
@@ -559,7 +561,7 @@ pub fn run() -> ! {
                                 surfaces.show_face(true, "ok", "Recognised you");
                                 surfaces.flash_success();
                                 let end_lock = end_lock.clone();
-                                glib::timeout_add_local_once(FACE_SETTLE, move || {
+                                glib::timeout_add_local_once(face_settle(), move || {
                                     end_lock();
                                 });
                                 return glib::ControlFlow::Break;

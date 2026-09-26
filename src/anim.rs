@@ -162,6 +162,20 @@ pub fn duration(ms: f64) -> f64 {
     ms * motion * debug_scale()
 }
 
+/// A motion token's length as this session plays it: [`duration`] of the
+/// token, so Look → Motion and reduced motion reach it. Rust never reads a
+/// token's `.ms` for anything that moves or waits on motion; this is the
+/// one door (design lint `motion-bypass`).
+pub fn ms(m: crate::tokens::motion::Motion) -> f64 {
+    duration(m.ms)
+}
+
+/// [`ms`] as a timer length, for a wait that has to end with a CSS
+/// animation of the same token (which the generator scales the same way).
+pub fn span(m: crate::tokens::motion::Motion) -> std::time::Duration {
+    std::time::Duration::from_millis(ms(m).round() as u64)
+}
+
 /// `SWAYPPLET_ANIM_SCALE` stretches every animation by this factor. A fade
 /// that is right at 200 ms is very hard to judge and nearly impossible to
 /// capture; at 20x it is four seconds and every frame can be looked at. Read

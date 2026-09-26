@@ -52,7 +52,7 @@
 /* ── The handoff: the beat between picking a face and landing in that
    session. The chip's bloom and dissolve are the chip component's
    (.ui-chip.picked, .ui-chip.dropped); the card's part is here. Everything
-   the user did not pick leaves as one exit, inside lock::ui::HANDOFF (the
+   the user did not pick leaves as one exit, inside lock::ui::handoff() (the
    same token), so the eye is left holding one face when the screen goes. The
    surface on the far side of the VT fades its card up from the same frame
    (auth-card-enter below). An exit, paired with that enter. ── */

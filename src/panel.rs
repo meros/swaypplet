@@ -212,11 +212,11 @@ impl Panel {
         let launcher = Rc::new(LauncherView::new());
 
         // ── Deck stack (Launcher stage ↔ In-place utility sub-sheets) ─────────
-        let deck_stack = gtk4::Stack::builder()
-            .transition_type(gtk4::StackTransitionType::Crossfade)
-            .transition_duration(anim::duration(crate::tokens::motion::EXPAND.ms) as u32)
-            .vexpand(true)
-            .build();
+        let deck_stack = ui::page_stack(
+            gtk4::StackTransitionType::Crossfade,
+            crate::tokens::motion::EXPAND,
+        );
+        deck_stack.set_vexpand(true);
         deck_stack.add_css_class("helm-deck-stack");
 
         // Page 1: Default Elephant launcher stage

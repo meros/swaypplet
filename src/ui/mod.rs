@@ -136,6 +136,37 @@ pub fn pad(w: &impl IsA<gtk4::Widget>, step: usize) {
     w.set_margin_end(p);
 }
 
+// ── Motion ──────────────────────────────────────────────────────────────
+
+/// A GTK transition length for a motion token, through `anim::ms`, so a
+/// revealer or a stack follows Look → Motion and reduced motion like every
+/// other animation. The only place Rust sets a `transition_duration`.
+fn transition_ms(motion: crate::tokens::motion::Motion) -> u32 {
+    crate::anim::ms(motion).round() as u32
+}
+
+/// A revealer that moves at `motion`, closed.
+pub fn revealer(
+    transition: gtk4::RevealerTransitionType,
+    motion: crate::tokens::motion::Motion,
+) -> gtk4::Revealer {
+    gtk4::Revealer::builder()
+        .transition_type(transition)
+        .transition_duration(transition_ms(motion))
+        .build()
+}
+
+/// A stack of pages that changes page at `motion`.
+pub fn page_stack(
+    transition: gtk4::StackTransitionType,
+    motion: crate::tokens::motion::Motion,
+) -> gtk4::Stack {
+    gtk4::Stack::builder()
+        .transition_type(transition)
+        .transition_duration(transition_ms(motion))
+        .build()
+}
+
 // ── Surface and card ────────────────────────────────────────────────────
 
 /// Mark a window's root as a design-system surface: base type and colour.
@@ -325,11 +356,11 @@ pub fn section(icon: &str, title: &str, summary: &str) -> Section {
     header.set_child(Some(&line));
     let body = vbox(1);
     body.add_css_class("ui-section-body");
-    let revealer = gtk4::Revealer::builder()
-        .transition_type(gtk4::RevealerTransitionType::SlideDown)
-        .transition_duration(crate::anim::duration(crate::tokens::motion::EXPAND.ms) as u32)
-        .child(&body)
-        .build();
+    let revealer = revealer(
+        gtk4::RevealerTransitionType::SlideDown,
+        crate::tokens::motion::EXPAND,
+    );
+    revealer.set_child(Some(&body));
     root.append(&header);
     root.append(&revealer);
     {
@@ -851,11 +882,11 @@ pub fn disclosure(label: &str) -> Disclosure {
     line.append(&l);
     button.set_child(Some(&line));
     let body = vbox(1);
-    let revealer = gtk4::Revealer::builder()
-        .transition_type(gtk4::RevealerTransitionType::SlideDown)
-        .transition_duration(crate::anim::duration(crate::tokens::motion::EXPAND.ms) as u32)
-        .child(&body)
-        .build();
+    let revealer = revealer(
+        gtk4::RevealerTransitionType::SlideDown,
+        crate::tokens::motion::EXPAND,
+    );
+    revealer.set_child(Some(&body));
     root.append(&button);
     root.append(&revealer);
     {

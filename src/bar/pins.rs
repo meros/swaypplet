@@ -56,11 +56,11 @@ pub fn build() -> gtk4::Widget {
     let btn = ui::mark(&inner, false);
     btn.add_css_class("bar-pinmark");
     btn.set_tooltip_text(Some("Pinned workspaces"));
-    let revealer = gtk4::Revealer::builder()
-        .transition_type(gtk4::RevealerTransitionType::SlideLeft)
-        .transition_duration(crate::tokens::motion::EXPAND.ms as u32)
-        .child(&btn)
-        .build();
+    let revealer = crate::ui::revealer(
+        gtk4::RevealerTransitionType::SlideLeft,
+        crate::tokens::motion::EXPAND,
+    );
+    revealer.set_child(Some(&btn));
 
     let (pop, body) = popover::chassis(&btn);
     let ui = Rc::new(Ui {

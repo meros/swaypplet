@@ -1418,7 +1418,7 @@ button.ui-chip.rich {
 /* ── The handoff: picking a face and landing in that session ──
    The picked chip blooms while everything else dissolves; the surface on the
    far side of the VT fades its card up from the same frame. All of it is the
-   picker leaving, so it is an exit, and it fits inside lock::ui::HANDOFF,
+   picker leaving, so it is an exit, and it fits inside lock::ui::handoff(),
    which is the same token. The transform is the topping: where GTK ignores
    it the bloom and the dissolve still carry the beat. */
 @keyframes ui-handoff-bloom {
@@ -1598,7 +1598,7 @@ button.ui-chip.dropped {
 }
 
 /* Motion. The verdicts arrive (the smile, the punch, the pill's glow are one
-   --motion-enter, so they land together, and lock::FACE_SETTLE holds the
+   --motion-enter, so they land together, and lock::face_settle() holds the
    unlock for the same token). The glance, the blink, the found pulse, the
    attention breath are attention loops: rhythms rather than transitions, so
    they keep their own periods, chosen against a heartbeat rather than
@@ -1625,7 +1625,7 @@ button.ui-chip.dropped {
     50%      { opacity: 0.55; }
 }
 
-/* An elastic punch that settles, the length of FACE_SETTLE in
+/* An elastic punch that settles, the length of face_settle() in
    src/lock/mod.rs so it lands with the unlock. The glow is a tint, under the compositor's
    discard line, so it never frosts into a halo. */
 @keyframes ui-face-ring-ok {

@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4::{Box, Button, Label, ListBox, Revealer, RevealerTransitionType, Spinner, Switch};
+use gtk4::{Box, Button, Label, ListBox, RevealerTransitionType, Spinner, Switch};
 
 use crate::spawn::spawn_work;
 use crate::ui;
@@ -226,11 +226,10 @@ impl NetworkSection {
         hero_card.append(&connectivity_row);
 
         // Expandable Details Drawer
-        let details_revealer = Revealer::builder()
-            .transition_type(RevealerTransitionType::SlideDown)
-            .transition_duration(crate::anim::duration(crate::tokens::motion::EXPAND.ms) as u32)
-            .reveal_child(false)
-            .build();
+        let details_revealer = ui::revealer(
+            RevealerTransitionType::SlideDown,
+            crate::tokens::motion::EXPAND,
+        );
 
         let details_tray = ui::vbox(2);
         details_tray.append(&ui::separator());

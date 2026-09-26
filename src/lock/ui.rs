@@ -51,7 +51,9 @@ const CHIP_AVATAR_SIZE: i32 = 36;
 /// switches: the picker's exit (`--motion-exit`, the same token the chips
 /// and the card leave on in the stylesheet). Long enough to read as a
 /// deliberate handoff, short enough that the machine still feels instant.
-pub const HANDOFF: Duration = Duration::from_millis(crate::tokens::motion::EXIT.ms as u64);
+pub fn handoff() -> Duration {
+    crate::anim::span(crate::tokens::motion::EXIT)
+}
 
 /// How long after the switch fires before [`SurfaceSet::end_handoff`] puts the
 /// card back. Both surfaces that play the handoff outlive it: the greeter is
@@ -736,8 +738,8 @@ impl SurfaceSet {
         // this surface is still here afterwards. Arm the way back now, while
         // we know we faded something out.
         let restore = self.clone();
-        glib::timeout_add_local_once(HANDOFF + HANDOFF_RECOVER, move || restore.end_handoff());
-        HANDOFF
+        glib::timeout_add_local_once(handoff() + HANDOFF_RECOVER, move || restore.end_handoff());
+        handoff()
     }
 
     /// Undo [`begin_handoff`]: card back, chips back, typing allowed again.

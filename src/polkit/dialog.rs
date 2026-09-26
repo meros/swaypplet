@@ -290,11 +290,10 @@ impl PolkitDialog {
         let details_toggle = ui::small_button("\u{f0142}  Details", ui::Kind::Flat);
         details_toggle.set_halign(gtk4::Align::Start);
         details_toggle.add_css_class("polkit-details-toggle");
-        let details_revealer = gtk4::Revealer::builder()
-            .transition_type(gtk4::RevealerTransitionType::SlideDown)
-            .transition_duration(crate::tokens::motion::EXPAND.ms as u32)
-            .reveal_child(false)
-            .build();
+        let details_revealer = ui::revealer(
+            gtk4::RevealerTransitionType::SlideDown,
+            crate::tokens::motion::EXPAND,
+        );
         let details_label = ui::text("", ui::Text::Caption, ui::Tone::Muted);
         ui::mono(&details_label);
         details_label.set_justify(gtk4::Justification::Left);

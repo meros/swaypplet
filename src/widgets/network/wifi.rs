@@ -3,8 +3,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 use gtk4::{
-    Button, Entry, Label, ListBox, ListBoxRow, PasswordEntry, Revealer, RevealerTransitionType,
-    Spinner,
+    Button, Entry, Label, ListBox, ListBoxRow, PasswordEntry, RevealerTransitionType, Spinner,
 };
 
 use super::NetworkState;
@@ -216,11 +215,10 @@ fn build_wifi_row(
 
         connect_area.append(&row_box);
 
-        let pw_revealer = Revealer::builder()
-            .transition_type(RevealerTransitionType::SlideDown)
-            .transition_duration(crate::anim::duration(crate::tokens::motion::EXPAND.ms) as u32)
-            .reveal_child(false)
-            .build();
+        let pw_revealer = ui::revealer(
+            RevealerTransitionType::SlideDown,
+            crate::tokens::motion::EXPAND,
+        );
 
         let pw_area = ui::vbox(2);
         pw_area.set_margin_start(space(3));
@@ -340,11 +338,10 @@ fn build_hidden_network_row(
 ) {
     let outer = ui::vbox(2);
 
-    let hidden_revealer = Revealer::builder()
-        .transition_type(RevealerTransitionType::SlideDown)
-        .transition_duration(crate::anim::duration(crate::tokens::motion::EXPAND.ms) as u32)
-        .reveal_child(false)
-        .build();
+    let hidden_revealer = ui::revealer(
+        RevealerTransitionType::SlideDown,
+        crate::tokens::motion::EXPAND,
+    );
 
     let form = ui::vbox(2);
     form.set_margin_top(space(2));

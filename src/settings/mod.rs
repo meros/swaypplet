@@ -103,12 +103,12 @@ impl SettingsSection {
         let alerts = alerts_pane::AlertsPane::new();
         let glass = glass_pane::GlassPane::new();
 
-        let stack = gtk4::Stack::builder()
-            .transition_type(gtk4::StackTransitionType::Crossfade)
-            .transition_duration(crate::anim::duration(crate::tokens::motion::EXPAND.ms) as u32)
-            .vhomogeneous(false)
-            .hexpand(true)
-            .build();
+        let stack = crate::ui::page_stack(
+            gtk4::StackTransitionType::Crossfade,
+            crate::tokens::motion::EXPAND,
+        );
+        stack.set_vhomogeneous(false);
+        stack.set_hexpand(true);
         stack.add_named(look.widget(), Some("look"));
         stack.add_named(idle.widget(), Some("idle"));
         stack.add_named(bar.widget(), Some("bar"));

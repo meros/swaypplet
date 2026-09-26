@@ -128,7 +128,7 @@ The handoff's stagger survives. Its delays are the choreography — chips step
 back before the card dissolves — so they are rescaled onto the ladder rather
 than flattened to a single duration.
 
-`FACE_SETTLE` in `src/lock/mod.rs` moves 350 → 300 with `face-ring-ok`. It was
+`face_settle()` in `src/lock/mod.rs` (then `FACE_SETTLE`) moves 350 → 300 with `face-ring-ok`. It was
 sized to that keyframe deliberately: the ring does its visible work by the
 overshoot at 60%, and 60% of 500 is 300.
 
