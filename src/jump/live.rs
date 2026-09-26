@@ -139,6 +139,10 @@ fn run(
     conn.display().get_registry(&qh, ());
 
     let mut state = State::default();
+    // Every window's requests fall on one grid of `interval` steps, so the
+    // windows of one picture answer together and the picture repaints once
+    // per step rather than once per window.
+    let epoch = Instant::now();
     // The first round trip brings the globals, the second the toplevels'
     // `identifier` events.
     for _ in 0..2 {
@@ -179,6 +183,14 @@ fn run(
             .push(Session::new(id.clone(), *crop, source, session));
     }
 
+    // Frames finished this step, held until every window asked in it has
+    // answered or half a step has gone by. Windows answer on different
+    // refreshes even when asked together, and a picture sent one window at
+    // a time repaints once per window.
+    let mut batch: Vec<Frame> = Vec::new();
+    let mut batch_since: Option<Instant> = None;
+    let hold = interval / 2;
+
     while !stop.load(Ordering::Relaxed) && !tx.is_closed() {
         let now = Instant::now();
         let mut wake = now + IDLE_POLL;
@@ -197,15 +209,13 @@ fn run(
                     buffer.format,
                     max_edge,
                 );
-                let frame = Frame {
+                batch.push(Frame {
                     id: s.id.clone(),
                     width,
                     height,
                     pixels,
-                };
-                if tx.try_send(frame).is_err() {
-                    return Ok(());
-                }
+                });
+                batch_since.get_or_insert(now);
             }
             if s.frame.is_some() {
                 continue;
@@ -217,7 +227,7 @@ fn run(
                     continue;
                 }
             }
-            let due = s.last + interval;
+            let due = next_step(epoch, s.last, interval);
             if due > now {
                 wake = wake.min(due);
                 continue;
@@ -231,6 +241,20 @@ fn run(
             // The cap counts from the request, so a compositor that takes a
             // frame's worth of time to answer does not halve the rate.
             s.last = now;
+        }
+
+        if let Some(since) = batch_since {
+            let waiting = state.sessions.iter().any(|s| !s.dead && s.frame.is_some());
+            if !waiting || now >= since + hold {
+                for frame in batch.drain(..) {
+                    if tx.try_send(frame).is_err() {
+                        return Ok(());
+                    }
+                }
+                batch_since = None;
+            } else {
+                wake = wake.min(since + hold);
+            }
         }
 
         let timeout = wake.saturating_duration_since(Instant::now());
@@ -249,6 +273,19 @@ fn run(
 }
 
 /// Flush, wait up to `timeout` for the socket, read and dispatch.
+/// The first step of the grid from `epoch` in `interval`s that is after
+/// `last`; `last` itself when there is no cap.
+fn next_step(epoch: Instant, last: Instant, interval: Duration) -> Instant {
+    // No cap, or never asked yet: the first picture should not wait.
+    if interval.is_zero() || last < epoch {
+        return last;
+    }
+    let step = interval.as_nanos();
+    let since = last.saturating_duration_since(epoch).as_nanos();
+    let n = since / step + 1;
+    epoch + Duration::from_nanos((n * step) as u64)
+}
+
 fn dispatch_for(
     conn: &Connection,
     queue: &mut wayland_client::EventQueue<State>,
@@ -679,6 +716,22 @@ impl Drop for Shm {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn requests_land_on_one_grid() {
+        let epoch = Instant::now();
+        let step = Duration::from_millis(50);
+        // Two windows last asked at different moments of one step are next
+        // asked at the same moment.
+        let a = next_step(epoch, epoch + Duration::from_millis(3), step);
+        let b = next_step(epoch, epoch + Duration::from_millis(41), step);
+        assert_eq!(a, b);
+        assert_eq!(a, epoch + step);
+        // A request on a step waits for the next one, not zero time.
+        assert_eq!(next_step(epoch, epoch + step, step), epoch + step * 2);
+        // No cap: due at once.
+        assert_eq!(next_step(epoch, epoch, Duration::ZERO), epoch);
+    }
 
     #[test]
     fn the_longer_edge_fits_and_the_aspect_holds() {
