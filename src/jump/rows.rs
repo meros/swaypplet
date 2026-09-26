@@ -61,18 +61,26 @@ pub fn rows(
         .iter()
         .skip(1)
         .take(MAX_ROWS)
-        .map(|p| {
-            let names = apps(&p.name);
-            Row {
-                chord: chord_for(bindings, p),
-                label: label_for(p),
-                detail: detail_for(&names),
-                windows: names.len(),
-                other_output: p.output != focused_output,
-                command: crate::bar::workspaces::switch_command(p.num, &p.name),
-            }
-        })
+        .map(|p| row(p, bindings, apps, focused_output))
         .collect()
+}
+
+/// One place's row. For the head too, which the switcher can walk back to.
+pub fn row(
+    p: &Place,
+    bindings: &[Binding],
+    apps: &dyn Fn(&str) -> Vec<String>,
+    focused_output: &str,
+) -> Row {
+    let names = apps(&p.name);
+    Row {
+        chord: chord_for(bindings, p),
+        label: label_for(p),
+        detail: detail_for(&names),
+        windows: names.len(),
+        other_output: p.output != focused_output,
+        command: crate::bar::workspaces::switch_command(p.num, &p.name),
+    }
 }
 
 /// The label under a tile, with the chord taken out when the label ends in

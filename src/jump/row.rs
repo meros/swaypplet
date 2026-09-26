@@ -1,28 +1,29 @@
 //! Where each workspace is drawn while the switcher is up.
 //!
-//! The switcher lays the workspaces you came from out in a row across the
-//! output, all at [`SCALE`] and [`ALPHA`]: the selected one in the middle,
-//! its neighbours peeking in at the edges, the rest off screen. sway draws
-//! them (the `workspace_transform` command, nixos
-//! patches/swayfx-ws-transform.patch) and animates every change, so a step
-//! is one command per workspace and the movement is the compositor's.
+//! The switcher lays the workspaces you came from out on a strip across the
+//! output, all at [`SCALE`]: the selected one in the middle and opaque, its
+//! neighbours peeking in at the edges at [`ALPHA`], the rest further along
+//! the strip past the edges. sway draws them (the `workspace_transform`
+//! command, nixos patches/swayfx-ws-transform.patch) and animates every
+//! change, so a step is one command per workspace and the movement is the
+//! compositor's.
 //!
-//! No GTK here: this is arithmetic on two rectangles, and the part of the
-//! switcher that has to be right to the pixel.
+//! A step moves every workspace by the same distance in the same time, so
+//! the strip moves as one piece, the gaps never change and a workspace
+//! comes into view from exactly where it was waiting. That needs the ones
+//! past the edge to be drawn there, and they would be drawn on the output
+//! next to this one: scene positions are global. sway draws a transformed
+//! workspace on its own output only, cut at its edge
+//! (patches/scenefx-only-output.patch).
 //!
-//! One rule shapes it. Scene positions in sway are global, and nothing clips
-//! a workspace to its output, so a workspace moved past the edge of this
-//! output is drawn on the one next to it. Nothing here goes further than
-//! the edge: a workspace leaves the row by sliding to the edge and fading
-//! out there, and comes in from the same place.
+//! No GTK here: this is arithmetic on two rectangles.
 
 /// A rectangle in layout coordinates: x, y, width, height.
 pub type Rect = (f64, f64, f64, f64);
 
-/// Every workspace in the row, the selected one included.
+/// Every workspace on the strip, the selected one included.
 pub const SCALE: f64 = 0.8;
-/// The same for all of them, so the position says which one is selected
-/// and nothing else has to.
+/// Every workspace but the selected one, which is opaque.
 pub const ALPHA: f64 = 0.85;
 
 /// How sway draws one workspace: scaled about the output's centre, faded,
@@ -97,80 +98,64 @@ impl Row {
         width + (side / 3.0).max(12.0)
     }
 
-    /// Just past the output's right edge (or left): the whole workspace out
-    /// of sight, none of it on the next output yet.
-    fn edge(&self, right: bool) -> f64 {
-        let m = self.middle();
-        if right {
-            self.output.0 + self.output.2 - m.0
-        } else {
-            self.output.0 - (m.0 + m.2)
-        }
-    }
-
     /// The workspace `offset` places right of the middle (negative: left).
-    /// `shown` false fades it out where it is, which is how the row ends.
+    /// `shown` false fades it out where it is, which is how the strip ends.
     pub fn look(&self, offset: i64, shown: bool) -> Look {
-        let (dx, alpha) = match offset {
-            -1..=1 => (offset as f64 * self.spacing(), ALPHA),
-            o => (self.edge(o > 0), 0.0),
-        };
+        let alpha = if offset == 0 { 1.0 } else { ALPHA };
         Look {
             scale: SCALE,
             alpha: if shown { alpha } else { 0.0 },
-            dx,
+            dx: offset as f64 * self.spacing(),
             dy: 0.0,
         }
     }
 }
 
-/// `names[0]` is the workspace you are on, and `names[1 + cursor]` the
-/// selected one. Every workspace's look with that one in the middle.
-pub fn layout(row: &Row, names: &[String], cursor: usize) -> Vec<(String, Look)> {
-    let middle = cursor as i64 + 1;
+/// `names[0]` is the workspace you are on, and `names[selected]` the one
+/// in the middle. Every workspace's look.
+pub fn layout(row: &Row, names: &[String], selected: usize) -> Vec<(String, Look)> {
     names
         .iter()
         .enumerate()
-        .map(|(j, name)| (name.clone(), row.look(j as i64 - middle, true)))
+        .map(|(j, name)| (name.clone(), row.look(j as i64 - selected as i64, true)))
         .collect()
 }
 
-/// Opening: every other workspace waits past the right edge (a hidden
-/// workspace given alpha 0 remembers where, and moves from there when it is
-/// next shown), then the row with the first step selected. The one you are
-/// on moves left, the one you came from slides in to the middle.
+/// Opening: every other workspace waits where the strip would have it with
+/// the one you are on in the middle (a hidden workspace given alpha 0
+/// remembers where, and moves from there when it is next shown), then the
+/// whole strip moves one place left.
 pub fn open(row: &Row, names: &[String]) -> Vec<(String, Look)> {
-    let wait = row.look(2, false);
     names
         .iter()
+        .enumerate()
         .skip(1)
-        .map(|n| (n.clone(), wait))
-        .chain(layout(row, names, 0))
+        .map(|(j, n)| (n.clone(), row.look(j as i64, false)))
+        .chain(layout(row, names, 1))
         .collect()
 }
 
-/// Committing to the selected workspace: what runs before the switch (every
+/// Committing to `names[selected]`: what runs before the switch (every
 /// other workspace fades out where it is) and after it (the selected one
 /// grows to its full size from the middle).
 pub fn commit(
     row: &Row,
     names: &[String],
-    cursor: usize,
+    selected: usize,
 ) -> (Vec<(String, Look)>, Option<(String, Look)>) {
-    let middle = cursor + 1;
     let before = names
         .iter()
         .enumerate()
-        .filter(|(j, _)| *j != middle)
-        .map(|(j, n)| (n.clone(), row.look(j as i64 - middle as i64, false)))
+        .filter(|(j, _)| *j != selected)
+        .map(|(j, n)| (n.clone(), row.look(j as i64 - selected as i64, false)))
         .collect();
-    let after = names.get(middle).map(|n| (n.clone(), Look::FULL));
+    let after = names.get(selected).map(|n| (n.clone(), Look::FULL));
     (before, after)
 }
 
-/// Cancelling: the one you are on grows back from wherever the row had it,
-/// and the others fade out on their way to where they would be with it in
-/// the middle.
+/// Cancelling: the one you are on grows back from wherever the strip had
+/// it, and the others move with the strip as it brings it to the middle,
+/// fading out on the way.
 pub fn cancel(row: &Row, names: &[String]) -> Vec<(String, Look)> {
     names
         .iter()
@@ -223,55 +208,70 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_ever_placed_past_the_output() {
-        // Past the edge is the next output, and sway would draw it there.
+    fn the_strip_has_one_spacing_everywhere() {
+        // A step moves every workspace by the same distance, so the gaps
+        // stay the same all the way through the animation.
         let r = row();
-        let m = r.middle();
-        for offset in -5..=5 {
-            let look = r.look(offset, true);
-            let x = left_edge(&r, look);
-            assert!(x <= 1600.0 && x + m.2 >= 0.0, "offset {offset} at {x}");
-            if offset.abs() > 1 {
-                assert_eq!(look.alpha, 0.0);
-            }
+        let step = r.look(1, true).dx - r.look(0, true).dx;
+        for offset in -6..6 {
+            let d = r.look(offset + 1, true).dx - r.look(offset, true).dx;
+            assert!(
+                (d - step).abs() < 1e-9,
+                "offset {offset}: {d} against {step}"
+            );
         }
     }
 
     #[test]
-    fn every_workspace_in_view_looks_the_same() {
+    fn the_middle_is_opaque_and_the_rest_the_same() {
         let r = row();
-        for offset in -1..=1 {
+        assert_eq!(r.look(0, true).alpha, 1.0);
+        for offset in [-3, -1, 1, 4] {
             let look = r.look(offset, true);
             assert_eq!((look.scale, look.alpha), (SCALE, ALPHA));
         }
+        assert_eq!(r.look(0, true).scale, SCALE);
     }
 
     #[test]
-    fn opening_puts_the_origin_left_and_the_first_step_in_the_middle() {
+    fn opening_moves_the_whole_strip_one_place_left() {
         let r = row();
         let all = open(&r, &names(4));
-        // Staged first: the three others, past the right edge.
-        assert!(all[..3].iter().all(|(_, l)| l.alpha == 0.0 && l.dx > 0.0));
+        // Staged first: the three others, where the strip has them with the
+        // origin in the middle.
+        for (j, (name, look)) in all[..3].iter().enumerate() {
+            assert_eq!(name, &(j + 2).to_string());
+            assert_eq!(look.alpha, 0.0);
+            assert_eq!(look.dx, r.look(j as i64 + 1, true).dx);
+        }
         let row: Vec<_> = all[3..].to_vec();
         assert_eq!(row[0], ("1".into(), r.look(-1, true)));
         assert_eq!(row[1], ("2".into(), r.look(0, true)));
         assert_eq!(row[2], ("3".into(), r.look(1, true)));
-        assert_eq!(row[3].1.alpha, 0.0);
+        assert_eq!(row[3], ("4".into(), r.look(2, true)));
     }
 
     #[test]
     fn a_step_moves_everything_one_place_left() {
         let r = row();
-        let a = layout(&r, &names(4), 0);
-        let b = layout(&r, &names(4), 1);
+        let a = layout(&r, &names(4), 1);
+        let b = layout(&r, &names(4), 2);
         assert_eq!(b[2].1, a[1].1, "3 takes the middle 2 had");
         assert_eq!(b[1].1, a[0].1, "2 takes the left place 1 had");
     }
 
     #[test]
+    fn the_origin_can_be_the_middle_again() {
+        let r = row();
+        let all = layout(&r, &names(3), 0);
+        assert_eq!(all[0].1, r.look(0, true));
+        assert_eq!(all[0].1.alpha, 1.0);
+    }
+
+    #[test]
     fn commit_fades_the_rest_and_grows_the_selected_one() {
         let r = row();
-        let (before, after) = commit(&r, &names(3), 1);
+        let (before, after) = commit(&r, &names(3), 2);
         assert_eq!(after, Some(("3".into(), Look::FULL)));
         assert_eq!(before.len(), 2);
         assert!(before.iter().all(|(_, l)| l.alpha == 0.0));
