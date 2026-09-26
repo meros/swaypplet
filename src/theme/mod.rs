@@ -180,10 +180,13 @@ fn rules() -> String {
 
 mod inputs;
 mod locked;
+mod paint;
+mod sun;
 mod sway;
 pub mod wallpaper;
 
 pub use inputs::inputs;
+pub use paint::{Paint, paint};
 
 /// The inputs the stylesheet on screen was generated from: the Look
 /// settings with the mode and the tint as they were last resolved rather

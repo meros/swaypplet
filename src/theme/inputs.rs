@@ -90,10 +90,7 @@ fn now_unix() -> f64 {
 fn sun_mode() -> Mode {
     location()
         .map(|(lat, lon)| {
-            crate::tokens::sun::mode(
-                crate::tokens::sun::elevation(lat, lon, now_unix()),
-                shown_mode(),
-            )
+            super::sun::mode(super::sun::elevation(lat, lon, now_unix()), shown_mode())
         })
         .unwrap_or(Mode::Dark)
 }

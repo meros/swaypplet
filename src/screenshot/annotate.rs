@@ -28,7 +28,7 @@ use super::capture::Image;
 /// survive being drawn on top of an arbitrary screenshot, which the muted
 /// fills do not reliably do. Read once per editor, in the mode it opened in.
 fn palette() -> [(f64, f64, f64); 5] {
-    let paint = crate::ui::paint();
+    let paint = crate::theme::paint();
     let [_, yellow, blue, _, green, _] = paint.categorical;
     [paint.status.danger, yellow, green, blue, paint.fg].map(|c| (c.0, c.1, c.2))
 }

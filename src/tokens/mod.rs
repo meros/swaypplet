@@ -16,7 +16,7 @@
 //! | `tint.rs` | [`Tint`], the wallpaper's hue as an input (§2.2) |
 //! | `scales.rs` | [`scales`]: neutral and accent, 12 steps each (§3.1) |
 //! | `semantic.rs` | [`status`], [`categorical`], [`levels`] (§3.2, §3.3) |
-//! | `material.rs` | [`material`] per mode and [`glass_body`] (§4) |
+//! | `material.rs` | [`material`] per mode and `glass_body` (§4) |
 //! | `apca.rs` | [`apca`], and the §5 contrast tests |
 //! | `fixed.rs` | space, type, radius, durations, the fill key, component sizes |
 //! | `motion.rs` | the seven motions by meaning (§3.8) |
@@ -31,7 +31,6 @@ mod material;
 pub mod motion;
 mod scales;
 mod semantic;
-pub mod sun;
 pub mod tint;
 
 pub use apca::apca;
