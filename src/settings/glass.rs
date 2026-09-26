@@ -890,9 +890,15 @@ mod tests {
         let nix = preset::plain().as_nix();
         assert!(nix.contains("samples = 4;"), "{nix}");
         assert!(nix.contains("surface = \"convex_squircle\";"));
-        // The shipped material carries a seeded grain, so the grainless
-        // spelling needs a preset that has none to be checked at all.
-        assert!(nix.contains("grain = \"seeded\";"), "{nix}");
+        // The shipped material is grainless now, so the seeded spelling is
+        // checked on a preset that carries one.
+        let seeded = preset::ALL
+            .iter()
+            .map(preset::Preset::material)
+            .find(|m| m.grain == GrainKind::Seeded)
+            .expect("no preset is seeded")
+            .as_nix();
+        assert!(seeded.contains("grain = \"seeded\";"), "{seeded}");
         let bare = preset::grainless().as_nix();
         assert!(bare.contains("grain = \"none\";"), "{bare}");
     }

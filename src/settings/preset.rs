@@ -64,22 +64,22 @@ fn base() -> Material {
         refraction: 1.07,
         dispersion: 0.003,
         samples: 4.0,
-        reflection: 1.0,
+        reflection: 0.73,
         lensing: 0.15,
-        frost_radius: 3.0,
+        frost_radius: 28.0,
         absorb: 1.0,
         absorb_floor: 0.07,
-        photochromic: 0.28,
+        photochromic: 0.35,
         haze: 0.0,
-        specular: 0.10,
+        specular: 0.0,
         edge_light: 0.09,
-        noise: 0.007,
-        frost: 0.05,
+        noise: 0.0,
+        frost: 0.33,
         shine: 0.0,
-        reflect_blur: 0.10,
-        grain: GrainKind::Seeded,
+        reflect_blur: 0.06,
+        grain: GrainKind::None,
         grain_scale: 10.0,
-        grain_strength: 1.0,
+        grain_strength: 0.0,
         // Unrotated and unstretched. A preset that turned the pattern would
         // be picking an orientation for a card whose long axis it does not
         // know: the bar runs one way and a notification the other.
@@ -331,9 +331,9 @@ mod tests {
             let m = p.material();
             assert_eq!(m.shine, 0.0, "{} sets shine", p.name);
             if p.name == "Bubble" {
-                assert_eq!(m.frost, 0.05, "Bubble no longer matches theme/glass.nix");
+                assert_eq!(m.frost, 0.33, "Bubble no longer matches theme/glass.nix");
                 assert_eq!(
-                    m.reflect_blur, 0.10,
+                    m.reflect_blur, 0.06,
                     "Bubble no longer matches theme/glass.nix"
                 );
             } else {
