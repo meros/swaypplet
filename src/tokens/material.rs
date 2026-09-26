@@ -39,7 +39,9 @@ pub fn material(inputs: Inputs) -> Material {
 
 /// What the glass body shows over `backdrop`, following
 /// `liquid_glass.frag` on the flat interior of a card: absorption along the
-/// full path, the photochromic ceiling or lift, then the body fill.
+/// full path, the photochromic ceiling or lift, then the body fill. The
+/// shader draws it; this model exists for the contrast tests.
+#[cfg(test)]
 pub fn glass_body(backdrop: Rgb, m: &Material) -> Rgb {
     let k = (-m.absorb).exp();
     let mut t = backdrop.to_linear().map(|x| x * k);

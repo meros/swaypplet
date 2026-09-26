@@ -5,6 +5,11 @@
 //! two things that mean the same move the same way on every surface. The
 //! stylesheet gets them as `--motion-*` (duration and curve in one token,
 //! for `transition` and `animation`); `src/anim.rs` reads the same values.
+//!
+//! Attention loops (a pulse, a shake, breathing) are outside the scale on
+//! purpose: they repeat, and their period is the design. They are the only
+//! animations that may name their own duration, and only in `@keyframes`
+//! users with `infinite` or a count.
 
 /// A CSS `cubic-bezier(x1, y1, x2, y2)`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -83,9 +88,3 @@ pub const PAGE: Motion = Motion {
 };
 
 pub const ALL: [Motion; 7] = [STATE, EXPAND, ENTER, EXIT, MOVE, TRAVEL, PAGE];
-
-/// Attention loops (a pulse, a shake, breathing) are outside the scale on
-/// purpose: they repeat, and their period is the design. They are the only
-/// animations that may name their own duration, and only in `@keyframes`
-/// users with `infinite` or a count.
-pub const ATTENTION_LOOPS_ARE_EXEMPT: () = ();

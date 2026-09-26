@@ -34,6 +34,7 @@ impl Rgb {
     }
 
     /// `self` at `alpha` over `under`, in sRGB as GTK composites.
+    #[cfg(test)]
     pub fn over(self, alpha: f64, under: Rgb) -> Rgb {
         let m = |a: f64, b: f64| a * alpha + b * (1.0 - alpha);
         Rgb(m(self.0, under.0), m(self.1, under.1), m(self.2, under.2))

@@ -43,6 +43,7 @@ pub enum Neutral {
 }
 
 impl Mode {
+    #[cfg(test)]
     pub const ALL: [Mode; 2] = [Mode::Dark, Mode::Light];
 }
 impl Contrast {
