@@ -123,7 +123,7 @@ fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
         (Tool::Highlight, "󰚄", "Highlight (H)"),
         (Tool::Pixelate, "󰸉", "Pixelate (X)"),
     ] {
-        let face = crate::ui::text(icon, crate::ui::Text::TitleSm, crate::ui::Tone::Fg);
+        let face = gtk4::Label::new(Some(icon));
         crate::ui::glyph::adopt(&face, crate::ui::Text::TitleSm, crate::ui::Tone::Fg);
         let btn = crate::ui::toggle_button(
             crate::ui::Face::Icon {
