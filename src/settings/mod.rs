@@ -1,8 +1,9 @@
 //! The settings pane: a deck page in the Helm card (`panel.rs`), one tab per
 //! thing that can be configured.
 //!
-//! Five tabs. Look, Idle & Lock, Bar and Alerts edit `store::Settings`, one
-//! file with one to three sections each; Glass edits the compositor material
+//! Six tabs. Look, Idle & Lock, Bar, Alerts and Launcher edit
+//! `store::Settings`, one file with one to three sections each; Glass edits
+//! the compositor material
 //! and keeps its own file (`glass.rs`, for why). Every tab applies live and
 //! saves after the fact, and every tab has one Reset that puts the defaults
 //! back and removes its sections from the file, so there is always a way
@@ -21,6 +22,7 @@ mod form;
 pub mod glass;
 mod glass_pane;
 mod idle_pane;
+mod launcher_pane;
 mod look_pane;
 pub mod preset;
 pub mod schema;
@@ -36,7 +38,7 @@ struct Tab {
     prefixes: &'static [&'static str],
 }
 
-const TABS: [Tab; 5] = [
+const TABS: [Tab; 6] = [
     Tab {
         name: "look",
         title: "Look",
@@ -58,6 +60,11 @@ const TABS: [Tab; 5] = [
         name: "alerts",
         title: "Alerts",
         prefixes: &[":alerts", ":quiet", ":shot", ":capture"],
+    },
+    Tab {
+        name: "launcher",
+        title: "Launcher",
+        prefixes: &[":launch", ":search"],
     },
     Tab {
         name: "glass",
@@ -88,6 +95,7 @@ pub struct SettingsSection {
     idle: idle_pane::IdlePane,
     bar: bar_pane::BarPane,
     alerts: alerts_pane::AlertsPane,
+    launcher: launcher_pane::LauncherPane,
     glass: glass_pane::GlassPane,
 }
 
@@ -101,6 +109,7 @@ impl SettingsSection {
         let idle = idle_pane::IdlePane::new();
         let bar = bar_pane::BarPane::new();
         let alerts = alerts_pane::AlertsPane::new();
+        let launcher = launcher_pane::LauncherPane::new();
         let glass = glass_pane::GlassPane::new();
 
         let stack = crate::ui::page_stack(
@@ -113,6 +122,7 @@ impl SettingsSection {
         stack.add_named(idle.widget(), Some("idle"));
         stack.add_named(bar.widget(), Some("bar"));
         stack.add_named(alerts.widget(), Some("alerts"));
+        stack.add_named(launcher.widget(), Some("launcher"));
         stack.add_named(glass.widget(), Some("glass"));
 
         // Chips in one toggle group rather than a StackSwitcher, so the
@@ -168,6 +178,7 @@ impl SettingsSection {
             idle,
             bar,
             alerts,
+            launcher,
             glass,
         }
     }
@@ -198,6 +209,7 @@ impl SettingsSection {
         self.idle.refresh();
         self.bar.refresh();
         self.alerts.refresh();
+        self.launcher.refresh();
         self.glass.refresh();
     }
 }

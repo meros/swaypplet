@@ -76,6 +76,7 @@ settings-look|preview:settings.look|1400x1400|
 settings-idle|preview:settings.idle|1400x1400|
 settings-bar|preview:settings.bar|1400x1400|
 settings-alerts|preview:settings.alerts|1400x1400|
+settings-launcher|preview:settings.launcher|1400x1400|
 settings-glass|preview:settings.glass|1400x1400|
 '
 

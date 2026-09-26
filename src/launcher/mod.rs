@@ -3,6 +3,25 @@
 //! [`LauncherView`] is an embeddable widget (search entry + results list +
 //! search/keyboard wiring) with no window of its own. Both the standalone
 //! full-screen [`Launcher`] and the start-menu popup mount the same view.
+//!
+//! | module | holds |
+//! |---|---|
+//! | `sources.rs` | the query's prefix (`=`, `>`), which elephant providers the Launcher settings ask, the rows made locally |
+//! | `calc.rs` | the `=` calculator |
+//! | `frecency.rs` | what you launch, and the ranking it gives |
+//! | `windows.rs` | open windows as rows, from sway's tree |
+//!
+//! A keystroke costs one frame, not one round trip. The local rows (a
+//! calculator result, the command row, a page by name) are made on the key's
+//! own frame, and the rows elephant gave for the query before are narrowed
+//! to the ones that still match, so the list follows the typing at once.
+//! Elephant's answer for the new query replaces them [`DEBOUNCE_MS`] later,
+//! on a worker, ranked by frecency (a hash lookup per row).
+
+mod calc;
+pub mod frecency;
+mod sources;
+mod windows;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -12,8 +31,17 @@ use gtk4::prelude::*;
 use crate::services::elephant::{self, SearchResult};
 use crate::shell::{Namespace, Surface};
 
+pub use sources::Page;
+use sources::Query;
+
 const MAX_VISIBLE_RESULTS: usize = 10;
-const DEBOUNCE_MS: u64 = 100;
+
+/// Coalesces a burst of typing into one elephant query. Short, because the
+/// list no longer waits for it: the local pass has already redrawn.
+const DEBOUNCE_MS: u64 = 40;
+
+/// Frecent rows the empty query opens with, above elephant's app list.
+const MAX_FRECENT_ROWS: usize = 6;
 
 /// How tall the results list stands on a screen with room for it.
 const RESULTS_HEIGHT: i32 = 360;
@@ -29,23 +57,22 @@ const LAUNCHER_CARD_SIZE: crate::shell::fit::CardSize = crate::shell::fit::CardS
     height: Some(520),
 };
 
-// Default providers matching the walker config
-const DEFAULT_PROVIDERS: &[&str] = &[
-    "desktopapplications",
-    "calc",
-    "runner",
-    "windows",
-    "clipboard",
-    "providerlist",
-    "menus",
-    "websearch",
-];
-
 /// What runs after an activation, so a host popup can hide itself.
 type OnActivate = Rc<RefCell<Option<Box<dyn Fn()>>>>;
 
 struct LauncherState {
+    /// What is on screen: `local` then `remote`.
     results: Vec<SearchResult>,
+    /// Rows made on the key's frame (`sources::local`).
+    local: Vec<SearchResult>,
+    /// Rows elephant and the window search gave, for the last query they
+    /// answered.
+    remote: Vec<SearchResult>,
+    /// The pages a query can open by name; empty in a host that cannot
+    /// route a prefix.
+    pages: Vec<Page>,
+    /// The list shows one app's windows (Tab), not the query's results.
+    tabbed: bool,
     selected: usize,
     query_generation: u64,
     /// The pictures of the running-window rows, and their capture. The
@@ -118,6 +145,10 @@ impl LauncherView {
             scroller,
             state: Rc::new(RefCell::new(LauncherState {
                 results: Vec::new(),
+                local: Vec::new(),
+                remote: Vec::new(),
+                pages: Vec::new(),
+                tabbed: false,
                 selected: 0,
                 query_generation: 0,
                 live: RefCell::default(),
@@ -127,6 +158,7 @@ impl LauncherView {
             on_activate: Rc::new(RefCell::new(None)),
         };
 
+        frecency::load();
         view.wire_search();
         // Whatever hosts the view, a launcher off screen captures nothing.
         let weak = Rc::downgrade(&view.state);
@@ -163,6 +195,13 @@ impl LauncherView {
         &self.scroller
     }
 
+    /// The pages this host can open by prefix, for the launcher to offer by
+    /// name. Activating one types its prefix into the entry, which the host
+    /// routes on its own `search-changed`.
+    pub fn set_pages(&self, pages: Vec<Page>) {
+        self.state.borrow_mut().pages = pages;
+    }
+
     /// Register a callback invoked right after an item is activated (used by
     /// the start menu to hide itself).
     pub fn set_on_activate<F: Fn() + 'static>(&self, f: F) {
@@ -174,10 +213,20 @@ impl LauncherView {
         self.entry.set_text("");
         {
             let mut s = self.state.borrow_mut();
-            s.results.clear();
+            s.local.clear();
+            // What you use most, drawn now from memory; elephant's app list
+            // follows below it.
+            s.remote = frecent_rows();
+            s.tabbed = false;
             s.selected = 0;
         }
-        // Empty query shows the default desktop-application list.
+        compose(&self.state);
+        rebuild_results_ui(
+            &self.results_box,
+            &self.state,
+            &self.on_activate,
+            &self.entry,
+        );
         run_search(
             String::new(),
             bump_generation(&self.state),
@@ -185,6 +234,7 @@ impl LauncherView {
             self.results_box.clone(),
             self.scroller.clone(),
             self.on_activate.clone(),
+            self.entry.clone(),
         );
     }
 
@@ -210,6 +260,10 @@ impl LauncherView {
         let on_activate = self.on_activate.clone();
 
         key_controller.connect_key_pressed(move |_, key, _, _| match key {
+            gtk4::gdk::Key::Tab | gtk4::gdk::Key::ISO_Left_Tab => {
+                toggle_windows_of(&view_state, &results_box, &scroller, &entry, &on_activate);
+                glib::Propagation::Stop
+            }
             gtk4::gdk::Key::Escape => {
                 on_escape();
                 glib::Propagation::Stop
@@ -247,10 +301,23 @@ impl LauncherView {
                 crate::spawn::remove_source(id);
             }
 
+            // This frame: the local rows, and the last answer narrowed to
+            // what still matches.
+            let started = std::time::Instant::now();
+            local_pass(&state, &query);
+            rebuild_results_ui(&results_box, &state, &on_activate, entry);
+            scroller.vadjustment().set_value(0.0);
+            log::debug!(
+                "launcher: {:?} drawn locally in {:?}",
+                query,
+                started.elapsed()
+            );
+
             let results_box_c = results_box.clone();
             let scroller_c = scroller.clone();
             let state_c = state.clone();
             let on_activate_c = on_activate.clone();
+            let entry_c = entry.clone();
 
             let generation = bump_generation(&state_c);
 
@@ -266,6 +333,7 @@ impl LauncherView {
                         results_box_c,
                         scroller_c,
                         on_activate_c,
+                        entry_c,
                     );
                 },
             );
@@ -428,22 +496,179 @@ fn activate_selected(
     on_activate: &OnActivate,
 ) {
     let s = state.borrow();
-    let Some(item) = s.results.get(s.selected) else {
+    let Some(item) = s.results.get(s.selected).cloned() else {
         return;
     };
-    let provider = item.provider.clone();
-    let identifier = item.identifier.clone();
-    let action = default_action(item);
-    let query = entry.text().to_string();
     let selected = s.selected;
     drop(s);
     if let Some(row) = nth_child(results_box, selected) {
-        hand_off_launch(&provider, &row);
+        hand_off_launch(&item.provider, &row);
     }
-    activate_async(provider, identifier, action, query);
+    activate(&item, entry, on_activate);
+}
+
+/// Run `item`, count it, and let the host hide, from Enter or a click.
+fn activate(item: &SearchResult, entry: &gtk4::SearchEntry, on_activate: &OnActivate) {
+    if item.provider == sources::PAGE {
+        // The host routes the prefix and stays open on the page.
+        entry.set_text(&item.identifier);
+        entry.set_position(-1);
+        return;
+    }
+    if launcher_settings().frecency {
+        frecency::record(item);
+    }
+    let query = sources::parse(&entry.text()).text().to_string();
+    activate_async(
+        item.provider.clone(),
+        item.identifier.clone(),
+        default_action(item),
+        query,
+    );
     if let Some(cb) = on_activate.borrow().as_ref() {
         cb();
     }
+}
+
+fn launcher_settings() -> crate::settings::store::Launcher {
+    crate::settings::store::with(|s| s.launcher())
+}
+
+/// The shell a `>` command runs in: `$SHELL`, else `sh`.
+fn user_shell() -> String {
+    std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "sh".to_string())
+}
+
+/// The empty query's first rows: what you launch most, from memory, as far
+/// as the settings still show its kind.
+fn frecent_rows() -> Vec<SearchResult> {
+    let l = launcher_settings();
+    if !l.frecency {
+        return Vec::new();
+    }
+    frecency::with(|f| f.top(MAX_FRECENT_ROWS * 2, frecency::now()))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| sources::allows(&l, &r.provider))
+        .take(MAX_FRECENT_ROWS)
+        .collect()
+}
+
+/// `local` then `remote` into `results`, the selection back on the first.
+fn compose(state: &Rc<RefCell<LauncherState>>) {
+    let mut s = state.borrow_mut();
+    let mut results = s.local.clone();
+    results.extend(s.remote.iter().cloned());
+    s.results = results;
+    s.selected = 0;
+}
+
+/// The keystroke's own frame: the local rows for `text`, and the previous
+/// remote rows narrowed to those whose name still has every query word in
+/// it. No IO, and nothing but string compares over a dozen rows.
+fn local_pass(state: &Rc<RefCell<LauncherState>>, text: &str) {
+    let l = launcher_settings();
+    let q = sources::parse(text);
+    {
+        let mut s = state.borrow_mut();
+        s.tabbed = false;
+        s.local = sources::local(&l, q, &s.pages, &user_shell());
+        let words: Vec<String> = q
+            .text()
+            .to_lowercase()
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
+        s.remote.retain(|r| match q {
+            Query::Plain(_) => {
+                let hay = format!("{} {}", r.text, r.subtext).to_lowercase();
+                words.iter().all(|w| hay.contains(w.as_str()))
+            }
+            // A prefix changes what is asked: nothing of the old answer
+            // stands.
+            _ => false,
+        });
+    }
+    compose(state);
+}
+
+/// Tab: the selected app's open windows in place of the results, or back
+/// to the results. On a row that is not an app with windows, nothing
+/// happens but a shake of the row.
+fn toggle_windows_of(
+    state: &Rc<RefCell<LauncherState>>,
+    results_box: &gtk4::Box,
+    scroller: &gtk4::ScrolledWindow,
+    entry: &gtk4::SearchEntry,
+    on_activate: &OnActivate,
+) {
+    let (tabbed, item, selected) = {
+        let s = state.borrow();
+        (s.tabbed, s.results.get(s.selected).cloned(), s.selected)
+    };
+    if tabbed {
+        // Back to the query's results, as a fresh search.
+        let query = entry.text().to_string();
+        local_pass(state, &query);
+        rebuild_results_ui(results_box, state, on_activate, entry);
+        run_search(
+            query,
+            bump_generation(state),
+            state.clone(),
+            results_box.clone(),
+            scroller.clone(),
+            on_activate.clone(),
+            entry.clone(),
+        );
+        return;
+    }
+    let shake = || {
+        if let Some(row) = nth_child(results_box, selected) {
+            crate::ui::shake(&row);
+        }
+    };
+    let Some(app) = item.filter(|r| r.provider == "desktopapplications") else {
+        shake();
+        return;
+    };
+    if !launcher_settings().windows {
+        shake();
+        return;
+    }
+    let generation = bump_generation(state);
+    let (state, results_box, scroller, entry, on_activate) = (
+        state.clone(),
+        results_box.clone(),
+        scroller.clone(),
+        entry.clone(),
+        on_activate.clone(),
+    );
+    crate::spawn::spawn_work(
+        move || windows::windows_of_app(&app),
+        move |rows| {
+            if generation != state.borrow().query_generation {
+                return;
+            }
+            if rows.is_empty() {
+                if let Some(row) = nth_child(&results_box, selected) {
+                    crate::ui::shake(&row);
+                }
+                return;
+            }
+            {
+                let mut s = state.borrow_mut();
+                s.local.clear();
+                s.remote = rows;
+                s.tabbed = true;
+            }
+            compose(&state);
+            rebuild_results_ui(&results_box, &state, &on_activate, &entry);
+            scroller.vadjustment().set_value(0.0);
+        },
+    );
 }
 
 /// An application about to start opens out of its row's icon (swayfx
@@ -471,6 +696,16 @@ fn nth_child(parent: &impl IsA<gtk4::Widget>, n: usize) -> Option<gtk4::Widget> 
 }
 
 fn activate_async(provider: String, identifier: String, action: String, query: String) {
+    if provider == sources::CALC {
+        if let Some(display) = gtk4::gdk::Display::default() {
+            display.clipboard().set_text(&identifier);
+        }
+        return;
+    }
+    if provider == sources::RUN {
+        crate::sway::ipc::run_command(&sources::exec_line(&user_shell(), &identifier));
+        return;
+    }
     if provider == WINDOW_PROVIDER {
         if let Some(con_id) = identifier.split_whitespace().next() {
             crate::sway::ipc::run_command(&format!("[con_id={con_id}] focus"));
@@ -500,6 +735,7 @@ fn clear_results_box(results_box: &gtk4::Box) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_search(
     query: String,
     generation: u64,
@@ -507,44 +743,90 @@ fn run_search(
     results_box: gtk4::Box,
     scroller: gtk4::ScrolledWindow,
     on_activate: OnActivate,
+    entry: gtk4::SearchEntry,
 ) {
-    // Empty query → default desktop-application list only.
-    let providers: Vec<&str> = if query.is_empty() {
-        vec!["desktopapplications"]
-    } else {
-        DEFAULT_PROVIDERS.to_vec()
-    };
-
-    let query_c = query.clone();
+    let l = launcher_settings();
+    let q = sources::parse(&query);
+    let providers = sources::providers(&l, q);
+    let asked = q.text().to_string();
+    let plain = matches!(q, Query::Plain(_));
+    let windows = l.windows && plain;
+    // Nothing remote to ask: the local pass already drew all there is.
+    if providers.is_empty() && !windows {
+        let mut s = state.borrow_mut();
+        if !matches!(q, Query::Empty) {
+            s.remote.clear();
+        }
+        drop(s);
+        compose(&state);
+        rebuild_results_ui(&results_box, &state, &on_activate, &entry);
+        return;
+    }
     crate::spawn::spawn_work(
         move || {
-            let results = match elephant::query(&query_c, &providers, MAX_VISIBLE_RESULTS as i32) {
-                Ok(results) => results,
-                Err(e) => {
-                    log::warn!("Elephant query failed: {}", e);
-                    Vec::new()
+            let results = if providers.is_empty() {
+                Vec::new()
+            } else {
+                // Twice what shows, so a frecent row just below the cut can
+                // rise into it.
+                match elephant::query(&asked, &providers, (MAX_VISIBLE_RESULTS * 2) as i32) {
+                    Ok(results) => results,
+                    Err(e) => {
+                        log::warn!("Elephant query failed: {}", e);
+                        Vec::new()
+                    }
                 }
             };
             // An app already open offers its windows first.
-            let mut running = if query_c.is_empty() {
-                Vec::new()
+            let running = if windows {
+                windows::running_windows(&asked, &results)
             } else {
-                running_windows(&query_c, &results)
+                Vec::new()
             };
-            running.extend(results);
-            running
+            (running, results)
         },
-        move |results| {
+        move |(mut running, results)| {
             // A newer query superseded this one while it ran — drop the results.
             if generation != state.borrow().query_generation {
                 return;
             }
+            let l = launcher_settings();
+            let now = frecency::now();
+            let ranked = if l.frecency {
+                frecency::with(|f| f.rank(results.clone(), now)).unwrap_or(results)
+            } else {
+                results
+            };
+            let mut remote = if matches!(q_kind(&query), Kind::Empty) {
+                // The frecent rows first, then elephant's list without them.
+                let frecent = frecent_rows();
+                let seen: std::collections::HashSet<String> = frecent
+                    .iter()
+                    .map(|r| frecency::key(&r.provider, &r.identifier))
+                    .collect();
+                let mut rows = frecent;
+                rows.extend(
+                    ranked
+                        .into_iter()
+                        .filter(|r| !seen.contains(&frecency::key(&r.provider, &r.identifier))),
+                );
+                rows
+            } else {
+                ranked
+            };
+            if let Query::Command(cmd) = sources::parse(&query) {
+                remote.retain(|r| !sources::duplicates_run_row(r, cmd));
+            }
+            remote.truncate(MAX_VISIBLE_RESULTS);
+            running.extend(remote);
             {
                 let mut s = state.borrow_mut();
-                s.results = results;
-                s.selected = 0;
+                s.remote = running;
+                s.tabbed = false;
             }
-            rebuild_results_ui(&results_box, &state, &query, &on_activate);
+            compose(&state);
+            rebuild_results_ui(&results_box, &state, &on_activate, &entry);
+            log::debug!("launcher: {query:?} answered by elephant");
             // A fresh result set selects its first row, so the list has to go
             // back to the top with it — otherwise a search run from halfway
             // down the previous results opens scrolled past the best match.
@@ -553,11 +835,24 @@ fn run_search(
     );
 }
 
+/// `Query` borrows the text; the worker's callback needs only the kind.
+enum Kind {
+    Empty,
+    Other,
+}
+
+fn q_kind(query: &str) -> Kind {
+    match sources::parse(query) {
+        Query::Empty => Kind::Empty,
+        _ => Kind::Other,
+    }
+}
+
 fn rebuild_results_ui(
     results_box: &gtk4::Box,
     state: &Rc<RefCell<LauncherState>>,
-    query: &str,
     on_activate: &OnActivate,
+    entry: &gtk4::SearchEntry,
 ) {
     clear_results_box(results_box);
 
@@ -569,7 +864,7 @@ fn rebuild_results_ui(
         let row = if result.provider == WINDOW_PROVIDER {
             window_row(result, i == selected, &mut s.live.borrow_mut(), on_activate)
         } else {
-            build_result_row(result, i == selected, query, on_activate)
+            build_result_row(result, i == selected, on_activate, entry)
         };
         results_box.append(&row);
     }
@@ -613,95 +908,6 @@ fn start_live(state: &Rc<RefCell<LauncherState>>) {
 const WINDOW_THUMB_W: i32 = 112;
 const WINDOW_THUMB_H: i32 = 70;
 
-/// The windows already open for the best application match, as rows. Their
-/// identifier is `<con_id> <foreign toplevel identifier>`: the first to go
-/// there, the second to show it.
-fn running_windows(query: &str, results: &[SearchResult]) -> Vec<SearchResult> {
-    let app = results.iter().find(|r| r.provider == "desktopapplications");
-    let names = app.map(app_names).unwrap_or_default();
-    let words = title_words(query);
-    if names.is_empty() && words.is_empty() {
-        return Vec::new();
-    }
-    let Some(tree) = crate::sway::ipc::connect()
-        .ok()
-        .and_then(|mut c| c.get_tree().ok())
-    else {
-        return Vec::new();
-    };
-    let windows: Vec<_> = crate::jump::scene::all_windows(&tree)
-        .into_iter()
-        .filter(|(w, _, _)| w.id.is_some())
-        .collect();
-    // A window whose title has the query in it comes first: that is the one
-    // being asked for by name. Then the windows of the app that matched.
-    let by_title = windows
-        .iter()
-        .filter(|(_, _, title)| title_matches(&words, title));
-    let by_app = windows.iter().filter(|(w, _, title)| {
-        !title_matches(&words, title) && names.iter().any(|n| same_app(n, &w.app))
-    });
-    by_title
-        .chain(by_app)
-        .take(MAX_WINDOW_ROWS)
-        .map(|(w, ws, title)| SearchResult {
-            identifier: format!("{} {}", w.con_id, w.id.clone().unwrap_or_default()),
-            text: format!("Go to {}", if title.is_empty() { &w.app } else { title }),
-            subtext: format!(
-                "{} \u{00b7} open on {}",
-                app.filter(|a| app_names(a).iter().any(|n| same_app(n, &w.app)))
-                    .map_or(w.app.as_str(), |a| a.text.as_str()),
-                ws
-            ),
-            icon: String::new(),
-            provider: WINDOW_PROVIDER.to_string(),
-            score: 0,
-            actions: Vec::new(),
-        })
-        .collect()
-}
-
-/// The words a window title has to contain, lowercased. None for a query
-/// under two characters, which would match nearly every title.
-fn title_words(query: &str) -> Vec<String> {
-    let query = query.trim().to_lowercase();
-    if query.chars().count() < 2 {
-        return Vec::new();
-    }
-    query.split_whitespace().map(str::to_string).collect()
-}
-
-/// Whether every query word is in the title, in any case.
-fn title_matches(words: &[String], title: &str) -> bool {
-    if words.is_empty() {
-        return false;
-    }
-    let title = title.to_lowercase();
-    words.iter().all(|w| title.contains(w.as_str()))
-}
-
-/// What an application result could be called as a window's app_id: its
-/// desktop entry and its icon name, lowercased, without `.desktop`.
-fn app_names(result: &SearchResult) -> Vec<String> {
-    let mut names = Vec::new();
-    for raw in [&result.identifier, &result.icon] {
-        let base = raw.rsplit('/').next().unwrap_or(raw);
-        let name = base.trim_end_matches(".desktop").to_lowercase();
-        if !name.is_empty() && !names.contains(&name) {
-            names.push(name);
-        }
-    }
-    names
-}
-
-/// A desktop-entry name and an app_id name the same app: exactly, or by the
-/// last part of a reverse-DNS id (`org.mozilla.firefox` is `firefox`).
-fn same_app(name: &str, app_id: &str) -> bool {
-    let id = app_id.to_lowercase();
-    let tail = |s: &str| s.rsplit('.').next().unwrap_or(s).to_string();
-    id == name || tail(&id) == tail(name)
-}
-
 /// A running-window row: the window live where the icon would be, "Go to"
 /// its title, and where it is open.
 fn window_row(
@@ -744,8 +950,8 @@ fn window_row(
 fn build_result_row(
     result: &SearchResult,
     selected: bool,
-    query: &str,
     on_activate: &OnActivate,
+    entry: &gtk4::SearchEntry,
 ) -> gtk4::Box {
     let r = crate::ui::row(
         provider_icon(&result.provider),
@@ -757,24 +963,26 @@ fn build_result_row(
     crate::ui::glyph::adopt(&r.icon, crate::ui::Text::Title, crate::ui::Tone::Muted);
 
     // The app's own icon in the glyph's place, when the theme has it.
-    if !result.icon.is_empty() && !result.icon.contains('/')
-        && let Some(display) = gtk4::gdk::Display::default() {
-            let theme = gtk4::IconTheme::for_display(&display);
-            if theme.has_icon(&result.icon) {
-                let image = gtk4::Image::builder()
-                    .icon_name(&result.icon)
-                    .pixel_size(24)
-                    .build();
-                r.set_icon_image(&image);
-            }
+    if !result.icon.is_empty()
+        && !result.icon.contains('/')
+        && let Some(display) = gtk4::gdk::Display::default()
+    {
+        let theme = gtk4::IconTheme::for_display(&display);
+        if theme.has_icon(&result.icon) {
+            let image = gtk4::Image::builder()
+                .icon_name(&result.icon)
+                .pixel_size(24)
+                .build();
+            r.set_icon_image(&image);
         }
+    }
 
     // Only badge non-default providers (websearch, calc, …). The dominant
     // "desktopapplications" source is implied by the surface, so badging every
     // row with it is pure visual noise.
     if result.provider != "desktopapplications" {
         let badge = crate::ui::text(
-            &result.provider,
+            provider_label(&result.provider),
             crate::ui::Text::Caption,
             crate::ui::Tone::Faint,
         );
@@ -783,25 +991,15 @@ fn build_result_row(
 
     // Click to activate.
     let gesture = gtk4::GestureClick::new();
-    let provider = result.provider.clone();
-    let identifier = result.identifier.clone();
-    let action = default_action(result);
-    let query_str = query.to_string();
+    let item = result.clone();
+    let entry = entry.clone();
     let on_activate = on_activate.clone();
     let row_weak = row.downgrade();
     gesture.connect_released(move |_, _, _, _| {
         if let Some(row) = row_weak.upgrade() {
-            hand_off_launch(&provider, row.upcast_ref());
+            hand_off_launch(&item.provider, row.upcast_ref());
         }
-        activate_async(
-            provider.clone(),
-            identifier.clone(),
-            action.clone(),
-            query_str.clone(),
-        );
-        if let Some(cb) = on_activate.borrow().as_ref() {
-            cb();
-        }
+        activate(&item, &entry, &on_activate);
     });
     row.add_controller(gesture);
 
@@ -874,8 +1072,21 @@ fn default_action(result: &SearchResult) -> String {
         .unwrap_or_else(|| "start".to_string())
 }
 
+/// The badge a row of `provider` carries.
+fn provider_label(provider: &str) -> &str {
+    match provider {
+        sources::CALC => "calc",
+        sources::RUN => "run",
+        sources::PAGE => "open",
+        other => other,
+    }
+}
+
 fn provider_icon(provider: &str) -> &'static str {
     match provider {
+        sources::CALC => "󰃬",
+        sources::RUN => "",
+        sources::PAGE => "󰒓",
         "desktopapplications" => "󰀻",
         "runner" => "",
         "windows" => "󰖯",
@@ -886,66 +1097,5 @@ fn provider_icon(provider: &str) -> &'static str {
         "menus" => "󰍜",
         "bookmarks" => "󰃃",
         _ => "󰍉",
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_title_matches_every_query_word_in_any_case() {
-        let words = title_words("dreaded Board");
-        assert!(title_matches(
-            &words,
-            "The dreaded board view · The project - Google Chrome"
-        ));
-        assert!(!title_matches(&words, "The dreaded list view"));
-        assert!(title_matches(
-            &title_words("youtube"),
-            "(238) YouTube - Google Chrome"
-        ));
-    }
-
-    #[test]
-    fn a_one_letter_query_matches_no_title() {
-        assert!(!title_matches(
-            &title_words("y"),
-            "(238) YouTube - Google Chrome"
-        ));
-        assert!(!title_matches(&title_words(" "), "anything"));
-    }
-
-    fn app(identifier: &str, icon: &str) -> SearchResult {
-        SearchResult {
-            identifier: identifier.into(),
-            text: String::new(),
-            subtext: String::new(),
-            icon: icon.into(),
-            provider: "desktopapplications".into(),
-            score: 0,
-            actions: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn an_application_is_named_by_its_entry_and_its_icon() {
-        let names = app_names(&app(
-            "/usr/share/applications/org.mozilla.firefox.desktop",
-            "firefox",
-        ));
-        assert_eq!(names, ["org.mozilla.firefox", "firefox"]);
-        assert_eq!(
-            app_names(&app("Alacritty.desktop", "Alacritty")),
-            ["alacritty"]
-        );
-    }
-
-    #[test]
-    fn a_window_matches_by_app_id_or_its_reverse_dns_tail() {
-        assert!(same_app("alacritty", "Alacritty"));
-        assert!(same_app("org.mozilla.firefox", "firefox"));
-        assert!(same_app("firefox", "org.mozilla.firefox"));
-        assert!(!same_app("code", "claude"));
     }
 }

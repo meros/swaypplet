@@ -207,6 +207,16 @@ impl Panel {
         notifications.expand_for_page();
 
         let launcher = Rc::new(LauncherView::new());
+        // The pages this card routes to, for the launcher to offer by name.
+        launcher.set_pages(
+            ROUTES
+                .iter()
+                .map(|(prefixes, _, title)| crate::launcher::Page::new(title, prefixes))
+                .chain(crate::settings::prefixes().map(|(prefixes, title)| {
+                    crate::launcher::Page::new(&title, prefixes)
+                }))
+                .collect(),
+        );
 
         // ── Deck stack (Launcher stage ↔ In-place utility sub-sheets) ─────────
         let deck_stack = ui::page_stack(
