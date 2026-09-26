@@ -21,6 +21,7 @@ Sizes: S is a day or less, M a few days, L a week or more.
 | Glass settings page with controls that mean the same in both modes (clarity, frost, refraction, …) | `glass-pane` | [design-system.md §4](design-system.md) |
 | Colour and material transitions: a mode, tint or wallpaper change fades over `page` (500 ms) instead of cutting | `theme-anim` | [design-system.md §2](design-system.md), [MOTION.md](MOTION.md) |
 | Launcher that learns (frecency), `=` calculator, `>` command, Tab for an app's windows, settings for which sources appear | `launcher` | [SETTINGS.md](SETTINGS.md) |
+| Night light in the process, from the theme's sun, replacing gammastep (`services::gamma`); the nixos side still has to drop `gammastep.nix` | `nightlight` | [SETTINGS.md](SETTINGS.md) |
 
 ## Next
 
@@ -50,17 +51,11 @@ Why now: the motion tokens (`move`, `travel`) and `anim::Reveal` exist, and
 the design system says what each duration means, so this is the last
 motion piece without a home.
 
-### 2. Night light and display profiles in the process (S each)
+### 2. Display profiles in the process (S)
 
-`zwlr_gamma_control_manager_v1` retires gammastep (a systemd unit and 20
-lines of config); `zwlr_output_manager_v1` retires kanshi (63 lines), and
+`zwlr_output_manager_v1` retires kanshi (63 lines), and
 `widgets/display.rs` is already the surface it hangs off. The night light
-temperature becomes a panel control instead of a rebuild.
-
-Why now: the theme already knows where the sun is (`theme/sun.rs`, the
-location from `/etc/swaypplet/theme.json`). One sun model can drive both the
-dark/light switch and the colour temperature, with the same deferral rules,
-instead of two daemons with two ideas of when dusk is.
+half of this item is in progress on `nightlight`.
 
 ### 3. Focus and quiet modes that know the context (M)
 

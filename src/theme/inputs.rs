@@ -65,29 +65,10 @@ fn tint(reach: Reach) -> Tint {
     }
 }
 
-/// Where the sun is computed for: `/etc/swaypplet/theme.json`
-/// (`{"latitude": …, "longitude": …}`, written by Nix from the night light's
-/// location), or `SWAYPPLET_THEME_CONFIG`.
-fn location() -> Option<(f64, f64)> {
-    let path = std::env::var("SWAYPPLET_THEME_CONFIG")
-        .unwrap_or_else(|_| "/etc/swaypplet/theme.json".to_string());
-    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
-    Some((v["latitude"].as_f64()?, v["longitude"].as_f64()?))
-}
-
-fn now_unix() -> f64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs_f64())
-        .unwrap_or(0.0)
-}
-
 /// The mode the sun asks for, or dark where no location is known.
 fn sun_mode() -> Mode {
-    location()
-        .map(|(lat, lon)| {
-            super::sun::mode(super::sun::elevation(lat, lon, now_unix()), shown_mode())
-        })
+    super::sun::elevation_now()
+        .map(|e| super::sun::mode(e, shown_mode()))
         .unwrap_or(Mode::Dark)
 }
 

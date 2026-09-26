@@ -14,6 +14,7 @@ pub mod backup;
 pub mod bluez;
 pub mod clipboard;
 pub mod elephant;
+pub mod gamma;
 pub mod inhibit;
 pub mod lid;
 pub mod mpris;

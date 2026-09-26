@@ -707,6 +707,59 @@ impl Default for Elevate {
     }
 }
 
+/// When the night light is on (`services::gamma`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NightSchedule {
+    /// Warm from dusk to dawn, across civil twilight, from the sun at
+    /// `/etc/swaypplet/theme.json`'s location: the one the automatic mode
+    /// uses.
+    #[default]
+    Sun,
+    /// Warm all day.
+    Always,
+}
+
+/// The night light: a colour temperature the compositor applies to every
+/// output, in place of gammastep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NightLight {
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub schedule: NightSchedule,
+    /// The night's colour temperature in kelvin, 1700–6500. The day is
+    /// 6500 K, which is no change at all.
+    #[serde(default = "NightLight::default_night_k")]
+    pub night_k: u32,
+}
+
+impl NightLight {
+    pub const MIN_K: u32 = 1700;
+    pub const DAY_K: u32 = 6500;
+
+    fn default_night_k() -> u32 {
+        3500
+    }
+
+    fn sanitized(self) -> NightLight {
+        NightLight {
+            night_k: self.night_k.clamp(Self::MIN_K, Self::DAY_K),
+            ..self
+        }
+    }
+}
+
+impl Default for NightLight {
+    fn default() -> Self {
+        NightLight {
+            enabled: true,
+            schedule: NightSchedule::Sun,
+            night_k: Self::default_night_k(),
+        }
+    }
+}
+
 // ── The file ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -727,11 +780,13 @@ pub struct Settings {
     pub capture: Option<Capture>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub elevate: Option<Elevate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub night_light: Option<NightLight>,
 }
 
 impl Settings {
     /// The section names, in the order the file and the pane list them.
-    pub const SECTIONS: [&'static str; 8] = [
+    pub const SECTIONS: [&'static str; 9] = [
         "wallpaper",
         "look",
         "idle",
@@ -740,12 +795,20 @@ impl Settings {
         "alerts",
         "capture",
         "elevate",
+        "night_light",
     ];
 
     /// The sections with a system layer, which is every one but the
     /// wallpaper: its system default is the sway config's `bg` line.
-    pub const NIX_SECTIONS: [&'static str; 7] = [
-        "look", "idle", "bar", "keys", "alerts", "capture", "elevate",
+    pub const NIX_SECTIONS: [&'static str; 8] = [
+        "look",
+        "idle",
+        "bar",
+        "keys",
+        "alerts",
+        "capture",
+        "elevate",
+        "night_light",
     ];
 
     /// The section in force: the user's, else the system's, else the
@@ -774,6 +837,11 @@ impl Settings {
     pub fn elevate(&self) -> Elevate {
         self.elevate.or(system().elevate).unwrap_or_default()
     }
+    pub fn night_light(&self) -> NightLight {
+        self.night_light
+            .or(system().night_light)
+            .unwrap_or_default()
+    }
 
     /// True when nothing is overridden, which is when the file should not
     /// exist.
@@ -792,6 +860,7 @@ impl Settings {
             alerts: Some(self.alerts()),
             capture: Some(self.capture()),
             elevate: Some(self.elevate()),
+            night_light: Some(self.night_light()),
         }
     }
 
@@ -816,6 +885,7 @@ impl Settings {
             alerts: Some(Alerts::default()),
             capture: Some(Capture::default()),
             elevate: Some(Elevate::default()),
+            night_light: Some(NightLight::default()),
         }
     }
 
@@ -826,6 +896,7 @@ impl Settings {
             idle: self.idle.map(Idle::sanitized),
             keys: self.keys.map(Keys::sanitized),
             alerts: self.alerts.map(Alerts::sanitized),
+            night_light: self.night_light.map(NightLight::sanitized),
             ..self
         }
     }
@@ -962,6 +1033,7 @@ section!(Keys, keys, keys);
 section!(Alerts, alerts, alerts);
 section!(Capture, capture, capture);
 section!(Elevate, elevate, elevate);
+section!(NightLight, night_light, night_light);
 
 /// Every `section` or `section.field` in `value` that the structs do not
 /// have.
@@ -1003,6 +1075,15 @@ mod tests {
         assert_eq!(s.capture(), Capture::default());
         assert_eq!(s.look(), Look::default());
         assert_eq!(s.elevate(), Elevate::default());
+        assert_eq!(s.night_light(), NightLight::default());
+    }
+
+    #[test]
+    fn a_night_temperature_out_of_range_is_clamped() {
+        let s: Settings = serde_json::from_str(r#"{"night_light": {"night_k": 900}}"#).unwrap();
+        let s = s.sanitized();
+        assert_eq!(s.night_light().night_k, NightLight::MIN_K);
+        assert!(s.night_light().enabled);
     }
 
     #[test]

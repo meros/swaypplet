@@ -4,6 +4,7 @@ use gtk4::prelude::*;
 use gtk4::{Box, Label};
 use serde::Deserialize;
 
+use crate::settings::store::{self, NightLight};
 use crate::spawn::spawn_work;
 use crate::ui;
 use crate::ui::icons;
@@ -161,16 +162,38 @@ impl DisplaySection {
         let night = ui::group(1);
         night.add_css_class("display-night");
         night.append(&ui::heading("Night Light Warmth"));
-        let night_row = ui::slider_row("󰖔", 2000.0, 6500.0, 100.0);
+        let night_row = ui::slider_row(
+            "󰖔",
+            f64::from(NightLight::MIN_K),
+            f64::from(NightLight::DAY_K),
+            100.0,
+        );
         ui::glyph::adopt(&night_row.icon, ui::Text::Title, ui::Tone::Fg);
         night_row.scale.adjustment().set_page_increment(500.0);
-        night_row.scale.set_value(3500.0);
-        night_row.value.set_label("3500K");
+        // The night's temperature (`night_light.night_k`): the night light
+        // ramps to it over a second as the slider moves, and the settings
+        // file is written once the drag rests.
+        let night_k = store::current().night_light().night_k;
+        night_row.scale.set_value(f64::from(night_k));
+        night_row.value.set_label(&format!("{night_k}K"));
         {
             let val_lbl = night_row.value.clone();
             night_row.scale.connect_value_changed(move |s| {
                 let temp = s.value().round() as u32;
                 val_lbl.set_label(&format!("{temp}K"));
+                store::edit::<NightLight>(|n| n.night_k = temp);
+            });
+        }
+        {
+            // A change from elsewhere (the settings file, the CLI) moves the
+            // slider; the handler above then writes back what is already
+            // there, which the store drops.
+            let scale = night_row.scale.clone();
+            store::observe(move || {
+                let k = f64::from(store::current().night_light().night_k);
+                if (scale.value() - k).abs() >= 1.0 {
+                    scale.set_value(k);
+                }
             });
         }
         night.append(&night_row.root);

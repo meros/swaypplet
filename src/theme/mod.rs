@@ -196,7 +196,7 @@ fn rules() -> String {
 mod inputs;
 mod locked;
 mod paint;
-mod sun;
+pub mod sun;
 mod sway;
 pub mod wallpaper;
 

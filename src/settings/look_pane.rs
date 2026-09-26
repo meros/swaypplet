@@ -20,7 +20,7 @@ use gtk4::prelude::*;
 
 use super::form::{self, dropdown_row, section_box};
 use super::schema::ThemeMode;
-use super::store::{self, Look, Motion, Tint, Wallpaper, WallpaperMode};
+use super::store::{self, Look, Motion, NightLight, NightSchedule, Tint, Wallpaper, WallpaperMode};
 use super::wallpaper::{apply, candidates, candidates_dir, system_default};
 use crate::tokens::{Accent, Contrast, Neutral};
 
@@ -126,6 +126,17 @@ fn rounded_rect(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f6
 
 // ── Appearance ──────────────────────────────────────────────────────────
 
+/// The night light dropdown: off, or which schedule.
+const NIGHT_CHOICES: [&str; 3] = ["Off", "Follow the sun", "Always on"];
+
+fn night_choice(n: NightLight) -> usize {
+    match (n.enabled, n.schedule) {
+        (false, _) => 0,
+        (true, NightSchedule::Sun) => 1,
+        (true, NightSchedule::Always) => 2,
+    }
+}
+
 fn accent_name(a: Accent) -> &'static str {
     match a {
         Accent::Aqua => "Aqua",
@@ -194,6 +205,8 @@ struct State {
     motion: gtk4::DropDown,
     launch_zoom: gtk4::Switch,
     tint: gtk4::DropDown,
+    night: gtk4::DropDown,
+    night_k: gtk4::Scale,
     /// The token scales, for the strip to repaint.
     strip: gtk4::DrawingArea,
     status: gtk4::Label,
@@ -237,6 +250,7 @@ impl State {
     fn reset(self: &Rc<Self>) {
         store::update(|s| s.wallpaper = None);
         store::reset::<Look>();
+        store::reset::<NightLight>();
         match self.system.borrow().as_ref() {
             Some(system) => apply(system),
             // Nothing to put back: the config sets no wallpaper, so what is
@@ -251,7 +265,9 @@ impl State {
         self.updating.set(true);
         let shown = self.shown();
         let settings = store::current();
-        let overridden = settings.wallpaper.is_some() || settings.look.is_some();
+        let overridden = settings.wallpaper.is_some()
+            || settings.look.is_some()
+            || settings.night_light.is_some();
         let look = settings.look();
         let theme_mode = ThemeMode::ALL.iter().position(|m| *m == look.mode);
         self.theme_mode.set_selected(theme_mode.unwrap_or(0) as u32);
@@ -270,6 +286,10 @@ impl State {
         self.launch_zoom.set_active(settings.look().launch_zoom);
         let tint = Tint::ALL.iter().position(|t| *t == settings.look().tint);
         self.tint.set_selected(tint.unwrap_or(0) as u32);
+        let night = settings.night_light();
+        self.night.set_selected(night_choice(night) as u32);
+        self.night_k.set_value(f64::from(night.night_k));
+        self.night_k.set_sensitive(night.enabled);
         // The stylesheet follows on `theme::watch`'s next tick, and a new
         // wallpaper's hue after the panel samples it; this paints what is on
         // screen now and `theme::observe` paints the rest when it lands.
@@ -285,7 +305,7 @@ impl State {
         form::set_source(
             &self.status,
             overridden,
-            "System default: the sway config's wallpaper, auto mode in aqua on gruvbox, full motion",
+            "System default: the sway config's wallpaper, auto mode in aqua on gruvbox, full motion, night light from the sun at 3500 K",
         );
         self.updating.set(false);
     }
@@ -481,6 +501,28 @@ impl LookPane {
         );
         look.append(&zoom_row);
 
+        let night_box = section_box(
+            "Night light",
+            "Warms every screen after dark, from the same sun the automatic mode follows. The panel's display section has the same warmth.",
+        );
+        let (night_row, night) = dropdown_row(
+            "Night light",
+            "Follow the sun warms across civil twilight, dusk to dawn.",
+            &NIGHT_CHOICES,
+        );
+        night_box.append(&night_row);
+        let (night_k_row, night_k) = form::scale_row(
+            "Night warmth",
+            "The night's colour temperature. Lower is warmer; 6500 K is no change.",
+            (
+                f64::from(NightLight::MIN_K),
+                f64::from(NightLight::DAY_K),
+                100.0,
+            ),
+            |k| format!("{k:.0} K"),
+        );
+        night_box.append(&night_k_row);
+
         let browse = form::action_button(
             "Browse…",
             &format!(
@@ -492,7 +534,7 @@ impl LookPane {
         );
         let reset = form::action_button(
             "Reset to system",
-            "Put the sway config's wallpaper back, and the system's theme colour and motion.",
+            "Put the sway config's wallpaper back, and the system's theme colour, motion and night light.",
         );
         let (footer, status) = form::footer(&[&browse, &reset]);
 
@@ -507,6 +549,8 @@ impl LookPane {
             motion: motion.clone(),
             launch_zoom: launch_zoom.clone(),
             tint: tint.clone(),
+            night: night.clone(),
+            night_k: night_k.clone(),
             strip: strip.clone(),
             status: status.clone(),
             system: RefCell::new(None),
@@ -632,6 +676,36 @@ impl LookPane {
         }
         {
             let state = state.clone();
+            night.connect_selected_notify(move |d| {
+                if state.updating.get() {
+                    return;
+                }
+                let choice = d.selected() as usize;
+                store::edit::<NightLight>(|n| {
+                    n.enabled = choice != 0;
+                    if choice != 0 {
+                        n.schedule = if choice == 2 {
+                            NightSchedule::Always
+                        } else {
+                            NightSchedule::Sun
+                        };
+                    }
+                });
+                state.sync();
+            });
+        }
+        {
+            let state = state.clone();
+            night_k.connect_value_changed(move |s| {
+                if state.updating.get() {
+                    return;
+                }
+                let k = ((s.value() / 100.0).round() * 100.0) as u32;
+                store::edit::<NightLight>(|n| n.night_k = k);
+            });
+        }
+        {
+            let state = state.clone();
             motion.connect_selected_notify(move |d| {
                 if state.updating.get() {
                     return;
@@ -681,6 +755,7 @@ impl LookPane {
         root.append(&appearance);
         root.append(&theme);
         root.append(&look);
+        root.append(&night_box);
         root.append(&footer);
 
         // Ask the compositor what the config shipped, then build the grid

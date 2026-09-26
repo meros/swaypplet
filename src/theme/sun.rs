@@ -1,10 +1,33 @@
-//! Where the sun is, for the automatic mode (docs/design-system.md §2.1).
+//! Where the sun is, for the two things that follow it: the automatic mode
+//! (docs/design-system.md §2.1) and the night light (`services::gamma`).
+//! One calculation and one location, so the screen warms and the theme
+//! darkens against the same horizon.
 //!
 //! The NOAA low-precision solar position: good to a few hundredths of a
 //! degree for this century, which is far below the 6° band the mode switch
 //! uses. No network, no daemon, no ephemeris file.
 
 use crate::tokens::Mode;
+
+/// Where the sun is computed for: `/etc/swaypplet/theme.json`
+/// (`{"latitude": …, "longitude": …}`, written by Nix from
+/// `theme/location.nix`), or `SWAYPPLET_THEME_CONFIG`.
+pub fn location() -> Option<(f64, f64)> {
+    let path = std::env::var("SWAYPPLET_THEME_CONFIG")
+        .unwrap_or_else(|_| "/etc/swaypplet/theme.json".to_string());
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    Some((v["latitude"].as_f64()?, v["longitude"].as_f64()?))
+}
+
+/// The sun's elevation here and now, or `None` where no location is known.
+pub fn elevation_now() -> Option<f64> {
+    let (lat, lon) = location()?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+    Some(elevation(lat, lon, now))
+}
 
 /// The sun's elevation above the horizon in degrees, at `lat`/`lon`
 /// (degrees, east positive) and `unix` seconds.

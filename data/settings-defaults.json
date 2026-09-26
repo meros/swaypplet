@@ -59,5 +59,10 @@
     "terminal_card": true,
     "cue": true,
     "typing_abandons_face": true
+  },
+  "night_light": {
+    "enabled": true,
+    "schedule": "sun",
+    "night_k": 3500
   }
 }

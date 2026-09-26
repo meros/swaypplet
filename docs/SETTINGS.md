@@ -6,7 +6,7 @@ gear in the flight deck; a bare `:` lists every prefix). Five tabs,
 
 | tab | edits | sections of `~/.config/swaypplet/settings.json` |
 |---|---|---|
-| Look | `output * bg` on the compositor; whether the theme takes its colours from it; how much the shell animates | `wallpaper`, `look` |
+| Look | `output * bg` on the compositor; whether the theme takes its colours from it; how much the shell animates; the night light | `wallpaper`, `look`, `night_light` |
 | Idle & Lock | the idle manager's timers; the night window; walk-away lock; face unlock; what sudo and pkexec may ask for | `idle`, `elevate` |
 | Bar | clock format, segments, OSD placement, key steps, volume boost | `bar`, `keys` |
 | Alerts | popup linger, corner and depth; quiet hours; what a screenshot becomes | `alerts`, `capture` |
@@ -89,6 +89,15 @@ and Bar tabs is `nix <section>` into the clipboard.
   never pays for a 100 ms JPEG decode. The watching process also puts the
   tokens on sway's `client.*` window borders (`src/theme/sway.rs`), so they
   follow the mode and the tint.
+- **Night light** (`night_light`: `enabled`, `schedule` sun | always,
+  `night_k` 1700–6500) is read in this process by `services::gamma`, which
+  holds the compositor's gamma tables over `zwlr_gamma_control_v1` in place
+  of gammastep. `store::observe` retargets it: a change ramps over a second.
+  With `schedule: sun` it asks `theme::sun` once a minute, the same
+  elevation and location the automatic mode uses, and warms linearly in
+  mired from +3° (day, 6500 K, no control held at all) to −6° (the end of
+  civil twilight, `night_k`). The panel's Night Light tile and the display
+  section's warmth slider edit this section too.
 - **Alerts**: a popup reads linger, corner and depth as it is created and
   keeps them (`notifications/stack.rs`); quiet hours is a 30 s tick plus an
   observer (`services/notifications/quiet.rs`), edge-triggered so a manual DND
