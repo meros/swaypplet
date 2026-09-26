@@ -116,7 +116,7 @@ entry.ui-entry.large {
 /* ── Dropdown list ──
    A dropdown's list: a small solid sheet, the same raised fill as a solid
    card (a popup has no glass behind it). Other popovers are `ui::popover`
-   around a `ui::solid_card`. */
+   around a `Card::Solid` card. */
 
 dropdown.ui-dropdown popover > contents {
     padding: var(--space-2);

@@ -1,7 +1,7 @@
 //! One frosted card on its own layer-shell surface.
 //!
-//! Everything swaypplet puts on screen is the same object: a `.glass-card`
-//! pane on a transparent apron, frosted by the compositor, that fades in and
+//! Everything swaypplet puts on screen is the same object: a glass card
+//! (`ui::card::adopt`, `.ui-card`) pane on a transparent apron, frosted by the compositor, that fades in and
 //! out as a material. [`GlassSurface`] is that object, so building a new UI
 //! is choosing a corner of the screen and handing over the content.
 //!
@@ -38,7 +38,7 @@ pub struct GlassSurface {
 
 struct Inner {
     window: gtk4::Window,
-    /// The `.glass-card` pane. Its alpha is what the compositor stencils
+    /// The card pane (`.ui-card`). Its alpha is what the compositor stencils
     /// blur against, so [`anim::Reveal`] owns it outright.
     pane: gtk4::Box,
     /// Vertical placement within the column, plus the collapsed scale.

@@ -505,7 +505,7 @@ fn matches(item: &str, query: &str) -> bool {
 }
 
 /// The launcher's row: the row component, its selection moving in one frame
-/// for the same keyed-card reason (`ui::instant`).
+/// for the same keyed-card reason (`ui::set_instant`).
 fn build_row(text: &str, selected: bool) -> gtk4::Box {
     let r = crate::ui::row("", text, "");
     crate::ui::set_instant(&r.root, true);

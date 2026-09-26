@@ -2,7 +2,8 @@
 
 Every animated surface in swaypplet moves on one scale, with one curve family,
 evaluated identically in Rust and in CSS. This is that scale. `src/anim.rs`
-implements it, `data/style.css` declares it, and both point here.
+implements it, the `--motion-*` tokens (`src/tokens/`, used by `data/css/`)
+declare it, and both point here.
 
 ## Why this needed doing
 

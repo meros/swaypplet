@@ -32,7 +32,7 @@ use crate::ui;
 /// The shared chassis: a top-anchored popover whose child is the card.
 /// The card lives on the child, not the popover node: popup surfaces sit
 /// outside swayfx's layer_effects list, so there is no frost behind them
-/// and the card is the solid one (`ui::solid_card`: the card's radius and
+/// and the card is the solid one (`Card::Solid`: the card's radius and
 /// border, the raised fill).
 pub fn chassis(parent: &impl IsA<gtk4::Widget>) -> (gtk4::Popover, gtk4::Box) {
     let body = ui::vbox(3);

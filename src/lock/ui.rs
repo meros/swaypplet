@@ -254,7 +254,7 @@ impl SurfaceSet {
         // screen would become a flat slab.
         //
         // It is also half of the card's key arithmetic: the card is painted
-        // pre-compensated for exactly this black (`ui::card_over_scrim`), so
+        // pre-compensated for exactly this black (`Card::OverScrim`), so
         // the two composite to the key the compositor drops. It dims the
         // card's backdrop as well as the screen, which is why it is 0.20 and
         // not the 0.45 it carried when the locker painted its own wallpaper.

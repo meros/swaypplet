@@ -1,7 +1,8 @@
 //! Shared motion scale for all animated surfaces.
 //!
 //! The scale, the curves and the reasoning are in `docs/MOTION.md`. This
-//! module implements the Rust half; `data/style.css` declares the CSS half,
+//! module implements the Rust half; the generator's `--motion-*` tokens
+//! (`src/tokens/`, used by `data/css/`) are the CSS half,
 //! and the two evaluate the same curves so a card driven from here and a
 //! label driven from a stylesheet move together.
 //!
@@ -54,7 +55,8 @@ pub const MOVE_MS: f64 = crate::tokens::motion::MOVE.ms;
 // (500ms) — have no Rust consumer. Micro is below the threshold where a
 // hand-driven tick is worth its wakeups, and the other two are only ever
 // keyframes: emphasis lost its last caller when the field's glyph marks went,
-// and the tier lives on in data/style.css where the verdict animations are.
+// and the tier lives on in data/css/components/ where the verdict
+// animations are.
 // They are declared there rather than sitting in this file as dead constants
 // that look authoritative and govern nothing.
 

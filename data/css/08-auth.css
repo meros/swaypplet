@@ -17,7 +17,7 @@
 }
 
 /* ── The lock and greeter card ──
-   Its fill is `ui::card_over_scrim`: pre-compensated for the scrim under it
+   Its fill is `Card::OverScrim`: pre-compensated for the scrim under it
    so the two layers land on the compositor's key. The polkit card has no
    scrim under it, which is why it is a plain card. */
 .lock-card {

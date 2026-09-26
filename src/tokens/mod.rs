@@ -655,7 +655,7 @@ fn mixed(color: Rgb, share: f64) -> String {
 }
 
 /// `tokens.css` for `inputs`: one `:root` block holding the primitives and
-/// the semantic tier. The rules in `data/style.css` use only the latter.
+/// the semantic tier. The rules in `data/css/` use only the latter.
 pub fn css(inputs: Inputs) -> String {
     let s = scales(inputs);
     let st = status(inputs);

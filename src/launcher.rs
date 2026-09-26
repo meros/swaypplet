@@ -830,7 +830,7 @@ fn build_result_row(
 }
 
 /// A result row's look: the row component, its selection moving in one frame
-/// (`ui::instant`: the card's fill is the compositor's key, and a fade from
+/// (`ui::set_instant`: the card's fill is the compositor's key, and a fade from
 /// the selected fill back to it spends most of its frames as a dark ghost of
 /// the old row).
 fn result_row_style(row: &gtk4::Box, selected: bool) {
@@ -901,7 +901,7 @@ const CARD_SIDE_MARGIN: i32 = 16;
 const CARD_BOTTOM_MARGIN: i32 = 24;
 
 /// Marks a card that had to give up vertical density to fit its output.
-/// data/style.css answers it by dropping the fixed minimum heights that would
+/// data/css/09-helm.css answers it by dropping the fixed minimum heights that would
 /// otherwise hold the card taller than the screen it is on.
 const COMPACT_CLASS: &str = "card-compact";
 

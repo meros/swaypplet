@@ -88,7 +88,7 @@ where a hue does not fit in sRGB.
 
 ## 3. Tokens
 
-Three tiers. **Rules in `data/style.css` may use only the semantic tier.**
+Three tiers. **Rules in `data/css/` may use only the semantic tier.**
 Primitives are private to `tokens.css`. Component tokens exist only where a
 component needs a value no semantic token gives (listed in §3.8).
 
@@ -440,49 +440,81 @@ token sets. A token set that fails does not ship.
 
 ## 6. Components
 
-One builder per component in `src/ui/`, one CSS class family each. A
+One module per component in `src/ui/`, one stylesheet per component in
+`data/css/components/` (the same split), and one class family each. A
 surface is assembled from these; a surface-specific class is allowed only
 for layout (where things go), never for colour, type or shape.
 
-| Component | Builder | Class | Replaces |
-|---|---|---|---|
-| Card | `ui::card(kind)` (`Card::Thin`, `Card::Floating`) | `.card`, `.card.thin` | `.glass-card` added by hand in 13 places; `GlassSurface` |
-| Section | `ui::section(icon, title, summary)` → header + revealer | `.section`, `.section-header` | 8 inline copies in `widgets/` |
-| Row | `ui::row(icon, title, subtitle)` + `.end(widget)` | `.row`, `.row.activatable`, `.row.selected` | device, network, user, backup, launcher result, dmenu, keybind, session rows |
-| Toggle tile | `ui::tile(icon, title, state)` + optional drill-in | `.tile`, `.tile.on` | `widgets/tiles.rs` (kept, restyled) |
-| Slider row | `ui::slider_row(icon, range)` | `.slider-row` | audio, brightness, display, glass pane |
-| Switch row | `ui::switch_row(title, subtitle)` | `.row` + `switch` | settings panes, network |
-| Button | `ui::button(label, Kind)` (`Primary`, `Secondary`, `Flat`, `Destructive`), `ui::icon_button` | `.btn.primary` etc. | per-surface button classes |
-| Chip | `ui::chip(label)` | `.chip`, `.chip.selected` | launcher filters, lock user chips |
-| Badge | `ui::badge(text)` | `.badge` | counts |
-| Key | `ui::key(text)` | `.key` | `.jump-chord`, keybind sheet keys |
-| Status | `ui::status(kind, label)` | `.status.ok/.warn/.bad` | ad hoc coloured labels |
-| Field | `ui::field(label, entry, help)` | `.field`, `.field.error` | entries in network, polkit, lock |
-| Menu | `ui::menu(items)` | `.menu`, `.menu-item` | notification card menu, bar popovers |
-| Avatar | `ui::avatar(user, size)` | `.avatar` | lock and users rows |
-| Progress | `ui::progress(fraction)` | `.progress` | OSD, media, power, notifications |
+The API has three shapes (the module docs of `src/ui/mod.rs`):
+
+1. **A noun constructs and returns**: `ui::button(label, kind)`,
+   `ui::row(..)`, `ui::badge(text, tone)`.
+2. **`ui::<component>::adopt(&w, ..)` styles a widget the caller had to
+   build**: one GTK builds (a search entry, a dropdown over a model, a scale
+   on a shared adjustment) or whose shape the surface owns (the box that
+   becomes a card).
+3. **`ui::set_<state>(&w, TypedEnum | bool)` changes state at runtime.** A
+   state is a typed value, never a class name: no `"ui-…"` string appears in
+   Rust outside `src/ui/` (§7, `rust-ui-class`).
+
+| Component (module, stylesheet) | Build | Adopt | State | Classes |
+|---|---|---|---|---|
+| Surface (`surface`) | `ui::scrim()` | `ui::surface::adopt(&root)`, `ui::window::adopt(&root)` (solid), `ui::canvas::adopt(&w)` | | `.ui-surface`, `.ui-window`, `.ui-scrim`, `.ui-canvas` |
+| Text (`text`) | `ui::text(s, Text, Tone)`, `ui::heading(s)`, `ui::overline(s, Tone)` | `ui::glyph::adopt(&l, Text, Tone)`, `ui::overline::adopt(&l)`, `ui::on_wallpaper::adopt(&w)`, `ui::live_caption::adopt(&l)` | `set_text_style`, `set_tone`, `set_weight(Weight)`, `set_numeric`, `set_mono` | `.ui-hero` … `.ui-caption`, `.ui-muted` … `.ui-danger`, `.ui-strong`, `.ui-glyph`, `.ui-mono`, `.ui-numeric`, `.ui-overline`, `.ui-on-wallpaper`, `.ui-live-caption` |
+| Layout (`layout`) | `ui::vbox(n)`, `ui::hbox(n)`, `ui::stack(o, n)`, `ui::separator(Orientation)`, `ui::pill_group(n)`, `ui::toolbar(n)`; `ui::pad(&w, n)` | | | `.ui-separator(.vertical)`, `.ui-pill-group`, `.ui-toolbar` |
+| Card (`card`) | `ui::group(n)`, `ui::well()` | `ui::card::adopt(&w, Card)` (`Floating`, `Thin`, `Solid`, `OverScrim`) | `set_card_tint(CardTint, on)`, `set_success` | `.ui-card` (`.thin`, `.solid`, `.over-scrim`, `.success`, `.danger`, `.recessed`), `.ui-group`, `.ui-well` |
+| Button (`button`) | `ui::button(label, Kind)`, `ui::button_with(Face, Kind, Size)`, `ui::toggle_button(Face, Kind, Size)` | `ui::button::adopt(&b, Kind, Size)` | `set_button_kind`, `set_armed` | `.ui-btn` (`.primary`, `.flat`, `.destructive`, `.small`, `.icon`, `.pill`, `.armed`) |
+| Chip, badge, key, status (`chip`) | `ui::chip(Face)`, `ui::toggle_chip(label)`, `ui::badge(text, BadgeTone)`, `ui::key(text)`, `ui::status(Status, label)` | | `set_status(Status)`, `set_handoff(Option<Handoff>)` | `.ui-chip` (`.rich`, `.picked`, `.dropped`), `.ui-badge(.neutral)`, `.ui-key`, `.ui-status` (`.success`, `.warning`, `.danger`, `.neutral`) |
+| Row (`row`) | `ui::row(icon, title, subtitle)` → `Row`, `ui::row_button(..)`, `ui::list()`, `ui::list_row(&content)`; `Row::set_icon_image` | | `set_selected`, `set_instant`, `set_busy` | `.ui-row` (`.activatable`, `.selected`, `.instant`, `.busy`) and its parts, `.ui-list` |
+| Expander (`expander`) | `ui::section(icon, title, summary)` → `Section`, `ui::disclosure(label)` → `Expander`; `set_open`, `Section::show_as_page` | | | `.ui-section` (`.open`, `.page`) and its parts, `.ui-disclosure(.open)`, `.ui-chevron` |
+| Toggle tile (`tile`) | `ui::tile_toggle(icon, title)` | | `set_loading` | `.ui-tile(.on)`, `.ui-tile-toggle(.loading)`, `.ui-tile-title` |
+| Slider, switch, check (`slider`) | `ui::slider_row(icon, min, max, step)` → `SliderRow` (`icon_button(tooltip)`), `ui::switch()`, `ui::switch_row(..)`, `ui::check(label)` | `ui::slider::adopt(&scale, Density)` | `set_over_range` | `.ui-slider` (`.dense`, `.over`), `.ui-slider-row` and its parts, `.ui-switch`, `.ui-check` |
+| Field (`field`) | `ui::field(label, &input)`, `ui::dropdown(choices)` | `ui::entry::adopt(&e, FieldSize)`, `ui::dropdown::adopt(&d)` | `set_field_state(FieldState, on)` | `.ui-field` (`.armed`, `.busy`, `.reject`), `.ui-field-label`, `.ui-entry(.large)`, `.ui-dropdown` |
+| Menu (`menu`) | `ui::menu()`, `ui::menu_item(label, accel, danger)` | | | `.ui-menu`, `.ui-menu-item(.danger)`, `.ui-menu-accel` |
+| Popover (`popover`) | `ui::popover(&child, position)` (its child is a `Card::Solid`) | | | `.ui-popover` |
+| Progress (`progress`) | `ui::progress(fraction)` | `ui::progress::adopt(&p)` | `set_progress_status(Option<Status>)` | `.ui-progress` (`.success`, `.warning`, `.danger`) |
+| Bar (`bar`) | `ui::segmented()`, `ui::mark(&child, quiet)`, `ui::bay(&child, task)`, `ui::bay_chip()`, `ui::rail(slot)` | `ui::segment::adopt(&w, quiet)`, `ui::mark::adopt(&b, quiet)`, `ui::meter::adopt(&area)` | `set_category`, `set_receded`, `set_selection(Selection)`, `set_danger`, `set_quiet`, `set_ribbon(Ribbon)`, `set_bay_state(BayState, local)` | `.ui-cat-1…6`, `.ui-receded`, `.ui-meter`, `.ui-segmented`, `.ui-segment`, `.ui-mark`, `.ui-bay`, `.ui-bay-chip`, `.ui-rail` |
+| Media (`media`) | `ui::thumb()`, `ui::pick_thumb(&child)`, `ui::swatch(&child)`, `ui::ring()` | `ui::thumb::adopt(&w)`, `ui::choice_grid::adopt(&g)`, `ui::placeholder::adopt(&w)`, `ui::lifted::adopt(&w)` | `set_pinned` | `.ui-thumb`, `.ui-pick-thumb`, `.ui-choice-grid`, `.ui-swatch`, `.ui-ring(.pinned)`, `.ui-placeholder`, `.ui-lifted` |
+| Face indicator (`face`) | `ui::face_ring(size)`, `ui::face_pill(size)` → `FacePill` | | `set_face_state(Option<FaceState>)`, `set_face_enter` | `.ui-face-ring`, `.ui-face-pill`, `.ui-face-eye`, `.ui-face-mouth`, `.ui-face-enter`; states `.looking`, `.dark`, `.found`, `.ok`, `.fail` |
+| Avatar (`avatar`) | `ui::avatar(name, icon, size, logged_in)` | | | `.ui-avatar` (`.cat-n`, `.active`), `.ui-avatar-presence` |
+| Motion (`motion`) | `ui::revealer(transition, motion)`, `ui::page_stack(transition, motion)` | | `set_breathing`, `ui::shake(&w)` (one-shot) | `.ui-breathing`, `.ui-shake` |
+
+`ui::icons` holds the icon-font glyphs; `ui::paint()` the token colours
+for code that draws with Cairo. `data/css/components/gtk.css` styles what
+GTK builds itself (windows, a popover menu's buttons and separators,
+scrollbars) and comes last in the cascade.
 
 ## 7. Enforcement
 
-Tests in `src/tokens.rs` and `src/theme.rs`, run by `cargo test`:
+`src/design_lint.rs`, run by `cargo test`. The CSS rules read every file in
+`theme::RULES` with comments removed; the Rust rules read `src/**/*.rs`
+minus `src/tokens/`, `src/ui/` and `#[cfg(test)]` code.
 
-1. **No literal colours in the rules.** `data/style.css` contains no hex,
-   `rgb()`, `rgba()`, `hsl()`, named colour (`white`, `black`), `alpha()`,
-   `shade()`, `mix()` or `@name` outside comments. Colours come from `var()`.
-2. **Only semantic tokens.** Every `var(--x)` in the rules names a token from
-   §3.2–3.9. Primitives (`--neutral-n`, `--accent-n`) are refused.
-3. **Only the scales.** Every `font-size` is a `--type-*` token; every
-   `border-radius` a `--radius-*` token; every padding, margin and
-   `border-spacing` a `--space-*` token or 0; every transition and
-   non-looping animation a `--motion-*` token (or `--dur-*` with
-   `--ease-*`).
-4. **Contrast** (§5) for every input combination.
-5. **Rust**: no `set_spacing`, `margin_*` or `spacing(...)` with any
-   non-zero literal (use `tokens::space(n)`, `ui::vbox(n)`, `ui::hbox(n)`);
-   no Cairo colour literals for red, green or blue outside `src/tokens/`;
-   no CSS class added that no rule styles. Checked by `src/design_lint.rs`,
-   which also keeps a ledger of the files not yet migrated: the ledger can
-   only shrink.
+| Rule | Refuses | Where |
+|---|---|---|
+| `colour-literal` | hex, `rgb()`/`hsl()`…, named colours | all CSS |
+| `colour-function` | `alpha()`, `shade()`, `mix()`, `lighter()`, `darker()`, `color-mix()` | all CSS |
+| `at-name` | `@name` colours and `@define-color` | all CSS |
+| `token` | a `var(--x)` the generator does not emit; a custom property defined outside the generator and `data/css/components/` | all CSS |
+| `primitive` | `--neutral-n`, `--accent-n` | all CSS |
+| `font-size`, `font-weight`, `radius`, `space`, `motion` | a value off its scale (§3.4–3.8); a looping animation names its own period | all CSS |
+| `surface-look` | colour, type, shape or state motion in a surface's file | CSS outside `components/` |
+| `component-scope` | a selector in `components/X.css` whose last compound targets no class X's `owns:` line names (a GTK node under one is fine); a class owned twice or by nobody; a component class in `gtk.css`. Justified reaches are listed with their reasons in `COMPONENT_SCOPE_EXCEPTIONS` | `data/css/components/` |
+| `rust-space` | a non-zero literal box spacing or margin (use `ui::vbox(n)`, `ui::pad`, `tokens::space(n)`) | Rust |
+| `rust-colour` | a Cairo or `gdk::RGBA` colour from numbers | Rust |
+| `rust-class` | a class added that no stylesheet styles | Rust |
+| `rust-ui-class` | a `"ui-…"` string literal: a component's class named outside the component | Rust |
+| `motion-bypass` | a `transition_duration` set, or a motion token's `.ms` read, outside `ui::revealer`/`ui::page_stack` and `anim::ms`/`anim::span`, so Look → Motion and reduced motion reach every animation | Rust except `src/anim.rs` |
+| `surface-on-window` | `ui::surface::adopt` or `ui::window::adopt` given a window (GTK's `window.background` outranks the class there; it goes on the root child) | Rust |
+
+The lint also carries a ledger of files not yet migrated, which can only
+shrink (empty today). Contrast (§5) is checked by the tests in
+`src/tokens/`.
+
+`dev/render-all.sh capture DIR` renders every surface in both modes over
+black and over a wallpaper; `dev/render-all.sh compare BEFORE AFTER` diffs
+two such runs and writes a sheet for every shot that changed. It is the
+check for a change that should move no pixel.
 
 ## 8. Migration
 
@@ -506,19 +538,19 @@ A surface is migrated when its file in `data/css/` and its Rust code
 satisfy §7, and a render from `dev/render.sh` has been compared with the
 one before. The steps:
 
-1. **Build with the components.** Replace hand-built widgets with the
-   builders in `src/ui/`: `ui::card` for the glass card, `ui::row` and
+1. **Build with the components** (§6). Replace hand-built widgets with
+   `src/ui/`: `ui::card::adopt` for the glass card, `ui::row` and
    `ui::row_button` for rows, `ui::section` for collapsible groups,
    `ui::button` for buttons, `ui::slider_row`, `ui::switch`, `ui::chip`,
    `ui::badge`, `ui::key`, `ui::status`, `ui::field`, `ui::menu`,
    `ui::progress`. Put text on the scale with `ui::text`,
-   `ui::set_text_style` or `ui::glyph`. Box spacing is `ui::vbox(n)` /
+   `ui::set_text_style` or `ui::glyph::adopt`. Box spacing is `ui::vbox(n)` /
    `ui::hbox(n)` with a step of the space scale.
 2. **Shrink the surface's CSS to layout.** What stays in its file places
    things: padding, margins, min sizes, alignment, the apron around a
    card. Colour, font size and weight, radius and state belong to the
    components. Where a surface needs a look no component gives, add it to
-   `00-components.css` and `src/ui/` as a component, not to the surface.
+   `data/css/components/` and `src/ui/` as a component, not to the surface.
 3. **Map what is left** with this table:
 
 | Legacy | Token |
