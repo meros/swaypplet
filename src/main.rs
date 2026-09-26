@@ -7,6 +7,8 @@ mod avatar;
 mod backup;
 mod bar;
 mod clipboard;
+#[cfg(test)]
+mod design_lint;
 mod dmenu;
 mod elephant;
 mod face;
