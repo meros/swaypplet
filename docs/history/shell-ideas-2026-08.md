@@ -1,7 +1,11 @@
-# Shell ideas — what else belongs in swaypplet
+# Shell ideas, August 2026 — what shipped and why
 
+> History. The open items moved to [ROADMAP.md](../ROADMAP.md) on
+> 2026-09-26; what is left here is what shipped, with the reasons, which the
+> code comments point back to.
+>
 > Research pass 2026-08-10, after the bar vision shipped end to end (BAR_VISION
-> increments 1-8 are in `src/bar/`). BAR_IDEAS asked what a *bar* should do.
+> increments 1-8 are in `src/bar/`). BAR_IDEAS (removed 2026-09-26) asked what a *bar* should do.
 > This asks what the *shell* should do, and the answer came mostly from two
 > places: an audit of what the session still runs outside swaypplet, and a dump
 > of the Wayland globals swayfx actually advertises.
@@ -164,24 +168,11 @@ up (`live.rs`). The same picture opens over a bar button on hover
 `⌘ ⌃ p`). Windows on hidden workspaces keep sending frames when they change;
 an idle one sends one.
 
-Next, chosen: **the overview with a real start.** A long Super hold opens a
-full-screen overlay whose first frame is an output capture, identical to the
-screen, and the windows then fly from their real positions into a grid of
-workspaces. It wants the dmabuf capture path first (`GdkDmabufTextureBuilder`,
-gtk4 feature `v4_16`): full-size frames through the shm path cost a CPU copy
-and a box filter each, which the tiles can afford and a full screen cannot.
+Next: the overview, in [ROADMAP.md](../ROADMAP.md).
 
 Limits met on the way: swayfx offers only `Xbgr8888` for a toplevel capture,
 with the X byte 255 everywhere, so a translucent terminal shows its opaque
 background in a picture.
-
-### 6. Night light and display profiles in-process (S each)
-
-`zwlr_gamma_control_manager_v1` retires gammastep (20 lines of config, one
-systemd unit). `zwlr_output_manager_v1` retires kanshi (63 lines), and
-`widgets/display.rs` is already the surface it would hang off. Two daemons out
-of the session for very little code, and night-light temperature becomes a
-panel control rather than a rebuild.
 
 ### 7. zbus and PipeWire, replacing text scraping (M) — DONE 2026-08-11
 
@@ -236,13 +227,6 @@ unexercised** — connect to an SSID, toggle the radio, VPN up/down, pair,
 unpair, scan — because verifying them means disrupting the session they run
 in. They are the next thing to try after a rebuild.
 
-### 8. claude-dash retirement (S, mostly other repo)
-
-An Electron process in the session. BAR_VISION increment 9 gated retirement on
-the `last-<pid>` Stop hook plus a task-number hint on notify-send. The hook is
-landing and `popover.rs:172` already renders the row, so only the notification
-hint is left.
-
 ### 9. Keybinds overlay as a real surface (S) — DONE 2026-08-11
 
 Was a `foot` terminal running `cat` on a hand-curated text file, shown and
@@ -263,28 +247,6 @@ binding is worse than none. The 1 s hold moved into the process
 (`HOLD_MS`), which is what let both systemd units go; the session keeps only
 the libinput watcher that reports the press and release edges.
 
-### 10. Tailscale (S)
-
-Three nodes live on this account. `widgets/network/vpn.rs` covers
-NetworkManager VPNs only, and `tailscaled` is its own daemon, so exit-node
-state and peer reachability are invisible today.
-
-### 11. Emoji and character picker that types (M)
-
-`zwp_input_method_manager_v2` and `zwp_virtual_keyboard_manager_v1` are both
-advertised, so the picker can insert into the focused surface rather than
-round-tripping through the clipboard. The dmenu chassis is most of the UI
-already.
-
-## Rejected
-
-- **Weather, calendar, agenda.** Each wants a network poll or a per-minute tick
-  for a surface opened twice a day. P7.
-- **Per-app context segment** (BAR_IDEAS 4). Reshapes the bar on the highest
-  frequency event in the workflow; the vision asks for stillness, and window
-  focus changes hundreds of times an hour.
-- **Clipboard persistence across restarts.** cliphist did this and it is how
-  clipboard managers leak passwords to disk. In-memory is the safer default;
-  revisit only with an encryption story.
-- **Image entries in clipboard history v1.** Real want, but the preview,
-  memory cap and eviction policy are a separate design.
+Open items (night light and display profiles, claude-dash retirement,
+Tailscale, the emoji picker) and the rejected list are in
+[ROADMAP.md](../ROADMAP.md).

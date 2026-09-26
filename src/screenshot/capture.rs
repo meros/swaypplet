@@ -3,7 +3,7 @@
 //! This is the half of a screenshot that `grim` used to be. The protocol is
 //! the staging successor to wlr-screencopy, and the compositor advertises both;
 //! the ext one is chosen because it is also what a live window thumbnail wants
-//! (SHELL_IDEAS item 5), so there is one capture path in the process rather
+//! (docs/history/shell-ideas-2026-08.md item 5), so there is one capture path in the process rather
 //! than two.
 //!
 //! The flow is fixed: ask an output for a capture source, open a session on it,

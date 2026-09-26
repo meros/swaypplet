@@ -49,7 +49,7 @@ Brief principles P1-P8 stand. The panel amends three and adds two.
 - **Workspace map**: the existing `1¹`..`4⁴` labels and task dots stay (unanimous veto on replacing them; they are the keybindings in print). Additions:
   - **Task ribbons**: 2 px bottom ribbon per task group from TaskStateService. Off = no session; dim solid = working; task hue = waiting. Ribbon state changes only on task transitions (a few per hour), so adding it to the rebuild cache key is safe. 
   - **Occupancy ticks are deferred** until `rebuild()` (workspaces.rs:68-90) goes incremental: window events in the cache key would defeat the anti-shimmer gate the cache exists for (maintainer finding 3). Backlog, not vision.
-  - Sliding focus caret (BAR_IDEAS 9) remains backlog, compatible.
+  - Sliding focus caret remains backlog, compatible ([ROADMAP](ROADMAP.md) item 1).
 - **Generic workspaces**: unchanged glyphs, dimmed.
 
 ### Center: the decision slot
@@ -58,12 +58,12 @@ Empty at nominal, and empty means "nobody needs you". Priority mux, one occupant
 
 1. **Battery critical** (red): glyph + % + time-to-empty (already parsed in widgets/power.rs). Stand-down: charger connect.
 2. **Oldest unacknowledged waiting session**: task-hue dot + full 40-char description + age chip. Multiple waiting: oldest holds the slot, `+1` suffix; the board already shows the rest. Stand-down: that session's workspace focused on any output.
-3. **OSD interjection** (transient, self-decaying 1.5 s): volume/brightness keys render icon + eased hairline + value here instead of a center-screen card (BAR_IDEAS spec 5 mechanics, center-anchored). Interjects over occupants 1-2 and yields back. The only transient tenant; notifications and media never occupy the slot.
+3. **OSD interjection** (transient, self-decaying 1.5 s): volume/brightness keys render icon + eased hairline + value here instead of a center-screen card (center-anchored). Interjects over occupants 1-2 and yields back. The only transient tenant; notifications and media never occupy the slot.
 4. Empty.
 
 ### Right cluster, in order
 
-- **Media mark**: single dim achromatic ♪ while a player exists, `.paused` dims further, hidden when idle. No title text, no ambient playback progress (deepwork veto: motionless means motionless). Detail (art, title, seek) in the click popover, BAR_IDEAS specs 2/8 as building blocks. Updates on player state change only.
+- **Media mark**: single dim achromatic ♪ while a player exists, `.paused` dims further, hidden when idle. No title text, no ambient playback progress (deepwork veto: motionless means motionless). Detail (art, title, seek) in the click popover. Updates on player state change only.
 - **Tray**: StatusNotifier `Status` filter (DARK COCKPIT's cut): `NeedsAttention` items show, `Active`/`Passive` live in the panel. Zero width at rest. No dwell-dot (deepwork veto: a hover invitation is a fidget invitation).
 - **Hazard lane**: zero width when healthy. Appear-only glyphs via 200 ms Revealer: 󰅶 caffeine/idle-inhibit armed (in-process state, free), sway mode ≠ default (mode name in tooltip; `mode` event on the existing persistent IPC), failed user units count (zbus signal subscription, ships later, severable). Amber, static; none of these are red by default. Optional fifth: budget-pacer actively throttling (GFileMonitor on the 133-byte JSON, `.stale` class when mtime > 5 min), pending owner interest.
 - **Battery**: dim gray glyph at rest, no %, no hue (owner veto on the hairline: "a dim glyph costs nothing and reads without a pointer"). Charging: bolt, still gray. ≤30 %: amber, % text Reveals in. ≤15 %: red, one onset nudge, decision-slot escalation. Watts and time-to-empty in the popover. 30 s poll (existing), class changes on threshold edges only.
@@ -84,7 +84,7 @@ Empty at nominal, and empty means "nobody needs you". Priority mux, one occupant
 
 ### The read layer
 
-One popover chassis (BAR_IDEAS spec 2). Board bay click opens the task popover: full description, raw `N/M ETA` text, per-session rows with working/waiting durations (suspend-skewed mtimes flagged as approximate), last assistant message (requires the nixos-side `last-<pid>` Stop hook; degrades to description without it). Click or Enter on a row focuses that session's workspace via the same path the keybinding takes. This absorbs claude-dash's two unique leftovers; dash retirement is *gated on* the two nixos-side hooks landing, and is a milestone, never a headline (maintainer finding 4). Battery, media, and hazard glyphs open the same chassis with their sections. Everything in every popover is also reachable without hover timing.
+One popover chassis. Board bay click opens the task popover: full description, raw `N/M ETA` text, per-session rows with working/waiting durations (suspend-skewed mtimes flagged as approximate), last assistant message (requires the nixos-side `last-<pid>` Stop hook; degrades to description without it). Click or Enter on a row focuses that session's workspace via the same path the keybinding takes. This absorbs claude-dash's two unique leftovers; dash retirement is *gated on* the two nixos-side hooks landing, and is a milestone, never a headline (maintainer finding 4). Battery, media, and hazard glyphs open the same chassis with their sections. Everything in every popover is also reachable without hover timing.
 
 ### Stand-down table (P10, normative)
 
@@ -116,7 +116,7 @@ Each increment ships independently and leaves the bar better than it found it.
 
 **4. Decision slot (M).** Center CenterBox occupant behind a GtkRevealer: priority mux over battery state + TaskStateService (occupants 1-2), 40-char description, age chip, handover = outgoing collapses 200 ms then incoming reveals. Media pill deletes; media mark (dim ♪ + popover) lands in the right track.
 
-**5. OSD interjection (M).** BAR_IDEAS spec 5 mechanics routed to the decision slot: `show_display` gains the bar route (needs the `fullscreen` flag on the focused-window snapshot, ~25 LoC sway_ipc), eased continuous hairline across repeated presses, 1.5 s decay, yields back to the standing occupant. Center-screen card remains for fullscreen and lock.
+**5. OSD interjection (M).** Routed to the decision slot: `show_display` gains the bar route (needs the `fullscreen` flag on the focused-window snapshot, ~25 LoC sway_ipc), eased continuous hairline across repeated presses, 1.5 s decay, yields back to the standing occupant. Center-screen card remains for fullscreen and lock.
 
 **6. Instrument quieting (S).** Battery threshold tiers + resting dim glyph; clock and start-button luminance drop; tray NeedsAttention filter (SNI `Status` in the tray service). Mostly CSS plus one tray predicate.
 
@@ -135,9 +135,9 @@ Each increment ships independently and leaves the bar better than it found it.
 - **Notification chips and media-handoff toasts in the center** (C): popups with better seating; ~15 track changes an hour with music on; GNOME's centralization lesson not re-derived inside a bar widget.
 - **Five-occupant priority ladder with decay timers** (C): a state machine maintained forever, driven by unvalidated policy. Two standing occupants plus one transient is the whole mux.
 - **Expand/collapse animation on workspace switch** (B): animates the single highest-frequency event; the in-flight guard means it rarely runs anyway. Static width step instead.
-- **1/s playback underline and any ambient playback progress** (B, BAR_IDEAS 8's ambient half): continuous motion for a zero-action state.
+- **1/s playback underline and any ambient playback progress**: continuous motion for a zero-action state.
 - **Continuous 2 s luminance breath as a rest state** (all four concepts): CSS keyframe loops ride the frame clock; hours of per-frame wakeups from a bar whose pitch is stillness.
-- **Indeterminate working arc** (BAR_IDEAS 6a): P2 violation, dropped even as backlog.
+- **Indeterminate working arc**: P2 violation, dropped even as backlog.
 - **Battery as a 6 px hairline at nominal** (A): owner veto; a dim glyph reads without a pointer.
 - **Hue as the sole identity channel in compact bays** (B, C): converges at small sizes and fails deuteranopia; numeral + position are primary.
 - **Popover ring buffers** (D's watts sparkline, 30-min transition timeline): permanent memory and code for a surface opened twice a day.
