@@ -42,9 +42,8 @@ use std::rc::Rc;
 
 use gtk4::glib;
 use gtk4::prelude::*;
-use gtk4_layer_shell::LayerShell;
 
-use crate::shell::layer::{self, LayerShellConfig};
+use crate::shell::{Namespace, Surface};
 use gesture::{Action, Ev, Gesture};
 use rows::Row;
 
@@ -92,7 +91,7 @@ struct State {
 type PinFn = Box<dyn Fn(String) -> bool>;
 
 pub struct Jump {
-    window: gtk4::Window,
+    surface: Surface,
     stage: gtk4::Fixed,
     /// The ring round the middle workspace.
     ring: gtk4::Box,
@@ -106,39 +105,28 @@ pub struct Jump {
 
 impl Jump {
     pub fn new(app: &gtk4::Application) -> Rc<Self> {
-        static CONFIG: LayerShellConfig = LayerShellConfig {
-            namespace: crate::shell::Namespace::Jump,
-            layer: gtk4_layer_shell::Layer::Overlay,
-            exclusive: false,
-            default_width: None,
-            default_height: None,
+        let surface = Surface::builder(app, Namespace::Jump)
             // The whole output: the row is drawn across all of it, and the
-            // pointer must not reach the windows in it.
-            anchors: &[
-                (gtk4_layer_shell::Edge::Left, true),
-                (gtk4_layer_shell::Edge::Right, true),
-                (gtk4_layer_shell::Edge::Top, true),
-                (gtk4_layer_shell::Edge::Bottom, true),
-            ],
-            margins: &[],
+            // pointer must not reach the windows in it. Over the bar too:
+            // the row's geometry is the output's, and the ring is placed in
+            // output coordinates.
+            .fill()
+            .over_exclusive_zones()
             // Exclusive: this surface has to see the modifier come up, and
             // that only arrives at whoever holds the keyboard. sway still
             // evaluates its own bindings first, which is why the switcher
             // puts sway in [`MODE`] while it is up.
-            keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
-        };
-
-        let window = layer::create_layer_window(app, &CONFIG);
-        // Over the bar too: the row's geometry is the output's, and the ring
-        // is placed in output coordinates.
-        window.set_exclusive_zone(-1);
-        window.set_decorated(false);
+            .keyboard(gtk4_layer_shell::KeyboardMode::Exclusive)
+            // A stage, not a card: what is on it is placed in output
+            // coordinates and shown and hidden outright.
+            .no_card()
+            .build();
+        let window = surface.window().clone();
         window.add_css_class("jump-surface");
 
         let stage = gtk4::Fixed::new();
-        // Base type and colour on the child: the theme's `window.background`
-        // outranks a class on the window node.
-        crate::ui::surface::adopt(&stage);
+        // The whole root, so the stage is the output.
+        stage.set_vexpand(true);
         // Outside the workspace, so it frames the windows and covers none.
         // It fades in as the row opens: the workspaces take the animation's
         // time to get there.
@@ -167,10 +155,10 @@ impl Jump {
         caption.set_can_target(false);
         stage.put(&ring, 0.0, 0.0);
         stage.put(&caption, 0.0, 0.0);
-        window.set_child(Some(&stage));
+        surface.root().append(&stage);
 
         let this = Rc::new(Jump {
-            window,
+            surface,
             stage,
             ring,
             caption,
@@ -198,8 +186,8 @@ impl Jump {
         // laid out - it maps, the compositor gives it a surface, and nothing
         // is drawn on it. That failure is silent and looks exactly like the
         // gesture not firing.
-        this.window.present();
-        this.window.set_visible(false);
+        this.surface.window().present();
+        this.surface.window().set_visible(false);
         this
     }
 
@@ -229,7 +217,7 @@ impl Jump {
                 }
             });
         }
-        self.window.add_controller(keys);
+        self.surface.window().add_controller(keys);
 
         let click = gtk4::GestureClick::new();
         {
@@ -252,7 +240,7 @@ impl Jump {
                 this.feed(ev);
             });
         }
-        self.window.add_controller(click);
+        self.surface.window().add_controller(click);
     }
 
     /// `Super+Tab`.
@@ -353,7 +341,7 @@ impl Jump {
         match action {
             Action::Map => {
                 self.place_ring();
-                self.window.set_visible(true);
+                self.surface.window().set_visible(true);
                 set_mode(MODE);
                 if let Some(pins) = pin::handle() {
                     pins.set_held(true);
@@ -396,7 +384,7 @@ impl Jump {
             }
             Action::Unmap => {
                 self.disarm_watchdog();
-                self.window.set_visible(false);
+                self.surface.window().set_visible(false);
                 set_mode("default");
                 if let Some(pins) = pin::handle() {
                     pins.set_held(false);
