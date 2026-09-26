@@ -60,7 +60,7 @@ pub use card::{Card, CardTint, group, set_card_tint, set_success, well};
 pub use chip::{
     BadgeTone, Handoff, Status, badge, chip, key, set_handoff, set_status, status, toggle_chip,
 };
-pub use expander::{Section, disclosure, section};
+pub use expander::{Disclosure, Section, disclosure, section};
 pub use face::{FacePill, FaceState, face_pill, set_face_enter, set_face_state};
 pub use field::{FieldSize, FieldState, dropdown, entry, field, set_field_state};
 pub use layout::{hbox, pad, pill_group, separator, toolbar, vbox};
