@@ -17,13 +17,13 @@ use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
 use crate::auth_field::{AuthField, Caption, Tone};
-use crate::layer_shell::{self, LayerShellConfig};
+use crate::shell::layer::{self, LayerShellConfig};
 use crate::ui;
 
 use super::agent::ResolvedIdentity;
 
 static POLKIT_CONFIG: LayerShellConfig = LayerShellConfig {
-    namespace: "swaypplet-polkit",
+    namespace: crate::shell::Namespace::Polkit,
     layer: gtk4_layer_shell::Layer::Overlay,
     exclusive: false,
     default_width: None,
@@ -166,7 +166,7 @@ pub struct PolkitDialog {
 
 impl PolkitDialog {
     pub fn new(app: &gtk4::Application) -> Rc<Self> {
-        let window = layer_shell::create_layer_window(app, &POLKIT_CONFIG);
+        let window = layer::create_layer_window(app, &POLKIT_CONFIG);
         window.set_visible(false);
 
         // ── Backdrop fills the whole screen; click anywhere → cancel ──

@@ -271,7 +271,7 @@ thread_local! {
 }
 
 /// A namespace no surface uses, for asking sway what it can parse.
-const PROBE_NAMESPACE: &str = "swaypplet-motion-probe";
+const PROBE_NAMESPACE: &str = crate::shell::Namespace::MotionProbe.as_str();
 
 /// Whether sway moves layer surfaces itself, asking it the first time.
 ///

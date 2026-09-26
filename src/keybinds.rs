@@ -30,7 +30,7 @@ use gtk4::prelude::*;
 use gtk4::{gdk, gio};
 
 use crate::anim;
-use crate::layer_shell::{self, LayerShellConfig};
+use crate::shell::layer::{self, LayerShellConfig};
 use crate::sway::ipc;
 use crate::sway::workspace::generic_label;
 
@@ -540,7 +540,7 @@ impl Drop for Card {
         // The alpha handle goes before its `wl_surface` (see
         // `anim::Reveal::release_alpha`).
         self.reveal.release_alpha();
-        crate::layer_shell::destroy_window(&self.window);
+        crate::shell::layer::destroy_window(&self.window);
     }
 }
 
@@ -726,7 +726,7 @@ impl Keybinds {
 
 fn build_card(app: &gtk4::Application, monitor: gdk::Monitor) -> Card {
     static CONFIG: LayerShellConfig = LayerShellConfig {
-        namespace: "swaypplet-keybinds",
+        namespace: crate::shell::Namespace::Keybinds,
         layer: gtk4_layer_shell::Layer::Overlay,
         exclusive: false,
         default_width: None,
@@ -737,7 +737,7 @@ fn build_card(app: &gtk4::Application, monitor: gdk::Monitor) -> Card {
         keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
     };
 
-    let window = layer_shell::create_layer_window_on(app, &CONFIG, Some(&monitor));
+    let window = layer::create_layer_window_on(app, &CONFIG, Some(&monitor));
     window.set_resizable(false);
     window.set_decorated(false);
 

@@ -44,7 +44,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4_layer_shell::LayerShell;
 
-use crate::layer_shell::{self, LayerShellConfig};
+use crate::shell::layer::{self, LayerShellConfig};
 use gesture::{Action, Ev, Gesture};
 use rows::Row;
 
@@ -107,7 +107,7 @@ pub struct Jump {
 impl Jump {
     pub fn new(app: &gtk4::Application) -> Rc<Self> {
         static CONFIG: LayerShellConfig = LayerShellConfig {
-            namespace: "swaypplet-jump",
+            namespace: crate::shell::Namespace::Jump,
             layer: gtk4_layer_shell::Layer::Overlay,
             exclusive: false,
             default_width: None,
@@ -128,7 +128,7 @@ impl Jump {
             keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
         };
 
-        let window = layer_shell::create_layer_window(app, &CONFIG);
+        let window = layer::create_layer_window(app, &CONFIG);
         // Over the bar too: the row's geometry is the output's, and the ring
         // is placed in output coordinates.
         window.set_exclusive_zone(-1);

@@ -35,7 +35,7 @@ use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, Layer};
 
 use crate::anim;
-use crate::layer_shell::{self, LayerShellConfig};
+use crate::shell::layer::{self, LayerShellConfig};
 use crate::services::task_state::TaskStateService;
 use crate::sway::ipc::SwayService;
 use crate::theme;
@@ -46,7 +46,7 @@ const APP_ID: &str = "dev.swaypplet.bar";
 // `gaps inner 4` so card edges align with tiled window edges. swayfx
 // layer_effects keyed on the namespace blur the wallpaper behind it.
 static BAR_CONFIG: LayerShellConfig = LayerShellConfig {
-    namespace: "swaypplet-bar",
+    namespace: crate::shell::Namespace::Bar,
     layer: Layer::Top,
     exclusive: true,
     default_width: None,
@@ -188,7 +188,7 @@ fn build_bar_window(
         ..
     } = bar;
     let toggle_panel = toggle_panel.clone();
-    let window = layer_shell::create_layer_window_on(app, &BAR_CONFIG, Some(monitor));
+    let window = layer::create_layer_window_on(app, &BAR_CONFIG, Some(monitor));
     // Resizable stays ON: the left+right anchors mean the compositor's
     // configure sets the width, and a non-resizable GTK window pins to its
     // natural (content) size instead — the card then ends after the clock

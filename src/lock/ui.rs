@@ -219,7 +219,7 @@ impl SurfaceSet {
         // the greeter alike: the compositor draws the wallpaper and puts the
         // glass on it, so an opaque fill here would hide both.
         let window = gtk4::Window::new();
-        let internal = monitor.is_some_and(crate::layer_shell::is_internal);
+        let internal = monitor.is_some_and(crate::shell::layer::is_internal);
         let content = self.build_content(&window, on_submit, internal);
         window.set_child(Some(&content));
         window

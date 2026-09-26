@@ -23,12 +23,12 @@ use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 use serde::{Deserialize, Serialize};
 
-use crate::layer_shell::{self, LayerShellConfig};
+use crate::shell::layer::{self, LayerShellConfig};
 use crate::theme;
 
 // Reuses the launcher's namespace so swayfx layer_effects (blur) apply.
 static DMENU_CONFIG: LayerShellConfig = LayerShellConfig {
-    namespace: "swaypplet-launcher",
+    namespace: crate::shell::Namespace::Launcher,
     layer: gtk4_layer_shell::Layer::Overlay,
     exclusive: false,
     default_width: None,
@@ -247,7 +247,7 @@ pub(crate) fn present_picker(
     items: Vec<String>,
     on_done: impl FnOnce(Option<String>) + 'static,
 ) -> Rc<Picker> {
-    let window = layer_shell::create_layer_window(app, &DMENU_CONFIG);
+    let window = layer::create_layer_window(app, &DMENU_CONFIG);
 
     let backdrop = gtk4::Box::builder().hexpand(true).vexpand(true).build();
 

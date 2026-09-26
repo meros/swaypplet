@@ -2,13 +2,15 @@ use gtk4::gdk;
 use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
-pub struct LayerShellConfig {
-    pub namespace: &'static str,
+use super::Namespace;
+
+pub struct LayerShellConfig<'a> {
+    pub namespace: Namespace,
     pub layer: Layer,
     pub default_width: Option<i32>,
     pub default_height: Option<i32>,
-    pub anchors: &'static [(Edge, bool)],
-    pub margins: &'static [(Edge, i32)],
+    pub anchors: &'a [(Edge, bool)],
+    pub margins: &'a [(Edge, i32)],
     pub keyboard_mode: KeyboardMode,
     /// Reserve screen space (auto exclusive zone) — bars, not overlays.
     pub exclusive: bool,
@@ -62,7 +64,7 @@ pub fn make_layer_window(
 
     window.init_layer_shell();
     window.set_layer(config.layer);
-    window.set_namespace(Some(config.namespace));
+    window.set_namespace(Some(config.namespace.as_str()));
     window.set_keyboard_mode(config.keyboard_mode);
 
     if let Some(monitor) = monitor {

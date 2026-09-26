@@ -16,7 +16,7 @@ mod idle;
 mod jump;
 mod keybinds;
 mod launcher;
-mod layer_shell;
+mod shell;
 mod lock;
 mod notifications;
 mod osd;

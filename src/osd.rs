@@ -7,7 +7,7 @@ use gtk4::{gdk, gio};
 use gtk4_layer_shell::Edge;
 
 use crate::anim;
-use crate::layer_shell::{self, LayerShellConfig};
+use crate::shell::layer::{self, LayerShellConfig};
 use crate::spawn::spawn_work;
 
 const OSD_TIMEOUT_MS: u32 = 1500;
@@ -255,14 +255,14 @@ impl Drop for Card {
         // The alpha handle goes before its `wl_surface` (see
         // `anim::Reveal::release_alpha`).
         self.reveal.release_alpha();
-        crate::layer_shell::destroy_window(&self.window);
+        crate::shell::layer::destroy_window(&self.window);
     }
 }
 
 impl Card {
     fn new(app: &gtk4::Application, monitor: gdk::Monitor) -> Card {
         static OSD_CONFIG: LayerShellConfig = LayerShellConfig {
-            namespace: "swaypplet-osd",
+            namespace: crate::shell::Namespace::Osd,
             layer: gtk4_layer_shell::Layer::Overlay,
             exclusive: false,
             default_width: None,
@@ -271,7 +271,7 @@ impl Card {
             margins: &[(Edge::Bottom, 72)],
             keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
         };
-        let window = layer_shell::create_layer_window_on(app, &OSD_CONFIG, Some(&monitor));
+        let window = layer::create_layer_window_on(app, &OSD_CONFIG, Some(&monitor));
         window.set_resizable(false);
         window.set_decorated(false);
 

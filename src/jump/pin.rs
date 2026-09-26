@@ -37,7 +37,7 @@ use gtk4_layer_shell::{Edge, LayerShell as _};
 use super::card::{self, Live};
 use super::live;
 use super::scene::{self, Scene};
-use crate::layer_shell::{self, LayerShellConfig};
+use crate::shell::layer::{self, LayerShellConfig};
 use crate::sway::ipc::SwayService;
 
 /// The picture, 16:10.
@@ -155,7 +155,7 @@ impl Drop for Pin {
         self.stream = None;
         // The alpha handle goes before its `wl_surface`.
         self.reveal.release_alpha();
-        crate::layer_shell::destroy_window(&self.window);
+        crate::shell::layer::destroy_window(&self.window);
     }
 }
 
@@ -298,7 +298,7 @@ impl Pins {
         };
         let monitor = output
             .as_deref()
-            .and_then(layer_shell::monitor_by_connector);
+            .and_then(layer::monitor_by_connector);
         let label = crate::sway::workspace::label_for_name(&workspace);
         let parts = build_window(&app, monitor.as_ref(), &label);
 
@@ -337,7 +337,7 @@ impl Pins {
         };
         let monitor = output
             .as_deref()
-            .and_then(layer_shell::monitor_by_connector);
+            .and_then(layer::monitor_by_connector);
         let label = region_label(&region.window.app, &region.workspace);
         let parts = build_window(&app, monitor.as_ref(), &label);
         self.wire(&parts, &key);
@@ -468,7 +468,7 @@ impl Pins {
         if moving.is_empty() {
             return;
         }
-        let monitor = layer_shell::monitor_by_connector(output);
+        let monitor = layer::monitor_by_connector(output);
         for i in moving {
             let (key, label) = {
                 let inner = self.inner.borrow();
@@ -482,7 +482,7 @@ impl Pins {
             // replaced fields is not Drop of the pin, so release by hand.
             pin.stream = None;
             pin.reveal.release_alpha();
-            crate::layer_shell::destroy_window(&pin.window);
+            crate::shell::layer::destroy_window(&pin.window);
             pin.window = parts.window;
             pin.reveal = parts.reveal;
             pin.holder = parts.holder;
@@ -730,7 +730,7 @@ struct Parts {
 
 fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: &str) -> Parts {
     static CONFIG: LayerShellConfig = LayerShellConfig {
-        namespace: "swaypplet-pin",
+        namespace: crate::shell::Namespace::Pin,
         // Top, not Overlay: a fullscreen window covers a pin, the way it
         // covers the bar.
         layer: gtk4_layer_shell::Layer::Top,
@@ -748,7 +748,7 @@ fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: 
         margins: &[(Edge::Bottom, MARGIN_BOTTOM)],
         keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
     };
-    let window = layer_shell::create_layer_window_on(app, &CONFIG, monitor);
+    let window = layer::create_layer_window_on(app, &CONFIG, monitor);
     window.set_resizable(false);
     window.set_decorated(false);
 

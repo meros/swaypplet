@@ -32,7 +32,7 @@ use gtk4_layer_shell::Edge;
 use super::card::{age_label, populate_card, set_critical_class, wants_keyboard};
 use super::timers::{Timer, cancel_timer, make_timer, pause_timers, resume_timers};
 use crate::anim;
-use crate::layer_shell::LayerShellConfig;
+use crate::shell::layer::LayerShellConfig;
 use crate::services::notifications::store::{self, NotificationStore};
 use crate::services::notifications::{CloseReason, Notification};
 use crate::settings::store::{Alerts, Corner};
@@ -73,7 +73,7 @@ pub(super) fn alerts() -> Alerts {
 /// corner is a config rather than a number.
 const fn popup_config(anchors: &'static [(Edge, bool)]) -> LayerShellConfig {
     LayerShellConfig {
-        namespace: "swaypplet-notification",
+        namespace: crate::shell::Namespace::Notification,
         layer: gtk4_layer_shell::Layer::Overlay,
         exclusive: false,
         default_width: Some(WINDOW_WIDTH),
@@ -91,7 +91,7 @@ static POPUP_BOTTOM_RIGHT: LayerShellConfig =
 static POPUP_BOTTOM_LEFT: LayerShellConfig =
     popup_config(&[(Edge::Bottom, true), (Edge::Left, true)]);
 
-fn config_for(corner: Corner) -> &'static LayerShellConfig {
+fn config_for(corner: Corner) -> &'static LayerShellConfig<'static> {
     match corner {
         Corner::TopRight => &POPUP_TOP_RIGHT,
         Corner::TopLeft => &POPUP_TOP_LEFT,
@@ -249,7 +249,7 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     let output = crate::sway::ipc::focused_output_from(sway.as_deref());
     let monitor = output
         .as_deref()
-        .and_then(crate::layer_shell::monitor_by_connector);
+        .and_then(crate::shell::layer::monitor_by_connector);
     if output.is_some() && monitor.is_none() {
         // Sway named an output GDK does not have. Letting the compositor
         // place the surface is still correct, so this is a note rather than

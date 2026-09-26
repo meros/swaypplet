@@ -18,7 +18,7 @@ use gtk4_layer_shell::LayerShell as _;
 use super::capture::Image;
 use crate::jump::card::{Live, LivePicture};
 use crate::jump::{live, scene};
-use crate::layer_shell::{self, LayerShellConfig};
+use crate::shell::layer::{self, LayerShellConfig};
 
 /// A window's picture in the grid, at most this box, keeping its shape.
 const TILE_W: i32 = 240;
@@ -64,7 +64,7 @@ pub fn pick(app: &gtk4::Application, done: impl FnOnce(Image) + 'static) {
 
 fn show(app: &gtk4::Application, windows: Vec<(scene::Window, String, String)>, done: Done) {
     static CONFIG: LayerShellConfig = LayerShellConfig {
-        namespace: "swaypplet-window-picker",
+        namespace: crate::shell::Namespace::WindowPicker,
         layer: gtk4_layer_shell::Layer::Overlay,
         exclusive: false,
         default_width: None,
@@ -74,7 +74,7 @@ fn show(app: &gtk4::Application, windows: Vec<(scene::Window, String, String)>, 
         // It is driven by the keyboard, so it takes it.
         keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
     };
-    let window = layer_shell::create_layer_window(app, &CONFIG);
+    let window = layer::create_layer_window(app, &CONFIG);
     window.set_decorated(false);
 
     let card = crate::ui::vbox(3);
@@ -248,7 +248,7 @@ fn close(picker: &Rc<Picker>) {
     picker.stream.replace(None);
     picker.done.borrow_mut().take();
     crate::anim::set_layer_blur(picker.window.namespace(), false, || {});
-    crate::layer_shell::destroy_window(&picker.window);
+    crate::shell::layer::destroy_window(&picker.window);
 }
 
 /// A live frame (premultiplied BGRA) as a screenshot image (straight RGBA).

@@ -69,9 +69,9 @@ pub fn run(component: &str) {
             // LOCAL RENDER PATCH (never committed): host the lock content on a
             // layer surface named like the session lock, so the harness's
             // real `layer_effects "session-lock"` material draws behind it.
-            static LOCK_LAYER: crate::layer_shell::LayerShellConfig =
-                crate::layer_shell::LayerShellConfig {
-                    namespace: "session-lock",
+            static LOCK_LAYER: crate::shell::layer::LayerShellConfig =
+                crate::shell::layer::LayerShellConfig {
+                    namespace: crate::shell::Namespace::SessionLock,
                     layer: gtk4_layer_shell::Layer::Overlay,
                     default_width: None,
                     default_height: None,
@@ -89,7 +89,7 @@ pub fn run(component: &str) {
                 crate::settings::glass::apply_saved();
             }
             let window: gtk4::Window = if std::env::var_os("SWAYPPLET_PREVIEW_LAYER").is_some() {
-                crate::layer_shell::create_layer_window(app, &LOCK_LAYER)
+                crate::shell::layer::create_layer_window(app, &LOCK_LAYER)
             } else {
                 ApplicationWindow::builder()
                     .application(app)

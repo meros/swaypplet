@@ -29,10 +29,10 @@
 use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer};
 
-use crate::layer_shell::{self, LayerShellConfig, create_layer_window};
+use crate::shell::layer::{self, LayerShellConfig, create_layer_window};
 
 static CUE_CONFIG: LayerShellConfig = LayerShellConfig {
-    namespace: "swaypplet-face-cue",
+    namespace: crate::shell::Namespace::FaceCue,
     layer: Layer::Overlay,
     exclusive: false,
     default_width: None,
@@ -130,7 +130,7 @@ impl Cue {
         // handle kept from startup can name one the compositor has since
         // forgotten. Set while hidden, which is the only time layer-shell
         // will take it.
-        if let Some(monitor) = layer_shell::internal_monitor() {
+        if let Some(monitor) = layer::internal_monitor() {
             gtk4_layer_shell::LayerShell::set_monitor(&self.window, Some(&monitor));
         }
         // Map first, animate on the next frame the compositor gives us. The

@@ -11,7 +11,7 @@ use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
 use crate::anim;
-use crate::layer_shell::{self, LayerShellConfig};
+use crate::shell::layer::{self, LayerShellConfig};
 use crate::services::elephant::{self, SearchResult};
 
 const MAX_VISIBLE_RESULTS: usize = 10;
@@ -32,7 +32,7 @@ const LAUNCHER_CARD_SIZE: CardSize = CardSize {
 };
 
 static LAUNCHER_CONFIG: LayerShellConfig = LayerShellConfig {
-    namespace: "swaypplet-launcher",
+    namespace: crate::shell::Namespace::Launcher,
     layer: gtk4_layer_shell::Layer::Overlay,
     exclusive: false,
     default_width: None,
@@ -308,7 +308,7 @@ pub struct Launcher {
 
 impl Launcher {
     pub fn new(app: &gtk4::Application) -> Self {
-        let window = layer_shell::create_layer_window(app, &LAUNCHER_CONFIG);
+        let window = layer::create_layer_window(app, &LAUNCHER_CONFIG);
 
         let backdrop = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)

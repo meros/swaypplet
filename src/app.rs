@@ -12,7 +12,7 @@ use crate::bar::BarManager;
 use crate::jump::Jump;
 use crate::keybinds::Keybinds;
 use crate::launcher::Launcher;
-use crate::layer_shell::{self, LayerShellConfig};
+use crate::shell::layer::{self, LayerShellConfig};
 use crate::notifications::stack::PopupManager;
 use crate::osd::{Osd, OsdCommand};
 use crate::panel::Panel;
@@ -38,7 +38,7 @@ pub(crate) fn pid_file_path() -> std::path::PathBuf {
 // Pilot's Helm popup: centered optical HUD (~25-28% Y-offset), 740px wide,
 // with full-screen dismiss backdrop.
 static PANEL_CONFIG: LayerShellConfig = LayerShellConfig {
-    namespace: "swaypplet",
+    namespace: crate::shell::Namespace::Panel,
     layer: gtk4_layer_shell::Layer::Overlay,
     exclusive: false,
     default_width: None,
@@ -220,7 +220,7 @@ pub fn run() {
         }
 
         // ── Main panel window ────────────────────────────────────────────────
-        let window = layer_shell::create_layer_window(app, &PANEL_CONFIG);
+        let window = layer::create_layer_window(app, &PANEL_CONFIG);
 
         // One connection to the sound server for the whole process: the
         // panel section reads it, and (BAR_VISION increment 7) the hazard

@@ -359,8 +359,8 @@ pub fn run() -> ! {
 /// and it must own the keyboard from the moment it maps, with no pointer
 /// anywhere near it. With one card per output sway gives the keyboard to one
 /// of them; a click on another moves it there, as on the lock screen.
-static CONFIG: crate::layer_shell::LayerShellConfig = crate::layer_shell::LayerShellConfig {
-    namespace: "swaypplet-greeter",
+static CONFIG: crate::shell::layer::LayerShellConfig = crate::shell::layer::LayerShellConfig {
+    namespace: crate::shell::Namespace::Greeter,
     layer: gtk4_layer_shell::Layer::Overlay,
     default_width: None,
     default_height: None,
@@ -402,7 +402,7 @@ fn sync_surfaces(
         }
         let window = surfaces.build_surface(on_submit.clone(), Some(&monitor));
         // Before `present`, which is where GTK asks for the surface.
-        crate::layer_shell::make_layer_window(&window, &CONFIG, Some(&monitor));
+        crate::shell::layer::make_layer_window(&window, &CONFIG, Some(&monitor));
         window.present();
         windows.borrow_mut().push((monitor, window));
     }

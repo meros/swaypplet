@@ -28,7 +28,7 @@ use gtk4::prelude::*;
 use gtk4_layer_shell::LayerShell;
 
 use crate::anim::{self, SlideBin};
-use crate::layer_shell::{self, LayerShellConfig};
+use crate::shell::layer::{self, LayerShellConfig};
 
 /// A card, its surface, and the transitions both need.
 #[derive(Clone)]
@@ -55,7 +55,7 @@ struct Inner {
 /// Take the surface down with the last handle to it.
 ///
 /// The window is the application's from the moment it is built
-/// ([`layer_shell::create_layer_window`] passes `.application(app)`), and a
+/// ([`layer::create_layer_window`] passes `.application(app)`), and a
 /// `GtkApplication` holds that reference until the window is *destroyed*.
 /// Hiding only unmaps: the window stays on the application's list, realized,
 /// still owning the buffers the renderer allocated for it.
@@ -104,7 +104,7 @@ impl GlassSurface {
         settle_px: f64,
         monitor: Option<&gtk4::gdk::Monitor>,
     ) -> Self {
-        let window = layer_shell::create_layer_window_on(app, config, monitor);
+        let window = layer::create_layer_window_on(app, config, monitor);
         window.set_resizable(false);
         window.set_decorated(false);
 

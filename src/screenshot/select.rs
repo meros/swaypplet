@@ -23,7 +23,7 @@ use gtk4::gdk;
 use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
-use crate::layer_shell::{self, LayerShellConfig};
+use crate::shell::layer::{self, LayerShellConfig};
 
 use super::capture::Image;
 
@@ -158,7 +158,7 @@ fn present(app: &gtk4::Application, mode: Mode, captured: Vec<(String, Image)>, 
     static CONFIG: LayerShellConfig = LayerShellConfig {
         // Absent from the compositor's layer_effects list on purpose: this is
         // the one surface that must show the screen, not frost it.
-        namespace: "swaypplet-screenshot",
+        namespace: crate::shell::Namespace::Screenshot,
         layer: Layer::Overlay,
         exclusive: false,
         default_width: None,
@@ -185,7 +185,7 @@ fn present(app: &gtk4::Application, mode: Mode, captured: Vec<(String, Image)>, 
                 .filter_map(Result::ok)
                 .find(|m| m.connector().is_some_and(|c| c == output))
         });
-        let window = layer_shell::create_layer_window_on(app, &CONFIG, monitor.as_ref());
+        let window = layer::create_layer_window_on(app, &CONFIG, monitor.as_ref());
         window.set_decorated(false);
         // Ignore everyone else's exclusive zone. Anchored to all four edges
         // with the default zone of 0, the surface is shrunk by the bar's

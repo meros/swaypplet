@@ -153,9 +153,9 @@ fn warm_and_wait() {
             .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
             .build();
         let _ = app.register(None::<&gtk4::gio::Cancellable>);
-        let config = crate::layer_shell::LayerShellConfig {
+        let config = crate::shell::layer::LayerShellConfig {
             layer: gtk4_layer_shell::Layer::Background,
-            namespace: "swaypplet-lock-warm",
+            namespace: crate::shell::Namespace::LockWarm,
             keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
             anchors: &[],
             margins: &[],
@@ -163,7 +163,7 @@ fn warm_and_wait() {
             default_width: Some(1),
             default_height: Some(1),
         };
-        let window = crate::layer_shell::create_layer_window(&app, &config);
+        let window = crate::shell::layer::create_layer_window(&app, &config);
         // Invisible on every axis that matters: one pixel, fully transparent,
         // on the background layer, and gone before the main loop ever runs.
         window.set_opacity(0.0);
