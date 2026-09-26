@@ -1,19 +1,56 @@
+//! The Wi-Fi page: the radios, the connection in use, the networks in
+//! range, VPNs, Tailscale, saved networks and the wired adapters.
+//!
+//! One source of truth, [`Snapshot`], read whole from NetworkManager
+//! (`services::network::snapshot`) whenever it signals a change
+//! (`services::network::watch`), and only while the page is on screen.
+//! Nothing polls. Opening the page draws what NetworkManager already knows
+//! at once, then asks for a scan; the rows are kept per network and updated
+//! in place (`wifi.rs`), so a list that is being scanned does not jump, and
+//! a password being typed survives every update.
+//!
+//! A join is followed through the device's own states ("Getting an
+//! address…") and ends in NetworkManager's reason when it fails ("Wrong
+//! password" opens the password field again, with the text still in it).
+//!
+//! `SWAYPPLET_NET_FIXTURE=<state>` draws a canned state instead
+//! (`services::network::fixture`) and makes every action a no-op, so the
+//! render harness can show "connecting" or "sign-in required" without
+//! touching the machine's network.
+
+mod extras;
 mod interfaces;
-mod monitor;
 mod vpn;
 mod wifi;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4::{Box, Button, Label, ListBox, RevealerTransitionType, Spinner, Switch};
+use gtk4::{Button, Label, ListBox, RevealerTransitionType, Spinner, Switch};
 
-use crate::services::network::*;
+use crate::services::network::model::{self, Failure, Snapshot};
+use crate::services::network::tailscale::{self, Status};
+use crate::services::network::{
+    ActiveConnection, ConnectivityState, ICON_DISCONNECTED, ICON_ETHERNET, NmResult, fixture,
+    signal_icon, snapshot, watch,
+};
 use crate::spawn::spawn_work;
 use crate::ui;
 
-// ── Shared UI helpers ─────────────────────────────────────────────────────────
+use extras::{Saved, SavedAsk, Tailscale, TailscaleAsk};
+use wifi::{Ask, WifiRow};
+
+/// How long after the last change signal the page rereads: a scan or a
+/// join is a burst of signals, and one read covers the burst.
+const SETTLE_MS: u64 = 120;
+
+/// How long a scan may take before the spinner gives up on it.
+const SCAN_PATIENCE_S: u32 = 8;
+
+/// Rows shown before "Show all".
+const FIRST_ROWS: usize = 8;
 
 /// A signal is only coloured when it is a problem: weak is a warning, none
 /// is danger, and anything usable stays in the icon's own tone.
@@ -25,848 +62,908 @@ fn signal_tone(strength: u8) -> ui::Tone {
     }
 }
 
-/// Draw a network glyph (a row's or the hero's icon) at title size, in the
-/// tone its signal earns.
-fn set_signal_glyph(icon: &gtk4::Label, glyph: &str, tone: ui::Tone) {
+/// A network glyph at title size, in the tone its signal earns.
+fn set_signal_glyph(icon: &Label, glyph: &str, tone: ui::Tone) {
     icon.set_label(glyph);
     ui::glyph::adopt(icon, ui::Text::Title, tone);
 }
 
-/// Apply an `NmResult` to a status label: set text, tone, and visibility.
-fn apply_nm_result(status_lbl: &gtk4::Label, result: &NmResult) {
-    match result {
-        NmResult::Success => {
-            status_lbl.set_label("✓");
-            ui::set_text_style(status_lbl, ui::Text::Label, ui::Tone::Success);
-        }
-        NmResult::Failure(msg) => {
-            let display = if msg.is_empty() {
-                "Failed"
-            } else {
-                msg.as_str()
-            };
-            status_lbl.set_label(display);
-            ui::set_text_style(status_lbl, ui::Text::Label, ui::Tone::Danger);
-        }
-    }
-    status_lbl.set_visible(true);
+/// The connection in use: its row, a line for a sign-in page, and the
+/// details and switches that open under it.
+struct Current {
+    card: gtk4::Box,
+    row: ui::Row,
+    spinner: Spinner,
+    disconnect: Button,
+    portal: gtk4::Box,
+    lines: gtk4::Box,
+    metered_row: gtk4::Box,
+    metered: Switch,
+    powersave_row: gtk4::Box,
+    powersave: Switch,
 }
 
-/// Auto-hide a status label after 4 seconds.
-fn auto_hide_status(status_lbl: &gtk4::Label) {
-    let status_hide = status_lbl.clone();
-    glib::timeout_add_local_once(std::time::Duration::from_secs(4), move || {
-        status_hide.set_visible(false);
-    });
+struct Inner {
+    section: ui::Section,
+    fixture: Option<String>,
+    snap: RefCell<Snapshot>,
+    syncing: Cell<bool>,
+
+    wifi_row: gtk4::Box,
+    wifi_switch: Switch,
+    airplane_row: gtk4::Box,
+    airplane: Switch,
+    off_note: gtk4::Box,
+    current: Current,
+
+    list_box: gtk4::Box,
+    list: ListBox,
+    rows: RefCell<HashMap<String, WifiRow>>,
+    order: RefCell<Vec<String>>,
+    empty: Label,
+    more: Button,
+    show_all: Cell<bool>,
+    scan_spinner: Spinner,
+    scan_btn: Button,
+    scanning: Cell<bool>,
+    scan_from: Cell<i64>,
+
+    vpn_box: gtk4::Box,
+    vpns: vpn::VpnList,
+    tailscale: Tailscale,
+    ts_status: RefCell<Option<Status>>,
+    saved: Saved,
+    adapters_box: gtk4::Box,
+    adapters: interfaces::Adapters,
+
+    /// The network a join was asked for, until it is up or has failed.
+    joining: RefCell<Option<String>>,
+    failure: RefCell<Option<Failure>>,
+    watch: RefCell<Option<watch::Watch>>,
+    reading: Cell<bool>,
+    reread: Cell<bool>,
+    settle: RefCell<Option<glib::SourceId>>,
 }
-
-// ── Async result types ───────────────────────────────────────────────────────
-
-/// Data gathered on a background thread during initial construction.
-struct InitResult {
-    network_manager_available: bool,
-    has_wifi: bool,
-    wifi_radio: bool,
-    active_wifi_conn_name: Option<String>,
-    power_saving: bool,
-}
-
-/// Data gathered on a background thread during refresh.
-struct RefreshResult {
-    active: ActiveConnection,
-    connectivity: ConnectivityState,
-    interfaces: Vec<NetworkInterface>,
-    vpns: Vec<VpnConnection>,
-    /// IP info fetched in the same background task.
-    ip_info: IpInfo,
-}
-
-/// IP / gateway / DNS info for the active connection device.
-struct IpInfo {
-    ip: Option<String>,
-    gateway: Option<String>,
-    dns: Vec<String>,
-}
-
-// ── Internal state ────────────────────────────────────────────────────────────
-
-pub(crate) struct NetworkState {
-    pub active: ActiveConnection,
-    pub connectivity: ConnectivityState,
-    pub networks: Vec<WifiNetwork>,
-    pub vpns: Vec<VpnConnection>,
-    pub interfaces: Vec<NetworkInterface>,
-    pub wifi_radio_enabled: bool,
-    pub list_visible: bool,
-    pub show_all: bool,
-    pub scanning: bool,
-    pub search_query: String,
-}
-
-// ── NetworkSection ────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
-pub struct NetworkSection {
-    section: Rc<ui::Section>,
-    state: Rc<RefCell<NetworkState>>,
-    // The section header's icon and summary
-    summary_icon: Label,
-    summary_text: Label,
-    // Header & radio
-    wifi_switch: Switch,
-    header_subtitle: Label,
-    radio_row: Box,
-    // Main containers
-    wifi_content_box: Box,
-    wifi_disabled_box: Box,
-    // Hero Card
-    hero_card: Box,
-    current_icon_label: Label,
-    current_ssid_label: Label,
-    current_signal_label: Label,
-    hero_status: Label,
-    current_disconnect_btn: Button,
-    current_spinner: Spinner,
-    ip_label: Label,
-    gateway_label: Label,
-    dns_label: Label,
-    connectivity_label: Label,
-    portal_btn: Button,
-    power_save_row: Box,
-    // Available networks
-    scan_spinner: Spinner,
-    scan_status_label: Label,
-    scan_btn: Button,
-    search_entry: gtk4::SearchEntry,
-    network_list_box: ListBox,
-    // Other & Advanced
-    vpn_section_box: Box,
-    vpn_list_box: ListBox,
-    iface_section_box: Box,
-    iface_list_box: ListBox,
-}
+pub struct NetworkSection(Rc<Inner>);
 
 impl NetworkSection {
     pub fn new() -> Self {
-        // Shown as a Helm page (`expand_for_page`), where the section drops
-        // its own fill and the sub-sheet is the ground, with groups used
-        // semantically inside.
-        let section = Rc::new(ui::section(ICON_DISCONNECTED, "Wi-Fi", "Disconnected"));
+        let section = ui::section(ICON_DISCONNECTED, "Wi-Fi", "Disconnected");
         ui::glyph::adopt(&section.icon, ui::Text::Title, ui::Tone::Fg);
-        let summary_icon = section.icon.clone();
-        let summary_text = section.summary.clone();
+        let body = ui::vbox(4);
+        section.body.append(&body);
 
-        // ── Placeholder (hidden by default, shown if nmcli unavailable) ───────
-        let placeholder = ui::text(
-            "NetworkManager not available",
-            ui::Text::Body,
-            ui::Tone::Muted,
-        );
-        placeholder.add_css_class("section-empty");
-        placeholder.set_visible(false);
-        section.root.append(&placeholder);
+        // ── The radios ──────────────────────────────────────────────────
+        let radios = ui::group(0);
+        let (wifi, wifi_switch) = ui::switch_row("Wi-Fi", "");
+        wifi.icon.set_label(signal_icon(100));
+        wifi.icon.set_visible(true);
+        ui::glyph::adopt(&wifi.icon, ui::Text::Title, ui::Tone::Fg);
+        let (air, airplane) = ui::switch_row("Airplane mode", "Wi-Fi and Bluetooth off");
+        air.icon.set_label("󰀝");
+        air.icon.set_visible(true);
+        ui::glyph::adopt(&air.icon, ui::Text::Title, ui::Tone::Fg);
+        radios.append(&wifi.root);
+        radios.append(&air.root);
+        body.append(&radios);
 
-        let detail_box = ui::vbox(4);
-        section.body.append(&detail_box);
-
-        // ── WiFi Header Bar: Radio switch + Status ────────────────────────────
-        let radio_row = ui::group(0);
-        radio_row.set_visible(false);
-        let (radio, wifi_switch) = ui::switch_row("Wi-Fi", "Enabled");
-        radio.icon.set_label(ICON_SIGNAL_EXCELLENT);
-        radio.icon.set_visible(true);
-        ui::glyph::adopt(&radio.icon, ui::Text::Title, ui::Tone::Fg);
-        wifi_switch.set_sensitive(false);
-        let header_subtitle = radio.subtitle.clone();
-        radio_row.append(&radio.root);
-        detail_box.append(&radio_row);
-
-        // ── WiFi Disabled State (shown when radio is off) ─────────────────────
-        let wifi_disabled_box = ui::vbox(1);
-        wifi_disabled_box.set_halign(gtk4::Align::Center);
-        wifi_disabled_box.set_valign(gtk4::Align::Center);
-        wifi_disabled_box.set_vexpand(true);
-        wifi_disabled_box.add_css_class("network-disabled");
-        wifi_disabled_box.set_visible(false);
-
-        let disabled_icon = gtk4::Label::new(Some(ICON_DISCONNECTED));
-        ui::glyph::adopt(&disabled_icon, ui::Text::DisplaySm, ui::Tone::Muted);
-
-        let disabled_title = ui::text("Wi-Fi is turned off", ui::Text::Body, ui::Tone::Fg);
-        crate::ui::set_weight(&disabled_title, crate::ui::Weight::Strong);
-        disabled_title.set_xalign(0.5);
-
-        let disabled_subtitle = ui::text(
-            "Turn on Wi-Fi to scan and connect to nearby networks",
+        let off_note = ui::vbox(1);
+        off_note.add_css_class("network-disabled");
+        let off_title = ui::text("Wi-Fi is off", ui::Text::Body, ui::Tone::Fg);
+        ui::set_weight(&off_title, ui::Weight::Strong);
+        let off_sub = ui::text(
+            "Turn it on to see networks in range",
             ui::Text::Label,
             ui::Tone::Muted,
         );
-        disabled_subtitle.set_xalign(0.5);
+        off_note.append(&off_title);
+        off_note.append(&off_sub);
+        off_note.set_visible(false);
+        body.append(&off_note);
 
-        wifi_disabled_box.append(&disabled_icon);
-        wifi_disabled_box.append(&disabled_title);
-        wifi_disabled_box.append(&disabled_subtitle);
-        detail_box.append(&wifi_disabled_box);
-
-        // ── WiFi Content Box (visible when radio is ON) ───────────────────────
-        let wifi_content_box = ui::vbox(4);
-        wifi_content_box.set_visible(false);
-
-        // ── Hero Card: Active Connection ──────────────────────────────────────
-        let hero_card = ui::group(1);
-        hero_card.add_css_class("network-hero");
-        hero_card.set_visible(false);
-
-        let hero = ui::row(ICON_DISCONNECTED, "", "");
-        ui::glyph::adopt(&hero.icon, ui::Text::Title, ui::Tone::Fg);
-        let current_icon_label = hero.icon.clone();
-        let current_ssid_label = hero.title.clone();
-
-        // Status and signal share the subtitle line, each updated on its own.
-        let hero_meta_box = ui::hbox(2);
-        let hero_status = ui::text("Connected", ui::Text::Label, ui::Tone::Muted);
-        let current_signal_label = ui::text("", ui::Text::Label, ui::Tone::Faint);
-        hero_meta_box.append(&hero_status);
-        hero_meta_box.append(&current_signal_label);
-        if let Some(texts) = hero.subtitle.parent().and_downcast::<gtk4::Box>() {
-            texts.append(&hero_meta_box);
-        }
-
-        let current_spinner = Spinner::new();
-        current_spinner.set_visible(false);
-
-        let current_disconnect_btn = ui::button_with(
+        // ── The connection in use ───────────────────────────────────────
+        let card = ui::group(1);
+        card.add_css_class("network-hero");
+        let row = ui::row(ICON_DISCONNECTED, "", "");
+        ui::glyph::adopt(&row.icon, ui::Text::Title, ui::Tone::Fg);
+        let spinner = Spinner::new();
+        spinner.set_visible(false);
+        let disconnect = ui::button_with(
             ui::Face::Label("Disconnect"),
             ui::Kind::Secondary,
             ui::Size::Small,
         );
-        current_disconnect_btn.set_visible(false);
+        let details_btn = ui::button_with(ui::Face::Label("Details"), ui::Kind::Flat, ui::Size::Small);
+        row.end.append(&spinner);
+        row.end.append(&disconnect);
+        row.end.append(&details_btn);
+        card.append(&row.root);
 
-        let details_toggle_btn = ui::button_with(
-            ui::Face::Label("Details ▸"),
-            ui::Kind::Flat,
-            ui::Size::Small,
+        let portal = ui::hbox(3);
+        portal.add_css_class("network-hero-line");
+        let portal_text = ui::text(
+            "This network wants you to sign in",
+            ui::Text::Label,
+            ui::Tone::Warning,
         );
+        portal_text.set_hexpand(true);
+        portal_text.set_xalign(0.0);
+        let portal_btn = ui::button_with(ui::Face::Label("Sign in"), ui::Kind::Primary, ui::Size::Small);
+        portal.append(&portal_text);
+        portal.append(&portal_btn);
+        portal.set_visible(false);
+        card.append(&portal);
 
-        hero.end.append(&current_spinner);
-        hero.end.append(&current_disconnect_btn);
-        hero.end.append(&details_toggle_btn);
-        hero_card.append(&hero.root);
-
-        // Connectivity warning & captive portal button
-        let connectivity_row = ui::hbox(3);
-        connectivity_row.add_css_class("network-hero-line");
-
-        let connectivity_label = ui::text("", ui::Text::Label, ui::Tone::Muted);
-        connectivity_label.set_hexpand(true);
-        connectivity_label.set_visible(false);
-
-        let portal_btn = ui::button_with(
-            ui::Face::Label("Open portal"),
-            ui::Kind::Primary,
-            ui::Size::Small,
-        );
-        portal_btn.set_visible(false);
-        portal_btn.connect_clicked(|_| {
-            let _ = std::process::Command::new("xdg-open")
-                .arg("http://nmcheck.gnome.org/")
-                .spawn();
-        });
-
-        connectivity_row.append(&connectivity_label);
-        connectivity_row.append(&portal_btn);
-        hero_card.append(&connectivity_row);
-
-        // Expandable Details Drawer
-        let details_revealer = ui::revealer(
+        let details = ui::revealer(
             RevealerTransitionType::SlideDown,
             crate::tokens::motion::EXPAND,
         );
-
-        let details_tray = ui::vbox(2);
-        details_tray.append(&ui::separator(gtk4::Orientation::Horizontal));
-
-        let ip_box = ui::vbox(1);
-        ip_box.add_css_class("network-hero-line");
-
-        let ip_line = || {
-            let l = ui::text("", ui::Text::Caption, ui::Tone::Faint);
-            crate::ui::set_mono(&l, true);
-            l.set_visible(false);
-            l
-        };
-        let ip_label = ip_line();
-        let gateway_label = ip_line();
-        let dns_label = ip_line();
-
-        ip_box.append(&ip_label);
-        ip_box.append(&gateway_label);
-        ip_box.append(&dns_label);
-        details_tray.append(&ip_box);
-
-        // Power saving row inside details
-        let (ps, ps_switch) = ui::switch_row("WiFi Power Saving", "");
-        let power_save_row = ps.root.clone();
-        power_save_row.set_visible(false);
+        let tray = ui::vbox(2);
+        tray.append(&ui::separator(gtk4::Orientation::Horizontal));
+        let lines = ui::vbox(1);
+        lines.add_css_class("network-hero-line");
+        tray.append(&lines);
+        let (metered_r, metered) = ui::switch_row(
+            "Metered connection",
+            "Apps hold back big downloads on it",
+        );
+        let (ps_r, powersave) = ui::switch_row("Power saving", "Saves battery, adds latency");
+        tray.append(&metered_r.root);
+        tray.append(&ps_r.root);
+        details.set_child(Some(&tray));
+        card.append(&details);
         {
-            let ps_switch_c = ps_switch.clone();
-            ps_switch.connect_state_set(move |_sw, active| {
-                if let Some(conn_name) = get_active_wifi_conn_name() {
-                    let sw_poll = ps_switch_c.clone();
-                    spawn_work(
-                        move || set_wifi_power_saving(&conn_name, active),
-                        move |result| match result {
-                            NmResult::Success => sw_poll.set_state(active),
-                            NmResult::Failure(_) => sw_poll.set_state(!active),
-                        },
-                    );
+            let d = details.clone();
+            details_btn.connect_clicked(move |b| {
+                let open = !d.reveals_child();
+                d.set_reveal_child(open);
+                b.set_label(if open { "Less" } else { "Details" });
+            });
+        }
+        card.set_visible(false);
+        body.append(&card);
+
+        // ── Networks in range ───────────────────────────────────────────
+        let list_box = ui::vbox(2);
+        let head = ui::hbox(2);
+        let heading = ui::heading("Networks");
+        heading.set_hexpand(true);
+        heading.set_xalign(0.0);
+        let scan_spinner = Spinner::new();
+        scan_spinner.set_visible(false);
+        let scan_btn = ui::button_with(ui::Face::Label("Scan"), ui::Kind::Flat, ui::Size::Small);
+        head.append(&heading);
+        head.append(&scan_spinner);
+        head.append(&scan_btn);
+        list_box.append(&head);
+        let list = ui::list();
+        list_box.append(&list);
+        let empty = ui::text("Looking for networks…", ui::Text::Label, ui::Tone::Muted);
+        empty.set_visible(false);
+        list_box.append(&empty);
+        let more = ui::button_with(ui::Face::Label("Show all"), ui::Kind::Flat, ui::Size::Small);
+        more.set_halign(gtk4::Align::Center);
+        more.set_visible(false);
+        list_box.append(&more);
+        body.append(&list_box);
+
+        // ── VPN ─────────────────────────────────────────────────────────
+        let vpn_box = ui::vbox(2);
+        vpn_box.append(&ui::heading("VPN"));
+        vpn_box.set_visible(false);
+        body.append(&vpn_box);
+
+        let inner = Rc::new_cyclic(|weak: &std::rc::Weak<Inner>| {
+            let w = weak.clone();
+            let vpns = vpn::VpnList::new(Rc::new(move |name, on| {
+                if let Some(i) = w.upgrade() {
+                    NetworkSection(i).toggle_vpn(name, on);
+                }
+            }));
+            let w = weak.clone();
+            let tailscale = Tailscale::new(Rc::new(move |ask| {
+                if let Some(i) = w.upgrade() {
+                    NetworkSection(i).tailscale(ask);
+                }
+            }));
+            let w = weak.clone();
+            let saved = Saved::new(Rc::new(move |ask| {
+                if let Some(i) = w.upgrade() {
+                    NetworkSection(i).saved(ask);
+                }
+            }));
+            let w = weak.clone();
+            let adapters = interfaces::Adapters::new(Rc::new(move |dev, on| {
+                if let Some(i) = w.upgrade() {
+                    NetworkSection(i).toggle_adapter(dev, on);
+                }
+            }));
+            Inner {
+                section,
+                fixture: fixture::requested(),
+                snap: RefCell::default(),
+                syncing: Cell::new(false),
+                wifi_row: wifi.root.clone(),
+                wifi_switch,
+                airplane_row: air.root.clone(),
+                airplane,
+                off_note,
+                current: Current {
+                    card,
+                    row,
+                    spinner,
+                    disconnect,
+                    portal,
+                    lines,
+                    metered_row: metered_r.root.clone(),
+                    metered,
+                    powersave_row: ps_r.root.clone(),
+                    powersave,
+                },
+                list_box,
+                list,
+                rows: RefCell::default(),
+                order: RefCell::default(),
+                empty,
+                more,
+                show_all: Cell::new(false),
+                scan_spinner,
+                scan_btn,
+                scanning: Cell::new(false),
+                scan_from: Cell::new(-1),
+                vpn_box,
+                vpns,
+                tailscale,
+                ts_status: RefCell::default(),
+                saved,
+                adapters_box: ui::vbox(2),
+                adapters,
+                joining: RefCell::default(),
+                failure: RefCell::default(),
+                watch: RefCell::default(),
+                reading: Cell::new(false),
+                reread: Cell::new(false),
+                settle: RefCell::default(),
+            }
+        });
+        let this = NetworkSection(inner);
+        let i = &this.0;
+        i.vpn_box.append(&i.vpns.list);
+        body.append(&i.tailscale.root);
+        body.append(&i.saved.disclosure.root);
+
+        // ── Advanced ────────────────────────────────────────────────────
+        let adv = ui::disclosure("Adapters and advanced");
+        i.adapters_box.append(&i.adapters.list);
+        adv.body.append(&i.adapters_box);
+        let editor = ui::button(
+            "Connection editor (nm-connection-editor)",
+            ui::Kind::Secondary,
+        );
+        editor.add_css_class("section-launch-btn");
+        editor.connect_clicked(|_| {
+            let _ = std::process::Command::new("nm-connection-editor").spawn();
+        });
+        adv.body.append(&editor);
+        body.append(&adv.root);
+
+        this.wire(portal_btn);
+        {
+            let s = this.clone();
+            i.section.root.connect_map(move |_| s.on_screen(true));
+            let s = this.clone();
+            i.section.root.connect_unmap(move |_| s.on_screen(false));
+        }
+        // Drawn from what NetworkManager knows before the page is ever
+        // opened, so the first frame of it is never empty.
+        this.refresh();
+        this
+    }
+
+    fn wire(&self, portal_btn: Button) {
+        let i = &self.0;
+        {
+            let s = self.clone();
+            i.wifi_switch.connect_state_set(move |_, on| {
+                if !s.0.syncing.get() {
+                    s.act(move || crate::services::network::set_wifi_radio(on), |_| {});
                 }
                 glib::Propagation::Proceed
             });
         }
-        details_tray.append(&power_save_row);
-
-        details_revealer.set_child(Some(&details_tray));
-        hero_card.append(&details_revealer);
-
-        // Wire details toggle
         {
-            let rev_c = details_revealer.clone();
-            let btn_c = details_toggle_btn.clone();
-            details_toggle_btn.connect_clicked(move |_| {
-                let open = rev_c.reveals_child();
-                rev_c.set_reveal_child(!open);
-                btn_c.set_label(if open { "Details ▸" } else { "Details ▾" });
-            });
-        }
-
-        wifi_content_box.append(&hero_card);
-
-        // ── Available Networks Section (Immediate, Hero list) ─────────────────
-        let available_section = ui::vbox(2);
-        available_section.append(&ui::heading("Available Networks"));
-
-        let search_bar = ui::hbox(3);
-
-        let search_entry = gtk4::SearchEntry::builder()
-            .placeholder_text("Search networks…")
-            .hexpand(true)
-            .build();
-        ui::entry::adopt(&search_entry, ui::FieldSize::Normal);
-
-        let scan_spinner = Spinner::new();
-        scan_spinner.set_visible(false);
-
-        let scan_status_label = ui::text("", ui::Text::Caption, ui::Tone::Faint);
-        scan_status_label.set_visible(false);
-
-        let scan_btn = ui::button("󰑐 Scan", ui::Kind::Secondary);
-        scan_btn.set_tooltip_text(Some("Scan for available networks"));
-
-        search_bar.append(&search_entry);
-        search_bar.append(&scan_spinner);
-        search_bar.append(&scan_status_label);
-        search_bar.append(&scan_btn);
-        available_section.append(&search_bar);
-
-        let no_adapter_label = ui::text("No WiFi adapter found", ui::Text::Body, ui::Tone::Muted);
-        no_adapter_label.add_css_class("section-empty");
-        no_adapter_label.set_visible(false);
-        available_section.append(&no_adapter_label);
-
-        let network_list_box = ui::list();
-        available_section.append(&network_list_box);
-
-        wifi_content_box.append(&available_section);
-
-        // ── Other Connections & Advanced (Collapsible) ────────────────────────
-        let other = ui::disclosure("Advanced & Other Connections");
-        let other_box = ui::vbox(3);
-        other.body.append(&other_box);
-
-        // VPN subsection
-        let vpn_section_box = ui::vbox(2);
-        vpn_section_box.set_visible(false);
-        vpn_section_box.append(&ui::heading("VPN Connections"));
-        let vpn_list_box = ui::list();
-        vpn_section_box.append(&vpn_list_box);
-        other_box.append(&vpn_section_box);
-
-        // Interface subsection (for physical Ethernet, etc.)
-        let iface_section_box = ui::vbox(2);
-        iface_section_box.set_visible(false);
-        iface_section_box.append(&ui::heading("Network Adapters"));
-        let iface_list_box = ui::list();
-        iface_section_box.append(&iface_list_box);
-        other_box.append(&iface_section_box);
-
-        // Advanced Network Connections launcher
-        let adv_btn = ui::button(
-            "󰒓  Advanced Network Connections (nm-connection-editor)",
-            ui::Kind::Secondary,
-        );
-        adv_btn.add_css_class("section-launch-btn");
-        adv_btn.connect_clicked(|_| {
-            let _ = std::process::Command::new("nm-connection-editor")
-                .spawn()
-                .or_else(|_| {
-                    std::process::Command::new("ghostty")
-                        .args(["-e", "nmtui"])
-                        .spawn()
-                })
-                .or_else(|_| {
-                    std::process::Command::new("foot")
-                        .args(["-e", "nmtui"])
-                        .spawn()
-                });
-        });
-        other_box.append(&adv_btn);
-
-        wifi_content_box.append(&other.root);
-
-        detail_box.append(&wifi_content_box);
-
-        let state_ref: Rc<RefCell<NetworkState>> = Rc::new(RefCell::new(NetworkState {
-            active: ActiveConnection::Disconnected,
-            connectivity: ConnectivityState::Unknown,
-            networks: Vec::new(),
-            vpns: Vec::new(),
-            interfaces: Vec::new(),
-            wifi_radio_enabled: false,
-            list_visible: true,
-            show_all: false,
-            scanning: false,
-            search_query: String::new(),
-        }));
-
-        let section = Self {
-            section,
-            state: state_ref,
-            summary_icon,
-            summary_text,
-            wifi_switch,
-            header_subtitle,
-            radio_row,
-            wifi_content_box,
-            wifi_disabled_box,
-            hero_card,
-            current_icon_label,
-            current_ssid_label,
-            current_signal_label,
-            hero_status,
-            current_disconnect_btn,
-            current_spinner,
-            ip_label,
-            gateway_label,
-            dns_label,
-            connectivity_label,
-            portal_btn,
-            power_save_row,
-            scan_spinner,
-            scan_status_label,
-            scan_btn,
-            search_entry,
-            network_list_box,
-            vpn_section_box,
-            vpn_list_box,
-            iface_section_box,
-            iface_list_box,
-        };
-
-        // Wire disconnect button on hero card
-        {
-            let sec_c = section.clone();
-            let btn_c = section.current_disconnect_btn.clone();
-            let spin_c = section.current_spinner.clone();
-            section.current_disconnect_btn.connect_clicked(move |_| {
-                btn_c.set_sensitive(false);
-                spin_c.set_visible(true);
-                spin_c.start();
-                let sec_poll = sec_c.clone();
-                let btn_poll = btn_c.clone();
-                let spin_poll = spin_c.clone();
-                spawn_work(disconnect_active_wifi, move |_| {
-                    spin_poll.stop();
-                    spin_poll.set_visible(false);
-                    btn_poll.set_sensitive(true);
-                    sec_poll.refresh();
-                });
-            });
-        }
-
-        // Wire search entry
-        {
-            let state_search = section.state.clone();
-            let list_search = section.network_list_box.clone();
-            let on_change_search = section.on_change();
-            section.search_entry.connect_search_changed(move |entry| {
-                state_search.borrow_mut().search_query = entry.text().to_string();
-                wifi::rebuild_wifi_list(&list_search, &state_search, &on_change_search);
-            });
-        }
-
-        // Wire scan button
-        {
-            let sec_scan = section.clone();
-            section.scan_btn.connect_clicked(move |_| {
-                sec_scan.trigger_scan();
-            });
-        }
-
-        // ── Async init: probe nmcli/adapter/radio on background thread ────
-        let radio_row_c = section.radio_row.clone();
-        let ps_switch_c = ps_switch;
-        let no_adapter_label_c = no_adapter_label;
-        let placeholder_c = placeholder;
-        let wifi_switch_init = section.wifi_switch.clone();
-        let wifi_content_init = section.wifi_content_box.clone();
-        let wifi_disabled_init = section.wifi_disabled_box.clone();
-        let subtitle_init = section.header_subtitle.clone();
-        let power_save_init = section.power_save_row.clone();
-        let state_init = section.state.clone();
-
-        // Clones for the WiFi radio toggle callback
-        let wifi_switch_radio = section.wifi_switch.clone();
-        let state_radio_init = section.state.clone();
-        let wifi_content_radio = section.wifi_content_box.clone();
-        let wifi_disabled_radio = section.wifi_disabled_box.clone();
-        let subtitle_radio = section.header_subtitle.clone();
-        let power_save_radio = section.power_save_row.clone();
-        let summary_icon_radio = section.summary_icon.clone();
-        let summary_text_radio = section.summary_text.clone();
-
-        spawn_work(
-            || {
-                let active_wifi_conn_name = get_active_wifi_conn_name();
-                let power_saving = active_wifi_conn_name
-                    .as_deref()
-                    .map(get_wifi_power_saving)
-                    .unwrap_or(false);
-                InitResult {
-                    network_manager_available: network_manager_available(),
-                    has_wifi: wifi_adapter_present(),
-                    wifi_radio: wifi_radio_enabled(),
-                    active_wifi_conn_name,
-                    power_saving,
+            let s = self.clone();
+            i.airplane.connect_state_set(move |_, on| {
+                if !s.0.syncing.get() {
+                    s.act(move || snapshot::set_airplane(on), |_| {});
                 }
-            },
-            move |init| {
-                if !init.network_manager_available {
-                    placeholder_c.set_visible(true);
-                    return;
-                }
-
-                if init.has_wifi {
-                    radio_row_c.set_visible(true);
-                    wifi_switch_init.set_sensitive(true);
-                    wifi_switch_init.set_active(init.wifi_radio);
-                    state_init.borrow_mut().wifi_radio_enabled = init.wifi_radio;
-
-                    wifi_content_init.set_visible(init.wifi_radio);
-                    wifi_disabled_init.set_visible(!init.wifi_radio);
-                    if !init.wifi_radio {
-                        subtitle_init.set_label("Wi-Fi is off");
+                glib::Propagation::Proceed
+            });
+        }
+        {
+            let s = self.clone();
+            i.current.disconnect.connect_clicked(move |_| {
+                *s.0.joining.borrow_mut() = None;
+                s.act(snapshot::disconnect_wifi, |_| {});
+            });
+        }
+        {
+            let s = self.clone();
+            i.current.metered.connect_state_set(move |_, on| {
+                if !s.0.syncing.get() {
+                    let d = s.0.snap.borrow().details.clone();
+                    if let Some(d) = d
+                        && let Some(id) = d.connection_id
+                    {
+                        s.act(move || snapshot::set_metered(&id, &d.device, on), |_| {});
                     }
-
-                    if init.active_wifi_conn_name.is_some() {
-                        ps_switch_c.set_active(init.power_saving);
-                        if init.wifi_radio {
-                            power_save_init.set_visible(true);
-                        }
-                    }
-
-                    // Wire WiFi radio toggle now that we know adapter is present.
-                    let wifi_switch_revert = wifi_switch_radio.clone();
-                    wifi_switch_radio.connect_state_set(move |_sw, active| {
-                        let state_poll = state_radio_init.clone();
-                        let content_poll = wifi_content_radio.clone();
-                        let disabled_poll = wifi_disabled_radio.clone();
-                        let subtitle_poll = subtitle_radio.clone();
-                        let ps_poll = power_save_radio.clone();
-                        let si_poll = summary_icon_radio.clone();
-                        let st_poll = summary_text_radio.clone();
-                        let sw_poll = wifi_switch_revert.clone();
-                        spawn_work(
-                            move || set_wifi_radio(active),
-                            move |result| match result {
-                                NmResult::Success => {
-                                    state_poll.borrow_mut().wifi_radio_enabled = active;
-                                    content_poll.set_visible(active);
-                                    disabled_poll.set_visible(!active);
-                                    if !active {
-                                        subtitle_poll.set_label("Wi-Fi is off");
-                                        si_poll.set_label(ICON_DISCONNECTED);
-                                        st_poll.set_label("WiFi Off");
-                                    } else {
-                                        subtitle_poll.set_label("Enabled");
-                                    }
-                                    ps_poll.set_visible(
-                                        active && get_active_wifi_conn_name().is_some(),
-                                    );
-                                }
-                                NmResult::Failure(_) => {
-                                    sw_poll.set_state(!active);
-                                }
-                            },
-                        );
-
-                        glib::Propagation::Proceed
-                    });
-                } else {
-                    no_adapter_label_c.set_visible(true);
                 }
-            },
-        );
-
-        // ── Async initial refresh ─────────────────────────────────────────
-        section.refresh();
-
-        // And again whenever the section comes back on screen. The poller
-        // sleeps while nothing of ours is mapped (`monitor::schedule_next`),
-        // so without this the first thing a reopened page shows is whatever
-        // was true when it was last closed, for as long as a tick. `map`
-        // rather than a call from the panel, because there are three ways in
-        // — the panel being shown, the deck switching to the page, and the
-        // Wi-Fi pill — and this covers all of them at once.
+                glib::Propagation::Proceed
+            });
+        }
         {
-            let section_c = section.clone();
-            section
-                .section
-                .root
-                .connect_map(move |_| section_c.refresh());
+            let s = self.clone();
+            i.current.powersave.connect_state_set(move |_, on| {
+                if !s.0.syncing.get() {
+                    let id = s
+                        .0
+                        .snap
+                        .borrow()
+                        .details
+                        .as_ref()
+                        .and_then(|d| d.connection_id.clone());
+                    if let Some(id) = id {
+                        s.act(move || snapshot::set_power_saving(&id, on), |_| {});
+                    }
+                }
+                glib::Propagation::Proceed
+            });
         }
-
-        // Start periodic poller.
-        monitor::start_periodic_poller(
-            section.state.clone(),
-            monitor::PollerWidgets {
-                display: section.display_widgets(),
-                root: section.section.root.clone(),
-                connectivity_label: section.connectivity_label.clone(),
-                portal_btn: section.portal_btn.clone(),
-                wifi_switch: section.wifi_switch.clone(),
-                wifi_content_box: section.wifi_content_box.clone(),
-                wifi_disabled_box: section.wifi_disabled_box.clone(),
-                power_save_row: section.power_save_row.clone(),
-                iface_list_box: section.iface_list_box.clone(),
-                iface_section_box: section.iface_section_box.clone(),
-                vpn_list_box: section.vpn_list_box.clone(),
-                vpn_section_box: section.vpn_section_box.clone(),
-            },
-        );
-
-        section
-    }
-
-    fn display_widgets(&self) -> monitor::DisplayWidgets {
-        monitor::DisplayWidgets {
-            summary_icon: self.summary_icon.clone(),
-            summary_text: self.summary_text.clone(),
-            current_icon: self.current_icon_label.clone(),
-            current_ssid: self.current_ssid_label.clone(),
-            current_signal: self.current_signal_label.clone(),
-            hero_status: self.hero_status.clone(),
-            header_subtitle: self.header_subtitle.clone(),
-            hero_card: self.hero_card.clone(),
-            ip_label: self.ip_label.clone(),
-            gateway_label: self.gateway_label.clone(),
-            dns_label: self.dns_label.clone(),
-            current_disconnect_btn: self.current_disconnect_btn.clone(),
-            current_spinner: self.current_spinner.clone(),
+        {
+            let s = self.clone();
+            portal_btn.connect_clicked(move |_| {
+                let uri = s
+                    .0
+                    .snap
+                    .borrow()
+                    .portal_uri
+                    .clone()
+                    .unwrap_or_else(|| "http://nmcheck.gnome.org/".into());
+                if s.0.fixture.is_none() {
+                    let _ = std::process::Command::new("xdg-open").arg(uri).spawn();
+                }
+            });
+        }
+        {
+            let s = self.clone();
+            i.scan_btn.connect_clicked(move |_| s.trigger_scan());
+        }
+        {
+            let s = self.clone();
+            i.more.connect_clicked(move |_| {
+                s.0.show_all.set(!s.0.show_all.get());
+                s.draw_list();
+            });
         }
     }
 
-    pub fn on_change(&self) -> Rc<dyn Fn()> {
-        let section = self.clone();
-        Rc::new(move || {
-            section.refresh();
-        })
-    }
+    // ── Reading ────────────────────────────────────────────────────────
 
-    pub fn trigger_scan(&self) {
-        if !self.state.borrow().wifi_radio_enabled {
+    /// Follow NetworkManager while the page is on screen, and not at all
+    /// while it is not.
+    fn on_screen(&self, shown: bool) {
+        let i = &self.0;
+        if !shown {
+            i.watch.borrow_mut().take();
+            // A fresh open ranks by signal again (`model::settle`).
+            i.order.borrow_mut().clear();
             return;
         }
-        let on_change = self.on_change();
-        Self::start_wifi_scan_static(
-            &self.state,
-            &self.scan_spinner,
-            &self.scan_status_label,
-            &self.scan_btn,
-            &self.network_list_box,
-            &on_change,
-        );
+        if i.fixture.is_none() && i.watch.borrow().is_none() {
+            let (tx, rx) = async_channel::bounded::<()>(1);
+            *i.watch.borrow_mut() = Some(watch::start(tx));
+            let weak = Rc::downgrade(&self.0);
+            glib::spawn_future_local(async move {
+                while rx.recv().await.is_ok() {
+                    let Some(i) = weak.upgrade() else { break };
+                    NetworkSection(i).changed();
+                }
+            });
+        }
+        self.refresh();
+        self.read_tailscale();
     }
 
-    /// Run all blocking network queries on a background thread, then apply
-    /// results on the GTK main thread.
+    /// A change signal: reread once the burst is over.
+    fn changed(&self) {
+        let i = &self.0;
+        if i.settle.borrow().is_some() {
+            return;
+        }
+        let s = self.clone();
+        *i.settle.borrow_mut() = Some(glib::timeout_add_local_once(
+            std::time::Duration::from_millis(SETTLE_MS),
+            move || {
+                s.0.settle.borrow_mut().take();
+                s.refresh();
+            },
+        ));
+    }
+
+    /// Read the whole state and draw it. One read at a time; a request
+    /// during a read runs once after it.
     pub fn refresh(&self) {
-        let state_c = self.state.clone();
-        let display = self.display_widgets();
-        let connectivity_label = self.connectivity_label.clone();
-        let portal_btn = self.portal_btn.clone();
-        let summary_text = self.summary_text.clone();
-        let iface_list_box = self.iface_list_box.clone();
-        let iface_section_box = self.iface_section_box.clone();
-        let vpn_list_box = self.vpn_list_box.clone();
-        let vpn_section_box = self.vpn_section_box.clone();
-        let wifi_content_box = self.wifi_content_box.clone();
-        let wifi_disabled_box = self.wifi_disabled_box.clone();
-        let subtitle = self.header_subtitle.clone();
-        let power_save_row = self.power_save_row.clone();
-        let scan_spinner = self.scan_spinner.clone();
-        let scan_status_label = self.scan_status_label.clone();
-        let scan_btn = self.scan_btn.clone();
-        let network_list_box = self.network_list_box.clone();
-        let on_change = self.on_change();
+        let i = &self.0;
+        if let Some(name) = &i.fixture {
+            let snap = fixture::snapshot(name);
+            if let Some(p) = fixture::pending(name) {
+                *i.joining.borrow_mut() = Some(p);
+            }
+            *i.ts_status.borrow_mut() = fixture::tailscale(name);
+            self.apply(snap);
+            return;
+        }
+        if i.reading.replace(true) {
+            i.reread.set(true);
+            return;
+        }
+        let s = self.clone();
+        spawn_work(snapshot::read, move |snap| {
+            s.0.reading.set(false);
+            s.apply(snap);
+            if s.0.reread.replace(false) {
+                s.refresh();
+            }
+        });
+    }
 
-        spawn_work(
-            || {
-                let active = get_active_connection();
-                let connectivity = check_connectivity();
-                let interfaces = get_network_interfaces();
-                let vpns = get_vpn_connections();
+    fn read_tailscale(&self) {
+        if self.0.fixture.is_some() {
+            return;
+        }
+        let s = self.clone();
+        spawn_work(tailscale::status, move |status| {
+            *s.0.ts_status.borrow_mut() = status;
+            s.0.tailscale.update(s.0.ts_status.borrow().as_ref());
+        });
+    }
 
-                // Fetch IP info for the active device while still on the background thread.
-                let ip_info = match &active {
-                    ActiveConnection::Wifi { device, .. }
-                    | ActiveConnection::Ethernet { device } => {
-                        let ip = get_device_ip(device);
-                        let gateway = get_default_gateway();
-                        let dns = get_dns_servers(device);
-                        IpInfo { ip, gateway, dns }
-                    }
-                    ActiveConnection::Disconnected => IpInfo {
-                        ip: None,
-                        gateway: None,
-                        dns: Vec::new(),
-                    },
+    /// Ask for a scan. The results arrive as change signals; the spinner
+    /// runs until `LastScan` moves or [`SCAN_PATIENCE_S`] pass.
+    pub fn trigger_scan(&self) {
+        let i = &self.0;
+        if !i.snap.borrow().wifi_enabled || i.scanning.get() {
+            return;
+        }
+        i.scanning.set(true);
+        i.scan_from.set(i.snap.borrow().last_scan);
+        i.scan_spinner.set_visible(true);
+        i.scan_spinner.start();
+        i.scan_btn.set_sensitive(false);
+        if i.fixture.is_some() {
+            // Nothing to wait for: the fixture's list is the result.
+            self.scan_done();
+            return;
+        }
+        spawn_work(snapshot::request_scan, |_| {});
+        let s = self.clone();
+        glib::timeout_add_seconds_local_once(SCAN_PATIENCE_S, move || s.scan_done());
+    }
+
+    fn scan_done(&self) {
+        let i = &self.0;
+        if !i.scanning.replace(false) {
+            return;
+        }
+        i.scan_spinner.stop();
+        i.scan_spinner.set_visible(false);
+        i.scan_btn.set_sensitive(true);
+        self.draw_list();
+    }
+
+    // ── Acting ─────────────────────────────────────────────────────────
+
+    /// Run `work` on a worker, then reread. Under a fixture, nothing runs.
+    fn act(
+        &self,
+        work: impl FnOnce() -> NmResult + Send + 'static,
+        on_done: impl FnOnce(&NmResult) + 'static,
+    ) {
+        if let Some(name) = &self.0.fixture {
+            log::info!("network: fixture {name}: an action was asked for and not run");
+            return;
+        }
+        let s = self.clone();
+        spawn_work(work, move |result| {
+            if let NmResult::Failure(msg) = &result {
+                log::info!("network: {msg}");
+            }
+            on_done(&result);
+            s.refresh();
+        });
+    }
+
+    fn ask(&self, ask: Ask) {
+        let i = &self.0;
+        *i.failure.borrow_mut() = None;
+        let ssid = match &ask {
+            Ask::Saved(id) => i
+                .snap
+                .borrow()
+                .saved
+                .iter()
+                .find(|s| s.id == *id)
+                .map_or_else(|| id.clone(), |s| s.ssid.clone()),
+            Ask::Join(ssid, ..) => ssid.clone(),
+        };
+        *i.joining.borrow_mut() = Some(ssid.clone());
+        self.draw_list();
+        let s = self.clone();
+        let fail = move |r: &NmResult| {
+            if let NmResult::Failure(msg) = r {
+                let reason = s.0.snap.borrow().wifi_reason;
+                let (text, needs) = if reason != 0 {
+                    (model::failure_text(reason), model::wants_password(reason))
+                } else {
+                    let m = msg.to_lowercase();
+                    (msg.clone(), m.contains("password") || m.contains("secret"))
                 };
+                *s.0.failure.borrow_mut() = Some(Failure {
+                    ssid: ssid.clone(),
+                    text,
+                    needs_password: needs,
+                });
+                *s.0.joining.borrow_mut() = None;
+            } else {
+                *s.0.joining.borrow_mut() = None;
+            }
+        };
+        match ask {
+            Ask::Saved(id) => self.act(move || snapshot::connect_saved(&id), fail),
+            Ask::Join(ssid, pw, sec) => {
+                self.act(move || snapshot::join(&ssid, &pw, &sec, false), fail)
+            }
+        }
+    }
 
-                RefreshResult {
-                    active,
-                    connectivity,
-                    interfaces,
-                    vpns,
-                    ip_info,
+    fn toggle_vpn(&self, name: String, on: bool) {
+        let s = self.clone();
+        let n = name.clone();
+        self.act(move || snapshot::vpn(&name, on), move |r| {
+            s.0.vpns.set_error(
+                &n,
+                match r {
+                    NmResult::Failure(m) => Some(m.clone()),
+                    NmResult::Success => None,
+                },
+            );
+        });
+    }
+
+    fn toggle_adapter(&self, dev: String, on: bool) {
+        self.act(
+            move || {
+                if on {
+                    crate::services::network::device_connect(&dev)
+                } else {
+                    crate::services::network::device_disconnect(&dev)
                 }
             },
-            move |result| {
-                // Apply active connection display (without re-fetching IP info).
-                monitor::update_active_display_with_ip(
-                    &result.active,
-                    &display,
-                    &result.ip_info.ip,
-                    &result.ip_info.gateway,
-                    &result.ip_info.dns,
-                );
-                state_c.borrow_mut().active = result.active;
+            |_| {},
+        );
+    }
 
-                // Connectivity.
-                monitor::update_connectivity_display(
-                    &result.connectivity,
-                    &connectivity_label,
-                    &portal_btn,
-                    &summary_text,
-                    &display.hero_status,
-                );
-                state_c.borrow_mut().connectivity = result.connectivity;
-
-                // Interfaces.
-                state_c.borrow_mut().interfaces = result.interfaces.clone();
-                interfaces::rebuild_iface_list(&iface_list_box, &state_c);
-                iface_section_box.set_visible(!result.interfaces.is_empty());
-
-                // VPNs.
-                state_c.borrow_mut().vpns = result.vpns.clone();
-                vpn::rebuild_vpn_list(&vpn_list_box, &state_c);
-                vpn_section_box.set_visible(!result.vpns.is_empty());
-
-                // WiFi scan.
-                if state_c.borrow().wifi_radio_enabled {
-                    Self::start_wifi_scan_static(
-                        &state_c,
-                        &scan_spinner,
-                        &scan_status_label,
-                        &scan_btn,
-                        &network_list_box,
-                        &on_change,
-                    );
+    fn tailscale(&self, ask: TailscaleAsk) {
+        if self.0.fixture.is_some() {
+            return;
+        }
+        let s = self.clone();
+        spawn_work(
+            move || match ask {
+                TailscaleAsk::Up(up) => tailscale::set_up(up),
+                TailscaleAsk::ExitNode(ip) => tailscale::set_exit_node(ip.as_deref()),
+            },
+            move |r| {
+                if let Err(e) = r {
+                    log::info!("network: tailscale: {e}");
                 }
-
-                // WiFi controls visibility.
-                let radio_on = state_c.borrow().wifi_radio_enabled;
-                wifi_content_box.set_visible(radio_on);
-                wifi_disabled_box.set_visible(!radio_on);
-                if !radio_on {
-                    subtitle.set_label("Wi-Fi is off");
-                }
-                power_save_row.set_visible(
-                    radio_on && matches!(state_c.borrow().active, ActiveConnection::Wifi { .. }),
-                );
+                s.read_tailscale();
             },
         );
     }
 
-    fn start_wifi_scan_static(
-        state: &Rc<RefCell<NetworkState>>,
-        scan_spinner: &Spinner,
-        scan_status_label: &Label,
-        scan_btn: &Button,
-        network_list_box: &ListBox,
-        on_change: &Rc<dyn Fn()>,
-    ) {
-        if state.borrow().scanning {
-            return;
+    fn saved(&self, ask: SavedAsk) {
+        match ask {
+            SavedAsk::Autoconnect(id, on) => {
+                self.act(move || snapshot::set_autoconnect(&id, on), |_| {})
+            }
+            SavedAsk::Forget(id) => self.act(move || snapshot::forget(&id), |_| {}),
         }
-        state.borrow_mut().scanning = true;
+    }
 
-        scan_btn.set_sensitive(false);
-        scan_spinner.set_visible(true);
-        scan_spinner.start();
-        scan_status_label.set_label("Scanning…");
-        scan_status_label.set_visible(true);
+    // ── Drawing ────────────────────────────────────────────────────────
 
-        let scan_spinner_c = scan_spinner.clone();
-        let scan_status_c = scan_status_label.clone();
-        let scan_btn_c = scan_btn.clone();
-        let network_list_box_c = network_list_box.clone();
-        let state_c = state.clone();
-        let on_change_c = on_change.clone();
+    fn apply(&self, snap: Snapshot) {
+        let i = &self.0;
+        // A join that ended: up, or failed with a reason.
+        let joining = i.joining.borrow().clone();
+        if let Some(ssid) = joining {
+            let up = matches!(&snap.active, ActiveConnection::Wifi { ssid: s, .. } if *s == ssid);
+            let failed = snap.activating.is_none()
+                && matches!(snap.wifi_state, 30 | 120)
+                && snap.wifi_reason != 0;
+            if up {
+                *i.joining.borrow_mut() = None;
+                *i.failure.borrow_mut() = None;
+            } else if failed {
+                *i.failure.borrow_mut() = Some(Failure {
+                    ssid: ssid.clone(),
+                    text: model::failure_text(snap.wifi_reason),
+                    needs_password: model::wants_password(snap.wifi_reason),
+                });
+                *i.joining.borrow_mut() = None;
+            }
+        }
+        if i.scanning.get() && snap.last_scan > i.scan_from.get() {
+            *i.snap.borrow_mut() = snap;
+            self.scan_done();
+        } else {
+            *i.snap.borrow_mut() = snap;
+        }
+        let snap = i.snap.borrow().clone();
 
-        spawn_work(
-            scan_wifi,
-            move |result: Result<Vec<WifiNetwork>, String>| {
-                scan_spinner_c.stop();
-                scan_spinner_c.set_visible(false);
-                scan_btn_c.set_sensitive(true);
-                state_c.borrow_mut().scanning = false;
+        i.syncing.set(true);
+        self.draw_radios(&snap);
+        self.draw_current(&snap);
+        i.syncing.set(false);
+        self.draw_list();
+        i.vpn_box.set_visible(!snap.vpns.is_empty());
+        i.vpns.update(&snap.vpns);
+        i.tailscale.update(i.ts_status.borrow().as_ref());
+        i.saved.update(&snap.saved);
+        i.adapters.update(&snap.interfaces);
+        i.adapters_box.set_visible(!snap.interfaces.is_empty());
+        self.draw_summary(&snap);
+    }
 
-                match result {
-                    Ok(networks) => {
-                        scan_status_c.set_visible(false);
-                        {
-                            let mut s = state_c.borrow_mut();
-                            s.networks = networks;
-                        }
-                        wifi::rebuild_wifi_list(&network_list_box_c, &state_c, &on_change_c);
-                    }
-                    Err(msg) => {
-                        scan_status_c.set_label(&msg);
-                        auto_hide_status(&scan_status_c);
-                    }
+    fn draw_radios(&self, s: &Snapshot) {
+        let i = &self.0;
+        i.wifi_row.set_visible(s.has_wifi);
+        i.wifi_switch.set_active(s.wifi_enabled);
+        i.wifi_switch.set_state(s.wifi_enabled);
+        let airplane = model::airplane(s);
+        i.airplane.set_active(airplane);
+        i.airplane.set_state(airplane);
+        i.airplane_row
+            .set_visible(s.has_wifi || s.bluetooth_powered.is_some());
+        let off = s.has_wifi && !s.wifi_enabled;
+        i.off_note.set_visible(off);
+        i.list_box.set_visible(s.has_wifi && s.wifi_enabled);
+        if !s.available {
+            i.off_note.set_visible(true);
+        }
+    }
+
+    fn draw_current(&self, s: &Snapshot) {
+        let c = &self.0.current;
+        let joining = s.activating.as_ref().map(|a| a.ssid.clone());
+        match (&s.active, &joining) {
+            (ActiveConnection::Wifi { ssid, signal, .. }, _) => {
+                set_signal_glyph(&c.row.icon, signal_icon(*signal), signal_tone(*signal));
+                c.row.title.set_label(ssid);
+                c.disconnect.set_label("Disconnect");
+                c.disconnect.set_visible(true);
+                c.spinner.set_visible(false);
+            }
+            (ActiveConnection::Ethernet { device }, _) => {
+                set_signal_glyph(&c.row.icon, ICON_ETHERNET, ui::Tone::Fg);
+                c.row.title.set_label(&format!("Wired · {device}"));
+                c.disconnect.set_visible(false);
+                c.spinner.set_visible(false);
+            }
+            (ActiveConnection::Disconnected, Some(ssid)) => {
+                set_signal_glyph(&c.row.icon, signal_icon(60), ui::Tone::Fg);
+                c.row.title.set_label(ssid);
+                c.disconnect.set_label("Cancel");
+                c.disconnect.set_visible(true);
+                c.spinner.set_visible(true);
+                c.spinner.start();
+            }
+            (ActiveConnection::Disconnected, None) => {
+                c.card.set_visible(false);
+                return;
+            }
+        }
+        c.card.set_visible(true);
+
+        let (sub, tone) = match (&s.active, &s.activating) {
+            (ActiveConnection::Disconnected, Some(a)) => (a.stage.to_string(), ui::Tone::Accent),
+            _ => (
+                model::active_subtitle(&s.connectivity, s.details.as_ref()),
+                match s.connectivity {
+                    ConnectivityState::Full | ConnectivityState::Unknown => ui::Tone::Muted,
+                    _ => ui::Tone::Warning,
+                },
+            ),
+        };
+        c.row.subtitle.set_label(&sub);
+        c.row.subtitle.set_visible(true);
+        ui::set_tone(&c.row.subtitle, tone);
+        c.portal
+            .set_visible(matches!(s.connectivity, ConnectivityState::Portal));
+
+        while let Some(ch) = c.lines.first_child() {
+            c.lines.remove(&ch);
+        }
+        if let Some(d) = &s.details {
+            let add = |k: &str, v: &str| {
+                let l = ui::text(&format!("{k:<9} {v}"), ui::Text::Caption, ui::Tone::Muted);
+                ui::set_mono(&l, true);
+                l.set_xalign(0.0);
+                l.set_selectable(true);
+                c.lines.append(&l);
+            };
+            if let Some(v) = &d.ip4 {
+                add("Address", v);
+            }
+            if let Some(v) = &d.ip6 {
+                add("IPv6", v);
+            }
+            if let Some(v) = &d.gateway {
+                add("Gateway", v);
+            }
+            if !d.dns.is_empty() {
+                add("DNS", &d.dns.join(", "));
+            }
+            let mut link = Vec::new();
+            if let Some(b) = d.bitrate_mbps.filter(|b| *b > 0) {
+                link.push(format!("{b} Mb/s"));
+            }
+            if let Some(f) = d.freq_mhz {
+                link.push(format!("{f} MHz"));
+            }
+            if !d.security.is_empty() {
+                link.push(d.security.clone());
+            }
+            if !link.is_empty() {
+                add("Link", &link.join(" · "));
+            }
+            if let Some(v) = &d.hw_address {
+                add("Hardware", v);
+            }
+            let wifi = matches!(s.active, ActiveConnection::Wifi { .. });
+            c.metered_row.set_visible(d.connection_id.is_some());
+            c.metered.set_active(d.metered.is_metered());
+            c.metered.set_state(d.metered.is_metered());
+            c.powersave_row.set_visible(wifi && d.connection_id.is_some());
+            c.powersave.set_active(d.power_saving);
+            c.powersave.set_state(d.power_saving);
+        } else {
+            c.metered_row.set_visible(false);
+            c.powersave_row.set_visible(false);
+        }
+    }
+
+    /// Add, update, remove and (rarely) reorder the rows.
+    fn draw_list(&self) {
+        let i = &self.0;
+        let snap = i.snap.borrow().clone();
+        // The network in use, or the one coming up, has the card above; it
+        // is not a row too.
+        let coming = snap.activating.as_ref().map(|a| a.ssid.as_str());
+        let fresh: Vec<_> = snap
+            .networks
+            .iter()
+            .filter(|n| !n.in_use && Some(n.ssid.as_str()) != coming)
+            .cloned()
+            .collect();
+        let settled = model::settle(&i.order.borrow(), fresh);
+        let order: Vec<String> = settled.iter().map(|n| n.ssid.clone()).collect();
+
+        let ask: Rc<dyn Fn(Ask)> = {
+            let weak = Rc::downgrade(&self.0);
+            Rc::new(move |a| {
+                if let Some(i) = weak.upgrade() {
+                    NetworkSection(i).ask(a);
                 }
-            },
-        );
+            })
+        };
+        let joining = i.joining.borrow().clone();
+        let failure = i.failure.borrow().clone();
+        let mut rows = i.rows.borrow_mut();
+        rows.retain(|ssid, row| {
+            let keep = order.contains(ssid);
+            if !keep {
+                i.list.remove(&row.list_row);
+            }
+            keep
+        });
+        let reorder = *i.order.borrow() != order;
+        for n in &settled {
+            match rows.get(&n.ssid) {
+                Some(r) => r.update(n, &snap, joining.as_deref(), failure.as_ref()),
+                None => {
+                    let r = WifiRow::new(n, &snap, ask.clone());
+                    r.update(n, &snap, joining.as_deref(), failure.as_ref());
+                    rows.insert(n.ssid.clone(), r);
+                }
+            }
+        }
+        if reorder {
+            // Detach and re-append in order. Rows keep their widgets, so a
+            // field being typed in keeps its text.
+            for n in &settled {
+                let r = &rows[&n.ssid];
+                if r.list_row.parent().is_some() {
+                    i.list.remove(&r.list_row);
+                }
+                i.list.append(&r.list_row);
+            }
+            *i.order.borrow_mut() = order.clone();
+        }
+        let all = i.show_all.get();
+        for (k, n) in settled.iter().enumerate() {
+            rows[&n.ssid]
+                .list_row
+                .set_visible(all || k < FIRST_ROWS || joining.as_deref() == Some(n.ssid.as_str()));
+        }
+        i.more.set_visible(settled.len() > FIRST_ROWS);
+        i.more.set_label(if all {
+            "Show fewer".to_string()
+        } else {
+            format!("Show all {}", settled.len())
+        }
+        .as_str());
+        i.empty.set_visible(settled.is_empty());
+        i.empty.set_label(if i.scanning.get() {
+            "Looking for networks…"
+        } else {
+            "No other networks in range"
+        });
+    }
+
+    fn draw_summary(&self, s: &Snapshot) {
+        let i = &self.0;
+        let (icon, text) = if !s.available {
+            (ICON_DISCONNECTED, "Unavailable".to_string())
+        } else if model::airplane(s) {
+            ("󰀝", "Airplane mode".to_string())
+        } else if let Some(a) = &s.activating {
+            (signal_icon(60), format!("{}…", a.ssid))
+        } else {
+            match &s.active {
+                ActiveConnection::Wifi { ssid, signal, .. } => {
+                    let mut t = ssid.clone();
+                    match s.connectivity {
+                        ConnectivityState::Portal => t.push_str(" · Sign in"),
+                        ConnectivityState::Limited | ConnectivityState::None => {
+                            t.push_str(" · No internet")
+                        }
+                        _ => {}
+                    }
+                    (signal_icon(*signal), t)
+                }
+                ActiveConnection::Ethernet { .. } => (ICON_ETHERNET, "Wired".to_string()),
+                ActiveConnection::Disconnected if !s.wifi_enabled => {
+                    (ICON_DISCONNECTED, "Off".to_string())
+                }
+                ActiveConnection::Disconnected => {
+                    (ICON_DISCONNECTED, "Not connected".to_string())
+                }
+            }
+        };
+        i.section.icon.set_label(icon);
+        i.section.summary.set_label(&text);
     }
 
     pub fn expand_for_page(&self) {
-        self.section.show_as_page();
-        self.state.borrow_mut().list_visible = true;
+        self.0.section.show_as_page();
         self.trigger_scan();
     }
 
     pub fn widget(&self) -> &gtk4::Box {
-        &self.section.root
+        &self.0.section.root
     }
 }

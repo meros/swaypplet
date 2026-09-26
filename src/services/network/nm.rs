@@ -378,7 +378,10 @@ pub fn add_and_activate(
     if !password.is_empty() {
         let mut sec: HashMap<&str, Value> = HashMap::new();
         if security.contains("WPA3") && !security.contains("WPA2") {
+            // SAE still takes its key in `psk`; without it the join could
+            // only ever fail.
             sec.insert("key-mgmt", Value::from("sae"));
+            sec.insert("psk", Value::from(password));
         } else if security.contains("WEP") {
             sec.insert("key-mgmt", Value::from("none"));
             sec.insert("wep-key0", Value::from(password));
