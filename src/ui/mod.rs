@@ -545,3 +545,244 @@ pub fn progress(fraction: f64) -> gtk4::ProgressBar {
 pub fn make_progress(p: &gtk4::ProgressBar) {
     p.add_css_class("ui-progress");
 }
+
+// ── Bar components (added by the bar migration) ─────────────────────────
+
+/// Put any widget's text in a tone, not only a label's (a box whose
+/// children inherit it).
+pub fn set_tone(w: &impl IsA<gtk4::Widget>, tone: Tone) {
+    for c in [
+        "ui-muted",
+        "ui-faint",
+        "ui-accent",
+        "ui-success",
+        "ui-warning",
+        "ui-danger",
+    ] {
+        w.remove_css_class(c);
+    }
+    if let Some(c) = tone.class() {
+        w.add_css_class(c);
+    }
+}
+
+/// Toggle a component modifier class.
+pub fn set_class(w: &impl IsA<gtk4::Widget>, class: &str, on: bool) {
+    if on {
+        w.add_css_class(class);
+    } else {
+        w.remove_css_class(class);
+    }
+}
+
+/// The categorical slots (§3.1): identity only, 1-based.
+pub const CATEGORIES: usize = 6;
+
+/// Text in a categorical tone, `n` in 1..=6; anything else clears it.
+pub fn set_category(w: &impl IsA<gtk4::Widget>, n: usize) {
+    for i in 1..=CATEGORIES {
+        w.remove_css_class(&format!("ui-cat-{i}"));
+    }
+    if (1..=CATEGORIES).contains(&n) {
+        w.add_css_class(&format!("ui-cat-{n}"));
+    }
+}
+
+/// Step a group back as a whole, or bring it forward.
+pub fn set_receded(w: &impl IsA<gtk4::Widget>, receded: bool) {
+    set_class(w, "ui-receded", receded);
+}
+
+/// A Cairo-drawn meter: its `color()` is the accent fill.
+pub fn meter(area: &gtk4::DrawingArea) {
+    area.add_css_class("ui-meter");
+}
+
+// ── Segment ─────────────────────────────────────────────────────────────
+
+/// A track of fused segments; only its ends round. No gap: the segments
+/// touch, and a divider separates them.
+pub fn segmented() -> gtk4::Box {
+    let b = gtk4::Box::new(Orientation::Horizontal, 0);
+    b.add_css_class("ui-segmented");
+    b
+}
+
+/// Make `w` a segment. `quiet` keeps its label muted until it is selected
+/// or under the pointer.
+pub fn segment(w: &impl IsA<gtk4::Widget>, quiet: bool) {
+    w.add_css_class("ui-segment");
+    set_class(w, "quiet", quiet);
+}
+
+/// Where a segment stands in its control.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Selection {
+    Idle,
+    /// What its screen shows.
+    Current,
+    /// Current, on the screen holding input.
+    Focused,
+}
+
+pub fn set_selection(w: &impl IsA<gtk4::Widget>, s: Selection) {
+    set_class(w, "current", s != Selection::Idle);
+    set_class(w, "focused", s == Selection::Focused);
+}
+
+/// The one red: act now (an urgent workspace, a dying battery).
+pub fn set_danger(w: &impl IsA<gtk4::Widget>, danger: bool) {
+    set_class(w, "danger", danger);
+}
+
+/// What a segment's ribbon lane says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ribbon {
+    Off,
+    /// A line: something is live here.
+    Working,
+    /// The categorical tone `n` (1..=4): this one wants you.
+    Category(usize),
+}
+
+/// Give a segment its 2 px ribbon lane, transparent until set.
+pub fn ribboned(w: &impl IsA<gtk4::Widget>) {
+    w.add_css_class("ribboned");
+}
+
+pub fn set_ribbon(w: &impl IsA<gtk4::Widget>, r: Ribbon) {
+    set_class(w, "ribbon-working", r == Ribbon::Working);
+    for n in 1..=4 {
+        set_class(w, &format!("ribbon-cat-{n}"), r == Ribbon::Category(n));
+    }
+}
+
+// ── Mark ────────────────────────────────────────────────────────────────
+
+/// A quiet button straight on thin glass: no fill at rest, muted, ink
+/// under the pointer. `quiet` sits it one level lower, at faint.
+pub fn mark(child: &impl IsA<gtk4::Widget>, quiet: bool) -> gtk4::Button {
+    let b = gtk4::Button::builder().child(child).build();
+    make_mark(&b, quiet);
+    b
+}
+
+pub fn make_mark(b: &gtk4::Button, quiet: bool) {
+    b.add_css_class("ui-mark");
+    set_class(b, "quiet", quiet);
+}
+
+// ── Bay ─────────────────────────────────────────────────────────────────
+
+/// One task's slot on the board; `task` (1..=4) picks its tone.
+pub fn bay(child: &impl IsA<gtk4::Widget>, task: usize) -> gtk4::Button {
+    let b = gtk4::Button::builder().child(child).build();
+    b.add_css_class("ui-bay");
+    b.add_css_class(&format!("cat-{task}"));
+    b
+}
+
+/// A bay's state, as the classes the component styles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BayState {
+    Socket,
+    Working,
+    /// Halted on a prompt; rides the unacked fill.
+    Blocked,
+    Waiting { acked: bool, overdue: bool },
+    Stopped,
+    Stale,
+}
+
+impl BayState {
+    pub fn classes(self) -> &'static [&'static str] {
+        match self {
+            BayState::Socket => &["socket"],
+            BayState::Working => &["working"],
+            BayState::Blocked => &["waiting", "unacked", "blocked"],
+            BayState::Waiting { acked: true, .. } => &["waiting"],
+            BayState::Waiting {
+                acked: false,
+                overdue: false,
+            } => &["waiting", "unacked"],
+            BayState::Waiting {
+                acked: false,
+                overdue: true,
+            } => &["waiting", "unacked", "overdue"],
+            BayState::Stopped => &["stopped"],
+            BayState::Stale => &["stale"],
+        }
+    }
+}
+
+pub fn set_bay_state(b: &gtk4::Button, state: BayState, local: bool) {
+    for c in [
+        "socket", "working", "waiting", "blocked", "unacked", "overdue", "stopped", "stale",
+    ] {
+        b.remove_css_class(c);
+    }
+    for c in state.classes() {
+        b.add_css_class(c);
+    }
+    set_class(b, "local", local);
+}
+
+/// The age chip beside a bay's numeral.
+pub fn bay_chip() -> gtk4::Label {
+    let l = gtk4::Label::new(None);
+    l.add_css_class("ui-bay-chip");
+    l
+}
+
+// ── Popover and list ────────────────────────────────────────────────────
+
+/// A popover that draws nothing itself; its child is the card.
+pub fn popover(child: &impl IsA<gtk4::Widget>, position: gtk4::PositionType) -> gtk4::Popover {
+    gtk4::Popover::builder()
+        .position(position)
+        .has_arrow(false)
+        .css_classes(["ui-popover"])
+        .child(child)
+        .build()
+}
+
+/// A card with no glass behind it (a popup, outside the compositor's
+/// layer effects): the same shape, a solid raised fill.
+pub fn solid_card(w: &impl IsA<gtk4::Widget>) {
+    card(w, Card::Floating);
+    w.add_css_class("solid");
+}
+
+/// A ListBox that draws nothing itself, for rows of `ui-row` content that
+/// light under the pointer or the keyboard.
+pub fn list() -> gtk4::ListBox {
+    let l = gtk4::ListBox::builder()
+        .selection_mode(gtk4::SelectionMode::None)
+        .build();
+    l.add_css_class("ui-list");
+    l
+}
+
+/// A rounded frame for an image, filled while it has none.
+pub fn thumb() -> gtk4::Box {
+    let b = gtk4::Box::builder()
+        .halign(Align::Center)
+        .valign(Align::Center)
+        .overflow(gtk4::Overflow::Hidden)
+        .build();
+    b.add_css_class("ui-thumb");
+    b
+}
+
+/// A button in a dense place (a popover's footer): label size, low.
+pub fn small_button(label: &str, kind: Kind) -> gtk4::Button {
+    let b = button(label, kind);
+    b.add_css_class("small");
+    b
+}
+
+/// A row of a `ui::list`: `content` becomes the row's padded, lit face.
+pub fn list_row(content: &impl IsA<gtk4::Widget>) -> gtk4::ListBoxRow {
+    content.add_css_class("ui-row");
+    gtk4::ListBoxRow::builder().child(content).build()
+}

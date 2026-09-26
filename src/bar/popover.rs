@@ -27,24 +27,18 @@ use super::workspaces::switch_command;
 use crate::spawn::spawn_work;
 use crate::sway_ipc;
 use crate::task_state::{Activity, SessionState, TaskState, first_line, state_dir};
+use crate::ui;
 
-/// The shared chassis: a top-anchored popover whose child is the glass
-/// card. The card lives on the child, not the popover node: popup
-/// surfaces sit outside swayfx's layer_effects list, so there is no
-/// frost behind them and .bar-popover-body swaps the translucent fill
-/// for the raised opaque one (keeping the glass-card radius + border).
+/// The shared chassis: a top-anchored popover whose child is the card.
+/// The card lives on the child, not the popover node: popup surfaces sit
+/// outside swayfx's layer_effects list, so there is no frost behind them
+/// and the card is the solid one (`ui::solid_card`: the card's radius and
+/// border, the raised fill).
 pub fn chassis(parent: &impl IsA<gtk4::Widget>) -> (gtk4::Popover, gtk4::Box) {
-    let body = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(8)
-        .css_classes(["glass-card", "bar-popover-body"])
-        .build();
-    let popover = gtk4::Popover::builder()
-        .position(gtk4::PositionType::Top)
-        .has_arrow(false)
-        .css_classes(["bar-popover"])
-        .child(&body)
-        .build();
+    let body = ui::vbox(3);
+    ui::solid_card(&body);
+    body.add_css_class("bar-popover-body");
+    let popover = ui::popover(&body, gtk4::PositionType::Top);
     popover.set_parent(parent);
     // set_parent without a container: the popover must be unparented when
     // the parent dies or GTK warns about a finalized widget with children.
@@ -57,13 +51,11 @@ pub fn chassis(parent: &impl IsA<gtk4::Widget>) -> (gtk4::Popover, gtk4::Box) {
     (popover, body)
 }
 
-/// Left-aligned prose label — the popovers' basic row unit.
-pub fn line(text: &str, class: &str) -> gtk4::Label {
-    gtk4::Label::builder()
-        .label(text)
-        .xalign(0.0)
-        .css_classes([class])
-        .build()
+/// A popover's heading: small, strong, muted, above what it names.
+pub fn title(text: &str) -> gtk4::Label {
+    let l = ui::text(text, ui::Text::Caption, ui::Tone::Muted);
+    l.add_css_class("ui-strong");
+    l
 }
 
 // ── Task section (board bays) ───────────────────────────────────────────
@@ -111,16 +103,13 @@ impl TaskPopover {
             Some(manual) => format!("TASK {} · {manual}", self.inner.n),
             None => format!("TASK {}", self.inner.n),
         };
-        body.append(&line(&title, "bar-popover-title"));
+        body.append(&self::title(&title));
 
         if task.sessions.is_empty() {
-            body.append(&line("No session", "bar-popover-empty"));
+            body.append(&ui::text("No session", ui::Text::Label, ui::Tone::Muted));
         } else {
             let now = SystemTime::now();
-            let list = gtk4::ListBox::builder()
-                .selection_mode(gtk4::SelectionMode::None)
-                .css_classes(["bar-popover-list"])
-                .build();
+            let list = ui::list();
             for session in &task.sessions {
                 list.append(&session_row(session, now, skew));
             }
@@ -137,16 +126,9 @@ impl TaskPopover {
             body.append(&list);
         }
 
-        let actions = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(6)
-            .css_classes(["bar-popover-actions"])
-            .build();
+        let actions = ui::hbox(3);
         for (label, cmd) in [("Find", "task-find"), ("Rename", "task-rename")] {
-            let btn = gtk4::Button::builder()
-                .label(label)
-                .css_classes(["bar-popover-action"])
-                .build();
+            let btn = ui::small_button(label, ui::Kind::Secondary);
             let popover = self.inner.popover.clone();
             btn.connect_clicked(move |_| {
                 popover.popdown();
@@ -158,24 +140,27 @@ impl TaskPopover {
     }
 }
 
+/// Session rows: click or Enter focuses the session's workspace.
 fn session_row(s: &SessionState, now: SystemTime, skew: Option<SystemTime>) -> gtk4::ListBoxRow {
-    let col = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(2)
-        .css_classes(["bar-popover-row"])
-        .build();
-    let desc = line(&s.desc, "bar-popover-desc");
+    let col = ui::vbox(1);
+    let desc = ui::text(&s.desc, ui::Text::Body, ui::Tone::Fg);
     desc.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     desc.set_max_width_chars(44);
     col.append(&desc);
-    col.append(&line(&meta_line(s, now, skew), "bar-popover-meta"));
+    col.append(&ui::text(
+        &meta_line(s, now, skew),
+        ui::Text::Caption,
+        ui::Tone::Muted,
+    ));
+    // The last assistant message: present once the nixos-side Stop hook
+    // writes last-<pid>, absent (and unmissed) until then.
     if let Some(msg) = last_message(s.pid) {
-        let last = line(&msg, "bar-popover-last");
+        let last = ui::text(&msg, ui::Text::Caption, ui::Tone::Faint);
         last.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         last.set_max_width_chars(44);
         col.append(&last);
     }
-    gtk4::ListBoxRow::builder().child(&col).build()
+    ui::list_row(&col)
 }
 
 /// First line of the last assistant message, written by the nixos-side

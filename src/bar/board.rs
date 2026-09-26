@@ -5,7 +5,7 @@
 //! identical on every output, so the whole cross-task picture is one
 //! glance. Position encodes task, each bay draws its numeral, hue only
 //! reinforces (vision P3) — every state stays distinct under grayscale:
-//! socket = hollow ring, working = mid fill, waiting = bright hue fill,
+//! socket = the lowest fill, working = mid fill, waiting = bright hue fill,
 //! stopped = near-off dot, stale = amber hollow OFF-flag. Motion is
 //! onset-only (P2): one SlideBin nudge when a bay turns unacked-waiting,
 //! then static rest; escalation at 10 min is a static luminance step.
@@ -29,11 +29,7 @@ use super::popover::TaskPopover;
 use crate::anim::{self, SlideBin};
 use crate::sway_ipc::SwayService;
 use crate::task_state::{Activity, SessionState, TaskState, TaskStateService, task_of_name};
-
-const BAY_TASK_CLASSES: [&str; 4] = ["t1", "t2", "t3", "t4"];
-const STATE_CLASSES: [&str; 8] = [
-    "socket", "working", "waiting", "blocked", "unacked", "overdue", "stopped", "stale",
-];
+use crate::ui;
 
 /// Age chip appears once a wait is no longer a blip.
 const CHIP_AFTER: Duration = Duration::from_secs(2 * 60);
@@ -87,25 +83,23 @@ impl BayView {
     }
 }
 
-fn state_classes(state: BayState) -> &'static [&'static str] {
+/// The bay component's state (`ui::bay`). Blocked rides the same
+/// solid-hue fill as an unacked wait; the marker glyph is what separates
+/// them, per the shape rule below.
+fn ui_state(state: BayState) -> ui::BayState {
     match state {
-        BayState::Socket => &["socket"],
-        BayState::Working => &["working"],
-        // Rides the same solid-hue fill as an unacked wait; the marker
-        // glyph is what separates them, per the shape rule below.
-        BayState::Blocked => &["waiting", "unacked", "blocked"],
-        BayState::Waiting { acked: true, .. } => &["waiting"],
-        BayState::Waiting {
-            acked: false,
-            overdue: false,
-        } => &["waiting", "unacked"],
-        BayState::Waiting {
-            acked: false,
-            overdue: true,
-        } => &["waiting", "unacked", "overdue"],
-        BayState::Stopped => &["stopped"],
-        BayState::Stale => &["stale"],
+        BayState::Socket => ui::BayState::Socket,
+        BayState::Working => ui::BayState::Working,
+        BayState::Blocked => ui::BayState::Blocked,
+        BayState::Waiting { acked, overdue } => ui::BayState::Waiting { acked, overdue },
+        BayState::Stopped => ui::BayState::Stopped,
+        BayState::Stale => ui::BayState::Stale,
     }
+}
+
+#[cfg(test)]
+fn state_classes(state: BayState) -> &'static [&'static str] {
+    ui_state(state).classes()
 }
 
 /// Shape channel beside the numeral: states whose CSS box (border/fill)
@@ -215,11 +209,10 @@ pub fn build(
     output: Option<String>,
     bar_root: &impl IsA<gtk4::Widget>,
 ) -> gtk4::Box {
-    let board = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(2)
-        .css_classes(["bar-board", "bar-seg"])
-        .build();
+    let board = ui::hbox(1);
+    board.add_css_class("bar-board");
+    board.add_css_class("bar-seg");
+    ui::segment(&board, false);
     let bays: Vec<Bay> = (1..=4).map(Bay::new).collect();
     for (i, bay) in bays.iter().enumerate() {
         board.append(&bay.button);
@@ -312,10 +305,13 @@ impl Bay {
             .visible(false)
             .build();
         let numeral = gtk4::Label::new(Some(&n.to_string()));
-        let chip = gtk4::Label::builder().css_classes(["bar-bay-chip"]).build();
+        // Waiting-age chip: revealed at the 2 min threshold, ticks 1/min
+        // while a session waits (boundary-aimed timer in task_state.rs).
+        let chip = ui::bay_chip();
+        chip.add_css_class("bar-bay-chip");
         let chip_reveal = gtk4::Revealer::builder()
             .transition_type(gtk4::RevealerTransitionType::Crossfade)
-            .transition_duration(200)
+            .transition_duration(crate::tokens::DURATION[1].1)
             .child(&chip)
             .build();
         let content = gtk4::Box::builder()
@@ -327,12 +323,14 @@ impl Bay {
         content.append(&chip_reveal);
 
         let fill_shown: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+        // Bottom 2 px N/M fill, painted in the bay's faint tone.
         let fill = gtk4::DrawingArea::builder()
             .content_height(2)
             .halign(gtk4::Align::Fill)
             .valign(gtk4::Align::End)
             .visible(false)
             .build();
+        ui::set_tone(&fill, ui::Tone::Faint);
         {
             let shown = fill_shown.clone();
             fill.set_draw_func(move |area, cr, w, h| {
@@ -357,10 +355,8 @@ impl Bay {
         let slide = SlideBin::new();
         slide.set_child(&overlay);
 
-        let button = gtk4::Button::builder()
-            .child(&slide)
-            .css_classes(["bar-bay", BAY_TASK_CLASSES[n as usize - 1]])
-            .build();
+        let button = ui::bay(&slide, n as usize);
+        button.add_css_class("bar-bay");
         let popover = TaskPopover::new(&button, n);
 
         Self {
@@ -384,17 +380,7 @@ impl Bay {
         }
         let onset = matches!(&*cache, Some(prev) if view.is_unacked() && !prev.is_unacked());
 
-        for class in STATE_CLASSES {
-            self.button.remove_css_class(class);
-        }
-        for class in state_classes(view.state) {
-            self.button.add_css_class(class);
-        }
-        if view.local {
-            self.button.add_css_class("local");
-        } else {
-            self.button.remove_css_class("local");
-        }
+        ui::set_bay_state(&self.button, ui_state(view.state), view.local);
 
         let marker = state_marker(view.state);
         self.marker.set_text(marker);

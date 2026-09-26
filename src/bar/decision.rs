@@ -35,6 +35,7 @@ use crate::anim;
 use crate::bar::battery::CRITICAL_PCT;
 use crate::bar::board::{chip_label, session_age};
 use crate::task_state::{Activity, SessionState, TaskSnapshot, TaskStateService};
+use crate::ui;
 use crate::widgets::power::{self, BatteryState};
 
 /// Structural show/hide scale (anim.rs module header).
@@ -48,8 +49,6 @@ const DESC_MAX_CHARS: i32 = 40;
 const OSD_DECAY_MS: u64 = 1500;
 const OSD_EASE_MS: f64 = 150.0;
 const HAIRLINE_WIDTH: i32 = 64;
-
-const DOT_CLASSES: [&str; 4] = ["t1", "t2", "t3", "t4"];
 
 // ── View model ──────────────────────────────────────────────────────────
 
@@ -192,43 +191,43 @@ pub struct DecisionSlot {
 
 impl DecisionSlot {
     pub fn build(tasks: &Rc<TaskStateService>) -> Self {
-        let dot = gtk4::Label::builder()
-            .css_classes(["bar-decision-dot"])
-            .build();
+        // The dot takes the task's categorical tone: hue reinforces
+        // identity, the description carries it.
+        let dot = gtk4::Label::new(None);
         let text = gtk4::Label::builder()
-            .css_classes(["bar-decision-text"])
             .ellipsize(gtk4::pango::EllipsizeMode::End)
             .max_width_chars(DESC_MAX_CHARS)
             .build();
-        let meta = gtk4::Label::builder()
-            .css_classes(["bar-decision-meta"])
-            .visible(false)
-            .build();
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(6)
-            .css_classes(["bar-decision"])
-            .build();
+        // Waiting age + "+N more wait" suffix.
+        let meta = gtk4::Label::builder().visible(false).build();
+        ui::set_text_style(&meta, ui::Text::Caption, ui::Tone::Muted);
+        let root = ui::hbox(3);
+        ui::segment(&root, false);
+        root.add_css_class("bar-decision");
         root.append(&dot);
         root.append(&text);
         root.append(&meta);
 
         // OSD interjection page: icon + center-anchored hairline + value.
-        // Shares the .bar-decision pill so the crossfade only swaps
-        // content, not the card.
+        // The same segment as the occupant, so the crossfade only swaps
+        // content, not the pill.
         let osd_icon = gtk4::Label::builder()
             .css_classes(["bar-decision-osd-icon"])
             .build();
         let osd_text = gtk4::Label::builder()
             .css_classes(["bar-decision-osd-text"])
             .build();
+        ui::set_text_style(&osd_text, ui::Text::Label, ui::Tone::Muted);
+        osd_text.add_css_class("ui-numeric");
         let hair_shown: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
         let hairline = gtk4::DrawingArea::builder()
             .content_width(HAIRLINE_WIDTH)
             .content_height(2)
             .valign(gtk4::Align::Center)
-            .css_classes(["bar-decision-hairline"])
             .build();
+        // The draw func paints the track (a quarter of it) and the fill
+        // from the meter's colour, the accent.
+        ui::meter(&hairline);
         {
             let shown = hair_shown.clone();
             hairline.set_draw_func(move |area, cr, w, h| {
@@ -261,11 +260,9 @@ impl DecisionSlot {
                 let _ = cr.fill();
             });
         }
-        let osd_page = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(8)
-            .css_classes(["bar-decision", "bar-decision-osd"])
-            .build();
+        let osd_page = ui::hbox(3);
+        ui::segment(&osd_page, false);
+        osd_page.add_css_class("bar-decision");
         osd_page.append(&osd_icon);
         osd_page.append(&hairline);
         osd_page.append(&osd_text);
@@ -275,7 +272,7 @@ impl DecisionSlot {
         // sub-threshold scale.
         let stack = gtk4::Stack::builder()
             .transition_type(gtk4::StackTransitionType::Crossfade)
-            .transition_duration(150)
+            .transition_duration(crate::tokens::DURATION[0].1)
             .hhomogeneous(false)
             .build();
         stack.add_child(&root);
@@ -480,12 +477,11 @@ impl DecisionSlot {
 
     fn render(&self, occ: &Occ) {
         let inner = &self.inner;
-        for class in DOT_CLASSES {
-            inner.dot.remove_css_class(class);
-        }
         match occ {
+            // Battery critical owns the slot in red: the one "act now".
             Occ::Battery { text } => {
-                inner.root.add_css_class("critical");
+                ui::set_danger(&inner.root, true);
+                ui::set_category(&inner.dot, 0);
                 inner.dot.set_text("󰂃");
                 inner.text.set_text(text);
                 inner.meta.set_visible(false);
@@ -497,11 +493,11 @@ impl DecisionSlot {
                 meta,
                 ..
             } => {
-                inner.root.remove_css_class("critical");
+                ui::set_danger(&inner.root, false);
                 // Same marker vocabulary as the board bay, so the two
                 // surfaces never disagree about what a glyph means.
                 inner.dot.set_text(if *blocked { "!" } else { "●" });
-                inner.dot.add_css_class(DOT_CLASSES[*task as usize - 1]);
+                ui::set_category(&inner.dot, *task as usize);
                 inner.text.set_text(desc);
                 match meta {
                     Some(m) => {
