@@ -40,7 +40,7 @@ pub use fixed::{COMPONENT, DURATION, RADIUS, SPACE, SURFACE_KEY, TYPE, space};
 #[cfg(test)]
 use inputs::every;
 pub use inputs::{Accent, Contrast, Inputs, Mode, Neutral};
-pub use material::material;
+pub use material::{material, material_at};
 pub use scales::scales;
 pub use semantic::{ON_STATUS, Status, categorical, levels, status};
 pub use tint::Tint;

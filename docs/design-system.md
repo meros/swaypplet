@@ -429,9 +429,22 @@ one material in both modes. A negative `photochromic` is the one shader
 change the light mode needs: a soft floor on luminance,
 `lum' = lum + f·exp(−lum/f)`, the mirror of the ceiling.
 
-`glass.nix` keeps its one material and gains `modes.dark` and `modes.light`
-overrides for these six values; the settings pane's glass tab edits the
-current mode's.
+The mode always sets these six, dark at standard contrast included
+(`glass::for_mode`), so nothing a person tunes is one mode's material
+only. The settings pane's Glass tab moves them only relative to the mode,
+with the same meaning in both:
+
+- **Clarity** (−1 to +1, 0 the mode's own) scales the body fill by up to
+  ±50 % (`tokens::material_at`). Where a thinner fill would cost the text
+  its §5 contrast over the mode's hard backdrop (black behind light glass,
+  white behind dark), the lift or the ceiling strengthens (to at most
+  −0.70 and 0.15), and past that the fill steps back toward the mode's own.
+  At +1 both standard modes reach a fill of 0.25.
+- **Frost** multiplies the mode's frost.
+
+The rest of the tab is the one material: the profile and grain,
+refraction, dispersion, the highlight and the bevel. Presets are written
+in the same terms: a smoked preset is a clarity of −0.8, never an absorb.
 
 ## 5. Contrast
 

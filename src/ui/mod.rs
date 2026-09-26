@@ -70,6 +70,7 @@ pub use motion::{clear_shake, page_stack, revealer, set_breathing, shake};
 pub use popover::popover;
 pub use progress::{progress, set_progress_status};
 pub use row::{Row, list, list_row, row, row_button, set_busy, set_instant, set_selected};
+#[allow(unused_imports)]
 pub use slider::{Density, check, set_over_range, slider_row, switch, switch_row};
 pub use surface::{canvas, scrim, window};
 pub use text::{
