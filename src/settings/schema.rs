@@ -462,7 +462,7 @@ impl Keys {
     /// The ceiling as a fraction, which is what the audio path speaks.
     pub fn volume_ceiling(&self) -> f64 {
         if self.volume_boost {
-            crate::audio::VOLUME_CEILING
+            crate::services::audio::VOLUME_CEILING
         } else {
             1.0
         }

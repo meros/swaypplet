@@ -141,7 +141,7 @@ fn fill(ui: &Rc<Ui>) {
     let ui = ui.clone();
     crate::spawn::spawn_work(
         move || {
-            let tree = crate::sway_ipc::connect().ok()?.get_tree().ok()?;
+            let tree = crate::sway::ipc::connect().ok()?.get_tree().ok()?;
             Some(
                 names
                     .into_iter()
@@ -175,15 +175,7 @@ fn rows(ui: &Rc<Ui>, scenes: &[(String, Option<crate::jump::scene::Scene>)]) {
         let side = ui::vbox(3);
         side.set_valign(gtk4::Align::Center);
         let label = ui::text(
-            &crate::jump::rows::label_for(&crate::jump::place::Place {
-                num: name
-                    .split(':')
-                    .next()
-                    .and_then(|n| n.parse().ok())
-                    .unwrap_or(-1),
-                name: name.clone(),
-                output: String::new(),
-            }),
+            &crate::sway::workspace::label_for_name(name),
             ui::Text::Body,
             ui::Tone::Fg,
         );

@@ -12,7 +12,7 @@
 //! a switch that moves twice a day.
 //!
 //! Only *edges* are published, and the opening reading is a seed rather than
-//! an edge — the same rule presence and resume follow (`crate::presence`,
+//! an edge — the same rule presence and resume follow (`services::presence`,
 //! lock/face.rs). A consumer that armed on the seed would fire the moment it
 //! started, on a lid that had not moved.
 

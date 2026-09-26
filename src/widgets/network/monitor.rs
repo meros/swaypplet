@@ -4,8 +4,8 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{Label, ListBox};
 
-use super::NetworkState;
-use super::backend::*;
+use super::{NetworkState, set_signal_glyph, signal_tone};
+use crate::services::network::*;
 
 /// Widget handles needed by the display update helpers.
 pub struct DisplayWidgets {
@@ -65,7 +65,7 @@ struct CachedState {
 /// or every 2 s while something is changing.
 ///
 /// One tick is five D-Bus conversations and about 120 ms of a worker thread
-/// (`backend::live::time_one_poll`), so it is not something to do to a
+/// (`services::network::live::time_one_poll`), so it is not something to do to a
 /// closed panel. The tick therefore starts by asking whether the section is
 /// mapped and skips the whole poll when it is not — the panel is a
 /// long-lived process and spends most of its life hidden. Coming back is

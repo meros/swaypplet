@@ -22,8 +22,8 @@ use gtk4::prelude::*;
 
 use super::popover;
 use crate::anim::{self, SlideBin};
+use crate::services::power::{self, BatteryState, ChargeState};
 use crate::ui;
-use crate::widgets::power::{self, BatteryState, ChargeState};
 
 const WARNING_PCT: u8 = 30;
 /// Shared with the decision slot's battery occupant (bar/decision.rs).

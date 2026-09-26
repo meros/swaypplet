@@ -4,8 +4,8 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{ListBox, ListBoxRow, Spinner};
 
-use super::NetworkState;
-use super::backend::*;
+use super::{NetworkState, set_signal_glyph};
+use crate::services::network::*;
 use crate::spawn::spawn_work;
 use crate::ui;
 

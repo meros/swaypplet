@@ -34,9 +34,9 @@ use gtk4::prelude::*;
 use crate::anim;
 use crate::bar::battery::CRITICAL_PCT;
 use crate::bar::board::{chip_label, session_age};
-use crate::task_state::{Activity, SessionState, TaskSnapshot, TaskStateService};
+use crate::services::power::{self, BatteryState};
+use crate::services::task_state::{Activity, SessionState, TaskSnapshot, TaskStateService};
 use crate::ui;
-use crate::widgets::power::{self, BatteryState};
 
 /// settask caps descriptions at 40 chars; the slot shows all of them
 /// (vision P5's one sanctioned exception) but never more.

@@ -6,8 +6,8 @@ use gtk4::{
     Button, Entry, Label, ListBox, ListBoxRow, PasswordEntry, RevealerTransitionType, Spinner,
 };
 
-use super::NetworkState;
-use super::backend::*;
+use super::{NetworkState, apply_nm_result, auto_hide_status, set_signal_glyph, signal_tone};
+use crate::services::network::*;
 use crate::spawn::spawn_work;
 use crate::tokens::space;
 use crate::ui;

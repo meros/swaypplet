@@ -1,6 +1,6 @@
 //! D-Bus implementation of `org.freedesktop.PolicyKit1.AuthenticationAgent`.
 //!
-//! Mirrors the threading model of `notifications/dbus.rs`: a dedicated
+//! Mirrors the threading model of `services/notifications/dbus.rs`: a dedicated
 //! background thread runs a current-thread tokio runtime hosting the zbus
 //! object server. RPC calls are forwarded to the GTK main thread over an
 //! `async_channel`; the main thread fulfils each request and

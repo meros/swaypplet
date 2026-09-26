@@ -45,7 +45,7 @@ pub fn pick(app: &gtk4::Application, done: impl FnOnce(Image) + 'static) {
     let app = app.clone();
     crate::spawn::spawn_work(
         || {
-            let tree = crate::sway_ipc::connect().ok()?.get_tree().ok()?;
+            let tree = crate::sway::ipc::connect().ok()?.get_tree().ok()?;
             Some(scene::all_windows(&tree))
         },
         move |windows| {
@@ -83,7 +83,10 @@ fn show(app: &gtk4::Application, windows: Vec<(scene::Window, String, String)>, 
     crate::ui::surface::adopt(&card);
     crate::ui::card::adopt(&card, crate::ui::Card::Floating);
     card.add_css_class("window-picker");
-    card.append(&crate::ui::overline("Screenshot a window", crate::ui::Tone::Muted));
+    card.append(&crate::ui::overline(
+        "Screenshot a window",
+        crate::ui::Tone::Muted,
+    ));
 
     let grid = gtk4::FlowBox::builder()
         .max_children_per_line(COLUMNS)

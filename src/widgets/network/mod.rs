@@ -1,7 +1,5 @@
-mod backend;
 mod interfaces;
 mod monitor;
-mod nm;
 mod vpn;
 mod wifi;
 
@@ -11,14 +9,56 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{Box, Button, Label, ListBox, RevealerTransitionType, Spinner, Switch};
 
+use crate::services::network::*;
 use crate::spawn::spawn_work;
 use crate::ui;
-use backend::*;
 
-// The quick-toggle tile drives the radio without going through this section
-// (widgets/tiles.rs), so the two calls it needs are re-exported here rather
-// than reaching into `backend` from outside the module.
-pub use backend::{NmResult, network_manager_available, set_wifi_radio, wifi_radio_enabled};
+// ── Shared UI helpers ─────────────────────────────────────────────────────────
+
+/// A signal is only coloured when it is a problem: weak is a warning, none
+/// is danger, and anything usable stays in the icon's own tone.
+fn signal_tone(strength: u8) -> ui::Tone {
+    match strength {
+        0..=20 => ui::Tone::Danger,
+        21..=40 => ui::Tone::Warning,
+        _ => ui::Tone::Fg,
+    }
+}
+
+/// Draw a network glyph (a row's or the hero's icon) at title size, in the
+/// tone its signal earns.
+fn set_signal_glyph(icon: &gtk4::Label, glyph: &str, tone: ui::Tone) {
+    icon.set_label(glyph);
+    ui::glyph::adopt(icon, ui::Text::Title, tone);
+}
+
+/// Apply an `NmResult` to a status label: set text, tone, and visibility.
+fn apply_nm_result(status_lbl: &gtk4::Label, result: &NmResult) {
+    match result {
+        NmResult::Success => {
+            status_lbl.set_label("✓");
+            ui::set_text_style(status_lbl, ui::Text::Label, ui::Tone::Success);
+        }
+        NmResult::Failure(msg) => {
+            let display = if msg.is_empty() {
+                "Failed"
+            } else {
+                msg.as_str()
+            };
+            status_lbl.set_label(display);
+            ui::set_text_style(status_lbl, ui::Text::Label, ui::Tone::Danger);
+        }
+    }
+    status_lbl.set_visible(true);
+}
+
+/// Auto-hide a status label after 4 seconds.
+fn auto_hide_status(status_lbl: &gtk4::Label) {
+    let status_hide = status_lbl.clone();
+    glib::timeout_add_local_once(std::time::Duration::from_secs(4), move || {
+        status_hide.set_visible(false);
+    });
+}
 
 // ── Async result types ───────────────────────────────────────────────────────
 

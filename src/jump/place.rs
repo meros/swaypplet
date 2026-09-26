@@ -92,7 +92,7 @@ fn outputs_in_focus_order(tree: &Node) -> Vec<&Node> {
 pub(crate) mod fixture {
     //! Trees for tests, from JSON, because `swayipc::Node` is
     //! `#[non_exhaustive]` and serde is the only way to build one. Same trick
-    //! `sway_ipc.rs`'s tests use.
+    //! `sway/ipc.rs`'s tests use.
 
     use serde_json::{Value, json};
     use swayipc::Node;

@@ -38,7 +38,7 @@ use super::card::{self, Live};
 use super::live;
 use super::scene::{self, Scene};
 use crate::layer_shell::{self, LayerShellConfig};
-use crate::sway_ipc::SwayService;
+use crate::sway::ipc::SwayService;
 
 /// The picture, 16:10.
 const PIN_W: i32 = 400;
@@ -209,7 +209,7 @@ impl Pins {
 
     /// Go to a pinned workspace.
     pub fn go(&self, workspace: &str) {
-        crate::sway_ipc::run_command(&format!(
+        crate::sway::ipc::run_command(&format!(
             "workspace \"{}\"",
             workspace.replace('\\', "\\\\").replace('"', "\\\"")
         ));
@@ -235,7 +235,7 @@ impl Pins {
         let this = self.clone();
         crate::spawn::spawn_work(
             || {
-                let mut conn = crate::sway_ipc::connect().ok()?;
+                let mut conn = crate::sway::ipc::connect().ok()?;
                 let ws = conn
                     .get_workspaces()
                     .ok()?
@@ -253,7 +253,11 @@ impl Pins {
     /// Pin `workspace` on the focused output, or unpin it. Returns whether
     /// it is pinned afterwards.
     pub fn toggle(&self, workspace: String) -> bool {
-        self.toggle_on(workspace, crate::sway_ipc::focused_output())
+        let sway = self.inner.borrow().sway.clone();
+        self.toggle_on(
+            workspace,
+            crate::sway::ipc::focused_output_from(sway.as_deref()),
+        )
     }
 
     fn toggle_on(&self, workspace: String, output: Option<String>) -> bool {
@@ -295,7 +299,7 @@ impl Pins {
         let monitor = output
             .as_deref()
             .and_then(layer_shell::monitor_by_connector);
-        let label = pin_label(&workspace);
+        let label = crate::sway::workspace::label_for_name(&workspace);
         let parts = build_window(&app, monitor.as_ref(), &label);
 
         self.wire(&parts, &workspace);
@@ -415,7 +419,7 @@ impl Pins {
             .map(|p| (p.workspace.clone(), p.region.as_ref().map(|r| r.con_id)));
         match target {
             Some((_, Some(con_id))) => {
-                crate::sway_ipc::run_command(&format!("[con_id={con_id}] focus"));
+                crate::sway::ipc::run_command(&format!("[con_id={con_id}] focus"));
             }
             Some((workspace, None)) => self.go(&workspace),
             None => {}
@@ -533,7 +537,7 @@ impl Pins {
         let this = self.clone();
         crate::spawn::spawn_work(
             move || {
-                let tree = crate::sway_ipc::connect().ok()?.get_tree().ok()?;
+                let tree = crate::sway::ipc::connect().ok()?.get_tree().ok()?;
                 Some(
                     wanted
                         .into_iter()
@@ -711,22 +715,10 @@ fn update(pin: &mut Pin, scene: Option<Scene>, show: bool) {
 
 /// A region pin's label: the app, and where its window is.
 fn region_label(app: &str, workspace: &str) -> String {
-    format!("{app} \u{00b7} {}", pin_label(workspace))
-}
-
-/// The Super+Tab tile's label for the workspace, so a pin and its tile
-/// agree.
-fn pin_label(workspace: &str) -> String {
-    let num: i32 = workspace
-        .split(':')
-        .next()
-        .and_then(|n| n.parse().ok())
-        .unwrap_or(-1);
-    super::rows::label_for(&super::place::Place {
-        num,
-        name: workspace.to_string(),
-        output: String::new(),
-    })
+    format!(
+        "{app} \u{00b7} {}",
+        crate::sway::workspace::label_for_name(workspace)
+    )
 }
 
 struct Parts {

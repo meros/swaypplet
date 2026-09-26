@@ -1,11 +1,11 @@
-/* ── Notification popups (src/notifications/popup.rs) ──
+/* ── Notification popups (src/notifications/) ──
    The popup cards. Colour, type and shape come from the components (the
    card and its tints, the rail, the overline, the badge, the menu); this
    places them. The centre is a panel section and has no rules here. */
 
 /* Cards live on transparent layer surfaces, one per card; everything
    outside the card must stay alpha 0 so the compositor's glass clips to
-   the card (see the window comment in popup.rs). The card is the design
+   the card (see the window comment in stack.rs). The card is the design
    system's glass card: it paints the key and nothing else, so a popup is
    the same material as the panel, the OSD and the launcher, frost and
    bevel included. The trade is accepted: over a bright wallpaper the body's

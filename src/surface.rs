@@ -94,7 +94,7 @@ impl GlassSurface {
     /// the surface maps — the right screen for a notification, and an
     /// unknowable one afterwards. Naming it makes the output the caller's
     /// fact, which is what lets the popup stack lay out one column per
-    /// screen (`notifications/popup.rs`).
+    /// screen (`notifications/stack.rs`).
     ///
     /// [`pane`]: Self::pane
     /// [`set_content`]: Self::set_content
@@ -251,7 +251,7 @@ impl GlassSurface {
     /// The order is the whole point. Asking for the height at `-1` asks every
     /// label inside for its height at its own natural width, and the cards
     /// deliberately collapse those to one character (`max_width_chars(1)` in
-    /// notifications/popup.rs) so the pane's size request is what drives
+    /// notifications/card.rs) so the pane's size request is what drives
     /// allocation. A wrapped, line-capped body answers that question with its
     /// full line cap whatever it actually holds: a one-line body measured
     /// 76 px where it renders 40, so the stack slotted every card as if its

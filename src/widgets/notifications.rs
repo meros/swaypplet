@@ -4,8 +4,8 @@ use std::time::SystemTime;
 
 use gtk4::prelude::*;
 
-use crate::notifications::CloseReason;
-use crate::notifications::store::{self, NotificationStore};
+use crate::services::notifications::CloseReason;
+use crate::services::notifications::store::{self, NotificationStore};
 use crate::ui;
 use crate::ui::icons;
 
@@ -143,7 +143,7 @@ fn rebuild_list(
 
     // Clone notification data out of the borrow to avoid holding RefCell
     // across widget creation (which could trigger re-entrant GTK callbacks).
-    let notifications: Vec<crate::notifications::Notification> = {
+    let notifications: Vec<crate::services::notifications::Notification> = {
         let store_ref = store.borrow();
         store_ref.all().to_vec()
     };
@@ -163,8 +163,10 @@ fn rebuild_list(
     empty_label.set_visible(false);
 
     // Group by app_name, show newest first
-    let mut grouped: std::collections::BTreeMap<String, Vec<&crate::notifications::Notification>> =
-        std::collections::BTreeMap::new();
+    let mut grouped: std::collections::BTreeMap<
+        String,
+        Vec<&crate::services::notifications::Notification>,
+    > = std::collections::BTreeMap::new();
     for notif in notifications.iter().rev() {
         grouped
             .entry(notif.app_name.clone())
@@ -187,7 +189,7 @@ fn rebuild_list(
 }
 
 fn build_entry(
-    notif: &crate::notifications::Notification,
+    notif: &crate::services::notifications::Notification,
     store: &Rc<RefCell<NotificationStore>>,
 ) -> gtk4::Box {
     let r = ui::row("", &notif.summary, "");

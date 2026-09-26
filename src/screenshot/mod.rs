@@ -33,7 +33,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::notifications::store::StoreRef;
+use crate::services::notifications::store::StoreRef;
 
 /// What the owner asked for.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -192,9 +192,9 @@ fn pick(store: &StoreRef, selection: &select::Selection) {
         display.clipboard().set_text(&hex);
     }
 
-    crate::notifications::store::store_add(
+    crate::services::notifications::store::store_add(
         store,
-        crate::notifications::Notification {
+        crate::services::notifications::Notification {
             app_name: "Colour picker".into(),
             summary: hex.clone(),
             body: format!("rgb({r}, {g}, {b}) — copied"),

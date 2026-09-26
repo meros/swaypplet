@@ -1,6 +1,6 @@
 //! SNI host service — `system-tray`'s tokio client on a dedicated thread
 //! (same runtime pattern as `idle/logind.rs`), mirroring the item map to
-//! the GTK thread the way `sway_ipc` does: full snapshots per event, not
+//! the GTK thread the way `sway::ipc` does: full snapshots per event, not
 //! deltas, so a lagged broadcast receiver can never leave the cache stale.
 //! A snapshot equal to the last one sent is dropped: the client emits an
 //! event for bus traffic that changes nothing the bar shows, and other

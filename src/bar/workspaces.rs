@@ -43,47 +43,13 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::sway_ipc::{self, OutputInfo, SwayService, WorkspaceInfo};
-use crate::task_state::{Activity, TaskSnapshot, TaskStateService, task_of_name};
+use crate::services::task_state::{Activity, TaskSnapshot, TaskStateService, task_of_name};
+use crate::sway::ipc::{self, OutputInfo, SwayService, WorkspaceInfo};
+use crate::sway::workspace::{generic_label, switch_command, task_label};
 use crate::ui;
 
 /// Marks the pin glyph inside a segment, so `set_pinned` can find it.
 const PIN_MARK_CLASS: &str = "bar-ws-pin-glyph";
-
-// Label tables — mirror users/modules/workspace-config.nix (nixos repo):
-// nums 1–16 are the task grid, rendered "1¹".."4⁴" behind a dot in the
-// task's categorical tone (`ui::set_category`), nums 17–38 the generic
-// keyed workspaces. Keep in lockstep with that file.
-//
-// The grid is 4 tasks × 2 screens as of 2026-08-10; the superscript table
-// still runs to four because the `num` spacing (1,2 / 5,6 / 9,10 / 13,14)
-// was kept when screens c and d were retired, and a task that grows a
-// third screen should render rather than fall back to its raw name.
-const TASK_SUPERSCRIPTS: [&str; 4] = ["¹", "²", "³", "⁴"];
-const GENERIC_LABELS: &[(i32, &str)] = &[
-    (17, "3"),
-    (18, "4"),
-    (19, "󰖟 b"),
-    (20, "󰃭 c"),
-    (21, "󰈙 d"),
-    (22, "e"),
-    (23, "󰉋 f"),
-    (24, "󰊤 g"),
-    (25, "h"),
-    (26, "i"),
-    (27, "j"),
-    (28, "k"),
-    (29, "l"),
-    (30, "󰍡 m"),
-    (31, "󱄅 n"),
-    (32, "📧 o"),
-    (33, "󰓇 p"),
-    (34, "󰜎 r"),
-    (35, "󰓓 t"),
-    (36, "󰑴 u"),
-    (37, "󰕧 v"),
-    (38, "󰗃 y"),
-];
 
 pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box {
     // Holder for the per-screen group pills; the fused-segment styling
@@ -254,8 +220,8 @@ fn raise(
                     ui::segment::adopt(&button, true);
                     ui::set_ribbon(&button, ui::Ribbon::Off);
                     let cmd = switch_command(ws.num, &ws.name);
-                    button.connect_clicked(move |_| sway_ipc::run_command(&cmd));
-                    crate::jump::peek::attach(&button, ws.name.clone(), on_screen.clone());
+                    button.connect_clicked(move |_| ipc::run_command(&cmd));
+                    super::peek::attach(&button, ws.name.clone(), on_screen.clone());
                     widget.append(&button);
                     Segment {
                         workspace: ws.name.clone(),
@@ -500,39 +466,6 @@ fn label_widget(num: i32, name: &str) -> gtk4::Widget {
     row.upcast()
 }
 
-/// Task strip membership: `Some((task 1–4, "1¹".."4⁴"))` for nums 1–16.
-fn task_label(num: i32) -> Option<(usize, String)> {
-    if !(1..=16).contains(&num) {
-        return None;
-    }
-    let task = ((num - 1) / 4) as usize + 1;
-    let screen = ((num - 1) % 4) as usize;
-    Some((task, format!("{task}{}", TASK_SUPERSCRIPTS[screen])))
-}
-
-/// Label for non-task workspaces.
-pub(crate) fn generic_label(num: i32, name: &str) -> &str {
-    match GENERIC_LABELS.iter().find(|(n, _)| *n == num) {
-        Some((_, label)) => label,
-        // Waybar's default icon was blank; the name keeps ad-hoc
-        // workspaces visible instead of rendering an empty button.
-        None => name,
-    }
-}
-
-/// Numbered workspaces switch by number, so "5:t2a" and a bare "5" resolve
-/// to the same target (matches waybar and the sway keybindings);
-/// named-only ones by quoted name. Also the popover session rows' focus
-/// path (bar/popover.rs).
-pub(crate) fn switch_command(num: i32, name: &str) -> String {
-    if num >= 0 {
-        format!("workspace number {num}")
-    } else {
-        let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
-        format!("workspace \"{escaped}\"")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -659,43 +592,8 @@ mod tests {
         assert_eq!(ws_state(&ws(9, "9:t3a")), WsState::Idle);
     }
 
-    #[test]
-    fn task_workspaces_carry_task_index_and_superscript() {
-        assert_eq!(task_label(1), Some((1, "1¹".into())));
-        assert_eq!(task_label(16), Some((4, "4⁴".into())));
-        // Task boundary: num 5 is task 2, screen 1.
-        assert_eq!(task_label(5), Some((2, "2¹".into())));
-        assert_eq!(task_label(17), None);
-        assert_eq!(task_label(-1), None);
-    }
-
-    #[test]
-    fn generic_labels_come_from_the_table() {
-        assert_eq!(generic_label(19, "19:wb"), "󰖟 b");
-        assert_eq!(generic_label(38, "38:wy"), "󰗃 y");
-        assert_eq!(generic_label(34, "34:wr"), "󰜎 r");
-        assert_eq!(generic_label(29, "29:wl"), "l");
-        assert_eq!(generic_label(17, "17:w3"), "3");
-    }
-
-    #[test]
-    fn unknown_workspaces_fall_back_to_the_name() {
-        assert_eq!(generic_label(-1, "mail"), "mail");
-        assert_eq!(generic_label(42, "42"), "42");
-    }
-
-    #[test]
-    fn switch_command_targets_number_or_quoted_name() {
-        assert_eq!(switch_command(5, "5:t2a"), "workspace number 5");
-        assert_eq!(switch_command(-1, "mail"), "workspace \"mail\"");
-        assert_eq!(
-            switch_command(-1, "we\"ird\\ws"),
-            "workspace \"we\\\"ird\\\\ws\""
-        );
-    }
-
-    fn session(activity: Activity, workspace: &str) -> crate::task_state::SessionState {
-        crate::task_state::SessionState {
+    fn session(activity: Activity, workspace: &str) -> crate::services::task_state::SessionState {
+        crate::services::task_state::SessionState {
             pid: 1,
             desc: "d".into(),
             activity,

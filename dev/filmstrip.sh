@@ -100,7 +100,7 @@ cleanup() {
 trap cleanup EXIT
 
 export SWAYSOCK="$SOCK"
-# swaypplet reads I3SOCK before SWAYSOCK (src/sway_ipc.rs), so an inherited
+# swaypplet reads I3SOCK before SWAYSOCK (src/sway/ipc.rs), so an inherited
 # I3SOCK sends the harness client's IPC to the live session instead. On
 # 2026-09-25 that delivered a layer_effects the live sway could not parse,
 # and the live sway went down with it.

@@ -1,6 +1,6 @@
 //! Audio section: output and input volume, device pickers, per-app mixer.
 //!
-//! All of the state comes from [`crate::audio`], which holds one connection to
+//! All of the state comes from [`crate::services::audio`], which holds one connection to
 //! the sound server and pushes a snapshot whenever anything changes. This file
 //! used to own that too — a `wpctl status` parser, a second `wpctl` call per
 //! device for its volume, and a 2-second timer polling for a default-device
@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::audio::{AudioService, AudioState, Command, Device, Stream, VolumeState};
+use crate::services::audio::{AudioService, AudioState, Command, Device, Stream, VolumeState};
 use crate::ui;
 use crate::ui::icons;
 

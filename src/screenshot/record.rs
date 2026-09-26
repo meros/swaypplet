@@ -9,9 +9,9 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
-use crate::notifications::store::{StoreRef, store_add};
-use crate::notifications::{Notification, Urgency};
 use crate::service::Observed;
+use crate::services::notifications::store::{StoreRef, store_add};
+use crate::services::notifications::{Notification, Urgency};
 
 thread_local! {
     static ACTIVE_RECORDING: RefCell<Option<RecordingState>> = RefCell::new(None);

@@ -18,12 +18,13 @@ mod clock;
 mod decision;
 mod hazards;
 mod media;
+mod peek;
 mod pins;
-pub(crate) mod popover;
+mod popover;
 mod presence;
 mod start;
 mod tray;
-pub(crate) mod workspaces;
+mod workspaces;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -35,8 +36,8 @@ use gtk4_layer_shell::{Edge, Layer};
 
 use crate::anim;
 use crate::layer_shell::{self, LayerShellConfig};
-use crate::sway_ipc::SwayService;
-use crate::task_state::TaskStateService;
+use crate::services::task_state::TaskStateService;
+use crate::sway::ipc::SwayService;
 use crate::theme;
 
 const APP_ID: &str = "dev.swaypplet.bar";
@@ -74,15 +75,15 @@ pub struct BarManager {
     sway: Rc<SwayService>,
     /// One sound-server connection per bar process; the hazard lane's
     /// microphone glyph is its only reader here.
-    audio: Rc<crate::audio::AudioService>,
+    audio: Rc<crate::services::audio::AudioService>,
     tasks: Rc<TaskStateService>,
     /// One status watcher per bar process; every output's backup segment
     /// reads the same snapshot.
-    backup: Rc<crate::backup::BackupStatusService>,
+    backup: Rc<crate::services::backup::BackupStatusService>,
     /// One MPRIS connection per bar process; every output's media mark
     /// reads the same snapshot.
-    mpris: Rc<crate::mpris::MprisService>,
-    tray: Rc<tray::TrayService>,
+    mpris: Rc<crate::services::mpris::MprisService>,
+    tray: Rc<crate::services::tray::TrayService>,
     /// What the start button does. In-process hosting passes a direct
     /// `panel.toggle()`; the standalone bar passes the cross-process
     /// SIGUSR1 fallback (see `start::toggle_panel_fallback`).
@@ -93,7 +94,7 @@ impl BarManager {
     pub fn new(
         app: &gtk4::Application,
         sway: Rc<SwayService>,
-        audio: Rc<crate::audio::AudioService>,
+        audio: Rc<crate::services::audio::AudioService>,
         toggle_panel: Rc<dyn Fn()>,
     ) -> Rc<Self> {
         let display = gdk::Display::default().expect("no gdk display");
@@ -105,9 +106,9 @@ impl BarManager {
             sway,
             audio,
             tasks,
-            backup: crate::backup::BackupStatusService::start(),
-            mpris: crate::mpris::MprisService::start(),
-            tray: tray::TrayService::start(),
+            backup: crate::services::backup::BackupStatusService::start(),
+            mpris: crate::services::mpris::MprisService::start(),
+            tray: crate::services::tray::TrayService::start(),
             toggle_panel,
         });
 
@@ -357,7 +358,7 @@ pub fn run() {
         *slot = Some(BarManager::new(
             app,
             sway,
-            crate::audio::AudioService::start(),
+            crate::services::audio::AudioService::start(),
             Rc::new(start::toggle_panel_fallback),
         ));
     });

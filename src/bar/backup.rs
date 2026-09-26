@@ -9,14 +9,14 @@
 //! One glyph, no text: the numbers belong in the tooltip, which is where
 //! the question the glyph provokes gets answered, and in the Helm's power
 //! sheet (`widgets/backup.rs`) for the full readout. State comes from
-//! `crate::backup`, which watches the status directory, so this segment
+//! `services::backup`, which watches the status directory, so this segment
 //! owns no timer and reads no files.
 
 use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::backup::{BackupStatusService, Tier};
+use crate::services::backup::{BackupStatusService, Tier};
 use crate::ui;
 
 /// The glyph's tone per tier. This breaks the battery's rest-is-faint rule

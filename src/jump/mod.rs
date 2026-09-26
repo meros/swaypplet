@@ -31,7 +31,6 @@
 pub mod card;
 pub mod gesture;
 pub mod live;
-pub mod peek;
 pub mod pin;
 pub mod place;
 pub mod row;
@@ -409,16 +408,6 @@ impl Jump {
                     (st.names.clone(), st.selected, st.row)
                 };
                 let origin = names.first().cloned().unwrap_or_default();
-                // Refuse to move if something already did (a click on the
-                // bar, a script): committing on top of that would move you
-                // twice. Put the row away instead.
-                if focused_workspace().is_some_and(|now| now != origin) {
-                    log::debug!("jump: cancelled, something else moved us from {origin:?}");
-                    if let Some(r) = &r {
-                        send(row::cancel(r, &names));
-                    }
-                    return;
-                }
                 // One connection, in order: the others fade where they are,
                 // the switch, then the selected one grows to full size. sway
                 // keeps a workspace that is already on screen where it is when
@@ -432,7 +421,21 @@ impl Jump {
                 }
                 cmds.push(command);
                 cmds.extend(after);
-                crate::sway_ipc::run_commands(cmds);
+                // Refuse to move if something already did (a click on the
+                // bar, a script): committing on top of that would move you
+                // twice. Put the row away instead. The question is a round
+                // trip, so it is asked on a worker, and the commands follow
+                // its answer from there.
+                crate::spawn::spawn_work(focused_workspace, move |now| {
+                    if now.is_some_and(|now| now != origin) {
+                        log::debug!("jump: cancelled, something else moved us from {origin:?}");
+                        if let Some(r) = &r {
+                            send(row::cancel(r, &names));
+                        }
+                        return;
+                    }
+                    crate::sway::ipc::run_commands(cmds);
+                });
             }
         }
     }
@@ -517,7 +520,7 @@ fn send(looks: Vec<(String, row::Look)>) {
     if looks.is_empty() {
         return;
     }
-    crate::sway_ipc::run_commands(looks.iter().map(|(n, l)| l.command(n)).collect());
+    crate::sway::ipc::run_commands(looks.iter().map(|(n, l)| l.command(n)).collect());
 }
 
 /// Everything the row needs.
@@ -532,7 +535,7 @@ struct Session {
 }
 
 fn read_session() -> Option<Session> {
-    let mut conn = crate::sway_ipc::connect().ok()?;
+    let mut conn = crate::sway::ipc::connect().ok()?;
     let tree = conn.get_tree().ok()?;
     let config = conn.get_config().ok().map(|c| c.config).unwrap_or_default();
     let places = place::mru(&tree);
@@ -570,7 +573,7 @@ fn read_session() -> Option<Session> {
 /// in the switcher's mode. One round trip on a unix socket is well under a
 /// millisecond.
 fn set_mode(mode: &str) {
-    let done = crate::sway_ipc::connect()
+    let done = crate::sway::ipc::connect()
         .map_err(|e| e.to_string())
         .and_then(|mut c| {
             c.run_command(format!("mode {mode}"))
@@ -582,7 +585,7 @@ fn set_mode(mode: &str) {
 }
 
 fn focused_workspace() -> Option<String> {
-    let mut conn = crate::sway_ipc::connect().ok()?;
+    let mut conn = crate::sway::ipc::connect().ok()?;
     conn.get_workspaces()
         .ok()?
         .into_iter()

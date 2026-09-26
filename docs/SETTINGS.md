@@ -90,8 +90,8 @@ and Bar tabs is `nix <section>` into the clipboard.
   tokens on sway's `client.*` window borders (`src/theme/sway.rs`), so they
   follow the mode and the tint.
 - **Alerts**: a popup reads linger, corner and depth as it is created and
-  keeps them (`notifications/popup.rs`); quiet hours is a 30 s tick plus an
-  observer (`notifications/quiet.rs`), edge-triggered so a manual DND
+  keeps them (`notifications/stack.rs`); quiet hours is a 30 s tick plus an
+  observer (`services/notifications/quiet.rs`), edge-triggered so a manual DND
   toggle inside the window stands. Capture is read at the moment of the
   shot (`screenshot/deliver.rs`, `screenshot/mod.rs`).
 - **Keys** are read per press by the OSD; the panel's volume rail takes

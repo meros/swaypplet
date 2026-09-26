@@ -6,7 +6,7 @@
 //! open the task section: full description, raw `N/M ETA` text,
 //! per-session rows with status_mtime-derived durations (ages straddling
 //! a detected suspend read approximate, "~9h"), and row activation (click
-//! or Enter) focusing the session's workspace over the same sway_ipc path
+//! or Enter) focusing the session's workspace over the same sway::ipc path
 //! as the keybindings. The task-find/task-rename actions the bay click
 //! used to fire directly live on as footer buttons; their sway
 //! keybindings are independent and unaffected. A last-message row appears
@@ -23,10 +23,10 @@ use std::time::{Duration, SystemTime};
 use gtk4::prelude::*;
 
 use super::board::session_age;
-use super::workspaces::switch_command;
+use crate::services::task_state::{Activity, SessionState, TaskState, first_line, state_dir};
 use crate::spawn::spawn_work;
-use crate::sway_ipc;
-use crate::task_state::{Activity, SessionState, TaskState, first_line, state_dir};
+use crate::sway::ipc;
+use crate::sway::workspace::switch_command;
 use crate::ui;
 
 /// The shared chassis: a top-anchored popover whose child is the card.
@@ -119,7 +119,7 @@ impl TaskPopover {
             let popover = self.inner.popover.clone();
             list.connect_row_activated(move |_, row| {
                 if let Some(workspace) = targets.get(row.index() as usize) {
-                    sway_ipc::run_command(&focus_command(workspace));
+                    ipc::run_command(&focus_command(workspace));
                     popover.popdown();
                 }
             });
@@ -176,7 +176,7 @@ fn session_row(s: &SessionState, now: SystemTime, skew: Option<SystemTime>) -> g
 fn last_message(pid: i32) -> Option<String> {
     let path = state_dir().join(format!("last-{pid}"));
     let written = std::fs::metadata(&path).and_then(|m| m.modified()).ok()?;
-    if crate::task_state::proc_start_time(pid).is_some_and(|start| written < start) {
+    if crate::services::task_state::proc_start_time(pid).is_some_and(|start| written < start) {
         return None;
     }
     first_line(&path)
@@ -260,7 +260,7 @@ fn fmt_age(age: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::task_state::Progress;
+    use crate::services::task_state::Progress;
 
     fn session(activity: Activity, age: Option<Duration>, now: SystemTime) -> SessionState {
         SessionState {

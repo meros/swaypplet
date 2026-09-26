@@ -17,8 +17,8 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, glib};
 
-use crate::notifications::store::NotificationStore;
 use crate::panel::Panel;
+use crate::services::notifications::store::NotificationStore;
 use crate::theme;
 use crate::widgets::{
     audio::AudioSection, bluetooth::BluetoothSection, brightness::BrightnessSection,
@@ -51,7 +51,7 @@ pub fn run(component: &str) {
                 .default_height(720)
                 .build()
                 .upcast();
-            let panel = Panel::new(window, store.clone(), crate::audio::AudioService::start());
+            let panel = Panel::new(window, store.clone(), crate::services::audio::AudioService::start());
             panel.window.set_visible(true);
             std::mem::forget(panel);
             return;
@@ -328,7 +328,7 @@ pub fn run(component: &str) {
                 host.append(&grid);
             }
             "audio" => {
-                let s = Box::leak(Box::new(AudioSection::new(crate::audio::AudioService::start())));
+                let s = Box::leak(Box::new(AudioSection::new(crate::services::audio::AudioService::start())));
                 s.expand_for_preview();
                 host.append(s.widget());
             }

@@ -40,7 +40,7 @@ pub fn client_colors(inputs: Inputs) -> Vec<String> {
 
 /// Put the tokens on sway's borders.
 pub fn apply_borders(inputs: Inputs) {
-    crate::sway_ipc::run_commands(client_colors(inputs));
+    crate::sway::ipc::run_commands(client_colors(inputs));
 }
 
 #[cfg(test)]

@@ -11,8 +11,8 @@ use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
 use crate::anim;
-use crate::elephant::{self, SearchResult};
 use crate::layer_shell::{self, LayerShellConfig};
+use crate::services::elephant::{self, SearchResult};
 
 const MAX_VISIBLE_RESULTS: usize = 10;
 const DEBOUNCE_MS: u64 = 100;
@@ -493,7 +493,7 @@ fn nth_child(parent: &impl IsA<gtk4::Widget>, n: usize) -> Option<gtk4::Widget> 
 fn activate_async(provider: String, identifier: String, action: String, query: String) {
     if provider == WINDOW_PROVIDER {
         if let Some(con_id) = identifier.split_whitespace().next() {
-            crate::sway_ipc::run_command(&format!("[con_id={con_id}] focus"));
+            crate::sway::ipc::run_command(&format!("[con_id={con_id}] focus"));
         }
         return;
     }
@@ -504,7 +504,7 @@ fn activate_async(provider: String, identifier: String, action: String, query: S
         && let Ok(cmd) = std::env::var("SWAYPPLET_LAUNCH_EXEC")
         && !cmd.is_empty()
     {
-        crate::sway_ipc::run_command(&format!("exec {cmd}"));
+        crate::sway::ipc::run_command(&format!("exec {cmd}"));
         return;
     }
     std::thread::spawn(move || {
@@ -643,7 +643,7 @@ fn running_windows(query: &str, results: &[SearchResult]) -> Vec<SearchResult> {
     if names.is_empty() && words.is_empty() {
         return Vec::new();
     }
-    let Some(tree) = crate::sway_ipc::connect()
+    let Some(tree) = crate::sway::ipc::connect()
         .ok()
         .and_then(|mut c| c.get_tree().ok())
     else {

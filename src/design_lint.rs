@@ -18,7 +18,7 @@
 //! | `rust-space`      | a box spacing or widget margin that is a non-zero literal    | Rust |
 //! | `rust-colour`     | a Cairo / `gdk::RGBA` colour from numeric literals            | Rust |
 //! | `rust-class`      | a CSS class added in Rust that no stylesheet styles          | Rust |
-//! | `surface-on-window` | `ui::surface` / `ui::solid_window` given a window rather than its root child | Rust |
+//! | `surface-on-window` | `ui::surface::adopt` / `ui::window::adopt` given a window rather than its root child | Rust |
 //! | `rust-ui-class`   | a `"ui-…"` string literal: a component class named outside its component | Rust |
 //! | `motion-bypass`   | a motion token's `.ms` read, or a `transition_duration` set, outside `anim::ms` / `ui::revealer` | Rust except src/anim.rs |
 //!
@@ -1230,7 +1230,7 @@ fn rust_violations() -> Vec<Violation> {
         // A surface class on the window node, where it loses to GTK's own
         // `window.background`. Read off the argument: a window is named
         // `window`, `win`, `*_window` or reached by `.window()`.
-        for needle in ["ui::surface(", "ui::solid_window("] {
+        for needle in ["ui::surface::adopt(", "ui::window::adopt("] {
             for (at, args) in calls(&code, needle) {
                 if names_a_window(args) {
                     push(

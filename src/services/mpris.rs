@@ -15,12 +15,107 @@
 //! the state they would draw changed.
 
 use std::collections::HashMap;
+use std::process::Command;
 use std::rc::Rc;
 
 use zbus::zvariant::OwnedValue;
 
 use crate::service::Observed;
-use crate::widgets::media::{MediaState, PlaybackStatus};
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PlaybackStatus {
+    Playing,
+    Paused,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MediaState {
+    pub(crate) status: PlaybackStatus,
+    pub(crate) artist: String,
+    pub(crate) title: String,
+    art_url: Option<String>,
+    pub(crate) player_name: Option<String>,
+    /// Track length in seconds (from mpris:length, which is in microseconds).
+    pub(crate) length_secs: Option<f64>,
+    /// Current position in seconds.
+    pub(crate) position_secs: Option<f64>,
+}
+
+impl MediaState {
+    /// Local album-art path for the bar media popover; remote URLs are
+    /// skipped (would need fetch + cache), same rule as the panel section.
+    pub(crate) fn art_path(&self) -> Option<String> {
+        self.art_url.as_deref().and_then(resolve_art_path)
+    }
+}
+
+pub(crate) fn playerctl(args: &[&str]) -> Option<String> {
+    let out = Command::new("playerctl").args(args).output().ok()?;
+    if out.status.success() {
+        Some(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+    } else {
+        None
+    }
+}
+
+pub(crate) fn read_state() -> Option<MediaState> {
+    let status_str = playerctl(&["status"])?;
+
+    let status = match status_str.as_str() {
+        "Playing" => PlaybackStatus::Playing,
+        "Paused" => PlaybackStatus::Paused,
+        _ => {
+            let artist = playerctl(&["metadata", "artist"]).unwrap_or_default();
+            let title = playerctl(&["metadata", "title"]).unwrap_or_default();
+            if artist.is_empty() && title.is_empty() {
+                return None;
+            }
+            PlaybackStatus::Paused
+        }
+    };
+
+    let artist = playerctl(&["metadata", "artist"]).unwrap_or_default();
+    let title = playerctl(&["metadata", "title"]).unwrap_or_default();
+
+    // Album art URL — may be file:///path or https://...
+    let art_url = playerctl(&["metadata", "mpris:artUrl"]).filter(|s| !s.is_empty());
+
+    // Player identity (e.g. "Spotify", "firefox")
+    let player_name =
+        playerctl(&["metadata", "--format", "{{playerName}}"]).filter(|s| !s.is_empty());
+
+    // Track length (mpris:length is in microseconds)
+    let length_secs = playerctl(&["metadata", "mpris:length"])
+        .and_then(|s| s.parse::<f64>().ok())
+        .map(|us| us / 1_000_000.0)
+        .filter(|&s| s > 0.0);
+
+    // Current position in seconds
+    let position_secs = playerctl(&["position"])
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|&s| s >= 0.0);
+
+    Some(MediaState {
+        status,
+        artist,
+        title,
+        art_url,
+        player_name,
+        length_secs,
+        position_secs,
+    })
+}
+
+/// Resolve an art URL to a local file path for GTK.
+/// - `file:///path` → `/path`
+/// - Other URLs are ignored (would need HTTP fetch + cache)
+fn resolve_art_path(url: &str) -> Option<String> {
+    if let Some(path) = url.strip_prefix("file://") {
+        Some(path.to_string())
+    } else {
+        None
+    }
+}
 
 const PREFIX: &str = "org.mpris.MediaPlayer2.";
 const PATH: &str = "/org/mpris/MediaPlayer2";
@@ -184,14 +279,16 @@ fn parse(name: &str, props: &HashMap<String, OwnedValue>) -> Option<MediaState> 
         // names it.
         p.split('.').next().unwrap_or(p).to_string()
     });
-    Some(MediaState::from_mpris(
+    // No position: MPRIS does not signal it, and the bar does not show it.
+    Some(MediaState {
         status,
         artist,
         title,
         art_url,
-        player,
+        player_name: player,
         length_secs,
-    ))
+        position_secs: None,
+    })
 }
 
 #[cfg(test)]

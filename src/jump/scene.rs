@@ -22,6 +22,8 @@
 //!
 //! No GTK here, so every rule above is a unit test.
 
+use std::ops::ControlFlow;
+
 use swayipc::{Node, NodeLayout, NodeType};
 
 /// A workspace's visible windows, relative to the top-left of their bounding
@@ -168,12 +170,8 @@ pub fn window_at(tree: &Node, output: &str, rect: (f64, f64, f64, f64)) -> Optio
 /// holding it and its title. The scratchpad's are left out; they are not on
 /// a workspace anyone can see.
 pub fn all_windows(tree: &Node) -> Vec<(Window, String, String)> {
-    fn walk(node: &Node, ws: Option<&str>, out: &mut Vec<(Window, String, String)>) {
-        let ws = if node.node_type == NodeType::Workspace {
-            node.name.as_deref()
-        } else {
-            ws
-        };
+    let mut out = Vec::new();
+    crate::sway::tree::for_each(tree, |node, ws| {
         if let Some(ws) = ws
             && !ws.starts_with("__")
             && is_view(node)
@@ -184,32 +182,19 @@ pub fn all_windows(tree: &Node) -> Vec<(Window, String, String)> {
                 node.name.clone().unwrap_or_default(),
             ));
         }
-        for c in node.nodes.iter().chain(node.floating_nodes.iter()) {
-            walk(c, ws, out);
-        }
-    }
-    let mut out = Vec::new();
-    walk(tree, None, &mut out);
+    });
     out
 }
 
 /// A window by its identifier, wherever it is, and the workspace holding it.
 pub fn find_window(tree: &Node, id: &str) -> Option<(Window, String)> {
-    fn walk(node: &Node, ws: Option<&str>, id: &str) -> Option<(Window, String)> {
-        let ws = if node.node_type == NodeType::Workspace {
-            node.name.as_deref()
-        } else {
-            ws
-        };
+    crate::sway::tree::walk(tree, &mut |node, ws| {
         if is_view(node) && node.foreign_toplevel_identifier.as_deref() == Some(id) {
-            return Some((content(node), ws.unwrap_or_default().to_string()));
+            ControlFlow::Break((content(node), ws.unwrap_or_default().to_string()))
+        } else {
+            ControlFlow::Continue(())
         }
-        node.nodes
-            .iter()
-            .chain(node.floating_nodes.iter())
-            .find_map(|c| walk(c, ws, id))
-    }
-    walk(tree, None, id)
+    })
 }
 
 fn find_workspace<'a>(node: &'a Node, name: &str) -> Option<&'a Node> {

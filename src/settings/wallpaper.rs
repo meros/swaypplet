@@ -69,7 +69,7 @@ fn command(w: &Wallpaper) -> Option<String> {
 
 pub fn apply(w: &Wallpaper) {
     if let Some(cmd) = command(w) {
-        crate::sway_ipc::run_command(&cmd);
+        crate::sway::ipc::run_command(&cmd);
     }
 }
 
@@ -77,7 +77,7 @@ pub fn apply(w: &Wallpaper) {
 /// connection, one command, and sway's answer.
 pub fn apply_blocking(w: &Wallpaper) -> Result<(), String> {
     let cmd = command(w).ok_or("path not sendable")?;
-    let outcomes = crate::sway_ipc::connect()
+    let outcomes = crate::sway::ipc::connect()
         .and_then(|mut c| c.run_command(&cmd))
         .map_err(|e| format!("sway ipc: {e}"))?;
     outcomes
@@ -100,7 +100,7 @@ pub fn apply_saved() {
 ///
 /// Blocking (one IPC round trip); the pane calls it on a worker.
 pub fn system_default() -> Option<Wallpaper> {
-    match crate::sway_ipc::config_text() {
+    match crate::sway::ipc::config_text() {
         Ok(text) => parse_bg(&text),
         Err(e) => {
             log::warn!("wallpaper: {e}");
