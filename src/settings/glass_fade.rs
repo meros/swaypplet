@@ -285,6 +285,8 @@ mod tests {
             bezel_scale: 1.0,
             thickness_ratio: 0.0,
             crest_scale: 1.0,
+            clarity: 0.0,
+            frost_scale: 1.0,
         }
     }
 

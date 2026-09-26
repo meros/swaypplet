@@ -229,6 +229,42 @@ fn unset_color() -> String {
     "none".to_string()
 }
 
+impl Material {
+    /// The fill colour as the compositor wants it, or `None` when the card
+    /// decides. Anything unparseable is treated as unset rather than as an
+    /// error: this value reaches here from a file a human may have edited,
+    /// and the card's own colour is always a safe answer.
+    pub fn fill_rgb(&self) -> Option<(f64, f64, f64)> {
+        let hex = self
+            .fill_color
+            .strip_prefix('#')
+            .unwrap_or(&self.fill_color);
+        if hex.len() != 6 {
+            return None;
+        }
+        let v = u32::from_str_radix(hex, 16).ok()?;
+        Some((
+            ((v >> 16) & 0xff) as f64 / 255.0,
+            ((v >> 8) & 0xff) as f64 / 255.0,
+            (v & 0xff) as f64 / 255.0,
+        ))
+    }
+
+    /// Set it from a colour, or clear it back to the card's own.
+    pub fn set_fill_rgb(&mut self, rgb: Option<(f64, f64, f64)>) {
+        self.fill_color = match rgb {
+            Some((r, g, b)) => format!(
+                "#{:02x}{:02x}{:02x}",
+                (r.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (g.clamp(0.0, 1.0) * 255.0).round() as u8,
+                (b.clamp(0.0, 1.0) * 255.0).round() as u8
+            ),
+            None => unset_color(),
+        };
+    }
+}
+
+
 fn isotropic() -> f64 {
     1.0
 }
