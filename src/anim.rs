@@ -513,9 +513,9 @@ impl Reveal {
     /// `wp_alpha_modifier_surface_v1` must be destroyed *before* its
     /// `wl_surface`: once the surface is gone, every request on the handle,
     /// the destructor included, is a fatal protocol error (see
-    /// [`crate::alpha`]). Anyone about to destroy the window calls this
-    /// first.
-    pub fn release_alpha(&self) {
+    /// [`crate::alpha`]). [`release`](Self::release) does it for a surface
+    /// about to be destroyed, which `shell::Surface`'s teardown calls first.
+    fn release_alpha(&self) {
         drop(self.inner.alpha.borrow_mut().take());
     }
 

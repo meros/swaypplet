@@ -1,5 +1,5 @@
-//! What every swaypplet surface is made of (docs/design-system.md,
-//! "Surfaces").
+//! What every swaypplet surface is made of (docs/design-system.md §6.1,
+//! Surfaces).
 //!
 //! - [`Namespace`]: the layer-shell namespace, which is also the key the
 //!   compositor's glass and the settings pane address a surface by.

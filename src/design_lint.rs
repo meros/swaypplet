@@ -173,7 +173,7 @@ impl Rule {
                 "the class is styled nowhere in data/css/: a typo, or a dead class; use a ui::* component or style it"
             }
             LayerWindow => {
-                "build the surface with `shell::Surface::builder(app, Namespace::…)`; it owns the window's creation and its teardown order (docs/design-system.md, Surfaces)"
+                "build the surface with `shell::Surface::builder(app, Namespace::…)`; it owns the window's creation and its teardown order (docs/design-system.md §6.1)"
             }
             LayerNamespace => {
                 "name the namespace with `shell::Namespace`; a new surface adds a variant there, and a glass row in the nixos repo's `sessionSurfaces`"

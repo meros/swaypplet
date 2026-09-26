@@ -206,6 +206,12 @@ impl Surface {
     /// Run `f` on a click that lands on the root outside the card: the
     /// dismiss gesture of a surface that spans its output. A click on the
     /// card, including its padding, never reaches `f`.
+    ///
+    /// A hit test, not a claiming gesture on the card: an ancestor gesture
+    /// that claims a press can starve the widget the press was aimed at, and
+    /// the failure is silent (the button highlights and then does nothing,
+    /// while the keyboard, which does not go through gesture propagation,
+    /// keeps working). The polkit card learned this first.
     pub fn connect_backdrop_click(&self, f: impl Fn() + 'static) {
         let gesture = gtk4::GestureClick::new();
         let root = self.inner.root.downgrade();
