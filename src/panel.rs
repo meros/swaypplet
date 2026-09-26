@@ -9,6 +9,7 @@ use gtk4::prelude::*;
 
 use crate::anim;
 use crate::launcher::LauncherView;
+use crate::shell::Surface;
 use crate::services::notifications::store::NotificationStore;
 use crate::settings::SettingsSection;
 use crate::ui::icons;
@@ -143,45 +144,41 @@ impl Sections {
 // ── Panel (Pilot's Helm HUD) ──────────────────────────────────────────────────
 
 pub struct Panel {
-    pub window: gtk4::Window,
+    /// The layer surface, built by the caller (`app::panel_surface`): its
+    /// root is the full-screen backdrop, its card the Helm.
+    surface: Surface,
     sections: Rc<Sections>,
     launcher: Rc<LauncherView>,
     deck_stack: gtk4::Stack,
-    /// Enter/exit transition for the glass HUD: fast pane tint, full-length
-    /// content fade, short [`anim::SlideBin`] settle (motion on glass,
-    /// anim.rs). `is_shown()` is the intent flag; the window unmaps when the
-    /// exit finishes.
-    reveal: anim::Reveal,
 }
 
 impl Panel {
     pub fn new(
-        window: gtk4::Window,
+        surface: Surface,
         store: Rc<RefCell<NotificationStore>>,
         audio_service: Rc<crate::services::audio::AudioService>,
     ) -> Self {
+        let window = surface.window().clone();
+
         // ── Backdrop (full-screen transparent click-catcher) ────────────────
-        let backdrop = ui::vbox(0);
-        backdrop.set_halign(gtk4::Align::Fill);
-        backdrop.set_valign(gtk4::Align::Fill);
+        // The Surface's root, which carries the design system's base type
+        // and colour (on the window's child, not the window: the GTK theme's
+        // `window.background` outranks a class on the window node).
+        let backdrop = surface.root().clone();
         backdrop.set_hexpand(true);
         backdrop.set_vexpand(true);
-        // The design system's base type and colour. On the window's child,
-        // not the window: the GTK theme's `window.background` outranks a
-        // class on the window node and would keep its own text colour.
-        ui::surface::adopt(&backdrop);
 
         // ── Top spacer (positions Helm at the optical foveal sweet spot ~25-28%) ──
         // Height and the card's width both come from
         // crate::shell::fit::install_monitor_fit below, against the output the
         // window lands on.
         let top_spacer = ui::vbox(0);
+        backdrop.prepend(&top_spacer);
 
         // ── Root container (the floating glass Helm card) ─────────────────────
-        let root = ui::vbox(0);
+        let root = surface.card().clone();
         root.set_halign(gtk4::Align::Center);
         root.set_valign(gtk4::Align::Start);
-        ui::card::adopt(&root, ui::Card::Floating);
         root.add_css_class("helm-card");
 
         // ── Build sections ───────────────────────────────────────────────────
@@ -355,13 +352,6 @@ impl Panel {
         content.append(&flight_deck);
         root.append(&content);
 
-        let slide = anim::SlideBin::new();
-        slide.set_child(&root);
-        slide.jump_to(anim::SLIDE_PX);
-        backdrop.append(&top_spacer);
-        backdrop.append(&slide);
-        window.set_child(Some(&backdrop));
-
         // `root`, not the slide bin around it, is what carries the size
         // request: the bin lays its child out with a BinLayout, so a request
         // on the bin would be overridden by the child's own.
@@ -382,15 +372,15 @@ impl Panel {
             })),
         );
 
-        // Enter/exit transition for the glass menu
-        let reveal = anim::Reveal::new(&window, &root)
-            .content(&content)
-            .slide(&slide, anim::SLIDE_PX);
+        // Enter/exit transition for the glass menu: fast pane tint,
+        // full-length content fade, the short settle the Surface was built
+        // with (motion on glass, anim.rs).
+        surface.set_content(&content);
 
         // Shared dismiss path: fade the menu out, then unmap.
         let hide_menu = {
-            let reveal_c = reveal.clone();
-            Rc::new(move || reveal_c.hide())
+            let surface = surface.clone();
+            Rc::new(move || surface.hide())
         };
 
         // ── Prefix routing from Omnibox ──────────────────────────────────────
@@ -440,23 +430,13 @@ impl Panel {
             });
         }
 
-        // ── Backdrop click → dismiss; clicks on the root card are claimed ────
-        let backdrop_gesture = gtk4::GestureClick::new();
-        backdrop_gesture.set_propagation_phase(gtk4::PropagationPhase::Bubble);
+        // ── Backdrop click → dismiss ─────────────────────────────────────────
+        // A hit test rather than a claiming gesture on the card, which can
+        // starve the controls inside it (see Surface::connect_backdrop_click).
         {
             let hide = hide_menu.clone();
-            backdrop_gesture.connect_released(move |_, _, _, _| {
-                hide();
-            });
+            surface.connect_backdrop_click(move || hide());
         }
-        backdrop.add_controller(backdrop_gesture);
-
-        let root_gesture = gtk4::GestureClick::new();
-        root_gesture.set_propagation_phase(gtk4::PropagationPhase::Bubble);
-        root_gesture.connect_released(|gesture, _, _, _| {
-            gesture.set_state(gtk4::EventSequenceState::Claimed);
-        });
-        root.add_controller(root_gesture);
 
         // ── Sections bundle ──────────────────────────────────────────────────
         let sections = Rc::new(Sections {
@@ -476,21 +456,24 @@ impl Panel {
         });
 
         Self {
-            window,
+            surface,
             sections,
             launcher,
             deck_stack,
-            reveal,
         }
     }
 
+    pub fn window(&self) -> &gtk4::Window {
+        self.surface.window()
+    }
+
     pub fn toggle(&self) {
-        if self.reveal.is_shown() && self.window.is_visible() {
-            self.reveal.hide();
+        if self.surface.is_shown() && self.surface.window().is_visible() {
+            self.surface.hide();
         } else {
             self.launcher.reset();
             self.deck_stack.set_visible_child_name("launcher");
-            self.reveal.show();
+            self.surface.show();
             self.launcher.focus_entry();
             // Harness hook: the nested session in dev/render.sh has no
             // keyboard, so `SWAYPPLET_PANEL_QUERY` types an omnibox prefix

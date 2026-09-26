@@ -6,13 +6,12 @@ use gio::prelude::*;
 use gtk4::Application;
 use gtk4::glib;
 use gtk4::prelude::*;
-use gtk4_layer_shell::Edge;
 
 use crate::bar::BarManager;
 use crate::jump::Jump;
 use crate::keybinds::Keybinds;
 use crate::launcher::Launcher;
-use crate::shell::layer::{self, LayerShellConfig};
+use crate::shell::{Namespace, Surface};
 use crate::notifications::stack::PopupManager;
 use crate::osd::{Osd, OsdCommand};
 use crate::panel::Panel;
@@ -35,23 +34,19 @@ pub(crate) fn pid_file_path() -> std::path::PathBuf {
     std::path::Path::new(&dir).join("swaypplet.pid")
 }
 
-// Pilot's Helm popup: centered optical HUD (~25-28% Y-offset), 740px wide,
-// with full-screen dismiss backdrop.
-static PANEL_CONFIG: LayerShellConfig = LayerShellConfig {
-    namespace: crate::shell::Namespace::Panel,
-    layer: gtk4_layer_shell::Layer::Overlay,
-    exclusive: false,
-    default_width: None,
-    default_height: None,
-    anchors: &[
-        (Edge::Top, true),
-        (Edge::Bottom, true),
-        (Edge::Left, true),
-        (Edge::Right, true),
-    ],
-    margins: &[],
-    keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
-};
+
+/// The panel's layer surface: Pilot's Helm popup, a floating card at the
+/// optical sweet spot (~25-28% down, placed by `shell::fit`) over a
+/// full-screen transparent backdrop that dismisses it. Exclusive keyboard,
+/// for the omnibox.
+pub(crate) fn panel_surface(app: &gtk4::Application) -> Surface {
+    Surface::builder(app, Namespace::Panel)
+        .fill()
+        .keyboard(gtk4_layer_shell::KeyboardMode::Exclusive)
+        .card(crate::ui::Card::Floating)
+        .slide(gtk4::Orientation::Vertical, crate::anim::SLIDE_PX)
+        .build()
+}
 
 struct AppState {
     panel: Option<Panel>,
@@ -221,16 +216,15 @@ pub fn run() {
         }
 
         // ── Main panel window ────────────────────────────────────────────────
-        let window = layer::create_layer_window(app, &PANEL_CONFIG);
 
         // One connection to the sound server for the whole process: the
         // panel section reads it, and (BAR_VISION increment 7) the hazard
         // lane's microphone glyph reads the same snapshot.
         let audio = crate::services::audio::AudioService::start();
 
-        let panel = Panel::new(window, store_activate.clone(), audio.clone());
-        panel.window.present();
-        panel.window.set_visible(false);
+        let panel = Panel::new(panel_surface(app), store_activate.clone(), audio.clone());
+        panel.window().present();
+        panel.window().set_visible(false);
 
         // ── Popup manager ────────────────────────────────────────────────────
         let popups = PopupManager::register(app, store_activate.clone());

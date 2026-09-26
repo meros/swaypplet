@@ -43,16 +43,15 @@ pub fn run(component: &str) {
         theme::load_css();
         let store = Rc::new(RefCell::new(NotificationStore::new()));
 
-        // Full panel: host the real panel content in a normal toplevel.
+        // Full panel: the real panel on its own layer surface, shown.
         if component == "panel" {
-            let window: gtk4::Window = ApplicationWindow::builder()
-                .application(app)
-                .default_width(820)
-                .default_height(720)
-                .build()
-                .upcast();
-            let panel = Panel::new(window, store.clone(), crate::services::audio::AudioService::start());
-            panel.window.set_visible(true);
+            // The panel's own layer surface, as the panel process builds it.
+            let panel = Panel::new(
+                crate::app::panel_surface(app),
+                store.clone(),
+                crate::services::audio::AudioService::start(),
+            );
+            panel.toggle();
             std::mem::forget(panel);
             return;
         }
