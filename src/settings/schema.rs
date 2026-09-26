@@ -400,6 +400,12 @@ pub struct Look {
     pub motion: Motion,
     #[serde(default)]
     pub tint: Tint,
+    /// A launched app grows out of its launcher row (sway's `handoff open`).
+    /// Off by default: on a real desktop the window's first frames rarely
+    /// match the icon it grows from, and it read as a glitch more than as a
+    /// transition.
+    #[serde(default)]
+    pub launch_zoom: bool,
 }
 
 /// The volume and brightness keys.
