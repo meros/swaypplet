@@ -9,8 +9,8 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::shell::{Namespace, Surface};
 use crate::services::elephant::{self, SearchResult};
+use crate::shell::{Namespace, Surface};
 
 const MAX_VISIBLE_RESULTS: usize = 10;
 const DEBOUNCE_MS: u64 = 100;
@@ -28,7 +28,6 @@ const LAUNCHER_CARD_SIZE: crate::shell::fit::CardSize = crate::shell::fit::CardS
     width: 560,
     height: Some(520),
 };
-
 
 // Default providers matching the walker config
 const DEFAULT_PROVIDERS: &[&str] = &[
@@ -313,7 +312,13 @@ impl Launcher {
         let view = LauncherView::new();
         container.append(view.widget());
 
-        crate::shell::fit::install_monitor_fit(&window, &top_spacer, container, LAUNCHER_CARD_SIZE, None);
+        crate::shell::fit::install_monitor_fit(
+            &window,
+            &top_spacer,
+            container,
+            LAUNCHER_CARD_SIZE,
+            None,
+        );
 
         // Enter/exit transition (motion on glass, anim.rs): the container is
         // the pane, the launcher view the content. Pure crossfade.

@@ -25,7 +25,6 @@ use serde::{Deserialize, Serialize};
 use crate::shell::{Namespace, Surface};
 use crate::theme;
 
-
 /// Cap on rendered rows — stdin can be arbitrarily long, the screen isn't.
 const MAX_ROWS: usize = 30;
 

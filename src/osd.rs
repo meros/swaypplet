@@ -2,8 +2,8 @@ use std::cell::{Cell, RefCell};
 use std::process::Command;
 use std::rc::Rc;
 
-use gtk4::prelude::*;
 use gtk4::gdk;
+use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
 use crate::shell::{Namespace, PerMonitor, Surface};

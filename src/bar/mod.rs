@@ -35,8 +35,8 @@ use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, Layer};
 
 use crate::anim;
-use crate::shell::{Namespace, PerMonitor, Surface};
 use crate::services::task_state::TaskStateService;
+use crate::shell::{Namespace, PerMonitor, Surface};
 use crate::sway::ipc::SwayService;
 use crate::theme;
 
@@ -116,10 +116,7 @@ impl BarManager {
     }
 }
 
-fn build_bar_window(
-    bar: &BarManager,
-    monitor: &gdk::Monitor,
-) -> (Surface, decision::DecisionSlot) {
+fn build_bar_window(bar: &BarManager, monitor: &gdk::Monitor) -> (Surface, decision::DecisionSlot) {
     let BarManager {
         app,
         sway,

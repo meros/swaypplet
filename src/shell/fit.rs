@@ -326,4 +326,3 @@ fn fit_card(
     let limit = (room - card_min).max(0);
     top_spacer.set_height_request((screen_height / 4).min(limit));
 }
-

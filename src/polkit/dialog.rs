@@ -21,7 +21,6 @@ use crate::ui;
 
 use super::agent::ResolvedIdentity;
 
-
 /// Nerd Font check, for the approved state.
 const ICON_OK: &str = "\u{f012c}";
 

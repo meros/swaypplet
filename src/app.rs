@@ -11,12 +11,12 @@ use crate::bar::BarManager;
 use crate::jump::Jump;
 use crate::keybinds::Keybinds;
 use crate::launcher::Launcher;
-use crate::shell::{Namespace, Surface};
 use crate::notifications::stack::PopupManager;
 use crate::osd::{Osd, OsdCommand};
 use crate::panel::Panel;
 use crate::services::notifications::dbus;
 use crate::services::notifications::store::NotificationStore;
+use crate::shell::{Namespace, Surface};
 use crate::sway::ipc::SwayService;
 use crate::theme;
 
@@ -33,7 +33,6 @@ pub(crate) fn pid_file_path() -> std::path::PathBuf {
     let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
     std::path::Path::new(&dir).join("swaypplet.pid")
 }
-
 
 /// The panel's layer surface: Pilot's Helm popup, a floating card at the
 /// optical sweet spot (~25-28% down, placed by `shell::fit`) over a

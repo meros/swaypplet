@@ -30,12 +30,12 @@ use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
 use super::card::{age_label, populate_card, set_critical_class, wants_keyboard};
+use super::card_surface::CardSurface;
 use super::timers::{Timer, cancel_timer, make_timer, pause_timers, resume_timers};
 use crate::anim;
 use crate::services::notifications::store::{self, NotificationStore};
 use crate::services::notifications::{CloseReason, Notification};
 use crate::settings::store::{Alerts, Corner};
-use super::card_surface::CardSurface;
 use crate::sway::ipc::SwayService;
 
 // ── Stack geometry ──

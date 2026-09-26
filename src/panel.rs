@@ -9,9 +9,9 @@ use gtk4::prelude::*;
 
 use crate::anim;
 use crate::launcher::LauncherView;
-use crate::shell::Surface;
 use crate::services::notifications::store::NotificationStore;
 use crate::settings::SettingsSection;
+use crate::shell::Surface;
 use crate::ui::icons;
 use crate::ui::{self, Kind, Text, Tone};
 use crate::widgets::backup::BackupSection;

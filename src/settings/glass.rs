@@ -838,7 +838,8 @@ mod tests {
     #[test]
     fn drift_names_a_stale_row_a_missing_one_and_a_wrong_class() {
         let mut sys = every_glass_surface();
-        sys.surfaces.insert("swaypplet-switcher".into(), "panel".into());
+        sys.surfaces
+            .insert("swaypplet-switcher".into(), "panel".into());
         sys.surfaces.remove(Namespace::Keybinds.as_str());
         sys.surfaces
             .insert(Namespace::Osd.as_str().into(), "panel".into());

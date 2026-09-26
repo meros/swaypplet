@@ -293,9 +293,7 @@ impl Pins {
         let Some(app) = self.inner.borrow().app.clone() else {
             return;
         };
-        let monitor = output
-            .as_deref()
-            .and_then(layer::monitor_by_connector);
+        let monitor = output.as_deref().and_then(layer::monitor_by_connector);
         let label = crate::sway::workspace::label_for_name(&workspace);
         let parts = build_window(&app, monitor.as_ref(), &label);
 
@@ -331,9 +329,7 @@ impl Pins {
         let Some(app) = self.inner.borrow().app.clone() else {
             return;
         };
-        let monitor = output
-            .as_deref()
-            .and_then(layer::monitor_by_connector);
+        let monitor = output.as_deref().and_then(layer::monitor_by_connector);
         let label = region_label(&region.window.app, &region.workspace);
         let parts = build_window(&app, monitor.as_ref(), &label);
         self.wire(&parts, &key);
