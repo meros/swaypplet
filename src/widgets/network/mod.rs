@@ -9,11 +9,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4::{
-    Box, Button, Label, ListBox, Orientation, Revealer, RevealerTransitionType, Spinner, Switch,
-};
+use gtk4::{Box, Button, Label, ListBox, Revealer, RevealerTransitionType, Spinner, Switch};
 
 use crate::spawn::spawn_work;
+use crate::ui;
 use backend::*;
 
 // The quick-toggle tile drives the radio without going through this section
@@ -68,14 +67,11 @@ pub(crate) struct NetworkState {
 
 #[derive(Clone)]
 pub struct NetworkSection {
-    root: Box,
+    section: Rc<ui::Section>,
     state: Rc<RefCell<NetworkState>>,
-    // Summary row
-    summary_btn: Button,
+    // The section header's icon and summary
     summary_icon: Label,
     summary_text: Label,
-    // Detail widgets
-    detail_revealer: Revealer,
     // Header & radio
     wifi_switch: Switch,
     header_subtitle: Label,
@@ -112,127 +108,60 @@ pub struct NetworkSection {
 
 impl NetworkSection {
     pub fn new() -> Self {
-        // The root canvas is unboxed (no .section card) so the subsheet scroller
-        // provides the natural background canvas, with cards used semantically inside.
-        let root = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(10)
-            .build();
-
-        // ── Summary row (kept hidden for expand_for_page compat) ──────────────
-        let summary_content = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(8)
-            .build();
-
-        let summary_icon = Label::builder().label(ICON_DISCONNECTED).build();
-        summary_icon.add_css_class("section-summary-icon");
-
-        let summary_text = Label::builder()
-            .label("Disconnected")
-            .hexpand(true)
-            .xalign(0.0)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .build();
-        summary_text.add_css_class("section-summary-label");
-
-        let summary_arrow = Label::builder().label("▸").build();
-        summary_arrow.add_css_class("section-expand-arrow");
-
-        summary_content.append(&summary_icon);
-        summary_content.append(&summary_text);
-        summary_content.append(&summary_arrow);
-
-        let summary_btn = Button::builder().child(&summary_content).build();
-        summary_btn.add_css_class("section-summary");
-        root.append(&summary_btn);
+        // Shown as a Helm page (`expand_for_page`), where the section drops
+        // its own fill and the sub-sheet is the ground, with groups used
+        // semantically inside.
+        let section = Rc::new(ui::section(ICON_DISCONNECTED, "Wi-Fi", "Disconnected"));
+        ui::glyph(&section.icon, ui::Text::Title, ui::Tone::Fg);
+        let summary_icon = section.icon.clone();
+        let summary_text = section.summary.clone();
 
         // ── Placeholder (hidden by default, shown if nmcli unavailable) ───────
-        let placeholder = Label::builder()
-            .label("NetworkManager not available")
-            .halign(gtk4::Align::Start)
-            .build();
-        placeholder.add_css_class("network-placeholder");
+        let placeholder = ui::text(
+            "NetworkManager not available",
+            ui::Text::Body,
+            ui::Tone::Muted,
+        );
+        placeholder.add_css_class("section-empty");
         placeholder.set_visible(false);
-        root.append(&placeholder);
+        section.root.append(&placeholder);
 
-        // ── Detail revealer ───────────────────────────────────────────────────
-        let detail_revealer = Revealer::builder()
-            .transition_type(RevealerTransitionType::SlideDown)
-            .transition_duration(200)
-            .reveal_child(false)
-            .build();
-
-        let detail_box = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(10)
-            .build();
+        let detail_box = ui::vbox(4);
+        section.body.append(&detail_box);
 
         // ── WiFi Header Bar: Radio switch + Status ────────────────────────────
-        let radio_row = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(12)
-            .build();
-        radio_row.add_css_class("network-header-bar");
+        let radio_row = ui::group(0);
         radio_row.set_visible(false);
-
-        let wifi_icon = Label::builder().label(ICON_SIGNAL_EXCELLENT).build();
-        wifi_icon.add_css_class("network-header-icon");
-
-        let title_vbox = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(2)
-            .hexpand(true)
-            .valign(gtk4::Align::Center)
-            .build();
-
-        let wifi_label = Label::builder()
-            .label("Wi-Fi")
-            .halign(gtk4::Align::Start)
-            .build();
-        wifi_label.add_css_class("network-header-title");
-
-        let header_subtitle = Label::builder()
-            .label("Enabled")
-            .halign(gtk4::Align::Start)
-            .build();
-        header_subtitle.add_css_class("network-header-subtitle");
-
-        title_vbox.append(&wifi_label);
-        title_vbox.append(&header_subtitle);
-
-        let wifi_switch = Switch::builder()
-            .active(false)
-            .valign(gtk4::Align::Center)
-            .sensitive(false)
-            .build();
-
-        radio_row.append(&wifi_icon);
-        radio_row.append(&title_vbox);
-        radio_row.append(&wifi_switch);
+        let (radio, wifi_switch) = ui::switch_row("Wi-Fi", "Enabled");
+        radio.icon.set_label(ICON_SIGNAL_EXCELLENT);
+        radio.icon.set_visible(true);
+        ui::glyph(&radio.icon, ui::Text::Title, ui::Tone::Fg);
+        wifi_switch.set_sensitive(false);
+        let header_subtitle = radio.subtitle.clone();
+        radio_row.append(&radio.root);
         detail_box.append(&radio_row);
 
         // ── WiFi Disabled State (shown when radio is off) ─────────────────────
-        let wifi_disabled_box = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(6)
-            .halign(gtk4::Align::Center)
-            .valign(gtk4::Align::Center)
-            .vexpand(true)
-            .build();
-        wifi_disabled_box.add_css_class("network-disabled-box");
+        let wifi_disabled_box = ui::vbox(1);
+        wifi_disabled_box.set_halign(gtk4::Align::Center);
+        wifi_disabled_box.set_valign(gtk4::Align::Center);
+        wifi_disabled_box.set_vexpand(true);
+        wifi_disabled_box.add_css_class("network-disabled");
         wifi_disabled_box.set_visible(false);
 
-        let disabled_icon = Label::builder().label(ICON_DISCONNECTED).build();
-        disabled_icon.add_css_class("network-disabled-icon");
+        let disabled_icon = gtk4::Label::new(Some(ICON_DISCONNECTED));
+        ui::glyph(&disabled_icon, ui::Text::DisplaySm, ui::Tone::Muted);
 
-        let disabled_title = Label::builder().label("Wi-Fi is turned off").build();
-        disabled_title.add_css_class("network-disabled-title");
+        let disabled_title = ui::text("Wi-Fi is turned off", ui::Text::Body, ui::Tone::Fg);
+        disabled_title.add_css_class("ui-strong");
+        disabled_title.set_xalign(0.5);
 
-        let disabled_subtitle = Label::builder()
-            .label("Turn on Wi-Fi to scan and connect to nearby networks")
-            .build();
-        disabled_subtitle.add_css_class("network-disabled-subtitle");
+        let disabled_subtitle = ui::text(
+            "Turn on Wi-Fi to scan and connect to nearby networks",
+            ui::Text::Label,
+            ui::Tone::Muted,
+        );
+        disabled_subtitle.set_xalign(0.5);
 
         wifi_disabled_box.append(&disabled_icon);
         wifi_disabled_box.append(&disabled_title);
@@ -240,103 +169,51 @@ impl NetworkSection {
         detail_box.append(&wifi_disabled_box);
 
         // ── WiFi Content Box (visible when radio is ON) ───────────────────────
-        let wifi_content_box = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(12)
-            .build();
+        let wifi_content_box = ui::vbox(4);
         wifi_content_box.set_visible(false);
 
         // ── Hero Card: Active Connection ──────────────────────────────────────
-        let hero_card = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(6)
-            .build();
-        hero_card.add_css_class("network-hero-card");
+        let hero_card = ui::group(1);
+        hero_card.add_css_class("network-hero");
         hero_card.set_visible(false);
 
-        let hero_main_row = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(10)
-            .build();
+        let hero = ui::row(ICON_DISCONNECTED, "", "");
+        ui::glyph(&hero.icon, ui::Text::Title, ui::Tone::Fg);
+        let current_icon_label = hero.icon.clone();
+        let current_ssid_label = hero.title.clone();
 
-        let current_icon_label = Label::builder().label(ICON_DISCONNECTED).build();
-        current_icon_label.add_css_class("network-hero-icon");
-
-        let hero_info_vbox = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(2)
-            .hexpand(true)
-            .valign(gtk4::Align::Center)
-            .build();
-
-        let current_ssid_label = Label::builder()
-            .label("")
-            .halign(gtk4::Align::Start)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .build();
-        current_ssid_label.add_css_class("network-hero-ssid");
-
-        let hero_meta_box = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(6)
-            .build();
-
-        let hero_status = Label::builder()
-            .label("Connected")
-            .halign(gtk4::Align::Start)
-            .build();
-        hero_status.add_css_class("network-hero-status");
-
-        let current_signal_label = Label::builder().label("").build();
-        current_signal_label.add_css_class("network-signal");
-
+        // Status and signal share the subtitle line, each updated on its own.
+        let hero_meta_box = ui::hbox(2);
+        let hero_status = ui::text("Connected", ui::Text::Label, ui::Tone::Muted);
+        let current_signal_label = ui::text("", ui::Text::Label, ui::Tone::Faint);
         hero_meta_box.append(&hero_status);
         hero_meta_box.append(&current_signal_label);
-
-        hero_info_vbox.append(&current_ssid_label);
-        hero_info_vbox.append(&hero_meta_box);
-
-        let hero_actions = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(6)
-            .valign(gtk4::Align::Center)
-            .build();
+        if let Some(texts) = hero.subtitle.parent().and_downcast::<gtk4::Box>() {
+            texts.append(&hero_meta_box);
+        }
 
         let current_spinner = Spinner::new();
         current_spinner.set_visible(false);
 
-        let current_disconnect_btn = Button::builder().label("Disconnect").build();
-        current_disconnect_btn.add_css_class("network-disconnect-btn");
+        let current_disconnect_btn = ui::small_button("Disconnect", ui::Kind::Secondary);
         current_disconnect_btn.set_visible(false);
 
-        let details_toggle_btn = Button::builder().label("Details ▸").build();
-        details_toggle_btn.add_css_class("network-details-btn");
+        let details_toggle_btn = ui::small_button("Details ▸", ui::Kind::Flat);
 
-        hero_actions.append(&current_spinner);
-        hero_actions.append(&current_disconnect_btn);
-        hero_actions.append(&details_toggle_btn);
-
-        hero_main_row.append(&current_icon_label);
-        hero_main_row.append(&hero_info_vbox);
-        hero_main_row.append(&hero_actions);
-        hero_card.append(&hero_main_row);
+        hero.end.append(&current_spinner);
+        hero.end.append(&current_disconnect_btn);
+        hero.end.append(&details_toggle_btn);
+        hero_card.append(&hero.root);
 
         // Connectivity warning & captive portal button
-        let connectivity_row = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(8)
-            .build();
+        let connectivity_row = ui::hbox(3);
+        connectivity_row.add_css_class("network-hero-line");
 
-        let connectivity_label = Label::builder()
-            .label("")
-            .halign(gtk4::Align::Start)
-            .hexpand(true)
-            .build();
-        connectivity_label.add_css_class("network-connectivity");
+        let connectivity_label = ui::text("", ui::Text::Label, ui::Tone::Muted);
+        connectivity_label.set_hexpand(true);
         connectivity_label.set_visible(false);
 
-        let portal_btn = Button::builder().label("Open portal").build();
-        portal_btn.add_css_class("network-connect-btn");
+        let portal_btn = ui::small_button("Open portal", ui::Kind::Primary);
         portal_btn.set_visible(false);
         portal_btn.connect_clicked(|_| {
             let _ = std::process::Command::new("xdg-open")
@@ -351,42 +228,25 @@ impl NetworkSection {
         // Expandable Details Drawer
         let details_revealer = Revealer::builder()
             .transition_type(RevealerTransitionType::SlideDown)
-            .transition_duration(200)
+            .transition_duration(crate::anim::duration(crate::tokens::motion::EXPAND.ms) as u32)
             .reveal_child(false)
             .build();
 
-        let details_tray = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(6)
-            .build();
-        details_tray.add_css_class("network-hero-details");
+        let details_tray = ui::vbox(2);
+        details_tray.append(&ui::separator());
 
-        let ip_box = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(2)
-            .build();
-        ip_box.add_css_class("network-ip-info");
+        let ip_box = ui::vbox(1);
+        ip_box.add_css_class("network-hero-line");
 
-        let ip_label = Label::builder()
-            .label("")
-            .halign(gtk4::Align::Start)
-            .build();
-        ip_label.add_css_class("network-ip");
-        ip_label.set_visible(false);
-
-        let gateway_label = Label::builder()
-            .label("")
-            .halign(gtk4::Align::Start)
-            .build();
-        gateway_label.add_css_class("network-ip");
-        gateway_label.set_visible(false);
-
-        let dns_label = Label::builder()
-            .label("")
-            .halign(gtk4::Align::Start)
-            .build();
-        dns_label.add_css_class("network-ip");
-        dns_label.set_visible(false);
+        let ip_line = || {
+            let l = ui::text("", ui::Text::Caption, ui::Tone::Faint);
+            l.add_css_class("ui-mono");
+            l.set_visible(false);
+            l
+        };
+        let ip_label = ip_line();
+        let gateway_label = ip_line();
+        let dns_label = ip_line();
 
         ip_box.append(&ip_label);
         ip_box.append(&gateway_label);
@@ -394,21 +254,9 @@ impl NetworkSection {
         details_tray.append(&ip_box);
 
         // Power saving row inside details
-        let power_save_row = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(8)
-            .build();
-        power_save_row.add_css_class("network-switch-row");
+        let (ps, ps_switch) = ui::switch_row("WiFi Power Saving", "");
+        let power_save_row = ps.root.clone();
         power_save_row.set_visible(false);
-
-        let ps_label = Label::builder()
-            .label("WiFi Power Saving")
-            .halign(gtk4::Align::Start)
-            .hexpand(true)
-            .build();
-        ps_label.add_css_class("network-ssid");
-
-        let ps_switch = Switch::builder().valign(gtk4::Align::Center).build();
         {
             let ps_switch_c = ps_switch.clone();
             ps_switch.connect_state_set(move |_sw, active| {
@@ -425,8 +273,6 @@ impl NetworkSection {
                 glib::Propagation::Proceed
             });
         }
-        power_save_row.append(&ps_label);
-        power_save_row.append(&ps_switch);
         details_tray.append(&power_save_row);
 
         details_revealer.set_child(Some(&details_tray));
@@ -446,42 +292,25 @@ impl NetworkSection {
         wifi_content_box.append(&hero_card);
 
         // ── Available Networks Section (Immediate, Hero list) ─────────────────
-        let available_section = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(6)
-            .build();
+        let available_section = ui::vbox(2);
+        available_section.append(&ui::heading("Available Networks"));
 
-        let avail_title = Label::builder()
-            .label("AVAILABLE NETWORKS")
-            .halign(gtk4::Align::Start)
-            .build();
-        avail_title.add_css_class("network-subsection-title");
-        available_section.append(&avail_title);
-
-        let search_bar = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(8)
-            .build();
-        search_bar.add_css_class("network-toolbar");
+        let search_bar = ui::hbox(3);
 
         let search_entry = gtk4::SearchEntry::builder()
             .placeholder_text("Search networks…")
             .hexpand(true)
             .build();
-        search_entry.add_css_class("network-search-entry");
+        ui::entry(&search_entry);
 
         let scan_spinner = Spinner::new();
         scan_spinner.set_visible(false);
 
-        let scan_status_label = Label::builder().label("").build();
-        scan_status_label.add_css_class("network-scan-status");
+        let scan_status_label = ui::text("", ui::Text::Caption, ui::Tone::Faint);
         scan_status_label.set_visible(false);
 
-        let scan_btn = Button::builder()
-            .label("󰑐 Scan")
-            .tooltip_text("Scan for available networks")
-            .build();
-        scan_btn.add_css_class("network-scan-btn");
+        let scan_btn = ui::button("󰑐 Scan", ui::Kind::Secondary);
+        scan_btn.set_tooltip_text(Some("Scan for available networks"));
 
         search_bar.append(&search_entry);
         search_bar.append(&scan_spinner);
@@ -489,90 +318,43 @@ impl NetworkSection {
         search_bar.append(&scan_btn);
         available_section.append(&search_bar);
 
-        let no_adapter_label = Label::builder()
-            .label("No WiFi adapter found")
-            .halign(gtk4::Align::Start)
-            .build();
-        no_adapter_label.add_css_class("network-placeholder");
+        let no_adapter_label = ui::text("No WiFi adapter found", ui::Text::Body, ui::Tone::Muted);
+        no_adapter_label.add_css_class("section-empty");
         no_adapter_label.set_visible(false);
         available_section.append(&no_adapter_label);
 
-        let network_list_box = ListBox::builder()
-            .selection_mode(gtk4::SelectionMode::None)
-            .build();
-        network_list_box.add_css_class("network-list");
+        let network_list_box = ui::list();
         available_section.append(&network_list_box);
 
         wifi_content_box.append(&available_section);
 
         // ── Other Connections & Advanced (Collapsible) ────────────────────────
-        let other_toggle_btn = Button::builder()
-            .label("▸ Advanced & Other Connections")
-            .halign(gtk4::Align::Start)
-            .build();
-        other_toggle_btn.add_css_class("section-expander");
-
-        let other_revealer = Revealer::builder()
-            .transition_type(RevealerTransitionType::SlideDown)
-            .transition_duration(200)
-            .reveal_child(false)
-            .build();
-
-        let other_box = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(8)
-            .margin_start(4)
-            .margin_end(4)
-            .build();
+        let other = ui::disclosure("Advanced & Other Connections");
+        let other_box = ui::vbox(3);
+        other.body.append(&other_box);
 
         // VPN subsection
-        let vpn_section_box = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(4)
-            .build();
+        let vpn_section_box = ui::vbox(2);
         vpn_section_box.set_visible(false);
-
-        let vpn_title = Label::builder()
-            .label("VPN CONNECTIONS")
-            .halign(gtk4::Align::Start)
-            .build();
-        vpn_title.add_css_class("network-subsection-title");
-        vpn_section_box.append(&vpn_title);
-
-        let vpn_list_box = ListBox::builder()
-            .selection_mode(gtk4::SelectionMode::None)
-            .build();
-        vpn_list_box.add_css_class("network-list");
+        vpn_section_box.append(&ui::heading("VPN Connections"));
+        let vpn_list_box = ui::list();
         vpn_section_box.append(&vpn_list_box);
         other_box.append(&vpn_section_box);
 
         // Interface subsection (for physical Ethernet, etc.)
-        let iface_section_box = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(4)
-            .build();
+        let iface_section_box = ui::vbox(2);
         iface_section_box.set_visible(false);
-
-        let iface_title = Label::builder()
-            .label("NETWORK ADAPTERS")
-            .halign(gtk4::Align::Start)
-            .build();
-        iface_title.add_css_class("network-subsection-title");
-        iface_section_box.append(&iface_title);
-
-        let iface_list_box = ListBox::builder()
-            .selection_mode(gtk4::SelectionMode::None)
-            .build();
-        iface_list_box.add_css_class("network-list");
+        iface_section_box.append(&ui::heading("Network Adapters"));
+        let iface_list_box = ui::list();
         iface_section_box.append(&iface_list_box);
         other_box.append(&iface_section_box);
 
         // Advanced Network Connections launcher
-        let adv_btn = Button::builder()
-            .label("󰒓  Advanced Network Connections (nm-connection-editor)")
-            .halign(gtk4::Align::Fill)
-            .build();
-        adv_btn.add_css_class("network-adv-btn");
+        let adv_btn = ui::button(
+            "󰒓  Advanced Network Connections (nm-connection-editor)",
+            ui::Kind::Secondary,
+        );
+        adv_btn.add_css_class("section-launch-btn");
         adv_btn.connect_clicked(|_| {
             let _ = std::process::Command::new("nm-connection-editor")
                 .spawn()
@@ -589,39 +371,9 @@ impl NetworkSection {
         });
         other_box.append(&adv_btn);
 
-        other_revealer.set_child(Some(&other_box));
-
-        {
-            let rev_c = other_revealer.clone();
-            let btn_c = other_toggle_btn.clone();
-            other_toggle_btn.connect_clicked(move |_| {
-                let open = rev_c.reveals_child();
-                rev_c.set_reveal_child(!open);
-                btn_c.set_label(if open {
-                    "▸ Advanced & Other Connections"
-                } else {
-                    "▾ Advanced & Other Connections"
-                });
-            });
-        }
-
-        wifi_content_box.append(&other_toggle_btn);
-        wifi_content_box.append(&other_revealer);
+        wifi_content_box.append(&other.root);
 
         detail_box.append(&wifi_content_box);
-        detail_revealer.set_child(Some(&detail_box));
-        root.append(&detail_revealer);
-
-        // ── Wire summary toggle ───────────────────────────────────────────────
-        {
-            let rev_c = detail_revealer.clone();
-            let arrow_c = summary_arrow.clone();
-            summary_btn.connect_clicked(move |_| {
-                let expanded = rev_c.reveals_child();
-                rev_c.set_reveal_child(!expanded);
-                arrow_c.set_label(if expanded { "▸" } else { "▾" });
-            });
-        }
 
         let state_ref: Rc<RefCell<NetworkState>> = Rc::new(RefCell::new(NetworkState {
             active: ActiveConnection::Disconnected,
@@ -637,12 +389,10 @@ impl NetworkSection {
         }));
 
         let section = Self {
-            root,
+            section,
             state: state_ref,
-            summary_btn,
             summary_icon,
             summary_text,
-            detail_revealer,
             wifi_switch,
             header_subtitle,
             radio_row,
@@ -829,7 +579,10 @@ impl NetworkSection {
         // Wi-Fi pill — and this covers all of them at once.
         {
             let section_c = section.clone();
-            section.root.connect_map(move |_| section_c.refresh());
+            section
+                .section
+                .root
+                .connect_map(move |_| section_c.refresh());
         }
 
         // Start periodic poller.
@@ -837,7 +590,7 @@ impl NetworkSection {
             section.state.clone(),
             monitor::PollerWidgets {
                 display: section.display_widgets(),
-                root: section.root.clone(),
+                root: section.section.root.clone(),
                 connectivity_label: section.connectivity_label.clone(),
                 portal_btn: section.portal_btn.clone(),
                 wifi_switch: section.wifi_switch.clone(),
@@ -1057,13 +810,12 @@ impl NetworkSection {
     }
 
     pub fn expand_for_page(&self) {
-        self.summary_btn.set_visible(false);
-        self.detail_revealer.set_reveal_child(true);
+        self.section.show_as_page();
         self.state.borrow_mut().list_visible = true;
         self.trigger_scan();
     }
 
     pub fn widget(&self) -> &gtk4::Box {
-        &self.root
+        &self.section.root
     }
 }

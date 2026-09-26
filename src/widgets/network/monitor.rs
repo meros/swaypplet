@@ -224,17 +224,7 @@ fn update_active_labels<'a>(active: &'a ActiveConnection, w: &DisplayWidgets) ->
             device,
             freq_mhz,
         } => {
-            w.current_icon.set_label(signal_icon(*signal));
-            for class in [
-                "network-signal-none",
-                "network-signal-weak",
-                "network-signal-ok",
-                "network-signal-good",
-                "network-signal-excellent",
-            ] {
-                w.current_icon.remove_css_class(class);
-            }
-            w.current_icon.add_css_class(signal_css_class(*signal));
+            set_signal_glyph(&w.current_icon, signal_icon(*signal), signal_tone(*signal));
 
             w.current_ssid.set_label(ssid);
             let signal_text = match freq_mhz {
@@ -259,16 +249,7 @@ fn update_active_labels<'a>(active: &'a ActiveConnection, w: &DisplayWidgets) ->
             Some(device.as_str())
         }
         ActiveConnection::Ethernet { device } => {
-            w.current_icon.set_label(ICON_ETHERNET);
-            for class in [
-                "network-signal-none",
-                "network-signal-weak",
-                "network-signal-ok",
-                "network-signal-good",
-                "network-signal-excellent",
-            ] {
-                w.current_icon.remove_css_class(class);
-            }
+            set_signal_glyph(&w.current_icon, ICON_ETHERNET, crate::ui::Tone::Fg);
             w.current_ssid.set_label("Wired Ethernet");
             w.current_signal.set_label(&device.clone());
             w.hero_status.set_label("Connected");
@@ -283,16 +264,7 @@ fn update_active_labels<'a>(active: &'a ActiveConnection, w: &DisplayWidgets) ->
             Some(device.as_str())
         }
         ActiveConnection::Disconnected => {
-            w.current_icon.set_label(ICON_DISCONNECTED);
-            for class in [
-                "network-signal-none",
-                "network-signal-weak",
-                "network-signal-ok",
-                "network-signal-good",
-                "network-signal-excellent",
-            ] {
-                w.current_icon.remove_css_class(class);
-            }
+            set_signal_glyph(&w.current_icon, ICON_DISCONNECTED, crate::ui::Tone::Fg);
             w.current_ssid.set_label("Disconnected");
             w.current_signal.set_label("");
             w.hero_status.set_label("");
@@ -347,23 +319,22 @@ pub fn update_connectivity_display(
 ) {
     label.set_label(connectivity.label());
 
-    label.remove_css_class("network-connectivity-ok");
-    label.remove_css_class("network-connectivity-warn");
+    use crate::ui::{Text, Tone, set_text_style};
     match connectivity {
         ConnectivityState::Full => {
-            label.add_css_class("network-connectivity-ok");
+            set_text_style(label, Text::Label, Tone::Success);
             hero_status.set_label("Connected (Internet)");
         }
         ConnectivityState::Limited => {
-            label.add_css_class("network-connectivity-warn");
+            set_text_style(label, Text::Label, Tone::Warning);
             hero_status.set_label("Limited connectivity");
         }
         ConnectivityState::Portal => {
-            label.add_css_class("network-connectivity-warn");
+            set_text_style(label, Text::Label, Tone::Warning);
             hero_status.set_label("Login required");
         }
         _ => {
-            label.add_css_class("network-connectivity-warn");
+            set_text_style(label, Text::Label, Tone::Warning);
         }
     }
 

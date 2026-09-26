@@ -2,11 +2,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4::{Box, Label, ListBox, ListBoxRow, Orientation, Spinner, Switch};
+use gtk4::{ListBox, ListBoxRow, Spinner};
 
 use super::NetworkState;
 use super::backend::*;
 use crate::spawn::spawn_work;
+use crate::ui;
 
 /// Rebuild the interface list from current state. Single implementation used
 /// both from `NetworkSection` methods and async polling callbacks.
@@ -24,27 +25,6 @@ pub fn rebuild_iface_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
     list.set_visible(true);
 
     for iface in interfaces {
-        let row_box = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(8)
-            .margin_top(4)
-            .margin_bottom(4)
-            .margin_start(4)
-            .margin_end(4)
-            .build();
-
-        let icon_lbl = Label::builder()
-            .label(iface_type_icon(&iface.iface_type))
-            .build();
-        icon_lbl.add_css_class("network-icon");
-
-        let name_lbl = Label::builder()
-            .label(&iface.device)
-            .halign(gtk4::Align::Start)
-            .hexpand(true)
-            .build();
-        name_lbl.add_css_class("network-ssid");
-
         let friendly_type = match iface.iface_type.as_str() {
             "wifi" => "WiFi",
             "ethernet" => "Ethernet",
@@ -52,16 +32,18 @@ pub fn rebuild_iface_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
             "bridge" => "Bridge",
             _ => &iface.iface_type,
         };
-        let type_lbl = Label::builder().label(friendly_type).build();
-        type_lbl.add_css_class("network-signal");
+        let r = ui::row("", &iface.device, friendly_type);
+        set_signal_glyph(&r.icon, iface_type_icon(&iface.iface_type), ui::Tone::Fg);
+        r.icon.set_visible(true);
+        // An enabled adapter is the selected row.
+        ui::set_selected(&r.root, iface.enabled);
+        let row_box = r.root.clone();
 
         let spinner = Spinner::new();
         spinner.set_visible(false);
 
-        let switch = Switch::builder()
-            .active(iface.enabled)
-            .valign(gtk4::Align::Center)
-            .build();
+        let switch = ui::switch();
+        switch.set_active(iface.enabled);
 
         {
             let device = iface.device.clone();
@@ -74,7 +56,7 @@ pub fn rebuild_iface_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
                 switch_c.set_sensitive(false);
                 spinner_c.set_visible(true);
                 spinner_c.start();
-                row_c.add_css_class("network-connecting");
+                ui::set_class(&row_c, "busy", true);
 
                 let device_bg = device.clone();
                 let state_poll = state_c.clone();
@@ -93,7 +75,7 @@ pub fn rebuild_iface_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
                     move |result| {
                         spinner_poll.stop();
                         spinner_poll.set_visible(false);
-                        row_poll.remove_css_class("network-connecting");
+                        ui::set_class(&row_poll, "busy", false);
                         match result {
                             NmResult::Success => {
                                 let interfaces = get_network_interfaces();
@@ -112,18 +94,11 @@ pub fn rebuild_iface_list(list: &ListBox, state: &Rc<RefCell<NetworkState>>) {
             });
         }
 
-        row_box.append(&icon_lbl);
-        row_box.append(&name_lbl);
-        row_box.append(&type_lbl);
-        row_box.append(&spinner);
-        row_box.append(&switch);
+        r.end.append(&spinner);
+        r.end.append(&switch);
 
         let list_row = ListBoxRow::builder().build();
         list_row.set_child(Some(&row_box));
-        list_row.add_css_class("network-row");
-        if iface.enabled {
-            list_row.add_css_class("network-row-active");
-        }
         list.append(&list_row);
     }
 }

@@ -3,10 +3,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4::{Box, Button, Label, Orientation, Revealer, RevealerTransitionType, Spinner};
+use gtk4::{Box, Button, Label, Spinner};
 
 use crate::icons;
 use crate::spawn::spawn_work;
+use crate::ui;
 use crate::widgets::bluez;
 
 // ── Nerd Font icons ───────────────────────────────────────────────────────────
@@ -152,15 +153,10 @@ struct State {
 
 #[allow(dead_code)] // Fields kept alive for GObject ref-counting
 pub struct BluetoothSection {
-    root: Box,
-    summary_btn: Button,
-    summary_icon: Label,
-    summary_text: Label,
-    summary_arrow: Label,
-    detail_revealer: Revealer,
+    section: ui::Section,
     connected_list: Box,
     available_list: Box,
-    revealer: Revealer,
+    available: ui::Disclosure,
     scan_spinner: Spinner,
     scan_btn: Button,
     scan_status_lbl: Label,
@@ -169,118 +165,43 @@ pub struct BluetoothSection {
 
 impl BluetoothSection {
     pub fn new() -> Rc<Self> {
-        // ── Root section box ──────────────────────────────────────────────────
-        let root = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(4)
-            .build();
-        root.add_css_class("section");
-
-        // ── Summary row (always visible) ──────────────────────────────────────
-        let summary_content = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(8)
-            .hexpand(true)
-            .build();
-
-        let summary_icon = Label::builder().label(ICON_BLUETOOTH).build();
-        summary_icon.add_css_class("section-summary-icon");
-
-        let summary_text = Label::builder()
-            .label("")
-            .xalign(0.0)
-            .hexpand(true)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .build();
-        summary_text.add_css_class("section-summary-label");
-
-        let summary_arrow = Label::builder().label("▸").build();
-        summary_arrow.add_css_class("section-expand-arrow");
-
-        summary_content.append(&summary_icon);
-        summary_content.append(&summary_text);
-        summary_content.append(&summary_arrow);
-
-        let summary_btn = Button::builder().child(&summary_content).build();
-        summary_btn.add_css_class("section-summary");
-        root.append(&summary_btn);
-
-        // ── Detail revealer ───────────────────────────────────────────────────
-        let detail_revealer = Revealer::builder()
-            .transition_type(RevealerTransitionType::SlideDown)
-            .transition_duration(200)
-            .reveal_child(false)
-            .build();
-
-        // ── Detail content box (lives inside detail_revealer) ─────────────────
-        let detail_box = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(4)
-            .build();
+        let section = ui::section(ICON_BLUETOOTH, "Bluetooth", "");
+        ui::glyph(&section.icon, ui::Text::Title, ui::Tone::Fg);
 
         // ── Connected devices list ────────────────────────────────────────────
-        let connected_list = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(2)
-            .build();
-        connected_list.add_css_class("device-list");
-        detail_box.append(&connected_list);
+        let connected_list = ui::vbox(1);
+        section.body.append(&connected_list);
 
-        // ── Revealer toggle button (available devices) ────────────────────────
-        let toggle_btn = Button::builder()
-            .label("▸ Available Devices")
-            .hexpand(true)
-            .build();
-        toggle_btn.add_css_class("section-expander");
-        detail_box.append(&toggle_btn);
-
-        // ── Revealer content (available devices) ──────────────────────────────
-        let revealer = Revealer::builder()
-            .transition_type(RevealerTransitionType::SlideDown)
-            .transition_duration(200)
-            .reveal_child(false)
-            .build();
-
-        let revealer_box = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(4)
-            .build();
-        revealer_box.add_css_class("revealer-content");
+        // ── Available devices, behind a disclosure ────────────────────────────
+        let available = ui::disclosure("Available Devices");
 
         // Scan row: button + spinner + status label
-        let scan_row = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(8)
-            .build();
+        let scan_row = ui::hbox(3);
+        scan_row.add_css_class("section-toolbar");
 
-        let scan_btn = Button::with_label("Scan");
-        scan_btn.add_css_class("scan-button");
+        let scan_btn = ui::small_button("Scan", ui::Kind::Secondary);
 
         let scan_spinner = Spinner::new();
         scan_spinner.set_visible(false);
 
-        let scan_status_lbl = Label::builder().label("").xalign(0.0).hexpand(true).build();
-        scan_status_lbl.add_css_class("scan-status");
+        let scan_status_lbl = ui::text("", ui::Text::Caption, ui::Tone::Faint);
+        scan_status_lbl.set_hexpand(true);
 
         scan_row.append(&scan_btn);
         scan_row.append(&scan_spinner);
         scan_row.append(&scan_status_lbl);
-        revealer_box.append(&scan_row);
+        available.body.append(&scan_row);
 
         // Available devices list
-        let available_list = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(2)
-            .build();
-        available_list.add_css_class("device-list");
-        revealer_box.append(&available_list);
+        let available_list = ui::vbox(1);
+        available.body.append(&available_list);
 
         // ── Advanced Bluetooth Settings launcher (blueman / bluetoothctl) ───
-        let adv_btn = Button::builder()
-            .label("󰂯  Advanced Bluetooth Manager (blueman / bluetoothctl)")
-            .halign(gtk4::Align::Fill)
-            .build();
-        adv_btn.add_css_class("network-adv-btn");
+        let adv_btn = ui::button(
+            "󰂯  Advanced Bluetooth Manager (blueman / bluetoothctl)",
+            ui::Kind::Secondary,
+        );
+        adv_btn.add_css_class("section-launch-btn");
         adv_btn.connect_clicked(|_| {
             let _ = std::process::Command::new("blueman-manager")
                 .spawn()
@@ -295,39 +216,9 @@ impl BluetoothSection {
                         .spawn()
                 });
         });
-        revealer_box.append(&adv_btn);
+        available.body.append(&adv_btn);
 
-        revealer.set_child(Some(&revealer_box));
-        detail_box.append(&revealer);
-
-        detail_revealer.set_child(Some(&detail_box));
-        root.append(&detail_revealer);
-
-        // ── Wire up summary row toggle ────────────────────────────────────────
-        {
-            let detail_revealer_c = detail_revealer.clone();
-            let summary_arrow_c = summary_arrow.clone();
-            summary_btn.connect_clicked(move |_| {
-                let revealed = !detail_revealer_c.reveals_child();
-                detail_revealer_c.set_reveal_child(revealed);
-                summary_arrow_c.set_label(if revealed { "▾" } else { "▸" });
-            });
-        }
-
-        // ── Wire up available-devices toggle ──────────────────────────────────
-        {
-            let revealer_c = revealer.clone();
-            let toggle_btn_c = toggle_btn.clone();
-            toggle_btn.connect_clicked(move |_| {
-                let revealed = !revealer_c.reveals_child();
-                revealer_c.set_reveal_child(revealed);
-                if revealed {
-                    toggle_btn_c.set_label("▾ Available Devices");
-                } else {
-                    toggle_btn_c.set_label("▸ Available Devices");
-                }
-            });
-        }
+        section.body.append(&available.root);
 
         // ── Wire up scan button ───────────────────────────────────────────────
         let state = Rc::new(RefCell::new(State { scanning: false }));
@@ -402,15 +293,10 @@ impl BluetoothSection {
         }
 
         let section = Rc::new(Self {
-            root,
-            summary_btn,
-            summary_icon,
-            summary_text,
-            summary_arrow,
-            detail_revealer,
+            section,
             connected_list,
             available_list,
-            revealer,
+            available,
             scan_spinner,
             scan_btn,
             scan_status_lbl,
@@ -433,8 +319,8 @@ impl BluetoothSection {
     /// Apply pre-fetched Bluetooth state to the UI (runs on the main thread).
     fn apply_state(&self, state: BluetoothState) {
         if !state.available {
-            self.summary_icon.set_label(ICON_BLUETOOTH_OFF);
-            self.summary_text.set_label("Unavailable");
+            self.section.icon.set_label(ICON_BLUETOOTH_OFF);
+            self.section.summary.set_label("Unavailable");
             return;
         }
 
@@ -447,8 +333,8 @@ impl BluetoothSection {
             self.scan_status_lbl.set_label("Bluetooth is off");
             self.connected_list.set_visible(false);
 
-            self.summary_icon.set_label(ICON_BLUETOOTH_OFF);
-            self.summary_text.set_label("Bluetooth off");
+            self.section.icon.set_label(ICON_BLUETOOTH_OFF);
+            self.section.summary.set_label("Bluetooth off");
             return;
         }
 
@@ -478,10 +364,10 @@ impl BluetoothSection {
         self.connected_list.set_visible(has_connected);
 
         // Update summary row.
-        self.summary_icon.set_label(ICON_BLUETOOTH);
+        self.section.icon.set_label(ICON_BLUETOOTH);
         match connected_devices.len() {
             0 => {
-                self.summary_text.set_label("No devices");
+                self.section.summary.set_label("No devices");
             }
             1 => {
                 let dev = connected_devices[0];
@@ -489,24 +375,24 @@ impl BluetoothSection {
                     Some(pct) => format!("{} {}%", dev.name, pct),
                     None => dev.name.clone(),
                 };
-                self.summary_text.set_label(&text);
+                self.section.summary.set_label(&text);
             }
             n => {
-                self.summary_text
+                self.section
+                    .summary
                     .set_label(&format!("{n} devices connected"));
             }
         }
     }
 
     pub fn expand_for_page(&self) {
-        self.summary_btn.set_visible(false);
-        self.detail_revealer.set_reveal_child(true);
-        self.revealer.set_reveal_child(true);
+        self.section.show_as_page();
+        self.available.set_open(true);
     }
 
     /// Return a reference to the root widget for embedding in the panel.
     pub fn widget(&self) -> &Box {
-        &self.root
+        &self.section.root
     }
 }
 
@@ -514,44 +400,24 @@ impl BluetoothSection {
 
 /// Build a row for a connected device with a disconnect button and forget (×) button.
 fn make_connected_row(dev: &BtDevice, parent_list: &Box) -> Box {
-    let row = Box::builder()
-        .orientation(Orientation::Horizontal)
-        .spacing(8)
-        .hexpand(true)
-        .build();
-    row.add_css_class("device-row");
-    row.add_css_class("connected");
-
-    let icon_lbl = Label::builder()
-        .label(device_icon(dev.icon_hint.as_deref()))
-        .build();
-    icon_lbl.add_css_class("device-icon");
-
     // Name + optional battery percentage.
     let name_text = match dev.battery {
         Some(pct) => format!("{} {}%", dev.name, pct),
         None => dev.name.clone(),
     };
-    let name_lbl = Label::builder()
-        .label(&name_text)
-        .xalign(0.0)
-        .hexpand(true)
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .build();
-    name_lbl.add_css_class("device-name");
+    let r = ui::row(device_icon(dev.icon_hint.as_deref()), &name_text, "");
+    ui::set_selected(&r.root, true);
+    let row = r.root.clone();
 
     // Status label — used for spinner/feedback during disconnect.
-    let status_lbl = Label::builder().label("").build();
-    status_lbl.add_css_class("device-status");
+    let status_lbl = ui::text("", ui::Text::Label, ui::Tone::Faint);
 
     let spinner = Spinner::new();
     spinner.set_visible(false);
 
-    let disconnect_btn = Button::with_label("Disconnect");
-    disconnect_btn.add_css_class("device-action");
+    let disconnect_btn = ui::small_button("Disconnect", ui::Kind::Secondary);
 
-    let forget_btn = Button::with_label("×");
-    forget_btn.add_css_class("device-forget");
+    let forget_btn = ui::glyph_button("×", "Forget", ui::Kind::Flat);
 
     // ── Disconnect handler ────────────────────────────────────────────────────
     {
@@ -591,7 +457,7 @@ fn make_connected_row(dev: &BtDevice, parent_list: &Box) -> Box {
                         btn_poll.set_sensitive(true);
                         forget_poll.set_sensitive(true);
                         status_poll.set_label(&format!("Error: {reason}"));
-                        status_poll.add_css_class("error");
+                        ui::set_text_style(&status_poll, ui::Text::Label, ui::Tone::Danger);
                     }
                 },
             );
@@ -610,50 +476,27 @@ fn make_connected_row(dev: &BtDevice, parent_list: &Box) -> Box {
         });
     }
 
-    row.append(&icon_lbl);
-    row.append(&name_lbl);
-    row.append(&spinner);
-    row.append(&status_lbl);
-    row.append(&disconnect_btn);
-    row.append(&forget_btn);
+    r.end.append(&spinner);
+    r.end.append(&status_lbl);
+    r.end.append(&disconnect_btn);
+    r.end.append(&forget_btn);
     row
 }
 
 /// Build a row for an available (not connected) device with a connect button and forget (×).
 fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
-    let row = Box::builder()
-        .orientation(Orientation::Horizontal)
-        .spacing(8)
-        .hexpand(true)
-        .build();
-    row.add_css_class("device-row");
-    row.add_css_class("available");
-
-    let icon_lbl = Label::builder()
-        .label(device_icon(dev.icon_hint.as_deref()))
-        .build();
-    icon_lbl.add_css_class("device-icon");
-
-    let name_lbl = Label::builder()
-        .label(&dev.name)
-        .xalign(0.0)
-        .hexpand(true)
-        .ellipsize(gtk4::pango::EllipsizeMode::End)
-        .build();
-    name_lbl.add_css_class("device-name");
+    let r = ui::row(device_icon(dev.icon_hint.as_deref()), &dev.name, "");
+    let row = r.root.clone();
 
     // Status label — shows spinner feedback and error/success messages.
-    let status_lbl = Label::builder().label("").build();
-    status_lbl.add_css_class("device-status");
+    let status_lbl = ui::text("", ui::Text::Label, ui::Tone::Faint);
 
     let spinner = Spinner::new();
     spinner.set_visible(false);
 
-    let connect_btn = Button::with_label("Connect");
-    connect_btn.add_css_class("device-action");
+    let connect_btn = ui::small_button("Connect", ui::Kind::Secondary);
 
-    let forget_btn = Button::with_label("×");
-    forget_btn.add_css_class("device-forget");
+    let forget_btn = ui::glyph_button("×", "Forget", ui::Kind::Flat);
 
     // ── Connect handler ───────────────────────────────────────────────────────
     {
@@ -671,8 +514,7 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
             spinner_c.set_visible(true);
             spinner_c.start();
             status_c.set_label("");
-            status_c.remove_css_class("error");
-            status_c.remove_css_class("success");
+            ui::set_text_style(&status_c, ui::Text::Label, ui::Tone::Faint);
 
             let mac_bg = mac.clone();
             let row_poll = row_c.clone();
@@ -689,7 +531,7 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
                         spinner_poll.stop();
                         spinner_poll.set_visible(false);
                         status_poll.set_label("✓");
-                        status_poll.add_css_class("success");
+                        ui::set_text_style(&status_poll, ui::Text::Label, ui::Tone::Success);
 
                         // Brief flash of the checkmark, then remove the row
                         // (caller's refresh() will add it to connected list).
@@ -708,7 +550,7 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
                         btn_poll.set_sensitive(true);
                         forget_poll.set_sensitive(true);
                         status_poll.set_label(&format!("Connection failed: {reason}"));
-                        status_poll.add_css_class("error");
+                        ui::set_text_style(&status_poll, ui::Text::Label, ui::Tone::Danger);
                     }
                 },
             );
@@ -727,12 +569,10 @@ fn make_available_row(dev: &BtDevice, parent_list: &Box) -> Box {
         });
     }
 
-    row.append(&icon_lbl);
-    row.append(&name_lbl);
-    row.append(&spinner);
-    row.append(&status_lbl);
-    row.append(&connect_btn);
-    row.append(&forget_btn);
+    r.end.append(&spinner);
+    r.end.append(&status_lbl);
+    r.end.append(&connect_btn);
+    r.end.append(&forget_btn);
     row
 }
 

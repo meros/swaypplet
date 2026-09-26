@@ -1,11 +1,12 @@
 use std::process::Command;
 
 use gtk4::prelude::*;
-use gtk4::{Box, Button, Label, Orientation, Revealer, RevealerTransitionType};
+use gtk4::{Box, Label};
 use serde::Deserialize;
 
 use crate::icons;
 use crate::spawn::spawn_work;
+use crate::ui;
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
@@ -66,41 +67,18 @@ fn toggle_output_blocking(name: &str, enable: bool) -> bool {
 /// Build a single output row and return it along with the widget that should be
 /// refreshed when the toggle completes (`output_list`).
 fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) -> Box {
-    let row = Box::builder()
-        .orientation(Orientation::Horizontal)
-        .spacing(8)
-        .hexpand(true)
-        .build();
-    row.add_css_class("device-row");
-
-    let icon_lbl = Label::builder().label(icons::DISPLAY).build();
-    icon_lbl.add_css_class("device-icon");
-
-    let info_box = Box::builder()
-        .orientation(Orientation::Vertical)
-        .hexpand(true)
-        .build();
-
-    let name_lbl = Label::builder().label(&output.name).xalign(0.0).build();
-    name_lbl.add_css_class("device-name");
-
     let mode_text = match &output.current_mode {
         Some(m) if m.width > 0 && m.height > 0 => {
             format!("{}x{} @ {}", m.width, m.height, format_refresh(m.refresh))
         }
         _ => "—".to_string(),
     };
-    let mode_lbl = Label::builder().label(&mode_text).xalign(0.0).build();
-    mode_lbl.add_css_class("device-status");
-
-    info_box.append(&name_lbl);
-    info_box.append(&mode_lbl);
+    let r = ui::row(icons::DISPLAY, &output.name, &mode_text);
 
     // Disable button is suppressed when it would turn off the last active display.
     let can_disable = output.active && active_count > 1;
     let btn_label = if output.active { "Disable" } else { "Enable" };
-    let toggle_btn = Button::with_label(btn_label);
-    toggle_btn.add_css_class("device-action");
+    let toggle_btn = ui::small_button(btn_label, ui::Kind::Secondary);
     if !can_disable && output.active {
         // Last active display: prevent disabling.
         toggle_btn.set_sensitive(false);
@@ -138,10 +116,8 @@ fn make_output_row(output: &OutputInfo, active_count: usize, output_list: &Box) 
         });
     }
 
-    row.append(&icon_lbl);
-    row.append(&info_box);
-    row.append(&toggle_btn);
-    row
+    r.end.append(&toggle_btn);
+    r.root
 }
 
 // ── List population ───────────────────────────────────────────────────────────
@@ -167,140 +143,46 @@ fn populate_output_list_with_data(list: &Box, outputs: &[OutputInfo]) {
 // ── DisplaySection ────────────────────────────────────────────────────────────
 
 pub struct DisplaySection {
-    root: Box,
-    summary_btn: Button,
-    summary_text: Label,
-    summary_arrow: Label,
-    detail_revealer: Revealer,
+    section: ui::Section,
     output_list: Box,
 }
 
 impl DisplaySection {
     pub fn new() -> Self {
-        // ── Root section box ──────────────────────────────────────────────────
-        let root = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(4)
-            .build();
-        root.add_css_class("section");
+        let section = ui::section(icons::DISPLAY, "Displays", "");
+        ui::glyph(&section.icon, ui::Text::Title, ui::Tone::Fg);
+        let output_list = ui::vbox(1);
 
-        // ── Summary row (always visible) ──────────────────────────────────────
-        let summary_content = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(8)
-            .hexpand(true)
-            .build();
-
-        let summary_icon = Label::builder().label(icons::DISPLAY).build();
-        summary_icon.add_css_class("section-summary-icon");
-
-        let summary_text = Label::builder()
-            .label("Displays")
-            .xalign(0.0)
-            .hexpand(true)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .build();
-        summary_text.add_css_class("section-summary-label");
-
-        let summary_arrow = Label::builder().label("▸").build();
-        summary_arrow.add_css_class("section-expand-arrow");
-
-        summary_content.append(&summary_icon);
-        summary_content.append(&summary_text);
-        summary_content.append(&summary_arrow);
-
-        let summary_btn = Button::builder().child(&summary_content).build();
-        summary_btn.add_css_class("section-summary");
-        root.append(&summary_btn);
-
-        // ── Detail revealer ───────────────────────────────────────────────────
-        let detail_revealer = Revealer::builder()
-            .transition_type(RevealerTransitionType::SlideDown)
-            .transition_duration(200)
-            .reveal_child(false)
-            .build();
-
-        let output_list = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(2)
-            .build();
-        output_list.add_css_class("device-list");
-
-        // ── Night light warmth controls in Display Section ───────────────────
-        let night_box = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(4)
-            .build();
-        night_box.add_css_class("display-night-box");
-
-        let night_hdr = Box::builder()
-            .orientation(Orientation::Horizontal)
-            .spacing(6)
-            .build();
-        let night_lbl = Label::builder()
-            .label("Night Light Warmth")
-            .xalign(0.0)
-            .hexpand(true)
-            .build();
-        night_lbl.add_css_class("display-night-label");
-        let night_val_lbl = Label::builder().label("3500K").xalign(1.0).build();
-        night_val_lbl.add_css_class("display-night-val");
-        night_hdr.append(&night_lbl);
-        night_hdr.append(&night_val_lbl);
-
-        let night_scale = gtk4::Scale::builder()
-            .orientation(Orientation::Horizontal)
-            .adjustment(&gtk4::Adjustment::new(
-                3500.0, 2000.0, 6500.0, 100.0, 500.0, 0.0,
-            ))
-            .draw_value(false)
-            .hexpand(true)
-            .build();
-        night_scale.add_css_class("night-scale");
-
+        // ── Night light warmth, above the outputs ─────────────────────────────
+        let night = ui::group(1);
+        night.add_css_class("display-night");
+        night.append(&ui::heading("Night Light Warmth"));
+        let night_row = ui::slider_row("󰖔", 2000.0, 6500.0, 100.0);
+        ui::glyph(&night_row.icon, ui::Text::Title, ui::Tone::Fg);
+        night_row.scale.adjustment().set_page_increment(500.0);
+        night_row.scale.set_value(3500.0);
+        night_row.value.set_label("3500K");
         {
-            let val_lbl = night_val_lbl.clone();
-            night_scale.connect_value_changed(move |s| {
+            let val_lbl = night_row.value.clone();
+            night_row.scale.connect_value_changed(move |s| {
                 let temp = s.value().round() as u32;
                 val_lbl.set_label(&format!("{temp}K"));
             });
         }
+        night.append(&night_row.root);
 
-        night_box.append(&night_hdr);
-        night_box.append(&night_scale);
-
-        let detail_box = Box::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(8)
-            .build();
-        detail_box.append(&night_box);
+        let detail_box = ui::vbox(3);
+        detail_box.append(&night);
         detail_box.append(&output_list);
+        section.body.append(&detail_box);
 
-        detail_revealer.set_child(Some(&detail_box));
-        root.append(&detail_revealer);
-
-        // ── Wire up summary row toggle ────────────────────────────────────────
-        {
-            let detail_revealer_c = detail_revealer.clone();
-            let summary_arrow_c = summary_arrow.clone();
-            summary_btn.connect_clicked(move |_| {
-                let revealed = !detail_revealer_c.reveals_child();
-                detail_revealer_c.set_reveal_child(revealed);
-                summary_arrow_c.set_label(if revealed { "▾" } else { "▸" });
-            });
-        }
-
-        let section = Self {
-            root,
-            summary_btn,
-            summary_text,
-            summary_arrow,
-            detail_revealer,
+        let display = Self {
+            section,
             output_list,
         };
 
-        section.refresh();
-        section
+        display.refresh();
+        display
     }
 
     /// Re-query swaymsg and rebuild the output list and summary label.
@@ -309,7 +191,7 @@ impl DisplaySection {
     /// updated on the GTK main thread once the result arrives.
     pub fn refresh(&self) {
         let output_list = self.output_list.clone();
-        let summary_text = self.summary_text.clone();
+        let summary_text: Label = self.section.summary.clone();
 
         spawn_work(get_outputs, move |outputs| {
             populate_output_list_with_data(&output_list, &outputs);
@@ -328,18 +210,13 @@ impl DisplaySection {
         });
     }
 
-    /// Switch into page mode: reveal detail immediately, hide the summary
-    /// toggle row.
+    /// Switch into page mode: the body alone, open at once.
     pub fn expand_for_page(&self) {
-        self.summary_btn.set_visible(false);
-        self.detail_revealer.set_transition_duration(0);
-        self.detail_revealer.set_reveal_child(true);
-        self.detail_revealer.set_transition_duration(200);
-        self.summary_arrow.set_label("▾");
+        self.section.show_as_page();
     }
 
     /// Return a reference to the root widget for embedding in the panel.
     pub fn widget(&self) -> &Box {
-        &self.root
+        &self.section.root
     }
 }

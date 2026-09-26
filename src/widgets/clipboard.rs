@@ -11,20 +11,17 @@ use gtk4::prelude::*;
 
 use crate::clipboard::{ClipboardService, EntryView};
 use crate::icons;
+use crate::ui;
 
 // ── ClipboardSection ──────────────────────────────────────────────────────────
 
 struct Widgets {
-    summary_btn: gtk4::Button,
-    summary_text: gtk4::Label,
-    summary_arrow: gtk4::Label,
-    detail_revealer: gtk4::Revealer,
+    section: ui::Section,
     entry_list: gtk4::Box,
     clear_btn: gtk4::Button,
 }
 
 pub struct ClipboardSection {
-    root: gtk4::Box,
     widgets: Rc<Widgets>,
     /// `None` on a compositor without the protocol; the section says so
     /// rather than showing an empty list that looks like an empty history.
@@ -33,79 +30,20 @@ pub struct ClipboardSection {
 
 impl ClipboardSection {
     pub fn new() -> Self {
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(6)
-            .build();
-        root.add_css_class("section");
+        let section = ui::section(icons::CLIPBOARD, "Clipboard", "");
+        ui::glyph(&section.icon, ui::Text::Title, ui::Tone::Fg);
 
-        // ── Summary row (always visible, toggles detail revealer) ─────────────
-        let summary_content = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(6)
-            .build();
+        let detail_box = ui::vbox(2);
+        section.body.append(&detail_box);
 
-        let summary_icon = gtk4::Label::new(Some(icons::CLIPBOARD));
-        summary_icon.add_css_class("section-summary-icon");
-
-        let summary_text = gtk4::Label::new(Some("Clipboard"));
-        summary_text.add_css_class("section-summary-label");
-        summary_text.set_hexpand(true);
-        summary_text.set_xalign(0.0);
-        summary_text.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-
-        let summary_arrow = gtk4::Label::new(Some("▸"));
-        summary_arrow.add_css_class("section-expand-arrow");
-
-        summary_content.append(&summary_icon);
-        summary_content.append(&summary_text);
-        summary_content.append(&summary_arrow);
-
-        let summary_btn = gtk4::Button::builder().child(&summary_content).build();
-        summary_btn.add_css_class("section-summary");
-
-        // ── Detail revealer (collapsed by default) ───────────────────────────
-        let detail_revealer = gtk4::Revealer::builder()
-            .transition_type(gtk4::RevealerTransitionType::SlideDown)
-            .transition_duration(200)
-            .reveal_child(false)
-            .build();
-
-        {
-            let rev = detail_revealer.clone();
-            let arrow = summary_arrow.clone();
-            summary_btn.connect_clicked(move |_| {
-                let revealed = rev.reveals_child();
-                rev.set_reveal_child(!revealed);
-                arrow.set_label(if revealed { "▸" } else { "▾" });
-            });
-        }
-
-        root.append(&summary_btn);
-        root.append(&detail_revealer);
-
-        let detail_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(4)
-            .build();
-        detail_revealer.set_child(Some(&detail_box));
-
-        let entry_list = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(2)
-            .build();
-        entry_list.add_css_class("device-list");
+        let entry_list = ui::vbox(1);
         detail_box.append(&entry_list);
 
-        let clear_btn = gtk4::Button::with_label("Clear History");
-        clear_btn.add_css_class("flat");
+        let clear_btn = ui::button("Clear History", ui::Kind::Flat);
         detail_box.append(&clear_btn);
 
         let widgets = Rc::new(Widgets {
-            summary_btn,
-            summary_text,
-            summary_arrow,
-            detail_revealer,
+            section,
             entry_list,
             clear_btn,
         });
@@ -135,13 +73,9 @@ impl ClipboardSection {
             widgets.clear_btn.set_sensitive(false);
         }
 
-        let section = ClipboardSection {
-            root,
-            widgets,
-            service,
-        };
-        section.refresh();
-        section
+        let clipboard = ClipboardSection { widgets, service };
+        clipboard.refresh();
+        clipboard
     }
 
     /// Draw `entries`, or the unavailable notice when there is no service.
@@ -151,32 +85,33 @@ impl ClipboardSection {
         }
 
         let Some(entries) = entries else {
-            let notice = gtk4::Label::new(Some("Clipboard history unavailable"));
-            notice.set_xalign(0.0);
-            notice.add_css_class("device-row");
+            let notice = ui::text(
+                "Clipboard history unavailable",
+                ui::Text::Body,
+                ui::Tone::Muted,
+            );
+            notice.add_css_class("section-empty");
             w.entry_list.append(&notice);
-            w.summary_text.set_label("Unavailable");
-            w.summary_arrow.set_label("▸");
-            w.detail_revealer.set_reveal_child(false);
-            w.detail_revealer.set_sensitive(false);
+            w.section.summary.set_label("Unavailable");
+            w.section.set_open(false);
+            w.section.revealer.set_sensitive(false);
             return;
         };
 
-        w.detail_revealer.set_sensitive(true);
+        w.section.revealer.set_sensitive(true);
         w.clear_btn.set_sensitive(!entries.is_empty());
 
         if entries.is_empty() {
-            w.summary_text.set_label("Clipboard");
-            let empty = gtk4::Label::new(Some("No clipboard history"));
-            empty.set_xalign(0.0);
-            empty.add_css_class("device-row");
+            w.section.summary.set_label("");
+            let empty = ui::text("No clipboard history", ui::Text::Body, ui::Tone::Muted);
+            empty.add_css_class("section-empty");
             w.entry_list.append(&empty);
             return;
         }
 
         let count = entries.len();
-        w.summary_text.set_label(&format!(
-            "Clipboard · {count} item{}",
+        w.section.summary.set_label(&format!(
+            "{count} item{}",
             if count == 1 { "" } else { "s" }
         ));
         for entry in entries {
@@ -185,37 +120,21 @@ impl ClipboardSection {
         }
     }
 
-    fn build_entry_row(entry: &EntryView, w: Rc<Widgets>) -> gtk4::Box {
-        let row = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(8)
-            .build();
-        row.add_css_class("device-row");
-        row.set_focusable(true);
-        row.set_can_focus(true);
-
-        let preview_label = gtk4::Label::new(Some(&entry.preview));
-        preview_label.add_css_class("device-name");
-        preview_label.set_hexpand(true);
-        preview_label.set_xalign(0.0);
-        preview_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-        row.append(&preview_label);
+    fn build_entry_row(entry: &EntryView, w: Rc<Widgets>) -> gtk4::Button {
+        let (btn, _) = ui::row_button("", &entry.preview, "");
 
         // Clicking puts the entry back on the selection and collapses the
         // list. The set is a Wayland request, not a subprocess, so there is
         // nothing to wait for and nothing to spawn.
         let id = entry.id;
-        let gesture = gtk4::GestureClick::new();
-        gesture.connect_released(move |_, _, _, _| {
+        btn.connect_clicked(move |_| {
             if let Some(svc) = crate::clipboard::service() {
                 svc.restore(id);
             }
-            w.detail_revealer.set_reveal_child(false);
-            w.summary_arrow.set_label("▸");
+            w.section.set_open(false);
         });
-        row.add_controller(gesture);
 
-        row
+        btn
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -230,14 +149,10 @@ impl ClipboardSection {
     /// Switch into page mode: reveal detail immediately, hide the summary
     /// toggle row.
     pub fn expand_for_page(&self) {
-        self.widgets.summary_btn.set_visible(false);
-        self.widgets.detail_revealer.set_transition_duration(0);
-        self.widgets.detail_revealer.set_reveal_child(true);
-        self.widgets.detail_revealer.set_transition_duration(200);
-        self.widgets.summary_arrow.set_label("▾");
+        self.widgets.section.show_as_page();
     }
 
     pub fn widget(&self) -> &gtk4::Box {
-        &self.root
+        &self.widgets.section.root
     }
 }

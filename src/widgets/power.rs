@@ -4,6 +4,8 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use crate::ui;
+
 // ---------------------------------------------------------------------------
 // Sysfs helpers
 // ---------------------------------------------------------------------------
@@ -358,7 +360,7 @@ struct BatteryHandles {
     summary_text: gtk4::Label,
     /// Detail: battery level bar (inside revealer).
     health_lbl: gtk4::Label,
-    level_bar: gtk4::LevelBar,
+    level_bar: gtk4::ProgressBar,
 }
 
 impl BatteryHandles {
@@ -369,7 +371,7 @@ impl BatteryHandles {
         self.summary_text.set_label(&battery_summary_text(bat));
 
         // Update detail widgets.
-        self.level_bar.set_value(bat.capacity as f64 / 100.0);
+        self.level_bar.set_fraction(bat.capacity as f64 / 100.0);
 
         if let Some(health) = bat.health_pct {
             self.health_lbl.set_label(&format!("Health: {}%", health));
@@ -378,25 +380,7 @@ impl BatteryHandles {
             self.health_lbl.set_visible(false);
         }
 
-        if bat.charging {
-            self.level_bar.add_css_class("charging");
-        } else {
-            self.level_bar.remove_css_class("charging");
-        }
-
-        if bat.capacity > 60 {
-            self.level_bar.add_css_class("battery-high");
-            self.level_bar.remove_css_class("battery-medium");
-            self.level_bar.remove_css_class("battery-low");
-        } else if bat.capacity >= 20 {
-            self.level_bar.add_css_class("battery-medium");
-            self.level_bar.remove_css_class("battery-high");
-            self.level_bar.remove_css_class("battery-low");
-        } else {
-            self.level_bar.add_css_class("battery-low");
-            self.level_bar.remove_css_class("battery-high");
-            self.level_bar.remove_css_class("battery-medium");
-        }
+        ui::set_progress_status(&self.level_bar, charge_status(bat));
     }
 }
 
@@ -405,7 +389,7 @@ impl BatteryHandles {
 // ---------------------------------------------------------------------------
 
 pub struct PowerSection {
-    root: gtk4::Box,
+    section: ui::Section,
     /// Cached battery sysfs path (None on desktops without a battery).
     bat_path: Option<String>,
     state: RefCell<PowerState>,
@@ -413,28 +397,12 @@ pub struct PowerSection {
     // Battery widget handles (only present when a battery was found).
     bat_handles: Option<Rc<BatteryHandles>>,
 
-    // Summary row button + labels (always visible).
-    summary_btn: gtk4::Button,
-    summary_icon: gtk4::Label,
-    summary_text: gtk4::Label,
-    summary_arrow: gtk4::Label,
-
-    // Governor info label (inside revealer).
+    // Governor info label (inside the section body).
     governor_label: gtk4::Label,
-
-    // Revealer for detail content.
-    detail_revealer: gtk4::Revealer,
 }
 
 impl PowerSection {
     pub fn new() -> Self {
-        // ── Root section box ────────────────────────────────────────────────
-        let root = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(6)
-            .build();
-        root.add_css_class("section");
-
         // ── Discover battery path ────────────────────────────────────────
         let bat_path = find_battery_path();
         if bat_path.is_none() {
@@ -443,13 +411,6 @@ impl PowerSection {
 
         // ── Read initial state ────────────────────────────────────────────
         let state = PowerState::read(bat_path.as_deref());
-
-        // ── Summary row (always visible) ──────────────────────────────────
-        let summary_content = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(8)
-            .valign(gtk4::Align::Center)
-            .build();
 
         // Determine initial icon and text for the summary.
         let (initial_icon, initial_text) = if let Some(ref bat) = state.battery {
@@ -461,83 +422,30 @@ impl PowerSection {
             ("󰻠".to_owned(), format_governor_info(&state.governor))
         };
 
-        let summary_icon = gtk4::Label::builder()
-            .label(&initial_icon)
-            .halign(gtk4::Align::Start)
-            .build();
-        summary_icon.add_css_class("section-summary-icon");
+        let section = ui::section(&initial_icon, "Power", &initial_text);
+        ui::glyph(&section.icon, ui::Text::Title, ui::Tone::Fg);
+        let summary_icon = section.icon.clone();
+        let summary_text = section.summary.clone();
 
-        let summary_text = gtk4::Label::builder()
-            .label(&initial_text)
-            .halign(gtk4::Align::Start)
-            .hexpand(true)
-            .xalign(0.0)
-            .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .build();
-        summary_text.add_css_class("section-summary-label");
-
-        let summary_arrow = gtk4::Label::builder()
-            .label("▸")
-            .halign(gtk4::Align::End)
-            .build();
-        summary_arrow.add_css_class("section-expand-arrow");
-
-        summary_content.append(&summary_icon);
-        summary_content.append(&summary_text);
-        summary_content.append(&summary_arrow);
-
-        let summary_btn = gtk4::Button::builder().child(&summary_content).build();
-        summary_btn.add_css_class("section-summary");
-        root.append(&summary_btn);
-
-        // ── Detail revealer ───────────────────────────────────────────────
-        let detail_revealer = gtk4::Revealer::builder()
-            .transition_type(gtk4::RevealerTransitionType::SlideDown)
-            .transition_duration(200)
-            .reveal_child(false)
-            .build();
-
-        let detail_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(8)
-            .build();
+        let detail_box = ui::vbox(3);
 
         // ── Battery detail widgets (conditional) ──────────────────────────
         let bat_handles: Option<Rc<BatteryHandles>> = if let Some(ref bat) = state.battery {
-            let bat_detail = gtk4::Box::builder()
-                .orientation(gtk4::Orientation::Vertical)
-                .spacing(4)
-                .build();
-            bat_detail.add_css_class("battery-row");
+            let bat_detail = ui::vbox(2);
+            bat_detail.add_css_class("battery-detail");
 
             // Health label
-            let health_lbl = gtk4::Label::builder()
-                .halign(gtk4::Align::Start)
-                .visible(false)
-                .build();
-            health_lbl.add_css_class("battery-health");
+            let health_lbl = ui::text("", ui::Text::Caption, ui::Tone::Faint);
+            health_lbl.set_visible(false);
             if let Some(health) = bat.health_pct {
                 health_lbl.set_label(&format!("Health: {}%", health));
                 health_lbl.set_visible(true);
             }
 
-            // Level bar
-            let level_bar = gtk4::LevelBar::builder()
-                .min_value(0.0)
-                .max_value(1.0)
-                .value(bat.capacity as f64 / 100.0)
-                .build();
-            level_bar.add_css_class("battery-bar");
-            if bat.charging {
-                level_bar.add_css_class("charging");
-            }
-            if bat.capacity > 60 {
-                level_bar.add_css_class("battery-high");
-            } else if bat.capacity >= 20 {
-                level_bar.add_css_class("battery-medium");
-            } else {
-                level_bar.add_css_class("battery-low");
-            }
+            // Level bar: the accent fill, green while charging and red
+            // when low, because those two are status.
+            let level_bar = ui::progress(bat.capacity as f64 / 100.0);
+            ui::set_progress_status(&level_bar, charge_status(bat));
 
             bat_detail.append(&level_bar);
             bat_detail.append(&health_lbl);
@@ -555,54 +463,15 @@ impl PowerSection {
         };
 
         // ── CPU governor info (managed by auto-cpufreq) ─────────────────
-        let cpu_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(8)
-            .build();
-        cpu_box.add_css_class("cpu-info-row");
+        let cpu = ui::row(
+            "󰻠",
+            &format_governor_info(&state.governor),
+            "Managed by auto-cpufreq",
+        );
+        let governor_label = cpu.title.clone();
+        detail_box.append(&cpu.root);
 
-        let cpu_icon = gtk4::Label::builder()
-            .label("󰻠")
-            .halign(gtk4::Align::Start)
-            .build();
-        cpu_icon.add_css_class("cpu-info-icon");
-
-        let cpu_text_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(2)
-            .build();
-
-        let governor_label = gtk4::Label::builder()
-            .label(&format_governor_info(&state.governor))
-            .halign(gtk4::Align::Start)
-            .build();
-        governor_label.add_css_class("cpu-info-governor");
-
-        let cpu_managed = gtk4::Label::builder()
-            .label("Managed by auto-cpufreq")
-            .halign(gtk4::Align::Start)
-            .build();
-        cpu_managed.add_css_class("cpu-info-managed");
-
-        cpu_text_box.append(&governor_label);
-        cpu_text_box.append(&cpu_managed);
-        cpu_box.append(&cpu_icon);
-        cpu_box.append(&cpu_text_box);
-        detail_box.append(&cpu_box);
-
-        detail_revealer.set_child(Some(&detail_box));
-        root.append(&detail_revealer);
-
-        // ── Toggle detail on summary button click ─────────────────────────
-        {
-            let revealer_c = detail_revealer.clone();
-            let arrow_c = summary_arrow.clone();
-            summary_btn.connect_clicked(move |_| {
-                let expanded = !revealer_c.reveals_child();
-                revealer_c.set_reveal_child(expanded);
-                arrow_c.set_label(if expanded { "▾" } else { "▸" });
-            });
-        }
+        section.body.append(&detail_box);
 
         // ── Periodic battery refresh every 30 s ───────────────────────────
         if let Some(ref handles) = bat_handles {
@@ -628,16 +497,11 @@ impl PowerSection {
         }
 
         Self {
-            root,
+            section,
             bat_path,
-            summary_btn,
             state: RefCell::new(state),
             bat_handles,
-            summary_icon,
-            summary_text,
-            summary_arrow,
             governor_label,
-            detail_revealer,
         }
     }
 
@@ -650,8 +514,9 @@ impl PowerSection {
             handles.apply(bat);
         } else if self.bat_handles.is_none() {
             // Desktop without battery: show governor in summary.
-            self.summary_icon.set_label("󰻠");
-            self.summary_text
+            self.section.icon.set_label("󰻠");
+            self.section
+                .summary
                 .set_label(&format_governor_info(&new_state.governor));
         }
         // else: machine has a battery but this read failed transiently —
@@ -666,15 +531,23 @@ impl PowerSection {
     /// Switch into page mode: reveal detail immediately, hide the summary
     /// toggle row.
     pub fn expand_for_page(&self) {
-        self.summary_btn.set_visible(false);
-        self.detail_revealer.set_transition_duration(0);
-        self.detail_revealer.set_reveal_child(true);
-        self.detail_revealer.set_transition_duration(200);
-        self.summary_arrow.set_label("▾");
+        self.section.show_as_page();
     }
 
     pub fn widget(&self) -> &gtk4::Box {
-        &self.root
+        &self.section.root
+    }
+}
+
+/// The level bar's status: charging is healthy, under 20 % is not, and
+/// anything between is just a level.
+fn charge_status(bat: &BatteryState) -> Option<ui::Status> {
+    if bat.charging {
+        Some(ui::Status::Ok)
+    } else if bat.capacity < 20 {
+        Some(ui::Status::Bad)
+    } else {
+        None
     }
 }
 
@@ -705,65 +578,9 @@ fn format_governor_info(gov: &GovernorProfile) -> String {
 // Session rail — icon-only Lock / Suspend / Logout / Reboot / Shutdown
 // ---------------------------------------------------------------------------
 
-/// Build the vertical session-action rail used in the start-menu's left rail.
-/// Buttons are icon-only (label via tooltip). Reboot and Shutdown are
-/// destructive, so they require a confirming second click within 3 s — shown
-/// as a red `.confirming` pulse plus a "Click again…" tooltip, since there is
-/// no text label to render a countdown into.
-pub fn build_session_rail() -> gtk4::Box {
-    let col = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(6)
-        .build();
-    col.add_css_class("rail-session");
-
-    // Lock — hide the panel first, then lock the session.
-    let lock = rail_btn("󰌾", "Lock", false);
-    lock.connect_clicked(|b| {
-        hide_panel_for_widget(b.upcast_ref());
-        spawn_session_cmd("loginctl", &["lock-session"]);
-    });
-    col.append(&lock);
-
-    // Switch user now lives in the session-aware user list (UserSection) in
-    // the right column, where rows have room for avatars — see widgets::users.
-
-    // Suspend — hide the panel first, then suspend.
-    let suspend = rail_btn("󰤄", "Suspend", false);
-    suspend.connect_clicked(|b| {
-        hide_panel_for_widget(b.upcast_ref());
-        spawn_session_cmd("systemctl", &["suspend"]);
-    });
-    col.append(&suspend);
-
-    // Logout.
-    let logout = rail_btn("󰍃", "Logout", false);
-    logout.connect_clicked(|_| spawn_session_cmd("swaymsg", &["exit"]));
-    col.append(&logout);
-
-    // Reboot (destructive — confirm).
-    let reboot = rail_btn("󰜉", "Reboot", true);
-    wire_confirm(&reboot, "Reboot", || {
-        spawn_session_cmd("systemctl", &["reboot"])
-    });
-    col.append(&reboot);
-
-    // Shutdown (destructive — confirm).
-    let shutdown = rail_btn("󰐥", "Shutdown", true);
-    wire_confirm(&shutdown, "Shutdown", || {
-        spawn_session_cmd("systemctl", &["poweroff"])
-    });
-    col.append(&shutdown);
-
-    col
-}
-
 /// Horizontal flight deck session cluster: Lock, Suspend, Logout, Reboot, Shutdown.
 pub fn build_session_row() -> gtk4::Box {
-    let row = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(6)
-        .build();
+    let row = ui::hbox(3);
     row.add_css_class("deck-session");
 
     let lock = rail_btn("󰌾", "Lock", false);

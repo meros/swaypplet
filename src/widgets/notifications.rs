@@ -10,7 +10,7 @@ use crate::notifications::store::{self, NotificationStore};
 use crate::ui;
 
 pub struct NotificationsSection {
-    section: ui::Section,
+    section: Rc<ui::Section>,
     list_box: gtk4::Box,
     empty_label: gtk4::Label,
     list_scroller: gtk4::ScrolledWindow,
@@ -19,22 +19,22 @@ pub struct NotificationsSection {
 
 impl NotificationsSection {
     pub fn new(store: Rc<RefCell<NotificationStore>>) -> Self {
-        // The header says how many there are and opens the list; the panel's
-        // page hides it and shows the list outright (`expand_for_page`).
-        let section = ui::section(icons::NOTIFICATION, "Notifications", "No notifications");
+        let section = Rc::new(ui::section(icons::NOTIFICATION, "Notifications", "None"));
+        ui::glyph(&section.icon, ui::Text::Title, ui::Tone::Fg);
 
-        // Title and clear-all, inside the body so they stay on the page.
+        // Header row: title + clear all button
         let header = ui::hbox(3);
-        header.add_css_class("notification-center-header");
-        let title = ui::overline("Notifications", ui::Tone::Muted);
+
+        let title = ui::heading("Notifications");
         title.set_hexpand(true);
-        title.set_valign(gtk4::Align::Center);
+
         let clear_btn = ui::glyph_button(icons::NOTIFICATION_CLEAR, "Clear all", ui::Kind::Flat);
-        ui::make_small(&clear_btn);
+
         let store_clear = store.clone();
         clear_btn.connect_clicked(move |_| {
             store::store_clear_all(&store_clear);
         });
+
         header.append(&title);
         header.append(&clear_btn);
         section.body.append(&header);
@@ -49,53 +49,52 @@ impl NotificationsSection {
 
         let list_box = ui::vbox(2);
 
-        let empty_label = ui::text("No notifications", ui::Text::Body, ui::Tone::Faint);
+        let empty_label = ui::text("No notifications", ui::Text::Body, ui::Tone::Muted);
         empty_label.set_halign(gtk4::Align::Center);
-        empty_label.add_css_class("notification-empty");
+        empty_label.add_css_class("section-empty");
         list_box.append(&empty_label);
 
         scroll.set_child(Some(&list_box));
         section.body.append(&scroll);
 
-        // Subscribe to changes for live updates
-        let list_box_c = list_box.clone();
-        let empty_label_c = empty_label.clone();
-        let summary_c = section.summary.clone();
-        let root_c = section.root.clone();
-        let revealer_c = section.revealer.clone();
-        let store_change = store.clone();
-        store.borrow_mut().connect_change(move || {
-            let has_notifications =
-                rebuild_list(&list_box_c, &empty_label_c, &summary_c, &store_change);
-            // Auto-expand when new notifications arrive
-            if has_notifications && !revealer_c.reveals_child() {
-                revealer_c.set_reveal_child(true);
-                root_c.add_css_class("open");
-            }
-        });
-
-        let this = Self {
+        let notifications = Self {
             section,
             list_box,
             empty_label,
-            list_scroller: scroll,
-            store,
+            list_scroller: scroll.clone(),
+            store: store.clone(),
         };
-        this.rebuild();
-        this
+
+        // Subscribe to changes for live updates
+        let list_box_c = notifications.list_box.clone();
+        let empty_label_c = notifications.empty_label.clone();
+        let section_c = notifications.section.clone();
+        let store_change = store.clone();
+        store.borrow_mut().connect_change(move || {
+            let has_notifications = rebuild_list(
+                &list_box_c,
+                &empty_label_c,
+                &section_c.summary,
+                &store_change,
+            );
+            // Auto-expand when new notifications arrive
+            if has_notifications && !section_c.revealer.reveals_child() {
+                section_c.set_open(true);
+            }
+        });
+
+        notifications.rebuild();
+        notifications
     }
 
     pub fn refresh(&self) {
         self.rebuild();
     }
 
-    /// Switch into page mode: reveal detail immediately, hide the header.
+    /// Switch into page mode: reveal detail immediately, hide the summary
+    /// toggle row.
     pub fn expand_for_page(&self) {
-        self.section.header.set_visible(false);
-        let duration = self.section.revealer.transition_duration();
-        self.section.revealer.set_transition_duration(0);
-        self.section.set_open(true);
-        self.section.revealer.set_transition_duration(duration);
+        self.section.show_as_page();
     }
 
     pub fn widget(&self) -> &gtk4::Box {
@@ -146,9 +145,8 @@ fn rebuild_list(
 
     // Update summary text
     match count {
-        0 => summary_text.set_label("No notifications"),
-        1 => summary_text.set_label("1 notification"),
-        n => summary_text.set_label(&format!("{n} notifications")),
+        0 => summary_text.set_label("None"),
+        n => summary_text.set_label(&format!("{n}")),
     }
 
     if notifications.is_empty() {
@@ -169,9 +167,7 @@ fn rebuild_list(
 
     for (app_name, notifs) in &grouped {
         if !app_name.is_empty() {
-            let group_label = ui::overline(app_name, ui::Tone::Muted);
-            group_label.add_css_class("notification-group");
-            list_box.append(&group_label);
+            list_box.append(&ui::heading(app_name));
         }
 
         for notif in notifs {
@@ -188,34 +184,30 @@ fn build_entry(
     store: &Rc<RefCell<NotificationStore>>,
 ) -> gtk4::Box {
     let r = ui::row("", &notif.summary, "");
-    r.root.add_css_class("notification-entry");
-    // The time and the dismiss close the summary's line, not the middle of
-    // a three-line body.
-    r.end.set_valign(gtk4::Align::Start);
 
-    // The row's text column, for the body and whatever follows it.
-    let texts = r
-        .title
-        .parent()
-        .and_downcast::<gtk4::Box>()
-        .expect("a row's title sits in its text column");
-
+    // The time sits after the summary, in the row's metadata tone.
     let time_label = ui::text(
         &format_relative_time(notif.timestamp),
         ui::Text::Caption,
         ui::Tone::Faint,
     );
-    r.end.append(&time_label);
+    let texts = r
+        .title
+        .parent()
+        .and_downcast::<gtk4::Box>()
+        .expect("a row's title sits in its text column");
+    let header_row = ui::hbox(3);
+    texts.remove(&r.title);
+    r.title.set_hexpand(true);
+    header_row.append(&r.title);
+    header_row.append(&time_label);
+    texts.prepend(&header_row);
 
-    // The body reads at full ink, as it does on the card: it is what the
-    // entry is for, not a subtitle to it.
     if !notif.body.is_empty() {
         let markup = crate::notifications::markup::sanitize(&notif.body);
         let body = &r.subtitle;
-        body.remove_css_class("ui-row-subtitle");
-        ui::set_text_style(body, ui::Text::Body, ui::Tone::Fg);
-        body.set_use_markup(true);
         body.set_label(&markup);
+        body.set_use_markup(true);
         body.set_wrap(true);
         body.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
         body.set_max_width_chars(50);
@@ -226,7 +218,6 @@ fn build_entry(
     if let Some(progress) = notif.progress {
         let bar = ui::progress(progress as f64 / 100.0);
         bar.set_hexpand(true);
-        bar.add_css_class("notification-progress");
         ui::breathing(&bar);
         texts.append(&bar);
     }
@@ -238,14 +229,12 @@ fn build_entry(
     // does that without an input grab on an overlay-layer surface.
     if !notif.actions.is_empty() {
         let actions_box = ui::hbox(2);
-        actions_box.add_css_class("notification-actions");
 
         for (key, label) in &notif.actions {
             // "default" is what clicking the notification itself means; in a
             // list of rows there is no such gesture to hang it on, so it gets
             // a button like any other.
-            let btn = ui::button(label, ui::Kind::Secondary);
-            ui::make_small(&btn);
+            let btn = ui::small_button(label, ui::Kind::Secondary);
 
             let id = notif.id;
             let key_c = key.clone();
@@ -264,7 +253,6 @@ fn build_entry(
 
     // Dismiss button
     let dismiss_btn = ui::glyph_button(icons::CLOSE, "Dismiss", ui::Kind::Flat);
-    ui::make_small(&dismiss_btn);
 
     let id = notif.id;
     let store_c = store.clone();

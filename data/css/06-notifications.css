@@ -1,7 +1,7 @@
-/* ── Notifications (src/notifications/popup.rs, src/widgets/notifications.rs) ──
-   The popup cards and the centre. Colour, type and shape come from the
-   components (the card and its tints, the rail, the overline, the badge,
-   the menu, the row); this places them. */
+/* ── Notification popups (src/notifications/popup.rs) ──
+   The popup cards. Colour, type and shape come from the components (the
+   card and its tints, the rail, the overline, the badge, the menu); this
+   places them. The centre is a panel section and has no rules here. */
 
 /* Cards live on transparent layer surfaces, one per card; everything
    outside the card must stay alpha 0 so the compositor's glass clips to
@@ -37,24 +37,4 @@
 
 .notification-actions {
     margin-top: var(--space-2);
-}
-
-/* ── Notification centre (the panel's Notifications page) ── */
-
-.notification-center-header {
-    padding: 0 var(--space-2) var(--space-2) var(--space-4);
-}
-
-.notification-group {
-    margin: var(--space-3) 0 var(--space-1) var(--space-4);
-}
-
-.notification-empty {
-    padding: var(--space-5) 0;
-}
-
-/* An entry carries a wrapped body under its summary, so it takes a row's
-   full vertical padding rather than a one-line row's. */
-.notification-entry {
-    padding: var(--space-3) var(--space-4);
 }
