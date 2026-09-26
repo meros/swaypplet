@@ -60,8 +60,8 @@ SOCK="$RUNTIME/sway-render-$$.sock"
   printf 'output HEADLESS-1 resolution %sx%s position 0 0 scale 1\n' "$W" "$H"
   printf 'default_border none\nxwayland disable\n'
   # A wallpaper, for a shot that is about one: the glass frosts what is
-  # behind it, and `look.tint` derives the palette from whatever sway's `bg`
-  # line names (swaypplet src/palette.rs). Without this the desktop is black,
+  # behind it, and `look.tint` takes its hue from whatever sway's `bg` line
+  # names (swaypplet src/theme/wallpaper.rs). Without this the desktop is black,
   # which is the best case for contrast and the wrong one for colour.
   #   SWPP_WALLPAPER=~/Pictures/wallpapers/x.jpg dev/render.sh --mode panel
   [ -n "${SWPP_WALLPAPER:-}" ] && printf 'output HEADLESS-1 bg "%s" fill\n' "$SWPP_WALLPAPER"
@@ -139,6 +139,10 @@ rm -f "$RUNTIME/swaypplet.pid"
 # §2). swaypplet's own startup replay then sends the mode's glass material,
 # the same path a mode switch takes in the session.
 [ -n "${SWPP_THEME:-}" ] && export SWAYPPLET_MODE="$SWPP_THEME"
+# SWPP_SETTINGS=1: a --mode preview:* reads the settings file, so it shows
+# the Look inputs there (a tint among them) instead of the defaults. Pair it
+# with an XDG_CONFIG_HOME (and XDG_CACHE_HOME) of the run's own.
+[ -n "${SWPP_SETTINGS:-}" ] && export SWAYPPLET_PREVIEW_SETTINGS=1
 
 case "$MODE" in
   polkit)    "$BIN" polkit-agent >/tmp/swpp-app.log 2>&1 & ;;

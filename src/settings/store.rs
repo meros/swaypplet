@@ -233,7 +233,7 @@ pub fn watch() {
 /// worker it does not fail and does not warn: it answers with a
 /// default-constructed `Settings`, which looks like a session where nothing
 /// was ever changed. Read what a worker needs before you spawn it and hand
-/// the values over. `palette::picked_wallpaper` carries the scar.
+/// the values over. `theme::wallpaper::picked_wallpaper` carries the scar.
 pub fn current() -> Settings {
     LIVE.with(|live| live.with(Clone::clone))
 }

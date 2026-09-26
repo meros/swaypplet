@@ -111,7 +111,7 @@ impl Rule {
                 "no derived colours in a rule: pick the semantic token for the job (§3.2), or the state overlay (§3.3) for a hover"
             }
             AtName => {
-                "the @define-color palette is legacy: map `@name` to its token with the table in §9"
+                "there is no named palette any more (the tokens replaced it): map `@name` to its token with the table in §9"
             }
             Token => {
                 "only tokens the generator emits (src/tokens/mod.rs `css`) and component-local properties in 00-components.css; a new value is a new token in the spec first"
@@ -1344,7 +1344,7 @@ fn check(rules: &[Rule]) {
 // ── Tests ───────────────────────────────────────────────────────────────
 
 /// §7.1: colours come from `var()`. No hex, `rgb()`, named colours,
-/// `alpha()`/`shade()`/`mix()`, or `@name` from the legacy palette.
+/// `alpha()`/`shade()`/`mix()`, or `@name` from the deleted palette.
 #[test]
 fn css_colours_come_from_tokens() {
     check(Rule::CSS_COLOUR);

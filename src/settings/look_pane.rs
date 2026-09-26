@@ -4,10 +4,10 @@
 //! Two sections on one tab, `wallpaper` and `look`, in four groups with one
 //! footer. The wallpaper group is a picker over `wallpaper.rs`, which owns
 //! setting and reading it back; the appearance group is the design system's
-//! four inputs (mode, accent, neutral, contrast; docs/design-system.md §2),
+//! first four inputs (mode, accent, neutral, contrast; docs/design-system.md §2),
 //! which `theme::watch` turns into the stylesheet within a second; the theme
-//! colour group is one dropdown over `crate::palette` with the palette it
-//! derived drawn beside it; the motion group is one dropdown, read per
+//! colour group is the wallpaper tint (another token input, §2.2) with the
+//! token scales it produces drawn below it; the motion group is one dropdown, read per
 //! animation by `anim::duration` and scaled into the motion tokens.
 
 use std::cell::{Cell, RefCell};
@@ -63,56 +63,39 @@ fn decode_thumb(path: &Path) -> Option<Thumb> {
     })
 }
 
-// ── The derived palette, as a strip ─────────────────────────────────────
+// ── The scales, as a strip ──────────────────────────────────────────────
 
-/// What the strip shows: the ground, the ink, and the five accents, in the
-/// order the palette defines them. Enough to tell one derivation from
-/// another at a glance, which is all this is for — the palette has forty
-/// entries and a wall of chips reads as a wall.
-const STRIP: [&str; 8] = [
-    "bg0",
-    "bg1",
-    "fg",
-    "accent",
-    "accent_secondary",
-    "accent_tertiary",
-    "accent_quaternary",
-    "accent_quinary",
-];
-
+/// Chip height; the strip is two rows of chips.
 const STRIP_H: i32 = 22;
 const STRIP_GAP: f64 = crate::tokens::space(2) as f64;
 /// `--radius-control`: a chip's corners.
 const STRIP_RADIUS: f64 = crate::tokens::RADIUS[0].1 as f64;
 
-/// A strip of the palette in force, repainted whenever `palette::observe`
-/// says it moved. It reads `palette::current` at draw time rather than
-/// holding a copy, so there is one answer to "what colour is @accent" in
-/// this process and it is the one GTK is using.
+/// The two scales the tokens are built from, as the stylesheet on screen
+/// has them (`theme::shown`): neutral 1–12 above, accent 1–12 below. Mode,
+/// accent, neutral and tint all show here, the tint as the hue both rows
+/// turn to. Repainted whenever `theme::observe` says the stylesheet moved.
 fn swatch_strip() -> gtk4::DrawingArea {
     let area = gtk4::DrawingArea::builder()
-        .content_height(STRIP_H)
+        .content_height(2 * STRIP_H + STRIP_GAP as i32)
         .hexpand(true)
         .build();
-    area.set_draw_func(|_, cr, w, h| {
-        let css = crate::palette::current();
-        let count = STRIP.len() as f64;
+    area.set_draw_func(|_, cr, w, _| {
+        let s = crate::tokens::scales(crate::theme::shown());
+        let count = s.neutral.len() as f64;
         let width = (f64::from(w) - STRIP_GAP * (count - 1.0)) / count;
         if width <= 0.0 {
             return;
         }
-        for (i, name) in STRIP.iter().enumerate() {
-            let Some(color) = crate::palette::lookup(&css, name) else {
-                continue;
-            };
-            let x = (width + STRIP_GAP) * i as f64;
-            rounded_rect(cr, x, 0.0, width, f64::from(h), STRIP_RADIUS);
-            cr.set_source_rgb(
-                f64::from(color.red) / 255.0,
-                f64::from(color.green) / 255.0,
-                f64::from(color.blue) / 255.0,
-            );
-            let _ = cr.fill();
+        let h = f64::from(STRIP_H);
+        for (row, scale) in [s.neutral, s.accent].iter().enumerate() {
+            let y = (h + STRIP_GAP) * row as f64;
+            for (i, color) in scale.iter().enumerate() {
+                let x = (width + STRIP_GAP) * i as f64;
+                rounded_rect(cr, x, y, width, h, STRIP_RADIUS);
+                crate::ui::set_source(cr, *color, 1.0);
+                let _ = cr.fill();
+            }
         }
     });
     area
@@ -211,7 +194,7 @@ struct State {
     motion: gtk4::DropDown,
     launch_zoom: gtk4::Switch,
     tint: gtk4::DropDown,
-    /// The palette the tint produced, for the strip to repaint.
+    /// The token scales, for the strip to repaint.
     strip: gtk4::DrawingArea,
     status: gtk4::Label,
     /// Read once from the compositor; `None` until it answers, and still
@@ -287,9 +270,9 @@ impl State {
         self.launch_zoom.set_active(settings.look().launch_zoom);
         let tint = Tint::ALL.iter().position(|t| *t == settings.look().tint);
         self.tint.set_selected(tint.unwrap_or(0) as u32);
-        // The derivation runs on a worker, so this paints the palette that
-        // is in force now; `palette::observe` paints the new one when it
-        // lands, a beat later.
+        // The stylesheet follows on `theme::watch`'s next tick, and a new
+        // wallpaper's hue after the panel samples it; this paints what is on
+        // screen now and `theme::observe` paints the rest when it lands.
         self.strip.queue_draw();
         for (path, button) in self.thumbs.borrow().iter() {
             let selected = shown.as_ref().is_some_and(|w| w.path == *path);
@@ -419,7 +402,7 @@ impl LookPane {
 
         let appearance = section_box(
             "Appearance",
-            "The design system's four inputs. Every surface follows within a second.",
+            "Four of the design system's inputs; the fifth, the tint, is below. Every surface follows within a second.",
         );
         let mode_labels: Vec<&str> = ThemeMode::ALL.iter().map(|m| m.label()).collect();
         let (theme_mode_row, theme_mode) = dropdown_row(
@@ -465,14 +448,15 @@ impl LookPane {
             "Theme colour",
             "Take the shell's colours from the wallpaper. Each colour keeps its \
              lightness and only its hue moves, so the contrast the shell is \
-             built on holds whatever the image is.",
+             built on holds whatever the image is. Below: the neutral and \
+             accent scales the shell is drawn from.",
         );
         let tint_labels: Vec<&str> = Tint::ALL.iter().map(|t| t.label()).collect();
         let (tint_row, tint) = dropdown_row(
             "Tint",
-            "Off is the shipped palette. Accents takes the five accent hues from \
-             the wallpaper. Full tints the greys with them too. Red stays red \
-             either way.",
+            "Off keeps the shipped colours. Accents gives the accent the \
+             wallpaper's hue and turns the app colours with it. Full tints the \
+             greys and the glass too. Red stays red either way.",
             &tint_labels,
         );
         theme.append(&tint_row);
@@ -679,18 +663,18 @@ impl LookPane {
                 let Some(tint) = Tint::ALL.get(d.selected() as usize).copied() else {
                     return;
                 };
-                // The panel is watching the store and does the deriving
-                // (`palette::follow_settings`); this only records the
-                // choice. In `swaypplet settings`, which has no panel, the
-                // strip stays on the palette the pane started with and the
-                // running panel repaints its own.
+                // The panel is watching the store and samples the wallpaper
+                // (`theme::wallpaper::follow_settings`); this only records
+                // the choice. In `swaypplet settings`, which has no panel,
+                // the strip stays on the scales the pane started with and
+                // the running panel repaints its own.
                 store::edit::<Look>(|l| l.tint = tint);
                 state.sync();
             });
         }
         {
             let strip = strip.clone();
-            crate::palette::observe(move || strip.queue_draw());
+            crate::theme::observe(move || strip.queue_draw());
         }
 
         root.append(&group);

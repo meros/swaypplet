@@ -5,8 +5,8 @@
 use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
 
-use crate::settings::schema::ThemeMode;
-use crate::tokens::{Inputs, Mode};
+use crate::settings::schema::{ThemeMode, Tint as Reach};
+use crate::tokens::{Inputs, Mode, Tint};
 
 /// Light mode waits until every surface is on the tokens: a legacy rule
 /// still naming a dark palette colour would sit on light glass. Until then
@@ -26,11 +26,47 @@ thread_local! {
     static STARTED: Cell<bool> = const { Cell::new(false) };
     /// A mode the sun asks for that is not on screen yet, and since when.
     static PENDING: RefCell<Option<(Mode, Instant)>> = const { RefCell::new(None) };
+    /// The tint last resolved.
+    static TINT: Cell<Tint> = const { Cell::new(Tint::Off) };
 }
 
 /// The mode last resolved.
-pub(super) fn shown() -> Mode {
+fn shown_mode() -> Mode {
     SHOWN.with(Cell::get)
+}
+
+/// The inputs with the mode and the tint as they were last resolved rather
+/// than resolved again: see `theme::shown`.
+pub(super) fn shown() -> Inputs {
+    build(SHOWN.with(Cell::get), TINT.with(Cell::get))
+}
+
+/// The one place `Inputs` is made: the Look settings as they are, with a
+/// mode and a tint already resolved.
+fn build(mode: Mode, tint: Tint) -> Inputs {
+    let look = crate::settings::store::with(|s| s.look());
+    Inputs {
+        mode,
+        accent: look.accent,
+        neutral: look.neutral,
+        contrast: look.contrast,
+        motion: (look.motion.scale() * 100.0).round() as u8,
+        tint,
+    }
+}
+
+/// The Look setting's reach with the wallpaper's hue, as the panel last
+/// sampled it (`super::wallpaper`). Off until a sample exists: a wallpaper
+/// with no usable colour, or one not sampled yet, leaves the tokens shipped.
+fn tint(reach: Reach) -> Tint {
+    if reach == Reach::Off {
+        return Tint::Off;
+    }
+    match (reach, super::wallpaper::hue()) {
+        (Reach::Accents, Some(h)) => Tint::Accents(h),
+        (Reach::Full, Some(h)) => Tint::Full(h),
+        _ => Tint::Off,
+    }
 }
 
 /// Where the sun is computed for: `/etc/swaypplet/theme.json`
@@ -54,7 +90,10 @@ fn now_unix() -> f64 {
 fn sun_mode() -> Mode {
     location()
         .map(|(lat, lon)| {
-            crate::tokens::sun::mode(crate::tokens::sun::elevation(lat, lon, now_unix()), shown())
+            crate::tokens::sun::mode(
+                crate::tokens::sun::elevation(lat, lon, now_unix()),
+                shown_mode(),
+            )
         })
         .unwrap_or(Mode::Dark)
 }
@@ -63,7 +102,7 @@ fn sun_mode() -> Mode {
 /// locked, or once it has waited `PATIENCE`. Otherwise the mode on screen,
 /// with `wanted` remembered.
 fn when_unseen(wanted: Mode) -> Mode {
-    let now = shown();
+    let now = shown_mode();
     if wanted == now || !STARTED.with(Cell::get) {
         PENDING.with(|p| *p.borrow_mut() = None);
         return wanted;
@@ -105,13 +144,9 @@ pub fn inputs() -> Inputs {
             ThemeMode::Auto => when_unseen(sun_mode()),
         }
     });
+    let tint = tint(look.tint);
     SHOWN.with(|s| s.set(mode));
+    TINT.with(|t| t.set(tint));
     STARTED.with(|s| s.set(true));
-    Inputs {
-        mode,
-        accent: look.accent,
-        neutral: look.neutral,
-        contrast: look.contrast,
-        motion: (look.motion.scale() * 100.0).round() as u8,
-    }
+    build(mode, tint)
 }

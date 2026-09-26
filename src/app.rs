@@ -171,10 +171,12 @@ pub fn run() {
         crate::settings::glass::apply_saved();
         crate::settings::wallpaper::apply_saved();
 
-        // The wallpaper-derived palette, if `look.tint` asks for one. This
-        // process is the only one that writes it (`palette::follow_settings`,
-        // for why); every other one reads the file it leaves behind.
-        crate::palette::follow_settings();
+        // The wallpaper's hue for `look.tint`. This process is the only one
+        // that samples it (`theme::wallpaper::follow_settings`, for why);
+        // every other one reads the file it leaves behind. Then follow the
+        // theme inputs: the stylesheet, the glass and sway's borders.
+        crate::theme::wallpaper::follow_settings();
+        theme::watch();
 
         // Start D-Bus notification server
         dbus::start_server(store_startup.clone());

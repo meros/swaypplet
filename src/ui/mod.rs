@@ -1365,8 +1365,8 @@ pub fn paint() -> Paint {
         fg: s.neutral[11],
         ground: s.neutral[0],
         accent: s.accent_bg,
-        status: tokens::status(inputs.mode),
-        categorical: tokens::categorical(inputs.mode).map(|(text, _)| text),
+        status: tokens::status(inputs),
+        categorical: tokens::categorical(inputs).map(|(text, _)| text),
     }
 }
 
