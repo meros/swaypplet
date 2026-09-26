@@ -29,19 +29,13 @@ Sizes: S is a day or less, M a few days, L a week or more.
 An element that lives in two places moves between them instead of fading
 out in one and in at the other: a notification popup into the notification
 centre, a bar segment into its panel section, a Super+Tab tile into the full
-workspace. Three concrete pieces, smallest first:
+workspace. Two concrete pieces, smallest first:
 
 - **Sliding focus caret** (S). A 3 px accent caret under the workspace
   buttons slides to the focused one over `move` (300 ms); task workspaces
   colour it with their categorical colour. Needs `SlideBin` to take a 2-axis
-  offset, which the other two pieces also need. BAR_VISION already names it
+  offset, which the tile piece also needs. BAR_VISION already names it
   as compatible backlog.
-- **Bar-to-panel morph** (M). The panel card grows out of the start button:
-  a rounded seed rectangle at the button's position scales and unclips to
-  the full card while the material comes up, and shrinks back on close. A
-  `MorphBin` beside `SlideBin` (clip + translate + scale between a seed rect
-  and the resting bounds); the seed comes from the button's `compute_bounds`.
-  No origin rect falls back to today's fade and settle.
 - **Workspace tile to workspace** (L). Super+Tab's chosen tile grows into
   the real workspace. Uses the per-output node restriction swayfx already
   has for the switcher strip.
@@ -93,12 +87,6 @@ Exit-node state and peer reachability. `tailscaled` is its own daemon, so
 the NetworkManager VPN rows do not see it; the network code only filters
 out the `tailscale0` interface today.
 
-### 7. claude-dash retirement (S, mostly the nixos repo)
-
-The popover already renders the `last-<pid>` row. What is left is a task
-number hint on the notification that the Stop hook sends; then the Electron
-process leaves the session.
-
 ## Research
 
 | Topic | Status | Detail |
@@ -110,6 +98,10 @@ process leaves the session.
 
 Each was proposed at least once. The reason is why it stays out.
 
+- **Bar-to-panel morph** (the panel card growing out of the start
+  button). Dropped by the owner 2026-09-26.
+- **claude-dash.** Retired 2026-09-26 (nixos `35e9de5`): not used; the bar's
+  task board and popover show the same sessions.
 - **Weather, calendar, agenda, clock calendar popover.** A network poll or a
   per-minute tick for a surface opened twice a day (BAR_VISION P7).
 - **Notification bell with an unread badge.** A count on the bar is colour
