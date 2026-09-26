@@ -186,7 +186,7 @@ impl Drop for SurfaceAlpha {
         // client down, so a window torn down ahead of its alpha handle must
         // not be spoken to at all — including the destructor.
         //
-        // Owners are expected to drop this first (GlassSurface does); the
+        // Owners are expected to drop this first (shell::Surface does); the
         // check is what keeps a path that forgets from killing the process.
         //
         // `wl_surface.is_alive()` used to be that check and never fired: the

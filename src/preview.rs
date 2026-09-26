@@ -43,16 +43,15 @@ pub fn run(component: &str) {
         theme::load_css();
         let store = Rc::new(RefCell::new(NotificationStore::new()));
 
-        // Full panel: host the real panel content in a normal toplevel.
+        // Full panel: the real panel on its own layer surface, shown.
         if component == "panel" {
-            let window: gtk4::Window = ApplicationWindow::builder()
-                .application(app)
-                .default_width(820)
-                .default_height(720)
-                .build()
-                .upcast();
-            let panel = Panel::new(window, store.clone(), crate::services::audio::AudioService::start());
-            panel.window.set_visible(true);
+            // The panel's own layer surface, as the panel process builds it.
+            let panel = Panel::new(
+                crate::app::panel_surface(app),
+                store.clone(),
+                crate::services::audio::AudioService::start(),
+            );
+            panel.toggle();
             std::mem::forget(panel);
             return;
         }
@@ -66,37 +65,24 @@ pub fn run(component: &str) {
         // its card are the compositor's, from `layer_effects "session-lock"`,
         // and no plain toplevel gets either.
         if component == "lock" {
-            // LOCAL RENDER PATCH (never committed): host the lock content on a
-            // layer surface named like the session lock, so the harness's
-            // real `layer_effects "session-lock"` material draws behind it.
-            static LOCK_LAYER: crate::layer_shell::LayerShellConfig =
-                crate::layer_shell::LayerShellConfig {
-                    namespace: "session-lock",
-                    layer: gtk4_layer_shell::Layer::Overlay,
-                    default_width: None,
-                    default_height: None,
-                    anchors: &[
-                        (gtk4_layer_shell::Edge::Top, true),
-                        (gtk4_layer_shell::Edge::Bottom, true),
-                        (gtk4_layer_shell::Edge::Left, true),
-                        (gtk4_layer_shell::Edge::Right, true),
-                    ],
-                    margins: &[],
-                    keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
-                    exclusive: false,
-                };
-            if std::env::var_os("SWAYPPLET_PREVIEW_LAYER").is_some() {
+            // SWAYPPLET_PREVIEW_LAYER=1 hosts the lock content on a layer
+            // surface named like the session lock, so the harness's real
+            // `layer_effects "session-lock"` material draws behind it.
+            let layer_surface = std::env::var_os("SWAYPPLET_PREVIEW_LAYER").map(|_| {
                 crate::settings::glass::apply_saved();
-            }
-            let window: gtk4::Window = if std::env::var_os("SWAYPPLET_PREVIEW_LAYER").is_some() {
-                crate::layer_shell::create_layer_window(app, &LOCK_LAYER)
-            } else {
-                ApplicationWindow::builder()
+                crate::shell::Surface::builder(app, crate::shell::Namespace::SessionLock)
+                    .fill()
+                    .no_card()
+                    .build()
+            });
+            let window: gtk4::Window = match &layer_surface {
+                Some(surface) => surface.window().clone(),
+                None => ApplicationWindow::builder()
                     .application(app)
                     .default_width(1280)
                     .default_height(800)
                     .build()
-                    .upcast()
+                    .upcast(),
             };
             let set = crate::lock::ui::SurfaceSet::new();
             // Greeter-mode preview: SWAYPPLET_GREET_USERS=meros,melvin adds
@@ -140,7 +126,16 @@ pub fn run(component: &str) {
                 }),
                 true,
             );
-            window.set_child(Some(&content));
+            match &layer_surface {
+                Some(surface) => {
+                    content.set_hexpand(true);
+                    content.set_vexpand(true);
+                    surface.root().append(&content);
+                }
+                None => window.set_child(Some(&content)),
+            }
+            // The preview process lives as long as its one window.
+            std::mem::forget(layer_surface);
             window.present();
             // SWAYPPLET_PREVIEW_LOCK_STATE drives the card into one of the
             // states that used to arrive after it was on screen. The point of

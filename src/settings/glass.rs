@@ -389,12 +389,53 @@ impl System {
             std::env::var("SWAYPPLET_GLASS_CONFIG").unwrap_or_else(|_| SYSTEM_CONFIG.to_string());
         let raw = std::fs::read(&path).ok()?;
         match serde_json::from_slice::<System>(&raw) {
-            Ok(system) => Some(system),
+            Ok(system) => {
+                for line in system.drift() {
+                    log::warn!("glass: {path}: {line}");
+                }
+                Some(system)
+            }
             Err(e) => {
                 log::warn!("glass: bad system config at {path}: {e}");
                 None
             }
         }
+    }
+
+    /// Where the shipped `surfaces` table and [`Namespace::glass`] disagree,
+    /// one line each; empty when they agree.
+    ///
+    /// Both are hand-kept copies of one fact, which surfaces get which glass,
+    /// held on two sides of a repository boundary (the nixos repo's
+    /// `sessionSurfaces`, and the code that names the surfaces). A namespace
+    /// in the file that no surface asks for is a row the pane pushes edits
+    /// at for nothing (a renamed or deleted surface); a glass namespace the
+    /// file lacks is a surface the compositor leaves bare and the pane never
+    /// reaches; a different class is a card whose bezel disagrees with its
+    /// kind.
+    ///
+    /// [`Namespace::glass`]: crate::shell::Namespace::glass
+    pub fn drift(&self) -> Vec<String> {
+        use crate::shell::Namespace;
+        let mut out = Vec::new();
+        for (name, class) in &self.surfaces {
+            match Namespace::parse(name) {
+                None => out.push(format!("`{name}` is no swaypplet namespace")),
+                Some(ns) => match ns.glass() {
+                    None => out.push(format!("`{name}` is not meant to have glass")),
+                    Some(want) if want != class => out.push(format!(
+                        "`{name}` has geometry `{class}`, the code expects `{want}`"
+                    )),
+                    Some(_) => {}
+                },
+            }
+        }
+        for ns in Namespace::ALL {
+            if ns.glass().is_some() && !self.surfaces.contains_key(ns.as_str()) {
+                out.push(format!("`{ns}` has glass in the code but no row here"));
+            }
+        }
+        out
     }
 
     /// One namespace's `liquid_glass_*` list, geometry folded in.
@@ -724,6 +765,7 @@ fn trim_float(value: f64) -> String {
 mod tests {
     use super::*;
     use crate::settings::preset;
+    use crate::shell::Namespace;
 
     fn system() -> System {
         System {
@@ -748,10 +790,67 @@ mod tests {
                 ),
             ]),
             surfaces: BTreeMap::from([
-                ("swaypplet-bar".into(), "thin".into()),
-                ("swaypplet".into(), "panel".into()),
+                (Namespace::Bar.as_str().into(), "thin".into()),
+                (Namespace::Panel.as_str().into(), "panel".into()),
             ]),
         }
+    }
+
+    /// The table as the code describes it: what `/etc/swaypplet/glass.json`
+    /// holds on a host whose Nix side agrees with this repository.
+    fn every_glass_surface() -> System {
+        let mut sys = system();
+        sys.geometries.insert(
+            "lock".into(),
+            Geometry {
+                bezel: 18.0,
+                thickness: 70.0,
+                crest_radius: 18.0,
+            },
+        );
+        sys.surfaces = Namespace::ALL
+            .into_iter()
+            .filter_map(|ns| Some((ns.as_str().to_string(), ns.glass()?.to_string())))
+            .collect();
+        sys
+    }
+
+    #[test]
+    fn the_surface_table_and_the_glass_namespaces_agree() {
+        let sys = every_glass_surface();
+        assert_eq!(sys.drift(), Vec::<String>::new());
+        // Every glass class the code names is one the table defines, so no
+        // surface is skipped as having no geometry.
+        for class in sys.surfaces.values() {
+            assert!(sys.geometries.contains_key(class), "no geometry `{class}`");
+        }
+        // The pane reaches every glass surface, and only those.
+        let cmd = sys.command(&Tuning::system(&sys));
+        for ns in Namespace::ALL {
+            assert_eq!(
+                cmd.contains(&format!("layer_effects \"{ns}\" ")),
+                ns.glass().is_some(),
+                "{ns}"
+            );
+        }
+    }
+
+    #[test]
+    fn drift_names_a_stale_row_a_missing_one_and_a_wrong_class() {
+        let mut sys = every_glass_surface();
+        sys.surfaces
+            .insert("swaypplet-switcher".into(), "panel".into());
+        sys.surfaces.remove(Namespace::Keybinds.as_str());
+        sys.surfaces
+            .insert(Namespace::Osd.as_str().into(), "panel".into());
+        sys.surfaces
+            .insert(Namespace::Screenshot.as_str().into(), "panel".into());
+        let drift = sys.drift();
+        assert_eq!(drift.len(), 4, "{drift:#?}");
+        assert!(drift.iter().any(|l| l.contains("swaypplet-switcher")));
+        assert!(drift.iter().any(|l| l.contains("swaypplet-keybinds")));
+        assert!(drift.iter().any(|l| l.contains("swaypplet-osd")));
+        assert!(drift.iter().any(|l| l.contains("swaypplet-screenshot")));
     }
 
     #[test]

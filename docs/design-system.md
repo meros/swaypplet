@@ -503,6 +503,78 @@ with the theme), and `ui::set_source` puts one on a Cairo context. `data/css/com
 GTK builds itself (windows, a popover menu's buttons and separators,
 scrollbars) and comes last in the cascade.
 
+### 6.1 Surfaces
+
+The components go on a surface, and a surface is `shell::Surface`
+(`src/shell/`): a layer-shell window, its root (`ui::surface`, on the
+window's child and never the window), the glass card on the root
+(`ui::card`) and the `anim::Reveal` that fades them in and out.
+
+```rust
+let surface = Surface::builder(app, Namespace::Osd)
+    .monitor(Some(&monitor))       // None: the compositor picks
+    .anchor(&[Edge::Bottom])       // .fill() for all four
+    .margin(Edge::Bottom, 72)
+    .card(ui::Card::Thin)          // or .no_card() for a stage
+    .build();                      // .slide(axis, px) for a settle
+surface.card().append(&content);
+surface.set_content(&content);
+surface.show();
+```
+
+- **Use it for every layer surface.** A card on it: `.card(kind)`, and
+  `.slide(axis, px)` when the card should travel as it fades. A full-screen
+  stage that draws its own ground (the Super+Tab row, the region selector)
+  or a surface with no card to fade (the face cue): `.no_card()`, which
+  maps and unmaps outright and has no Reveal. Anything placed around the
+  card goes on `surface.root()`: a spacer (`shell::fit` sizes the launcher's
+  and the panel's), an alignment.
+- **Dropping it is its teardown.** The last handle releases the Reveal (the
+  compositor alpha handle, which must go before its `wl_surface` or the
+  process dies of a protocol error, and the namespace's glass count), then
+  destroys the window, realizing one that was never shown so GTK does not
+  dereference a NULL surface. A surface is dismissed with `hide()` and
+  dropped from `connect_hidden`.
+- **One per output** is `shell::PerMonitor<T>`: it builds an entry for each
+  monitor and drops the entry of one that leaves (the bar, the OSD, the
+  keybind sheet, the greeter's cards).
+- **Click outside the card** is `connect_backdrop_click`, a hit test. A
+  claiming gesture on the card is the wrong tool: it can starve the
+  controls inside it.
+- The lock and the greeter are session-lock surfaces with their own fade
+  (`lock/fade.rs`); they share `Namespace` and `ui::surface` on the root,
+  not `Surface`. Annotate is a normal toplevel on `ui::window`.
+
+The namespace is `shell::Namespace`, never a string (`layer-namespace`,
+§7): it is also the key the compositor's glass and the settings pane
+address the surface by. `Namespace::glass()` is the geometry class the
+session's sway config gives it, which must agree with the nixos repo's
+`sessionSurfaces` table (`users/modules/theme/glass-config.nix`, delivered as
+`/etc/swaypplet/glass.json`); `settings::glass::System::drift` compares
+the two on load.
+
+| Namespace | String | Glass | Surface |
+|---|---|---|---|
+| `Panel` | `swaypplet` | panel | the control centre (`app::panel_surface`) |
+| `Bar` | `swaypplet-bar` | thin | the bar, one per output |
+| `Launcher` | `swaypplet-launcher` | panel | the launcher, and the dmenu picker |
+| `Osd` | `swaypplet-osd` | thin | the OSD, one per output |
+| `Notification` | `swaypplet-notification` | panel | one per popup card |
+| `Pin` | `swaypplet-pin` | panel | a pinned workspace or region |
+| `WindowPicker` | `swaypplet-window-picker` | panel | screenshot → window |
+| `Polkit` | `swaypplet-polkit` | panel | the polkit / sudo card |
+| `FaceCue` | `swaypplet-face-cue` | thin | the look-at-the-camera pill |
+| `Keybinds` | `swaypplet-keybinds` | panel | the held-Super sheet, one per output |
+| `Jump` | `swaypplet-jump` | none | the Super+Tab stage |
+| `Screenshot` | `swaypplet-screenshot` | none, on purpose | the region selector's frozen screen |
+| `Greeter` | `swaypplet-greeter` | the greeter compositor's own | the greeter's cards |
+| `LockWarm` | `swaypplet-lock-warm` | none | the locker's one-pixel warm-up |
+| `SessionLock` | `session-lock` | lock | not a layer namespace: the lock surfaces' block, borrowed by `preview:lock` |
+| `MotionProbe` | `swaypplet-motion-probe` | none | used by no surface; asks sway what it parses |
+
+A new surface adds a variant, and, if it wears glass, a row in
+`sessionSurfaces` of the same class.
+
 ## 7. Enforcement
 
 `src/design_lint.rs`, run by `cargo test`. The CSS rules read every file in
@@ -525,6 +597,8 @@ minus `src/tokens/`, `src/ui/` and `#[cfg(test)]` code.
 | `rust-ui-class` | a `"ui-…"` string literal: a component's class named outside the component | Rust |
 | `motion-bypass` | a `transition_duration` set, or a motion token's `.ms` read, outside `ui::revealer`/`ui::page_stack` and `anim::ms`/`anim::span`, so Look → Motion and reduced motion reach every animation | Rust except `src/anim.rs` |
 | `surface-on-window` | `ui::surface::adopt` or `ui::window::adopt` given a window (GTK's `window.background` outranks the class there; it goes on the root child) | Rust |
+| `layer-window` | a layer-shell window made outside `src/shell/` (`create_layer_window*`, `init_layer_shell`, and `make_layer_window` outside the greeter): build a `shell::Surface` (§6.1) | Rust |
+| `layer-namespace` | a namespace spelled as a string (`namespace: "…"`, `set_namespace` with a literal) outside `src/shell/namespace.rs` | Rust |
 
 The lint also carries a ledger of files not yet migrated, which can only
 shrink (empty today). Contrast (§5) is checked by the tests in

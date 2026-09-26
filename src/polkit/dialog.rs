@@ -14,29 +14,12 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4_layer_shell::Edge;
 
 use crate::auth_field::{AuthField, Caption, Tone};
-use crate::layer_shell::{self, LayerShellConfig};
+use crate::shell::{Namespace, Surface};
 use crate::ui;
 
 use super::agent::ResolvedIdentity;
-
-static POLKIT_CONFIG: LayerShellConfig = LayerShellConfig {
-    namespace: "swaypplet-polkit",
-    layer: gtk4_layer_shell::Layer::Overlay,
-    exclusive: false,
-    default_width: None,
-    default_height: None,
-    anchors: &[
-        (Edge::Top, true),
-        (Edge::Bottom, true),
-        (Edge::Left, true),
-        (Edge::Right, true),
-    ],
-    margins: &[],
-    keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
-};
 
 /// Nerd Font check, for the approved state.
 const ICON_OK: &str = "\u{f012c}";
@@ -155,7 +138,7 @@ pub struct PolkitDialog {
     details_label: gtk4::Label,
     auth_btn: gtk4::Button,
     card: gtk4::Box,
-    reveal: crate::anim::Reveal,
+    surface: Surface,
     identities: Rc<RefCell<Vec<u32>>>,
     callbacks: Rc<RefCell<Callbacks>>,
     /// Caps Lock, so a rejection composes the warning onto its own line.
@@ -166,7 +149,12 @@ pub struct PolkitDialog {
 
 impl PolkitDialog {
     pub fn new(app: &gtk4::Application) -> Rc<Self> {
-        let window = layer_shell::create_layer_window(app, &POLKIT_CONFIG);
+        let surface = Surface::builder(app, Namespace::Polkit)
+            .fill()
+            .keyboard(gtk4_layer_shell::KeyboardMode::Exclusive)
+            .card(ui::Card::Floating)
+            .build();
+        let window = surface.window().clone();
         window.set_visible(false);
 
         // ── Backdrop fills the whole screen; click anywhere → cancel ──
@@ -177,28 +165,19 @@ impl PolkitDialog {
         // this card is not `Card::OverScrim`: with nothing under it, a
         // card painted at the lock's 0.375 lands in the band glass.nix
         // reserves for nothing, a flat slab with no bevel and no rim.
-        let backdrop = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .halign(gtk4::Align::Fill)
-            .valign(gtk4::Align::Fill)
-            .hexpand(true)
-            .vexpand(true)
-            .build();
-        ui::surface::adopt(&backdrop);
-
-        // Centring wrapper
-        let center = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .halign(gtk4::Align::Center)
-            .valign(gtk4::Align::Center)
-            .hexpand(true)
-            .vexpand(true)
-            .build();
+        let backdrop = surface.root();
+        backdrop.set_hexpand(true);
+        backdrop.set_vexpand(true);
 
         // ── The card ─────────────────────────────────────────────────
-        let card = ui::vbox(0);
+        // Centred on the output: the root gives the card all of its room
+        // and the card takes its natural size in the middle of it.
+        let card = surface.card().clone();
+        card.set_halign(gtk4::Align::Center);
+        card.set_valign(gtk4::Align::Center);
+        card.set_hexpand(true);
+        card.set_vexpand(true);
         card.set_width_request(400);
-        ui::card::adopt(&card, ui::Card::Floating);
         card.add_css_class("polkit-container");
 
         // Icon (image first, fallback nerd-font label).
@@ -357,12 +336,7 @@ impl PolkitDialog {
         content.append(&details_revealer);
         content.append(&actions);
         card.append(&content);
-
-        center.append(&card);
-        backdrop.append(&center);
-        window.set_child(Some(&backdrop));
-
-        let reveal = crate::anim::Reveal::new(&window, &card).content(&content);
+        surface.set_content(&content);
 
         let identities: Rc<RefCell<Vec<u32>>> = Rc::new(RefCell::new(Vec::new()));
         let callbacks: Rc<RefCell<Callbacks>> = Rc::new(RefCell::new(Callbacks::default()));
@@ -384,7 +358,7 @@ impl PolkitDialog {
             details_label,
             auth_btn: auth_btn.clone(),
             card: card.clone(),
-            reveal,
+            surface: surface.clone(),
             identities: identities.clone(),
             callbacks: callbacks.clone(),
             caps: Cell::new(false),
@@ -448,34 +422,14 @@ impl PolkitDialog {
         }
 
         // Backdrop click → cancel, but only when the click really landed on
-        // the apron.
-        //
-        // This used to be enforced by a claiming gesture on the card, which
-        // is a trap: any ancestor gesture that claims a press can starve the
-        // widget the press was aimed at, and the failure is silent -- the
-        // button highlights under the pointer and then does nothing, while
-        // the keyboard keeps working because a layer surface's keyboard grab
-        // does not go through gesture propagation at all. Hit-testing the
-        // apron asks the question directly and cannot interfere with anything
-        // inside the card.
+        // the apron: a hit test (Surface::connect_backdrop_click), never a
+        // claiming gesture on the card, which starves the buttons in it.
         {
             let cbs = callbacks.clone();
-            let backdrop_gesture = gtk4::GestureClick::new();
-            backdrop_gesture.connect_released(move |gesture, _, x, y| {
-                let Some(apron) = gesture.widget() else {
-                    return;
-                };
-                let landed_on_apron = apron
-                    .pick(x, y, gtk4::PickFlags::DEFAULT)
-                    .is_some_and(|hit| hit == apron);
-                log::debug!("polkit: backdrop release, on apron: {landed_on_apron}");
-                if !landed_on_apron {
-                    return;
-                }
+            surface.connect_backdrop_click(move || {
                 let cb = cbs.borrow().on_cancel.clone();
                 cb();
             });
-            backdrop.add_controller(backdrop_gesture);
         }
 
         // Esc cancels — capture-phase so it beats the password entry.
@@ -597,11 +551,11 @@ impl PolkitDialog {
         if card.password {
             self.password_entry.grab_focus();
         }
-        self.reveal.show();
+        self.surface.show();
     }
 
     pub fn hide(&self) {
-        self.reveal.hide();
+        self.surface.hide();
         self.password_entry.set_text("");
         *self.callbacks.borrow_mut() = Callbacks::default();
     }

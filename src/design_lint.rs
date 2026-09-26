@@ -22,6 +22,8 @@
 //! | `surface-on-window` | `ui::surface::adopt` / `ui::window::adopt` given a window rather than its root child | Rust |
 //! | `rust-ui-class`   | a `"ui-…"` string literal: a component class named outside its component | Rust |
 //! | `motion-bypass`   | a motion token's `.ms` read, or a `transition_duration` set, outside `anim::ms` / `ui::revealer` | Rust except src/anim.rs |
+//! | `layer-window`    | a layer-shell window made outside `src/shell/` (`create_layer_window*`, `init_layer_shell`; `make_layer_window` outside the greeter): build a `shell::Surface` | Rust |
+//! | `layer-namespace` | a layer-shell namespace spelled as a string (`namespace: "…"`, `set_namespace(Some("…"))`) outside `src/shell/namespace.rs`: use `shell::Namespace` | Rust |
 //!
 //! Every CSS rule reads the files in [`crate::theme::RULES`] with comments
 //! removed (a comment may cite the colour a token was derived from). The
@@ -79,6 +81,8 @@ pub enum Rule {
     MotionBypass,
     SurfaceOnWindow,
     RustUiClass,
+    LayerWindow,
+    LayerNamespace,
 }
 
 use Rule::*;
@@ -95,6 +99,8 @@ impl Rule {
         MotionBypass,
         SurfaceOnWindow,
         RustUiClass,
+        LayerWindow,
+        LayerNamespace,
     ];
 
     fn id(self) -> &'static str {
@@ -117,6 +123,8 @@ impl Rule {
             MotionBypass => "motion-bypass",
             SurfaceOnWindow => "surface-on-window",
             RustUiClass => "rust-ui-class",
+            LayerWindow => "layer-window",
+            LayerNamespace => "layer-namespace",
         }
     }
 
@@ -163,6 +171,12 @@ impl Rule {
             }
             RustClass => {
                 "the class is styled nowhere in data/css/: a typo, or a dead class; use a ui::* component or style it"
+            }
+            LayerWindow => {
+                "build the surface with `shell::Surface::builder(app, Namespace::…)`; it owns the window's creation and its teardown order (docs/design-system.md §6.1)"
+            }
+            LayerNamespace => {
+                "name the namespace with `shell::Namespace`; a new surface adds a variant there, and a glass row in the nixos repo's `sessionSurfaces`"
             }
             RustUiClass => {
                 "a component's classes are its own: call the component (`ui::set_weight`, `ui::set_busy`, `ui::entry::adopt` …), or give it the setter it lacks in src/ui/"
@@ -1428,6 +1442,48 @@ fn rust_violations() -> Vec<Violation> {
             }
         }
 
+        // A layer-shell window, or its namespace, made outside the shell.
+        if !file.starts_with("src/shell/") {
+            let mut needles = vec![
+                "create_layer_window(",
+                "create_layer_window_on(",
+                "init_layer_shell(",
+            ];
+            if !file.starts_with("src/greet/") {
+                needles.push("make_layer_window(");
+            }
+            for needle in needles {
+                for (at, args) in calls(&code, needle) {
+                    push(
+                        at,
+                        LayerWindow,
+                        snippet(at, args, needle),
+                        "a layer-shell window made outside src/shell/".into(),
+                    );
+                }
+            }
+        }
+        if file != "src/shell/namespace.rs" {
+            for (at, _) in code.match_indices("namespace: \"") {
+                push(
+                    at,
+                    LayerNamespace,
+                    collapse(&code[at..(at + 40).min(code.len())]),
+                    "a namespace spelled as a string".into(),
+                );
+            }
+            for (at, args) in calls(&code, "set_namespace(") {
+                if !string_literals(args).is_empty() {
+                    push(
+                        at,
+                        LayerNamespace,
+                        snippet(at, args, "set_namespace("),
+                        "a namespace spelled as a string".into(),
+                    );
+                }
+            }
+        }
+
         // A component class spelled outside the component.
         for (at, _) in code.match_indices("\"ui-") {
             let end = code[at + 1..].find('"').map_or(code.len(), |e| at + e + 2);
@@ -1796,6 +1852,14 @@ fn the_linter_catches_what_it_should() {
         motion_token_ms("a(motion::EXPAND.ms as u32); ENTER.ms; x.msg; EXPANDED.ms").len(),
         2
     );
+    let code = rust_code(
+        "fn a() { layer::create_layer_window_on(app, &C, None); w.set_namespace(Some(\"x\")); }\n\
+         static C: Config = Config { namespace: \"swaypplet-x\", };",
+    );
+    assert_eq!(calls(&code, "create_layer_window_on(").len(), 1);
+    assert_eq!(calls(&code, "create_layer_window(").len(), 0);
+    assert_eq!(code.matches("namespace: \"").count(), 1);
+    assert_eq!(string_literals(calls(&code, "set_namespace(")[0].1), ["x"]);
 }
 
 /// Prints [`LEDGER`] as the code stands. Run after migrating a surface to
@@ -1822,6 +1886,8 @@ fn print_the_ledger() {
         MotionBypass,
         SurfaceOnWindow,
         RustUiClass,
+        LayerWindow,
+        LayerNamespace,
     ]);
     let mut s = String::new();
     for (file, by_rule) in &found {

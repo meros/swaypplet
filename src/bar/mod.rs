@@ -35,34 +35,17 @@ use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, Layer};
 
 use crate::anim;
-use crate::layer_shell::{self, LayerShellConfig};
 use crate::services::task_state::TaskStateService;
+use crate::shell::{Namespace, PerMonitor, Surface};
 use crate::sway::ipc::SwayService;
 use crate::theme;
 
 const APP_ID: &str = "dev.swaypplet.bar";
 
-// Waybar's mainBar geometry: bottom card, 38px, insets matching sway's
-// `gaps inner 4` so card edges align with tiled window edges. swayfx
-// layer_effects keyed on the namespace blur the wallpaper behind it.
-static BAR_CONFIG: LayerShellConfig = LayerShellConfig {
-    namespace: "swaypplet-bar",
-    layer: Layer::Top,
-    exclusive: true,
-    default_width: None,
-    default_height: Some(38),
-    anchors: &[
-        (Edge::Bottom, true),
-        (Edge::Left, true),
-        (Edge::Right, true),
-    ],
-    margins: &[(Edge::Right, 4), (Edge::Bottom, 4), (Edge::Left, 4)],
-    keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
-};
-
+/// One output's bar. Dropping it (its monitor left) destroys the surface.
 struct BarWindow {
-    monitor: gdk::Monitor,
-    window: gtk4::Window,
+    #[allow(dead_code)] // held for its Drop: the surface lives as long as this
+    surface: Surface,
     /// OSD interjections route here (BAR_VISION increment 5).
     decision: decision::DecisionSlot,
 }
@@ -70,8 +53,7 @@ struct BarWindow {
 /// Keeps one bar window per connected output, following monitor hotplug.
 pub struct BarManager {
     app: gtk4::Application,
-    monitors: gio::ListModel,
-    windows: RefCell<Vec<BarWindow>>,
+    windows: Rc<PerMonitor<BarWindow>>,
     sway: Rc<SwayService>,
     /// One sound-server connection per bar process; the hazard lane's
     /// microphone glyph is its only reader here.
@@ -97,12 +79,10 @@ impl BarManager {
         audio: Rc<crate::services::audio::AudioService>,
         toggle_panel: Rc<dyn Fn()>,
     ) -> Rc<Self> {
-        let display = gdk::Display::default().expect("no gdk display");
         let tasks = TaskStateService::start(&sway);
         let manager = Rc::new(Self {
             app: app.clone(),
-            monitors: display.monitors(),
-            windows: RefCell::new(Vec::new()),
+            windows: PerMonitor::new(),
             sway,
             audio,
             tasks,
@@ -112,51 +92,17 @@ impl BarManager {
             toggle_panel,
         });
 
-        // Intentional Rc cycle (monitors → handler → manager → monitors):
-        // the manager lives for the process, so it never needs to drop.
-        let for_sync = manager.clone();
-        manager
-            .monitors
-            .connect_items_changed(move |_, _, _, _| for_sync.sync());
-        manager.sync();
-
-        manager
-    }
-
-    /// Reconcile windows against the current monitor list. A layer surface
-    /// is bound to its wl_output, so a window whose monitor vanished is
-    /// destroyed and a fresh one built for any new monitor — never migrated.
-    fn sync(&self) {
-        let current: Vec<gdk::Monitor> = self
-            .monitors
-            .iter::<gdk::Monitor>()
-            .filter_map(|m| m.ok())
-            .collect();
-
-        self.windows.borrow_mut().retain(|bar| {
-            let alive = current.contains(&bar.monitor);
-            if !alive {
-                bar.window.destroy();
-            }
-            alive
+        // One bar per output, following hotplug. Weak: the manager owns
+        // the set, and the set's build must not own the manager.
+        let weak = Rc::downgrade(&manager);
+        manager.windows.watch(move |monitor| {
+            let manager = weak.upgrade().expect("the bar manager outlives its bars");
+            // build_bar_window maps the window itself (Reveal enter).
+            let (surface, decision) = build_bar_window(&manager, monitor);
+            BarWindow { surface, decision }
         });
 
-        for monitor in current {
-            let known = self
-                .windows
-                .borrow()
-                .iter()
-                .any(|bar| bar.monitor == monitor);
-            if !known {
-                // build_bar_window maps the window itself (Reveal enter).
-                let (window, decision) = build_bar_window(self, &monitor);
-                self.windows.borrow_mut().push(BarWindow {
-                    monitor,
-                    window,
-                    decision,
-                });
-            }
-        }
+        manager
     }
 
     /// Route a volume/brightness OSD into the decision slot of every bar,
@@ -164,18 +110,13 @@ impl BarManager {
     /// no output. `false` when no bar exists, so the caller falls back to
     /// the center-screen card.
     pub fn interject(&self, icon: &str, fraction: f64, text: &str) -> bool {
-        let windows = self.windows.borrow();
-        for bar in windows.iter() {
-            bar.decision.interject(icon, fraction, text);
-        }
-        !windows.is_empty()
+        self.windows
+            .for_each(|bar| bar.decision.interject(icon, fraction, text));
+        !self.windows.is_empty()
     }
 }
 
-fn build_bar_window(
-    bar: &BarManager,
-    monitor: &gdk::Monitor,
-) -> (gtk4::Window, decision::DecisionSlot) {
+fn build_bar_window(bar: &BarManager, monitor: &gdk::Monitor) -> (Surface, decision::DecisionSlot) {
     let BarManager {
         app,
         sway,
@@ -188,28 +129,46 @@ fn build_bar_window(
         ..
     } = bar;
     let toggle_panel = toggle_panel.clone();
-    let window = layer_shell::create_layer_window_on(app, &BAR_CONFIG, Some(monitor));
-    // Resizable stays ON: the left+right anchors mean the compositor's
-    // configure sets the width, and a non-resizable GTK window pins to its
-    // natural (content) size instead — the card then ends after the clock
-    // rather than spanning the output.
-    window.set_decorated(false);
+    // Waybar's mainBar geometry: bottom card, 38px, insets matching sway's
+    // `gaps inner 4` so card edges align with tiled window edges. Top, with
+    // an exclusive zone, so tiled windows sit above the bar and its margins
+    // while the overlay surfaces still stack over it. Stretched between
+    // left and right, so the compositor sets its width (Surface keeps it
+    // resizable).
+    let surface = Surface::builder(app, Namespace::Bar)
+        .monitor(Some(monitor))
+        .layer(Layer::Top)
+        .anchor(&[Edge::Bottom, Edge::Left, Edge::Right])
+        .margin(Edge::Right, 4)
+        .margin(Edge::Bottom, 4)
+        .margin(Edge::Left, 4)
+        .height(38)
+        .exclusive()
+        .card(crate::ui::Card::Thin)
+        // Enter: fade + short settle up from below the surface edge, per bar
+        // window (so hotplugged outputs get it too).
+        .slide(gtk4::Orientation::Vertical, anim::SLIDE_PX)
+        .build();
+    let window = surface.window().clone();
+    // The whole 38px: the root is a box, and the bar's card fills it.
+    if let Some(slide) = surface.slide() {
+        slide.set_vexpand(true);
+    }
 
     // Pane/content split for the enter transition (motion on glass,
     // anim.rs): `root` carries the thin glass card so its tint lands with
     // the frost in one step, while the clusters on it fade over the full
     // enter.
-    let root = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .build();
-    crate::ui::surface::adopt(&root);
-    crate::ui::card::adopt(&root, crate::ui::Card::Thin);
+    let root = surface.card().clone();
 
     // CenterBox, not Box: the center slot must stay screen-centered
     // regardless of how the left/right clusters grow.
     let content = gtk4::CenterBox::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .hexpand(true)
+        // The card is a vertical box; the clusters take its whole height,
+        // as they did in a horizontal one.
+        .vexpand(true)
         .build();
 
     let left = gtk4::Box::builder()
@@ -273,10 +232,7 @@ fn build_bar_window(
     content.set_center_widget(Some(&center));
     content.set_end_widget(Some(&right));
     root.append(&content);
-
-    let slide = anim::SlideBin::new();
-    slide.set_child(&root);
-    window.set_child(Some(&slide));
+    surface.set_content(&content);
 
     // Height forensics at map time: the surface only honours the requested
     // 38px if no cluster's minimum exceeds it, and a single padded widget
@@ -297,17 +253,12 @@ fn build_bar_window(
         });
     }
 
-    // Enter: fade + short settle up from below the surface edge, per bar
-    // window (so hotplugged outputs get it too). The exclusive zone is a
-    // property of the mapped surface, so tiled windows take their final
-    // size on frame one — only render nodes move. Bars never hide; the
-    // Reveal drops once the enter finishes.
-    anim::Reveal::new(&window, &root)
-        .content(&content)
-        .slide(&slide, anim::SLIDE_PX)
-        .show();
+    // The exclusive zone is a property of the mapped surface, so tiled
+    // windows take their final size on frame one: only render nodes move.
+    // Bars never hide.
+    surface.show();
 
-    (window, decision)
+    (surface, decision)
 }
 
 /// Show `widget` while `wanted` says so, now and on every settings change.

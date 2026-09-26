@@ -21,9 +21,9 @@ use std::rc::Rc;
 
 use gtk4::gdk;
 use gtk4::prelude::*;
-use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use gtk4_layer_shell::KeyboardMode;
 
-use crate::layer_shell::{self, LayerShellConfig};
+use crate::shell::{Namespace, Surface};
 
 use super::capture::Image;
 
@@ -59,7 +59,8 @@ pub enum Mode {
 struct Sheet {
     output: String,
     image: Image,
-    window: gtk4::Window,
+    /// Destroyed with the session, once `answer` has broken its cycles.
+    surface: Surface,
     area: gtk4::DrawingArea,
     /// Drag rectangle in widget (logical) coordinates, `None` until a drag
     /// starts. Shared with the draw function.
@@ -155,26 +156,6 @@ fn monitors() -> Vec<String> {
 }
 
 fn present(app: &gtk4::Application, mode: Mode, captured: Vec<(String, Image)>, done: Done) {
-    static CONFIG: LayerShellConfig = LayerShellConfig {
-        // Absent from the compositor's layer_effects list on purpose: this is
-        // the one surface that must show the screen, not frost it.
-        namespace: "swaypplet-screenshot",
-        layer: Layer::Overlay,
-        exclusive: false,
-        default_width: None,
-        default_height: None,
-        anchors: &[
-            (Edge::Top, true),
-            (Edge::Bottom, true),
-            (Edge::Left, true),
-            (Edge::Right, true),
-        ],
-        margins: &[],
-        // Escape has to reach the selector even though the panel below it may
-        // want the keyboard.
-        keyboard_mode: KeyboardMode::Exclusive,
-    };
-
     let display = gdk::Display::default();
     let mut sheets = Vec::new();
 
@@ -185,17 +166,25 @@ fn present(app: &gtk4::Application, mode: Mode, captured: Vec<(String, Image)>, 
                 .filter_map(Result::ok)
                 .find(|m| m.connector().is_some_and(|c| c == output))
         });
-        let window = layer_shell::create_layer_window_on(app, &CONFIG, monitor.as_ref());
-        window.set_decorated(false);
-        // Ignore everyone else's exclusive zone. Anchored to all four edges
-        // with the default zone of 0, the surface is shrunk by the bar's
-        // reserved strip, which leaves the bar unselectable and un-dimmed
-        // above a selector claiming to cover the screen.
-        window.set_exclusive_zone(-1);
-        // Fully opaque: the frozen screen is the background, and the near-unity
-        // opacity the other surfaces need for compositor blending would show
-        // the live screen through the still one.
-        window.set_opacity(1.0);
+        // Absent from the compositor's glass table on purpose: this is the
+        // one surface that must show the screen, not frost it.
+        let surface = Surface::builder(app, Namespace::Screenshot)
+            .monitor(monitor.as_ref())
+            .fill()
+            // Ignore everyone else's exclusive zone. Anchored to all four
+            // edges with the default zone of 0, the surface is shrunk by the
+            // bar's reserved strip, which leaves the bar unselectable and
+            // un-dimmed above a selector claiming to cover the screen.
+            .over_exclusive_zones()
+            // Fully opaque: the frozen screen is the background, and the
+            // near-unity opacity the other surfaces need for compositor
+            // blending would show the live screen through the still one.
+            .opaque()
+            // Escape has to reach the selector even though the panel below
+            // it may want the keyboard.
+            .keyboard(KeyboardMode::Exclusive)
+            .no_card()
+            .build();
 
         let texture = texture_for(&image);
         let picture = gtk4::Picture::for_paintable(&texture);
@@ -213,12 +202,14 @@ fn present(app: &gtk4::Application, mode: Mode, captured: Vec<(String, Image)>, 
         let overlay = gtk4::Overlay::new();
         overlay.set_child(Some(&picture));
         overlay.add_overlay(&area);
-        window.set_child(Some(&overlay));
+        overlay.set_hexpand(true);
+        overlay.set_vexpand(true);
+        surface.root().append(&overlay);
 
         sheets.push(Sheet {
             output,
             image,
-            window,
+            surface,
             area,
             rect: Rc::new(RefCell::new(None)),
             pointer: Rc::new(RefCell::new(None)),
@@ -235,7 +226,7 @@ fn present(app: &gtk4::Application, mode: Mode, captured: Vec<(String, Image)>, 
     }
     for sheet in &session.sheets {
         seed_rect(sheet);
-        sheet.window.present();
+        sheet.surface.window().present();
     }
 }
 
@@ -370,7 +361,7 @@ fn wire(session: &Rc<Session>, index: usize, mode: Mode) {
         }
         glib::Propagation::Stop
     });
-    sheet.window.add_controller(keys);
+    sheet.surface.window().add_controller(keys);
 }
 
 /// Draw a magnified pixel loupe with live RGB/Hex readout for color picking.
@@ -559,7 +550,7 @@ impl Session {
             return;
         };
         for sheet in &self.sheets {
-            sheet.window.set_visible(false);
+            sheet.surface.window().set_visible(false);
             // Closing the window is not enough to free the pixels, and there
             // are three full copies of every output per selector: the `Image`
             // in the sheet, the clone captured by the draw closure, and the
@@ -586,8 +577,8 @@ impl Session {
                     sheet.area.observe_controllers(),
                 ),
                 (
-                    sheet.window.upcast_ref::<gtk4::Widget>(),
-                    sheet.window.observe_controllers(),
+                    sheet.surface.window().upcast_ref::<gtk4::Widget>(),
+                    sheet.surface.window().observe_controllers(),
                 ),
             ] {
                 for i in (0..controllers.n_items()).rev() {
@@ -599,8 +590,12 @@ impl Session {
                     }
                 }
             }
-            sheet.window.set_child(gtk4::Widget::NONE);
-            sheet.window.close();
+            let root = sheet.surface.root();
+            while let Some(child) = root.first_child() {
+                root.remove(&child);
+            }
+            // The window itself goes with the Surface, when the session
+            // drops: the cycle above is what used to keep it.
         }
         done(selection);
     }

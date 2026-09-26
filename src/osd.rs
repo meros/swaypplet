@@ -2,12 +2,11 @@ use std::cell::{Cell, RefCell};
 use std::process::Command;
 use std::rc::Rc;
 
+use gtk4::gdk;
 use gtk4::prelude::*;
-use gtk4::{gdk, gio};
 use gtk4_layer_shell::Edge;
 
-use crate::anim;
-use crate::layer_shell::{self, LayerShellConfig};
+use crate::shell::{Namespace, PerMonitor, Surface};
 use crate::spawn::spawn_work;
 
 const OSD_TIMEOUT_MS: u32 = 1500;
@@ -239,59 +238,34 @@ struct Pending {
 /// The card on one output. A layer surface is bound to its `wl_output`, so
 /// a card is built for a monitor and destroyed with it, never moved.
 struct Card {
-    monitor: gdk::Monitor,
-    window: gtk4::Window,
+    surface: Surface,
     icon_label: gtk4::Label,
     bar: gtk4::ProgressBar,
     text_label: gtk4::Label,
     // For indicator mode (caps lock etc.)
     indicator_label: gtk4::Label,
     bar_box: gtk4::Box,
-    reveal: anim::Reveal,
-}
-
-impl Drop for Card {
-    fn drop(&mut self) {
-        // The alpha handle goes before its `wl_surface` (see
-        // `anim::Reveal::release_alpha`).
-        self.reveal.release_alpha();
-        crate::layer_shell::destroy_window(&self.window);
-    }
 }
 
 impl Card {
-    fn new(app: &gtk4::Application, monitor: gdk::Monitor) -> Card {
-        static OSD_CONFIG: LayerShellConfig = LayerShellConfig {
-            namespace: "swaypplet-osd",
-            layer: gtk4_layer_shell::Layer::Overlay,
-            exclusive: false,
-            default_width: None,
-            default_height: None,
-            anchors: &[(Edge::Bottom, true)],
-            margins: &[(Edge::Bottom, 72)],
-            keyboard_mode: gtk4_layer_shell::KeyboardMode::None,
-        };
-        let window = layer_shell::create_layer_window_on(app, &OSD_CONFIG, Some(&monitor));
-        window.set_resizable(false);
-        window.set_decorated(false);
+    fn new(app: &gtk4::Application, monitor: &gdk::Monitor) -> Card {
+        let surface = Surface::builder(app, Namespace::Osd)
+            .monitor(Some(monitor))
+            .anchor(&[Edge::Bottom])
+            .margin(Edge::Bottom, 72)
+            .card(crate::ui::Card::Thin)
+            .build();
 
         // Transparent apron around the card (48px CSS padding); must stay
         // alpha-0 so compositor blur clips to the card
-        let wrapper = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .halign(gtk4::Align::Center)
-            .valign(gtk4::Align::Center)
-            .build();
+        let wrapper = surface.root();
+        wrapper.set_halign(gtk4::Align::Center);
+        wrapper.set_valign(gtk4::Align::Center);
         wrapper.add_css_class("osd-wrapper");
-        crate::ui::surface::adopt(&wrapper);
 
         // Vertical layout: icon → bar → percentage
-        let outer = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(0)
-            .halign(gtk4::Align::Center)
-            .build();
-        crate::ui::card::adopt(&outer, crate::ui::Card::Thin);
+        let outer = surface.card();
+        outer.set_halign(gtk4::Align::Center);
         outer.add_css_class("osd-container");
 
         let icon_label = gtk4::Label::builder()
@@ -342,21 +316,15 @@ impl Card {
         content.append(&bar_box);
         content.append(&indicator_label);
         outer.append(&content);
-
-        wrapper.append(&outer);
-        window.set_child(Some(&wrapper));
-
-        let reveal = anim::Reveal::new(&window, &outer).content(&content);
+        surface.set_content(&content);
 
         Card {
-            monitor,
-            window,
+            surface,
             icon_label,
             bar,
             text_label,
             indicator_label,
             bar_box,
-            reveal,
         }
     }
 
@@ -399,9 +367,7 @@ impl Card {
 /// looking at is among them either way.
 #[derive(Clone)]
 pub struct Osd {
-    app: gtk4::Application,
-    monitors: gio::ListModel,
-    cards: Rc<RefCell<Vec<Card>>>,
+    cards: Rc<PerMonitor<Card>>,
     /// What is on the cards, for a monitor plugged in while they are up.
     current: Rc<RefCell<Option<OsdDisplay>>>,
     timeout_id: Rc<RefCell<Option<glib::SourceId>>>,
@@ -419,11 +385,8 @@ pub struct Osd {
 
 impl Osd {
     pub fn new(app: &gtk4::Application) -> Self {
-        let display = gdk::Display::default().expect("no gdk display");
         let osd = Osd {
-            app: app.clone(),
-            monitors: display.monitors(),
-            cards: Rc::new(RefCell::new(Vec::new())),
+            cards: PerMonitor::new(),
             current: Rc::new(RefCell::new(None)),
             timeout_id: Rc::new(RefCell::new(None)),
             bar_route: Rc::new(RefCell::new(None)),
@@ -432,40 +395,19 @@ impl Osd {
             pending: Rc::new(RefCell::new(Pending::default())),
             drawn: Rc::new(Cell::new(None)),
         };
-        // Intentional Rc cycle (monitors → handler → osd → monitors), as in
-        // the bar: the OSD lives for the process.
-        let this = osd.clone();
-        osd.monitors
-            .connect_items_changed(move |_, _, _, _| this.sync());
-        osd.sync();
-        osd
-    }
-
-    /// Reconcile the cards against the current monitor list, the same way
-    /// the bar does: drop the card of a monitor that left, build one for a
-    /// monitor that arrived, and put what the others show on it.
-    fn sync(&self) {
-        let current: Vec<gdk::Monitor> = self
-            .monitors
-            .iter::<gdk::Monitor>()
-            .filter_map(Result::ok)
-            .collect();
-
-        self.cards
-            .borrow_mut()
-            .retain(|card| current.contains(&card.monitor));
-
-        for monitor in current {
-            if self.cards.borrow().iter().any(|c| c.monitor == monitor) {
-                continue;
-            }
-            let card = Card::new(&self.app, monitor);
-            if let Some(display) = &*self.current.borrow() {
+        // One card per output; a monitor plugged in while the cards are up
+        // gets what the others show.
+        let app = app.clone();
+        let current = osd.current.clone();
+        osd.cards.watch(move |monitor| {
+            let card = Card::new(&app, monitor);
+            if let Some(display) = &*current.borrow() {
                 card.draw(display);
-                card.reveal.show();
+                card.surface.show();
             }
-            self.cards.borrow_mut().push(card);
-        }
+            card
+        });
+        osd
     }
 
     /// Install the bar route (docs/BAR_VISION.md, increment 5): while the
@@ -648,9 +590,7 @@ impl Osd {
         {
             return;
         }
-        for card in self.cards.borrow().iter() {
-            card.draw(display);
-        }
+        self.cards.for_each(|card| card.draw(display));
         *self.current.borrow_mut() = Some(display.clone());
 
         // Fade in (motion on glass, anim.rs). Retriggering mid-exit
@@ -658,9 +598,7 @@ impl Osd {
         // unmaps the content, so the auto-sized surface stays put during
         // the transition (the old spacer overlay is gone with the
         // revealer).
-        for card in self.cards.borrow().iter() {
-            card.reveal.show();
-        }
+        self.cards.for_each(|card| card.surface.show());
 
         // Cancel previous timeout
         if let Some(id) = self.timeout_id.borrow_mut().take() {
@@ -681,9 +619,7 @@ impl Osd {
                 showing.set(Showing::Other);
                 drawn.set(None);
                 current.replace(None);
-                for card in cards.borrow().iter() {
-                    card.reveal.hide();
-                }
+                cards.for_each(|card| card.surface.hide());
             },
         );
         *self.timeout_id.borrow_mut() = Some(id);

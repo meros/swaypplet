@@ -271,7 +271,7 @@ thread_local! {
 }
 
 /// A namespace no surface uses, for asking sway what it can parse.
-const PROBE_NAMESPACE: &str = "swaypplet-motion-probe";
+const PROBE_NAMESPACE: &str = crate::shell::Namespace::MotionProbe.as_str();
 
 /// Whether sway moves layer surfaces itself, asking it the first time.
 ///
@@ -365,6 +365,22 @@ pub fn set_layer_blur(namespace: Option<glib::GString>, on: bool, then: impl FnO
         then();
         return;
     }
+    send_layer_blur(&ns, on, then);
+}
+
+/// Send the enable again for a namespace that still has surfaces showing,
+/// without counting anything: for a disable that may have overtaken the
+/// enable after it (each command is its own connection, so sway can see
+/// them in either order).
+fn restate_layer_blur(namespace: Option<glib::GString>) {
+    let Some(ns) = namespace else { return };
+    let showing = SURFACES.with(|s| s.borrow().get(ns.as_str()).is_some_and(|&n| n > 0));
+    if showing {
+        send_layer_blur(&ns, true, || {});
+    }
+}
+
+fn send_layer_blur(ns: &str, on: bool, then: impl FnOnce() + 'static) {
     let effects = if on {
         "blur enable; liquid_glass enable"
     } else {
@@ -417,6 +433,11 @@ struct RevealInner {
     /// The compositor's own alpha for this surface, when it offers one. Bound
     /// on the first show, because the surface does not exist before that.
     alpha: RefCell<Option<crate::alpha::SurfaceAlpha>>,
+    /// Whether this surface is counted among its namespace's glass
+    /// ([`set_layer_blur`]). Counted once per showing, however many times
+    /// `show` is called while it is up, and given back exactly once: by the
+    /// hide, or by [`Reveal::release`] for a surface torn down while shown.
+    counted: Cell<bool>,
     /// Run once the hide has finished and the surface is unmapped. A caller
     /// that owns the surface (one card of a stack, say) drops it here.
     on_hidden: RefCell<Option<Box<dyn Fn()>>>,
@@ -460,6 +481,7 @@ impl Reveal {
                 shown: Cell::new(false),
                 tick: RefCell::new(None),
                 alpha: RefCell::new(None),
+                counted: Cell::new(false),
                 on_hidden: RefCell::new(None),
             }),
         }
@@ -467,13 +489,6 @@ impl Reveal {
 
     /// Everything drawn on the glass; fades over the full enter/exit
     /// duration. Without one, pane and content fade as a single channel.
-    pub fn content(self, content: &impl IsA<gtk4::Widget>) -> Self {
-        *self.inner.content.borrow_mut() = Some(content.clone().upcast());
-        self
-    }
-
-    /// Point at the content after the fact, for a surface whose contents are
-    /// rebuilt in place.
     pub fn set_content(&self, content: &impl IsA<gtk4::Widget>) {
         *self.inner.content.borrow_mut() = Some(content.clone().upcast());
     }
@@ -498,10 +513,24 @@ impl Reveal {
     /// `wp_alpha_modifier_surface_v1` must be destroyed *before* its
     /// `wl_surface`: once the surface is gone, every request on the handle,
     /// the destructor included, is a fatal protocol error (see
-    /// [`crate::alpha`]). Anyone about to destroy the window calls this
-    /// first.
-    pub fn release_alpha(&self) {
+    /// [`crate::alpha`]). [`release`](Self::release) does it for a surface
+    /// about to be destroyed, which `shell::Surface`'s teardown calls first.
+    fn release_alpha(&self) {
         drop(self.inner.alpha.borrow_mut().take());
+    }
+
+    /// Let go of everything this Reveal holds on the compositor's side, for
+    /// a surface about to be destroyed: the alpha handle (see
+    /// [`release_alpha`](Self::release_alpha)) and, when the surface is
+    /// still counted as showing, its share of the namespace's glass. A
+    /// surface destroyed while up used to keep its count forever, and the
+    /// namespace then never saw its last surface leave.
+    pub fn release(&self) {
+        self.cancel_tick();
+        self.release_alpha();
+        if self.inner.counted.replace(false) {
+            set_layer_blur(self.inner.window.namespace(), false, || {});
+        }
     }
 
     /// Pair the fade with a settle: `bin` translates from `px` below its
@@ -549,7 +578,9 @@ impl Reveal {
             *inner.alpha.borrow_mut() = crate::alpha::SurfaceAlpha::attach(&inner.window);
         }
         if inner.window.is_layer_window() {
-            set_layer_blur(inner.window.namespace(), true, || {});
+            if !inner.counted.replace(true) {
+                set_layer_blur(inner.window.namespace(), true, || {});
+            }
             if inner.alpha.borrow().is_some()
                 && let (Some(ns), Some((bin, px))) =
                     (inner.window.namespace(), &*inner.slide.borrow())
@@ -671,13 +702,15 @@ impl Reveal {
             self.hidden();
             return;
         }
-        if inner.window.is_layer_window() {
+        if inner.window.is_layer_window() && inner.counted.replace(false) {
             let this = self.clone();
             set_layer_blur(inner.window.namespace(), false, move || {
                 if this.inner.shown.get() {
-                    // A show() beat the reply here; its own enable may have
-                    // reached sway before this disable, so restate it.
-                    set_layer_blur(this.inner.window.namespace(), true, || {});
+                    // A show() beat the reply here and counted the surface
+                    // again. Its enable went out on a connection of its own
+                    // and may have reached sway before this disable, so the
+                    // enable is restated; the count is already right.
+                    restate_layer_blur(this.inner.window.namespace());
                 } else {
                     this.inner.window.set_visible(false);
                     this.hidden();
