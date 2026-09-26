@@ -283,6 +283,7 @@ impl Card {
             .valign(gtk4::Align::Center)
             .build();
         wrapper.add_css_class("osd-wrapper");
+        crate::ui::surface(&wrapper);
 
         // Vertical layout: icon → bar → percentage
         let outer = gtk4::Box::builder()
@@ -290,7 +291,7 @@ impl Card {
             .spacing(0)
             .halign(gtk4::Align::Center)
             .build();
-        outer.add_css_class("glass-card");
+        crate::ui::card(&outer, crate::ui::Card::Thin);
         outer.add_css_class("osd-container");
 
         let icon_label = gtk4::Label::builder()
@@ -300,21 +301,20 @@ impl Card {
             .xalign(0.5)
             .build();
         icon_label.add_css_class("osd-icon");
+        crate::ui::glyph(&icon_label, crate::ui::Text::Display, crate::ui::Tone::Fg);
 
         // Bar mode: bar + percentage below
-        let bar_box = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .spacing(8)
-            .build();
+        let bar_box = crate::ui::vbox(3);
 
         let bar = gtk4::ProgressBar::builder().hexpand(true).build();
-        bar.add_css_class("osd-bar");
+        crate::ui::make_progress(&bar);
 
         let text_label = gtk4::Label::builder()
             .label("")
             .halign(gtk4::Align::Center)
             .build();
-        text_label.add_css_class("osd-text");
+        crate::ui::set_text_style(&text_label, crate::ui::Text::Title, crate::ui::Tone::Fg);
+        text_label.add_css_class("ui-numeric");
 
         bar_box.append(&bar);
         bar_box.append(&text_label);
@@ -324,7 +324,7 @@ impl Card {
             .label("")
             .halign(gtk4::Align::Center)
             .build();
-        indicator_label.add_css_class("osd-indicator");
+        crate::ui::set_text_style(&indicator_label, crate::ui::Text::TitleSm, crate::ui::Tone::Muted);
         indicator_label.set_visible(false);
 
         // Content sits on the glass and fades over the full duration; the
@@ -378,12 +378,13 @@ impl Card {
                 self.indicator_label.set_label(label);
                 self.bar_box.set_visible(false);
                 self.indicator_label.set_visible(true);
-                if *active {
-                    self.indicator_label.add_css_class("osd-indicator-active");
+                // The accent says the lock is on; off is muted.
+                let tone = if *active {
+                    crate::ui::Tone::Accent
                 } else {
-                    self.indicator_label
-                        .remove_css_class("osd-indicator-active");
-                }
+                    crate::ui::Tone::Muted
+                };
+                crate::ui::set_text_style(&self.indicator_label, crate::ui::Text::TitleSm, tone);
             }
         }
     }

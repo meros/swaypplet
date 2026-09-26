@@ -30,6 +30,9 @@
 .ui-label      { font-size: var(--type-label); }
 .ui-caption    { font-size: var(--type-caption); }
 .ui-strong     { font-weight: var(--w-strong); }
+/* A glyph from the icon font takes a size from the scale but never its
+   weight: a bold glyph is a different glyph. */
+.ui-glyph      { font-weight: var(--w-regular); }
 .ui-mono       { font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace; }
 .ui-numeric    { font-feature-settings: "tnum"; }
 

@@ -437,3 +437,53 @@ surface from `dev/render.sh`.
 4. The enforcement tests switched on as each rule becomes true.
 5. Light mode: the light token set, the material overrides, the shader's
    lift, and the sun.
+
+## 9. Migrating a surface
+
+A surface is migrated when its file in `data/css/` and its Rust code
+satisfy §7, and a render from `dev/render.sh` has been compared with the
+one before. The steps:
+
+1. **Build with the components.** Replace hand-built widgets with the
+   builders in `src/ui/`: `ui::card` for the glass card, `ui::row` and
+   `ui::row_button` for rows, `ui::section` for collapsible groups,
+   `ui::button` for buttons, `ui::slider_row`, `ui::switch`, `ui::chip`,
+   `ui::badge`, `ui::key`, `ui::status`, `ui::field`, `ui::menu`,
+   `ui::progress`. Put text on the scale with `ui::text`,
+   `ui::set_text_style` or `ui::glyph`. Box spacing is `ui::vbox(n)` /
+   `ui::hbox(n)` with a step of the space scale.
+2. **Shrink the surface's CSS to layout.** What stays in its file places
+   things: padding, margins, min sizes, alignment, the apron around a
+   card. Colour, font size and weight, radius and state belong to the
+   components. Where a surface needs a look no component gives, add it to
+   `00-components.css` and `src/ui/` as a component, not to the surface.
+3. **Map what is left** with this table:
+
+| Legacy | Token |
+|---|---|
+| `@fg` | `--fg` |
+| `@fg_dim` | `--fg-muted` |
+| `@text_faint` | `--fg-faint` |
+| `@surface` (the card fill) | `--surface-key` |
+| `@surface_raised`, `@bg0`, `alpha(@bg0, …)` as a solid | `--surface-raised` |
+| `@surface_hover`, `@bg1`, `alpha(@fg, 0.04–0.08)`, `alpha(white, 0.03–0.06)` | `--fill-1` or `--fill-2` |
+| `@surface_track`, `@bg2`, `alpha(@bg3, …)`, `alpha(@fg, 0.10–0.16)` | `--fill-3` |
+| `@border_subtle` | `--border-subtle` |
+| `@border_strong`, `@bg3` as a line | `--border-strong` |
+| `@accent`, `@aqua` as a fill | `--accent-bg` |
+| `@accent`, `@aqua` as text or an icon | `--accent` (15 px strong and up), else `--fg` |
+| `@accent_tint`, `@accent_tint_hi`, `alpha(@accent, < 0.5)` | `--accent-tint` |
+| `alpha(@accent, ≥ 0.5)` as a ring | `--focus-ring` |
+| `@danger`, `@red`, `@accent_quinary` | `--danger` (text) / `--danger-bg` (fill) |
+| `@danger_tint`, `alpha(@red, …)` | `--danger-tint` |
+| `@accent_secondary`, `@yellow` as a warning | `--warning` / `--warning-bg` / `--warning-tint` |
+| `@green`, `@accent_bright_5` as health | `--success` / `--success-bg` |
+| task colours t1–t4 | `--cat-1` … `--cat-4` (and `-bg`, `-tint`) |
+| notification app colours a1–a6 | `--cat-1` … `--cat-6` |
+| `shade(@x, k)` for a hover | the state overlay (§3.3), or `--accent-bg-hover` |
+| `alpha(black, …)` in a text-shadow on the desktop | `--scrim` |
+| `alpha(black, …)` as a shadow under glass | remove: the compositor frosts it |
+| a font size | the nearest `--type-*`; a glyph keeps the size, not the weight |
+| a radius | `--radius-control` 6, `--radius-tile` 10, `--radius-thin` 14, `--radius-card` 18, `--radius-pill` |
+| a padding, margin or spacing | the nearest `--space-*` |
+| a duration | the nearest `--dur-*` |

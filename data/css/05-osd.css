@@ -1,58 +1,19 @@
-/* ── OSD overlay ── */
+/* ── OSD (src/osd.rs) ──
+   A thin card: the icon, the bar, the value; or one indicator word.
+   Colour, type and shape come from the components; this places them. */
 .osd-wrapper {
-    /* Transparent apron — kept for window geometry (positioning was
-       tuned with it); must stay fully alpha-0 so compositor blur clips
-       to the card (see the window comment). */
-    padding: 48px;
-    font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
+    /* The transparent apron around the card: the window's geometry was
+       tuned with it, and it must stay alpha 0 so the compositor's glass
+       clips to the card. */
+    padding: calc(var(--space-7) + var(--space-5));
 }
 
 .osd-container {
-    box-shadow: none;
-    padding: 20px 28px 16px;
+    padding: var(--space-5) var(--space-6);
     min-width: 160px;
 }
 
 .osd-icon {
-    font-size: 36px;
-    color: @fg;
-    margin-bottom: 14px;
+    margin-bottom: var(--space-4);
     -gtk-icon-style: symbolic;
-}
-
-.osd-bar {
-    min-height: 6px;
-    border-radius: 3px;
-}
-
-.osd-bar trough {
-    background-color: alpha(@bg3, 0.5);
-    border-radius: 3px;
-    min-height: 6px;
-}
-
-.osd-bar progress {
-    background-color: @accent;
-    border-radius: 3px;
-    min-height: 6px;
-    box-shadow: 0 0 8px alpha(@accent, 0.3);
-}
-
-.osd-text {
-    font-size: 22px;
-    font-weight: 700;
-    color: @fg;
-    letter-spacing: 0.5px;
-}
-
-.osd-indicator {
-    font-size: 14px;
-    font-weight: 700;
-    color: @fg_dim;
-    margin-top: 8px;
-    letter-spacing: 1px;
-}
-
-.osd-indicator.osd-indicator-active {
-    color: @accent;
 }

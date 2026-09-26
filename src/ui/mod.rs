@@ -77,6 +77,12 @@ pub fn text(s: &str, size: Text, tone: Tone) -> gtk4::Label {
     l
 }
 
+/// A glyph from the icon font at a size of the scale, regular weight.
+pub fn glyph(l: &gtk4::Label, size: Text, tone: Tone) {
+    set_text_style(l, size, tone);
+    l.add_css_class("ui-glyph");
+}
+
 /// Restyle an existing label onto the scale.
 pub fn set_text_style(l: &gtk4::Label, size: Text, tone: Tone) {
     for c in [
