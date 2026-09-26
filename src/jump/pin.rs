@@ -299,7 +299,7 @@ impl Pins {
             introduce_until: Some(Instant::now() + INTRODUCE),
             output: output.clone(),
         });
-        // A new pin is meant to be seen: pinning brings the tucked ones back.
+        // A new pin is meant to be seen, and only the new one: see introduce.
         self.introduce();
         self.announce(PIN_GLYPH, "PINNED", &label);
     }
@@ -345,13 +345,17 @@ impl Pins {
         self.announce(PIN_GLYPH, "PINNED", &label);
     }
 
-    /// After a pin is added: untuck, restack, publish, draw, and look again
-    /// once the introduction is over.
+    /// After a pin is added: restack, publish, draw, and look again once the
+    /// introduction is over.
+    ///
+    /// The tucked pins stay tucked. Pinning used to untuck them all, and
+    /// pinning the workspace you are on then left exactly the wrong thing on
+    /// screen: the new pin hides once its introduction ends, because its
+    /// workspace is the one in front of you, while the others, brought back,
+    /// stay. You pinned b and were left looking at a pin of something else.
+    /// The new pin shows through its introduction whether the rest are
+    /// tucked or not (see `refresh`).
     fn introduce(&self) {
-        if self.inner.borrow().tucked {
-            self.inner.borrow_mut().tucked = false;
-            TUCKED.with(|t| t.set(false));
-        }
         self.stack();
         self.publish();
         self.refresh();
@@ -555,7 +559,7 @@ impl Pins {
                     if !introducing {
                         pin.introduce_until = None;
                     }
-                    let show = !tucked && (introducing || !on_screen.contains(&pin.workspace));
+                    let show = introducing || (!tucked && !on_screen.contains(&pin.workspace));
                     match f {
                         Found::Workspace(scene) => update(pin, Some(scene), show),
                         Found::Window(window, _) => update_region(pin, &window, show),
