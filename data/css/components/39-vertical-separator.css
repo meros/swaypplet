@@ -1,8 +1,0 @@
-/* ── Vertical separator (added by the helm/settings migration) ──
-   The separator of a toolbar, between runs of controls. */
-
-.ui-separator.vertical {
-    min-width: 1px;
-    min-height: 0;
-    margin: var(--space-1) var(--space-3);
-}

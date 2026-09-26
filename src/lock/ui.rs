@@ -774,11 +774,7 @@ impl SurfaceSet {
     pub fn shake(&self) {
         for s in self.inner.borrow().iter() {
             s.field.flash_reject();
-            let card = s.card.clone();
-            card.remove_css_class("lock-shake");
-            glib::idle_add_local_once(move || {
-                card.add_css_class("lock-shake");
-            });
+            ui::shake(&s.card);
         }
     }
 

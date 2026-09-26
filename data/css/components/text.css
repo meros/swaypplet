@@ -1,0 +1,90 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Text (src/ui/text.rs).
+
+   The type scale (§3.4) and the text tones (§3.2), and the small
+   typographic roles: strong, glyph, mono, numeric, overline, text on bare
+   wallpaper, a caption whose tone moves.
+
+   owns: ui-hero ui-display ui-display-sm ui-title ui-title-sm ui-body ui-label ui-caption ui-strong ui-glyph ui-mono ui-numeric ui-muted ui-faint ui-accent ui-success ui-warning ui-danger ui-overline ui-on-wallpaper ui-live-caption
+   ══════════════════════════════════════════════════════════════════════ */
+
+.ui-hero       { font-size: var(--type-hero);       font-weight: var(--w-light); }
+
+.ui-display    { font-size: var(--type-display);    font-weight: var(--w-heavy); }
+
+.ui-display-sm { font-size: var(--type-display-sm); font-weight: var(--w-heavy); }
+
+.ui-title      { font-size: var(--type-title);      font-weight: var(--w-strong); }
+
+.ui-title-sm   { font-size: var(--type-title-sm);   font-weight: var(--w-strong); }
+
+.ui-body       { font-size: var(--type-body); }
+
+.ui-label      { font-size: var(--type-label); }
+
+.ui-caption    { font-size: var(--type-caption); }
+
+.ui-strong     { font-weight: var(--w-strong); }
+
+/* A glyph from the icon font takes a size from the scale but never its
+   weight: a bold glyph is a different glyph. */
+.ui-glyph      { font-weight: var(--w-regular); }
+
+.ui-mono       { font-family: var(--mono); }
+
+.ui-numeric    { font-feature-settings: "tnum"; }
+
+.ui-muted      { color: var(--fg-muted); }
+
+.ui-faint      { color: var(--fg-faint); }
+
+.ui-accent     { color: var(--accent); }
+
+.ui-success    { color: var(--success); }
+
+.ui-warning    { color: var(--warning); }
+
+.ui-danger     { color: var(--danger); }
+
+/* Text standing on bare wallpaper with no card behind it (the lock's clock,
+   date and switch-user button). It is light in both modes: it never sits on
+   glass, only on the wallpaper under the black scrim, which the mode does not
+   change and which only ever darkens. The mode's --fg is ink in light mode,
+   on exactly that dark ground. --on-status is the token the scale already
+   keeps white in both modes.
+
+   Colour cannot make light text readable on a light image; a shadow that
+   darkens the ground around the glyphs can. The scrim is stacked because one
+   layer of it is too thin to give 13–18 px glyphs an edge: four tight layers
+   reach about 0.6 at the core, three soft ones make the halo. */
+:root {
+    --fg-on-wallpaper: var(--on-status);
+}
+
+.ui-on-wallpaper,
+button.ui-btn.ui-on-wallpaper {
+    color: var(--fg-on-wallpaper);
+    text-shadow:
+        0 1px 3px var(--scrim),
+        0 1px 3px var(--scrim),
+        0 1px 3px var(--scrim),
+        0 1px 3px var(--scrim),
+        0 2px 14px var(--scrim),
+        0 2px 14px var(--scrim),
+        0 2px 14px var(--scrim);
+}
+
+/* A caption whose tone changes in place (an error arriving, a success):
+   the colour moves as a state. */
+.ui-live-caption {
+    transition: color var(--motion-state);
+}
+
+/* A small uppercase label that names what follows: a sender, a task, a
+   group, a sheet's section. Tracked out because caps at caption size run
+   together otherwise. The caller uppercases the text. */
+.ui-overline {
+    font-size: var(--type-caption);
+    font-weight: var(--w-strong);
+    letter-spacing: 1px;
+}

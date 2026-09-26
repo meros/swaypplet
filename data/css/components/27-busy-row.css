@@ -1,7 +1,0 @@
-/* ── Busy row (added by the panel migration) ───────────────────────────
-   `ui::set_busy`: a row waiting on something it asked for. */
-
-.ui-row.busy {
-    opacity: 0.6;
-    transition: opacity var(--motion-state);
-}

@@ -88,7 +88,7 @@ pub fn section(icon: &str, title: &str, summary: &str) -> Section {
     summary_l.set_xalign(1.0);
     summary_l.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     let chevron = gtk4::Image::from_icon_name("pan-end-symbolic");
-    chevron.add_css_class("ui-section-chevron");
+    chevron.add_css_class("ui-chevron");
     line.append(&icon_l);
     line.append(&title_l);
     line.append(&summary_l);
@@ -123,7 +123,7 @@ pub type Disclosure = Expander;
 pub fn disclosure(label: &str) -> Disclosure {
     let line = hbox(2);
     let chevron = gtk4::Image::from_icon_name("pan-end-symbolic");
-    chevron.add_css_class("ui-disclosure-chevron");
+    chevron.add_css_class("ui-chevron");
     let l = gtk4::Label::new(Some(label));
     line.append(&chevron);
     line.append(&l);

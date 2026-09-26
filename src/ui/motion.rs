@@ -37,6 +37,20 @@ pub fn page_stack(
         .build()
 }
 
+/// Shake `w` once: a "no" on the card that asked (a rejected password).
+/// Every call replays it: the class comes off now and back on the next
+/// main-loop turn, so the style recomputes between the two.
+pub fn shake(w: &impl IsA<gtk4::Widget>) {
+    w.remove_css_class("ui-shake");
+    let w = w.clone().upcast::<gtk4::Widget>();
+    gtk4::glib::idle_add_local_once(move || w.add_css_class("ui-shake"));
+}
+
+/// Stop a shake's class from lingering (a card being reset for reuse).
+pub fn clear_shake(w: &impl IsA<gtk4::Widget>) {
+    w.remove_css_class("ui-shake");
+}
+
 /// Breathe: the attention loop for something working in the background
 /// (a notification's progress, the player's art).
 pub fn set_breathing(w: &impl IsA<gtk4::Widget>, breathing: bool) {

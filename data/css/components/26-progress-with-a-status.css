@@ -1,6 +1,0 @@
-/* ── Progress with a status (added by the panel migration) ──────────────
-   A level that is also a verdict: charging, low. */
-
-progressbar.ui-progress.success progress { background-color: var(--success-bg); }
-progressbar.ui-progress.warning progress { background-color: var(--warning-bg); }
-progressbar.ui-progress.danger progress  { background-color: var(--danger-bg); }

@@ -1,4 +1,10 @@
-/* ── Menu ───────────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════
+   Menu (src/ui/menu.rs).
+
+   The menu and its items.
+
+   owns: ui-menu ui-menu-item ui-menu-accel
+   ══════════════════════════════════════════════════════════════════════ */
 
 .ui-menu {
     padding: var(--space-2);
@@ -33,10 +39,4 @@ button.ui-menu-item.danger {
 .ui-menu-accel {
     font-size: var(--type-caption);
     color: var(--fg-faint);
-}
-
-.ui-separator {
-    min-height: 1px;
-    margin: var(--space-2) var(--space-3);
-    background-color: var(--border-subtle);
 }

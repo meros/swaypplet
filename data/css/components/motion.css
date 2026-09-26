@@ -1,0 +1,43 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Motion (src/ui/motion.rs).
+
+   Motion that belongs to no one component: the breathing loop and the
+   shake.
+
+   owns: ui-breathing ui-shake
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Breathing: an attention loop for something working in the background (a
+   notification's progress, the player's art). A soft glow in the accent's
+   tint, in and out. A loop, so it names its own period (§3.8); on a
+   progress bar it breathes on the filled part. The animation replaces the
+   element's whole box-shadow each frame, so it goes only on elements that
+   have none. */
+@keyframes ui-breathing {
+    from { box-shadow: 0 0 0 transparent; }
+    to   { box-shadow: 0 0 10px var(--accent-tint); }
+}
+
+.ui-breathing:not(progressbar),
+progressbar.ui-breathing progress {
+    animation: ui-breathing 2s ease-in-out infinite alternate;
+}
+
+/* Shake: a one-shot "no" on the card that asked (a rejected password on
+   the lock or the polkit card). Paint only, a transform, so it costs no
+   layout pass. Attention, which no motion token names, so it takes the
+   scale's length and curve rather than a meaning (§3.8). A surface's own
+   entrance on the same card writes `:not(.ui-shake)`, so the two never
+   meet on one element and neither has to come later to win. */
+@keyframes ui-shake {
+    0%, 100% { transform: translateX(0); }
+    15%      { transform: translateX(-7px); }
+    30%      { transform: translateX(6px); }
+    45%      { transform: translateX(-4px); }
+    60%      { transform: translateX(3px); }
+    75%      { transform: translateX(-2px); }
+}
+
+.ui-shake {
+    animation: ui-shake var(--dur-spatial) var(--ease-standard);
+}

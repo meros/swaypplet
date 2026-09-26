@@ -1,0 +1,146 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Media (src/ui/media.rs).
+
+   Pictures: the thumbnail frame, the picked thumbnail, the choice grid,
+   the swatch, the ring, the placeholder and the lifted picture.
+
+   owns: ui-thumb ui-pick-thumb ui-choice-grid ui-swatch ui-ring ui-placeholder ui-lifted
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* An image in a rounded frame: album art, with a fill while it loads or
+   when there is none. */
+.ui-thumb {
+    border-radius: var(--radius-tile);
+    background-color: var(--fill-3);
+}
+
+/* ── Picked thumbnail ──
+   A picture you choose. The frame is the whole selection cue: no tick, no
+   overlay, because the picture is the thing being chosen and anything drawn
+   over it hides part of that. */
+
+button.ui-pick-thumb {
+    padding: 0;
+    min-width: 0;
+    min-height: 0;
+    border: 2px solid var(--border-subtle);
+    border-radius: var(--radius-tile);
+    background-color: var(--fill-2);
+    background-image: none;
+    box-shadow: none;
+    transition: border-color var(--motion-state);
+}
+
+button.ui-pick-thumb picture {
+    border-radius: var(--radius-control);
+}
+
+button.ui-pick-thumb:hover {
+    border-color: var(--focus-ring);
+}
+
+button.ui-pick-thumb.selected {
+    border-color: var(--accent-bg);
+}
+
+button.ui-pick-thumb:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+/* ── Choice grid ──
+   A flow box of tiles where one is picked: the pointer's tile takes the
+   hover overlay, the picked one the accent tint and a ring. */
+
+flowbox.ui-choice-grid > flowboxchild {
+    padding: var(--space-3);
+    border-radius: var(--radius-tile);
+    outline: none;
+    transition:
+        background-color var(--motion-state),
+        background-image var(--motion-state);
+}
+
+flowbox.ui-choice-grid > flowboxchild:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+flowbox.ui-choice-grid > flowboxchild:selected {
+    background-color: var(--accent-tint);
+    box-shadow: inset 0 0 0 2px var(--accent-bg);
+}
+
+/* ── Swatch ──
+   A colour you pick, drawn by its child; the button carries only the ring
+   that says which one is picked. */
+
+button.ui-swatch {
+    min-width: 26px;
+    min-height: 26px;
+    padding: 0;
+    border: 2px solid transparent;
+    border-radius: var(--radius-pill);
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    transition: border-color var(--motion-state);
+}
+
+button.ui-swatch:hover {
+    border-color: var(--border-strong);
+}
+
+button.ui-swatch:checked {
+    border-color: var(--fg);
+}
+
+button.ui-swatch:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+/* ── Ring ──
+   An accent ring round something the compositor draws, which the shell can
+   frame but not fill: the selected workspace in the Super+Tab row. A second,
+   quieter band says it is pinned. Fades in with the row. */
+
+.ui-ring {
+    border-radius: var(--radius-card);
+    box-shadow:
+        0 0 0 2px var(--accent-bg),
+        0 0 24px var(--accent-tint);
+    animation: ui-ring-in var(--motion-enter);
+}
+
+.ui-ring.pinned {
+    box-shadow:
+        0 0 0 2px var(--accent-bg),
+        0 0 0 5px var(--accent-tint),
+        0 0 24px var(--accent-tint);
+}
+
+@keyframes ui-ring-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+/* ── Placeholder ──
+   Where a picture will be before its first frame: a solid ground and the
+   app's icon in the muted tone. */
+
+.ui-placeholder {
+    background-color: var(--surface-raised);
+    color: var(--fg-muted);
+}
+
+/* ── Lifted ──
+   A picture lifted off what is behind it by a shadow: a window drawn over
+   the desktop or the glass, never a card (glass needs no shadow, §3.7). */
+
+.ui-lifted {
+    box-shadow: var(--shadow-solid);
+}

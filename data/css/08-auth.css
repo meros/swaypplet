@@ -2,7 +2,7 @@
    Auth surfaces (src/polkit/dialog.rs, src/lock/ui.rs, src/auth_field.rs).
    The polkit card and the lock card share one language: one card, one
    field, one sentence under it, one primary action. Colour, type and shape
-   come from the components (00-components.css); this file places things,
+   come from the components (data/css/components/); this file places things,
    and keeps the motion that is the auth surfaces' own.
    ════════════════════════════════════════════════════════════════════ */
 
@@ -68,44 +68,24 @@
 }
 
 /* Arriving from the other side of the cut: the card fades up out of the
-   wallpaper rather than popping in fully formed. Deliberately not on
-   `.lock-shake`, whose own animation must win. */
+   wallpaper rather than popping in fully formed. Never while it shakes
+   (`ui::shake`), whose animation is the one that card wants then. */
 @keyframes auth-card-enter {
     from { opacity: 0; transform: translateY(14px); }
     to   { opacity: 1; transform: translateY(0); }
 }
 
-.lock-card {
+.lock-card:not(.ui-shake) {
     animation: auth-card-enter var(--motion-enter);
 }
 
 /* The compositor cross-fades the whole lock surface (lock/fade.rs), which
    already carries the entrance. Stacking the card's own fade on top makes its
    opacity css x surface, so the card visibly lags the wallpaper under it.
-   Above .lock-shake, which has equal specificity and must still win.
-
-   The polkit card's shake used to be grouped into this rule by a stray
-   comma, which set `animation: none` on it: the polkit card never shook. It
-   has its own rule below now. */
-.lock-crossfade .lock-card {
+   A shake still plays: it is the component's (`.ui-shake`), and this rule
+   stands aside for it by selector rather than by coming first. */
+.lock-crossfade .lock-card:not(.ui-shake) {
     animation: none;
-}
-
-/* ── Shake on error (paint-only transform; zero layout passes) ──
-   A one-shot: attention, which no motion token names, so it takes the
-   scale's length and curve rather than a meaning (§3.8). */
-@keyframes auth-shake {
-    0%, 100% { transform: translateX(0); }
-    15%      { transform: translateX(-7px); }
-    30%      { transform: translateX(6px); }
-    45%      { transform: translateX(-4px); }
-    60%      { transform: translateX(3px); }
-    75%      { transform: translateX(-2px); }
-}
-
-.lock-card.lock-shake,
-.polkit-container.polkit-shake {
-    animation: auth-shake var(--dur-spatial) var(--ease-standard);
 }
 
 /* ── The polkit card's gaps ──

@@ -1,0 +1,114 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Expander: section and disclosure (src/ui/expander.rs).
+
+   A header that opens a body under it. The section is a group with a
+   header row; the disclosure a quiet line inside one.
+
+   owns: ui-section ui-section-header ui-section-title ui-section-summary ui-section-body ui-disclosure ui-disclosure-button ui-chevron
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Section: a collapsible group header and its body ───────────────── */
+
+.ui-section {
+    background-color: var(--fill-1);
+    border-radius: var(--radius-tile);
+}
+
+button.ui-section-header {
+    min-height: var(--row-height);
+    padding: 0 var(--space-4);
+    border: none;
+    border-radius: var(--radius-tile);
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg);
+    transition: background-image var(--motion-state);
+}
+
+button.ui-section-header:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+button.ui-section-header:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+button.ui-section-header:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+.ui-section-title {
+    font-size: var(--type-title-sm);
+    font-weight: var(--w-strong);
+}
+
+.ui-section-summary {
+    font-size: var(--type-label);
+    color: var(--fg-muted);
+}
+
+/* The chevron on either header turns as the body opens. The rule walks
+   down from the open expander through its own header only, so an open
+   section never turns the chevron of a closed disclosure in its body. */
+.ui-chevron {
+    transition: -gtk-icon-transform var(--motion-expand);
+}
+
+.ui-section-header .ui-chevron {
+    color: var(--fg-faint);
+}
+
+.ui-section.open > .ui-section-header .ui-chevron,
+.ui-disclosure.open > .ui-disclosure-button .ui-chevron {
+    -gtk-icon-transform: rotate(90deg);
+}
+
+.ui-section-body {
+    padding: 0 var(--space-2) var(--space-2) var(--space-2);
+}
+
+/* ── Section as a page ──────────────────
+   A Helm sub-sheet shows one section as its whole page: the sheet is the
+   group, so the section drops its own fill and its body's inset. */
+
+.ui-section.page {
+    background-color: transparent;
+}
+
+.ui-section.page .ui-section-body {
+    padding: 0;
+}
+
+/* ── Disclosure ─────────────────────────
+   A quiet line inside a section that opens a body under it. */
+
+button.ui-disclosure-button {
+    min-height: var(--control-height);
+    padding: 0 var(--space-3);
+    border: none;
+    border-radius: var(--radius-control);
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg-muted);
+    font-size: var(--type-label);
+    font-weight: var(--w-strong);
+    transition: background-image var(--motion-state),
+                color var(--motion-state);
+}
+
+button.ui-disclosure-button:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+    color: var(--fg);
+}
+
+button.ui-disclosure-button:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+button.ui-disclosure-button:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}

@@ -30,192 +30,84 @@ thread_local! {
 /// The rules, one file per surface, in cascade order.
 pub const RULES: &[(&str, &str)] = &[
     (
-        "components/01-base.css",
-        include_str!("../../data/css/components/01-base.css"),
+        "components/surface.css",
+        include_str!("../../data/css/components/surface.css"),
     ),
     (
-        "components/02-type.css",
-        include_str!("../../data/css/components/02-type.css"),
+        "components/text.css",
+        include_str!("../../data/css/components/text.css"),
     ),
     (
-        "components/03-card.css",
-        include_str!("../../data/css/components/03-card.css"),
+        "components/layout.css",
+        include_str!("../../data/css/components/layout.css"),
     ),
     (
-        "components/04-group.css",
-        include_str!("../../data/css/components/04-group.css"),
+        "components/card.css",
+        include_str!("../../data/css/components/card.css"),
     ),
     (
-        "components/05-button.css",
-        include_str!("../../data/css/components/05-button.css"),
+        "components/button.css",
+        include_str!("../../data/css/components/button.css"),
     ),
     (
-        "components/06-row.css",
-        include_str!("../../data/css/components/06-row.css"),
+        "components/chip.css",
+        include_str!("../../data/css/components/chip.css"),
     ),
     (
-        "components/07-section.css",
-        include_str!("../../data/css/components/07-section.css"),
+        "components/row.css",
+        include_str!("../../data/css/components/row.css"),
     ),
     (
-        "components/08-toggle-tile.css",
-        include_str!("../../data/css/components/08-toggle-tile.css"),
+        "components/expander.css",
+        include_str!("../../data/css/components/expander.css"),
     ),
     (
-        "components/09-slider.css",
-        include_str!("../../data/css/components/09-slider.css"),
+        "components/tile.css",
+        include_str!("../../data/css/components/tile.css"),
     ),
     (
-        "components/10-switch.css",
-        include_str!("../../data/css/components/10-switch.css"),
+        "components/slider.css",
+        include_str!("../../data/css/components/slider.css"),
     ),
     (
-        "components/11-chip-badge-key-status.css",
-        include_str!("../../data/css/components/11-chip-badge-key-status.css"),
+        "components/field.css",
+        include_str!("../../data/css/components/field.css"),
     ),
     (
-        "components/12-field.css",
-        include_str!("../../data/css/components/12-field.css"),
+        "components/menu.css",
+        include_str!("../../data/css/components/menu.css"),
     ),
     (
-        "components/13-menu.css",
-        include_str!("../../data/css/components/13-menu.css"),
+        "components/avatar.css",
+        include_str!("../../data/css/components/avatar.css"),
     ),
     (
-        "components/14-avatar.css",
-        include_str!("../../data/css/components/14-avatar.css"),
+        "components/progress.css",
+        include_str!("../../data/css/components/progress.css"),
     ),
     (
-        "components/15-progress.css",
-        include_str!("../../data/css/components/15-progress.css"),
+        "components/bar.css",
+        include_str!("../../data/css/components/bar.css"),
     ),
     (
-        "components/16-bar-components.css",
-        include_str!("../../data/css/components/16-bar-components.css"),
+        "components/popover.css",
+        include_str!("../../data/css/components/popover.css"),
     ),
     (
-        "components/17-segment.css",
-        include_str!("../../data/css/components/17-segment.css"),
+        "components/media.css",
+        include_str!("../../data/css/components/media.css"),
     ),
     (
-        "components/18-mark.css",
-        include_str!("../../data/css/components/18-mark.css"),
+        "components/face.css",
+        include_str!("../../data/css/components/face.css"),
     ),
     (
-        "components/19-bay.css",
-        include_str!("../../data/css/components/19-bay.css"),
+        "components/motion.css",
+        include_str!("../../data/css/components/motion.css"),
     ),
     (
-        "components/20-popover.css",
-        include_str!("../../data/css/components/20-popover.css"),
-    ),
-    (
-        "components/21-section-as-a-page.css",
-        include_str!("../../data/css/components/21-section-as-a-page.css"),
-    ),
-    (
-        "components/22-disclosure.css",
-        include_str!("../../data/css/components/22-disclosure.css"),
-    ),
-    (
-        "components/23-toggle-tile-as-one-button.css",
-        include_str!("../../data/css/components/23-toggle-tile-as-one-button.css"),
-    ),
-    (
-        "components/24-slider-marks-and-over-range.css",
-        include_str!("../../data/css/components/24-slider-marks-and-over-range.css"),
-    ),
-    (
-        "components/25-tones-on-component-parts.css",
-        include_str!("../../data/css/components/25-tones-on-component-parts.css"),
-    ),
-    (
-        "components/26-progress-with-a-status.css",
-        include_str!("../../data/css/components/26-progress-with-a-status.css"),
-    ),
-    (
-        "components/27-busy-row.css",
-        include_str!("../../data/css/components/27-busy-row.css"),
-    ),
-    (
-        "components/28-bare-gtk-widgets.css",
-        include_str!("../../data/css/components/28-bare-gtk-widgets.css"),
-    ),
-    (
-        "components/29-auth-components.css",
-        include_str!("../../data/css/components/29-auth-components.css"),
-    ),
-    (
-        "components/30-the-handoff.css",
-        include_str!("../../data/css/components/30-the-handoff.css"),
-    ),
-    (
-        "components/31-the-auth-field-s-states.css",
-        include_str!("../../data/css/components/31-the-auth-field-s-states.css"),
-    ),
-    (
-        "components/32-the-face-indicator.css",
-        include_str!("../../data/css/components/32-the-face-indicator.css"),
-    ),
-    (
-        "components/33-notification-components.css",
-        include_str!("../../data/css/components/33-notification-components.css"),
-    ),
-    (
-        "components/34-dense-slider.css",
-        include_str!("../../data/css/components/34-dense-slider.css"),
-    ),
-    (
-        "components/35-picked-thumbnail.css",
-        include_str!("../../data/css/components/35-picked-thumbnail.css"),
-    ),
-    (
-        "components/36-choice-grid.css",
-        include_str!("../../data/css/components/36-choice-grid.css"),
-    ),
-    (
-        "components/37-pill-group.css",
-        include_str!("../../data/css/components/37-pill-group.css"),
-    ),
-    (
-        "components/38-swatch.css",
-        include_str!("../../data/css/components/38-swatch.css"),
-    ),
-    (
-        "components/39-vertical-separator.css",
-        include_str!("../../data/css/components/39-vertical-separator.css"),
-    ),
-    (
-        "components/40-window-toolbar-canvas.css",
-        include_str!("../../data/css/components/40-window-toolbar-canvas.css"),
-    ),
-    (
-        "components/41-ring.css",
-        include_str!("../../data/css/components/41-ring.css"),
-    ),
-    (
-        "components/42-placeholder.css",
-        include_str!("../../data/css/components/42-placeholder.css"),
-    ),
-    (
-        "components/43-toggle-button.css",
-        include_str!("../../data/css/components/43-toggle-button.css"),
-    ),
-    (
-        "components/44-dropdown-list.css",
-        include_str!("../../data/css/components/44-dropdown-list.css"),
-    ),
-    (
-        "components/45-check.css",
-        include_str!("../../data/css/components/45-check.css"),
-    ),
-    (
-        "components/46-lifted.css",
-        include_str!("../../data/css/components/46-lifted.css"),
-    ),
-    (
-        "components/47-armed.css",
-        include_str!("../../data/css/components/47-armed.css"),
+        "components/gtk.css",
+        include_str!("../../data/css/components/gtk.css"),
     ),
     ("02-bar.css", include_str!("../../data/css/02-bar.css")),
     ("03-panel.css", include_str!("../../data/css/03-panel.css")),

@@ -524,7 +524,7 @@ impl PolkitDialog {
         self.password_entry.set_text("");
         self.password_entry.set_placeholder_text(Some("Password"));
         self.set_status("", StatusKind::Info);
-        self.card.remove_css_class("polkit-shake");
+        ui::clear_shake(&self.card);
         ui::set_success(&self.card, false);
         self.field.set_busy(false);
         self.field.set_fp_armed(false);
@@ -692,13 +692,7 @@ impl PolkitDialog {
     }
 
     pub fn shake(&self) {
-        // Re-trigger the CSS keyframe by removing then adding the class.
-        let card = self.card.clone();
-        card.remove_css_class("polkit-shake");
-        let c = card.clone();
-        glib::idle_add_local_once(move || {
-            c.add_css_class("polkit-shake");
-        });
+        ui::shake(&self.card);
     }
 
     /// Say it was approved, inside the card, without moving anything.

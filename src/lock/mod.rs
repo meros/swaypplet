@@ -48,7 +48,7 @@ use ui::{StatusKind, SurfaceSet};
 ///
 /// The length of the animation rather than picked: the verdict (the ring's
 /// punch, the smile and the pill's glow, `.ui-face-ring.ok` in
-/// 00-components.css) is one `--motion-enter`, the same token, so holding
+/// components/face.css) is one `--motion-enter`, the same token, so holding
 /// for it is the whole gesture as far as the eye is concerned. The face
 /// channel is already polled every 200 ms, so this is under two ticks and is
 /// not what governs how fast an unlock feels.

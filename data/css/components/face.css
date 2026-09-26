@@ -1,3 +1,11 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Face indicator (src/ui/face.rs).
+
+   The face in a ring, in a thin glass pill.
+
+   owns: ui-face-ring ui-face-eye ui-face-mouth ui-face-pill ui-face-enter
+   ══════════════════════════════════════════════════════════════════════ */
+
 /* ── The face indicator (ui::face_pill, ui::face_ring) ──
    A ring with a face in it: it glances while the camera looks, stills and
    meets your eye when it has found you, smiles on a match, frowns on a miss,
@@ -7,6 +15,7 @@
    Colours say the state and nothing else: accent while looking and found
    (the one thing to look at), success on a match, danger on a miss, warning
    when it is too dark to see. */
+
 .ui-face-ring {
     border: 2px solid var(--border-strong);
     border-radius: var(--radius-pill);
@@ -32,9 +41,11 @@
     border-color: var(--border-strong);
     border-top-color: var(--accent);
 }
+
 .ui-face-ring.looking .ui-face-eye {
     animation: ui-face-glance 2.6s ease-in-out infinite;
 }
+
 .ui-face-ring.looking .ui-face-mouth {
     /* Full thickness: at 22 px a half-height line is a smudge, not a mouth. */
     border-radius: 0;
@@ -46,7 +57,9 @@
     border-color: var(--border-subtle);
     border-top-color: var(--warning);
 }
+
 .ui-face-ring.dark .ui-face-eye { transform: scaleY(0.25); opacity: 0.6; }
+
 .ui-face-ring.dark .ui-face-mouth { border-radius: 0; opacity: 0.6; }
 
 /* Found: the glance stops and the eyes meet yours. The stop is the signal to
@@ -55,11 +68,13 @@
     border-color: var(--accent);
     animation: ui-face-ring-pulse 0.9s ease-in-out infinite;
 }
+
 .ui-face-ring.found .ui-face-eye {
     background-color: var(--accent);
     opacity: 1;
     animation: ui-face-blink 3.2s ease-in-out infinite;
 }
+
 .ui-face-ring.found .ui-face-mouth { border-color: var(--accent); }
 
 /* Recognised: it smiles. A tint behind, not a fill: the smile is drawn in
@@ -69,11 +84,13 @@
     background-color: var(--success-tint);
     animation: ui-face-ring-ok var(--motion-enter);
 }
+
 .ui-face-ring.ok .ui-face-eye {
     background-color: var(--success);
     opacity: 1;
     transform: scaleY(0.45);
 }
+
 .ui-face-ring.ok .ui-face-mouth {
     border-color: var(--success);
     border-bottom-width: 2px;
@@ -90,7 +107,9 @@
        scale's length and curve rather than a meaning. */
     animation: ui-face-ring-fail var(--dur-emphasis) var(--ease-standard);
 }
+
 .ui-face-ring.fail .ui-face-eye { background-color: var(--danger); opacity: 1; }
+
 .ui-face-ring.fail .ui-face-mouth {
     border-color: var(--danger);
     /* The same arc turned over and dropped under the eyes. Translate first:

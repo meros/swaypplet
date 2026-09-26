@@ -1,0 +1,108 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Card (src/ui/card.rs).
+
+   The glass card (§4) and what sits in it: the group fill, the well, the
+   solid card of a popup, the card over a scrim, and the card's tints and
+   states.
+
+   owns: ui-card ui-group ui-well
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Card: the glass surface ─────────────────────────────────────────────
+   Paints the key only so the compositor finds the card's shape; the
+   compositor drops it and draws the material (§4). Never a box-shadow: the
+   compositor would frost its translucent pixels into a halo. */
+
+.ui-card {
+    background-color: var(--surface-key);
+    border-radius: var(--radius-card);
+    border: 1px solid var(--border-strong);
+}
+
+.ui-card.thin {
+    border-radius: var(--radius-thin);
+}
+
+.no-glass .ui-card {
+    background-color: var(--surface-raised);
+    box-shadow: var(--shadow-solid);
+}
+
+/* ── Group: a fill inside a card (never glass on glass) ─────────────── */
+
+.ui-group {
+    background-color: var(--fill-1);
+    border-radius: var(--radius-tile);
+}
+
+.ui-card.solid {
+    background-color: var(--surface-raised);
+}
+
+/* The card over the scrim: the key, pre-compensated for the black under it.
+
+   The lock and the greeter paint --scrim (black at 0.20) under the whole
+   screen and the card on top of it, and the compositor has to find the
+   card's composite on exactly the key every other card paints (--surface-key,
+   #32302f at 0.50; `fillKey` in the nixos repo's users/modules/theme/glass.nix)
+   so it drops those pixels and draws the material. Two layers reach 0.50 when
+   the card is painted at a = (0.50 − 0.20) / (1 − 0.20) = 0.375, which is the
+   key's alpha × 0.75. Its colour has to come back up by what the black under
+   it takes away: the scrim adds nothing to the premultiplied sum, so the card
+   carries the key's premultiplied colour at the lower alpha, the key's colour
+   × 0.50 / 0.375 = × 4/3. Composited: 0.375 × 4/3 × #32302f = 0.50 × #32302f
+   at alpha 0.375 + 0.20 × 0.625 = 0.500, which is #32302f at 0.500 exactly.
+   (The legacy literal was #43403f, the same product rounded to 8 bits.)
+
+   Derived from the key rather than written down, so the two cannot drift.
+   Change --scrim and both factors move: check the result against the table
+   in glass.nix (discard line 0.28, seeding line 0.40), not against either
+   number alone. */
+:root {
+    --surface-key-over-scrim: color(from var(--surface-key) srgb
+        calc(r * 4 / 3) calc(g * 4 / 3) calc(b * 4 / 3) / calc(alpha * 0.75));
+}
+
+.ui-card.over-scrim {
+    background-color: var(--surface-key-over-scrim);
+}
+
+/* A card that has just said yes: the border takes the accent, nothing else
+   moves. Approval is stated, not celebrated. */
+.ui-card.success {
+    border-color: var(--accent-bg);
+    transition: border-color var(--motion-state);
+}
+
+/* A well: sunk below the card rather than laid on it, for text that came
+   from outside the card (the command asking to run as root, polkit's raw
+   details). Quoted evidence, not something the card wrote. */
+.ui-well {
+    background-color: var(--scrim);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-tile);
+    color: var(--fg);
+}
+
+/* A deliberate tint on a glass card. The card's background-color stays the
+   key (§4) and the tint is a fill drawn over it, as a background-image: the
+   compositor un-mixes the key and draws the tint over the material, so the
+   glass itself carries the state in either mode. Never a different colour
+   in the key's place: the compositor takes that for the key and draws
+   nothing. The alpha only rises (the key's 0.50 plus the tint), so the card
+   stays clear of the seeding line (glass.nix `maskThreshold`).
+
+   .danger: a critical notification. The glass runs warm, and the hairline
+   picks up the same red at the weight every card edge has.
+   .recessed: a card further back in a stack, dimmer. A fill, not the bar's
+   `.ui-receded` opacity: each card owns its surface, and that surface's
+   alpha is the material's fade, which an opacity here would fight. */
+.ui-card.danger {
+    background-image: linear-gradient(var(--danger-tint), var(--danger-tint));
+    border-color: var(--danger-tint);
+}
+
+.ui-card.recessed {
+    background-image: linear-gradient(var(--scrim), var(--scrim));
+    border-color: var(--border-subtle);
+}

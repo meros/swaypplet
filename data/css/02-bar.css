@@ -1,7 +1,7 @@
 /* ── Bar: bottom thin card, one per output (src/bar/) ──
-   A thin glass card (ui::card Thin; the compositor frosts the wallpaper
+   A thin glass card (ui::card::adopt Thin; the compositor frosts the wallpaper
    behind the "swaypplet-bar" namespace). Colour, type and shape come from
-   the components (00-components.css): segments, marks, bays, the popover
+   the components (data/css/components/): segments, marks, bays, the popover
    chassis. This file places them.
 
    Height budget: the window asks for 38 px, the card's border takes 1 px

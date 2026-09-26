@@ -58,7 +58,7 @@ static CUE_CONFIG: LayerShellConfig = LayerShellConfig {
 pub struct Cue {
     window: gtk4::Window,
     /// Carries the entrance animation, so a state change on the pill cannot
-    /// replay it. See `.ui-face-enter` in 00-components.css.
+    /// replay it. See `.ui-face-enter` in data/css/components/face.css.
     strip: gtk4::Box,
     pill: gtk4::Box,
     ring: gtk4::Box,

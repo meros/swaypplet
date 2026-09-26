@@ -1,0 +1,19 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Popover (src/ui/popover.rs).
+
+   The popover chassis: it draws nothing itself; its child is the card.
+
+   owns: ui-popover
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Popover: the card is the popover's child and the popover node draws
+   nothing. Popup surfaces sit outside the compositor's layer effects, so
+   no glass is behind them: the card is solid (--surface-raised). */
+
+popover.ui-popover,
+popover.ui-popover > contents {
+    background: none;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+}

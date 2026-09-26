@@ -1,0 +1,340 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Bar (src/ui/bar.rs).
+
+   The bar's pieces: the categorical tones, the receded group, the meter,
+   the segmented track and its segments, marks, the task bays and the rail.
+
+   owns: ui-cat-1 ui-cat-2 ui-cat-3 ui-cat-4 ui-cat-5 ui-cat-6 ui-receded ui-meter ui-segmented ui-segment ui-mark ui-bay ui-bay-chip ui-rail
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Categorical tones: identity only (§3.2), never state. */
+.ui-cat-1 { color: var(--cat-1); }
+
+.ui-cat-2 { color: var(--cat-2); }
+
+.ui-cat-3 { color: var(--cat-3); }
+
+.ui-cat-4 { color: var(--cat-4); }
+
+.ui-cat-5 { color: var(--cat-5); }
+
+.ui-cat-6 { color: var(--cat-6); }
+
+/* A group or a mark that steps back as a whole (the screen without input,
+   a paused player). Opacity, not a colour, so everything inside keeps its
+   own tone and the step reads the same over any backdrop. */
+.ui-receded {
+    opacity: 0.6;
+}
+
+/* A Cairo-drawn meter (a hairline, a bay's progress) takes its fill from
+   this colour, so the meter is the slider's accent without a literal. */
+.ui-meter {
+    color: var(--accent-bg);
+}
+
+/* ── Segment: a fill on thin glass; fused into a track, only the ends round.
+   One segmented control per track: its segments are mutually exclusive
+   (a screen's workspaces) or side by side (the instruments). The text
+   tone lives on the content, not the segment, so every segment in a track
+   carries the same fill (the fills are mixes of currentColor). */
+
+.ui-segmented {
+    border-radius: var(--radius-tile);
+    transition: opacity var(--motion-state);
+}
+
+.ui-segment {
+    min-width: 0;
+    min-height: 0;
+    border: none;
+    border-radius: var(--radius-tile);
+    background-color: var(--fill-1);
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg);
+    font-weight: var(--w-regular);
+    transition: background-color var(--motion-state),
+                background-image var(--motion-state),
+                color var(--motion-state),
+                border-color var(--motion-state);
+}
+
+.ui-segmented > .ui-segment {
+    border-radius: 0;
+}
+
+.ui-segmented > .ui-segment:not(:first-child) {
+    border-left: 1px solid var(--border-subtle);
+}
+
+.ui-segmented > .ui-segment:first-child {
+    border-top-left-radius: var(--radius-tile);
+    border-bottom-left-radius: var(--radius-tile);
+}
+
+.ui-segmented > .ui-segment:last-child {
+    border-top-right-radius: var(--radius-tile);
+    border-bottom-right-radius: var(--radius-tile);
+}
+
+/* Quiet: the label sits muted until it is the selection or under the
+   pointer, so the selection is the only loud thing in the track. */
+.ui-segment.quiet {
+    color: var(--fg-muted);
+}
+
+button.ui-segment:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+    color: var(--fg);
+}
+
+/* The state is the overlay; the fill under it stays the segment's own,
+   whatever a generic button:hover or :active elsewhere says. */
+button.ui-segment:hover,
+button.ui-segment:active {
+    background-color: var(--fill-1);
+    box-shadow: none;
+}
+
+button.ui-segment.current:hover,
+button.ui-segment.current:active {
+    background-color: var(--fill-3);
+}
+
+button.ui-segment:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+button.ui-segment:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+/* A quiet readout on a segment or a mark comes up to ink under the
+   pointer. */
+button.ui-segment:hover .ui-muted,
+button.ui-segment:hover .ui-faint,
+button.ui-mark:hover .ui-muted,
+button.ui-mark:hover .ui-faint {
+    color: var(--fg);
+}
+
+/* Selection is a step on the fill ladder, achromatic: hue is spoken for by
+   task identity (the categorical tones). `current` is what a screen shows;
+   `focused` is current on the screen holding input, the fill doubled
+   (two layers of --fill-3, about 30 %) and the label strong. */
+.ui-segment.current {
+    background-color: var(--fill-3);
+    color: var(--fg);
+}
+
+.ui-segment.current.focused {
+    background-image: linear-gradient(var(--fill-3), var(--fill-3));
+    font-weight: var(--w-strong);
+}
+
+button.ui-segment.current.focused:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover)),
+                      linear-gradient(var(--fill-3), var(--fill-3));
+}
+
+/* Act now: the one red. Text on it is --on-status, and so is any muted or
+   faint text inside, which would otherwise go grey on red. */
+.ui-segment.danger,
+button.ui-segment.danger:hover,
+button.ui-segment.danger:active {
+    background-color: var(--danger-bg);
+    color: var(--on-status);
+}
+
+.ui-segment.danger .ui-muted,
+.ui-segment.danger .ui-faint {
+    color: inherit;
+}
+
+/* The ribbon lane: a 2 px bottom edge, transparent until a state lands, so
+   a segment never changes height. Working is a line; waiting is the task's
+   categorical tone. */
+.ui-segment.ribboned {
+    border-bottom: 2px solid transparent;
+}
+
+.ui-segment.ribbon-working { border-bottom-color: var(--border-strong); }
+
+.ui-segment.ribbon-cat-1   { border-bottom-color: var(--cat-1); }
+
+.ui-segment.ribbon-cat-2   { border-bottom-color: var(--cat-2); }
+
+.ui-segment.ribbon-cat-3   { border-bottom-color: var(--cat-3); }
+
+.ui-segment.ribbon-cat-4   { border-bottom-color: var(--cat-4); }
+
+/* ── Mark: a quiet glyph button straight on thin glass, no fill at rest. */
+
+button.ui-mark {
+    min-width: 0;
+    min-height: 0;
+    border: none;
+    border-radius: var(--radius-control);
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg-muted);
+    font-weight: var(--w-regular);
+    transition: background-color var(--motion-state),
+                background-image var(--motion-state),
+                color var(--motion-state);
+}
+
+button.ui-mark.quiet {
+    color: var(--fg-faint);
+}
+
+button.ui-mark:hover {
+    background-color: transparent;
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+    box-shadow: none;
+    color: var(--fg);
+}
+
+button.ui-mark:active {
+    background-color: transparent;
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+    box-shadow: none;
+}
+
+button.ui-mark:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+/* An item that wants you now (a tray icon in NeedsAttention). */
+button.ui-mark.danger,
+button.ui-mark.danger:hover,
+button.ui-mark.danger:active {
+    background-color: var(--danger-bg);
+    color: var(--on-status);
+}
+
+/* ── Bay: one task's slot on the board. Position and numeral carry
+   identity; every state stays distinct in grayscale, and hue (the task's
+   categorical tone) only reinforces. Flat on purpose: the thin glass is the
+   only thing with height, so state speaks through fill and hue, never
+   depth. The border is reserved, transparent until stale claims it. */
+
+button.ui-bay {
+    min-height: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg-muted);
+    font-weight: var(--w-regular);
+    transition: background-color var(--motion-state),
+                color var(--motion-state),
+                border-color var(--motion-state),
+                box-shadow var(--motion-state);
+}
+
+/* Flat under the pointer and when pressed too: the state rules below give
+   the fill, and a generic button:hover or :active must not. */
+button.ui-bay:hover,
+button.ui-bay:active {
+    background-color: transparent;
+    box-shadow: none;
+}
+
+button.ui-bay:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
+}
+
+.ui-bay-chip {
+    font-size: var(--type-caption);
+}
+
+/* No session: the lowest step of the ladder, spoken as fill. */
+button.ui-bay.socket {
+    background-color: var(--fill-2);
+    color: var(--fg-disabled);
+}
+
+/* Working: a stronger neutral fill; busy needs nothing from the owner. */
+button.ui-bay.working {
+    background-color: var(--fill-3);
+    color: var(--fg-muted);
+}
+
+/* Stopped: near-off; the slot is taken, the session done. */
+button.ui-bay.stopped {
+    color: var(--fg-disabled);
+}
+
+/* Stale: data invalid, a hollow warning outline, never a filled state. */
+button.ui-bay.stale {
+    border-color: var(--warning);
+    color: var(--warning);
+}
+
+/* Waiting, acknowledged: the task's tint, seen but not yet served. */
+button.ui-bay.cat-1.waiting { background-color: var(--cat-1-tint); color: var(--fg); }
+
+button.ui-bay.cat-2.waiting { background-color: var(--cat-2-tint); color: var(--fg); }
+
+button.ui-bay.cat-3.waiting { background-color: var(--cat-3-tint); color: var(--fg); }
+
+button.ui-bay.cat-4.waiting { background-color: var(--cat-4-tint); color: var(--fg); }
+
+/* Waiting, unacknowledged: the task's full fill. */
+button.ui-bay.cat-1.waiting.unacked { background-color: var(--cat-1-bg); color: var(--on-status); }
+
+button.ui-bay.cat-2.waiting.unacked { background-color: var(--cat-2-bg); color: var(--on-status); }
+
+button.ui-bay.cat-3.waiting.unacked { background-color: var(--cat-3-bg); color: var(--on-status); }
+
+button.ui-bay.cat-4.waiting.unacked { background-color: var(--cat-4-bg); color: var(--on-status); }
+
+/* Overdue: one static luminance step over the fill, never a loop. */
+button.ui-bay.waiting.unacked.overdue {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+/* Blocked rides the unacked fill; the marker and the weight separate it. */
+button.ui-bay.blocked {
+    font-weight: var(--w-heavy);
+}
+
+/* The bay of the task on this screen: a ring in the task's tone, zero blur
+   and offset, so it draws an outline and never a bevel. */
+button.ui-bay.cat-1.local { box-shadow: 0 0 0 1px var(--cat-1); }
+
+button.ui-bay.cat-2.local { box-shadow: 0 0 0 1px var(--cat-2); }
+
+button.ui-bay.cat-3.local { box-shadow: 0 0 0 1px var(--cat-3); }
+
+button.ui-bay.cat-4.local { box-shadow: 0 0 0 1px var(--cat-4); }
+
+/* A sender's identity as a thin pill down a card's leading edge. Inset
+   rather than bled to the card edge: the card's radius would clip a
+   full-bleed rail into a crescent, and GTK does not clip children to the
+   border radius, so a straight stripe would overhang the corner instead.
+   With no slot it falls back to the muted text level. */
+.ui-rail {
+    min-width: 3px;
+    border-radius: var(--radius-pill);
+    background-color: var(--fg-muted);
+}
+
+.ui-rail.cat-1 { background-color: var(--cat-1); }
+
+.ui-rail.cat-2 { background-color: var(--cat-2); }
+
+.ui-rail.cat-3 { background-color: var(--cat-3); }
+
+.ui-rail.cat-4 { background-color: var(--cat-4); }
+
+.ui-rail.cat-5 { background-color: var(--cat-5); }
+
+.ui-rail.cat-6 { background-color: var(--cat-6); }

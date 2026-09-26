@@ -1,5 +1,5 @@
 /* ── Quick settings (src/widgets/, the sections src/panel.rs builds) ──
-   Every section is assembled from the components (00-components.css,
+   Every section is assembled from the components (data/css/components/,
    src/ui/): ui::section for the collapsible ones, ui::group for the
    fixed ones (users, backup, now playing), rows, sliders, switches,
    buttons and the tile. Colour, type and shape come from there; this

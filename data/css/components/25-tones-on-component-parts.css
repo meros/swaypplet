@@ -1,9 +1,0 @@
-/* ── Tones on component parts (added by the panel migration) ───────────
-   A part's own colour rule comes after the tone classes above, so a tone
-   on a part names both classes to win. */
-
-.ui-row-icon.ui-warning,
-.ui-slider-icon.ui-warning { color: var(--warning); }
-
-.ui-row-icon.ui-danger,
-.ui-slider-icon.ui-danger { color: var(--danger); }

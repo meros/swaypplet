@@ -1,0 +1,106 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Row (src/ui/row.rs).
+
+   One form for device, list and settings rows: the row and its parts, the
+   pressable row, the list that holds rows, and the row's states.
+
+   owns: ui-row ui-row-icon ui-row-title ui-row-subtitle ui-row-end ui-list
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Row: one form for device, list and settings rows ───────────────── */
+
+.ui-row {
+    min-height: var(--row-height);
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-tile);
+    border: none;
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg);
+    transition: background-color var(--motion-state),
+                background-image var(--motion-state);
+}
+
+.ui-row.activatable:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+.ui-row.activatable:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+.ui-row.selected,
+.ui-row:selected {
+    background-color: var(--fill-2);
+}
+
+.ui-row.activatable:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+.ui-row-icon {
+    color: var(--fg-muted);
+    -gtk-icon-size: 18px;
+    min-width: 24px;
+}
+
+.ui-row.selected .ui-row-icon {
+    color: var(--accent);
+}
+
+.ui-row-title {
+    font-size: var(--type-body);
+    font-weight: var(--w-strong);
+    color: var(--fg);
+}
+
+.ui-row-subtitle {
+    font-size: var(--type-label);
+    color: var(--fg-muted);
+}
+
+.ui-row-end {
+    font-size: var(--type-label);
+    color: var(--fg-faint);
+}
+
+/* A ListBox of rows on a card: the list itself draws nothing, and a row
+   lights under the pointer or the keyboard. No transition: arrow keys move
+   focus through the rows, and a fade over a keyed fill leaves a ghost. */
+list.ui-list,
+list.ui-list > row {
+    background: none;
+    padding: 0;
+    border: none;
+    box-shadow: none;
+}
+
+list.ui-list > row:hover > .ui-row,
+list.ui-list > row:focus > .ui-row {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+/* A status tone on the icon (`ui::set_tone`, a weak signal): the icon's
+   own muted colour and the tone are both one class, so the rule names the
+   two together rather than relying on which file comes last. */
+.ui-row-icon.ui-warning { color: var(--warning); }
+.ui-row-icon.ui-danger  { color: var(--danger); }
+
+/* ── Busy row ───────────────────────────
+   `ui::set_busy`: a row waiting on something it asked for. */
+
+.ui-row.busy {
+    opacity: 0.6;
+    transition: opacity var(--motion-state);
+}
+
+/* A row whose state must change in one frame, for rows that are plain
+   boxes rather than a `.ui-list` (which has no transition for the same
+   reason): a background that fades spends most of its frames a few 255ths
+   off the key, where the compositor draws a dark ghost of the old row. The
+   launcher's selection moves this way. */
+.ui-row.instant {
+    transition: none;
+}

@@ -1,0 +1,182 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Slider, switch, check (src/ui/slider.rs).
+
+   Controls that hold a value: the slider (normal and dense, its marks and
+   its over-range fill), the switch and the check.
+
+   owns: ui-slider ui-slider-row ui-slider-icon ui-slider-value ui-switch ui-check
+   ══════════════════════════════════════════════════════════════════════ */
+
+scale.ui-slider {
+    padding: var(--space-3) 0;
+    min-height: 22px;
+}
+
+scale.ui-slider trough {
+    min-height: var(--track-height);
+    border-radius: var(--radius-pill);
+    border: none;
+    background-color: var(--fill-3);
+    background-image: none;
+    box-shadow: none;
+}
+
+scale.ui-slider highlight,
+scale.ui-slider fill {
+    border-radius: var(--radius-pill);
+    border: none;
+    background-color: var(--accent-bg);
+    background-image: none;
+}
+
+scale.ui-slider slider {
+    min-width: 16px;
+    min-height: 16px;
+    margin: -6px 0;
+    border-radius: var(--radius-pill);
+    border: none;
+    background-color: var(--knob);
+    background-image: none;
+    box-shadow: 0 1px 3px var(--scrim);
+    transition: transform var(--motion-state);
+}
+
+scale.ui-slider:hover slider {
+    transform: scale(1.1);
+}
+
+scale.ui-slider:focus-visible slider {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+scale.ui-slider:disabled highlight {
+    background-color: var(--fg-disabled);
+}
+
+.ui-slider-icon {
+    color: var(--fg-muted);
+    min-width: 20px;
+}
+
+/* A status tone on the icon (a muted output): named together with the
+   icon's own class, as on a row's icon. */
+.ui-slider-icon.ui-warning { color: var(--warning); }
+.ui-slider-icon.ui-danger  { color: var(--danger); }
+
+.ui-slider-value {
+    font-size: var(--type-caption);
+    font-feature-settings: "tnum";
+    color: var(--fg-faint);
+    min-width: 36px;
+}
+
+/* ── Switch ─────────────────────────────────────────────────────────── */
+
+switch.ui-switch {
+    min-width: 38px;
+    min-height: 22px;
+    border: none;
+    border-radius: var(--radius-pill);
+    background-color: var(--fill-3);
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg);
+    transition: background-color var(--motion-state);
+}
+
+switch.ui-switch:checked {
+    background-color: var(--accent-bg);
+}
+
+switch.ui-switch slider {
+    min-width: 16px;
+    min-height: 16px;
+    margin: 3px;
+    border: none;
+    border-radius: var(--radius-pill);
+    background-color: var(--knob);
+    background-image: none;
+    box-shadow: 0 1px 2px var(--scrim);
+}
+
+switch.ui-switch:checked slider {
+    background-color: var(--on-accent);
+}
+
+switch.ui-switch:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+switch.ui-switch:disabled {
+    background-color: var(--fill-2);
+}
+
+switch.ui-switch:disabled slider {
+    background-color: var(--fg-disabled);
+}
+
+/* ── Slider marks and over-range ────────
+   `ui::set_over_range`: past the normal range (volume over 100 %), the
+   fill turns warning. */
+
+scale.ui-slider marks label {
+    font-size: var(--type-caption);
+    color: var(--fg-faint);
+}
+
+scale.ui-slider.over highlight,
+scale.ui-slider.over fill {
+    background-color: var(--warning-bg);
+}
+
+/* ── Dense slider ──
+   The slider for a column of twenty: the same track, a smaller knob and
+   less air. The knob's negative margin centres it on the track, so the
+   horizontal padding has to absorb its overhang. */
+
+scale.ui-slider.dense {
+    padding: var(--space-2) var(--space-3);
+    min-height: 8px;
+}
+
+scale.ui-slider.dense slider {
+    min-width: 14px;
+    min-height: 14px;
+    margin: calc(-1 * var(--space-2));
+}
+
+/* ── Check ──
+   A check box and its label. Accent means on, as on a switch. */
+
+checkbutton.ui-check {
+    color: var(--fg);
+    font-size: var(--type-label);
+}
+
+checkbutton.ui-check check {
+    min-width: 14px;
+    min-height: 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-control);
+    background-color: var(--fill-1);
+    background-image: none;
+    box-shadow: none;
+    color: var(--on-accent);
+    transition: background-color var(--motion-state), background-image var(--motion-state);
+}
+
+checkbutton.ui-check check:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+checkbutton.ui-check check:checked {
+    border-color: transparent;
+    background-color: var(--accent-bg);
+}
+
+checkbutton.ui-check:focus-visible check {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}

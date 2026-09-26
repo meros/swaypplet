@@ -1,4 +1,31 @@
-/* ── Toggle tile as one button (added by the panel migration) ──────────
+/* ══════════════════════════════════════════════════════════════════════
+   Toggle tile (src/ui/tile.rs).
+
+   A glyph and a name on one toggle button. Accent means on.
+
+   owns: ui-tile ui-tile-title ui-tile-toggle
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Toggle tile: a pill with an optional drill-in. Accent means on. ─── */
+
+.ui-tile {
+    min-height: var(--tile-height);
+    border-radius: var(--radius-tile);
+    background-color: var(--fill-2);
+    color: var(--fg);
+}
+
+.ui-tile.on {
+    background-color: var(--accent-bg);
+    color: var(--on-accent);
+}
+
+.ui-tile-title {
+    font-size: var(--type-body);
+    font-weight: var(--w-strong);
+}
+
+/* ── Toggle tile as one button ──────────
    The tile itself is the toggle, so the states sit on it rather than on a
    button inside. Sizes stay on .ui-tile, where a surface may place it. */
 

@@ -1,0 +1,49 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Avatar (src/ui/avatar.rs).
+
+   A round picture or monogram: the identity fill, the presence dot, the
+   current user's ring, and its bloom in a picked chip.
+
+   owns: ui-avatar ui-avatar-presence
+   ══════════════════════════════════════════════════════════════════════ */
+
+.ui-avatar {
+    border-radius: var(--radius-pill);
+    color: var(--on-status);
+    font-weight: var(--w-heavy);
+}
+
+.ui-avatar-presence {
+    min-width: 10px;
+    min-height: 10px;
+    border-radius: var(--radius-pill);
+    background-color: var(--success);
+    box-shadow: 0 0 0 2px var(--surface-raised);
+}
+
+/* The avatar's monogram fill: identity, so a categorical colour picked by
+   hashing the name (ui::avatar). Never set under a picture. */
+.ui-avatar.cat-1 { background-color: var(--cat-1-bg); }
+
+.ui-avatar.cat-2 { background-color: var(--cat-2-bg); }
+
+.ui-avatar.cat-3 { background-color: var(--cat-3-bg); }
+
+.ui-avatar.cat-4 { background-color: var(--cat-4-bg); }
+
+.ui-avatar.cat-5 { background-color: var(--cat-5-bg); }
+
+.ui-avatar.cat-6 { background-color: var(--cat-6-bg); }
+
+/* The current user: a ring, as an outline rather than a border, because a
+   border would shrink the avatar's draw area. */
+.ui-avatar.active {
+    outline: 2px solid var(--accent-bg);
+    outline-offset: 1px;
+}
+
+button.ui-chip.picked .ui-avatar {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
+    animation: ui-handoff-bloom var(--motion-exit) forwards;
+}

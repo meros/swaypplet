@@ -15,6 +15,7 @@
 //! | `space`           | padding, margin, border-spacing off the `--space-*` scale    | all CSS |
 //! | `motion`          | a transition or animation off `--motion-*` / `--dur-*`+`--ease-*` | all CSS |
 //! | `surface-look`    | colour, type, shape or state motion in a surface's own file  | CSS outside `data/css/components/` |
+//! | `component-scope` | a rule in `components/X.css` whose last compound selector targets none of X's own classes (its `owns:` line), a class two files own, or a `ui-` class nobody owns | components/ |
 //! | `rust-space`      | a box spacing or widget margin that is a non-zero literal    | Rust |
 //! | `rust-colour`     | a Cairo / `gdk::RGBA` colour from numeric literals            | Rust |
 //! | `rust-class`      | a CSS class added in Rust that no stylesheet styles          | Rust |
@@ -71,6 +72,7 @@ pub enum Rule {
     Space,
     Motion,
     SurfaceLook,
+    ComponentScope,
     RustSpace,
     RustColour,
     RustClass,
@@ -85,7 +87,7 @@ impl Rule {
     const CSS_COLOUR: &[Rule] = &[Colour, ColourFn, AtName];
     const CSS_TOKENS: &[Rule] = &[Token, Primitive];
     const CSS_SCALES: &[Rule] = &[FontSize, FontWeight, Radius, Space, Motion];
-    const CSS_HYGIENE: &[Rule] = &[SurfaceLook];
+    const CSS_HYGIENE: &[Rule] = &[SurfaceLook, ComponentScope];
     const RUST: &[Rule] = &[
         RustSpace,
         RustColour,
@@ -108,6 +110,7 @@ impl Rule {
             Space => "space",
             Motion => "motion",
             SurfaceLook => "surface-look",
+            ComponentScope => "component-scope",
             RustSpace => "rust-space",
             RustColour => "rust-colour",
             RustClass => "rust-class",
@@ -148,6 +151,9 @@ impl Rule {
             }
             SurfaceLook => {
                 "a surface's file only places things; colour, type, shape and state belong to a component in data/css/components/ + src/ui/ (§6, §9 step 2)"
+            }
+            ComponentScope => {
+                "a component's file styles that component: put the rule in the file whose `owns:` line names the class it targets, or add the class to this file's `owns:`; a genuine reach into another component goes on COMPONENT_SCOPE_EXCEPTIONS with its reason"
             }
             RustSpace => {
                 "`ui::vbox(n)` / `ui::hbox(n)` / `ui::pad(w, n)` or `tokens::space(n)` (§3.5)"
@@ -208,6 +214,41 @@ const COMPONENT_SPACE_EXCEPTIONS: &[(&str, &str, &str, &str)] = &[
 /// rule in data/css/ (a widget that should look like GTK's own, or a state
 /// GTK reads). Keep this to what is actually used.
 const GTK_CLASSES: &[&str] = &[];
+
+/// Rules in a component's file whose last compound targets another
+/// component's class on purpose: (file, selector, why).
+const COMPONENT_SCOPE_EXCEPTIONS: &[(&str, &str, &str)] = &[
+    (
+        "components/bar.css",
+        "button.ui-segment:hover .ui-muted",
+        "a quiet readout inside a segment comes up to ink under the pointer; the readout's tone is the text component's, the hover is the segment's",
+    ),
+    (
+        "components/bar.css",
+        "button.ui-segment:hover .ui-faint",
+        "as above, the faint level",
+    ),
+    (
+        "components/bar.css",
+        "button.ui-mark:hover .ui-muted",
+        "as above, on a mark",
+    ),
+    (
+        "components/bar.css",
+        "button.ui-mark:hover .ui-faint",
+        "as above, on a mark, the faint level",
+    ),
+    (
+        "components/bar.css",
+        ".ui-segment.danger .ui-muted",
+        "muted text on the danger fill would go grey on red; the segment's state sets the text inside it to its own ink",
+    ),
+    (
+        "components/bar.css",
+        ".ui-segment.danger .ui-faint",
+        "as above, the faint level",
+    ),
+];
 
 // ── CSS parsing ─────────────────────────────────────────────────────────
 
@@ -920,6 +961,142 @@ fn css_violations() -> Vec<Violation> {
     out
 }
 
+// ── Component scope ─────────────────────────────────────────────────────
+
+/// The classes a component file says it owns: its `owns:` line.
+fn owned_classes(css: &str) -> Vec<String> {
+    css.lines()
+        .filter_map(|l| l.trim().strip_prefix("owns:"))
+        .flat_map(|l| l.split_whitespace().map(str::to_string))
+        .collect()
+}
+
+/// The classes of one compound selector, outside any `:not(…)`.
+fn compound_classes(compound: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let b = compound.as_bytes();
+    let (mut i, mut depth) = (0, 0i32);
+    while i < b.len() {
+        match b[i] {
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            b'.' if depth == 0 => {
+                let n = compound[i + 1..]
+                    .find(|c: char| !is_ident(c))
+                    .map_or(compound.len(), |e| i + 1 + e);
+                out.push(&compound[i + 1..n]);
+                i = n;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out
+}
+
+/// A selector's compounds, split at descendant and child combinators.
+fn compounds(selector: &str) -> Vec<&str> {
+    split_top(selector, |c| {
+        c.is_whitespace() || c == '>' || c == '+' || c == '~'
+    })
+}
+
+fn component_scope_violations() -> Vec<Violation> {
+    let files: Vec<(&str, &str)> = crate::theme::RULES
+        .iter()
+        .filter(|(n, _)| is_component(n))
+        .copied()
+        .collect();
+    let mut home: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    for (name, css) in &files {
+        for c in owned_classes(css) {
+            home.entry(c).or_default().push(*name);
+        }
+    }
+    let mut out = Vec::new();
+    for (name, css) in &files {
+        let file = format!("data/css/{name}");
+        let own = owned_classes(css);
+        let bare = own.is_empty();
+        for c in &own {
+            if home[c].len() > 1 {
+                out.push(Violation {
+                    file: file.clone(),
+                    line: 1,
+                    rule: ComponentScope,
+                    text: format!("owns: {c}"),
+                    why: format!("owned by {} files: {}", home[c].len(), home[c].join(", ")),
+                });
+            }
+        }
+        let src = strip_css_comments(css);
+        for sel_list in parse(css).selectors {
+            let line = src
+                .find(&*sel_list.split(',').next().unwrap_or_default())
+                .map_or(1, |i| src[..i].bytes().filter(|&c| c == b'\n').count() + 1);
+            for sel in items(&sel_list) {
+                if sel == ":root" {
+                    continue;
+                }
+                let excepted = COMPONENT_SCOPE_EXCEPTIONS
+                    .iter()
+                    .any(|(f, s, _)| *f == *name && *s == sel);
+                let cs = compounds(sel);
+                let all: Vec<&str> = cs.iter().flat_map(|c| compound_classes(c)).collect();
+                let mut why = Vec::new();
+                for c in all.iter().filter(|c| c.starts_with("ui-")) {
+                    if !home.contains_key(*c) {
+                        why.push(format!("`.{c}` is owned by no component file"));
+                    }
+                }
+                if bare {
+                    if all.iter().any(|c| c.starts_with("ui-")) {
+                        why.push("a file with no `owns:` line (bare GTK widgets) names a component class".into());
+                    }
+                } else if !excepted {
+                    let last = cs.last().map(|c| compound_classes(c)).unwrap_or_default();
+                    let owns = |c: &&str| own.iter().any(|o| o.as_str() == *c);
+                    let ok = if last.is_empty() {
+                        // A GTK node inside the component (`trough`,
+                        // `> button`): fine under one of its own classes.
+                        all.iter().any(owns)
+                    } else {
+                        last.iter().any(owns)
+                    };
+                    if !ok {
+                        why.push("its last compound targets no class this file owns".into());
+                    }
+                }
+                if !why.is_empty() {
+                    out.push(Violation {
+                        file: file.clone(),
+                        line,
+                        rule: ComponentScope,
+                        text: sel.to_string(),
+                        why: why.join("; "),
+                    });
+                }
+            }
+        }
+    }
+    for (file, sel, _) in COMPONENT_SCOPE_EXCEPTIONS {
+        let used = files.iter().any(|(n, css)| {
+            n == file && parse(css).selectors.iter().any(|l| items(l).contains(sel))
+        });
+        if !used {
+            out.push(Violation {
+                file: format!("data/css/{file}"),
+                line: 1,
+                rule: ComponentScope,
+                text: sel.to_string(),
+                why: "COMPONENT_SCOPE_EXCEPTIONS names a selector the file no longer has: delete the entry".into(),
+            });
+        }
+    }
+    out
+}
+
 // ── Rust scan ───────────────────────────────────────────────────────────
 
 fn root() -> PathBuf {
@@ -1346,6 +1523,7 @@ fn all_violations() -> &'static [Violation] {
     static ALL: OnceLock<Vec<Violation>> = OnceLock::new();
     ALL.get_or_init(|| {
         let mut v = css_violations();
+        v.extend(component_scope_violations());
         v.extend(rust_violations());
         v
     })
@@ -1637,6 +1815,7 @@ fn print_the_ledger() {
         Space,
         Motion,
         SurfaceLook,
+        ComponentScope,
         RustSpace,
         RustColour,
         RustClass,

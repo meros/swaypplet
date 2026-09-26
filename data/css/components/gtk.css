@@ -1,0 +1,81 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Bare GTK widgets.
+
+   What GTK builds itself, which no component class reaches: every window,
+   the scrolled window's viewport, the buttons of a popover menu and a
+   dropdown, a menu's section separators, scrollbars.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Base: every window swaypplet opens ──────────────────────────────────
+   Transparent, so the compositor alpha-blends it: a glass card is drawn by
+   the compositor behind the client, and anything opaque here would cover
+   it. No drop shadows on a window either: blur_ignore_transparent skips
+   only pixels with alpha exactly 0, so a shadow overhanging the apron
+   around a card would be frosted into a halo the size of the window.
+
+   Every window also starts on the design system's type and ink, so a
+   surface that forgets ui::surface still reads as swaypplet rather than
+   as GTK's defaults. */
+
+window, window.background, window.csd, decoration {
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    border: none;
+    font-family: var(--font);
+    font-size: var(--type-body);
+    color: var(--fg);
+}
+
+scrolledwindow, viewport {
+    background-color: transparent;
+}
+
+/* ── Bare GTK widgets ────────────────────────────────────────────────────
+   What GTK builds inside its own widgets, which no component class can
+   reach: the buttons of a popover menu (the tray's) and a dropdown, the
+   separators between a menu's sections, the scrollbars of a scrolled
+   window. Every button the shell builds itself is a component (`ui::button`
+   and kin), which outranks `button` on its class. Not first, though:
+   `button:disabled` and `button:focus-visible` tie with `button.ui-*` on
+   specificity, and sitting after those components they give each one a
+   disabled look and a focus ring it does not write itself. */
+
+button {
+    min-height: 32px;
+    padding: var(--space-3) var(--space-4);
+    border: none;
+    border-radius: var(--radius-control);
+    background-color: var(--fill-2);
+    background-image: none;
+    box-shadow: none;
+    color: var(--fg);
+    transition: background-color var(--motion-state),
+                background-image var(--motion-state);
+}
+
+button:disabled {
+    color: var(--fg-disabled);
+    background-image: none;
+}
+
+button:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+separator {
+    background-color: var(--border-subtle);
+    min-height: 1px;
+    margin: var(--space-2) 0;
+}
+
+scrollbar slider {
+    background-color: var(--fill-3);
+    border-radius: var(--radius-pill);
+    min-width: 3px;
+}
+
+scrollbar slider:hover {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}

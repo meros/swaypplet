@@ -1,0 +1,37 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Surface (src/ui/surface.rs).
+
+   A window's root: the design-system surface (type and ink), the solid
+   window an editor sits in, the scrim under a modal, the canvas an editor
+   letterboxes against.
+
+   owns: ui-surface ui-scrim ui-window ui-canvas
+   ══════════════════════════════════════════════════════════════════════ */
+
+.ui-surface {
+    font-family: var(--font);
+    font-size: var(--type-body);
+    font-weight: var(--w-regular);
+    color: var(--fg);
+}
+
+/* The scrim: the dimming layer under a modal full-screen surface. Its alpha
+   is below the compositor's discard line (0.28), so it stays backdrop and
+   only the cards above it stencil glass. The lock card's key arithmetic
+   above depends on it. */
+.ui-scrim {
+    background-color: var(--scrim);
+}
+
+/* ── Window, toolbar, canvas ──
+   A normal window rather than glass, for an editor you sit in: a solid
+   ground, a toolbar a fill above it, and a canvas a shade below it for the
+   thing being edited to letterbox against. */
+
+.ui-window {
+    background-color: var(--surface-raised);
+}
+
+.ui-canvas {
+    background-color: var(--scrim);
+}
