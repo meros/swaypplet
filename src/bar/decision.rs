@@ -38,8 +38,8 @@ use crate::task_state::{Activity, SessionState, TaskSnapshot, TaskStateService};
 use crate::ui;
 use crate::widgets::power::{self, BatteryState};
 
-/// Structural show/hide scale (anim.rs module header).
-const SWAP_MS: u64 = 200;
+/// A revealer opening or closing in place (motion: expand).
+const SWAP_MS: u64 = crate::tokens::motion::EXPAND.ms as u64;
 /// settask caps descriptions at 40 chars; the slot shows all of them
 /// (vision P5's one sanctioned exception) but never more.
 const DESC_MAX_CHARS: i32 = 40;
@@ -47,7 +47,7 @@ const DESC_MAX_CHARS: i32 = 40;
 /// OSD interjection: decay after the last keypress (matches the center
 /// card's `OSD_TIMEOUT_MS`) and the per-press hairline ease.
 const OSD_DECAY_MS: u64 = 1500;
-const OSD_EASE_MS: f64 = 150.0;
+const OSD_EASE_MS: f64 = crate::tokens::motion::STATE.ms;
 const HAIRLINE_WIDTH: i32 = 64;
 
 // ── View model ──────────────────────────────────────────────────────────
@@ -272,7 +272,7 @@ impl DecisionSlot {
         // sub-threshold scale.
         let stack = gtk4::Stack::builder()
             .transition_type(gtk4::StackTransitionType::Crossfade)
-            .transition_duration(crate::tokens::DURATION[0].1)
+            .transition_duration(crate::tokens::motion::STATE.ms as u32)
             .hhomogeneous(false)
             .build();
         stack.add_child(&root);

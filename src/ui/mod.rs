@@ -689,7 +689,10 @@ pub enum BayState {
     Working,
     /// Halted on a prompt; rides the unacked fill.
     Blocked,
-    Waiting { acked: bool, overdue: bool },
+    Waiting {
+        acked: bool,
+        overdue: bool,
+    },
     Stopped,
     Stale,
 }

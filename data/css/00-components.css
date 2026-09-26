@@ -657,7 +657,7 @@ progressbar.ui-progress progress {
 
 .ui-segmented {
     border-radius: var(--radius-tile);
-    transition: opacity var(--dur-fast) var(--ease-standard);
+    transition: opacity var(--motion-state);
 }
 
 .ui-segment {
@@ -670,10 +670,10 @@ progressbar.ui-progress progress {
     box-shadow: none;
     color: var(--fg);
     font-weight: var(--w-regular);
-    transition: background-color var(--dur-fast) var(--ease-standard),
-                background-image var(--dur-fast) var(--ease-standard),
-                color var(--dur-fast) var(--ease-standard),
-                border-color var(--dur-fast) var(--ease-standard);
+    transition: background-color var(--motion-state),
+                background-image var(--motion-state),
+                color var(--motion-state),
+                border-color var(--motion-state);
 }
 
 .ui-segmented > .ui-segment {
@@ -794,9 +794,9 @@ button.ui-mark {
     box-shadow: none;
     color: var(--fg-muted);
     font-weight: var(--w-regular);
-    transition: background-color var(--dur-fast) var(--ease-standard),
-                background-image var(--dur-fast) var(--ease-standard),
-                color var(--dur-fast) var(--ease-standard);
+    transition: background-color var(--motion-state),
+                background-image var(--motion-state),
+                color var(--motion-state);
 }
 
 button.ui-mark.quiet {
@@ -844,10 +844,10 @@ button.ui-bay {
     box-shadow: none;
     color: var(--fg-muted);
     font-weight: var(--w-regular);
-    transition: background-color var(--dur-fast) var(--ease-standard),
-                color var(--dur-fast) var(--ease-standard),
-                border-color var(--dur-fast) var(--ease-standard),
-                box-shadow var(--dur-fast) var(--ease-standard);
+    transition: background-color var(--motion-state),
+                color var(--motion-state),
+                border-color var(--motion-state),
+                box-shadow var(--motion-state);
 }
 
 /* Flat under the pointer and when pressed too: the state rules below give

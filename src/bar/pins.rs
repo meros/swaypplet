@@ -20,9 +20,9 @@ use gtk4::glib;
 use gtk4::prelude::*;
 
 use super::popover;
-use crate::ui;
 use crate::jump::card::{self, Live};
 use crate::jump::{live, pin};
+use crate::ui;
 
 const PIN: &str = "\u{f0403}";
 const PIN_OUTLINE: &str = "\u{f0931}";
@@ -58,7 +58,7 @@ pub fn build() -> gtk4::Widget {
     btn.set_tooltip_text(Some("Pinned workspaces"));
     let revealer = gtk4::Revealer::builder()
         .transition_type(gtk4::RevealerTransitionType::SlideLeft)
-        .transition_duration(crate::tokens::DURATION[1].1)
+        .transition_duration(crate::tokens::motion::EXPAND.ms as u32)
         .child(&btn)
         .build();
 

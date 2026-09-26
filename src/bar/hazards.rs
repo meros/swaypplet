@@ -142,7 +142,7 @@ fn hazard(glyph: &str) -> (gtk4::Revealer, gtk4::Label) {
     ui::glyph(&label, ui::Text::Body, ui::Tone::Warning);
     let revealer = gtk4::Revealer::builder()
         .transition_type(gtk4::RevealerTransitionType::SlideRight)
-        .transition_duration(crate::tokens::DURATION[1].1)
+        .transition_duration(crate::tokens::motion::EXPAND.ms as u32)
         .reveal_child(false)
         .child(&label)
         .build();

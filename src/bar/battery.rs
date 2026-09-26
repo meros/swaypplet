@@ -86,7 +86,7 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
         .build();
     let pct_reveal = gtk4::Revealer::builder()
         .transition_type(gtk4::RevealerTransitionType::SlideRight)
-        .transition_duration(crate::tokens::DURATION[1].1)
+        .transition_duration(crate::tokens::motion::EXPAND.ms as u32)
         .child(&pct)
         .build();
     // Time estimate beside the glyph (time-to-full charging, time-to-empty
@@ -99,7 +99,7 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
     ui::set_tone(&eta, ui::Tone::Faint);
     let eta_reveal = gtk4::Revealer::builder()
         .transition_type(gtk4::RevealerTransitionType::SlideRight)
-        .transition_duration(crate::tokens::DURATION[1].1)
+        .transition_duration(crate::tokens::motion::EXPAND.ms as u32)
         .child(&eta)
         .build();
     let content = gtk4::Box::builder()

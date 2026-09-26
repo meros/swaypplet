@@ -311,7 +311,7 @@ impl Bay {
         chip.add_css_class("bar-bay-chip");
         let chip_reveal = gtk4::Revealer::builder()
             .transition_type(gtk4::RevealerTransitionType::Crossfade)
-            .transition_duration(crate::tokens::DURATION[1].1)
+            .transition_duration(crate::tokens::motion::EXPAND.ms as u32)
             .child(&chip)
             .build();
         let content = gtk4::Box::builder()
