@@ -8,10 +8,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4_layer_shell::Edge;
 
-use crate::anim;
-use crate::shell::layer::{self, LayerShellConfig};
+use crate::shell::{Namespace, Surface};
 use crate::services::elephant::{self, SearchResult};
 
 const MAX_VISIBLE_RESULTS: usize = 10;
@@ -31,21 +29,6 @@ const LAUNCHER_CARD_SIZE: crate::shell::fit::CardSize = crate::shell::fit::CardS
     height: Some(520),
 };
 
-static LAUNCHER_CONFIG: LayerShellConfig = LayerShellConfig {
-    namespace: crate::shell::Namespace::Launcher,
-    layer: gtk4_layer_shell::Layer::Overlay,
-    exclusive: false,
-    default_width: None,
-    default_height: None,
-    anchors: &[
-        (Edge::Top, true),
-        (Edge::Bottom, true),
-        (Edge::Left, true),
-        (Edge::Right, true),
-    ],
-    margins: &[],
-    keyboard_mode: gtk4_layer_shell::KeyboardMode::Exclusive,
-};
 
 // Default providers matching the walker config
 const DEFAULT_PROVIDERS: &[&str] = &[
@@ -301,45 +284,41 @@ impl Default for LauncherView {
 // ── Standalone full-screen launcher window ──────────────────────────────────
 
 pub struct Launcher {
-    window: gtk4::Window,
+    surface: Surface,
     view: LauncherView,
-    reveal: anim::Reveal,
 }
 
 impl Launcher {
     pub fn new(app: &gtk4::Application) -> Self {
-        let window = layer::create_layer_window(app, &LAUNCHER_CONFIG);
-
-        let backdrop = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Vertical)
-            .halign(gtk4::Align::Fill)
-            .valign(gtk4::Align::Fill)
-            .hexpand(true)
-            .vexpand(true)
+        let surface = Surface::builder(app, Namespace::Launcher)
+            .fill()
+            .keyboard(gtk4_layer_shell::KeyboardMode::Exclusive)
+            .card(crate::ui::Card::Floating)
             .build();
+        let window = surface.window().clone();
+
+        let backdrop = surface.root();
+        backdrop.set_hexpand(true);
+        backdrop.set_vexpand(true);
 
         let top_spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        backdrop.prepend(&top_spacer);
 
         // Size requests come from install_monitor_fit below, which clamps
         // them to the output the launcher opens on.
-        let container = crate::ui::vbox(0);
+        let container = surface.card();
         container.set_halign(gtk4::Align::Center);
-        crate::ui::card::adopt(&container, crate::ui::Card::Floating);
         container.add_css_class("launcher-container");
 
         let view = LauncherView::new();
         container.append(view.widget());
 
-        backdrop.append(&top_spacer);
-        backdrop.append(&container);
-        crate::ui::surface::adopt(&backdrop);
-        window.set_child(Some(&backdrop));
-
-        crate::shell::fit::install_monitor_fit(&window, &top_spacer, &container, LAUNCHER_CARD_SIZE, None);
+        crate::shell::fit::install_monitor_fit(&window, &top_spacer, container, LAUNCHER_CARD_SIZE, None);
 
         // Enter/exit transition (motion on glass, anim.rs): the container is
         // the pane, the launcher view the content. Pure crossfade.
-        let reveal = anim::Reveal::new(&window, &container).content(view.widget());
+        surface.set_content(view.widget());
+        let reveal = surface.reveal().expect("the launcher has a card").clone();
 
         // Hide the window after a result is activated.
         {
@@ -363,19 +342,15 @@ impl Launcher {
         }
         window.add_controller(gesture);
 
-        Launcher {
-            window,
-            view,
-            reveal,
-        }
+        Launcher { surface, view }
     }
 
     pub fn toggle(&self) {
-        if self.reveal.is_shown() && self.window.is_visible() {
-            self.reveal.hide();
+        if self.surface.is_shown() && self.surface.window().is_visible() {
+            self.surface.hide();
         } else {
             self.view.reset();
-            self.reveal.show();
+            self.surface.show();
             self.view.focus_entry();
             // Harness hook: the nested session in dev/render.sh has no
             // keyboard, so `SWAYPPLET_LAUNCHER_QUERY` types a query on open.
