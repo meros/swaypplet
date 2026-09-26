@@ -1,0 +1,2920 @@
+<title>swaypplet Zoo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Ubuntu+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+/>
+<style>
+  /* ── Primitives and mode inputs. The script regenerates all of these from
+   the inputs in the bar; the values here are the dark defaults, so the page
+   is whole before it runs. ── */
+  :root {
+    color-scheme: dark;
+    --neutral-1: #1d1b1a;
+    --neutral-2: #242120;
+    --neutral-3: #2d2a28;
+    --neutral-4: #34302e;
+    --neutral-5: #3b3735;
+    --neutral-6: #46413e;
+    --neutral-7: #57514d;
+    --neutral-8: #6f6863;
+    --neutral-9: #8a827c;
+    --neutral-10: #a39a93;
+    --neutral-11: #cbc0b7;
+    --neutral-12: #efe5dc;
+    --accent-1: #16201a;
+    --accent-2: #1a271f;
+    --accent-3: #1f3226;
+    --accent-4: #243b2c;
+    --accent-5: #2a4533;
+    --accent-6: #32523c;
+    --accent-7: #3d6449;
+    --accent-8: #4b7c58;
+    --accent-9: #689d6a;
+    --accent-10: #78ad79;
+    --accent-11: #9fd29e;
+    --accent-12: #d9f3d6;
+    --on-accent-auto: #1d2021;
+    --glass-fill-base: var(--neutral-3);
+    --glass-fill-alpha: 0.5;
+    --glass-filter: blur(22px) saturate(1.6) brightness(0.62) contrast(0.85);
+    --glass-edge:
+      inset 0 0 0 1px rgb(255 255 255 / 0.08),
+      inset 0 1px 0 rgb(255 255 255 / 0.07);
+    --glass-shadow: 0 0 0 0 transparent;
+    --muted-mix: 68%;
+    --faint-mix: 46%;
+    --border-subtle-mix: 8%;
+    --border-strong-mix: 16%;
+    --success: #8ec07c;
+    --success-bg: #689d6a;
+    --warning: #fabd2f;
+    --warning-bg: #d79921;
+    --danger: #fb6a5a;
+    --danger-bg: #cc241d;
+    --on-status: #ffffff;
+    --head-shadow: 0 1px 3px rgb(0 0 0 / 0.7), 0 0 14px rgb(0 0 0 / 0.5);
+    --head-color: #f4ece2;
+  }
+
+  /* ── Semantic tier: the only names the rules below use. Declared on every
+   scope as well as :root, so a scope that swaps the primitives (the
+   side-by-side panels) recomputes them. ── */
+  :root,
+  .scope {
+    --surface-glass: color-mix(
+      in srgb,
+      var(--glass-fill-base) calc(var(--glass-fill-alpha) * 100%),
+      transparent
+    );
+    --surface-raised: var(--neutral-4);
+    --scrim: rgb(0 0 0 / 0.35);
+
+    --fg: var(--neutral-12);
+    --fg-muted: color-mix(
+      in srgb,
+      var(--neutral-12) var(--muted-mix),
+      transparent
+    );
+    --fg-faint: color-mix(
+      in srgb,
+      var(--neutral-12) var(--faint-mix),
+      transparent
+    );
+    --fg-disabled: color-mix(in srgb, var(--neutral-12) 32%, transparent);
+
+    --fill-1: color-mix(in srgb, currentColor 6%, transparent);
+    --fill-2: color-mix(in srgb, currentColor 10%, transparent);
+    --fill-3: color-mix(in srgb, currentColor 16%, transparent);
+
+    --border-subtle: color-mix(
+      in srgb,
+      var(--neutral-12) var(--border-subtle-mix),
+      transparent
+    );
+    --border-strong: color-mix(
+      in srgb,
+      var(--neutral-12) var(--border-strong-mix),
+      transparent
+    );
+
+    --accent-bg: var(--accent-9);
+    --on-accent: var(--on-accent-auto);
+    --accent: var(--accent-11);
+    --focus-ring: color-mix(in srgb, var(--accent-11) 70%, transparent);
+    --knob: var(--neutral-12);
+    color: var(--fg);
+  }
+
+  :root {
+    /* Type: seven sizes, one unit, three weights. */
+    --type-caption: 11px;
+    --type-label: 12px;
+    --type-body: 13px;
+    --type-title-sm: 15px;
+    --type-title: 18px;
+    --type-display-sm: 28px;
+    --type-display: 36px;
+    --w-regular: 400;
+    --w-strong: 600;
+    --w-heavy: 700;
+    /* Space, radius, motion. */
+    --space-1: 2px;
+    --space-2: 4px;
+    --space-3: 8px;
+    --space-4: 12px;
+    --space-5: 16px;
+    --space-6: 24px;
+    --space-7: 32px;
+    --radius-control: 6px;
+    --radius-tile: 10px;
+    --radius-thin: 14px;
+    --radius-card: 18px;
+    --radius-pill: 999px;
+    --dur-fast: 150ms;
+    --dur-standard: 200ms;
+    --dur-emphasis: 300ms;
+    --dur-spatial: 400ms;
+    --dur-long: 500ms;
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --ease-decelerate: cubic-bezier(0, 0, 0, 1);
+    --ease-accelerate: cubic-bezier(0.3, 0, 1, 1);
+    --font: "Ubuntu Sans", "Ubuntu", "Noto Sans", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "DejaVu Sans Mono", monospace;
+  }
+  :root[data-mode="light"] {
+    color-scheme: light;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+  html {
+    background: #101114;
+  }
+  body {
+    margin: 0;
+    font-family: var(--font);
+    font-size: var(--type-body);
+    line-height: 1.45;
+    color: var(--fg);
+    background: #101114;
+    min-height: 100%;
+  }
+
+  /* The desktop behind the glass. Switchable, because glass has to hold up
+   over whatever is under it. */
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(60% 50% at 18% 20%, #2bb6d6 0%, transparent 60%),
+      radial-gradient(40% 45% at 80% 15%, #c64bd1 0%, transparent 65%),
+      radial-gradient(50% 60% at 70% 80%, #1f47c9 0%, transparent 60%),
+      radial-gradient(35% 30% at 35% 75%, #e0b43a 0%, transparent 70%),
+      linear-gradient(135deg, #0e2b52, #3a1760 55%, #0a3a4a);
+  }
+  .backdrop::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      115deg,
+      transparent 0 38px,
+      rgb(255 255 255 / 0.05) 38px 40px
+    );
+  }
+  [data-backdrop="dawn"] .backdrop {
+    background:
+      radial-gradient(55% 50% at 20% 25%, #ffe2b8 0%, transparent 65%),
+      radial-gradient(45% 45% at 80% 20%, #bfe3ff 0%, transparent 65%),
+      radial-gradient(50% 55% at 65% 80%, #f7c6d9 0%, transparent 60%),
+      linear-gradient(135deg, #f7efe3, #dfe9f5 55%, #f3e6ef);
+  }
+  [data-backdrop="white"] .backdrop {
+    background: #ffffff;
+  }
+  [data-backdrop="black"] .backdrop {
+    background: #000000;
+  }
+  [data-backdrop="text"] .backdrop {
+    background: #f3f3f3;
+  }
+  [data-backdrop="white"] .backdrop::after,
+  [data-backdrop="black"] .backdrop::after {
+    display: none;
+  }
+  [data-backdrop="text"] .backdrop::after {
+    background:
+      repeating-linear-gradient(0deg, #202020 0 2px, transparent 2px 9px),
+      repeating-linear-gradient(90deg, #f3f3f3 0 3px, transparent 3px 11px);
+    opacity: 0.55;
+  }
+
+  .page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding-inline: 16px;
+    padding-block: 16px 64px;
+    display: grid;
+    gap: var(--space-7);
+  }
+
+  /* ── Glass: one material, tuned per mode. The browser's backdrop-filter
+   stands in for the compositor: brightness and contrast approximate the
+   absorption and the photochromic ceiling (dark) or lift (light). ── */
+  .glass {
+    background: var(--surface-glass);
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
+    border-radius: var(--radius-card);
+    box-shadow: var(--glass-edge), var(--glass-shadow);
+  }
+  .glass.thin {
+    border-radius: var(--radius-thin);
+  }
+
+  /* ── The bar: this page's controls, drawn as the bar component. ── */
+  .bar {
+    position: sticky;
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+  }
+  .bar .brand {
+    font-weight: var(--w-heavy);
+    font-size: var(--type-title-sm);
+    display: flex;
+    gap: var(--space-3);
+    align-items: baseline;
+  }
+  .bar .brand small {
+    color: var(--fg-faint);
+    font-weight: var(--w-regular);
+    font-size: var(--type-caption);
+  }
+  .bar .spacer {
+    flex: 1;
+  }
+  .ctl {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .ctl > span {
+    color: var(--fg-muted);
+    font-size: var(--type-caption);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-right: var(--space-2);
+  }
+
+  /* ── Section heads sit on the desktop, like the switcher's captions. They
+   carry their own contrast and stay light in both modes. ── */
+  .head {
+    display: grid;
+    gap: var(--space-2);
+    max-width: 72ch;
+    color: var(--head-color);
+  }
+  .head h2 {
+    margin: 0;
+    font-size: var(--type-display-sm);
+    font-weight: var(--w-heavy);
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    text-shadow: var(--head-shadow);
+  }
+  .head p {
+    margin: 0;
+    opacity: 0.92;
+    text-shadow: 0 1px 3px rgb(0 0 0 / 0.85);
+  }
+  .head code {
+    font-family: var(--mono);
+    font-size: 0.92em;
+  }
+  .head .eyebrow {
+    font-family: var(--mono);
+    font-size: var(--type-caption);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+    opacity: 0.85;
+  }
+  .hero h1 {
+    margin: 0;
+    font-size: var(--type-display);
+    font-weight: var(--w-heavy);
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    text-shadow: var(--head-shadow);
+    text-wrap: balance;
+  }
+  [data-backdrop="white"] .head,
+  [data-backdrop="text"] .head,
+  [data-backdrop="dawn"] .head {
+    --head-color: #1d1b1a;
+    --head-shadow:
+      0 0 1px rgb(255 255 255 / 0.9), 0 0 12px rgb(255 255 255 / 0.8);
+  }
+  [data-backdrop="white"] .head p,
+  [data-backdrop="text"] .head p,
+  [data-backdrop="dawn"] .head p,
+  [data-backdrop="white"] .head .eyebrow,
+  [data-backdrop="text"] .head .eyebrow,
+  [data-backdrop="dawn"] .head .eyebrow {
+    text-shadow: 0 0 6px rgb(255 255 255 / 0.95);
+  }
+
+  .grid {
+    display: grid;
+    gap: var(--space-5);
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  }
+  .card {
+    padding: var(--space-5);
+    display: grid;
+    gap: var(--space-4);
+    align-content: start;
+  }
+  .card > h3 {
+    margin: 0;
+    font-size: var(--type-title-sm);
+    font-weight: var(--w-strong);
+  }
+  .note {
+    margin: 0;
+    color: var(--fg-muted);
+    font-size: var(--type-label);
+  }
+  .label {
+    font-size: var(--type-caption);
+    color: var(--fg-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  code,
+  .mono {
+    font-family: var(--mono);
+    font-size: var(--type-caption);
+  }
+
+  /* ── Scales ── */
+  .scale {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: var(--space-1);
+  }
+  .chip-sw {
+    aspect-ratio: 1 / 1.25;
+    border-radius: var(--radius-control);
+    position: relative;
+    box-shadow: inset 0 0 0 1px rgb(127 127 127 / 0.18);
+  }
+  .chip-sw span {
+    position: absolute;
+    left: 4px;
+    bottom: 3px;
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+  .scale-row {
+    display: grid;
+    gap: var(--space-2);
+  }
+  .scale-row .legend {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: var(--space-1);
+    font-size: 10px;
+    color: var(--fg-faint);
+    font-family: var(--mono);
+  }
+  .scale-row .legend b {
+    font-weight: var(--w-regular);
+    grid-column: span 2;
+  }
+  .scale-row .legend b.w3 {
+    grid-column: span 3;
+  }
+  .scale-pair {
+    display: grid;
+    gap: var(--space-3);
+  }
+  .scale-pair .label {
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .tokens {
+    display: grid;
+    gap: var(--space-1);
+  }
+  .tok {
+    display: grid;
+    grid-template-columns: 28px 1fr auto;
+    gap: var(--space-3);
+    align-items: center;
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .tok:last-child {
+    border-bottom: 0;
+  }
+  .tok i {
+    width: 28px;
+    height: 20px;
+    border-radius: var(--radius-control);
+    box-shadow: inset 0 0 0 1px var(--border-subtle);
+  }
+  .tok small {
+    color: var(--fg-faint);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .type-row {
+    display: grid;
+    grid-template-columns: 92px 1fr;
+    gap: var(--space-4);
+    align-items: baseline;
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .type-row:last-child {
+    border-bottom: 0;
+  }
+  .type-row code {
+    color: var(--fg-faint);
+  }
+
+  .bars {
+    display: grid;
+    gap: var(--space-2);
+  }
+  .bars div {
+    display: grid;
+    grid-template-columns: 70px 1fr;
+    gap: var(--space-3);
+    align-items: center;
+  }
+  .bars em {
+    display: block;
+    height: 10px;
+    border-radius: 2px;
+    background: var(--accent-bg);
+  }
+  .radii {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+  }
+  .radii div {
+    display: grid;
+    gap: var(--space-2);
+    justify-items: center;
+    font-size: var(--type-caption);
+    color: var(--fg-muted);
+  }
+  .radii i {
+    width: 64px;
+    height: 44px;
+    background: var(--fill-3);
+    box-shadow: inset 0 0 0 1px var(--border-strong);
+  }
+  .motion {
+    display: grid;
+    gap: var(--space-3);
+  }
+  .motion div {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: var(--space-3);
+    align-items: center;
+    font-size: var(--type-caption);
+    color: var(--fg-muted);
+  }
+  .track-m {
+    height: 14px;
+    border-radius: 7px;
+    background: var(--fill-1);
+    color: var(--fg);
+    position: relative;
+  }
+  .track-m b {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent-bg);
+  }
+  .motion.go .track-m b {
+    left: calc(100% - 12px);
+  }
+
+  /* ── Controls. States are overlays of the control's own text colour, so
+   they read the same over any backdrop and in either mode: light text
+   lightens, dark text darkens. ── */
+  .btn {
+    font: inherit;
+    font-size: var(--type-body);
+    font-weight: var(--w-strong);
+    color: var(--fg);
+    background: var(--fill-2);
+    border: 0;
+    border-radius: var(--radius-control);
+    min-height: 30px;
+    padding: 0 var(--space-4);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    cursor: pointer;
+    position: relative;
+    transition:
+      background-color var(--dur-fast) var(--ease-standard),
+      color var(--dur-fast) var(--ease-standard);
+  }
+  .btn::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: currentColor;
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-standard);
+    pointer-events: none;
+  }
+  .btn:hover::after,
+  .btn.is-hover::after {
+    opacity: 0.07;
+  }
+  .btn:active::after,
+  .btn.is-press::after {
+    opacity: 0.16;
+  }
+  .btn:focus-visible,
+  .btn.is-focus {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+  .btn:disabled,
+  .btn.is-disabled {
+    color: var(--fg-disabled);
+    cursor: default;
+  }
+  .btn:disabled::after,
+  .btn.is-disabled::after {
+    opacity: 0;
+  }
+  .btn.primary {
+    background: var(--accent-bg);
+    color: var(--on-accent);
+  }
+  .btn.flat {
+    background: transparent;
+  }
+  .btn.destructive {
+    background: var(--danger-bg);
+    color: var(--on-status);
+  }
+  .btn.icon {
+    width: 30px;
+    padding: 0;
+    justify-content: center;
+  }
+  .btn.pill {
+    border-radius: var(--radius-pill);
+  }
+  .btn.primary:disabled,
+  .btn.primary.is-disabled,
+  .btn.destructive:disabled,
+  .btn.destructive.is-disabled {
+    background: var(--fill-2);
+    color: var(--fg-disabled);
+  }
+
+  .states {
+    display: grid;
+    grid-template-columns: 76px repeat(5, auto);
+    gap: var(--space-3);
+    align-items: center;
+    overflow-x: auto;
+  }
+  .states .label {
+    white-space: nowrap;
+  }
+
+  /* Toggle tile: a pill, with an optional drill-in. Accent means "on". */
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+  .tile {
+    display: flex;
+    align-items: stretch;
+    min-height: 52px;
+    border-radius: var(--radius-tile);
+    background: var(--fill-2);
+    color: var(--fg);
+    overflow: hidden;
+  }
+  .tile button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    position: relative;
+  }
+  .tile button::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: currentColor;
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-standard);
+  }
+  .tile button:hover::after {
+    opacity: 0.07;
+  }
+  .tile button:active::after {
+    opacity: 0.16;
+  }
+  .tile button:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+  }
+  .tile .main {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 0 var(--space-4);
+    text-align: left;
+  }
+  .tile .main .glyph {
+    font-size: 18px;
+    line-height: 1;
+    width: 20px;
+    text-align: center;
+  }
+  .tile .main .txt {
+    display: grid;
+  }
+  .tile .main .txt b {
+    font-weight: var(--w-strong);
+    font-size: var(--type-body);
+  }
+  .tile .main .txt small {
+    font-size: var(--type-caption);
+    color: var(--fg-muted);
+  }
+  .tile .more {
+    width: 36px;
+    border-left: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+    font-size: 14px;
+  }
+  .tile.on {
+    background: var(--accent-bg);
+    color: var(--on-accent);
+  }
+  .tile.on .main .txt small {
+    color: color-mix(in srgb, var(--on-accent) 72%, transparent);
+  }
+
+  /* Rows: one form for device, list and settings rows. */
+  .rows {
+    display: grid;
+    gap: var(--space-1);
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 28px 1fr auto;
+    gap: var(--space-4);
+    align-items: center;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-tile);
+    position: relative;
+    color: var(--fg);
+  }
+  .row::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: currentColor;
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-standard);
+    pointer-events: none;
+  }
+  .row.activatable {
+    cursor: pointer;
+  }
+  .row.activatable:hover::after {
+    opacity: 0.07;
+  }
+  .row.selected {
+    background: var(--fill-2);
+  }
+  .row .ico {
+    font-size: 18px;
+    text-align: center;
+    color: var(--fg-muted);
+  }
+  .row .t b {
+    display: block;
+    font-weight: var(--w-strong);
+  }
+  .row .t small {
+    color: var(--fg-muted);
+    font-size: var(--type-label);
+  }
+  .row .end {
+    color: var(--fg-faint);
+    font-size: var(--type-label);
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+  }
+  .row.selected .ico {
+    color: var(--accent);
+  }
+
+  .section-h {
+    display: grid;
+    grid-template-columns: 20px 1fr auto 14px;
+    gap: var(--space-3);
+    align-items: center;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-tile);
+    background: var(--fill-1);
+    color: var(--fg);
+    cursor: pointer;
+    position: relative;
+    font: inherit;
+    border: 0;
+    text-align: left;
+    width: 100%;
+  }
+  .section-h::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: currentColor;
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-standard);
+  }
+  .section-h:hover::after {
+    opacity: 0.07;
+  }
+  .section-h b {
+    font-weight: var(--w-strong);
+  }
+  .section-h small {
+    color: var(--fg-muted);
+    font-size: var(--type-label);
+  }
+  .section-h .chev {
+    transition: transform var(--dur-standard) var(--ease-standard);
+    color: var(--fg-faint);
+  }
+  .section-h[aria-expanded="true"] .chev {
+    transform: rotate(90deg);
+  }
+  .section-body {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--dur-standard) var(--ease-standard);
+  }
+  .section-body > div {
+    overflow: hidden;
+  }
+  .section-body.open {
+    grid-template-rows: 1fr;
+  }
+
+  /* Switch */
+  .switch {
+    width: 38px;
+    height: 22px;
+    border-radius: var(--radius-pill);
+    background: var(--fill-3);
+    color: var(--fg);
+    position: relative;
+    border: 0;
+    cursor: pointer;
+    transition: background-color var(--dur-fast) var(--ease-standard);
+    flex: none;
+  }
+  .switch::before {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--knob);
+    transition: transform var(--dur-standard) var(--ease-standard);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+  }
+  .switch[aria-checked="true"] {
+    background: var(--accent-bg);
+  }
+  .switch[aria-checked="true"]::before {
+    transform: translateX(16px);
+    background: var(--on-accent);
+  }
+  .switch:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* Slider row: always its own full-width row. */
+  .slider-row {
+    display: grid;
+    grid-template-columns: 20px 1fr 40px;
+    gap: var(--space-4);
+    align-items: center;
+  }
+  .slider-row .glyph {
+    color: var(--fg-muted);
+    font-size: 16px;
+    text-align: center;
+  }
+  .slider-row output {
+    font-family: var(--mono);
+    font-size: var(--type-caption);
+    color: var(--fg-faint);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 22px;
+    background: transparent;
+    color: var(--fg);
+    cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 3px;
+    background: linear-gradient(
+      to right,
+      var(--accent-bg) var(--p, 50%),
+      color-mix(in srgb, currentColor 16%, transparent) var(--p, 50%)
+    );
+  }
+  input[type="range"]::-moz-range-track {
+    height: 6px;
+    border-radius: 3px;
+    background: color-mix(in srgb, currentColor 16%, transparent);
+  }
+  input[type="range"]::-moz-range-progress {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--accent-bg);
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--knob);
+    margin-top: -5px;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border: 0;
+    border-radius: 50%;
+    background: var(--knob);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
+  }
+  input[type="range"]:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Chips, badges, pills */
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    align-items: center;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 26px;
+    padding: 0 var(--space-4);
+    border-radius: var(--radius-pill);
+    background: var(--fill-2);
+    color: var(--fg);
+    font-size: var(--type-label);
+    font-weight: var(--w-strong);
+  }
+  .chip.selected {
+    background: var(--accent-bg);
+    color: var(--on-accent);
+  }
+  .badge {
+    display: inline-grid;
+    place-items: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: var(--radius-pill);
+    font-size: 10px;
+    font-weight: var(--w-heavy);
+    background: var(--danger-bg);
+    color: var(--on-status);
+  }
+  .kbd {
+    font-family: var(--mono);
+    font-size: var(--type-label);
+    font-weight: var(--w-strong);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent-9) 16%, transparent);
+    border-radius: var(--radius-control);
+    padding: 1px 6px;
+  }
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--type-label);
+    font-weight: var(--w-strong);
+  }
+  .status::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .status.ok {
+    color: var(--success);
+  }
+  .status.warn {
+    color: var(--warning);
+  }
+  .status.bad {
+    color: var(--danger);
+  }
+
+  /* Text field */
+  .field {
+    display: grid;
+    gap: var(--space-2);
+  }
+  .field label {
+    font-size: var(--type-label);
+    color: var(--fg-muted);
+  }
+  .field input {
+    font: inherit;
+    color: var(--fg);
+    background: var(--fill-1);
+    border: 0;
+    border-radius: var(--radius-control);
+    height: 34px;
+    padding: 0 var(--space-4);
+    box-shadow: inset 0 0 0 1px var(--border-subtle);
+    transition: box-shadow var(--dur-fast) var(--ease-standard);
+  }
+  .field input::placeholder {
+    color: var(--fg-faint);
+  }
+  .field input:focus {
+    outline: none;
+    box-shadow:
+      inset 0 0 0 1px var(--border-strong),
+      0 0 0 2px var(--focus-ring);
+  }
+  .field.error input {
+    box-shadow: inset 0 0 0 1px var(--danger);
+  }
+  .field .help {
+    font-size: var(--type-caption);
+    color: var(--fg-faint);
+  }
+  .field.error .help {
+    color: var(--danger);
+  }
+
+  /* Menu */
+  .menu {
+    padding: var(--space-2);
+    display: grid;
+    gap: var(--space-1);
+    width: min(100%, 240px);
+    border-radius: var(--radius-tile);
+  }
+  .menu .item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-3);
+    border-radius: var(--radius-control);
+    position: relative;
+    cursor: pointer;
+  }
+  .menu .item::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: currentColor;
+    opacity: 0;
+  }
+  .menu .item:hover::after {
+    opacity: 0.07;
+  }
+  .menu .item small {
+    color: var(--fg-faint);
+    font-family: var(--mono);
+    font-size: var(--type-caption);
+  }
+  .menu hr {
+    border: 0;
+    height: 1px;
+    background: var(--border-subtle);
+    margin: var(--space-1) var(--space-2);
+  }
+  .menu .item.danger {
+    color: var(--danger);
+  }
+
+  /* Avatar, progress */
+  .avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-weight: var(--w-heavy);
+    color: #fff;
+    position: relative;
+    flex: none;
+  }
+  .avatar::after {
+    content: "";
+    position: absolute;
+    right: -1px;
+    bottom: -1px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 0 2px var(--neutral-3);
+  }
+  .progress {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--fill-3);
+    color: var(--fg);
+    overflow: hidden;
+  }
+  .progress i {
+    display: block;
+    height: 100%;
+    width: 62%;
+    background: var(--accent-bg);
+    border-radius: 3px;
+  }
+
+  /* ── Composition ── */
+  .compose {
+    display: grid;
+    gap: var(--space-5);
+    grid-template-columns: minmax(0, 380px) minmax(0, 1fr);
+    align-items: start;
+  }
+  .panel {
+    padding: var(--space-4);
+    display: grid;
+    gap: var(--space-4);
+  }
+  .panel .top {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+  }
+  .panel .top .who {
+    flex: 1;
+    display: grid;
+  }
+  .panel .top .who b {
+    font-weight: var(--w-strong);
+  }
+  .panel .top .who small {
+    color: var(--fg-muted);
+    font-size: var(--type-label);
+  }
+  .annot {
+    display: grid;
+    gap: var(--space-3);
+    counter-reset: n;
+    margin: 0;
+    padding: var(--space-5);
+  }
+  .annot li {
+    list-style: none;
+    display: grid;
+    grid-template-columns: 22px 1fr;
+    gap: var(--space-3);
+    align-items: start;
+  }
+  .annot li::before {
+    counter-increment: n;
+    content: counter(n);
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--fill-3);
+    color: var(--fg);
+    font-size: var(--type-caption);
+    font-weight: var(--w-heavy);
+  }
+  .annot b {
+    display: block;
+    font-weight: var(--w-strong);
+  }
+  .annot span {
+    color: var(--fg-muted);
+    font-size: var(--type-label);
+  }
+
+  /* Rules */
+  .rules {
+    display: grid;
+    gap: var(--space-4);
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  }
+  .rule {
+    padding: var(--space-4);
+    display: grid;
+    gap: var(--space-3);
+    align-content: start;
+  }
+  .rule h4 {
+    margin: 0;
+    font-size: var(--type-body);
+    font-weight: var(--w-strong);
+  }
+  .rule p {
+    margin: 0;
+    color: var(--fg-muted);
+    font-size: var(--type-label);
+  }
+  .dd {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-3);
+  }
+  .dd > div {
+    display: grid;
+    gap: var(--space-2);
+    align-content: start;
+  }
+  .dd .tag {
+    font-size: 10px;
+    font-weight: var(--w-heavy);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .dd .do .tag {
+    color: var(--success);
+  }
+  .dd .dont .tag {
+    color: var(--danger);
+  }
+  .mini {
+    border-radius: var(--radius-tile);
+    padding: var(--space-3);
+    min-height: 56px;
+    display: grid;
+    gap: var(--space-2);
+    align-content: center;
+    font-size: var(--type-label);
+  }
+
+  /* ── Modes and the glass ── */
+  .pipeline {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: var(--space-2);
+  }
+  .stage {
+    border-radius: var(--radius-tile);
+    background: var(--fill-1);
+    padding: var(--space-3);
+    display: grid;
+    gap: var(--space-2);
+    align-content: start;
+    position: relative;
+  }
+  .stage b {
+    font-size: var(--type-label);
+    font-weight: var(--w-strong);
+  }
+  .stage small {
+    font-size: var(--type-caption);
+    color: var(--fg-muted);
+  }
+  .stage .who {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-faint);
+  }
+  .stage.mode {
+    box-shadow: inset 0 0 0 1px var(--accent-8);
+    background: color-mix(in srgb, var(--accent-9) 10%, transparent);
+  }
+  .stage.mode .who {
+    color: var(--accent);
+  }
+  .stage:not(:last-child)::after {
+    content: "→";
+    position: absolute;
+    right: -9px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--fg-faint);
+    font-size: 12px;
+    z-index: 1;
+  }
+
+  .sidebyside {
+    display: grid;
+    gap: var(--space-5);
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  }
+  .sidebyside .caption {
+    font-size: var(--type-caption);
+    color: var(--head-color);
+    text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: var(--space-2);
+  }
+  [data-backdrop="white"] .sidebyside .caption,
+  [data-backdrop="text"] .sidebyside .caption,
+  [data-backdrop="dawn"] .sidebyside .caption {
+    color: #1d1b1a;
+    text-shadow: 0 0 6px #fff;
+  }
+
+  .decisions {
+    display: grid;
+    gap: var(--space-3);
+    margin: 0;
+    padding: 0;
+  }
+  .decisions li {
+    list-style: none;
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    gap: var(--space-4);
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .decisions li:last-child {
+    border-bottom: 0;
+  }
+  .decisions b {
+    font-weight: var(--w-strong);
+  }
+  .decisions span {
+    color: var(--fg-muted);
+    font-size: var(--type-label);
+  }
+
+  /* Tables */
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: var(--type-label);
+  }
+  th,
+  td {
+    text-align: left;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--border-subtle);
+    white-space: nowrap;
+  }
+  th {
+    color: var(--fg-faint);
+    font-weight: var(--w-regular);
+    font-size: var(--type-caption);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  td.num {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+  }
+  td.why {
+    white-space: normal;
+    color: var(--fg-muted);
+    min-width: 260px;
+  }
+  td .new {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--accent);
+    margin-left: var(--space-2);
+  }
+  .pass {
+    color: var(--success);
+    font-weight: var(--w-strong);
+  }
+  .fail {
+    color: var(--danger);
+    font-weight: var(--w-strong);
+  }
+  .swatch-pair {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 54px;
+    height: 24px;
+    border-radius: var(--radius-control);
+    font-weight: var(--w-strong);
+    font-size: var(--type-label);
+    box-shadow: inset 0 0 0 1px rgb(127 127 127 / 0.2);
+  }
+  .tablewrap {
+    overflow-x: auto;
+  }
+
+  /* Inputs */
+  .seg {
+    display: inline-flex;
+    padding: 2px;
+    border-radius: var(--radius-pill);
+    background: var(--fill-2);
+    color: var(--fg);
+    gap: 2px;
+  }
+  .seg button {
+    font: inherit;
+    font-size: var(--type-label);
+    font-weight: var(--w-strong);
+    color: var(--fg-muted);
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-pill);
+    padding: 3px var(--space-4);
+    cursor: pointer;
+  }
+  .seg button[aria-pressed="true"] {
+    background: var(--fg);
+    color: var(--neutral-1);
+  }
+  .seg button:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
+  }
+  .accents {
+    display: inline-flex;
+    gap: var(--space-2);
+  }
+  .accents button {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 0;
+    cursor: pointer;
+    box-shadow: inset 0 0 0 1px rgb(127 127 127 / 0.35);
+  }
+  .accents button[aria-pressed="true"] {
+    outline: 2px solid var(--fg);
+    outline-offset: 2px;
+  }
+  .accents button:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  @media (max-width: 900px) {
+    .pipeline {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .stage::after {
+      display: none;
+    }
+  }
+  @media (max-width: 760px) {
+    .compose {
+      grid-template-columns: 1fr;
+    }
+    .scale span {
+      display: none;
+    }
+    .tiles {
+      grid-template-columns: 1fr;
+    }
+    .decisions li {
+      grid-template-columns: 1fr;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0ms !important;
+      animation-duration: 0ms !important;
+    }
+  }
+</style>
+
+<div class="backdrop" aria-hidden="true"></div>
+
+<div class="page">
+  <header class="bar glass thin" aria-label="Theme inputs">
+    <div class="brand">
+      swaypplet <small>design system zoo · proposal</small>
+    </div>
+    <div class="spacer"></div>
+    <div class="ctl">
+      <span>Mode</span>
+      <div class="seg" id="mode" role="group" aria-label="Mode">
+        <button type="button" data-v="dark" aria-pressed="true">Dark</button>
+        <button type="button" data-v="light" aria-pressed="false">Light</button>
+        <button type="button" data-v="auto" aria-pressed="false">Auto</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span>Accent</span>
+      <div class="accents" id="accents" role="group" aria-label="Accent"></div>
+    </div>
+    <div class="ctl">
+      <span>Neutral</span>
+      <div class="seg" id="neutral" role="group" aria-label="Neutral">
+        <button type="button" data-v="warm" aria-pressed="true">Warm</button>
+        <button type="button" data-v="slate" aria-pressed="false">Slate</button>
+        <button type="button" data-v="pure" aria-pressed="false">Pure</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span>Contrast</span>
+      <div class="seg" id="contrast" role="group" aria-label="Contrast">
+        <button type="button" data-v="standard" aria-pressed="true">
+          Standard
+        </button>
+        <button type="button" data-v="high" aria-pressed="false">High</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span>Behind glass</span>
+      <div class="seg" id="backdrop" role="group" aria-label="Backdrop">
+        <button type="button" data-v="wallpaper" aria-pressed="true">
+          Night
+        </button>
+        <button type="button" data-v="dawn" aria-pressed="false">Dawn</button>
+        <button type="button" data-v="white" aria-pressed="false">White</button>
+        <button type="button" data-v="black" aria-pressed="false">Black</button>
+        <button type="button" data-v="text" aria-pressed="false">Text</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero head">
+    <div class="eyebrow">
+      Proposal · 2026-09-26 · GTK 4.22 custom properties
+    </div>
+    <h1>Four inputs, one set of tokens, one material in two tunings.</h1>
+    <p>
+      Everything on this page is drawn from the proposed tokens, and the tokens
+      come from the inputs in the bar: mode, accent, neutral and contrast.
+      Change one and every scale, control and contrast figure below follows, the
+      way the theme generator would rewrite <code>tokens.css</code> and retune
+      the glass. Switch what is behind the glass to see which parts hold up over
+      a white page or a page of text.
+    </p>
+  </section>
+
+  <!-- ── 1 ── -->
+  <section class="head">
+    <div class="eyebrow">1 · Primitives</div>
+    <h2>Two generated scales per mode</h2>
+    <p>
+      Twelve steps each, in OKLCH. The steps keep their jobs in both modes (1 is
+      the ground, 12 is the strongest text), so a rule written against step 12
+      is right in light and dark alike. Only the lightness curve flips.
+    </p>
+  </section>
+  <div class="grid">
+    <div class="card glass">
+      <h3>Neutral</h3>
+      <div class="scale-pair">
+        <div class="label"><span>Dark</span></div>
+        <div class="scale" id="neutral-dark"></div>
+        <div class="label"><span>Light</span></div>
+        <div class="scale" id="neutral-light"></div>
+        <div class="scale-row">
+          <div class="legend">
+            <b>1–2 ground</b><b class="w3">3–5 component</b
+            ><b class="w3">6–8 lines</b><b>9–10 solid</b><b>11–12 text</b>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card glass">
+      <h3>Accent</h3>
+      <div class="scale-pair">
+        <div class="label">
+          <span>Dark</span><span id="accent-dark-in"></span>
+        </div>
+        <div class="scale" id="accent-dark"></div>
+        <div class="label">
+          <span>Light</span><span id="accent-light-in"></span>
+        </div>
+        <div class="scale" id="accent-light"></div>
+        <div class="scale-row">
+          <div class="legend">
+            <b>1–2 tint</b><b class="w3">3–5 fill</b
+            ><b class="w3">6–8 lines, focus</b><b>9–10 solid</b
+            ><b>11–12 text</b>
+          </div>
+        </div>
+      </div>
+      <p class="note">
+        Each accent is a pair, as gruvbox ships it: the bright tone for dark,
+        the deep tone for light. Step 9 is the input.
+      </p>
+    </div>
+  </div>
+
+  <!-- ── 2 ── -->
+  <section class="head">
+    <div class="eyebrow">2 · Semantic tier</div>
+    <h2>The only names a rule may use</h2>
+    <p>
+      About thirty, against 40 <code>@define-color</code> and 88 different
+      <code>alpha()</code> pairs today. They mean the same thing in both modes;
+      only their values move.
+    </p>
+  </section>
+  <div class="grid">
+    <div class="card glass">
+      <h3>Surfaces and text</h3>
+      <div class="tokens" id="tok-a"></div>
+    </div>
+    <div class="card glass">
+      <h3>Fills, lines, accent</h3>
+      <div class="tokens" id="tok-b"></div>
+    </div>
+    <div class="card glass">
+      <h3>Status and states</h3>
+      <div class="tokens" id="tok-c"></div>
+    </div>
+  </div>
+
+  <!-- ── 3 ── -->
+  <section class="head">
+    <div class="eyebrow">3 · Type, space, shape, motion</div>
+    <h2>Seven sizes where there are twenty-six</h2>
+    <p>
+      One unit (px), three weights. Spacing on a 4 px grid, five radii with a
+      job each, and the motion ladder the stylesheet already keeps, now as
+      tokens. None of these change with the mode.
+    </p>
+  </section>
+  <div class="grid">
+    <div class="card glass">
+      <h3>Type scale</h3>
+      <div>
+        <div class="type-row">
+          <code>display 36</code
+          ><span
+            style="
+              font-size: var(--type-display);
+              font-weight: var(--w-heavy);
+              line-height: 1.1;
+            "
+            >14:32</span
+          >
+        </div>
+        <div class="type-row">
+          <code>display-sm 28</code
+          ><span
+            style="
+              font-size: var(--type-display-sm);
+              font-weight: var(--w-heavy);
+              line-height: 1.15;
+            "
+            >Welcome back</span
+          >
+        </div>
+        <div class="type-row">
+          <code>title 18</code
+          ><span
+            style="font-size: var(--type-title); font-weight: var(--w-strong)"
+            >Authentication required</span
+          >
+        </div>
+        <div class="type-row">
+          <code>title-sm 15</code
+          ><span
+            style="
+              font-size: var(--type-title-sm);
+              font-weight: var(--w-strong);
+            "
+            >Bluetooth</span
+          >
+        </div>
+        <div class="type-row">
+          <code>body 13</code><span>Sony WH-1000XM5 · connected</span>
+        </div>
+        <div class="type-row">
+          <code>label 12</code
+          ><span style="font-size: var(--type-label); color: var(--fg-muted)"
+            >Battery 84 %, 6 h 10 min left</span
+          >
+        </div>
+        <div class="type-row">
+          <code>caption 11</code
+          ><span style="font-size: var(--type-caption); color: var(--fg-faint)"
+            >Updated 2 min ago</span
+          >
+        </div>
+      </div>
+    </div>
+    <div class="card glass">
+      <h3>Spacing</h3>
+      <div class="bars" id="space-bars"></div>
+      <h3>Radius</h3>
+      <div class="radii">
+        <div><i style="border-radius: var(--radius-control)"></i>control 6</div>
+        <div><i style="border-radius: var(--radius-tile)"></i>tile 10</div>
+        <div>
+          <i style="border-radius: var(--radius-thin)"></i>thin glass 14
+        </div>
+        <div><i style="border-radius: var(--radius-card)"></i>card 18</div>
+        <div><i style="border-radius: var(--radius-pill)"></i>pill</div>
+      </div>
+    </div>
+    <div class="card glass">
+      <h3>Motion</h3>
+      <p class="note">
+        Hover or tap the card to play. The spatial steps are what sway's
+        workspace strip and the reveals use; effects (colour, opacity) stay at
+        fast.
+      </p>
+      <div class="motion" id="motion"></div>
+    </div>
+  </div>
+
+  <!-- ── 4 ── -->
+  <section class="head">
+    <div class="eyebrow">4 · Components</div>
+    <h2>One builder per part, one state model</h2>
+    <p>
+      Rest, hover, pressed, focus and disabled are the same five everywhere: +7
+      %, +16 %, a 2 px ring, and text at 32 %. The overlays take the text
+      colour, so in light mode they darken and in dark mode they lighten, with
+      no second set of state tokens.
+    </p>
+  </section>
+  <div class="grid">
+    <div class="card glass">
+      <h3>Buttons</h3>
+      <div class="states" id="states"></div>
+      <div class="chips">
+        <button class="btn icon flat" type="button" aria-label="Settings">
+          ⚙
+        </button>
+        <button class="btn icon" type="button" aria-label="Power">⏻</button>
+        <button class="btn pill primary" type="button">Restore</button>
+        <button class="btn pill" type="button">Not now</button>
+      </div>
+    </div>
+    <div class="card glass">
+      <h3>Toggle tiles</h3>
+      <div class="tiles" id="tiles"></div>
+      <p class="note">
+        A pill with an optional drill-in, as in GNOME 43 and ChromeOS. The fill
+        says on or off; the second line says the state in words.
+      </p>
+    </div>
+    <div class="card glass">
+      <h3>Sliders and switches</h3>
+      <div class="slider-row">
+        <span class="glyph">🔊</span
+        ><input
+          type="range"
+          id="vol"
+          min="0"
+          max="100"
+          value="64"
+          aria-label="Volume"
+        /><output for="vol">64 %</output>
+      </div>
+      <div class="slider-row">
+        <span class="glyph">☀</span
+        ><input
+          type="range"
+          id="bri"
+          min="0"
+          max="100"
+          value="40"
+          aria-label="Brightness"
+        /><output for="bri">40 %</output>
+      </div>
+      <div class="rows">
+        <div class="row">
+          <span class="ico">☾</span
+          ><span class="t"
+            ><b>Night light</b><small>Sunset to sunrise</small></span
+          ><button
+            class="switch"
+            type="button"
+            role="switch"
+            aria-checked="true"
+            aria-label="Night light"
+          ></button>
+        </div>
+        <div class="row">
+          <span class="ico">⚡</span
+          ><span class="t"><b>Power saver</b><small>Off</small></span
+          ><button
+            class="switch"
+            type="button"
+            role="switch"
+            aria-checked="false"
+            aria-label="Power saver"
+          ></button>
+        </div>
+      </div>
+    </div>
+    <div class="card glass">
+      <h3>Section and rows</h3>
+      <button class="section-h" type="button" aria-expanded="true" id="sec-bt">
+        <span>ᛒ</span><b>Bluetooth</b><small>2 connected</small
+        ><span class="chev">›</span>
+      </button>
+      <div class="section-body open" id="sec-bt-body">
+        <div>
+          <div class="rows">
+            <div class="row activatable selected">
+              <span class="ico">🎧</span
+              ><span class="t"
+                ><b>WH-1000XM5</b><small>Connected · 84 %</small></span
+              ><span class="end">⋯</span>
+            </div>
+            <div class="row activatable">
+              <span class="ico">⌨</span
+              ><span class="t"
+                ><b>MX Keys</b><small>Connected · 60 %</small></span
+              ><span class="end">⋯</span>
+            </div>
+            <div class="row activatable">
+              <span class="ico">🖱</span
+              ><span class="t"
+                ><b>MX Master 3S</b><small>Paired, not connected</small></span
+              ><span class="end">Connect</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="note">
+        One section builder replaces the eight copies in audio, bluetooth,
+        brightness, clipboard, display, network, notifications and power.
+      </p>
+    </div>
+    <div class="card glass">
+      <h3>Chips, badges, status, fields</h3>
+      <div class="chips">
+        <span class="chip selected">All</span><span class="chip">Apps</span
+        ><span class="chip">Windows</span
+        ><span class="chip">Files <span class="badge">3</span></span>
+      </div>
+      <div class="chips">
+        <span class="kbd">⌘ y</span><span class="kbd">⌘ Tab</span
+        ><span class="status ok">Online</span
+        ><span class="status warn">Backup 3 d old</span
+        ><span class="status bad">Disk 96 %</span>
+      </div>
+      <div class="field">
+        <label for="f1">Network name</label
+        ><input id="f1" placeholder="SSID" /><span class="help"
+          >Hidden networks need the exact name.</span
+        >
+      </div>
+      <div class="field error">
+        <label for="f2">Password</label
+        ><input id="f2" type="password" value="hunter2" /><span class="help"
+          >Wrong password. Check caps lock and try again.</span
+        >
+      </div>
+    </div>
+    <div class="card glass">
+      <h3>Menu, avatar, progress</h3>
+      <div style="display: flex; gap: var(--space-4); align-items: center">
+        <div class="avatar" style="background: #8f5b3e">A</div>
+        <div style="display: grid; flex: 1; gap: var(--space-2)">
+          <b style="font-weight: var(--w-strong)">Backing up to nas</b>
+          <div class="progress"><i></i></div>
+          <small style="color: var(--fg-faint); font-size: var(--type-caption)"
+            >62 % · 3.1 of 5.0 GB</small
+          >
+        </div>
+      </div>
+      <div
+        class="menu"
+        style="
+          background: var(--fill-1);
+          box-shadow: inset 0 0 0 1px var(--border-subtle);
+        "
+      >
+        <div class="item">Copy <small>Ctrl C</small></div>
+        <div class="item">Pin to screen <small>p</small></div>
+        <hr />
+        <div class="item danger">Close window <small>Super ⎋</small></div>
+      </div>
+      <p class="note">
+        On the desktop the menu is its own glass surface. Inside a card it gets
+        a fill instead: no glass on glass.
+      </p>
+    </div>
+  </div>
+
+  <!-- ── 5 ── -->
+  <section class="head">
+    <div class="eyebrow">5 · Composition</div>
+    <h2>The quick-settings panel, built only from the parts</h2>
+    <p>
+      The panel the Helm shows today, assembled from the components above and
+      the rules next to it.
+    </p>
+  </section>
+  <div class="compose">
+    <div
+      class="panel glass"
+      id="panel-main"
+      aria-label="Quick settings example"
+    ></div>
+    <ol class="annot glass">
+      <li>
+        <div>
+          <b>One glass layer</b
+          ><span
+            >The panel is the only glass. Tiles, rows and the section header are
+            fills on it.</span
+          >
+        </div>
+      </li>
+      <li>
+        <div>
+          <b>Accent means on, and the one primary action</b
+          ><span
+            >The tiles that are on, the slider fill, and "Lock". Nothing else is
+            accent-coloured.</span
+          >
+        </div>
+      </li>
+      <li>
+        <div>
+          <b>Sliders own a full row</b
+          ><span
+            >They never share a line with a tile or a label that competes with
+            them.</span
+          >
+        </div>
+      </li>
+      <li>
+        <div>
+          <b>Three text levels</b
+          ><span
+            >Fg for names, muted for state, faint for metadata. Size and weight
+            say importance before colour does.</span
+          >
+        </div>
+      </li>
+      <li>
+        <div>
+          <b>Status colour for status only</b
+          ><span
+            >Green here means the backup is current. Green is never
+            decoration.</span
+          >
+        </div>
+      </li>
+      <li>
+        <div>
+          <b>Group with fills, not lines</b
+          ><span>No dividers between blocks; the gaps and fills do it.</span>
+        </div>
+      </li>
+    </ol>
+  </div>
+
+  <!-- ── 6 ── -->
+  <section class="head">
+    <div class="eyebrow">6 · Hierarchy rules</div>
+    <h2>Checked in review</h2>
+    <p>
+      Taken from Apple's Liquid Glass guidance, Microsoft's rules for Acrylic,
+      and GNOME and ChromeOS quick settings, where they agree.
+    </p>
+  </section>
+  <div class="rules">
+    <div class="rule glass">
+      <h4>No accent text on glass</h4>
+      <p>
+        Microsoft forbids it on Acrylic: at 14 px it fails contrast over half
+        the backdrops. Put the accent in a fill and the text on top.
+      </p>
+      <div class="dd">
+        <div class="do">
+          <span class="tag">Do</span>
+          <div
+            class="mini"
+            style="
+              background: var(--accent-bg);
+              color: var(--on-accent);
+              font-weight: 600;
+            "
+          >
+            Connected
+          </div>
+        </div>
+        <div class="dont">
+          <span class="tag">Don't</span>
+          <div class="mini" style="color: var(--accent-9); font-weight: 400">
+            Connected
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="rule glass">
+      <h4>No glass on glass</h4>
+      <p>
+        A card inside a card gets a fill. Two blurred layers stack their tint
+        and their seams.
+      </p>
+      <div class="dd">
+        <div class="do">
+          <span class="tag">Do</span>
+          <div class="mini" style="background: var(--fill-2); color: var(--fg)">
+            Row on a fill
+          </div>
+        </div>
+        <div class="dont">
+          <span class="tag">Don't</span>
+          <div class="mini glass" style="border-radius: var(--radius-tile)">
+            Card in a card
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="rule glass">
+      <h4>Size and weight before colour</h4>
+      <p>
+        The name is bigger and heavier; the state is smaller and muted. Colour
+        stays free for status.
+      </p>
+      <div class="dd">
+        <div class="do">
+          <span class="tag">Do</span>
+          <div class="mini" style="background: var(--fill-1); color: var(--fg)">
+            <b style="font-weight: 600">WH-1000XM5</b
+            ><small style="color: var(--fg-muted)">Connected</small>
+          </div>
+        </div>
+        <div class="dont">
+          <span class="tag">Don't</span>
+          <div class="mini" style="background: var(--fill-1); color: var(--fg)">
+            <span style="color: var(--accent-11)">WH-1000XM5</span
+            ><span style="color: var(--warning)">Connected</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="rule glass">
+      <h4>One primary action per card</h4>
+      <p>
+        When everything is tinted, nothing stands out. The rest are secondary or
+        flat.
+      </p>
+      <div class="dd">
+        <div class="do">
+          <span class="tag">Do</span>
+          <div class="chips">
+            <span class="btn primary" style="min-height: 26px">Allow</span
+            ><span class="btn flat" style="min-height: 26px">Deny</span>
+          </div>
+        </div>
+        <div class="dont">
+          <span class="tag">Don't</span>
+          <div class="chips">
+            <span class="btn primary" style="min-height: 26px">Allow</span
+            ><span class="btn primary" style="min-height: 26px">Deny</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 7 · Modes ── -->
+  <section class="head" id="modes">
+    <div class="eyebrow">7 · Light, dark and the glass</div>
+    <h2>A mode is a token set and a material tuning, never a new shape</h2>
+    <p>
+      The card keeps painting the same key colour in both modes, only so the
+      compositor can see its shape; the compositor drops those pixels. What the
+      glass shows is the material's own body fill, and that is what a mode
+      changes. So a mode switch rewrites <code>tokens.css</code> and sends five
+      material values to sway, and the mask, the fill key and the cross-repo
+      guard's key check stay exactly as they are.
+    </p>
+  </section>
+
+  <div class="card glass">
+    <h3>
+      What the compositor does to one pixel, and which steps the mode touches
+    </h3>
+    <div class="pipeline" id="pipeline"></div>
+    <p class="note">
+      From <code>liquid_glass.frag</code> in the scenefx patch. Highlighted
+      steps take a per-mode value; the rest are the material itself and do not
+      change.
+    </p>
+  </div>
+
+  <div class="sidebyside">
+    <div>
+      <div class="caption">Dark tuning, over the current backdrop</div>
+      <div
+        class="panel glass scope"
+        id="panel-dark"
+        aria-label="Dark example"
+      ></div>
+    </div>
+    <div>
+      <div class="caption">Light tuning, over the same backdrop</div>
+      <div
+        class="panel glass scope"
+        id="panel-light"
+        aria-label="Light example"
+      ></div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card glass">
+      <h3>Material by mode</h3>
+      <div class="tablewrap"><table id="material-table"></table></div>
+      <p class="note">
+        Everything not listed (refraction, dispersion, bevel, crest, specular,
+        grain) is the same material in both modes. The glass should look like
+        one object that changed its tint, not two products.
+      </p>
+    </div>
+    <div class="card glass">
+      <h3>How a switch happens</h3>
+      <ol class="decisions">
+        <li>
+          <b>Source of the mode</b
+          ><span
+            >Auto follows the desktop's colour scheme (<code
+              >org.freedesktop.appearance color-scheme</code
+            >
+            through the portal), which GTK 4.20+ already maps to
+            <code>prefers-color-scheme</code>. The night-light schedule can set
+            that scheme at sunset and sunrise, so one clock drives both.</span
+          >
+        </li>
+        <li>
+          <b>What swaypplet sends</b
+          ><span
+            >It regenerates <code>tokens.css</code> for the mode and reloads its
+            one provider, then sends the material values per glass namespace
+            over IPC. That is the path the glass pane's replay already takes;
+            nothing restarts.</span
+          >
+        </li>
+        <li>
+          <b>When</b
+          ><span
+            >Manual switches apply at once. Auto waits for the next idle or
+            unlock, so a sunset never flips a panel in front of someone reading
+            it.</span
+          >
+        </li>
+        <li>
+          <b>What never changes</b
+          ><span
+            >The fill key (<code>#32302f</code> at 0.50), the mask threshold
+            (0.40), the geometry, and the lock screen's scrim arithmetic. The
+            guard keeps checking them as it does today.</span
+          >
+        </li>
+        <li>
+          <b>New in the shader</b
+          ><span
+            >One sign: a negative <code>photochromic</code> becomes a lift (a
+            floor on luminance) instead of a ceiling. Dark glass caps a bright
+            backdrop; light glass raises a dark one. Everything else exists
+            already.</span
+          >
+        </li>
+        <li>
+          <b>Nix side</b
+          ><span
+            ><code>glass.nix</code> keeps one material and adds
+            <code>modes.dark</code> and <code>modes.light</code> overrides for
+            the five values; <code>theme.json</code> carries the mode. The guard
+            checks both overrides against the shipped presets.</span
+          >
+        </li>
+        <li>
+          <b>Surfaces that ignore the mode</b
+          ><span
+            >None by default. The lock screen and greeter follow it too; their
+            scrim stays black at 0.20 in both, because it dims the session
+            behind, not the glass.</span
+          >
+        </li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- ── 8 · Contrast ── -->
+  <section class="head">
+    <div class="eyebrow">8 · Contrast, measured through the material</div>
+    <h2>Worst case: white, mid-grey and black behind the glass</h2>
+    <p>
+      APCA Lc of each text token over the glass body, computed with the shader's
+      own steps for the current mode: absorption, the photochromic ceiling or
+      lift, then the body fill. The flat interior of a card is assumed (full
+      path, no lens). Switch Mode and Contrast and watch the fails move.
+    </p>
+  </section>
+  <div class="card glass">
+    <div class="tablewrap"><table id="contrast-table"></table></div>
+    <p class="note" id="contrast-note"></p>
+  </div>
+</div>
+
+<script>
+  (() => {
+    const root = document.documentElement;
+
+    // ── Colour maths: OKLCH ↔ sRGB, linear light ─────────────────────────────
+    const clamp01 = (x) => Math.min(1, Math.max(0, x));
+    const toLin = (c) =>
+      c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    const toSrgb = (v) =>
+      clamp01(
+        v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055,
+      );
+    function oklchToRgb(L, C, h) {
+      const hr = (h * Math.PI) / 180,
+        a = C * Math.cos(hr),
+        b = C * Math.sin(hr);
+      const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+      const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+      const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+      return [
+        4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+      ].map(toSrgb);
+    }
+    function rgbToOklch([r, g, b]) {
+      const R = toLin(r),
+        G = toLin(g),
+        B = toLin(b);
+      const l = Math.cbrt(
+        0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B,
+      );
+      const m = Math.cbrt(
+        0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B,
+      );
+      const s = Math.cbrt(
+        0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B,
+      );
+      const L = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
+      const A = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+      const Bb = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+      return [
+        L,
+        Math.hypot(A, Bb),
+        ((Math.atan2(Bb, A) * 180) / Math.PI + 360) % 360,
+      ];
+    }
+    const hex = (rgb) =>
+      "#" +
+      rgb
+        .map((v) =>
+          Math.round(clamp01(v) * 255)
+            .toString(16)
+            .padStart(2, "0"),
+        )
+        .join("");
+    const parseHex = (h) =>
+      [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+
+    // ── Inputs ──────────────────────────────────────────────────────────────
+    // Each accent is a gruvbox pair: bright for dark, deep for light.
+    const ACCENTS = [
+      { name: "Aqua", dark: "#689d6a", light: "#427b58" },
+      { name: "Yellow", dark: "#d79921", light: "#b57614" },
+      { name: "Blue", dark: "#458588", light: "#076678" },
+      { name: "Purple", dark: "#b16286", light: "#8f3f71" },
+      { name: "Orange", dark: "#d65d0e", light: "#af3a03" },
+      { name: "Red", dark: "#cc241d", light: "#9d0006" },
+    ];
+    const NEUTRALS = { warm: [75, 0.016], slate: [250, 0.018], pure: [0, 0] };
+
+    // Lightness per step. The job of each step is the same in both modes.
+    const L_NEUTRAL = {
+      dark: [
+        0.17, 0.2, 0.235, 0.265, 0.295, 0.335, 0.4, 0.49, 0.6, 0.68, 0.82,
+        0.935,
+      ],
+      light: [
+        0.985, 0.965, 0.94, 0.915, 0.89, 0.86, 0.8, 0.72, 0.6, 0.54, 0.42, 0.27,
+      ],
+    };
+    const L_ACCENT = {
+      dark: [
+        0.18,
+        0.21,
+        0.25,
+        0.285,
+        0.32,
+        0.37,
+        0.44,
+        0.53,
+        null,
+        null,
+        0.84,
+        0.95,
+      ],
+      light: [
+        0.975,
+        0.95,
+        0.915,
+        0.885,
+        0.85,
+        0.8,
+        0.73,
+        0.64,
+        null,
+        null,
+        0.45,
+        0.3,
+      ],
+    };
+
+    // The material per mode: only these five move. absorb is the Beer-Lambert
+    // coefficient; photo > 0 is the ceiling, photo < 0 a lift (the new sign).
+    const MATERIAL = {
+      dark: {
+        standard: {
+          fill: 0.5,
+          absorb: 1.0,
+          photo: 0.35,
+          edge: 0.09,
+          frost: 0.33,
+        },
+        high: { fill: 0.72, absorb: 1.0, photo: 0.25, edge: 0.12, frost: 0.45 },
+      },
+      light: {
+        standard: {
+          fill: 0.55,
+          absorb: 0.25,
+          photo: -0.3,
+          edge: 0.14,
+          frost: 0.45,
+        },
+        high: { fill: 0.75, absorb: 0.2, photo: -0.4, edge: 0.18, frost: 0.55 },
+      },
+    };
+    const STATUS = {
+      dark: {
+        success: "#8ec07c",
+        successBg: "#689d6a",
+        warning: "#fabd2f",
+        warningBg: "#d79921",
+        danger: "#fb6a5a",
+        dangerBg: "#cc241d",
+        onStatus: "#ffffff",
+      },
+      light: {
+        success: "#427b58",
+        successBg: "#427b58",
+        warning: "#9a5b04",
+        warningBg: "#b57614",
+        danger: "#9d0006",
+        dangerBg: "#cc241d",
+        onStatus: "#ffffff",
+      },
+    };
+
+    const state = {
+      mode: "dark",
+      accent: 0,
+      neutral: "warm",
+      contrast: "standard",
+      backdrop: "wallpaper",
+    };
+    try {
+      const saved = JSON.parse(localStorage.getItem("zoo-state-2") || "null");
+      if (saved) Object.assign(state, saved);
+    } catch (e) {
+      /* storage blocked: defaults */
+    }
+
+    const prefersDark = window.matchMedia
+      ? window.matchMedia("(prefers-color-scheme: dark)")
+      : null;
+    function effectiveMode() {
+      if (state.mode !== "auto") return state.mode;
+      const host = root.getAttribute("data-theme");
+      if (host === "dark" || host === "light") return host;
+      return prefersDark && !prefersDark.matches ? "light" : "dark";
+    }
+
+    function makeScales(mode) {
+      const [nh, nc] = NEUTRALS[state.neutral];
+      const neutral = L_NEUTRAL[mode].map((L, i) =>
+        hex(oklchToRgb(L, i >= 10 ? nc * 0.7 : nc, nh)),
+      );
+      const input = ACCENTS[state.accent][mode];
+      const [aL, aC, aH] = rgbToOklch(parseHex(input));
+      const accent = L_ACCENT[mode].map((L, i) => {
+        if (i === 8) return input;
+        if (i === 9)
+          return hex(
+            oklchToRgb(
+              mode === "dark"
+                ? Math.min(aL + 0.05, 0.9)
+                : Math.max(aL - 0.05, 0.2),
+              aC,
+              aH,
+            ),
+          );
+        const c =
+          i < 8
+            ? Math.min(aC, 0.02 + i * 0.012)
+            : Math.min(aC, 0.1) * (i === 11 ? 0.5 : 1);
+        return hex(oklchToRgb(L, c, aH));
+      });
+      const onAccent =
+        aL > 0.62 ? neutral[mode === "dark" ? 0 : 11] : "#ffffff";
+      return { neutral, accent, onAccent, aL };
+    }
+
+    // Everything a scope needs to be one mode: primitives and the knobs that
+    // feed the semantic tier. Applied to :root for the page, and to the two
+    // side-by-side panels for their fixed modes.
+    function modeVars(mode) {
+      const sc = makeScales(mode);
+      const mat = MATERIAL[mode][state.contrast];
+      const st = STATUS[mode];
+      const high = state.contrast === "high";
+      const v = {};
+      sc.neutral.forEach((x, i) => (v[`--neutral-${i + 1}`] = x));
+      sc.accent.forEach((x, i) => (v[`--accent-${i + 1}`] = x));
+      v["--on-accent-auto"] = sc.onAccent;
+      v["--glass-fill-base"] = mode === "dark" ? sc.neutral[2] : sc.neutral[1];
+      v["--glass-fill-alpha"] = String(mat.fill);
+      v["--glass-filter"] =
+        mode === "dark"
+          ? `blur(22px) saturate(1.6) brightness(${high ? 0.5 : 0.62}) contrast(0.85)`
+          : `blur(${high ? 26 : 22}px) saturate(1.45) brightness(${high ? 1.18 : 1.1}) contrast(${high ? 0.6 : 0.7})`;
+      v["--glass-edge"] =
+        mode === "dark"
+          ? `inset 0 0 0 1px rgb(255 255 255 / ${mat.edge.toFixed(2)}), inset 0 1px 0 rgb(255 255 255 / 0.07)`
+          : `inset 0 0 0 1px rgb(0 0 0 / ${(mat.edge * 0.6).toFixed(2)}), inset 0 1px 0 rgb(255 255 255 / 0.6)`;
+      v["--glass-shadow"] =
+        mode === "dark"
+          ? "0 0 0 0 transparent"
+          : "0 10px 30px rgb(20 16 10 / 0.16)";
+      v["--muted-mix"] = high
+        ? mode === "dark"
+          ? "82%"
+          : "86%"
+        : mode === "dark"
+          ? "68%"
+          : "74%";
+      v["--faint-mix"] = high
+        ? mode === "dark"
+          ? "64%"
+          : "70%"
+        : mode === "dark"
+          ? "46%"
+          : "54%";
+      v["--border-subtle-mix"] = high ? "16%" : mode === "dark" ? "8%" : "10%";
+      v["--border-strong-mix"] = high ? "30%" : mode === "dark" ? "16%" : "20%";
+      v["--success"] = st.success;
+      v["--success-bg"] = st.successBg;
+      v["--warning"] = st.warning;
+      v["--warning-bg"] = st.warningBg;
+      v["--danger"] = st.danger;
+      v["--danger-bg"] = st.dangerBg;
+      v["--on-status"] = st.onStatus;
+      v["--knob"] = mode === "dark" ? sc.neutral[11] : "#ffffff";
+      return { vars: v, scales: sc, material: mat };
+    }
+    const applyVars = (el, vars) => {
+      for (const [k, x] of Object.entries(vars)) el.style.setProperty(k, x);
+    };
+
+    let current = null;
+    function generate() {
+      const mode = effectiveMode();
+      current = modeVars(mode);
+      applyVars(root, current.vars);
+      root.dataset.mode = mode;
+      root.dataset.contrast = state.contrast;
+      root.dataset.backdrop = state.backdrop;
+      applyVars(document.getElementById("panel-dark"), modeVars("dark").vars);
+      applyVars(document.getElementById("panel-light"), modeVars("light").vars);
+      try {
+        localStorage.setItem("zoo-state-2", JSON.stringify(state));
+      } catch (e) {}
+      renderScales();
+      renderTokens();
+      renderMaterial();
+      renderPipeline();
+      renderContrast(mode);
+      syncControls();
+    }
+
+    function swatches(list) {
+      return list
+        .map((v, i) => {
+          const [L] = rgbToOklch(parseHex(v));
+          return `<div class="chip-sw" style="background:${v}" title="${i + 1} ${v}"><span style="color:${L > 0.6 ? "#111" : "#eee"}">${i + 1}</span></div>`;
+        })
+        .join("");
+    }
+    function renderScales() {
+      for (const m of ["dark", "light"]) {
+        const s = makeScales(m);
+        document.getElementById(`neutral-${m}`).innerHTML = swatches(s.neutral);
+        document.getElementById(`accent-${m}`).innerHTML = swatches(s.accent);
+        document.getElementById(`accent-${m}-in`).innerHTML =
+          `<code>${ACCENTS[state.accent][m]}</code>`;
+      }
+    }
+
+    const TOKENS = {
+      "tok-a": [
+        ["--surface-glass", "the glass body's fill, per mode"],
+        ["--surface-raised", "solid, where there is no glass"],
+        ["--scrim", "behind modal surfaces, both modes"],
+        ["--fg", "names, values"],
+        ["--fg-muted", "state, secondary text"],
+        ["--fg-faint", "metadata, captions"],
+        ["--fg-disabled", "controls that can't be used"],
+      ],
+      "tok-b": [
+        ["--fill-1", "sections, fields · 6 % of currentColor"],
+        ["--fill-2", "controls at rest · 10 %"],
+        ["--fill-3", "tracks, strong fills · 16 %"],
+        ["--border-subtle", "card edges, dividers"],
+        ["--border-strong", "focused fields"],
+        ["--accent-bg", "on, selected, primary"],
+        ["--on-accent", "text on --accent-bg"],
+        ["--accent", "accent text, 15 px bold and up"],
+        ["--focus-ring", "keyboard focus, 2 px"],
+      ],
+      "tok-c": [
+        ["--success", "success text and dots"],
+        ["--success-bg", "success fill"],
+        ["--warning", "warning text"],
+        ["--danger", "danger text"],
+        ["--danger-bg", "destructive action"],
+        ["hover", "+7 % of currentColor"],
+        ["pressed", "+16 %"],
+        ["selected", "+10 %, or accent fill"],
+      ],
+    };
+    function renderTokens() {
+      const cs = getComputedStyle(root);
+      for (const [id, list] of Object.entries(TOKENS)) {
+        document.getElementById(id).innerHTML = list
+          .map(([name, use]) => {
+            const isVar = name.startsWith("--");
+            const pct = { hover: 7, pressed: 16, selected: 10 }[name];
+            const sw = isVar
+              ? `background:var(${name})`
+              : `background:color-mix(in srgb, var(--fg) ${pct}%, transparent)`;
+            const val = isVar ? cs.getPropertyValue(name).trim() : "";
+            return `<div class="tok"><i style="${sw}"></i><span><code>${name}</code><br><small>${use}</small></span><small>${val.startsWith("#") ? val : ""}</small></div>`;
+          })
+          .join("");
+      }
+    }
+
+    function renderMaterial() {
+      const d = MATERIAL.dark[state.contrast],
+        l = MATERIAL.light[state.contrast];
+      const dFill = makeScales("dark").neutral[2],
+        lFill = makeScales("light").neutral[1];
+      const rows = [
+        [
+          "fill_color",
+          `<code>${dFill}</code>`,
+          `<code>${lFill}</code>`,
+          "The body tint. Dark glass is smoked, light glass is milky. Neutral step 3 or 2 of the mode, so it follows the Neutral input.",
+        ],
+        [
+          "fill_alpha",
+          d.fill,
+          l.fill,
+          "Light glass needs a little more body: a bright tint over a dark backdrop shows every edge behind it.",
+        ],
+        [
+          "absorb",
+          d.absorb,
+          l.absorb,
+          "Beer-Lambert darkening through the slab. Right for smoked glass, wrong for milky glass, which must not grey out the light it lets through.",
+        ],
+        [
+          "photochromic",
+          d.photo,
+          `${l.photo}<span class="new">new sign</span>`,
+          "Dark: a ceiling, so a white page behind cannot wash the text out. Light: a lift, a floor on luminance, so a black terminal behind cannot swallow dark text.",
+        ],
+        [
+          "edge_light",
+          d.edge,
+          l.edge,
+          "The rim. Light glass needs more of it, drawn as a darker line, because a light edge on a light body disappears.",
+        ],
+        [
+          "frost",
+          d.frost,
+          l.frost,
+          "Light glass shows detail behind it more clearly, so it gets a little more frost.",
+        ],
+      ];
+      document.getElementById("material-table").innerHTML =
+        `<tr><th>Value</th><th>Dark</th><th>Light</th><th>Why</th></tr>` +
+        rows
+          .map(
+            ([k, a, b, why]) =>
+              `<tr><td><code>${k}</code></td><td class="num">${a}</td><td class="num">${b}</td><td class="why">${why}</td></tr>`,
+          )
+          .join("");
+    }
+
+    function renderPipeline() {
+      const m = effectiveMode();
+      const mat = MATERIAL[m][state.contrast];
+      const steps = [
+        ["Backdrop", "What is behind the surface on screen.", "input", false],
+        [
+          "Refract, blur",
+          "Snell through the bevel, frost scatter. Same in both modes.",
+          "material",
+          false,
+        ],
+        [
+          "Absorb",
+          `exp(−${mat.absorb} · path). ${m === "dark" ? "Smoked." : "Barely: milky glass stays bright."}`,
+          "mode",
+          true,
+        ],
+        [
+          m === "dark" ? "Ceiling" : "Lift",
+          m === "dark"
+            ? `Luminance capped softly at ${mat.photo}.`
+            : `Luminance floored softly at ${Math.abs(mat.photo)}.`,
+          "mode",
+          true,
+        ],
+        ["Body fill", `Mix toward the fill at ${mat.fill}.`, "mode", true],
+        [
+          "Client",
+          "The card's content. Its key-coloured fill was dropped.",
+          "swaypplet",
+          false,
+        ],
+        [
+          "Rim, specular",
+          `Edge light ${mat.edge}, Fresnel reflection.`,
+          "mode",
+          true,
+        ],
+      ];
+      document.getElementById("pipeline").innerHTML = steps
+        .map(
+          ([t, d, who, isMode]) =>
+            `<div class="stage ${isMode ? "mode" : ""}"><span class="who">${who}</span><b>${t}</b><small>${d}</small></div>`,
+        )
+        .join("");
+    }
+
+    // ── APCA 0.0.98G ─────────────────────────────────────────────────────────
+    const Ylum = ([r, g, b]) =>
+      0.2126729 * r ** 2.4 + 0.7151522 * g ** 2.4 + 0.072175 * b ** 2.4;
+    function apca(txt, bg) {
+      const clamp = (y) => (y < 0.022 ? y + (0.022 - y) ** 1.414 : y);
+      const yt = clamp(Ylum(txt)),
+        yb = clamp(Ylum(bg));
+      if (Math.abs(yb - yt) < 0.0005) return 0;
+      let out;
+      if (yb > yt) {
+        const s = (yb ** 0.56 - yt ** 0.57) * 1.14;
+        out = s < 0.1 ? 0 : s - 0.027;
+      } else {
+        const s = (yb ** 0.65 - yt ** 0.62) * 1.14;
+        out = s > -0.1 ? 0 : s + 0.027;
+      }
+      return out * 100;
+    }
+    const mixLin = (a, b, t) => a.map((x, i) => x * (1 - t) + b[i] * t);
+
+    // The shader's steps on one flat pixel, in linear light.
+    function glassBody(backdropSrgb, mode) {
+      const mat = MATERIAL[mode][state.contrast];
+      let t = backdropSrgb.map(toLin).map((x) => x * Math.exp(-mat.absorb));
+      const lum = 0.2126 * t[0] + 0.7152 * t[1] + 0.0722 * t[2];
+      if (mat.photo > 0 && lum > 0.0005) {
+        const k = (mat.photo * (1 - Math.exp(-lum / mat.photo))) / lum;
+        t = t.map((x) => x * k);
+      } else if (mat.photo < 0) {
+        const f = -mat.photo;
+        const lifted = lum + f * Math.exp(-lum / f);
+        t =
+          lum > 0.0005
+            ? t.map((x) => (x * lifted) / lum)
+            : [lifted, lifted, lifted];
+      }
+      const sc = makeScales(mode);
+      const fill = parseHex(
+        mode === "dark" ? sc.neutral[2] : sc.neutral[1],
+      ).map(toLin);
+      return mixLin(t, fill, mat.fill).map(toSrgb);
+    }
+    const overSrgb = (fg, a, bg) => fg.map((c, i) => c * a + bg[i] * (1 - a));
+
+    function renderContrast(mode) {
+      const sc = makeScales(mode);
+      const v = current.vars;
+      const pct = (s) => parseFloat(s) / 100;
+      const fg = parseHex(sc.neutral[11]);
+      const rows = [
+        ["--fg", fg, 1, 75, "names, values"],
+        ["--fg-muted", fg, pct(v["--muted-mix"]), 60, "state text"],
+        ["--fg-faint", fg, pct(v["--faint-mix"]), 45, "captions"],
+        [
+          "--accent (text)",
+          parseHex(sc.accent[10]),
+          1,
+          60,
+          "15 px bold and up",
+        ],
+        [
+          "--accent-9 as text",
+          parseHex(sc.accent[8]),
+          1,
+          60,
+          "what the rules forbid",
+        ],
+      ];
+      const bgs = [
+        ["White", [1, 1, 1]],
+        ["Mid-grey", [0.5, 0.5, 0.5]],
+        ["Black", [0, 0, 0]],
+      ];
+      let fails = 0,
+        total = 0;
+      const head = `<tr><th>Token</th><th>Use</th><th>Needs</th>${bgs.map(([n]) => `<th>${n}</th><th></th>`).join("")}</tr>`;
+      const body = rows
+        .map(([name, col, a, need, use]) => {
+          const cells = bgs
+            .map(([, b]) => {
+              const ground = glassBody(b, mode);
+              const text = overSrgb(col, a, ground);
+              const lc = Math.abs(apca(text, ground));
+              const ok = lc >= need;
+              if (!name.includes("as text")) {
+                total++;
+                if (!ok) fails++;
+              }
+              return `<td><span class="swatch-pair" style="background:${hex(ground)};color:${hex(text)}">Aa</span></td><td class="num ${ok ? "pass" : "fail"}">Lc ${lc.toFixed(0)}</td>`;
+            })
+            .join("");
+          return `<tr><td><code>${name}</code></td><td>${use}</td><td class="num">Lc ${need}</td>${cells}</tr>`;
+        })
+        .join("");
+      document.getElementById("contrast-table").innerHTML = head + body;
+      const mat = MATERIAL[mode][state.contrast];
+      document.getElementById("contrast-note").textContent =
+        `${mode === "dark" ? "Dark" : "Light"} mode, ${state.contrast} contrast: fill ${mat.fill}, absorb ${mat.absorb}, ${mat.photo > 0 ? "ceiling " + mat.photo : "lift " + -mat.photo}. ` +
+        (fails
+          ? `${fails} of ${total} token checks fail.`
+          : `All ${total} token checks pass.`) +
+        ` The last row is the rule's counter-example and does not count.`;
+    }
+
+    // ── Controls ─────────────────────────────────────────────────────────────
+    const accentsEl = document.getElementById("accents");
+    accentsEl.innerHTML = ACCENTS.map(
+      (a, i) =>
+        `<button type="button" data-v="${i}" aria-label="${a.name}" aria-pressed="false"></button>`,
+    ).join("");
+    function syncControls() {
+      const m = effectiveMode();
+      [...accentsEl.children].forEach((b, i) => {
+        b.style.background = ACCENTS[i][m];
+        b.setAttribute("aria-pressed", String(i === state.accent));
+      });
+      for (const [id, key] of [
+        ["mode", "mode"],
+        ["neutral", "neutral"],
+        ["contrast", "contrast"],
+        ["backdrop", "backdrop"],
+      ])
+        for (const b of document.getElementById(id).children)
+          b.setAttribute("aria-pressed", String(b.dataset.v === state[key]));
+    }
+    accentsEl.addEventListener("click", (e) => {
+      const v = e.target.dataset?.v;
+      if (v != null) {
+        state.accent = Number(v);
+        generate();
+      }
+    });
+    for (const [id, key] of [
+      ["mode", "mode"],
+      ["neutral", "neutral"],
+      ["contrast", "contrast"],
+      ["backdrop", "backdrop"],
+    ])
+      document.getElementById(id).addEventListener("click", (e) => {
+        const v = e.target.dataset?.v;
+        if (v) {
+          state[key] = v;
+          generate();
+        }
+      });
+    if (prefersDark && prefersDark.addEventListener)
+      prefersDark.addEventListener("change", () => {
+        if (state.mode === "auto") generate();
+      });
+    new MutationObserver(() => {
+      if (state.mode === "auto") generate();
+    }).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+
+    // Button state matrix.
+    const kinds = [
+      ["primary", "Primary"],
+      ["", "Secondary"],
+      ["flat", "Flat"],
+      ["destructive", "Delete"],
+    ];
+    const st = [
+      ["", "Rest"],
+      ["is-hover", "Hover"],
+      ["is-press", "Pressed"],
+      ["is-focus", "Focus"],
+      ["is-disabled", "Disabled"],
+    ];
+    document.getElementById("states").innerHTML =
+      `<span></span>${st.map(([, n]) => `<span class="label">${n}</span>`).join("")}` +
+      kinds
+        .map(
+          ([k, n]) =>
+            `<span class="label">${n}</span>` +
+            st
+              .map(
+                ([s]) =>
+                  `<button type="button" class="btn ${k} ${s}" ${s === "is-disabled" ? "disabled" : ""}>${n === "Delete" ? "Delete" : "Apply"}</button>`,
+              )
+              .join(""),
+        )
+        .join("");
+
+    // Tiles.
+    const TILE_SET = [
+      ["Wi-Fi", "Fjällvägen 5G", "📶", true, true],
+      ["Bluetooth", "2 connected", "ᛒ", true, true],
+      ["Do not disturb", "Off", "🔕", false, false],
+      ["Night light", "Until 07:00", "☾", true, false],
+      ["Airplane", "Off", "✈", false, false],
+      ["Camera", "Not in use", "◉", false, true],
+    ];
+    const tileHtml = (n) =>
+      TILE_SET.slice(0, n)
+        .map(
+          ([t, s, g, on, more]) =>
+            `<div class="tile ${on ? "on" : ""}"><button type="button" class="main" aria-pressed="${on}"><span class="glyph">${g}</span><span class="txt"><b>${t}</b><small>${s}</small></span></button>${more ? `<button type="button" class="more" aria-label="${t} details">›</button>` : ""}</div>`,
+        )
+        .join("");
+    document.getElementById("tiles").innerHTML = tileHtml(4);
+
+    const panelHtml = `
+    <div class="top">
+      <div class="avatar" style="background:#6a5a8f">M</div>
+      <div class="who"><b>meros</b><small>meros-laptop · 84 % · 6 h left</small></div>
+      <button class="btn icon flat" type="button" aria-label="Settings">⚙</button>
+      <button class="btn icon" type="button" aria-label="Power">⏻</button>
+    </div>
+    <div class="tiles">${tileHtml(4)}</div>
+    <div class="slider-row"><span class="glyph">🔊</span><input type="range" min="0" max="100" value="64" aria-label="Volume"><output>64 %</output></div>
+    <div class="slider-row"><span class="glyph">☀</span><input type="range" min="0" max="100" value="40" aria-label="Brightness"><output>40 %</output></div>
+    <button class="section-h" type="button" aria-expanded="false"><span>🔔</span><b>Notifications</b><small>3 new</small><span class="chev">›</span></button>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-4)">
+      <span class="status ok">Backup today 09:12</span>
+      <button class="btn pill primary" type="button">Lock</button>
+    </div>`;
+    for (const id of ["panel-main", "panel-dark", "panel-light"])
+      document.getElementById(id).innerHTML = panelHtml;
+
+    document.addEventListener("click", (e) => {
+      const main = e.target.closest(".tile .main");
+      if (main) {
+        const tile = main.parentElement;
+        const on = !tile.classList.contains("on");
+        tile.classList.toggle("on", on);
+        main.setAttribute("aria-pressed", String(on));
+        const small = main.querySelector("small");
+        if (!on) {
+          small.dataset.was = small.textContent;
+          small.textContent = "Off";
+        } else if (small.dataset.was) small.textContent = small.dataset.was;
+      }
+      const sw = e.target.closest(".switch");
+      if (sw)
+        sw.setAttribute(
+          "aria-checked",
+          String(sw.getAttribute("aria-checked") !== "true"),
+        );
+    });
+    for (const r of document.querySelectorAll('input[type="range"]')) {
+      const upd = () => {
+        r.style.setProperty("--p", r.value + "%");
+        const o = r.parentElement.querySelector("output");
+        if (o) o.textContent = r.value + " %";
+      };
+      r.addEventListener("input", upd);
+      upd();
+    }
+    const secBtn = document.getElementById("sec-bt"),
+      secBody = document.getElementById("sec-bt-body");
+    secBtn.addEventListener("click", () => {
+      const open = secBtn.getAttribute("aria-expanded") !== "true";
+      secBtn.setAttribute("aria-expanded", String(open));
+      secBody.classList.toggle("open", open);
+    });
+
+    document.getElementById("space-bars").innerHTML = [1, 2, 3, 4, 5, 6, 7]
+      .map(
+        (i) =>
+          `<div><code>space-${i}</code><em style="width:var(--space-${i})"></em></div>`,
+      )
+      .join("");
+    const MOTION = [
+      ["fast 150", "--dur-fast", "--ease-standard"],
+      ["standard 200", "--dur-standard", "--ease-standard"],
+      ["emphasis 300", "--dur-emphasis", "--ease-decelerate"],
+      ["spatial 400", "--dur-spatial", "--ease-standard"],
+      ["long 500", "--dur-long", "--ease-standard"],
+    ];
+    const motion = document.getElementById("motion");
+    motion.innerHTML = MOTION.map(
+      ([n, d, e]) =>
+        `<div><code>${n}</code><div class="track-m"><b style="transition:left var(${d}) var(${e})"></b></div></div>`,
+    ).join("");
+    const mcard = motion.closest(".card");
+    mcard.addEventListener("mouseenter", () => motion.classList.add("go"));
+    mcard.addEventListener("mouseleave", () => motion.classList.remove("go"));
+    mcard.addEventListener("click", () => motion.classList.toggle("go"));
+
+    generate();
+  })();
+</script>

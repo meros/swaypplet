@@ -16,7 +16,8 @@
 #              indistinguishable from the standard curve; ease-in-out and
 #              linear for loops and spinners; one bespoke shake curve.
 set -uo pipefail
-CSS="${1:-$(dirname "$0")/../data/style.css}"
+CSS="${1:-$(dirname "$0")/../data/css}"
+[ -d "$CSS" ] && CSS=$(cat "$CSS"/*.css | { f=$(mktemp); cat > "$f"; echo "$f"; })
 
 echo "── durations ──"
 grep -oE '[0-9]+(\.[0-9]+)?m?s' "$CSS" | sort | uniq -c | sort -rn

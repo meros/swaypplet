@@ -1,8 +1,13 @@
 //! The stylesheet, as GTK gets it.
 //!
-//! Two files in one provider: `data/palette.css` names every colour and
-//! `data/style.css` is every rule, concatenated in that order and parsed as
-//! one document. They cannot be two providers. GTK4 resolves `@define-color`
+//! One provider, one document, in this order: the design tokens
+//! (`crate::tokens`, generated from the theme inputs; docs/design-system.md),
+//! `data/palette.css` (the `@define-color` names the rules still use while
+//! they move onto the tokens), then the rules, one file per surface in
+//! `data/css/`, joined in the order of [`RULES`]. The order is the cascade:
+//! the files are contiguous pieces of what was one stylesheet.
+//!
+//! The palette and the rules are one provider on purpose. They cannot be two providers. GTK4 resolves `@define-color`
 //! per provider at parse time, so a second provider that redefines @accent
 //! recolours nothing the first one already parsed — which is why the
 //! wallpaper-derived palette (`crate::palette`) is swapped in *here*, in
@@ -25,23 +30,89 @@ thread_local! {
     static LOADED: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
-/// The rules. Dev override: SWAYPPLET_CSS=<path> loads them from disk at
-/// runtime instead of the baked-in copy, so the render harness can iterate
-/// on style.css without recompiling. Production runs leave it unset.
+/// The rules, one file per surface, in cascade order.
+pub const RULES: &[(&str, &str)] = &[
+    ("01-base.css", include_str!("../data/css/01-base.css")),
+    ("02-bar.css", include_str!("../data/css/02-bar.css")),
+    ("03-panel.css", include_str!("../data/css/03-panel.css")),
+    ("04-network.css", include_str!("../data/css/04-network.css")),
+    ("05-osd.css", include_str!("../data/css/05-osd.css")),
+    (
+        "06-notifications.css",
+        include_str!("../data/css/06-notifications.css"),
+    ),
+    (
+        "07-launcher.css",
+        include_str!("../data/css/07-launcher.css"),
+    ),
+    ("08-auth.css", include_str!("../data/css/08-auth.css")),
+    ("09-helm.css", include_str!("../data/css/09-helm.css")),
+    ("10-lock.css", include_str!("../data/css/10-lock.css")),
+    (
+        "11-keybinds.css",
+        include_str!("../data/css/11-keybinds.css"),
+    ),
+    (
+        "12-screenshot.css",
+        include_str!("../data/css/12-screenshot.css"),
+    ),
+    (
+        "13-switcher.css",
+        include_str!("../data/css/13-switcher.css"),
+    ),
+    (
+        "14-elevation-face.css",
+        include_str!("../data/css/14-elevation-face.css"),
+    ),
+    (
+        "15-settings.css",
+        include_str!("../data/css/15-settings.css"),
+    ),
+    ("16-jump.css", include_str!("../data/css/16-jump.css")),
+];
+
+/// Every rule file joined, as GTK parses them.
+pub fn joined_rules() -> String {
+    RULES
+        .iter()
+        .map(|(_, css)| *css)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The rules. Dev override: SWAYPPLET_CSS=<dir> loads the same files from
+/// that directory at runtime instead of the baked-in copies, so the render
+/// harness can iterate on them without recompiling. Production runs leave
+/// it unset.
 fn rules() -> String {
     match std::env::var_os("SWAYPPLET_CSS") {
-        Some(path) => std::fs::read_to_string(&path).unwrap_or_else(|e| {
-            log::warn!("theme: cannot read SWAYPPLET_CSS={path:?}: {e}");
-            include_str!("../data/style.css").to_string()
-        }),
-        None => include_str!("../data/style.css").to_string(),
+        Some(dir) => {
+            let dir = std::path::PathBuf::from(dir);
+            RULES
+                .iter()
+                .map(|(name, baked)| {
+                    std::fs::read_to_string(dir.join(name)).unwrap_or_else(|e| {
+                        log::warn!("theme: cannot read {name} in SWAYPPLET_CSS: {e}");
+                        (*baked).to_string()
+                    })
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+        None => joined_rules(),
     }
+}
+
+/// The whole document: tokens, palette, rules.
+fn document(palette: &str) -> String {
+    let tokens = crate::tokens::css(crate::tokens::Inputs::default());
+    format!("{tokens}\n{palette}\n{}", rules())
 }
 
 pub fn load_css() {
     let provider = CssProvider::new();
     let palette = crate::palette::current();
-    provider.load_from_string(&format!("{palette}\n{}", rules()));
+    provider.load_from_string(&document(&palette));
     LOADED.with(|l| *l.borrow_mut() = palette);
 
     gtk4::style_context_add_provider_for_display(
@@ -63,7 +134,7 @@ pub fn reload() -> bool {
     }
     PROVIDER.with(|p| {
         if let Some(provider) = p.borrow().as_ref() {
-            provider.load_from_string(&format!("{palette}\n{}", rules()));
+            provider.load_from_string(&document(&palette));
         }
     });
     LOADED.with(|l| *l.borrow_mut() = palette);
@@ -99,34 +170,33 @@ mod tests {
     /// still made of the pieces it says it is.
     #[test]
     fn the_stylesheet_is_structurally_whole() {
-        for (name, css) in [
-            ("data/style.css", include_str!("../data/style.css")),
-            ("data/palette.css", include_str!("../data/palette.css")),
-            // What GTK actually parses: the two of them, joined. A file that
-            // is whole on its own and breaks the other one at the seam is
-            // the failure the split introduced.
-            (
-                "the joined stylesheet",
-                &*format!(
-                    "{}\n{}",
-                    include_str!("../data/palette.css"),
-                    include_str!("../data/style.css")
-                ),
-            ),
-        ] {
+        for (name, css) in super::RULES {
             structurally_whole(name, css);
         }
+        structurally_whole("data/palette.css", include_str!("../data/palette.css"));
+        // What GTK actually parses: all of them, joined. A file that is
+        // whole on its own and breaks the next one at the seam is the
+        // failure a split introduces.
+        let tokens = crate::tokens::css(crate::tokens::Inputs::default());
+        structurally_whole(
+            "the joined stylesheet",
+            &format!(
+                "{tokens}\n{}\n{}",
+                include_str!("../data/palette.css"),
+                super::joined_rules()
+            ),
+        );
 
         // The accent classes the notification card hands out by number
         // (`notifications::popup::accent_for`) have to exist, or a sender
         // silently falls back to @fg_dim and the hue channel is dead.
-        let css = include_str!("../data/style.css");
+        let css = super::joined_rules();
         for n in 1..=crate::notifications::popup::ACCENTS {
             for rule in [
                 format!(".notification-rail.a{n}"),
                 format!(".notification-app-name.a{n}"),
             ] {
-                assert!(css.contains(&rule), "data/style.css has no `{rule}`");
+                assert!(css.contains(&rule), "data/css/ has no `{rule}`");
             }
         }
     }
@@ -198,48 +268,48 @@ mod tests {
     /// and that is the documentation the derivation depends on.
     #[test]
     fn the_rules_carry_no_colour_literals() {
-        let css = include_str!("../data/style.css");
-        let mut in_comment = false;
-        for (n, line) in css.lines().enumerate() {
-            let mut rest = line;
-            let mut code = String::new();
-            loop {
-                if in_comment {
-                    match rest.find("*/") {
-                        Some(i) => {
-                            in_comment = false;
-                            rest = &rest[i + 2..];
+        for (file, css) in super::RULES {
+            let mut in_comment = false;
+            for (n, line) in css.lines().enumerate() {
+                let mut rest = line;
+                let mut code = String::new();
+                loop {
+                    if in_comment {
+                        match rest.find("*/") {
+                            Some(i) => {
+                                in_comment = false;
+                                rest = &rest[i + 2..];
+                            }
+                            None => break,
                         }
-                        None => break,
-                    }
-                } else {
-                    match rest.find("/*") {
-                        Some(i) => {
-                            code.push_str(&rest[..i]);
-                            in_comment = true;
-                            rest = &rest[i + 2..];
-                        }
-                        None => {
-                            code.push_str(rest);
-                            break;
+                    } else {
+                        match rest.find("/*") {
+                            Some(i) => {
+                                code.push_str(&rest[..i]);
+                                in_comment = true;
+                                rest = &rest[i + 2..];
+                            }
+                            None => {
+                                code.push_str(rest);
+                                break;
+                            }
                         }
                     }
                 }
-            }
-            let bytes = code.as_bytes();
-            for (i, b) in bytes.iter().enumerate() {
-                if *b != b'#' {
-                    continue;
+                let bytes = code.as_bytes();
+                for (i, b) in bytes.iter().enumerate() {
+                    if *b != b'#' {
+                        continue;
+                    }
+                    let hex = &bytes[i + 1..bytes.len().min(i + 7)];
+                    assert!(
+                        hex.len() < 6 || !hex.iter().all(u8::is_ascii_hexdigit),
+                        "data/css/{file}:{} has the colour literal {} in a rule. \n\
+                     Use a token (docs/design-system.md §3), or the theme cannot reach it.\n  {line}",
+                        n + 1,
+                        &code[i..i + 7]
+                    );
                 }
-                let hex = &bytes[i + 1..bytes.len().min(i + 7)];
-                assert!(
-                    hex.len() < 6 || !hex.iter().all(u8::is_ascii_hexdigit),
-                    "data/style.css:{} has the colour literal {} in a rule. \n\
-                     Name it in data/palette.css and reference it with @name, or the \n\
-                     wallpaper-derived palette cannot reach it.\n  {line}",
-                    n + 1,
-                    &code[i..i + 7]
-                );
             }
         }
     }

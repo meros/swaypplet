@@ -250,9 +250,7 @@ pub fn run() -> ! {
     // and one that goes away takes its window with it — a layer surface is
     // bound to its wl_output and is rebuilt, never migrated (as in the bar).
     let windows: Rc<RefCell<Vec<(gdk4::Monitor, gtk4::Window)>>> = Rc::default();
-    let monitors = gdk4::Display::default()
-        .expect("no gdk display")
-        .monitors();
+    let monitors = gdk4::Display::default().expect("no gdk display").monitors();
     let sync = {
         let surfaces = surfaces.clone();
         let windows = windows.clone();

@@ -1,0 +1,236 @@
+/* ── Jump (src/jump/) ──
+   Super+Tab: sway draws the workspaces themselves in a row (row.rs). This
+   surface is transparent over the output and draws only the ring round the
+   middle workspace and the caption under it. ── */
+.jump-surface {
+    background: none;
+}
+
+/* Outside the workspace, so it frames the windows and covers none. Fades in
+   as the row opens: the workspaces take the animation's time to get there. */
+.jump-ring {
+    border-radius: 16px;
+    box-shadow: 0 0 0 2px alpha(@accent, 0.9), 0 0 24px alpha(@accent, 0.25);
+    animation: jump-ring-in 220ms ease-out;
+}
+
+.jump-ring.pinned {
+    box-shadow: 0 0 0 2px alpha(@accent, 0.9), 0 0 0 5px alpha(@accent, 0.25),
+        0 0 24px alpha(@accent, 0.25);
+}
+
+@keyframes jump-ring-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* The workspace picture (the bar's peek and pins): its windows straight on
+   the glass. No ground and no frame, so the workspace is the group its
+   windows make and nothing else; the gaps between them are the glass. */
+.jump-preview {
+    background: none;
+    box-shadow: none;
+}
+
+/* One window. The panel and icon hold the spot until the first frame. The
+   shadow is what lifts a picture off the desktop behind it. */
+.jump-window {
+    box-shadow: 0 4px 14px alpha(black, 0.55);
+}
+
+.jump-window-panel {
+    background-color: @surface_raised;
+    color: @fg_dim;
+}
+
+.jump-window.live .jump-window-panel {
+    background-color: transparent;
+}
+
+/* Peek (src/jump/peek.rs): the bar popover chassis around a tile's picture,
+   with no ground of its own either. */
+.jump-peek {
+    padding: 8px;
+}
+
+/* Pins (src/jump/pin.rs): a small glass card in a corner, the picture over
+   a footer. The picture has no ground, like a tile's. The footer says what
+   the pin is and what it does: the mark and the label always, the hint and
+   the × at full strength only while the pointer is on the pin, so a pin
+   you are not touching stays quiet and one you are explains itself. */
+.jump-pin {
+    padding: 8px 8px 4px 8px;
+}
+
+.jump-pin-footer {
+    padding: 0 2px;
+}
+
+.jump-pin-mark {
+    font-size: 12px;
+    color: @accent;
+}
+
+.jump-pin-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: @fg_dim;
+}
+
+.jump-pin-hint {
+    font-size: 11px;
+    color: @text_faint;
+    opacity: 0;
+    transition: opacity 150ms ease-out;
+}
+
+.jump-pin:hover .jump-pin-hint {
+    opacity: 1;
+}
+
+button.jump-pin-close {
+    min-width: 22px;
+    min-height: 22px;
+    padding: 0;
+    border-radius: 11px;
+    font-size: 15px;
+    color: @fg_dim;
+    opacity: 0.45;
+    transition: opacity 150ms ease-out, background-color 150ms ease-out;
+}
+
+.jump-pin:hover button.jump-pin-close {
+    opacity: 1;
+}
+
+button.jump-pin-close:hover {
+    background-color: alpha(@fg, 0.14);
+    color: @fg;
+}
+
+/* The bar's pins mark (src/bar/pins.rs): dim and achromatic like the media
+   mark, filled while pins float, hollow while they are tucked. */
+button.bar-pins-mark {
+    padding: 0 8px;
+    min-height: 0;
+    background: none;
+    color: @fg_dim;
+    font-size: 13px;
+}
+
+button.bar-pins-mark:hover {
+    color: @fg;
+}
+
+button.bar-pins-mark.tucked {
+    color: alpha(@fg, 0.45);
+}
+
+.bar-pins-count {
+    font-size: 11px;
+}
+
+.bar-pins-row {
+    padding: 4px 0;
+}
+
+.bar-pins-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: @fg;
+}
+
+button.bar-pins-action,
+button.bar-pins-tuck {
+    padding: 2px 10px;
+    min-height: 0;
+    font-size: 12px;
+}
+
+/* A pinned workspace's button carries the pin after its label: the second
+   of the two marks P5 allows a segment, after the task dot. */
+.bar-ws-pin {
+    font-size: 9px;
+    color: alpha(@fg, 0.55);
+}
+
+/* A launcher row for a window already open (src/launcher.rs): the window
+   live where the icon would be. */
+.launcher-window-picture {
+    border-radius: 6px;
+    background-color: alpha(@bg0, 0.6);
+}
+
+/* The window picker for screenshots (src/screenshot/window.rs): a glass
+   card with a grid of every window, live. */
+.window-picker {
+    padding: 16px;
+}
+
+.window-picker-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: @fg_dim;
+}
+
+.window-picker-grid flowboxchild {
+    border-radius: 12px;
+    padding: 8px;
+}
+
+.window-picker-grid flowboxchild:selected,
+.window-picker-grid flowboxchild:hover {
+    background-color: @accent_tint;
+    box-shadow: inset 0 0 0 2px @accent;
+}
+
+.window-picker-name {
+    font-size: 13px;
+    color: @fg;
+}
+
+.window-picker-place {
+    font-size: 11px;
+    color: @fg_dim;
+}
+
+.jump-empty {
+    font-size: 12px;
+    color: @text_faint;
+}
+
+.jump-caption {
+    padding: 0 2px;
+}
+
+/* The captions sit on whatever the desktop is, so they carry their own
+   contrast. */
+.jump-caption label {
+    text-shadow: 0 1px 3px alpha(black, 0.85), 0 0 8px alpha(black, 0.6);
+}
+
+/* The key that reaches this place without this surface. Accent, because it is
+   the part of the tile worth learning. */
+.jump-chord {
+    font-family: monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: @accent;
+    background-color: alpha(@accent, 0.14);
+    border-radius: 6px;
+    padding: 1px 6px;
+    margin-right: 8px;
+}
+
+.jump-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: @fg;
+    margin-right: 8px;
+}
+
+.jump-detail {
+    font-size: 12px;
+    color: @fg_dim;
+}

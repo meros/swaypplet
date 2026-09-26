@@ -575,8 +575,8 @@ impl Pins {
                     if !introducing {
                         pin.introduce_until = None;
                     }
-                    let show = !held
-                        && (introducing || (!tucked && !on_screen.contains(&pin.workspace)));
+                    let show =
+                        !held && (introducing || (!tucked && !on_screen.contains(&pin.workspace)));
                     match f {
                         Found::Workspace(scene) => update(pin, Some(scene), show),
                         Found::Window(window, _) => update_region(pin, &window, show),

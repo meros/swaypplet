@@ -42,6 +42,7 @@ mod sway_ipc;
 mod switch_user;
 mod task_state;
 mod theme;
+mod tokens;
 mod widgets;
 
 fn main() {

@@ -1,0 +1,65 @@
+/* ══════════════════════════════════════════════════════
+   Swaypplet – Gruvbox Dark Theme
+   Matches the waybar design language: flat frosted surfaces,
+   hairline borders, no gradients or bevel highlights.
+   Saturated color is reserved for state.
+   Nested radii are concentric (inner = outer − gap) where
+   corners sit close together (gap ≤ ~8px).
+   Motion: docs/MOTION.md, restated in full further down
+   this file. Five durations (150/200/300/400/500) and
+   three curves, evaluated identically in src/anim.rs.
+   Attention loops (pulses, shake, breathing) sit outside
+   the scale on purpose.
+   ══════════════════════════════════════════════════════ */
+
+/* ── Palette ──
+   In data/palette.css, not here, and loaded in front of these rules by
+   `theme::load_css`. The wallpaper-derived palette replaces that file's
+   block wholesale (src/palette.rs), so a colour LITERAL in a rule below is
+   a colour the wallpaper cannot reach: name it there and reference it here.
+   `the_rules_carry_no_colour_literals` in src/theme.rs fails the build on
+   one that slips back in. */
+
+/* ── Glass card: shared base for floating surfaces (OSD, notification
+   popups, launcher, polkit/lock cards, start menu). box-shadow stays
+   per-surface: compositor-blurred layers need `none` (a shadow's
+   translucent pixels would frost into a halo), while the unblurred lock
+   layer keeps a real drop shadow. ── */
+.glass-card {
+    background-color: @surface;
+    border-radius: 18px;
+    border: 1px solid @border_strong;
+}
+
+/* ── Graceful Fallback: when running without compositor liquid glass ── */
+.no-glass .glass-card,
+.no-glass .bar-root,
+.no-glass .panel-window {
+    background-color: alpha(@bg0, 0.94);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+/* ── Window: transparent so compositor alpha-blends ──
+   No outer drop shadows on floating cards: swayfx blur_ignore_transparent
+   only skips pixels with alpha exactly 0, so a shadow overhanging the
+   transparent apron around a card gets frosted by the compositor — a
+   blurred halo the size of the whole window. Depth comes from the
+   hairline border + the frosted contrast instead. Inner shadows
+   (insets, knobs, glows over opaque fills) are fine. */
+window, window.background, window.csd, decoration {
+    background-color: transparent;
+    background: none;
+    box-shadow: none;
+    border: none;
+}
+
+scrolledwindow, viewport {
+    background-color: transparent;
+}
+
+/* ── Panel window: background + rounded corners on the window itself ── */
+window.panel {
+    font-family: "UbuntuSans Nerd Font", "Ubuntu Nerd Font", "Noto Sans", sans-serif;
+    font-size: 10pt;
+    color: @fg;
+}

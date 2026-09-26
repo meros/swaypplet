@@ -144,7 +144,10 @@ async fn session(
     let client = Client::new().await?;
     let mut events = client.subscribe();
     let mut last = None;
-    if send_changed(tx, snapshot(&client), &mut last).await.is_err() {
+    if send_changed(tx, snapshot(&client), &mut last)
+        .await
+        .is_err()
+    {
         return Ok(());
     }
 

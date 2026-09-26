@@ -166,7 +166,12 @@ impl LauncherView {
 
     /// What Enter does: activate the selected row.
     pub fn activate_selected(&self) {
-        activate_selected(&self.state, &self.results_box, &self.entry, &self.on_activate);
+        activate_selected(
+            &self.state,
+            &self.results_box,
+            &self.entry,
+            &self.on_activate,
+        );
     }
 
     pub fn entry(&self) -> &gtk4::SearchEntry {
@@ -1294,14 +1299,23 @@ mod tests {
     #[test]
     fn a_title_matches_every_query_word_in_any_case() {
         let words = title_words("dreaded Board");
-        assert!(title_matches(&words, "The dreaded board view · The project - Google Chrome"));
+        assert!(title_matches(
+            &words,
+            "The dreaded board view · The project - Google Chrome"
+        ));
         assert!(!title_matches(&words, "The dreaded list view"));
-        assert!(title_matches(&title_words("youtube"), "(238) YouTube - Google Chrome"));
+        assert!(title_matches(
+            &title_words("youtube"),
+            "(238) YouTube - Google Chrome"
+        ));
     }
 
     #[test]
     fn a_one_letter_query_matches_no_title() {
-        assert!(!title_matches(&title_words("y"), "(238) YouTube - Google Chrome"));
+        assert!(!title_matches(
+            &title_words("y"),
+            "(238) YouTube - Google Chrome"
+        ));
         assert!(!title_matches(&title_words(" "), "anything"));
     }
 
