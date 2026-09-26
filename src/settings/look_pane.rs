@@ -143,6 +143,7 @@ struct State {
     thumbs: RefCell<Vec<(PathBuf, gtk4::Button)>>,
     mode: gtk4::DropDown,
     motion: gtk4::DropDown,
+    launch_zoom: gtk4::Switch,
     tint: gtk4::DropDown,
     /// The palette the tint produced, for the strip to repaint.
     strip: gtk4::DrawingArea,
@@ -206,6 +207,7 @@ impl State {
             .iter()
             .position(|m| *m == settings.look().motion);
         self.motion.set_selected(motion.unwrap_or(0) as u32);
+        self.launch_zoom.set_active(settings.look().launch_zoom);
         let tint = Tint::ALL.iter().position(|t| *t == settings.look().tint);
         self.tint.set_selected(tint.unwrap_or(0) as u32);
         // The derivation runs on a worker, so this paints the palette that
@@ -380,6 +382,12 @@ impl LookPane {
             &motion_labels,
         );
         look.append(&motion_row);
+        let (zoom_row, launch_zoom) = ui::switch_row(
+            "Launch zoom",
+            "An app you start from the launcher grows out of its row. Needs the swayfx handoff patch.",
+            false,
+        );
+        look.append(&zoom_row);
 
         let browse = ui::action_button(
             "Browse…",
@@ -401,6 +409,7 @@ impl LookPane {
             thumbs: RefCell::new(Vec::new()),
             mode: mode.clone(),
             motion: motion.clone(),
+            launch_zoom: launch_zoom.clone(),
             tint: tint.clone(),
             strip: strip.clone(),
             status: status.clone(),
@@ -477,6 +486,17 @@ impl LookPane {
                     return;
                 };
                 store::edit::<Look>(|l| l.motion = motion);
+                state.sync();
+            });
+        }
+        {
+            let state = state.clone();
+            launch_zoom.connect_active_notify(move |s| {
+                if state.updating.get() {
+                    return;
+                }
+                let on = s.is_active();
+                store::edit::<Look>(|l| l.launch_zoom = on);
                 state.sync();
             });
         }

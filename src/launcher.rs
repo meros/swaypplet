@@ -475,6 +475,10 @@ fn activate_selected(
 /// `handoff open`). Only for applications: every other provider either opens
 /// no window or, for the running-window rows, goes to one that exists.
 fn hand_off_launch(provider: &str, row: &gtk4::Widget) {
+    // Off unless the Look tab's "Launch zoom" is on.
+    if !crate::settings::store::with(|s| s.look().launch_zoom) {
+        return;
+    }
     if provider == "desktopapplications"
         && let Some(icon) = row.first_child()
     {
