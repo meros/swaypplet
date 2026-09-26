@@ -1,21 +1,19 @@
 //! Network state and actions, over NetworkManager's D-Bus interface.
 //!
-//! The types and the public functions are unchanged from when this file drove
-//! `nmcli`; only the bodies moved. See `nm.rs` for why.
+//! The reads and actions the tile and the section share. The section itself
+//! reads through `snapshot` on NetworkManager's change signals (`watch`);
+//! `model` is the pure part, `fixture` the canned states for screenshots,
+//! `tailscale` the tailnet through its CLI. See `nm.rs` for why D-Bus and
+//! not `nmcli`.
 
 use std::collections::HashSet;
-use std::time::{Duration, Instant};
 
+pub mod fixture;
+pub mod model;
 mod nm;
-
-/// How long to wait for a rescan's results before drawing what we have.
-///
-/// A scan is asynchronous now: `RequestScan` returns immediately and the
-/// access-point list fills in behind it, so this is a poll on `LastScan`
-/// rather than a wait on a process. Shorter than the old 15 s process
-/// timeout because there is no process to hang — only a driver that may not
-/// answer, and 6 s of a spinner is already longer than anyone wants.
-const WIFI_SCAN_TIMEOUT: Duration = Duration::from_secs(6);
+pub mod snapshot;
+pub mod tailscale;
+pub mod watch;
 
 // ── Nerd Font icons ───────────────────────────────────────────────────────────
 pub const ICON_SIGNAL_NONE: &str = "󰤯";
@@ -23,13 +21,9 @@ pub const ICON_SIGNAL_WEAK: &str = "󰤟";
 pub const ICON_SIGNAL_OK: &str = "󰤢";
 pub const ICON_SIGNAL_GOOD: &str = "󰤥";
 pub const ICON_SIGNAL_EXCELLENT: &str = "󰤨";
-pub const ICON_LOCK: &str = "";
 pub const ICON_ETHERNET: &str = "󰈀";
 pub const ICON_DISCONNECTED: &str = "󰤭";
 pub const ICON_VPN: &str = "󰦝";
-
-/// Maximum number of networks shown before a "Show all" button appears.
-pub const MAX_VISIBLE_NETWORKS: usize = 8;
 
 // ── NetworkManager connection type identifiers ────────────────────────────────
 const NM_TYPE_WIFI: &str = "802-11-wireless";
@@ -87,7 +81,7 @@ pub struct WifiNetwork {
     pub freq_mhz: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum ActiveConnection {
     Wifi {
         ssid: String,
@@ -98,6 +92,7 @@ pub enum ActiveConnection {
     Ethernet {
         device: String,
     },
+    #[default]
     Disconnected,
 }
 
@@ -115,34 +110,14 @@ pub struct NetworkInterface {
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum ConnectivityState {
     Full,
     Limited,
     Portal,
     None,
+    #[default]
     Unknown,
-}
-
-impl ConnectivityState {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Full => "Connected",
-            Self::Limited => "Limited — No internet",
-            Self::Portal => "Captive portal",
-            Self::None => "Disconnected",
-            Self::Unknown => "Unknown",
-        }
-    }
-
-    pub fn summary_badge(&self) -> Option<&'static str> {
-        match self {
-            Self::Portal => Some(" · ⚠ Portal"),
-            Self::Limited => Some(" · ⚠ Limited"),
-            Self::None => Some(" · ⚠ Offline"),
-            _ => Option::None,
-        }
-    }
 }
 
 // ── Is the daemon there? ──────────────────────────────────────────────────────
@@ -158,14 +133,6 @@ pub fn network_manager_available() -> bool {
     nm::prop::<u32>(&conn, nm::MANAGER_PATH, nm::IFACE_MANAGER, "State").is_some()
 }
 
-pub fn wifi_adapter_present() -> bool {
-    let Ok(conn) = nm::system() else {
-        return false;
-    };
-    nm::devices(&conn)
-        .iter()
-        .any(|d| d.device_type == nm::DEVICE_TYPE_WIFI)
-}
 
 // ── WiFi radio state ──────────────────────────────────────────────────────────
 
@@ -231,109 +198,7 @@ pub fn merge_and_rank(found: Vec<WifiNetwork>) -> Vec<WifiNetwork> {
     networks
 }
 
-pub fn get_known_ssids() -> Vec<String> {
-    let Ok(conn) = nm::system() else {
-        return Vec::new();
-    };
-    nm::stored_connections(&conn)
-        .into_iter()
-        .filter(|(_, _, kind)| kind == NM_TYPE_WIFI)
-        .map(|(_, id, _)| id)
-        .collect()
-}
 
-/// Ask every wifi device to rescan, then read what they can see.
-///
-/// `RequestScan` is asynchronous: it returns as soon as the driver accepts,
-/// and `LastScan` moves when results land. Waiting on that is the honest
-/// version of the old bounded wait on an `nmcli` process — and unlike a
-/// process, nothing here can be left running after we stop caring.
-pub fn scan_wifi() -> Result<Vec<WifiNetwork>, String> {
-    let conn = nm::system()?;
-
-    let radios: Vec<String> = nm::devices(&conn)
-        .into_iter()
-        .filter(|d| d.device_type == nm::DEVICE_TYPE_WIFI)
-        .map(|d| d.path)
-        .collect();
-
-    if radios.is_empty() {
-        return Err("No WiFi adapter".to_string());
-    }
-
-    // With the radio off there is nothing to wait for, and waiting the full
-    // timeout to report an empty list reads as a broken scan rather than a
-    // switched-off one.
-    if !nm::prop::<bool>(
-        &conn,
-        nm::MANAGER_PATH,
-        nm::IFACE_MANAGER,
-        "WirelessEnabled",
-    )
-    .unwrap_or(false)
-    {
-        return Err("WiFi is off".to_string());
-    }
-
-    let before: Vec<i64> = radios
-        .iter()
-        .map(|path| nm::prop::<i64>(&conn, path, nm::IFACE_WIRELESS, "LastScan").unwrap_or(-1))
-        .collect();
-
-    for path in &radios {
-        // A refused scan is not fatal: the device may have scanned a second
-        // ago, and its access-point list is still worth drawing.
-        if let Ok(proxy) = nm::proxy(&conn, path, nm::IFACE_WIRELESS) {
-            let options: std::collections::HashMap<&str, zbus::zvariant::Value> =
-                std::collections::HashMap::new();
-            let _ = proxy.call::<_, _, ()>("RequestScan", &(options,));
-        }
-    }
-
-    let deadline = Instant::now() + WIFI_SCAN_TIMEOUT;
-    while Instant::now() < deadline {
-        let moved = radios.iter().zip(&before).any(|(path, was)| {
-            nm::prop::<i64>(&conn, path, nm::IFACE_WIRELESS, "LastScan").unwrap_or(-1) > *was
-        });
-        if moved {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(200));
-    }
-
-    let known = get_known_ssids();
-    let active_conn_ssid = match get_active_connection() {
-        ActiveConnection::Wifi { ssid, .. } => Some(ssid),
-        _ => None,
-    };
-    let mut found = Vec::new();
-
-    for path in &radios {
-        let active = nm::path_prop(&conn, path, nm::IFACE_WIRELESS, "ActiveAccessPoint");
-        for ap in nm::paths(&conn, path, nm::IFACE_WIRELESS, "AccessPoints") {
-            let Some(ssid) = nm::ssid_of(&conn, &ap) else {
-                continue;
-            };
-            let flags = nm::prop::<u32>(&conn, &ap, nm::IFACE_AP, "Flags").unwrap_or(0);
-            let wpa = nm::prop::<u32>(&conn, &ap, nm::IFACE_AP, "WpaFlags").unwrap_or(0);
-            let rsn = nm::prop::<u32>(&conn, &ap, nm::IFACE_AP, "RsnFlags").unwrap_or(0);
-
-            let is_in_use = active.as_deref() == Some(ap.as_str())
-                || active_conn_ssid.as_deref() == Some(ssid.as_str());
-
-            found.push(WifiNetwork {
-                is_known: known.contains(&ssid),
-                in_use: is_in_use,
-                signal: nm::prop::<u8>(&conn, &ap, nm::IFACE_AP, "Strength").unwrap_or(0),
-                security: nm::security_label(flags, wpa, rsn),
-                freq_mhz: nm::prop::<u32>(&conn, &ap, nm::IFACE_AP, "Frequency"),
-                ssid,
-            });
-        }
-    }
-
-    Ok(merge_and_rank(found))
-}
 
 pub fn get_active_connection() -> ActiveConnection {
     let Ok(conn) = nm::system() else {
@@ -394,15 +259,6 @@ pub fn freq_band_label(freq_mhz: u32) -> &'static str {
     }
 }
 
-pub fn freq_band_short(freq_mhz: u32) -> &'static str {
-    if freq_mhz < 3000 {
-        "2.4G"
-    } else if freq_mhz < 6000 {
-        "5G"
-    } else {
-        "6G"
-    }
-}
 
 // ── VPN ───────────────────────────────────────────────────────────────────────
 
@@ -442,87 +298,10 @@ pub fn vpn_down(name: &str) -> NmResult {
 
 // ── WiFi connect/forget ───────────────────────────────────────────────────────
 
-pub fn connect_known(ssid: &str) -> NmResult {
-    let ssid = ssid.to_string();
-    acting(move |conn| nm::activate_by_id(conn, &ssid))
-}
 
-pub fn connect_new(ssid: &str, password: &str, security: &str, hidden: bool) -> NmResult {
-    let (ssid, password, security) = (ssid.to_string(), password.to_string(), security.to_string());
-    acting(move |conn| {
-        // If a stored connection already exists with this SSID, delete it first to prevent duplicates.
-        let existing = nm::stored_connections(conn)
-            .into_iter()
-            .find(|(_, id, kind)| id == &ssid && kind == NM_TYPE_WIFI)
-            .map(|(path, _, _)| path);
 
-        if let Some(path) = existing {
-            let _ = nm::proxy(conn, &path, nm::IFACE_CONNECTION).and_then(|p| {
-                p.call::<_, _, ()>("Delete", &())
-                    .map_err(|e| nm::dbus_message(&e))
-            });
-        }
 
-        let device = nm::devices(conn)
-            .into_iter()
-            .find(|d| d.device_type == nm::DEVICE_TYPE_WIFI)
-            .map(|d| d.path)
-            .ok_or("No WiFi adapter")?;
-        nm::add_and_activate(conn, &device, &ssid, &password, &security, hidden)
-    })
-}
 
-pub fn disconnect_active_wifi() -> NmResult {
-    acting(nm::deactivate_active_wifi)
-}
-
-pub fn disconnect_network(ssid: &str) -> NmResult {
-    let ssid = ssid.to_string();
-    acting(move |conn| {
-        let active = nm::paths(
-            conn,
-            nm::MANAGER_PATH,
-            nm::IFACE_MANAGER,
-            "ActiveConnections",
-        );
-        for path in active {
-            let id = nm::prop::<String>(conn, &path, nm::IFACE_ACTIVE, "Id");
-            if id.as_deref() == Some(&ssid) {
-                let target = zbus::zvariant::ObjectPath::try_from(path.as_str())
-                    .map_err(|e| e.to_string())?;
-                nm::proxy(conn, nm::MANAGER_PATH, nm::IFACE_MANAGER)?
-                    .call::<_, _, ()>("DeactivateConnection", &(&target,))
-                    .map_err(|e| nm::dbus_message(&e))?;
-                return Ok(());
-            }
-        }
-        for dev in nm::devices(conn) {
-            if dev.device_type == nm::DEVICE_TYPE_WIFI && dev.state > nm::DEVICE_STATE_DISCONNECTED
-            {
-                nm::proxy(conn, &dev.path, nm::IFACE_DEVICE)?
-                    .call::<_, _, ()>("Disconnect", &())
-                    .map_err(|e| nm::dbus_message(&e))?;
-                return Ok(());
-            }
-        }
-        Err(format!("Network {ssid} is not currently active"))
-    })
-}
-
-pub fn forget_network(ssid: &str) -> NmResult {
-    let ssid = ssid.to_string();
-    acting(move |conn| {
-        let path = nm::stored_connections(conn)
-            .into_iter()
-            .find(|(_, id, kind)| id == &ssid && kind == NM_TYPE_WIFI)
-            .map(|(path, _, _)| path)
-            .ok_or_else(|| format!("no saved network named {ssid}"))?;
-
-        nm::proxy(conn, &path, nm::IFACE_CONNECTION)?
-            .call::<_, _, ()>("Delete", &())
-            .map_err(|e| nm::dbus_message(&e))
-    })
-}
 
 // ── Interface management ──────────────────────────────────────────────────────
 
@@ -675,60 +454,9 @@ pub fn iface_type_icon(iface_type: &str) -> &'static str {
 
 // ── IP info ───────────────────────────────────────────────────────────────────
 
-/// The device's IPv4 address, from NetworkManager's own view of it.
-///
-/// This used to shell out to `ip`; the daemon has the same answer and is
-/// already being asked about the device on the line above.
-pub fn get_device_ip(device: &str) -> Option<String> {
-    let conn = nm::system().ok()?;
-    let ip4 = ip4_config(&conn, device)?;
-    let addresses: Vec<std::collections::HashMap<String, zbus::zvariant::OwnedValue>> =
-        nm::prop(&conn, &ip4, nm::IFACE_IP4, "AddressData")?;
-    addresses.first()?.get("address").and_then(nm::as_string)
-}
 
-pub fn get_default_gateway() -> Option<String> {
-    let conn = nm::system().ok()?;
-    let primary = nm::path_prop(
-        &conn,
-        nm::MANAGER_PATH,
-        nm::IFACE_MANAGER,
-        "PrimaryConnection",
-    )?;
-    let device = nm::paths(&conn, &primary, nm::IFACE_ACTIVE, "Devices")
-        .into_iter()
-        .next()?;
-    let ip4 = nm::path_prop(&conn, &device, nm::IFACE_DEVICE, "Ip4Config")?;
-    let gateway: String = nm::prop(&conn, &ip4, nm::IFACE_IP4, "Gateway")?;
-    (!gateway.is_empty()).then_some(gateway)
-}
 
-pub fn get_dns_servers(device: &str) -> Vec<String> {
-    let Ok(conn) = nm::system() else {
-        return Vec::new();
-    };
-    let Some(ip4) = ip4_config(&conn, device) else {
-        return Vec::new();
-    };
-    nm::prop::<Vec<std::collections::HashMap<String, zbus::zvariant::OwnedValue>>>(
-        &conn,
-        &ip4,
-        nm::IFACE_IP4,
-        "NameserverData",
-    )
-    .unwrap_or_default()
-    .into_iter()
-    .filter_map(|entry| entry.get("address").and_then(nm::as_string))
-    .collect()
-}
 
-fn ip4_config(conn: &zbus::blocking::Connection, device: &str) -> Option<String> {
-    let path = nm::devices(conn)
-        .into_iter()
-        .find(|d| d.interface == device)
-        .map(|d| d.path)?;
-    nm::path_prop(conn, &path, nm::IFACE_DEVICE, "Ip4Config")
-}
 
 // ── Connectivity ──────────────────────────────────────────────────────────────
 
@@ -755,33 +483,6 @@ pub fn check_connectivity() -> ConnectivityState {
 const POWERSAVE_DISABLE: u32 = 2;
 const POWERSAVE_ENABLE: u32 = 3;
 
-pub fn get_wifi_power_saving(conn_name: &str) -> bool {
-    let Ok(conn) = nm::system() else {
-        return false;
-    };
-    let Some(path) = wifi_connection_path(&conn, conn_name) else {
-        return false;
-    };
-    let Ok(proxy) = nm::proxy(&conn, &path, nm::IFACE_CONNECTION) else {
-        return false;
-    };
-    let settings: std::collections::HashMap<
-        String,
-        std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
-    > = match proxy.call("GetSettings", &()) {
-        Ok(s) => s,
-        Err(e) => {
-            log::debug!("nm: GetSettings for {conn_name}: {e}");
-            return false;
-        }
-    };
-
-    settings
-        .get(NM_TYPE_WIFI)
-        .and_then(|section| section.get("powersave"))
-        .and_then(nm::as_u32)
-        == Some(POWERSAVE_ENABLE)
-}
 
 pub fn set_wifi_power_saving(conn_name: &str, enable: bool) -> NmResult {
     let conn_name = conn_name.to_string();
@@ -827,14 +528,6 @@ fn wifi_connection_path(conn: &zbus::blocking::Connection, name: &str) -> Option
         .map(|(path, _, _)| path)
 }
 
-/// The NM connection name of the active WiFi connection.
-pub fn get_active_wifi_conn_name() -> Option<String> {
-    let conn = nm::system().ok()?;
-    nm::active_connections(&conn)
-        .into_iter()
-        .find(|(_, kind, _)| kind == NM_TYPE_WIFI)
-        .map(|(id, _, _)| id)
-}
 
 #[cfg(test)]
 mod tests {
@@ -990,80 +683,18 @@ mod live {
     #[test]
     #[ignore]
     fn read_the_session() {
-        use super::*;
-        println!("available:    {}", network_manager_available());
-        println!("wifi adapter: {}", wifi_adapter_present());
-        println!("wifi radio:   {}", wifi_radio_enabled());
-        println!("active:       {:?}", get_active_connection());
-        println!("connectivity: {:?}", check_connectivity());
-        println!("gateway:      {:?}", get_default_gateway());
-        println!("known ssids:  {:?}", get_known_ssids());
-        println!("vpns:         {:?}", get_vpn_connections());
-        for iface in get_network_interfaces() {
-            println!(
-                "  iface {:<12} {:<10} enabled={} ip={:?} dns={:?}",
-                iface.device,
-                iface.iface_type,
-                iface.enabled,
-                get_device_ip(&iface.device),
-                get_dns_servers(&iface.device),
-            );
+        let at = std::time::Instant::now();
+        let s = super::snapshot::read();
+        println!("read in {:?}", at.elapsed());
+        println!("available {} wifi {} on {} airplane {}", s.available, s.has_wifi, s.wifi_enabled, super::model::airplane(&s));
+        println!("active {:?} connectivity {:?} portal {:?}", s.active, s.connectivity, s.portal_uri);
+        println!("details {:?}", s.details);
+        println!("state {} reason {} activating {:?} last_scan {}", s.wifi_state, s.wifi_reason, s.activating, s.last_scan);
+        for n in s.networks.iter().take(12) {
+            println!("  {:>3}% {:<10} {:<24} known={} in_use={}", n.signal, n.security, n.ssid, n.is_known, n.in_use);
         }
-        if let Some(name) = get_active_wifi_conn_name() {
-            println!(
-                "active wifi conn: {name} powersave={}",
-                get_wifi_power_saving(&name)
-            );
-        }
-    }
-
-    /// What one tick of `monitor::start_periodic_poller` costs, which is the
-    /// number the poller's interval has to be weighed against: it is five
-    /// D-Bus conversations, one of them NetworkManager's connectivity check.
-    #[test]
-    #[ignore]
-    fn time_one_poll() {
-        use super::*;
-        for round in 1..=3 {
-            let at = std::time::Instant::now();
-            let _ = get_active_connection();
-            let active = at.elapsed();
-            let at = std::time::Instant::now();
-            let _ = check_connectivity();
-            let connectivity = at.elapsed();
-            let at = std::time::Instant::now();
-            let _ = wifi_radio_enabled();
-            let radio = at.elapsed();
-            let at = std::time::Instant::now();
-            let _ = get_network_interfaces();
-            let interfaces = at.elapsed();
-            let at = std::time::Instant::now();
-            let _ = get_vpn_connections();
-            let vpns = at.elapsed();
-            let total = active + connectivity + radio + interfaces + vpns;
-            println!(
-                "{round}: active {active:?}, connectivity {connectivity:?}, radio {radio:?}, \
-                 interfaces {interfaces:?}, vpns {vpns:?} — {total:?} total"
-            );
-        }
-    }
-
-    /// A rescan. Ignored and separate: it asks the radio to do something,
-    /// even though it changes no configuration.
-    #[test]
-    #[ignore]
-    fn scan() {
-        match super::scan_wifi() {
-            Ok(networks) => {
-                for n in networks.iter().take(12) {
-                    println!(
-                        "{:>3}% {:<10} {:<24} known={} in_use={}",
-                        n.signal, n.security, n.ssid, n.is_known, n.in_use
-                    );
-                }
-                println!("{} networks", networks.len());
-            }
-            Err(e) => println!("scan failed: {e}"),
-        }
+        println!("saved {:?}", s.saved.iter().map(|x| (&x.id, &x.ssid, x.autoconnect)).collect::<Vec<_>>());
+        println!("vpns {:?}", s.vpns);
+        println!("tailscale {:?}", super::tailscale::status());
     }
 }
