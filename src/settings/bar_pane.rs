@@ -1,12 +1,19 @@
-//! The Bar tab: what the bar does that is a matter of taste, and where a
-//! volume or brightness press draws. How far a press goes is on the Input
-//! tab (`input_pane.rs`), with the rest of the keys.
+//! The Bar tab: what the bar does that is a matter of taste, where a volume
+//! or brightness press draws, and the pins and peeks the bar keeps. How far
+//! a press goes is on the Input tab (`input_pane.rs`), with the rest of the
+//! keys.
+//!
+//! Two sections, `bar` and `pins`, on one tab with one footer, the way
+//! Alerts carries `alerts` and `capture`. Pins are here rather than on a tab
+//! of their own because the bar is where they live when they are not
+//! floating (`bar/pins.rs`), and the peek is the bar's.
 //!
 //! Every row here is read live by something in this process — the clock
 //! (`bar/clock.rs`), the segments (`bar/mod.rs`), the OSD and its route
-//! (`osd.rs`, `app.rs`), the panel's volume rail (`widgets/audio.rs`) —
-//! through `store::observe` or per press, so a switch takes effect on
-//! release and the file is only there for the next start.
+//! (`osd.rs`, `app.rs`), the panel's volume rail (`widgets/audio.rs`), the
+//! pins (`jump/pin.rs`) and the peek (`bar/peek.rs`) — through
+//! `store::observe` or per use, so a switch takes effect on release and the
+//! file is only there for the next start.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -14,7 +21,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use super::form::{self, dropdown_row, section_box, switch_row};
-use super::store::{self, Bar};
+use super::store::{self, Bar, Corner, PinSize, Pins};
 
 /// Where a volume or brightness press draws, in the order the dropdown
 /// lists them.
@@ -67,15 +74,22 @@ const SEGMENTS: [Segment; 6] = [
     },
 ];
 
+/// The frame-rate dropdown's rows, in [`Pins::FRAME_RATES`] order.
+const FRAME_RATE_LABELS: [&str; 3] = [
+    "15 a second — lightest",
+    "30 a second",
+    "60 a second — smoothest",
+];
+
 /// The status line at the system default, naming what the default is.
-fn describe(bar: &Bar) -> String {
+fn describe(bar: &Bar, pins: &Pins) -> String {
     let hidden: Vec<&str> = SEGMENTS
         .iter()
         .filter(|s| !(s.get)(bar))
         .map(|s| s.label)
         .collect();
     format!(
-        "System default: {} clock{}, volume and brightness {}, {} hidden",
+        "System default: {} clock{}, volume and brightness {}, {} hidden; {} pins at {} a second, {}",
         if bar.clock_24h { "24-hour" } else { "12-hour" },
         if bar.clock_date { " with the date" } else { "" },
         if bar.osd_in_bar {
@@ -88,6 +102,14 @@ fn describe(bar: &Bar) -> String {
         } else {
             hidden.join(" and ").to_lowercase()
         },
+        pins.size
+            .label()
+            .split(' ')
+            .next()
+            .unwrap_or("")
+            .to_lowercase(),
+        pins.fps,
+        pins.corner.label().to_lowercase(),
     )
 }
 
@@ -96,12 +118,23 @@ struct State {
     clock_date: gtk4::Switch,
     osd: gtk4::DropDown,
     segments: Vec<gtk4::Switch>,
+    pin_size: gtk4::DropDown,
+    pin_fps: gtk4::DropDown,
+    pin_corner: gtk4::DropDown,
     status: gtk4::Label,
     updating: Cell<bool>,
 }
 
 impl State {
     fn edit_bar(&self, f: impl FnOnce(&mut Bar)) {
+        if self.updating.get() {
+            return;
+        }
+        store::edit(f);
+        self.sync();
+    }
+
+    fn edit_pins(&self, f: impl FnOnce(&mut Pins)) {
         if self.updating.get() {
             return;
         }
@@ -122,7 +155,19 @@ impl State {
         for (segment, switch) in SEGMENTS.iter().zip(&self.segments) {
             switch.set_active((segment.get)(&bar));
         }
-        form::set_source(&self.status, settings.bar.is_some(), &describe(&bar));
+        let pins = settings.pins();
+        let pos = |i: Option<usize>| i.unwrap_or(0) as u32;
+        self.pin_size
+            .set_selected(pos(PinSize::ALL.iter().position(|s| *s == pins.size)));
+        self.pin_fps
+            .set_selected(pos(Pins::FRAME_RATES.iter().position(|r| *r == pins.fps)));
+        self.pin_corner
+            .set_selected(pos(Corner::ALL.iter().position(|c| *c == pins.corner)));
+        form::set_source(
+            &self.status,
+            settings.bar.is_some() || settings.pins.is_some(),
+            &describe(&bar, &pins),
+        );
         self.updating.set(false);
     }
 }
@@ -175,15 +220,48 @@ impl BarPane {
             &osd_labels,
         );
         osd_group.append(&row_osd);
+
+        let pins_group = section_box(
+            "Pins & previews",
+            "The floating pins, and the peek over a workspace button. A change redraws the pins on screen where they stand; an open peek keeps what it had until it closes.",
+        );
+        let size_labels: Vec<&str> = PinSize::ALL.iter().map(|s| s.label()).collect();
+        let (row_size, pin_size) = dropdown_row(
+            "Size",
+            "The picture's box, 16:10; a workspace is fitted inside it at its own shape. The peek follows it; the rows in the pins popover do not.",
+            &size_labels,
+        );
+        pins_group.append(&row_size);
+        let (row_fps, pin_fps) = dropdown_row(
+            "Frame rate",
+            "Frames a second per window, for pins and the peek alike, so the two share one capture. Every frame is a full-size readback in the compositor: 60 costs twice what 30 does.",
+            &FRAME_RATE_LABELS,
+        );
+        pins_group.append(&row_fps);
+        let corner_labels: Vec<&str> = Corner::ALL.iter().map(|c| c.label()).collect();
+        let (row_corner, pin_corner) = dropdown_row(
+            "Corner",
+            "Where the pins stand and stack from, and the side they slide in from. The bottom corners keep clear of the bar.",
+            &corner_labels,
+        );
+        pins_group.append(&row_corner);
+
         let reset = form::action_button(
             "Reset to system",
-            "Put the system's choices back and drop the bar section from the settings file.",
+            "Put the system's choices back and drop the bar and pins sections from the settings file.",
         );
         let (footer, status) = form::footer(&[&reset]);
         let copy = form::copy_nix_button(
             &status,
-            "The bar section as theme/settings.nix holds it, for promoting a keeper into the Nix side by hand.",
-            || store::current().section_as_nix("bar"),
+            "The bar and pins sections as theme/settings.nix holds them, for promoting a keeper into the Nix side by hand.",
+            || {
+                let s = store::current();
+                Some(format!(
+                    "{}{}",
+                    s.section_as_nix("bar")?,
+                    s.section_as_nix("pins")?
+                ))
+            },
         );
         if let Some(row) = reset.parent().and_downcast::<gtk4::Box>() {
             row.append(&copy);
@@ -194,6 +272,9 @@ impl BarPane {
             clock_date: clock_date.clone(),
             osd: osd.clone(),
             segments: segments.clone(),
+            pin_size: pin_size.clone(),
+            pin_fps: pin_fps.clone(),
+            pin_corner: pin_corner.clone(),
             status,
             updating: Cell::new(false),
         });
@@ -229,11 +310,36 @@ impl BarPane {
         }
         {
             let state = state.clone();
+            pin_size.connect_selected_notify(move |d| {
+                if let Some(s) = PinSize::ALL.get(d.selected() as usize).copied() {
+                    state.edit_pins(|p| p.size = s);
+                }
+            });
+        }
+        {
+            let state = state.clone();
+            pin_fps.connect_selected_notify(move |d| {
+                if let Some(r) = Pins::FRAME_RATES.get(d.selected() as usize).copied() {
+                    state.edit_pins(|p| p.fps = r);
+                }
+            });
+        }
+        {
+            let state = state.clone();
+            pin_corner.connect_selected_notify(move |d| {
+                if let Some(c) = Corner::ALL.get(d.selected() as usize).copied() {
+                    state.edit_pins(|p| p.corner = c);
+                }
+            });
+        }
+        {
+            let state = state.clone();
             reset.connect_clicked(move |_| {
                 if state.updating.get() {
                     return;
                 }
                 store::reset::<Bar>();
+                store::reset::<Pins>();
                 state.sync();
             });
         }
@@ -241,6 +347,7 @@ impl BarPane {
         root.append(&clock);
         root.append(&segments_group);
         root.append(&osd_group);
+        root.append(&pins_group);
         root.append(&footer);
         state.sync();
 
@@ -273,11 +380,21 @@ pub(super) const SEARCH: &[Entry] = &[
     row("Segments", "Backup", "The nightly backup's glyph", &["restic", "borg", "backup status"]),
     row("Segments", "Task board", "Tasks 1–4 on the bar", &["tasks", "todo", "board"]),
     row("Volume & brightness", "Shown as", "Where a volume or brightness key shows", &["osd", "on screen display", "popup", "volume popup", "overlay"]),
+    row("Pins & previews", "Size", "How big pins and the peek are", &["pin size", "pinned workspace", "preview size", "peek", "thumbnail", "picture in picture", "pip"]),
+    row("Pins & previews", "Frame rate", "How smooth pins and the peek are", &["fps", "frames per second", "pin fps", "refresh", "smooth", "live preview"]),
+    row("Pins & previews", "Corner", "Where pins stand on screen", &["pin position", "pin corner", "pinned workspace", "placement", "picture in picture", "pip"]),
 ];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_frame_rate_rows_name_the_rates_they_pick() {
+        for (label, rate) in FRAME_RATE_LABELS.iter().zip(Pins::FRAME_RATES) {
+            assert!(label.starts_with(&format!("{rate} ")), "{label}");
+        }
+    }
 
     #[test]
     fn every_segment_switch_moves_exactly_one_field() {

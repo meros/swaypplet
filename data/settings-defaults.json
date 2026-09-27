@@ -37,6 +37,11 @@
     "presence": true,
     "backup": true
   },
+  "pins": {
+    "size": "medium",
+    "fps": 30,
+    "corner": "bottom_right"
+  },
   "keys": {
     "volume_step": 5,
     "brightness_step": 5,

@@ -132,7 +132,7 @@ fn show(state: &State, button: &gtk4::Button, workspace: String, scene: crate::j
     let label = crate::sway::workspace::label_for_name(&workspace);
     let mut view = View::new(&label, "click to go");
     view.set_scale(crate::jump::card::device_scale(button));
-    view.show_scene(Some(scene), view::FPS);
+    view.show_scene(Some(scene), view::fps());
 
     // The pin button: pin what you are looking at, or unpin it.
     let toggle = if pin::is_pinned(&workspace) {
