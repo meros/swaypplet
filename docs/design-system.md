@@ -446,7 +446,8 @@ Only these, because no semantic token gives their value:
 | `--chip-height` | 26 px | chips |
 | `--menu-item-height` | 32 px | menu items |
 | `--row-height` | 40 px | list rows, so every list has one rhythm |
-| `--tile-height` | 52 px | quick-settings tiles |
+| `--row-height-dense` | 32 px | a row in a column of many (a settings row, the settings sidebar, a picker's hits, the prefix list): the same step for every one, so a group is a column of equal steps |
+| `--tile-height` | 52 px | quick-settings tiles, and every control on the Helm's deck beside them, so the deck is one grid |
 | `--track-height` | 6 px | slider and progress tracks |
 | `--knob` | dark `--neutral-12`, light white | the slider and switch knob |
 | `--on-accent-muted` | `--on-accent` at 80 % | the second line on an accent fill, a tile's state under its name |
@@ -719,6 +720,36 @@ the two on load.
 
 A new surface adds a variant, and, if it wears glass, a row in
 `sessionSurfaces` of the same class.
+
+### 6.2 Layout rules
+
+What the components do not decide: where things go on a surface. These
+hold on every surface, and a surface that needs an exception writes it
+down in its file.
+
+1. **One primary per surface.** The launcher's field on the Helm, the
+   password on the lock, the chosen pane in settings. Everything else is
+   secondary in size, weight or tone, never in colour.
+2. **A row reads label, then value.** In a column of settings the control
+   sits at the row's far end at its natural width, never narrower than
+   `.settings-control`, so a column of controls lines up on both edges
+   (`settings::form::Placement`). A rail and a text field fill the row: the
+   one needs the length, the other is read where it is typed. Every row
+   stands on `--row-height-dense`.
+3. **A column is read across in one glance.** Settings' card stops at 980
+   px: the sidebar and a pane column of about 720. Past that a label and
+   its value drift apart.
+4. **A grid has one height.** The Helm's deck stands every control at
+   `--tile-height`, square where it is a glyph, and the four switches
+   share one line at equal widths (`panel::HelmLayout`). The card is a
+   launcher's width (800), so the results list is read at one glance and
+   the card stands on the screen rather than across it.
+5. **A result says its name first and its place second.** A launcher row
+   for a setting is the setting's name over its subtitle, with the pane
+   and group in the end slot (faint caption); a group named after its pane
+   is said once.
+6. **A list is scanned by its first column.** The prefix list puts the
+   page in a fixed gutter and what you type beside it, quieter.
 
 ## 7. Enforcement
 
