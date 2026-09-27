@@ -204,6 +204,7 @@ struct State {
     contrast: gtk4::DropDown,
     motion: gtk4::DropDown,
     launch_zoom: gtk4::Switch,
+    apps_follow: gtk4::Switch,
     tint: gtk4::DropDown,
     night: gtk4::DropDown,
     night_k: gtk4::Scale,
@@ -284,6 +285,7 @@ impl State {
             .position(|m| *m == settings.look().motion);
         self.motion.set_selected(motion.unwrap_or(0) as u32);
         self.launch_zoom.set_active(settings.look().launch_zoom);
+        self.apps_follow.set_active(settings.look().apps_follow);
         let tint = Tint::ALL.iter().position(|t| *t == settings.look().tint);
         self.tint.set_selected(tint.unwrap_or(0) as u32);
         let night = settings.night_light();
@@ -463,6 +465,12 @@ impl LookPane {
             &contrast_labels,
         );
         appearance.append(&contrast_row);
+        let (apps_row, apps_follow) = form::switch_row(
+            "Apps follow the shell's appearance",
+            "Apps switch between dark and light with the shell, and take the nearest GNOME accent, high contrast and reduced motion from it. Off leaves the apps' own settings alone.",
+            true,
+        );
+        appearance.append(&apps_row);
 
         let theme = section_box(
             "Theme colour",
@@ -548,6 +556,7 @@ impl LookPane {
             contrast: contrast.clone(),
             motion: motion.clone(),
             launch_zoom: launch_zoom.clone(),
+            apps_follow: apps_follow.clone(),
             tint: tint.clone(),
             night: night.clone(),
             night_k: night_k.clone(),
@@ -725,6 +734,17 @@ impl LookPane {
                 }
                 let on = s.is_active();
                 store::edit::<Look>(|l| l.launch_zoom = on);
+                state.sync();
+            });
+        }
+        {
+            let state = state.clone();
+            apps_follow.connect_active_notify(move |s| {
+                if state.updating.get() {
+                    return;
+                }
+                let on = s.is_active();
+                store::edit::<Look>(|l| l.apps_follow = on);
                 state.sync();
             });
         }

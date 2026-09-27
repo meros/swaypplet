@@ -23,6 +23,7 @@
 //! | `locked.rs` | logind's LockedHint, to time a sun switch |
 //! | `paint.rs` | [`Paint`]: the token colours for Cairo |
 //! | `sway.rs` | sway's window borders from the tokens |
+//! | `apps.rs` | the appearance, published to apps through GSettings |
 //!
 //! It sits below `crate::settings::glass`: the material is sent through the
 //! callback [`watch`] is given, not by a call up.
@@ -194,6 +195,7 @@ fn rules() -> String {
     }
 }
 
+mod apps;
 mod fade;
 mod inputs;
 mod locked;
@@ -331,6 +333,20 @@ pub fn changed() {
     if ON_MATERIAL.with(|m| m.borrow().is_some()) {
         sway::apply_borders(now);
     }
+    // In the same step as the stylesheet, so a sun switch that waited for
+    // nobody to be looking moves the apps with the shell.
+    apps::publish(now);
+}
+
+/// Publish the appearance to apps from this process: at once, on every
+/// change [`changed`] makes, and on every settings change (the "Apps
+/// follow" switch among them; the worker writes only what differs). The
+/// panel alone calls this, after [`watch`], so one process owns the keys.
+pub fn publish_to_apps() {
+    apps::start();
+    let on_screen = || LOADED.with(|l| *l.borrow()).unwrap_or_else(shown);
+    apps::publish(on_screen());
+    crate::settings::store::observe(move || apps::publish(on_screen()));
 }
 
 /// Call `check` once a minute while the Look mode is automatic, and not at

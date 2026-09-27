@@ -417,7 +417,7 @@ impl ThemeMode {
 
 /// The Look tab's second group. The wallpaper is the first and has its own
 /// section, since it has no system layer in this file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Look {
     /// The theme inputs (docs/design-system.md §2).
     #[serde(default)]
@@ -438,6 +438,26 @@ pub struct Look {
     /// transition.
     #[serde(default)]
     pub launch_zoom: bool,
+    /// Apps follow the shell's appearance: the panel publishes the mode, the
+    /// accent, contrast and motion to the GNOME settings that the desktop
+    /// portal serves (`theme::apps`). Off, it leaves them as they are.
+    #[serde(default = "yes")]
+    pub apps_follow: bool,
+}
+
+impl Default for Look {
+    fn default() -> Self {
+        Look {
+            mode: ThemeMode::default(),
+            accent: crate::tokens::Accent::default(),
+            neutral: crate::tokens::Neutral::default(),
+            contrast: crate::tokens::Contrast::default(),
+            motion: Motion::default(),
+            tint: Tint::default(),
+            launch_zoom: false,
+            apps_follow: true,
+        }
+    }
 }
 
 /// The volume and brightness keys.

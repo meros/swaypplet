@@ -94,6 +94,19 @@ and Bar tabs is `nix <section>` into the clipboard.
 - **Look**: the wallpaper is one `output * bg` command over sway IPC;
   motion is read per animation (`anim::duration`), in every process that
   animates, which is why `lock::run` and `bar::run` call `store::init` too.
+- **Apps follow** (`look.apps_follow`, on by default): the panel publishes
+  the inputs on screen to the GNOME settings the desktop portal serves
+  (`src/theme/apps.rs`): the mode as `color-scheme`, the accent as the
+  nearest GNOME `accent-color` (by hue, tint included; slate when grey),
+  contrast as `high-contrast`, motion off as `enable-animations` false and
+  `reduced-motion` true, and `gtk-theme` between `adw-gtk3` and
+  `adw-gtk3-dark` (or `Adwaita` and `Adwaita-dark`) for GTK3. It publishes
+  from `theme::changed`, so a sun switch that waits for nobody to be looking
+  moves the apps in the same step, at startup, and on every settings
+  change. A worker thread reads each key and writes only what differs,
+  through GSettings, or `dconf write` when the schemas are missing. Off, the
+  keys stay as they were. Home-manager's `dconf.settings` writes the same
+  keys on every activation, so the nixos side must not set them.
 - **Tint** (`look.tint`, off | accents | full) is a token input
   (docs/design-system.md §2.2). The one part of it that is not a setting,
   the wallpaper's hue, is sampled by the panel alone

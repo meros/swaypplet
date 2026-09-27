@@ -174,6 +174,10 @@ pub fn run() {
         // the theme hands back here because sending it is the settings'.
         crate::theme::wallpaper::follow_settings();
         theme::watch(crate::settings::glass::apply_saved_for);
+        // Apps follow the mode, the accent, contrast and motion
+        // (`theme::apps`); the bar process watches the theme too, but only
+        // this one publishes.
+        theme::publish_to_apps();
 
         // The night light: this process holds the gamma tables, from the
         // same sun the automatic mode follows.
