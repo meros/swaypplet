@@ -18,16 +18,44 @@
     color: var(--fg);
     font-size: var(--type-label);
     font-weight: var(--w-strong);
+    transition: background-color var(--motion-state),
+                background-image var(--motion-state),
+                color var(--motion-state),
+                outline-color var(--motion-state);
 }
 
 button.ui-chip:hover {
     background-image: linear-gradient(var(--state-hover), var(--state-hover));
 }
 
+button.ui-chip:active,
+button.ui-chip:checked:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+button.ui-chip:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
 .ui-chip.selected,
 button.ui-chip:checked {
     background-color: var(--accent-bg);
     color: var(--on-accent);
+}
+
+/* Disabled as a button is (button.css): the box stays, the label greys;
+   a checked chip stays checked at half strength. */
+button.ui-chip:disabled {
+    color: var(--fg-disabled);
+    background-color: var(--fill-disabled);
+    background-image: none;
+}
+
+button.ui-chip:checked:disabled {
+    background-color: var(--accent-bg);
+    color: var(--on-accent);
+    opacity: 0.5;
 }
 
 .ui-badge {
@@ -79,9 +107,6 @@ button.ui-chip:checked {
 /* A chip that can hold more than a word (an avatar and a name). */
 button.ui-chip.rich {
     padding: var(--space-1) var(--space-5) var(--space-1) var(--space-1);
-    transition: background-color var(--motion-state),
-                background-image var(--motion-state),
-                color var(--motion-state);
 }
 
 /* ── The handoff: picking a face and landing in that session ──

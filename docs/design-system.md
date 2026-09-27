@@ -277,6 +277,7 @@ the text colour of whatever they sit in.
 | `--fill-1` | 6 % | sections, fields, menus inside a card |
 | `--fill-2` | 10 % | controls at rest, selected rows |
 | `--fill-3` | 16 % | tracks, strong fills, the avatar ring |
+| `--fill-disabled` | `--neutral-12` at the hairline's share (8 % / 16 %; light 10 / 16) | the box of a control that cannot be used. Not a currentColor mix: the label greys to `--fg-disabled` and the box must not grey with it |
 
 **Lines**
 
@@ -323,7 +324,7 @@ so the same rule works on a fill, on the accent and on nothing:
 | pressed (`:active`, `:checked` while pressed) | the same with `--state-pressed` |
 | selected (`:selected`, `.selected`) | `--fill-2`, or `--accent-bg` where selection is the point (a chip, a toggle) |
 | focus (`:focus-visible`) | `outline: 2px solid var(--focus-ring); outline-offset: 2px` |
-| disabled | text `--fg-disabled`, no overlay, accent fills fall back to `--fill-2` |
+| disabled | the label `--fg-disabled`, the box `--fill-disabled`, no overlay; a flat button keeps no box. An action's accent falls back to `--fill-disabled`. A control that is *on* (a checked toggle, chip or tile) keeps its accent at half strength (`opacity: 0.5`), and a switch, check or slider, whose value is its shape, fades whole the same way: a value that cannot be changed is still a value |
 
 Transitions on state: `background-color`, `background-image`, `color` and
 `outline-color` over `--dur-fast` with `--ease-standard`. GTK cannot

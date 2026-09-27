@@ -50,8 +50,10 @@ scale.ui-slider:focus-visible slider {
     outline-offset: 2px;
 }
 
-scale.ui-slider:disabled highlight {
-    background-color: var(--fg-disabled);
+/* A value that cannot be changed is still a value: the slider keeps its
+   fill and its knob and fades whole, as the switch and the check do. */
+scale.ui-slider:disabled {
+    opacity: 0.5;
 }
 
 .ui-slider-icon {
@@ -85,6 +87,10 @@ switch.ui-switch {
     transition: background-color var(--motion-state);
 }
 
+switch.ui-switch:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
 switch.ui-switch:checked {
     background-color: var(--accent-bg);
 }
@@ -109,12 +115,11 @@ switch.ui-switch:focus-visible {
     outline-offset: 2px;
 }
 
+/* Disabled, the switch still says which way it is: on stays accent, off
+   stays the track, both at half strength. */
 switch.ui-switch:disabled {
-    background-color: var(--fill-2);
-}
-
-switch.ui-switch:disabled slider {
-    background-color: var(--fg-disabled);
+    background-image: none;
+    opacity: 0.5;
 }
 
 /* ── Slider marks and over-range ────────
@@ -179,4 +184,12 @@ checkbutton.ui-check check:checked {
 checkbutton.ui-check:focus-visible check {
     outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
+}
+
+checkbutton.ui-check:disabled {
+    opacity: 0.5;
+}
+
+checkbutton.ui-check:disabled check {
+    background-image: none;
 }

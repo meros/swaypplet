@@ -62,6 +62,9 @@ pub fn css(inputs: Inputs) -> String {
         "fill-3",
         "color-mix(in srgb, currentColor 16%, transparent)".into(),
     );
+    // The fill of a control that cannot be used: the ink at the hairline's
+    // share, not currentColor, so the box stays while the label greys.
+    put("fill-disabled", mixed(fg, lv.border_subtle));
     put(
         "state-hover",
         "color-mix(in srgb, currentColor 7%, transparent)".into(),
@@ -206,6 +209,7 @@ mod tests {
             "fill-1",
             "fill-2",
             "fill-3",
+            "fill-disabled",
             "state-hover",
             "state-pressed",
             "state-selected",

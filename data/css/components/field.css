@@ -38,6 +38,11 @@ passwordentry.ui-entry text placeholder {
     color: var(--fg-faint);
 }
 
+entry.ui-entry:disabled,
+passwordentry.ui-entry:disabled {
+    color: var(--fg-disabled);
+}
+
 entry.ui-entry selection,
 passwordentry.ui-entry selection {
     background-color: var(--accent-tint);
@@ -72,7 +77,10 @@ scrolledwindow.ui-text-area textview > text selection {
     color: var(--fg);
 }
 
-/* A dropdown: the field's fill and hairline around GTK's own button. */
+/* A dropdown: the field's fill and hairline around GTK's own button. It
+   shows a value, as the entry does, so it takes the entry's weight (GTK's
+   own button would set it bold) and the entry's focus ring, which hugs the
+   field rather than standing off it as a button's does. */
 dropdown.ui-dropdown > button {
     min-height: var(--control-height);
     padding: 0 var(--space-3);
@@ -83,16 +91,27 @@ dropdown.ui-dropdown > button {
     box-shadow: inset 0 0 0 1px var(--border-subtle);
     color: var(--fg);
     font-size: var(--type-body);
-    transition: background-image var(--motion-state);
+    font-weight: var(--w-regular);
+    transition: background-image var(--motion-state),
+                box-shadow var(--motion-state);
 }
 
 dropdown.ui-dropdown > button:hover {
     background-image: linear-gradient(var(--state-hover), var(--state-hover));
 }
 
+dropdown.ui-dropdown > button:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
 dropdown.ui-dropdown > button:focus-visible {
-    outline: 2px solid var(--focus-ring);
-    outline-offset: 2px;
+    box-shadow: inset 0 0 0 1px var(--border-strong), 0 0 0 2px var(--focus-ring);
+    outline: none;
+}
+
+dropdown.ui-dropdown > button:disabled {
+    color: var(--fg-disabled);
+    background-image: none;
 }
 
 /* ── The auth field's states (ui::set_field_state) ──

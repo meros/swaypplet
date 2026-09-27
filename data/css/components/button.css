@@ -42,9 +42,21 @@ button.ui-btn:focus-visible {
     outline-offset: 2px;
 }
 
+/* ── Disabled ──
+   An action that cannot be taken keeps its box and greys its label: the
+   fill is --fill-disabled rather than the currentColor fill, which would
+   fade with the label and leave a floating grey word. A flat button has no
+   box at rest and gets none here. A toggle that is down stays down, its
+   accent at half strength: what it says is still true, it just cannot be
+   changed. */
 button.ui-btn:disabled {
     color: var(--fg-disabled);
+    background-color: var(--fill-disabled);
     background-image: none;
+}
+
+button.ui-btn.flat:disabled {
+    background-color: transparent;
 }
 
 button.ui-btn.primary,
@@ -64,13 +76,23 @@ button.ui-btn.destructive {
 
 button.ui-btn.primary:disabled,
 button.ui-btn.destructive:disabled {
-    background-color: var(--fill-2);
+    background-color: var(--fill-disabled);
     color: var(--fg-disabled);
 }
 
+button.ui-btn:checked:disabled {
+    background-color: var(--accent-bg);
+    color: var(--on-accent);
+    opacity: 0.5;
+}
+
+/* A glyph on a square button is drawn a step up from the label size: at
+   body size a 30 px square is mostly air around it. A widget face keeps
+   whatever size its own class gives it. */
 button.ui-btn.icon {
     min-width: var(--control-height);
     padding: 0;
+    font-size: var(--type-title-sm);
 }
 
 button.ui-btn.pill {
@@ -81,6 +103,12 @@ button.ui-btn.small {
     min-height: var(--control-height-small);
     padding: 0 var(--space-3);
     font-size: var(--type-label);
+}
+
+button.ui-btn.small.icon {
+    min-width: var(--control-height-small);
+    padding: 0;
+    font-size: var(--type-body);
 }
 
 /* ── Toggle button ──

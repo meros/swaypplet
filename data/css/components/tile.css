@@ -57,10 +57,18 @@ button.ui-tile-toggle:focus-visible {
     outline-offset: 2px;
 }
 
+/* Disabled as a button is (button.css): the box stays, the label greys,
+   and a tile that is on stays on at half strength. */
 button.ui-tile-toggle:disabled {
-    background-color: var(--fill-2);
+    background-color: var(--fill-disabled);
     background-image: none;
     color: var(--fg-disabled);
+}
+
+button.ui-tile-toggle.on:disabled {
+    background-color: var(--accent-bg);
+    color: var(--on-accent);
+    opacity: 0.5;
 }
 
 /* Waiting on the tool the tile drives. */
@@ -72,7 +80,8 @@ button.ui-tile-toggle:disabled {
    The tile's fill and its accent stay on the outer box, which clips both
    halves to its corners; the halves carry only the state overlays. */
 
-.ui-tile-split > .ui-tile-toggle {
+.ui-tile-split > .ui-tile-toggle,
+.ui-tile-split > button.ui-tile-toggle:disabled {
     background-color: transparent;
     min-height: var(--tile-height);
     border-radius: 0;
