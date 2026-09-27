@@ -405,24 +405,54 @@ fn region(crop: Option<Crop>, w: u32, h: u32) -> (u32, u32, u32, u32) {
     (x, y, rw, rh)
 }
 
-/// The whole factor a `w` by `h` region is cut down by for `size`.
-fn factor(w: u32, h: u32, size: Size) -> u32 {
+/// The size a `w` by `h` region is sent at for `size`, never larger than
+/// it is.
+fn out_size(w: u32, h: u32, size: Size) -> (u32, u32) {
     match size {
-        Size::MaxEdge(edge) => w.max(h).div_ceil(edge.max(1)),
-        // Contained in the box, the region is drawn at 1 / max(w / bw,
-        // h / bh) of its size; the floor of that keeps it covered.
-        Size::Draw(bw, bh) => (w / bw.max(1)).max(h / bh.max(1)),
+        Size::MaxEdge(edge) => {
+            let f = w.max(h).div_ceil(edge.max(1)).max(1);
+            ((w / f).max(1), (h / f).max(1))
+        }
+        // Contained in the box, as `LivePicture` draws it: then GTK draws
+        // the frame one pixel to one, and has nothing left to filter.
+        Size::Draw(bw, bh) => {
+            let s = (f64::from(bw) / f64::from(w.max(1)))
+                .min(f64::from(bh) / f64::from(h.max(1)))
+                .min(1.0);
+            let px = |v: u32| ((f64::from(v) * s).round() as u32).max(1);
+            (px(w), px(h))
+        }
     }
-    .max(1)
 }
 
-/// Box-filter the region `(x0, y0, w, h)` of a buffer `full_w` pixels wide
-/// down by [`factor`].
+/// How `n` output pixels cover `len` source pixels from `start`: for each,
+/// the first source pixel it covers and the share of it each covered one
+/// has, summing to 1.
+fn spans(start: u32, len: u32, n: u32) -> Vec<(usize, Vec<f32>)> {
+    let step = f64::from(len) / f64::from(n.max(1));
+    (0..n)
+        .map(|o| {
+            let (a, b) = (f64::from(o) * step, f64::from(o + 1) * step);
+            let first = a.floor() as u32;
+            let last = (b.ceil() as u32).clamp(first + 1, len.max(first + 1));
+            let weights = (first..last)
+                .map(|i| ((b.min(f64::from(i) + 1.0) - a.max(f64::from(i))) / step) as f32)
+                .collect();
+            ((start + first) as usize, weights)
+        })
+        .collect()
+}
+
+/// Scale the region `(x0, y0, w, h)` of a buffer `full_w` pixels wide down
+/// to [`out_size`], every output pixel the average of the source area it
+/// covers, fractions of pixels at its edges included.
 ///
-/// The factor is a whole number, so every output pixel averages a full square
-/// of source pixels and the result has no seams. `xrgb` carries no alpha, so
-/// it is written opaque; `argb` from the compositor is already premultiplied,
-/// and an average of premultiplied pixels stays premultiplied.
+/// An area average and not a whole-factor box then GTK's linear filter:
+/// the two in a row blurred a terminal's text in a pin (a 3x box, then
+/// 233 px drawn at 200), and a linear filter alone over more than 2x skips
+/// pixels and shimmers. `xrgb` carries no alpha, so it is written opaque;
+/// `argb` from the compositor is already premultiplied, and an average of
+/// premultiplied pixels stays premultiplied.
 fn downscale(
     src: &[u8],
     full_w: u32,
@@ -430,38 +460,52 @@ fn downscale(
     format: wl_shm::Format,
     size: Size,
 ) -> (u32, u32, Vec<u8>) {
-    let f = factor(w, h, size);
-    let (ow, oh) = ((w / f).max(1), (h / f).max(1));
+    let (ow, oh) = out_size(w, h, size);
     let stride = (full_w * 4) as usize;
     let opaque = matches!(format, wl_shm::Format::Xrgb8888 | wl_shm::Format::Xbgr8888);
     // Both ABGR formats are RGBA in memory; the card wants BGRA.
     let swap = matches!(format, wl_shm::Format::Xbgr8888 | wl_shm::Format::Abgr8888);
-    let n = f * f;
 
-    let mut out = vec![0u8; (ow * oh * 4) as usize];
-    for oy in 0..oh {
-        for ox in 0..ow {
-            let mut acc = [0u32; 4];
-            for sy in y0 + oy * f..y0 + oy * f + f {
-                let row = sy as usize * stride;
-                for sx in x0 + ox * f..x0 + ox * f + f {
-                    let i = row + sx as usize * 4;
-                    acc[0] += u32::from(src[i]);
-                    acc[1] += u32::from(src[i + 1]);
-                    acc[2] += u32::from(src[i + 2]);
-                    acc[3] += u32::from(src[i + 3]);
+    // Across each source row first, then down the columns.
+    let across = spans(x0, w, ow);
+    let row_w = ow as usize * 4;
+    let mut rows = vec![0f32; h as usize * row_w];
+    for sy in 0..h as usize {
+        let line = (y0 as usize + sy) * stride;
+        let dst = &mut rows[sy * row_w..(sy + 1) * row_w];
+        for (ox, (first, weights)) in across.iter().enumerate() {
+            let mut acc = [0f32; 4];
+            for (k, wt) in weights.iter().enumerate() {
+                let i = line + (first + k) * 4;
+                for c in 0..4 {
+                    acc[c] += wt * f32::from(src[i + c]);
                 }
             }
-            let o = ((oy * ow + ox) * 4) as usize;
+            dst[ox * 4..ox * 4 + 4].copy_from_slice(&acc);
+        }
+    }
+
+    let mut out = vec![0u8; ow as usize * oh as usize * 4];
+    for (oy, (first, weights)) in spans(0, h, oh).iter().enumerate() {
+        for ox in 0..ow as usize {
+            let mut acc = [0f32; 4];
+            for (k, wt) in weights.iter().enumerate() {
+                let i = (first + k) * row_w + ox * 4;
+                for c in 0..4 {
+                    acc[c] += wt * rows[i + c];
+                }
+            }
+            let px = |v: f32| v.round().clamp(0.0, 255.0) as u8;
             let (b, r) = if swap {
                 (acc[2], acc[0])
             } else {
                 (acc[0], acc[2])
             };
-            out[o] = (b / n) as u8;
-            out[o + 1] = (acc[1] / n) as u8;
-            out[o + 2] = (r / n) as u8;
-            out[o + 3] = if opaque { 0xff } else { (acc[3] / n) as u8 };
+            let o = (oy * ow as usize + ox) * 4;
+            out[o] = px(b);
+            out[o + 1] = px(acc[1]);
+            out[o + 2] = px(r);
+            out[o + 3] = if opaque { 0xff } else { px(acc[3]) };
         }
     }
     (ow, oh, out)
@@ -902,17 +946,41 @@ mod tests {
     }
 
     #[test]
-    fn a_draw_box_is_covered_by_a_whole_factor() {
-        // A 1400x870 window drawn at 200x124: cut by 7, to 200x124.
-        assert_eq!(factor(1400, 870, Size::Draw(200, 124)), 7);
-        // 2880x1800 in an 800x500 box: 3, to 960x600, which covers it; 4
-        // would be 720x450, below it.
-        assert_eq!(factor(2880, 1800, Size::Draw(800, 500)), 3);
-        // The binding side decides: tall in a wide box.
-        assert_eq!(factor(700, 1800, Size::Draw(800, 200)), 9);
+    fn a_frame_is_sent_at_the_size_it_is_drawn() {
+        // A 700x870 window drawn in a 200x245 box: height binds.
+        assert_eq!(out_size(700, 870, Size::Draw(200, 245)), (197, 245));
+        // Wide in a tall box: width binds.
+        assert_eq!(out_size(2880, 1800, Size::Draw(800, 800)), (800, 500));
         // Smaller than the box: never scaled up.
-        assert_eq!(factor(100, 60, Size::Draw(400, 250)), 1);
-        assert_eq!(factor(2560, 1600, Size::MaxEdge(320)), 8);
+        assert_eq!(out_size(100, 60, Size::Draw(400, 250)), (100, 60));
+        assert_eq!(out_size(2560, 1600, Size::MaxEdge(320)), (320, 200));
+    }
+
+    #[test]
+    fn fractional_spans_share_their_edge_pixels() {
+        // Three pixels into two: 1.5 each, the middle one split.
+        let s = spans(10, 3, 2);
+        assert_eq!(s[0].0, 10);
+        assert_eq!(s[0].1, vec![2.0 / 3.0, 1.0 / 3.0]);
+        assert_eq!(s[1].0, 11);
+        assert_eq!(s[1].1, vec![1.0 / 3.0, 2.0 / 3.0]);
+        // One to one: a copy.
+        assert!(spans(0, 4, 4).iter().all(|(_, w)| w == &vec![1.0]));
+    }
+
+    #[test]
+    fn an_edge_between_two_colours_averages_by_area() {
+        // 3x1 XRGB, blue 0, 90, 180 in BGRX: into 2x1, 1.5 source each.
+        let src = [0, 0, 0, 0, 90, 0, 0, 0, 180, 0, 0, 0];
+        let (w, h, px) = downscale(
+            &src,
+            3,
+            (0, 0, 3, 1),
+            wl_shm::Format::Xrgb8888,
+            Size::Draw(2, 1),
+        );
+        assert_eq!((w, h), (2, 1));
+        assert_eq!((px[0], px[4]), (30, 150));
     }
 
     #[test]
