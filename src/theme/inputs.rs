@@ -24,6 +24,9 @@ thread_local! {
     static TINT: Cell<Tint> = const { Cell::new(Tint::Off) };
     /// The wallpaper text's backdrop last read.
     static BACKDROP: Cell<Option<Backdrop>> = const { Cell::new(None) };
+    /// The Look mode setting last resolved, to tell a choice made just now
+    /// from the sun moving.
+    static SETTING: Cell<Option<ThemeMode>> = const { Cell::new(None) };
 }
 
 /// The mode last resolved.
@@ -107,9 +110,23 @@ fn when_unseen(wanted: Mode) -> Mode {
     }
 }
 
+/// The mode Auto shows: the sun's, at once when Auto was chosen just now
+/// (the person asked, and is looking at it), else when nobody is looking
+/// ([`when_unseen`]).
+fn auto_mode(sun: Mode, chosen_now: bool) -> Mode {
+    if chosen_now {
+        PENDING.with(|p| *p.borrow_mut() = None);
+        return sun;
+    }
+    when_unseen(sun)
+}
+
 /// The theme inputs right now.
 pub fn inputs() -> Inputs {
     let look = crate::settings::store::with(|s| s.look());
+    // Whether the mode setting moved since the last resolution: then the
+    // person just chose it, and Auto shows the sun's answer at once.
+    let chosen_now = SETTING.with(|c| c.replace(Some(look.mode))) != Some(look.mode);
     let forced = match std::env::var("SWAYPPLET_MODE").as_deref() {
         Ok("light") => Some(Mode::Light),
         Ok("dark") => Some(Mode::Dark),
@@ -121,7 +138,7 @@ pub fn inputs() -> Inputs {
             // A choice made in the pane applies at once: the person made it.
             ThemeMode::Dark => Mode::Dark,
             ThemeMode::Light => Mode::Light,
-            ThemeMode::Auto => when_unseen(sun_mode()),
+            ThemeMode::Auto => auto_mode(sun_mode(), chosen_now),
         }
     });
     // One read of the one-line cache for both of the wallpaper's inputs.
@@ -135,4 +152,27 @@ pub fn inputs() -> Inputs {
     BACKDROP.with(|b| b.set(backdrop));
     STARTED.with(|s| s.set(true));
     build(&look, mode, tint, backdrop)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Choosing Auto shows the sun's mode at once; the sun moving while Auto
+    /// is already set waits until nobody is looking.
+    #[test]
+    fn auto_applies_at_once_when_chosen_and_waits_when_the_sun_moves() {
+        STARTED.with(|s| s.set(true));
+        SHOWN.with(|s| s.set(Mode::Dark));
+        PENDING.with(|p| *p.borrow_mut() = None);
+        // Chosen just now: the sun says light, light it is.
+        assert_eq!(auto_mode(Mode::Light, true), Mode::Light);
+        // Already on Auto, the sun turns: the dark on screen stays for now.
+        SHOWN.with(|s| s.set(Mode::Dark));
+        assert_eq!(auto_mode(Mode::Light, false), Mode::Dark);
+        assert!(PENDING.with(|p| p.borrow().is_some()));
+        // Choosing Auto again clears the wait and applies.
+        assert_eq!(auto_mode(Mode::Light, true), Mode::Light);
+        assert!(PENDING.with(|p| p.borrow().is_none()));
+    }
 }
