@@ -705,7 +705,9 @@ impl InputPane {
             add.connect_clicked(move |_| {
                 let open = !state.picker.reveals_child();
                 state.picker.set_reveal_child(open);
-                state.add.set_label(if open { "Done" } else { "Add layout" });
+                state
+                    .add
+                    .set_label(if open { "Done" } else { "Add layout" });
                 if open {
                     state.fill_hits();
                     state.search.grab_focus();
