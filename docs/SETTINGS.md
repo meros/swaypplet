@@ -247,6 +247,9 @@ and Bar tabs is `nix <section>` into the clipboard.
    `store::observe` in the panel process, or through `cfg` in the idle
    loop.
 
+6. Add the row to the tab's `SEARCH` table (see below). `cargo test`
+   fails until you do.
+
 A setting earns a row when it is a matter of taste that a rebuild is too
 slow a loop for. What is deliberately not here: the bar's position and
 height (the stylesheet is built around bottom, 38 px), the night light's
@@ -254,6 +257,49 @@ temperature (gammastep's config), anything the panel already has a section
 for, and anything whose bad value is "gone" rather than "ugly": no setting
 may leave the machine unlocked or asleep unlocked, which is why the lock
 switches only ever remove a way in or add a lock.
+
+## Search
+
+Every row is findable from the launcher by its title, a subtitle and the
+words people type for it: "dark" finds Look › Appearance › Mode, "blur"
+Glass › Material › Frost, "screen timeout" Idle & Lock › Idle timers ›
+Screen off after. Activating a result opens the settings page on that
+tab, centres the row in the sheet and lights it for a moment
+(`ui::highlight`: the accent's tint, in and out at the state motion).
+The panel's Wi-Fi, Bluetooth and audio sections are results too
+(`search::QUICK`); they open by their omnibox prefix.
+
+The index is static, one table per tab beside the code that builds it:
+
+```rust
+// look_pane.rs
+pub(super) const SEARCH: &[Entry] = &[
+    //   group          row (gutter label)  subtitle                       keywords
+    row("Appearance", "Mode", "Dark, light, or by the sun", &["dark", "dark mode", "theme"]),
+    row("Wallpaper",  "",     "The image behind every output", &["background"]), // "" = the whole group
+];
+```
+
+`search::TABLES` lists the tables by tab name. A new tab adds its `SEARCH`
+there and its source to the test's `SOURCES`. The anchor is what the pane
+already shows, the group's overline and the row's gutter label, so a pane
+carries no ids: `SettingsSection::reveal` finds the `settings-group` whose
+overline is the group and, inside it, the `settings-row-label` with the
+title (the whole page when no group has that name, as on Displays, whose
+group is named after the output). The tests in `search.rs` keep the table
+and the pane in step without a display: every entry's group and title is a
+string literal in the pane's source, every row label the pane builds
+(`switch_row("…"`, `dropdown_row(`, `scale_row(`, `kind_row(`, `time_row(`,
+a table's `label: "…"`) has an entry, and each synonym finds its row.
+
+Matching is the launcher's local rule: every query word starts a word of
+the entry. Title words weigh most, then keywords, then the tab and group,
+then the subtitle; a whole-word match beats a prefix, and a query that is
+the title or a keyword phrase gets a bonus. A query whose every word is a
+whole word of a title or keyword names the setting, and its rows (at most
+three) go above the apps; the rest (at most four) go below them. The table
+is lowercased on the first query and kept; a closed launcher costs nothing.
+The Launcher tab's "Pages and settings" switch turns the rows off.
 
 ## Trying it without a rebuild
 
@@ -265,6 +311,12 @@ switches only ever remove a way in or add a lock.
   `system`). `SWAYPPLET_SYSTEM_FIXTURE=behind|staged|in-sync|applying`
   gives the System tab a canned state, and its buttons play a canned log
   instead of running nx.
+  (`wallpaper`, `idle`, `bar`, `alerts`, `launcher`, `displays`, `glass`).
+- `SWPP_SETTLE=4 SWAYPPLET_PANEL_QUERY=dark dev/render.sh --mode launcher`
+  shows the search results; `SWAYPPLET_PANEL_ACTIVATE=1` also presses
+  Enter, for the row lit on its tab. The light holds 1.2 s and the harness
+  shoots about 5 s after it opens the panel, so pass a delay in
+  milliseconds (`=4500`) with `SWPP_SETTLE=0` to catch it.
   `settings.displays` drives the nested compositor's outputs;
   `SWAYPPLET_PREVIEW_DISPLAYS_APPLY=1` moves one and applies it after two
   seconds (the keep question, then the revert), `=leave` also hides the

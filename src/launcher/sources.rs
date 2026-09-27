@@ -5,7 +5,8 @@
 //! [`providers`], from the query's prefix and the Launcher settings.
 //! **Local** results are made here, on the main thread, in the frame the key
 //! was typed in: the calculator, the command row and the pages of the panel.
-//! They cost microseconds and need nothing but the query.
+//! They cost microseconds and need nothing but the query. The settings
+//! rows are local too: a walk over the static index (`settings::search`).
 
 use crate::services::elephant::SearchResult;
 use crate::settings::store::Launcher;
@@ -16,6 +17,7 @@ use super::calc;
 pub const CALC: &str = "swaypplet-calc";
 pub const RUN: &str = "swaypplet-run";
 pub const PAGE: &str = "swaypplet-page";
+pub const SETTING: &str = "swaypplet-setting";
 
 /// What was typed, read by its prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -224,6 +226,43 @@ pub fn local(l: &Launcher, q: Query, pages: &[Page], shell: &str) -> Vec<SearchR
     out
 }
 
+/// At most this many settings rows above the apps, for a query that names a
+/// setting, and below them, for one that only might.
+const MAX_CLEAR_SETTINGS: usize = 3;
+const MAX_OTHER_SETTINGS: usize = 4;
+
+/// The settings rows for `q`: those that go above elephant's rows, and
+/// those that go below them. A query goes above when every word of it is a
+/// whole word of a setting's title or keywords ("dark", "blur",
+/// "resolution"); the rest ("re", "fir") trail the apps, where a word that
+/// happens to start a setting's name costs nothing.
+pub fn settings(l: &Launcher, q: Query) -> (Vec<SearchResult>, Vec<SearchResult>) {
+    let Query::Plain(text) = q else {
+        return (Vec::new(), Vec::new());
+    };
+    if !l.settings {
+        return (Vec::new(), Vec::new());
+    }
+    let (clear, other): (Vec<_>, Vec<_>) = crate::settings::search::find(text)
+        .into_iter()
+        .partition(|h| h.clear);
+    let to_row = |h: crate::settings::search::Hit| {
+        row(SETTING, h.target.id(), h.path, h.subtitle.to_string())
+    };
+    (
+        clear
+            .into_iter()
+            .take(MAX_CLEAR_SETTINGS)
+            .map(to_row)
+            .collect(),
+        other
+            .into_iter()
+            .take(MAX_OTHER_SETTINGS)
+            .map(to_row)
+            .collect(),
+    )
+}
+
 fn calc_row(expr: &str, v: f64) -> SearchResult {
     let value = calc::format(v);
     row(
@@ -342,6 +381,27 @@ mod tests {
         };
         assert!(local(&off, Query::Plain("glass"), &pages, "zsh").is_empty());
         assert!(local(&off, Query::Calc("1+1"), &pages, "zsh").is_empty());
+    }
+
+    #[test]
+    fn settings_rows_go_above_the_apps_only_when_the_query_names_one() {
+        let l = Launcher::default();
+        let (above, below) = settings(&l, Query::Plain("dark"));
+        assert_eq!(above[0].text, "Look › Appearance › Mode");
+        assert_eq!(above[0].provider, SETTING);
+        assert!(below.len() <= MAX_OTHER_SETTINGS);
+        let (above, below) = settings(&l, Query::Plain("reso"));
+        assert!(above.is_empty());
+        assert_eq!(below[0].text, "Displays › Display › Resolution");
+        let (above, below) = settings(&l, Query::Plain("firefox"));
+        assert!(above.is_empty() && below.is_empty());
+        // The Launcher tab's switch for pages and settings covers these.
+        let off = Launcher {
+            settings: false,
+            ..l
+        };
+        assert!(settings(&off, Query::Plain("dark")).0.is_empty());
+        assert!(settings(&l, Query::Command("dark")).0.is_empty());
     }
 
     #[test]

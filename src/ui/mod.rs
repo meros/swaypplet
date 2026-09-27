@@ -66,7 +66,7 @@ pub use field::{FieldSize, FieldState, dropdown, entry, field, set_field_state};
 pub use layout::{hbox, pad, pill_group, separator, toolbar, vbox};
 pub use media::{choice_grid, lifted, pick_thumb, placeholder, ring, set_pinned, swatch, thumb};
 pub use menu::{menu, menu_item};
-pub use motion::{clear_shake, page_stack, revealer, set_breathing, shake};
+pub use motion::{clear_shake, highlight, page_stack, revealer, set_breathing, shake};
 pub use popover::popover;
 pub use progress::{progress, set_progress_status};
 pub use row::{Row, list, list_row, row, row_button, set_busy, set_instant, set_selected};

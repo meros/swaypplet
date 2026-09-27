@@ -433,6 +433,14 @@ impl Panel {
             });
         }
 
+        // ── Settings rows from the launcher ──────────────────────────────────
+        {
+            let deck_stack_c = deck_stack.clone();
+            let settings_c = settings.clone();
+            let entry = launcher.entry().clone();
+            launcher.set_on_setting(move |id| open_setting(&deck_stack_c, &settings_c, &entry, id));
+        }
+
         // ── Launcher activation + Esc hide the menu / return to search ───────
         {
             let hide = hide_menu.clone();
@@ -509,6 +517,20 @@ impl Panel {
                 glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
                     entry.set_text(&query)
                 });
+                // `SWAYPPLET_PANEL_ACTIVATE=1` then presses Enter 1.5 s
+                // later, or that many milliseconds after opening when it is
+                // a larger number: a result opened, a settings row among
+                // them, timed to land between the harness's shots.
+                if let Ok(v) = std::env::var("SWAYPPLET_PANEL_ACTIVATE")
+                    && !v.is_empty()
+                {
+                    let ms = v.parse::<u64>().ok().filter(|ms| *ms > 1).unwrap_or(1800);
+                    let launcher = self.launcher.clone();
+                    glib::timeout_add_local_once(
+                        std::time::Duration::from_millis(ms),
+                        move || launcher.activate_selected(),
+                    );
+                }
             }
             // The section reads land as widget churn (sysfs, clipboard rows,
             // wallpaper rescans, eight worker threads); measured on open they
@@ -530,6 +552,20 @@ impl Panel {
             self.toggle();
         }
         self.deck_stack.set_visible_child_name("notifications");
+    }
+
+    /// Open the settings row or the panel section a launcher result names
+    /// (`settings::search`), opening the panel first when it is closed.
+    pub fn open_setting(&self, id: &str) {
+        if !(self.surface.is_shown() && self.surface.window().is_visible()) {
+            self.toggle();
+        }
+        open_setting(
+            &self.deck_stack,
+            &self.sections.settings,
+            self.launcher.entry(),
+            id,
+        );
     }
 
     pub fn refresh_audio(&self) {
@@ -574,6 +610,23 @@ fn elastic_lists(
             (list, full)
         })
         .collect()
+}
+
+/// A settings search result: a panel section by its prefix, which the
+/// omnibox routes like a typed one, or a settings row, which the settings
+/// page scrolls to and lights.
+fn open_setting(
+    deck_stack: &gtk4::Stack,
+    settings: &SettingsSection,
+    entry: &gtk4::SearchEntry,
+    id: &str,
+) {
+    if id.starts_with(':') {
+        entry.set_text(id);
+        entry.set_position(-1);
+    } else if settings.reveal(id) {
+        deck_stack.set_visible_child_name("settings");
+    }
 }
 
 /// Every prefix the omnibox knows, one row per page, from the same tables
@@ -1121,6 +1174,17 @@ mod tests {
         assert_eq!(route(":pref"), Some(("settings", None)));
         assert_eq!(route(":nothing"), None);
         assert_eq!(route("firefox"), None);
+    }
+
+    #[test]
+    fn every_quick_search_result_opens_a_page() {
+        for q in crate::settings::search::QUICK {
+            assert!(
+                matches!(route(q.prefix), Some((page, None)) if page != "settings"),
+                "{} routes nowhere",
+                q.prefix
+            );
+        }
     }
 
     #[test]

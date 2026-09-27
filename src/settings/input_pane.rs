@@ -927,3 +927,28 @@ mod tests {
         assert_eq!(got.layouts, None);
     }
 }
+
+// The rows the launcher's settings search finds (`settings::search`).
+use super::search::{Entry, row};
+
+pub(super) const SEARCH: &[Entry] = &[
+    row("Keyboard", "", "Keyboard layouts, in switching order", &["layout", "keyboard layout", "language", "xkb", "dvorak", "qwerty", "input method"]),
+    row("Keyboard", "Switch layout", "The keys that change layout", &["layout shortcut", "switch language", "keyboard switch"]),
+    row("Keyboard", "Caps Lock", "What the Caps Lock key does", &["capslock", "caps", "escape", "ctrl", "control"]),
+    row("Keyboard", "Repeat delay", "How long a held key waits before repeating", &["key repeat", "typematic", "delay"]),
+    row("Keyboard", "Repeat rate", "How fast a held key repeats", &["key repeat", "typematic", "rate"]),
+    row("Touchpad", "Tap to click", "A tap is a click", &["tap", "trackpad", "touchpad click"]),
+    row("Touchpad", "Natural scrolling", "Content follows the fingers", &["reverse scroll", "invert scroll", "trackpad scroll"]),
+    row("Touchpad", "Off while typing", "Ignore the touchpad while keys are pressed", &["disable while typing", "dwt", "palm"]),
+    row("Touchpad", "Speed", "Touchpad pointer speed", &["trackpad speed", "sensitivity", "cursor speed"]),
+    row("Touchpad", "Acceleration", "Touchpad acceleration profile", &["trackpad acceleration", "accel", "pointer acceleration"]),
+    row("Touchpad", "Right click", "How a right click is made", &["secondary click", "two finger click", "click method", "clickfinger"]),
+    row("Touchpad", "Scrolling", "Two fingers or the edge", &["scroll method", "two finger scroll", "edge scroll"]),
+    row("Mouse", "Speed", "Mouse pointer speed", &["mouse speed", "sensitivity", "cursor speed", "trackball"]),
+    row("Mouse", "Acceleration", "Mouse acceleration profile", &["mouse acceleration", "accel", "pointer acceleration"]),
+    row("Mouse", "Natural scrolling", "The wheel scrolls the content's way", &["reverse scroll", "invert wheel", "mouse scroll"]),
+    row("Keys", "Volume step", "Percent per volume key press", &["volume", "increment", "sound"]),
+    row("Keys", "Brightness step", "Percent per brightness key press", &["brightness", "backlight", "increment"]),
+    row("Keys", "Volume past 100 %", "Let the volume go to 150 %", &["boost", "overamplification", "loud", "louder", "amplify"]),
+    row("Devices", "", "The keyboards, touchpads and mice connected now", &["devices", "connected", "input devices"]),
+];

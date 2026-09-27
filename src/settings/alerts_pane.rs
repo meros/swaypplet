@@ -409,3 +409,27 @@ impl AlertsPane {
         self.state.sync();
     }
 }
+
+// ── Search ──────────────────────────────────────────────────────────────
+
+use super::search::{Entry, row};
+
+/// This tab's rows as the launcher finds them (`search.rs`). A row added
+/// to the tab gets a line here; the test there fails until it does.
+#[rustfmt::skip]
+pub(super) const SEARCH: &[Entry] = &[
+    row("Notifications", "Linger", "How long a notification stays", &["notification timeout", "duration", "popup", "toast", "dismiss"]),
+    row("Notifications", "Corner", "Where notifications appear", &["position", "notification position", "top right", "placement"]),
+    row("Notifications", "Stack", "Cards shown before older ones fold", &["notifications", "count", "collapse"]),
+    row("Quiet hours", "Quiet hours", "Do Not Disturb on a schedule", &["do not disturb", "dnd", "silence", "mute notifications", "focus"]),
+    row("Quiet hours", "From", "When quiet hours start", &["start", "begin"]),
+    row("Quiet hours", "Until", "When quiet hours end", &["end", "stop"]),
+    row("Capture", "Folder", "Where screenshots are saved", &["screenshot", "screenshots", "save location", "directory", "path"]),
+    row("Capture", "After a shot", "Save, copy, or both", &["screenshot", "clipboard", "copy", "save"]),
+    row("Capture", "Annotate every shot", "Open the editor on each screenshot", &["annotate", "edit", "draw", "screenshot", "satty", "swappy"]),
+    row("Quiet by context", "Hold popups", "Hold popups while presenting or in full screen", &["dnd", "do not disturb", "focus", "presenting", "quiet mode", "focus assist"]),
+    row("Quiet by context", "Screen shared", "Quiet while the screen is shared", &["screen share", "screencast", "presenting", "meeting"]),
+    row("Quiet by context", "Display mirrored", "Quiet while a display mirrors another", &["projector", "mirror", "duplicate", "presentation"]),
+    row("Quiet by context", "Full screen", "Quiet while a window is full screen", &["fullscreen", "game", "video", "movie"]),
+    row("Quiet by context", "In a call", "Quiet while the camera or a call app runs", &["call", "meeting", "camera", "microphone", "zoom", "teams"]),
+];

@@ -256,6 +256,25 @@ impl BarPane {
     }
 }
 
+// ── Search ──────────────────────────────────────────────────────────────
+
+use super::search::{Entry, row};
+
+/// This tab's rows as the launcher finds them (`search.rs`). A row added
+/// to the tab gets a line here; the test there fails until it does.
+#[rustfmt::skip]
+pub(super) const SEARCH: &[Entry] = &[
+    row("Clock", "24-hour clock", "14:05 rather than 2:05 PM", &["24h", "12h", "am pm", "time format", "military time", "clock format"]),
+    row("Clock", "Show the date", "Weekday and date beside the time", &["date", "day", "weekday", "calendar"]),
+    row("Segments", "Media mark", "What is playing, on the bar", &["music", "now playing", "player", "mpris", "song"]),
+    row("Segments", "Tray", "Status icons from applications", &["system tray", "systray", "status icons", "appindicator", "tray icons"]),
+    row("Segments", "Battery", "The battery segment of the bar", &["power", "charge", "percentage"]),
+    row("Segments", "Presence", "The presence sensor's mark", &["sensor", "proximity"]),
+    row("Segments", "Backup", "The nightly backup's glyph", &["restic", "borg", "backup status"]),
+    row("Segments", "Task board", "Tasks 1–4 on the bar", &["tasks", "todo", "board"]),
+    row("Volume & brightness", "Shown as", "Where a volume or brightness key shows", &["osd", "on screen display", "popup", "volume popup", "overlay"]),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;

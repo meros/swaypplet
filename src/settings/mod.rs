@@ -35,6 +35,7 @@ mod launcher_pane;
 mod look_pane;
 pub mod preset;
 pub mod schema;
+pub mod search;
 pub mod store;
 mod system_info;
 mod system_job;
@@ -119,6 +120,7 @@ pub struct SettingsSection {
     tabs_strip: gtk4::Box,
     root: gtk4::Box,
     tabs: Vec<(&'static str, gtk4::ToggleButton)>,
+    stack: gtk4::Stack,
     look: look_pane::LookPane,
     idle: idle_pane::IdlePane,
     bar: bar_pane::BarPane,
@@ -211,6 +213,7 @@ impl SettingsSection {
             tabs_strip: strip,
             root,
             tabs,
+            stack,
             look,
             idle,
             bar,
@@ -242,6 +245,29 @@ impl SettingsSection {
         }
     }
 
+    /// Open the tab a search result names, bring its row into view and
+    /// light it up for a moment (`search.rs`). False when `id` names no
+    /// row of the index.
+    pub fn reveal(&self, id: &str) -> bool {
+        let Some(search::Target::Row(tab, group, title)) = search::Target::from_id(id) else {
+            return false;
+        };
+        self.show(tab);
+        let Some(page) = self.stack.child_by_name(tab) else {
+            return false;
+        };
+        match find_row(&page, group, title) {
+            Some(row) => {
+                reveal_when_laid_out(&row);
+                true
+            }
+            None => {
+                log::warn!("settings: no row {group} › {title} on the {tab} tab");
+                false
+            }
+        }
+    }
+
     /// The Displays tab's apply, for the render harness.
     pub fn demo_displays(&self) {
         self.displays.demo_apply();
@@ -265,6 +291,94 @@ impl SettingsSection {
         self.displays.refresh();
         self.glass.refresh();
         self.system.refresh();
+    }
+}
+
+/// Every widget under `root`, depth first, `root` included.
+fn descendants(root: &gtk4::Widget) -> Vec<gtk4::Widget> {
+    let mut out = vec![root.clone()];
+    let mut i = 0;
+    while i < out.len() {
+        let mut child = out[i].first_child();
+        while let Some(c) = child {
+            child = c.next_sibling();
+            out.push(c);
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The row a search entry names on a tab's page: inside the group whose
+/// overline is `group` (anywhere on the page when no group has that name,
+/// as on Displays, whose group is named after the selected output), the
+/// row whose gutter label is `title`. An empty `title` is the group itself.
+fn find_row(page: &gtk4::Widget, group: &str, title: &str) -> Option<gtk4::Widget> {
+    let text_is = |w: &gtk4::Widget, text: &str| {
+        w.downcast_ref::<gtk4::Label>()
+            .is_some_and(|l| l.text().as_str() == text)
+    };
+    let group_box = descendants(page).into_iter().find(|w| {
+        w.has_css_class("settings-group") && w.first_child().is_some_and(|o| text_is(&o, group))
+    });
+    if title.is_empty() {
+        return group_box;
+    }
+    let scope = group_box.unwrap_or_else(|| page.clone());
+    descendants(&scope)
+        .into_iter()
+        .find(|w| w.has_css_class("settings-row-label") && text_is(w, title))
+        .and_then(|label| label.parent())
+}
+
+/// Scroll `row` into the middle of the settings sheet's scroller and light
+/// it, once it has a place on screen. The tab and the deck page were only
+/// just switched, so the row is laid out a frame or two from now: the tick
+/// callback waits for it, for at most a second of frames.
+fn reveal_when_laid_out(row: &gtk4::Widget) {
+    let frames = std::cell::Cell::new(0u32);
+    row.add_tick_callback(move |row, _| {
+        frames.set(frames.get() + 1);
+        let laid_out = row.is_mapped() && row.height() > 0;
+        if !laid_out && frames.get() < 60 {
+            return glib::ControlFlow::Continue;
+        }
+        if laid_out {
+            scroll_to(row);
+            crate::ui::highlight(row);
+        }
+        glib::ControlFlow::Break
+    });
+}
+
+/// Centre `row` in the nearest scroller above it that scrolls vertically.
+fn scroll_to(row: &gtk4::Widget) {
+    let mut up = row.parent();
+    while let Some(w) = up {
+        if let Some(scroller) = w.downcast_ref::<gtk4::ScrolledWindow>()
+            && scroller.vscrollbar_policy() != gtk4::PolicyType::Never
+        {
+            // The adjustment measures in the scrolled content's space, which
+            // is the viewport's child when GTK wrapped one in.
+            let content = scroller
+                .child()
+                .map(|c| match c.downcast_ref::<gtk4::Viewport>() {
+                    Some(v) => v.child().unwrap_or(c.clone()),
+                    None => c,
+                });
+            let Some(bounds) = content.and_then(|c| row.compute_bounds(&c)) else {
+                return;
+            };
+            let adj = scroller.vadjustment();
+            let middle =
+                f64::from(bounds.y()) - (adj.page_size() - f64::from(bounds.height())) / 2.0;
+            adj.set_value(middle.clamp(
+                adj.lower(),
+                (adj.upper() - adj.page_size()).max(adj.lower()),
+            ));
+            return;
+        }
+        up = w.parent();
     }
 }
 

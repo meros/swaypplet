@@ -619,6 +619,27 @@ fn build_footer(state: &Rc<State>, status: &gtk4::Label, undo_btn: &gtk4::Button
     footer
 }
 
+// ── Search ──────────────────────────────────────────────────────────────
+
+use super::search::{Entry, row};
+
+/// This tab's rows as the launcher finds them (`search.rs`). A row added
+/// to the tab gets a line here; the test there fails until it does.
+#[rustfmt::skip]
+pub(super) const SEARCH: &[Entry] = &[
+    row("Presets", "", "The shipped glass and other coherent ones", &["preset", "glass style", "material"]),
+    row("Material", "Clarity", "How much of the backdrop shows through", &["transparency", "transparent", "opacity", "see through", "translucent"]),
+    row("Material", "Frost", "Blur of the backdrop", &["blur", "frosted", "frosting", "blur radius"]),
+    row("Material", "Refraction", "How far the slab bends the backdrop", &["bend", "distortion", "lens", "index"]),
+    row("Material", "Dispersion", "Colour split through the bevel", &["chromatic aberration", "rainbow", "prism"]),
+    row("Material", "Highlight", "The light on the top of the card", &["specular", "shine", "gloss"]),
+    row("Material", "Bevel", "The width and depth of the edge", &["edge", "bezel", "depth", "border"]),
+    row("Profile", "Surface", "The bevel's height profile", &["shape", "curve"]),
+    row("Profile", "Grain", "Structure laid over the bevel", &["texture", "pattern", "noise", "fluted", "ribbed"]),
+    row("Profile", "Grain size", "The grain's pitch", &["texture size"]),
+    row("Profile", "Grain strength", "How far the grain moves the light", &["texture strength"]),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;

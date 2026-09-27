@@ -10,6 +10,7 @@ same `LauncherView`). Code: `src/launcher/`. Settings: the Launcher tab
 |---|---|---|
 | nothing | what you launch most, then the installed apps | launches |
 | `firefox` | apps, open windows, commands, pages and the other kinds switched on | launches the row; a page row opens that page |
+| `dark`, `blur` | a setting the words name, above the apps; one they only start, below them (docs/SETTINGS.md, Search) | opens the settings on that row and lights it |
 | `2*21`, `sqrt 2` | a `= 42` row on top when the text is arithmetic | copies the result |
 | `=expr` | the calculator only; what it cannot read goes to elephant's `calc` (units, currencies) | copies |
 | `>cmd` | a "Run cmd" row, then commands on `PATH` from elephant's `runner` | runs `$SHELL -c cmd` through sway's `exec`, so it outlives the panel |

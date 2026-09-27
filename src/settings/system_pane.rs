@@ -648,3 +648,12 @@ impl Pane {
             })));
     }
 }
+
+// What the launcher's settings search finds (`settings::search`): no
+// settings rows here, only the page's groups.
+pub(super) const SEARCH: &[super::search::Entry] = &[
+    super::search::row("NixOS build", "", "The build this machine runs, and whether a newer one waits", &["update", "upgrade", "nixos", "version", "nx", "rebuild", "generation", "staged"]),
+    super::search::row("What's new", "", "Commits this machine does not run yet", &["changelog", "changes", "commits", "news"]),
+    super::search::row("Update this host", "", "Apply the newest build now", &["apply", "switch", "nx apply", "install update", "reboot"]),
+    super::search::row("This machine", "", "Host, kernel, uptime, disk and memory", &["about", "system info", "kernel", "uptime", "disk space", "memory", "ram"]),
+];

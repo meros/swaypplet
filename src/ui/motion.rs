@@ -142,6 +142,33 @@ pub fn clear_shake(w: &impl IsA<gtk4::Widget>) {
     w.remove_css_class("ui-shake");
 }
 
+/// How long [`highlight`] holds before it fades. A dwell, not a motion:
+/// long enough to find the row after the sheet moved under the eye.
+const HIGHLIGHT_HOLD_MS: u64 = 1200;
+
+/// Light `w` in the accent's tint, hold, and fade back: the row a search
+/// result landed on. The light comes and goes at the state motion (the
+/// class carries the transition), so reduced motion makes it a plain blink.
+/// Every call replays it.
+pub fn highlight(w: &impl IsA<gtk4::Widget>) {
+    let w = w.clone().upcast::<gtk4::Widget>();
+    w.add_css_class("ui-highlight");
+    w.remove_css_class("lit");
+    gtk4::glib::idle_add_local_once({
+        let w = w.clone();
+        move || w.add_css_class("lit")
+    });
+    let weak = w.downgrade();
+    gtk4::glib::timeout_add_local_once(
+        std::time::Duration::from_millis(HIGHLIGHT_HOLD_MS),
+        move || {
+            if let Some(w) = weak.upgrade() {
+                w.remove_css_class("lit");
+            }
+        },
+    );
+}
+
 /// Breathe: the attention loop for something working in the background
 /// (a notification's progress, the player's art).
 pub fn set_breathing(w: &impl IsA<gtk4::Widget>, breathing: bool) {

@@ -6,7 +6,7 @@
 //!
 //! | module | holds |
 //! |---|---|
-//! | `sources.rs` | the query's prefix (`=`, `>`), which elephant providers the Launcher settings ask, the rows made locally |
+//! | `sources.rs` | the query's prefix (`=`, `>`), which elephant providers the Launcher settings ask, the rows made locally (settings rows among them, from `settings::search`) |
 //! | `calc.rs` | the `=` calculator |
 //! | `frecency.rs` | what you launch, and the ranking it gives |
 //! | `windows.rs` | open windows as rows, from sway's tree |
@@ -57,14 +57,31 @@ const LAUNCHER_CARD_SIZE: crate::shell::fit::CardSize = crate::shell::fit::CardS
     height: Some(520),
 };
 
-/// What runs after an activation, so a host popup can hide itself.
-type OnActivate = Rc<RefCell<Option<Box<dyn Fn()>>>>;
+/// What the host does when a row is activated.
+#[derive(Default)]
+struct Hooks {
+    /// Runs after an activation, so a host popup can hide itself.
+    done: Option<Box<dyn Fn()>>,
+    /// Opens a settings row or a panel section a result names, given the
+    /// row's identifier (`settings::search::Target::id`). Set by the host
+    /// that can open them; without one the launcher lists no settings rows.
+    setting: Option<OpenSetting>,
+}
+
+type OpenSetting = Box<dyn Fn(&str)>;
+
+type OnActivate = Rc<RefCell<Hooks>>;
 
 struct LauncherState {
-    /// What is on screen: `local` then `remote`.
+    /// What is on screen: `local`, `remote`, then `tail`.
     results: Vec<SearchResult>,
-    /// Rows made on the key's frame (`sources::local`).
+    /// Rows made on the key's frame (`sources::local`), and the settings
+    /// the query names.
     local: Vec<SearchResult>,
+    /// Settings rows the query only might mean, below elephant's.
+    tail: Vec<SearchResult>,
+    /// Whether the host opens settings rows (`set_on_setting`).
+    settings_host: bool,
     /// Rows elephant and the window search gave, for the last query they
     /// answered.
     remote: Vec<SearchResult>,
@@ -146,6 +163,8 @@ impl LauncherView {
             state: Rc::new(RefCell::new(LauncherState {
                 results: Vec::new(),
                 local: Vec::new(),
+                tail: Vec::new(),
+                settings_host: false,
                 remote: Vec::new(),
                 pages: Vec::new(),
                 tabbed: false,
@@ -155,7 +174,7 @@ impl LauncherView {
                 stream: RefCell::default(),
                 stream_ids: RefCell::default(),
             })),
-            on_activate: Rc::new(RefCell::new(None)),
+            on_activate: Rc::default(),
         };
 
         frecency::load();
@@ -202,10 +221,18 @@ impl LauncherView {
         self.state.borrow_mut().pages = pages;
     }
 
+    /// Offer the settings and the panel sections by what they do, and open
+    /// one through `f` when its row is activated. `f` gets the row's
+    /// identifier, a `settings::search::Target` id.
+    pub fn set_on_setting<F: Fn(&str) + 'static>(&self, f: F) {
+        self.on_activate.borrow_mut().setting = Some(Box::new(f));
+        self.state.borrow_mut().settings_host = true;
+    }
+
     /// Register a callback invoked right after an item is activated (used by
     /// the start menu to hide itself).
     pub fn set_on_activate<F: Fn() + 'static>(&self, f: F) {
-        *self.on_activate.borrow_mut() = Some(Box::new(f));
+        self.on_activate.borrow_mut().done = Some(Box::new(f));
     }
 
     /// Reset to the empty-query state (cleared input + default app list).
@@ -214,6 +241,7 @@ impl LauncherView {
         {
             let mut s = self.state.borrow_mut();
             s.local.clear();
+            s.tail.clear();
             // What you use most, drawn now from memory; elephant's app list
             // follows below it.
             s.remote = frecent_rows();
@@ -418,6 +446,16 @@ impl Launcher {
         Launcher { surface, view }
     }
 
+    /// Offer the settings and the panel sections, and open one through `f`
+    /// (the panel, which holds them) once this card has gone.
+    pub fn set_on_setting(&self, f: impl Fn(&str) + 'static) {
+        let surface = self.surface.clone();
+        self.view.set_on_setting(move |id| {
+            surface.hide();
+            f(id);
+        });
+    }
+
     pub fn toggle(&self) {
         if self.surface.is_shown() && self.surface.window().is_visible() {
             self.surface.hide();
@@ -515,6 +553,14 @@ fn activate(item: &SearchResult, entry: &gtk4::SearchEntry, on_activate: &OnActi
         entry.set_position(-1);
         return;
     }
+    if item.provider == sources::SETTING {
+        // The host opens it and stays open on it; nothing is remembered,
+        // as for a page.
+        if let Some(open) = on_activate.borrow().setting.as_ref() {
+            open(&item.identifier);
+        }
+        return;
+    }
     if launcher_settings().frecency {
         frecency::record(item);
     }
@@ -525,7 +571,7 @@ fn activate(item: &SearchResult, entry: &gtk4::SearchEntry, on_activate: &OnActi
         default_action(item),
         query,
     );
-    if let Some(cb) = on_activate.borrow().as_ref() {
+    if let Some(cb) = on_activate.borrow().done.as_ref() {
         cb();
     }
 }
@@ -557,11 +603,13 @@ fn frecent_rows() -> Vec<SearchResult> {
         .collect()
 }
 
-/// `local` then `remote` into `results`, the selection back on the first.
+/// `local`, `remote` and `tail` into `results`, the selection back on the
+/// first.
 fn compose(state: &Rc<RefCell<LauncherState>>) {
     let mut s = state.borrow_mut();
     let mut results = s.local.clone();
     results.extend(s.remote.iter().cloned());
+    results.extend(s.tail.iter().cloned());
     s.results = results;
     s.selected = 0;
 }
@@ -576,6 +624,14 @@ fn local_pass(state: &Rc<RefCell<LauncherState>>, text: &str) {
         let mut s = state.borrow_mut();
         s.tabbed = false;
         s.local = sources::local(&l, q, &s.pages, &user_shell());
+        (s.tail, s.local) = if s.settings_host {
+            let (clear, other) = sources::settings(&l, q);
+            let mut local = std::mem::take(&mut s.local);
+            local.extend(clear);
+            (other, local)
+        } else {
+            (Vec::new(), std::mem::take(&mut s.local))
+        };
         let words: Vec<String> = q
             .text()
             .to_lowercase()
@@ -661,6 +717,7 @@ fn toggle_windows_of(
             {
                 let mut s = state.borrow_mut();
                 s.local.clear();
+                s.tail.clear();
                 s.remote = rows;
                 s.tabbed = true;
             }
@@ -939,7 +996,7 @@ fn window_row(
             String::new(),
             String::new(),
         );
-        if let Some(cb) = on_activate.borrow().as_ref() {
+        if let Some(cb) = on_activate.borrow().done.as_ref() {
             cb();
         }
     });
@@ -1078,6 +1135,7 @@ fn provider_label(provider: &str) -> &str {
         sources::CALC => "calc",
         sources::RUN => "run",
         sources::PAGE => "open",
+        sources::SETTING => "setting",
         other => other,
     }
 }
@@ -1086,7 +1144,7 @@ fn provider_icon(provider: &str) -> &'static str {
     match provider {
         sources::CALC => "󰃬",
         sources::RUN => "",
-        sources::PAGE => "󰒓",
+        sources::PAGE | sources::SETTING => "󰒓",
         "desktopapplications" => "󰀻",
         "runner" => "",
         "windows" => "󰖯",

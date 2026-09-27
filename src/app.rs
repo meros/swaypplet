@@ -252,6 +252,18 @@ pub fn run() {
 
         // ── Launcher ────────────────────────────────────────────────────────
         let launcher = Launcher::new(app);
+        // A settings row found from the launcher card opens in the panel,
+        // which holds the settings.
+        {
+            let state = Rc::downgrade(&state_clone);
+            launcher.set_on_setting(move |id| {
+                let Some(state) = state.upgrade() else { return };
+                let Ok(st) = state.try_borrow() else { return };
+                if let Some(panel) = st.panel.as_ref() {
+                    panel.open_setting(id);
+                }
+            });
+        }
 
         // ── Keybinding sheet ────────────────────────────────────────────────
         let keybinds = Keybinds::new(app);
