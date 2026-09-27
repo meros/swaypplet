@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use gtk4::prelude::*;
 use gtk4::{gdk, glib};
 
-use super::live::Frame;
+use super::live::{Crop, Frame, Size, Want};
 use super::scene::{self, Scene};
 
 /// Every picture a window's frames land on, by window identifier. Each
@@ -48,6 +48,26 @@ impl Live {
     /// Every window identifier drawn, for the capture to ask for.
     pub fn window_ids(&self) -> Vec<String> {
         self.pictures.keys().cloned().collect()
+    }
+
+    /// What to capture for every window drawn: each cut to the largest box
+    /// any of its pictures is drawn in, at `scale` device pixels to one of
+    /// GTK's, and to `crop` of it when given.
+    pub fn wants(&self, crop: Option<Crop>, scale: f64) -> Vec<Want> {
+        self.pictures
+            .iter()
+            .map(|(id, pics)| {
+                let (w, h) = pics.iter().fold((1, 1), |(w, h), p| {
+                    let (pw, ph) = p.size_request();
+                    (w.max(pw), h.max(ph))
+                });
+                Want {
+                    id: id.clone(),
+                    crop,
+                    size: draw_size(w, h, scale),
+                }
+            })
+            .collect()
     }
 
     /// Register a picture for a window's frames, drawn by the caller. It
@@ -91,6 +111,13 @@ impl Live {
             }
         }
     }
+}
+
+/// A box `w` by `h` in GTK's pixels, in device pixels at `scale`. Rounded
+/// up, so a fractional scale never cuts a frame below what it is drawn at.
+fn draw_size(w: i32, h: i32, scale: f64) -> Size {
+    let px = |v: i32| (f64::from(v.max(1)) * scale.max(1.0)).ceil() as u32;
+    Size::Draw(px(w), px(h))
 }
 
 /// A frame as a texture, kept as its window's last picture ([`LAST`]).
@@ -217,7 +244,15 @@ fn icon_name(app: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::place_in;
+    use super::{Size, draw_size, place_in};
+
+    #[test]
+    fn a_draw_box_is_in_device_pixels_rounded_up() {
+        assert_eq!(draw_size(200, 125, 2.0), Size::Draw(400, 250));
+        assert_eq!(draw_size(201, 125, 1.5), Size::Draw(302, 188));
+        // Never below one pixel, never below 1x.
+        assert_eq!(draw_size(0, -3, 0.5), Size::Draw(1, 1));
+    }
 
     #[test]
     fn a_window_is_kept_inside_the_box() {

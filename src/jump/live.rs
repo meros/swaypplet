@@ -57,6 +57,31 @@ pub struct Stream {
 /// A piece of a window, as fractions of it: x, y, width, height in 0..=1.
 pub type Crop = (f64, f64, f64, f64);
 
+/// How far a window's frames are cut down before they cross to GTK.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Size {
+    /// The longer side at most this many pixels.
+    MaxEdge(u32),
+    /// Drawn contained in a box this many device pixels: cut by the largest
+    /// whole factor that still covers the box, so GTK scales the frame down
+    /// by less than 2x and never up. A box and not an edge, because a pin's
+    /// windows are drawn at many sizes, and a cut to the picture's edge left
+    /// a small window's frame several times the pixels it is drawn at, or a
+    /// large one below them.
+    Draw(u32, u32),
+}
+
+/// One window a stream captures.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Want {
+    /// The `foreign_toplevel_identifier` sway reports for the window.
+    pub id: String,
+    /// Only this piece of it, cut from the full buffer before scaling, so a
+    /// small piece stays as sharp as the window is.
+    pub crop: Option<Crop>,
+    pub size: Size,
+}
+
 impl Stream {
     /// Capture the windows named by `ids` until dropped.
     ///
@@ -69,33 +94,28 @@ impl Stream {
         fps: u32,
         tx: async_channel::Sender<Frame>,
     ) -> Stream {
-        Stream::spawn(
-            ids.into_iter().map(|id| (id, None)).collect(),
-            max_edge,
+        Stream::start_wants(
+            ids.into_iter()
+                .map(|id| Want {
+                    id,
+                    crop: None,
+                    size: Size::MaxEdge(max_edge),
+                })
+                .collect(),
             fps,
             tx,
         )
     }
 
-    /// Capture one piece of one window until dropped: every frame is cut to
-    /// `crop` at the buffer's full resolution before it is scaled, so a small
-    /// piece stays as sharp as the window is.
-    pub fn start_region(
-        id: String,
-        crop: Crop,
-        max_edge: u32,
-        fps: u32,
-        tx: async_channel::Sender<Frame>,
-    ) -> Stream {
-        Stream::spawn(vec![(id, Some(crop))], max_edge, fps, tx)
-    }
-
-    fn spawn(
-        ids: Vec<(String, Option<Crop>)>,
-        max_edge: u32,
-        fps: u32,
-        tx: async_channel::Sender<Frame>,
-    ) -> Stream {
+    /// Capture every window of `wants`, each cut as it asks, until dropped.
+    ///
+    /// The worker outlives what goes wrong under it. A window whose session
+    /// stops (it closed, or sway replaced its capture) is asked for again
+    /// with a growing delay, and found again when it comes back under the
+    /// same identifier; a lost connection is made again the same way. A
+    /// picture fed by a stream therefore never freezes because the stream
+    /// died: it freezes only while its window draws nothing.
+    pub fn start_wants(wants: Vec<Want>, fps: u32, tx: async_channel::Sender<Frame>) -> Stream {
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
         let spawned = std::thread::Builder::new()
@@ -105,8 +125,28 @@ impl Stream {
                     0 => Duration::ZERO,
                     fps => Duration::from_millis(1000 / u64::from(fps)),
                 };
-                if let Err(e) = run(&ids, max_edge, interval, &tx, &flag) {
-                    log::warn!("jump: live capture: {e}");
+                let mut backoff = RESTART_MIN;
+                let mut warned = false;
+                while !flag.load(Ordering::Relaxed) && !tx.is_closed() {
+                    let started = Instant::now();
+                    match run(&wants, interval, &tx, &flag) {
+                        Ok(()) => break,
+                        // Warn once; a compositor without the protocol
+                        // would otherwise say so every few seconds.
+                        Err(e) if !warned => {
+                            log::warn!("jump: live capture: {e}; trying again");
+                            warned = true;
+                        }
+                        Err(e) => log::debug!("jump: live capture: {e}"),
+                    }
+                    if started.elapsed() > Duration::from_secs(10) {
+                        backoff = RESTART_MIN;
+                    }
+                    let until = Instant::now() + backoff;
+                    while Instant::now() < until && !flag.load(Ordering::Relaxed) {
+                        std::thread::sleep(IDLE_POLL);
+                    }
+                    backoff = next_backoff(backoff);
                 }
             });
         if let Err(e) = spawned {
@@ -125,10 +165,18 @@ impl Drop for Stream {
 /// How long the worker sleeps on the socket when nothing is due. It is also
 /// how long a dropped [`Stream`] can take to notice.
 const IDLE_POLL: Duration = Duration::from_millis(50);
+/// The first delay before a stopped window, or a lost connection, is tried
+/// again, and the longest one: each failure in a row doubles it.
+const RESTART_MIN: Duration = Duration::from_millis(100);
+const RESTART_MAX: Duration = Duration::from_secs(5);
+
+/// The delay after `d` when the retry after `d` failed too.
+fn next_backoff(d: Duration) -> Duration {
+    (d * 2).clamp(RESTART_MIN, RESTART_MAX)
+}
 
 fn run(
-    ids: &[(String, Option<Crop>)],
-    max_edge: u32,
+    wants: &[Want],
     interval: Duration,
     tx: &async_channel::Sender<Frame>,
     stop: &AtomicBool,
@@ -160,28 +208,7 @@ fn run(
         .ok_or("compositor does not advertise ext-foreign-toplevel-image-capture-source-v1")?;
     let shm = state.shm.clone().ok_or("compositor has no wl_shm")?;
 
-    for (id, crop) in ids {
-        let Some(handle) = state
-            .toplevels
-            .iter()
-            .find(|(_, ident)| ident.as_deref() == Some(id.as_str()))
-            .map(|(h, _)| h.clone())
-        else {
-            log::debug!("jump: no toplevel with identifier {id}");
-            continue;
-        };
-        let index = state.sessions.len();
-        let source = sources.create_source(&handle, &qh, ());
-        let session = manager.create_session(
-            &source,
-            ext_image_copy_capture_manager_v1::Options::empty(),
-            &qh,
-            index,
-        );
-        state
-            .sessions
-            .push(Session::new(id.clone(), *crop, source, session));
-    }
+    state.sessions = wants.iter().cloned().map(Session::new).collect();
 
     // Frames finished this step, held until every window asked in it has
     // answered or half a step has gone by. Windows answer on different
@@ -189,14 +216,40 @@ fn run(
     // a time repaints once per window.
     let mut batch: Vec<Frame> = Vec::new();
     let mut batch_since: Option<Instant> = None;
-    let hold = interval / 2;
 
     while !stop.load(Ordering::Relaxed) && !tx.is_closed() {
         let now = Instant::now();
         let mut wake = now + IDLE_POLL;
+        // A toplevel came or went since the last pass: a window waiting for
+        // its identifier looks again now instead of after its delay.
+        let toplevels_changed = std::mem::take(&mut state.toplevels_changed);
 
         for (index, s) in state.sessions.iter_mut().enumerate() {
-            if s.dead {
+            if s.capture.is_none() {
+                if now < s.retry_at && !toplevels_changed {
+                    wake = wake.min(s.retry_at);
+                    continue;
+                }
+                let handle = state
+                    .toplevels
+                    .iter()
+                    .find(|(_, ident)| ident.as_deref() == Some(s.want.id.as_str()))
+                    .map(|(h, _)| h.clone());
+                let Some(handle) = handle else {
+                    log::debug!("jump: no toplevel with identifier {}", s.want.id);
+                    s.retry_at = now + s.backoff;
+                    s.backoff = next_backoff(s.backoff);
+                    wake = wake.min(s.retry_at);
+                    continue;
+                };
+                let source = sources.create_source(&handle, &qh, ());
+                let session = manager.create_session(
+                    &source,
+                    ext_image_copy_capture_manager_v1::Options::empty(),
+                    &qh,
+                    (index, s.generation),
+                );
+                s.capture = Some((source, session));
                 continue;
             }
             if std::mem::take(&mut s.ready)
@@ -205,12 +258,12 @@ fn run(
                 let (width, height, pixels) = downscale(
                     buffer.memory.as_slice(),
                     buffer.width,
-                    region(s.crop, buffer.width, buffer.height),
+                    region(s.want.crop, buffer.width, buffer.height),
                     buffer.format,
-                    max_edge,
+                    s.want.size,
                 );
                 batch.push(Frame {
-                    id: s.id.clone(),
+                    id: s.want.id.clone(),
                     width,
                     height,
                     pixels,
@@ -232,8 +285,9 @@ fn run(
                 wake = wake.min(due);
                 continue;
             }
+            let (_, session) = s.capture.as_ref().expect("checked above");
             let buffer = s.buffer.as_ref().expect("built above");
-            let frame = s.session.create_frame(&qh, index);
+            let frame = session.create_frame(&qh, (index, s.generation));
             frame.attach_buffer(&buffer.buffer);
             frame.damage_buffer(0, 0, buffer.width as i32, buffer.height as i32);
             frame.capture();
@@ -244,16 +298,21 @@ fn run(
         }
 
         if let Some(since) = batch_since {
-            let waiting = state.sessions.iter().any(|s| !s.dead && s.frame.is_some());
-            if !waiting || now >= since + hold {
+            let asked: Vec<Instant> = state
+                .sessions
+                .iter()
+                .filter(|s| s.frame.is_some())
+                .map(|s| s.last)
+                .collect();
+            if holds(now, since, interval, &asked) {
+                wake = wake.min(since + interval / 2);
+            } else {
                 for frame in batch.drain(..) {
                     if tx.try_send(frame).is_err() {
                         return Ok(());
                     }
                 }
                 batch_since = None;
-            } else {
-                wake = wake.min(since + hold);
             }
         }
 
@@ -261,18 +320,28 @@ fn run(
         dispatch_for(&conn, &mut queue, &mut state, timeout)?;
     }
 
-    for s in &state.sessions {
-        if let Some(frame) = &s.frame {
-            frame.destroy();
-        }
-        s.session.destroy();
-        s.source.destroy();
+    for s in &mut state.sessions {
+        s.release();
     }
     let _ = conn.flush();
     Ok(())
 }
 
-/// Flush, wait up to `timeout` for the socket, read and dispatch.
+/// Whether a batch that began at `since` waits longer for the windows
+/// still out: those in `asked` (when each window with a frame in flight
+/// asked for it).
+///
+/// It waits at most half a step, and only for a window asked less than a
+/// step ago. A window asked longer ago is idle: the compositor answers only
+/// when it draws, which can be never, and a batch that waited for it held
+/// every other window's frame back by half a step, every step.
+fn holds(now: Instant, since: Instant, interval: Duration, asked: &[Instant]) -> bool {
+    now < since + interval / 2
+        && asked
+            .iter()
+            .any(|&a| now.saturating_duration_since(a) < interval)
+}
+
 /// The first step of the grid from `epoch` in `interval`s that is after
 /// `last`; `last` itself when there is no cap.
 fn next_step(epoch: Instant, last: Instant, interval: Duration) -> Instant {
@@ -286,6 +355,7 @@ fn next_step(epoch: Instant, last: Instant, interval: Duration) -> Instant {
     epoch + Duration::from_nanos((n * step) as u64)
 }
 
+/// Flush, wait up to `timeout` for the socket, read and dispatch.
 fn dispatch_for(
     conn: &Connection,
     queue: &mut wayland_client::EventQueue<State>,
@@ -321,12 +391,6 @@ fn dispatch_for(
     Ok(())
 }
 
-/// Box-filter the buffer so its longer side is at most `max_edge`.
-///
-/// The factor is a whole number, so every output pixel averages a full square
-/// of source pixels and the result has no seams. `xrgb` carries no alpha, so
-/// it is written opaque; `argb` from the compositor is already premultiplied,
-/// and an average of premultiplied pixels stays premultiplied.
 /// The pixels of `crop` in a `w` by `h` buffer, as x, y, width, height;
 /// the whole buffer without one. At least one pixel each way.
 fn region(crop: Option<Crop>, w: u32, h: u32) -> (u32, u32, u32, u32) {
@@ -341,50 +405,148 @@ fn region(crop: Option<Crop>, w: u32, h: u32) -> (u32, u32, u32, u32) {
     (x, y, rw, rh)
 }
 
-/// Box-filter the region `(x0, y0, w, h)` of a buffer `full_w` pixels wide
-/// so its longer side is at most `max_edge`.
+/// The size a `w` by `h` region is sent at for `size`, never larger than
+/// it is.
+fn out_size(w: u32, h: u32, size: Size) -> (u32, u32) {
+    match size {
+        Size::MaxEdge(edge) => {
+            let f = w.max(h).div_ceil(edge.max(1)).max(1);
+            ((w / f).max(1), (h / f).max(1))
+        }
+        // Contained in the box, as `LivePicture` draws it: then GTK draws
+        // the frame one pixel to one, and has nothing left to filter.
+        Size::Draw(bw, bh) => {
+            let s = (f64::from(bw) / f64::from(w.max(1)))
+                .min(f64::from(bh) / f64::from(h.max(1)))
+                .min(1.0);
+            let px = |v: u32| ((f64::from(v) * s).round() as u32).max(1);
+            (px(w), px(h))
+        }
+    }
+}
+
+/// What each of `n` output pixels covers of `len` source pixels, for
+/// `n <= len`, in units where a source pixel is `n` wide and an output
+/// pixel `len` wide, so every share is whole: the first source pixel and
+/// its share,
+/// how many whole pixels follow it, and the share of the one after those
+/// (0 when the output ends on a pixel edge).
+fn cover(len: u32, n: u32) -> Vec<(usize, u32, usize, u32)> {
+    (0..n)
+        .map(|o| {
+            let (from, to) = (o * len, (o + 1) * len);
+            let first = from / n;
+            let first_end = (first + 1) * n;
+            if to <= first_end {
+                return (first as usize, to - from, 0, 0);
+            }
+            let whole_to = to / n;
+            (
+                first as usize,
+                first_end - from,
+                (whole_to - first - 1) as usize,
+                to - whole_to * n,
+            )
+        })
+        .collect()
+}
+
+/// Scale the region `(x0, y0, w, h)` of a buffer `full_w` pixels wide down
+/// to [`out_size`], every output pixel the exact average of the source
+/// area it covers, the pixels cut at its edges counted by the part inside.
+///
+/// Not a whole-factor box and GTK's linear filter for the rest: the two in
+/// a row blurred a terminal's text in a pin (a 3x box, then 233 px drawn at
+/// 200), and a linear filter alone over more than 2x skips pixels and
+/// shimmers. One pass over the source in memory order ([`area_sums`]).
+/// `xrgb` carries no
+/// alpha, so it is written opaque; `argb` from the compositor is already
+/// premultiplied, and an average of premultiplied pixels stays so.
 fn downscale(
     src: &[u8],
     full_w: u32,
     (x0, y0, w, h): (u32, u32, u32, u32),
     format: wl_shm::Format,
-    max_edge: u32,
+    size: Size,
 ) -> (u32, u32, Vec<u8>) {
-    let f = w.max(h).div_ceil(max_edge.max(1)).max(1);
-    let (ow, oh) = ((w / f).max(1), (h / f).max(1));
+    let (ow, oh) = out_size(w, h, size);
     let stride = (full_w * 4) as usize;
     let opaque = matches!(format, wl_shm::Format::Xrgb8888 | wl_shm::Format::Xbgr8888);
     // Both ABGR formats are RGBA in memory; the card wants BGRA.
     let swap = matches!(format, wl_shm::Format::Xbgr8888 | wl_shm::Format::Abgr8888);
-    let n = f * f;
 
-    let mut out = vec![0u8; (ow * oh * 4) as usize];
-    for oy in 0..oh {
-        for ox in 0..ow {
-            let mut acc = [0u32; 4];
-            for sy in y0 + oy * f..y0 + oy * f + f {
-                let row = sy as usize * stride;
-                for sx in x0 + ox * f..x0 + ox * f + f {
-                    let i = row + sx as usize * 4;
-                    acc[0] += u32::from(src[i]);
-                    acc[1] += u32::from(src[i + 1]);
-                    acc[2] += u32::from(src[i + 2]);
-                    acc[3] += u32::from(src[i + 3]);
-                }
-            }
-            let o = ((oy * ow + ox) * 4) as usize;
-            let (b, r) = if swap {
-                (acc[2], acc[0])
-            } else {
-                (acc[0], acc[2])
-            };
-            out[o] = (b / n) as u8;
-            out[o + 1] = (acc[1] / n) as u8;
-            out[o + 2] = (r / n) as u8;
-            out[o + 3] = if opaque { 0xff } else { (acc[3] / n) as u8 };
-        }
+    let sums = area_sums(src, stride, (x0, y0, w, h), (ow, oh));
+    let per = 1.0 / (w as f32 * h as f32);
+    let mut out = vec![0u8; sums.len()];
+    for (o, px) in out.chunks_exact_mut(4).zip(sums.chunks_exact(4)) {
+        let v = |c: usize| (px[c] * per + 0.5).min(255.0) as u8;
+        let (b, r) = if swap { (v(2), v(0)) } else { (v(0), v(2)) };
+        o[0] = b;
+        o[1] = v(1);
+        o[2] = r;
+        o[3] = if opaque { 0xff } else { v(3) };
     }
     (ow, oh, out)
+}
+
+/// For every output pixel and channel of the region scaled to `ow` by
+/// `oh`, the sum of the source under it weighted by the share covered, in
+/// [`cover`]'s units: `w * h` times the average.
+///
+/// Down first, then across. The rows under an output row add into one row
+/// of the region's width, contiguous work the compiler turns into vector
+/// adds; only then is that row gathered into columns, once per output row
+/// rather than once per source row. In `f32`, because the build targets
+/// baseline x86-64, whose vector unit multiplies floats but not 32-bit
+/// integers: the same sums in `u32` took 2.4x the old box on a large
+/// window. The shares are whole numbers and a row's sum stays below 2^24,
+/// so the rows are exact; across, the error is a part in 10^7.
+fn area_sums(
+    src: &[u8],
+    stride: usize,
+    (x0, y0, w, h): (u32, u32, u32, u32),
+    (ow, oh): (u32, u32),
+) -> Vec<f32> {
+    let across = cover(w, ow);
+    let row_len = w as usize * 4;
+    let line = |sy: usize| {
+        let start = (y0 as usize + sy) * stride + x0 as usize * 4;
+        &src[start..start + row_len]
+    };
+    let mut col = vec![0f32; row_len];
+    let mut sums = Vec::with_capacity(ow as usize * oh as usize * 4);
+    for (first, a, whole, b) in cover(h, oh) {
+        col.fill(0.0);
+        let mut add = |sy: usize, share: u32| {
+            let share = share as f32;
+            for (d, &v) in col.iter_mut().zip(line(sy)) {
+                *d += share * f32::from(v);
+            }
+        };
+        add(first, a);
+        for sy in first + 1..first + 1 + whole {
+            add(sy, oh);
+        }
+        if b > 0 {
+            add(first + 1 + whole, b);
+        }
+        let ow_ = ow as f32;
+        for &(fx, ax, wx, bx) in &across {
+            let px = |i: usize| -> [f32; 4] { [0, 1, 2, 3].map(|c| col[i * 4 + c]) };
+            let mut mid = [0f32; 4];
+            for p in col[(fx + 1) * 4..(fx + 1 + wx) * 4].chunks_exact(4) {
+                for c in 0..4 {
+                    mid[c] += p[c];
+                }
+            }
+            let f = px(fx);
+            let l = if bx > 0 { px(fx + 1 + wx) } else { [0.0; 4] };
+            for c in 0..4 {
+                sums.push(ax as f32 * f[c] + ow_ * mid[c] + bx as f32 * l[c]);
+            }
+        }
+    }
+    sums
 }
 
 // ── Per-window state ────────────────────────────────────────────────────
@@ -443,11 +605,18 @@ impl Drop for Buffer {
 }
 
 struct Session {
-    id: String,
-    /// Only this piece of the window is sent.
-    crop: Option<Crop>,
-    source: ExtImageCaptureSourceV1,
-    session: ExtImageCopyCaptureSessionV1,
+    want: Want,
+    /// The capture source and session while the window is being captured;
+    /// `None` until its toplevel is found, and again after it stopped.
+    capture: Option<(ExtImageCaptureSourceV1, ExtImageCopyCaptureSessionV1)>,
+    /// Bumped whenever the capture is let go. Its session's and frames'
+    /// events carry the number they were made under, and an event from an
+    /// older one is ignored rather than landing on the new capture.
+    generation: u32,
+    /// When to look for the toplevel again, while `capture` is `None`.
+    retry_at: Instant,
+    /// The delay after the next failed try; back to the start on a frame.
+    backoff: Duration,
     pending_size: Option<(u32, u32)>,
     pending_format: Option<wl_shm::Format>,
     constraints: Option<Constraints>,
@@ -458,30 +627,56 @@ struct Session {
     ready: bool,
     /// When the last frame was asked for, for the frame cap.
     last: Instant,
-    dead: bool,
 }
 
 impl Session {
-    fn new(
-        id: String,
-        crop: Option<Crop>,
-        source: ExtImageCaptureSourceV1,
-        session: ExtImageCopyCaptureSessionV1,
-    ) -> Session {
+    fn new(want: Want) -> Session {
+        let now = Instant::now();
         Session {
-            id,
-            crop,
-            source,
-            session,
+            want,
+            capture: None,
+            generation: 0,
+            retry_at: now,
+            backoff: RESTART_MIN,
             pending_size: None,
             pending_format: None,
             constraints: None,
             buffer: None,
             frame: None,
             ready: false,
-            last: Instant::now() - Duration::from_secs(1),
-            dead: false,
+            last: now - Duration::from_secs(1),
         }
+    }
+
+    /// Let go of the capture and everything made for it.
+    fn release(&mut self) {
+        if let Some(frame) = self.frame.take() {
+            frame.destroy();
+        }
+        if let Some((source, session)) = self.capture.take() {
+            session.destroy();
+            source.destroy();
+        }
+        self.buffer = None;
+        self.constraints = None;
+        self.pending_size = None;
+        self.pending_format = None;
+        self.ready = false;
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    /// The compositor stopped the capture: the window closed, or sway let
+    /// go of what it captured from. Try again after the delay; a window
+    /// that is still there, or back under the same identifier, picks up.
+    fn stopped(&mut self) {
+        self.release();
+        self.retry_at = Instant::now() + self.backoff;
+        self.backoff = next_backoff(self.backoff);
+    }
+
+    /// Whether an event made under `generation` is this capture's.
+    fn current(&self, generation: u32) -> bool {
+        self.capture.is_some() && self.generation == generation
     }
 }
 
@@ -491,6 +686,8 @@ struct State {
     toplevel_sources: Option<ExtForeignToplevelImageCaptureSourceManagerV1>,
     shm: Option<wl_shm::WlShm>,
     toplevels: Vec<(ExtForeignToplevelHandleV1, Option<String>)>,
+    /// A toplevel was named or closed since the loop last looked.
+    toplevels_changed: bool,
     sessions: Vec<Session>,
 }
 
@@ -525,19 +722,22 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
     }
 }
 
-impl Dispatch<ExtImageCopyCaptureSessionV1, usize> for State {
+impl Dispatch<ExtImageCopyCaptureSessionV1, (usize, u32)> for State {
     fn event(
         state: &mut Self,
         _: &ExtImageCopyCaptureSessionV1,
         event: ext_image_copy_capture_session_v1::Event,
-        index: &usize,
+        &(index, generation): &(usize, u32),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
         use ext_image_copy_capture_session_v1::Event;
-        let Some(s) = state.sessions.get_mut(*index) else {
+        let Some(s) = state.sessions.get_mut(index) else {
             return;
         };
+        if !s.current(generation) {
+            return;
+        }
         match event {
             Event::BufferSize { width, height } => s.pending_size = Some((width, height)),
             Event::ShmFormat { format } => {
@@ -570,7 +770,9 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, usize> for State {
                         format,
                     };
                     // A resized window: the old buffer no longer fits. The
-                    // loop builds a new one before the next frame.
+                    // loop builds a new one before the next frame. A frame
+                    // in flight in the old one fails with
+                    // `buffer_constraints` and is asked again.
                     if s.constraints.as_ref() != Some(&next) {
                         s.buffer = None;
                     }
@@ -579,40 +781,46 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, usize> for State {
                 s.pending_size = None;
                 s.pending_format = None;
             }
-            Event::Stopped => s.dead = true,
+            Event::Stopped => s.stopped(),
             _ => {}
         }
     }
 }
 
-impl Dispatch<ExtImageCopyCaptureFrameV1, usize> for State {
+impl Dispatch<ExtImageCopyCaptureFrameV1, (usize, u32)> for State {
     fn event(
         state: &mut Self,
         frame: &ExtImageCopyCaptureFrameV1,
         event: ext_image_copy_capture_frame_v1::Event,
-        index: &usize,
+        &(index, generation): &(usize, u32),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
         use ext_image_copy_capture_frame_v1::{Event, FailureReason};
-        let Some(s) = state.sessions.get_mut(*index) else {
+        let Some(s) = state.sessions.get_mut(index) else {
             return;
         };
+        if !s.current(generation) {
+            // A frame of a capture already let go; `release` destroyed the
+            // one in flight, so this is only a late event.
+            return;
+        }
         match event {
             Event::Ready => {
                 frame.destroy();
                 s.frame = None;
                 s.ready = true;
+                s.backoff = RESTART_MIN;
             }
             Event::Failed { reason } => {
                 frame.destroy();
                 s.frame = None;
                 match reason.into_result() {
-                    // New constraints follow; the `done` that closes them
-                    // drops the buffer.
+                    // New constraints come before this; the `done` that
+                    // closed them dropped the buffer.
                     Ok(FailureReason::BufferConstraints) => {}
-                    Ok(FailureReason::Stopped) => s.dead = true,
-                    // Try again after one frame interval.
+                    Ok(FailureReason::Stopped) => s.stopped(),
+                    // Try again on the next step.
                     _ => s.last = Instant::now(),
                 }
             }
@@ -649,13 +857,25 @@ impl Dispatch<ExtForeignToplevelHandleV1, ()> for State {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let ext_foreign_toplevel_handle_v1::Event::Identifier { identifier } = event
-            && let Some(slot) = state
-                .toplevels
-                .iter_mut()
-                .find(|(h, _)| h.id() == handle.id())
-        {
-            slot.1 = Some(identifier);
+        match event {
+            ext_foreign_toplevel_handle_v1::Event::Identifier { identifier } => {
+                if let Some(slot) = state
+                    .toplevels
+                    .iter_mut()
+                    .find(|(h, _)| h.id() == handle.id())
+                {
+                    slot.1 = Some(identifier);
+                    state.toplevels_changed = true;
+                }
+            }
+            // A closed toplevel is gone for good; its handle is only ours
+            // to free.
+            ext_foreign_toplevel_handle_v1::Event::Closed => {
+                state.toplevels.retain(|(h, _)| h.id() != handle.id());
+                handle.destroy();
+                state.toplevels_changed = true;
+            }
+            _ => {}
         }
     }
 }
@@ -717,6 +937,23 @@ impl Drop for Shm {
 mod tests {
     use super::*;
 
+    /// The reference for [`cover`], from the source side.
+    /// Where each of `len` source pixels lands among `n` output pixels, for
+    /// `n <= len`: the output it starts in, and how much of it goes there and
+    /// to the next, in units where a source pixel is `n` wide and an output
+    /// pixel `len` wide. Whole numbers, so every output pixel's shares add up
+    /// to exactly `len`.
+    fn taps(len: u32, n: u32) -> Vec<(usize, u32, u32)> {
+        (0..len)
+            .map(|i| {
+                let (from, to) = (i * n, (i + 1) * n);
+                let o = from / len;
+                let here = to.min((o + 1) * len) - from;
+                (o as usize, here, n - here)
+            })
+            .collect()
+    }
+
     #[test]
     fn requests_land_on_one_grid() {
         let epoch = Instant::now();
@@ -734,6 +971,105 @@ mod tests {
     }
 
     #[test]
+    fn a_window_that_never_answers_holds_a_batch_one_step_at_most() {
+        let epoch = Instant::now();
+        let step = Duration::from_millis(33);
+        let at = |ms| epoch + Duration::from_millis(ms);
+        // Asked with the rest this step, not answered yet: wait for it.
+        assert!(holds(at(105), at(104), step, &[at(99)]));
+        // Half a step on, the batch goes without it.
+        assert!(!holds(at(121), at(104), step, &[at(99)]));
+        // Asked a step or more ago: idle, not waited for at all.
+        assert!(!holds(at(105), at(104), step, &[at(60)]));
+        // Nothing out: go.
+        assert!(!holds(at(105), at(104), step, &[]));
+        // No cap: never held.
+        assert!(!holds(at(105), at(104), Duration::ZERO, &[at(105)]));
+    }
+
+    #[test]
+    fn restarts_back_off_to_a_ceiling() {
+        let mut d = RESTART_MIN;
+        let mut seen = vec![d];
+        for _ in 0..10 {
+            d = next_backoff(d);
+            seen.push(d);
+        }
+        assert_eq!(seen[1], RESTART_MIN * 2);
+        assert!(seen.windows(2).all(|w| w[1] >= w[0]));
+        assert_eq!(*seen.last().unwrap(), RESTART_MAX);
+    }
+
+    #[test]
+    fn a_frame_is_sent_at_the_size_it_is_drawn() {
+        // A 700x870 window drawn in a 200x245 box: height binds.
+        assert_eq!(out_size(700, 870, Size::Draw(200, 245)), (197, 245));
+        // Wide in a tall box: width binds.
+        assert_eq!(out_size(2880, 1800, Size::Draw(800, 800)), (800, 500));
+        // Smaller than the box: never scaled up.
+        assert_eq!(out_size(100, 60, Size::Draw(400, 250)), (100, 60));
+        assert_eq!(out_size(2560, 1600, Size::MaxEdge(320)), (320, 200));
+    }
+
+    #[test]
+    fn cover_agrees_with_taps() {
+        for (len, n) in [(3, 2), (3, 3), (870, 245), (700, 197), (1400, 400), (10, 1)] {
+            let mut want = vec![vec![0u32; len as usize]; n as usize];
+            for (i, (o, a, b)) in taps(len, n).into_iter().enumerate() {
+                want[o][i] += a;
+                if b > 0 {
+                    want[o + 1][i] += b;
+                }
+            }
+            for (o, (first, a, whole, b)) in cover(len, n).into_iter().enumerate() {
+                let mut got = vec![0u32; len as usize];
+                got[first] += a;
+                for g in got.iter_mut().skip(first + 1).take(whole) {
+                    *g += n;
+                }
+                if b > 0 {
+                    got[first + 1 + whole] += b;
+                }
+                assert_eq!(got, want[o], "{len} into {n}, output {o}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_source_pixel_on_an_output_edge_is_split_by_area() {
+        // Three pixels into two: in units of 2 per source pixel and 3 per
+        // output, the middle one gives 1 to each side.
+        assert_eq!(taps(3, 2), vec![(0, 2, 0), (0, 1, 1), (1, 2, 0)]);
+        // One to one: every pixel whole into its own.
+        assert_eq!(taps(3, 3), vec![(0, 3, 0), (1, 3, 0), (2, 3, 0)]);
+        // Every output gets exactly `len`.
+        let t = taps(870, 245);
+        let mut got = vec![0; 245];
+        for (o, a, b) in t {
+            got[o] += a;
+            if b > 0 {
+                got[o + 1] += b;
+            }
+        }
+        assert!(got.iter().all(|&g| g == 870));
+    }
+
+    #[test]
+    fn an_edge_between_two_colours_averages_by_area() {
+        // 3x1 XRGB, blue 0, 90, 180 in BGRX: into 2x1, 1.5 source each.
+        let src = [0, 0, 0, 0, 90, 0, 0, 0, 180, 0, 0, 0];
+        let (w, h, px) = downscale(
+            &src,
+            3,
+            (0, 0, 3, 1),
+            wl_shm::Format::Xrgb8888,
+            Size::Draw(2, 1),
+        );
+        assert_eq!((w, h), (2, 1));
+        assert_eq!((px[0], px[4]), (30, 150));
+    }
+
+    #[test]
     fn the_longer_edge_fits_and_the_aspect_holds() {
         let src = vec![0u8; 2560 * 1600 * 4];
         let (w, h, px) = downscale(
@@ -741,7 +1077,7 @@ mod tests {
             2560,
             (0, 0, 2560, 1600),
             wl_shm::Format::Xrgb8888,
-            320,
+            Size::MaxEdge(320),
         );
         assert_eq!((w, h), (320, 200));
         assert_eq!(px.len(), 320 * 200 * 4);
@@ -751,7 +1087,13 @@ mod tests {
     fn each_output_pixel_averages_its_square() {
         // 2x2 XRGB, BGRX in memory: two black pixels, two at blue 200.
         let src = [0, 0, 0, 0, 0, 0, 0, 0, 200, 0, 0, 0, 200, 0, 0, 0];
-        let (w, h, px) = downscale(&src, 2, (0, 0, 2, 2), wl_shm::Format::Xrgb8888, 1);
+        let (w, h, px) = downscale(
+            &src,
+            2,
+            (0, 0, 2, 2),
+            wl_shm::Format::Xrgb8888,
+            Size::MaxEdge(1),
+        );
         assert_eq!((w, h), (1, 1));
         assert_eq!(px, vec![100, 0, 0, 0xff]);
     }
@@ -759,7 +1101,13 @@ mod tests {
     #[test]
     fn abgr_is_swapped_to_bgra_and_keeps_alpha() {
         let src = [10u8, 20, 30, 128];
-        let (_, _, px) = downscale(&src, 1, (0, 0, 1, 1), wl_shm::Format::Abgr8888, 4);
+        let (_, _, px) = downscale(
+            &src,
+            1,
+            (0, 0, 1, 1),
+            wl_shm::Format::Abgr8888,
+            Size::MaxEdge(4),
+        );
         assert_eq!(px, vec![30, 20, 10, 128]);
     }
 
@@ -772,7 +1120,13 @@ mod tests {
                 src[(y * 4 + x) * 4] = 200;
             }
         }
-        let (w, h, px) = downscale(&src, 4, (2, 0, 2, 2), wl_shm::Format::Xrgb8888, 8);
+        let (w, h, px) = downscale(
+            &src,
+            4,
+            (2, 0, 2, 2),
+            wl_shm::Format::Xrgb8888,
+            Size::MaxEdge(8),
+        );
         assert_eq!((w, h), (2, 2), "unscaled: the piece is small");
         assert!(
             px.chunks_exact(4).all(|p| p[0] == 200),
@@ -795,7 +1149,13 @@ mod tests {
     #[test]
     fn a_small_window_is_not_scaled_up() {
         let src = vec![7u8; 10 * 6 * 4];
-        let (w, h, _) = downscale(&src, 10, (0, 0, 10, 6), wl_shm::Format::Argb8888, 320);
+        let (w, h, _) = downscale(
+            &src,
+            10,
+            (0, 0, 10, 6),
+            wl_shm::Format::Argb8888,
+            Size::MaxEdge(320),
+        );
         assert_eq!((w, h), (10, 6));
     }
 }

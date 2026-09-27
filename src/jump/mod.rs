@@ -221,6 +221,23 @@ impl Jump {
         }
         self.surface.window().add_controller(keys);
 
+        // The keyboard arriving: see `Ev::Focused`. Read on the next idle,
+        // once GDK has taken in the modifiers that follow the enter.
+        {
+            let this = self.clone();
+            self.surface.window().connect_is_active_notify(move |w| {
+                if w.is_active() {
+                    this.check_modifiers();
+                }
+            });
+        }
+        {
+            let focus = gtk4::EventControllerFocus::new();
+            let this = self.clone();
+            focus.connect_enter(move |_| this.check_modifiers());
+            self.surface.window().add_controller(focus);
+        }
+
         let click = gtk4::GestureClick::new();
         {
             let this = self.clone();
@@ -243,6 +260,28 @@ impl Jump {
             });
         }
         self.surface.window().add_controller(click);
+    }
+
+    /// Whether Super is still down, now that the surface has the keyboard;
+    /// a release that went elsewhere commits here.
+    fn check_modifiers(self: &Rc<Self>) {
+        let this = self.clone();
+        glib::idle_add_local_once(move || {
+            if !this.state.borrow().gesture.is_live() {
+                return;
+            }
+            let Some(keyboard) = gtk4::gdk::Display::default()
+                .and_then(|d| d.default_seat())
+                .and_then(|s| s.keyboard())
+            else {
+                return;
+            };
+            let held = keyboard.modifier_state().intersects(
+                gtk4::gdk::ModifierType::SUPER_MASK | gtk4::gdk::ModifierType::META_MASK,
+            );
+            log::debug!("jump: keyboard here, Super held: {held}");
+            this.feed(Ev::Focused { super_held: held });
+        });
     }
 
     /// `Super+Tab`.
@@ -328,6 +367,18 @@ impl Jump {
         // action is in.
         let committed = actions.iter().any(|a| matches!(a, Action::Run(_)));
         let unmapped = actions.iter().any(|a| matches!(a, Action::Unmap));
+        // The pins come back as the switcher unmaps, before the switch it
+        // commits has landed: tell them where it is going first, so the pin
+        // of that workspace does not flash up on the way.
+        if committed {
+            let target = {
+                let st = self.state.borrow();
+                st.names.get(st.selected).cloned()
+            };
+            if let (Some(target), Some(pins)) = (target, pin::handle()) {
+                pins.expect_arrival(&target);
+            }
+        }
         for action in actions {
             self.apply(action);
         }

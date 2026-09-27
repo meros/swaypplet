@@ -43,14 +43,16 @@ impl<T> Observed<T> {
     }
 
     /// [`Self::set`] that drops snapshots equal to the current state, so
-    /// observers don't re-render for nothing.
-    pub fn set_if_changed(&self, value: T)
+    /// observers don't re-render for nothing. Whether it was set.
+    pub fn set_if_changed(&self, value: T) -> bool
     where
         T: PartialEq,
     {
-        if *self.state.borrow() != value {
+        let changed = *self.state.borrow() != value;
+        if changed {
             self.set(value);
         }
+        changed
     }
 }
 

@@ -34,6 +34,17 @@ pub enum Ev {
     Escape,
     /// The modifier came up: commit.
     SuperReleased,
+    /// The surface got the keyboard, and with it the modifiers as they are
+    /// now.
+    ///
+    /// The release edge only reaches whoever holds the keyboard, and the
+    /// surface gets it a moment after it maps: `Super+Tab` runs a client,
+    /// which reaches this process, which maps, which sway then focuses. A
+    /// quick tap lets go of Super inside that moment, the release goes to
+    /// the window underneath, and the switcher used to stay up until the
+    /// watchdog. The modifier state that comes with the focus says whether
+    /// that happened.
+    Focused { super_held: bool },
     /// Nothing at all happened for long enough that the grab is suspect.
     Watchdog,
 }
@@ -100,6 +111,7 @@ impl Gesture {
             (false, _) => Vec::new(),
 
             // ── walking ─────────────────────────────────────────────────
+            (true, Ev::Focused { super_held: true }) => Vec::new(),
             (true, Ev::Step) => {
                 // Clamped, not wrapped. Wrapping past the end lands you back
                 // at the top of a list you were walking away from, which is
@@ -113,7 +125,9 @@ impl Gesture {
             }
 
             // ── ending ──────────────────────────────────────────────────
-            (true, Ev::SuperReleased) | (true, Ev::Watchdog) => {
+            (true, Ev::SuperReleased)
+            | (true, Ev::Watchdog)
+            | (true, Ev::Focused { super_held: false }) => {
                 // At 0, back where it started: nothing to run, the same end
                 // as Escape.
                 let command = self
@@ -205,6 +219,40 @@ mod tests {
         // The 40ms tap: the release arrives before anything is drawn.
         let a = run(3, &[Ev::Step, Ev::SuperReleased]);
         assert_eq!(runs(&a), ["workspace number 0"]);
+    }
+
+    #[test]
+    fn a_release_before_the_surface_had_the_keyboard_commits_on_focus() {
+        // Press, release while the surface is still on its way: the release
+        // went elsewhere, and the focus that follows finds Super up.
+        let a = run(3, &[Ev::Step, Ev::Focused { super_held: false }]);
+        assert_eq!(runs(&a), ["workspace number 0"]);
+        assert!(a.contains(&Action::Unmap));
+        // Still held when the keyboard arrives: nothing yet, and the real
+        // release commits once.
+        let a = run(
+            3,
+            &[
+                Ev::Step,
+                Ev::Focused { super_held: true },
+                Ev::Step,
+                Ev::SuperReleased,
+            ],
+        );
+        assert_eq!(runs(&a), ["workspace number 1"]);
+        // A late release after a focus that already committed does nothing.
+        let a = run(
+            3,
+            &[
+                Ev::Step,
+                Ev::Focused { super_held: false },
+                Ev::SuperReleased,
+            ],
+        );
+        assert_eq!(runs(&a).len(), 1);
+        assert_eq!(a.iter().filter(|x| **x == Action::Unmap).count(), 1);
+        // Focus with nothing live: nothing.
+        assert!(run(3, &[Ev::Focused { super_held: false }]).is_empty());
     }
 
     #[test]

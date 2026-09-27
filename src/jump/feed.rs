@@ -22,17 +22,113 @@ use std::rc::{Rc, Weak};
 use gtk4::glib;
 
 use super::card::{self, Live};
-use super::live::{self, Crop};
+use super::live::{self, Want};
 
-struct Entry {
-    stream: live::Stream,
-    /// The stream's frame cap; 0 is none.
+/// The pictures sharing one stream, by subscription id, and the stream's
+/// frame cap (0 is none). Generic over the stream so the bookkeeping is a
+/// unit test without a compositor.
+struct Entry<S> {
+    stream: S,
     fps: u32,
     subscribers: Vec<(u64, Weak<RefCell<Live>>)>,
 }
 
+/// What a new subscriber means for its key's stream.
+#[derive(Debug, PartialEq)]
+enum Join {
+    /// Nothing captures this yet: start a stream.
+    Start,
+    /// A stream runs, at a lower cap than this subscriber asks for: replace
+    /// it with a faster one.
+    Faster,
+    /// A stream runs, fast enough.
+    Shared,
+}
+
+/// Every running stream, by [`key`].
+struct Hub<S> {
+    entries: HashMap<String, Entry<S>>,
+}
+
+impl<S> Default for Hub<S> {
+    fn default() -> Self {
+        Hub {
+            entries: HashMap::new(),
+        }
+    }
+}
+
+impl<S> Hub<S> {
+    /// Add subscriber `id` to `key`, whose stream `start` makes when none
+    /// runs. `Faster` leaves replacing the stream to the caller, outside
+    /// any borrow of the hub, because dropping a stream is not free.
+    fn join(
+        &mut self,
+        key: &str,
+        id: u64,
+        fps: u32,
+        live: Weak<RefCell<Live>>,
+        start: impl FnOnce() -> S,
+    ) -> Join {
+        match self.entries.get_mut(key) {
+            Some(entry) => {
+                entry.subscribers.push((id, live));
+                if slower(entry.fps, fps) {
+                    Join::Faster
+                } else {
+                    Join::Shared
+                }
+            }
+            None => {
+                self.entries.insert(
+                    key.to_string(),
+                    Entry {
+                        stream: start(),
+                        fps,
+                        subscribers: vec![(id, live)],
+                    },
+                );
+                Join::Start
+            }
+        }
+    }
+
+    /// Put `stream` in place of `key`'s, at cap `fps`; the old one comes
+    /// back for the caller to drop.
+    fn replace(&mut self, key: &str, fps: u32, stream: S) -> Option<S> {
+        let entry = self.entries.get_mut(key)?;
+        entry.fps = fps;
+        Some(std::mem::replace(&mut entry.stream, stream))
+    }
+
+    /// Take subscriber `id` off `key`. The stream comes back, for the
+    /// caller to drop, when that was its last subscriber.
+    fn leave(&mut self, key: &str, id: u64) -> Option<S> {
+        let entry = self.entries.get_mut(key)?;
+        entry.subscribers.retain(|(sub, _)| *sub != id);
+        if entry.subscribers.is_empty() {
+            self.entries.remove(key).map(|e| e.stream)
+        } else {
+            None
+        }
+    }
+
+    /// The pictures of `key` still alive.
+    fn subscribers(&self, key: &str) -> Vec<Rc<RefCell<Live>>> {
+        self.entries
+            .get(key)
+            .map(|e| {
+                e.subscribers
+                    .iter()
+                    .filter_map(|(_, w)| w.upgrade())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
 thread_local! {
-    static HUB: RefCell<HashMap<String, Entry>> = RefCell::new(HashMap::new());
+    static HUB: RefCell<Hub<live::Stream>> = RefCell::default();
     static NEXT: Cell<u64> = const { Cell::new(0) };
 }
 
@@ -46,16 +142,8 @@ impl Drop for Feed {
     fn drop(&mut self) {
         // The stream leaves the map before it is dropped, so its Drop never
         // runs inside a borrow of the map.
-        let gone = HUB.with(|h| {
-            let mut hub = h.borrow_mut();
-            let entry = hub.get_mut(&self.key)?;
-            entry.subscribers.retain(|(id, _)| *id != self.id);
-            if entry.subscribers.is_empty() {
-                hub.remove(&self.key)
-            } else {
-                None
-            }
-        });
+        let gone = HUB.with(|h| h.borrow_mut().leave(&self.key, self.id));
+        log::debug!(target: "swaypplet::feed", "leave {} last={}", self.key, gone.is_some());
         drop(gone);
     }
 }
@@ -69,78 +157,48 @@ fn slower(have: u32, want: u32) -> bool {
     }
 }
 
-/// The capture's identity: the windows (order does not matter), the piece,
-/// and the frames' longer edge. The frame cap is not in it; a subscriber
-/// that wants more frames speeds the shared stream up instead.
-fn key(windows: &[String], crop: Option<Crop>, max_edge: u32) -> String {
-    let mut ids = windows.to_vec();
-    ids.sort();
-    format!("{}|{crop:?}|{max_edge}", ids.join(","))
+/// The capture's identity: every window with its piece and its size, in
+/// any order. The frame cap is not in it; a subscriber that wants more
+/// frames speeds the shared stream up instead.
+fn key(wants: &[Want]) -> String {
+    let mut parts: Vec<String> = wants
+        .iter()
+        .map(|w| format!("{}|{:?}|{:?}", w.id, w.crop, w.size))
+        .collect();
+    parts.sort();
+    parts.join(",")
 }
 
-/// Feed `live`'s pictures from a capture of `windows` (or of `crop` of the
-/// one window, when given), at most `max_edge` pixels on a side and `fps`
-/// frames a second per window (0: every frame). `None` when there is
-/// nothing to capture.
-pub fn subscribe(
-    windows: Vec<String>,
-    crop: Option<Crop>,
-    max_edge: u32,
-    fps: u32,
-    live: &Rc<RefCell<Live>>,
-) -> Option<Feed> {
-    if windows.is_empty() || (crop.is_some() && windows.len() != 1) {
+/// Feed `live`'s pictures from a capture of `wants`, at most `fps` frames a
+/// second per window (0: every frame). `None` when there is nothing to
+/// capture.
+pub fn subscribe(wants: Vec<Want>, fps: u32, live: &Rc<RefCell<Live>>) -> Option<Feed> {
+    if wants.is_empty() {
         return None;
     }
-    let key = key(&windows, crop, max_edge);
+    let key = key(&wants);
     let id = NEXT.with(|n| {
         let v = n.get();
         n.set(v + 1);
         v
     });
-    let restart = HUB.with(|h| {
-        let mut hub = h.borrow_mut();
-        match hub.get_mut(&key) {
-            Some(entry) => {
-                entry.subscribers.push((id, Rc::downgrade(live)));
-                slower(entry.fps, fps)
-            }
-            None => {
-                let stream = start(&key, &windows, crop, max_edge, fps);
-                hub.insert(
-                    key.clone(),
-                    Entry {
-                        stream,
-                        fps,
-                        subscribers: vec![(id, Rc::downgrade(live))],
-                    },
-                );
-                false
-            }
-        }
+    let joined = HUB.with(|h| {
+        h.borrow_mut().join(&key, id, fps, Rc::downgrade(live), || {
+            start(&key, &wants, fps)
+        })
     });
-    if restart {
+    log::debug!(target: "swaypplet::feed", "join {key} {joined:?}");
+    if joined == Join::Faster {
         // Faster for everyone. The old stream stops as it is replaced; the
         // pictures keep their last frame until the new one sends.
-        let stream = start(&key, &windows, crop, max_edge, fps);
-        let old = HUB.with(|h| {
-            h.borrow_mut().get_mut(&key).map(|entry| {
-                entry.fps = fps;
-                std::mem::replace(&mut entry.stream, stream)
-            })
-        });
+        let stream = start(&key, &wants, fps);
+        let old = HUB.with(|h| h.borrow_mut().replace(&key, fps, stream));
         drop(old);
     }
     Some(Feed { key, id })
 }
 
-fn start(
-    key: &str,
-    windows: &[String],
-    crop: Option<Crop>,
-    max_edge: u32,
-    fps: u32,
-) -> live::Stream {
+fn start(key: &str, wants: &[Want], fps: u32) -> live::Stream {
     let (tx, rx) = async_channel::unbounded::<live::Frame>();
     let key = key.to_string();
     glib::spawn_future_local(async move {
@@ -150,10 +208,7 @@ fn start(
             }
         }
     });
-    match crop {
-        Some(crop) => live::Stream::start_region(windows[0].clone(), crop, max_edge, fps, tx),
-        None => live::Stream::start(windows.to_vec(), max_edge, fps, tx),
-    }
+    live::Stream::start_wants(wants.to_vec(), fps, tx)
 }
 
 /// `first` and everything queued behind it, keeping each window's newest
@@ -171,15 +226,12 @@ fn newest(first: live::Frame, rx: &async_channel::Receiver<live::Frame>) -> Vec<
 
 /// One frame to every picture of its window, as one texture.
 fn fan_out(key: &str, frame: live::Frame) {
-    let subscribers: Vec<Rc<RefCell<Live>>> = HUB.with(|h| {
-        h.borrow()
-            .get(key)
-            .map(|e| e.subscribers.iter().filter_map(|(_, w)| w.upgrade()).collect())
-            .unwrap_or_default()
-    });
+    let subscribers = HUB.with(|h| h.borrow().subscribers(key));
     if subscribers.is_empty() {
         return;
     }
+    // One line per frame shown, for dev/frame-bench.sh --pin to count.
+    log::debug!(target: "swaypplet::feed", "frame {} {}x{}", frame.id, frame.width, frame.height);
     let (id, texture) = card::remember(frame);
     for live in subscribers {
         live.borrow().show(&id, &texture);
@@ -190,16 +242,89 @@ fn fan_out(key: &str, frame: live::Frame) {
 mod tests {
     use super::*;
 
+    fn want(id: &str, crop: Option<live::Crop>, w: u32) -> Want {
+        Want {
+            id: id.to_string(),
+            crop,
+            size: live::Size::Draw(w, w),
+        }
+    }
+
     #[test]
     fn the_key_ignores_window_order_but_not_size_or_piece() {
-        let a = vec!["x".to_string(), "y".to_string()];
-        let b = vec!["y".to_string(), "x".to_string()];
-        assert_eq!(key(&a, None, 800), key(&b, None, 800));
-        assert_ne!(key(&a, None, 800), key(&a, None, 384));
+        let a = vec![want("x", None, 400), want("y", None, 200)];
+        let b = vec![want("y", None, 200), want("x", None, 400)];
+        assert_eq!(key(&a), key(&b));
+        assert_ne!(key(&a), key(&[want("x", None, 400), want("y", None, 100)]));
         assert_ne!(
-            key(&a[..1], None, 800),
-            key(&a[..1], Some((0.0, 0.0, 0.5, 0.5)), 800)
+            key(&a[..1]),
+            key(&[want("x", Some((0.0, 0.0, 0.5, 0.5)), 400)])
         );
+    }
+
+    /// A stand-in stream: which one it is.
+    type Hub = super::Hub<u32>;
+
+    #[test]
+    fn a_pin_keeps_its_stream_when_the_peek_of_it_closes() {
+        let (pin, peek) = (
+            Rc::<RefCell<Live>>::default(),
+            Rc::<RefCell<Live>>::default(),
+        );
+        let mut hub = Hub::default();
+        assert_eq!(
+            hub.join("ws", 0, 30, Rc::downgrade(&pin), || 1),
+            Join::Start
+        );
+        assert_eq!(
+            hub.join("ws", 1, 30, Rc::downgrade(&peek), || unreachable!()),
+            Join::Shared
+        );
+        assert_eq!(hub.subscribers("ws").len(), 2);
+        // The peek closes: nothing stops.
+        assert_eq!(hub.leave("ws", 1), None);
+        assert_eq!(hub.subscribers("ws").len(), 1);
+        // Leaving twice changes nothing.
+        assert_eq!(hub.leave("ws", 1), None);
+        // The pin hides: its stream comes back to be dropped.
+        assert_eq!(hub.leave("ws", 0), Some(1));
+        assert!(hub.subscribers("ws").is_empty());
+        // Shown again: a new stream starts.
+        assert_eq!(
+            hub.join("ws", 2, 30, Rc::downgrade(&pin), || 2),
+            Join::Start
+        );
+        assert_eq!(hub.leave("ws", 2), Some(2));
+    }
+
+    #[test]
+    fn a_faster_subscriber_replaces_the_stream_for_everyone() {
+        let (a, b) = (
+            Rc::<RefCell<Live>>::default(),
+            Rc::<RefCell<Live>>::default(),
+        );
+        let mut hub = Hub::default();
+        hub.join("ws", 0, 15, Rc::downgrade(&a), || 1);
+        assert_eq!(hub.join("ws", 1, 30, Rc::downgrade(&b), || 9), Join::Faster);
+        assert_eq!(hub.replace("ws", 30, 2), Some(1));
+        // Now at 30: a third at 30 shares it.
+        assert_eq!(hub.join("ws", 2, 30, Rc::downgrade(&b), || 9), Join::Shared);
+        hub.leave("ws", 1);
+        hub.leave("ws", 2);
+        assert_eq!(
+            hub.leave("ws", 0),
+            Some(2),
+            "the replacement is the one dropped"
+        );
+    }
+
+    #[test]
+    fn a_dropped_picture_gets_no_frames() {
+        let gone = Rc::<RefCell<Live>>::default();
+        let mut hub = Hub::default();
+        hub.join("ws", 0, 30, Rc::downgrade(&gone), || 1);
+        drop(gone);
+        assert!(hub.subscribers("ws").is_empty());
     }
 
     fn frame(id: &str, width: u32) -> live::Frame {

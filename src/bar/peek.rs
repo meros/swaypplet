@@ -131,6 +131,7 @@ fn open(state: &State, button: &gtk4::Button, workspace: String) {
 fn show(state: &State, button: &gtk4::Button, workspace: String, scene: crate::jump::scene::Scene) {
     let label = crate::sway::workspace::label_for_name(&workspace);
     let mut view = View::new(&label, "click to go");
+    view.set_scale(f64::from(button.scale_factor()));
     view.show_scene(Some(scene), view::FPS);
 
     // The pin button: pin what you are looking at, or unpin it.

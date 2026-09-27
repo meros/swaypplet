@@ -49,6 +49,11 @@ const PIN_STEP: i32 = view::H + 32 + 16 + GAP;
 /// How long a new pin shows itself before its workspace's own screen hides
 /// it: long enough to see where it lives.
 const INTRODUCE: Duration = Duration::from_millis(1600);
+/// How long a workspace the switcher committed to counts as on screen
+/// before sway confirms it. The switch lands in tens of milliseconds; the
+/// limit is for a switch that never comes (something else moved you first,
+/// and the switcher put the row away instead).
+const ARRIVAL: Duration = Duration::from_millis(1000);
 /// A pin slides in from, and out to, the screen's edge by this much.
 const SLIDE_PX: f64 = 48.0;
 
@@ -166,6 +171,16 @@ struct Inner {
     /// as tucked: nothing changes in the bar, and they come back on their
     /// own when it closes.
     held: bool,
+    /// The last tree read asked for, and the newest one applied. Reads run
+    /// on threads of their own and can land out of order; an older one
+    /// landing last put back the windows of a moment before, and a window
+    /// opened in between stayed out of the pin until sway next said
+    /// something.
+    reads: Reads,
+    /// The workspace the switcher has just committed to, counted as on
+    /// screen until sway says it is or [`ARRIVAL`] runs out. See
+    /// [`Pins::expect_arrival`].
+    arriving: Option<(String, Instant)>,
 }
 
 #[derive(Clone, Default)]
@@ -201,6 +216,24 @@ impl Pins {
         self.refresh();
     }
 
+    /// The switcher committed to `workspace`: its pin stays hidden through
+    /// the switch.
+    ///
+    /// The switcher lets go of the pins as it closes, and the switch it
+    /// commits reaches sway a moment later. In between, a pin of the
+    /// workspace being switched to saw it off screen, slid in, and slid out
+    /// again once the switch landed: a sub-second flash of exactly the pin
+    /// the switch makes pointless. Call this before [`Self::set_held`]
+    /// `(false)`.
+    pub fn expect_arrival(&self, workspace: &str) {
+        self.inner.borrow_mut().arriving = Some((workspace.to_string(), Instant::now() + ARRIVAL));
+        // Look again once the wait is over, in case no sway event comes.
+        let this = self.clone();
+        glib::timeout_add_local_once(ARRIVAL + Duration::from_millis(20), move || {
+            this.refresh();
+        });
+    }
+
     /// Go to a pinned workspace.
     pub fn go(&self, workspace: &str) {
         go(workspace);
@@ -208,9 +241,15 @@ impl Pins {
 
     /// Follow sway: rebuild a pin whose workspace changed shape, and hide
     /// the ones whose workspace is on a screen.
+    ///
+    /// On every window change too, and not only the ones the bar's model
+    /// sees: that model leaves out where windows are and which they are, so
+    /// a window opened or closed beside another of the same process, moved
+    /// within a workspace, resized, or mapped again under a new identifier
+    /// changed nothing in it, and the pin kept capturing the windows it had.
     pub fn set_sway(&self, sway: Rc<SwayService>) {
         let this = self.clone();
-        sway.connect_change(move || this.refresh());
+        sway.connect_windows(move || this.refresh());
         self.inner.borrow_mut().sway = Some(sway);
         self.refresh();
     }
@@ -498,6 +537,11 @@ impl Pins {
                 }
                 None => (Vec::new(), None),
             };
+        let on_screen = with_arrival(
+            on_screen,
+            &mut self.inner.borrow_mut().arriving,
+            Instant::now(),
+        );
         self.follow(focused_output.as_deref());
         let wanted: Vec<(String, Option<String>)> = self
             .inner
@@ -507,6 +551,7 @@ impl Pins {
             .map(|p| (p.key.clone(), p.region.as_ref().map(|r| r.id.clone())))
             .collect();
         let this = self.clone();
+        let read = self.inner.borrow_mut().reads.ask();
         crate::spawn::spawn_work(
             move || {
                 let tree = crate::sway::ipc::connect().ok()?.get_tree().ok()?;
@@ -527,6 +572,9 @@ impl Pins {
             move |found| {
                 let Some(found) = found else { return };
                 let mut inner = this.inner.borrow_mut();
+                if !inner.reads.land(read) {
+                    return;
+                }
                 let tucked = inner.tucked;
                 let held = inner.held;
                 // A workspace or a window that is gone takes its pin with it.
@@ -565,6 +613,49 @@ impl Pins {
                 }
             },
         );
+    }
+}
+
+/// The workspaces on screen, `visible` plus one the switcher is switching
+/// to, while it is still on its way: until `visible` has it, or its time is
+/// up, after which it is forgotten.
+fn with_arrival(
+    mut visible: Vec<String>,
+    arriving: &mut Option<(String, Instant)>,
+    now: Instant,
+) -> Vec<String> {
+    if let Some((name, until)) = arriving.as_ref() {
+        if visible.contains(name) || now >= *until {
+            *arriving = None;
+        } else {
+            visible.push(name.clone());
+        }
+    }
+    visible
+}
+
+/// Tree reads in the order they were asked for.
+#[derive(Default)]
+struct Reads {
+    asked: u64,
+    applied: u64,
+}
+
+impl Reads {
+    /// A new read's number.
+    fn ask(&mut self) -> u64 {
+        self.asked += 1;
+        self.asked
+    }
+
+    /// Whether read `n`, just landed, is newer than every one applied; if
+    /// so it counts as applied.
+    fn land(&mut self, n: u64) -> bool {
+        if n <= self.applied {
+            return false;
+        }
+        self.applied = n;
+        true
     }
 }
 
@@ -656,9 +747,46 @@ fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: 
         slide.set_margin_end(MARGIN_RIGHT);
     }
 
-    let view = View::new(label, "click to go \u{00b7} right-click to unpin");
+    let mut view = View::new(label, "click to go \u{00b7} right-click to unpin");
+    view.set_scale(f64::from(monitor.map_or(1, |m| m.scale_factor())));
     frame.append(view.widget());
     surface.set_content(view.widget());
 
     Parts { surface, view }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Reads, with_arrival};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_workspace_on_its_way_counts_as_on_screen_until_it_lands() {
+        let now = Instant::now();
+        let later = now + Duration::from_millis(1000);
+        let mut arriving = Some(("7".to_string(), later));
+        // Switch not landed yet: 7 counts as shown, so its pin stays hidden.
+        let shown = with_arrival(vec!["1".into()], &mut arriving, now);
+        assert_eq!(shown, ["1", "7"]);
+        assert!(arriving.is_some());
+        // Landed: sway reports it, and the expectation is spent.
+        let shown = with_arrival(vec!["7".into()], &mut arriving, now);
+        assert_eq!(shown, ["7"]);
+        assert!(arriving.is_none());
+        // Never landed: forgotten once its time is up.
+        let mut arriving = Some(("7".to_string(), later));
+        let shown = with_arrival(vec!["1".into()], &mut arriving, later);
+        assert_eq!(shown, ["1"]);
+        assert!(arriving.is_none());
+    }
+
+    #[test]
+    fn a_read_that_lands_after_a_newer_one_is_dropped() {
+        let mut reads = Reads::default();
+        let (a, b, c) = (reads.ask(), reads.ask(), reads.ask());
+        assert!(reads.land(b));
+        assert!(!reads.land(a), "older than one applied");
+        assert!(reads.land(c));
+        assert!(!reads.land(c), "applied once");
+    }
 }
