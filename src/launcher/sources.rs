@@ -493,7 +493,7 @@ mod tests {
     fn settings_rows_go_above_the_apps_only_when_the_query_names_one() {
         let l = Launcher::default();
         let (above, below) = settings(&l, Query::Plain("dark"));
-        assert_eq!(above[0].text, "Appearance › Appearance › Mode");
+        assert_eq!(above[0].text, "Appearance › Mode");
         assert_eq!(above[0].provider, SETTING);
         assert!(below.len() <= MAX_OTHER_SETTINGS);
         let (above, below) = settings(&l, Query::Plain("reso"));

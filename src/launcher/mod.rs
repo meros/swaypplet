@@ -1091,14 +1091,28 @@ fn build_result_row(
     on_activate: &OnActivate,
     entry: &gtk4::SearchEntry,
 ) -> gtk4::Box {
-    let r = crate::ui::row(
-        provider_icon(&result.provider),
-        &result.text,
-        &result.subtext,
-    );
+    // A setting's row says the setting first and where it lives second:
+    // "Mode", then "Appearance" in the end slot, rather than the path as
+    // one title. The path is the identifier; the name is what was asked
+    // for.
+    let (title, crumb) = match (
+        result.provider == sources::SETTING,
+        result.text.rsplit_once(" › "),
+    ) {
+        (true, Some((place, name))) => (name, Some(place)),
+        _ => (result.text.as_str(), None),
+    };
+    let r = crate::ui::row(provider_icon(&result.provider), title, &result.subtext);
     let row = r.root.clone();
     result_row_style(&row, selected);
     crate::ui::glyph::adopt(&r.icon, crate::ui::Text::Title, crate::ui::Tone::Muted);
+    if let Some(place) = crumb {
+        r.end.append(&crate::ui::text(
+            place,
+            crate::ui::Text::Caption,
+            crate::ui::Tone::Faint,
+        ));
+    }
 
     // The app's own icon in the glyph's place, when the theme has it.
     if !result.icon.is_empty()
@@ -1118,7 +1132,7 @@ fn build_result_row(
     // Only badge non-default providers (websearch, calc, …). The dominant
     // "desktopapplications" source is implied by the surface, so badging every
     // row with it is pure visual noise.
-    if result.provider != "desktopapplications" {
+    if result.provider != "desktopapplications" && crumb.is_none() {
         let badge = crate::ui::text(
             provider_label(&result.provider),
             crate::ui::Text::Caption,

@@ -1,6 +1,6 @@
 //! The settings as the launcher finds them: every row of every tab, by its
 //! title, a one-line subtitle and the words people type for it ("dark mode"
-//! for Appearance › Appearance › Mode, "blur" for Glass › Material › Frost).
+//! for Appearance › Mode, "blur" for Glass › Material › Frost).
 //!
 //! The index is static. Each pane keeps its own table, `SEARCH`, beside the
 //! code that builds its rows, and [`TABLES`] lists the tables by tab. Nothing
@@ -189,7 +189,7 @@ impl Target {
 #[derive(Debug, Clone)]
 pub struct Hit {
     pub target: Target,
-    /// "Appearance › Appearance › Mode".
+    /// "Appearance › Mode".
     pub path: String,
     pub subtitle: &'static str,
     pub score: u32,
@@ -229,11 +229,17 @@ fn prepare() -> Vec<Prepared> {
         let tab_title = tab_title(tab);
         for e in *entries {
             let title = if e.title.is_empty() { e.group } else { e.title };
-            let path = if e.title.is_empty() {
-                format!("{tab_title} › {}", e.group)
-            } else {
-                format!("{tab_title} › {} › {}", e.group, e.title)
-            };
+            // A group named after its pane (Appearance › Appearance) is
+            // said once: the path is where the row is, not a repetition.
+            let mut path = tab_title.to_string();
+            if !e.group.eq_ignore_ascii_case(tab_title) {
+                path.push_str(" › ");
+                path.push_str(e.group);
+            }
+            if !e.title.is_empty() {
+                path.push_str(" › ");
+                path.push_str(e.title);
+            }
             let mut place = words(tab_title);
             place.extend(words(e.group));
             out.push(Prepared {
@@ -483,9 +489,9 @@ mod tests {
     #[test]
     fn synonyms_find_their_row() {
         for (query, path) in [
-            ("dark mode", "Appearance › Appearance › Mode"),
-            ("dark", "Appearance › Appearance › Mode"),
-            ("light theme", "Appearance › Appearance › Mode"),
+            ("dark mode", "Appearance › Mode"),
+            ("dark", "Appearance › Mode"),
+            ("light theme", "Appearance › Mode"),
             ("wallpaper", "Appearance › Wallpaper"),
             ("background image", "Appearance › Wallpaper"),
             ("night light", "Appearance › Night light › Night light"),
@@ -516,7 +522,7 @@ mod tests {
             ("wireless", "Panel › Wi-Fi"),
             ("headphones", "Panel › Audio output"),
             ("pair", "Panel › Bluetooth"),
-            ("accent colour", "Appearance › Appearance › Accent"),
+            ("accent colour", "Appearance › Accent"),
         ] {
             assert_eq!(top(query), path, "{query:?}");
         }
