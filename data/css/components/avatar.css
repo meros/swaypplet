@@ -4,7 +4,7 @@
    A round picture or monogram: the identity fill, the presence dot, the
    current user's ring, and its bloom in a picked chip.
 
-   owns: ui-avatar ui-avatar-presence
+   owns: ui-avatar ui-avatar-frame ui-avatar-presence
    ══════════════════════════════════════════════════════════════════════ */
 
 .ui-avatar {
@@ -37,7 +37,7 @@
 
 /* The current user: a ring, as an outline rather than a border, because a
    border would shrink the avatar's draw area. */
-.ui-avatar.active {
+.ui-avatar-frame.active > .ui-avatar {
     outline: 2px solid var(--accent-bg);
     outline-offset: 1px;
 }

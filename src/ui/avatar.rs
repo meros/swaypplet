@@ -10,8 +10,9 @@
 //! a categorical colour hashed from the name, because which user this is is
 //! identity and identity is what the categorical set is for. The initial is
 //! drawn in the widget's CSS colour, so no colour is written down here.
-//! Callers mark the current user with `.active` (a ring); the dot is a
-//! `.ui-avatar-presence` overlay.
+//! Callers mark the current user with `.active` on the returned frame (a
+//! ring on the circle inside it); the dot is a `.ui-avatar-presence`
+//! overlay on the frame, so it paints above the ring.
 
 use gtk4::{gdk, glib, graphene, gsk, pango, prelude::*, subclass::prelude::*};
 
@@ -131,12 +132,21 @@ pub fn avatar(name: &str, icon_path: Option<&str>, size: i32, logged_in: bool) -
         overlay.add_css_class(&format!("cat-{}", category_for(name) + 1));
     }
     overlay.set_size_request(size, size);
-    // Never stretched: a row or a box that fills its height would make the
-    // overlay taller than wide, and its pill-radius fill and ring with it,
-    // an oval around a round picture.
-    overlay.set_halign(gtk4::Align::Center);
-    overlay.set_valign(gtk4::Align::Center);
     overlay.set_child(Some(&image));
+
+    // The frame: what callers get and mark `.active`, and what carries the
+    // presence dot. The circle (fill, picture and the `.active` ring, which
+    // `.ui-avatar-frame.active > .ui-avatar` draws) is its child, so the
+    // dot, an overlay of the frame, paints after the ring and sits on it,
+    // not under it.
+    let frame = gtk4::Overlay::new();
+    frame.add_css_class("ui-avatar-frame");
+    frame.set_child(Some(&overlay));
+    // Never stretched: a row or a box that fills its height would make the
+    // circle taller than wide, and its pill-radius fill and ring with it,
+    // an oval around a round picture.
+    frame.set_halign(gtk4::Align::Center);
+    frame.set_valign(gtk4::Align::Center);
 
     if logged_in {
         let dot = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
@@ -152,10 +162,10 @@ pub fn avatar(name: &str, icon_path: Option<&str>, size: i32, logged_in: bool) -
             .max(0.0) as i32;
         dot.set_margin_end(inset);
         dot.set_margin_bottom(inset);
-        overlay.add_overlay(&dot);
+        frame.add_overlay(&dot);
     }
 
-    overlay.upcast()
+    frame.upcast()
 }
 
 /// Hash a username to one of the six categorical slots, stably.
