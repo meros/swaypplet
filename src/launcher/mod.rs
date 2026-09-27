@@ -69,6 +69,9 @@ struct Hooks {
     /// Runs an action row by its identifier (`set_actions`), and says
     /// whether the host is already out of the way.
     action: Option<RunAction>,
+    /// Offered the typed text on Enter before the selected row is: true
+    /// when the host took it (`set_on_enter`).
+    enter: Option<RunAction>,
 }
 
 type OpenSetting = Box<dyn Fn(&str)>;
@@ -202,8 +205,11 @@ impl LauncherView {
     }
 
     /// What Enter does: activate the selected row.
-    pub fn activate_selected(&self) {
-        activate_selected(
+    /// What Enter does: the host's take on the typed text first
+    /// (`set_on_enter`), else the selected row. The key controller and the
+    /// render harness both come through here.
+    pub fn press_enter(&self) {
+        press_enter(
             &self.state,
             &self.results_box,
             &self.entry,
@@ -243,6 +249,13 @@ impl LauncherView {
     ) {
         self.state.borrow_mut().actions = Some(Rc::new(list));
         self.on_activate.borrow_mut().action = Some(Box::new(run));
+    }
+
+    /// Offer the typed text to the host on Enter, before the selected row
+    /// is activated; `take` answers true when it took it. The Helm takes a
+    /// settings prefix (`:idle`), which is no row.
+    pub fn set_on_enter(&self, take: impl Fn(&str) -> bool + 'static) {
+        self.on_activate.borrow_mut().enter = Some(Box::new(take));
     }
 
     /// Offer the settings and the panel sections by what they do, and open
@@ -329,7 +342,7 @@ impl LauncherView {
                 glib::Propagation::Stop
             }
             gtk4::gdk::Key::Return | gtk4::gdk::Key::KP_Enter => {
-                activate_selected(&view_state, &results_box, &entry, &on_activate);
+                press_enter(&view_state, &results_box, &entry, &on_activate);
                 glib::Propagation::Stop
             }
             _ => glib::Propagation::Proceed,
@@ -509,7 +522,7 @@ impl Launcher {
                     let view = self.view.clone();
                     glib::timeout_add_local_once(
                         std::time::Duration::from_millis(1500 * steps.len() as u64),
-                        move || view.activate_selected(),
+                        move || view.press_enter(),
                     );
                 }
             }
@@ -567,6 +580,24 @@ fn activate_selected(
         hand_off_launch(&item.provider, &row);
     }
     activate(&item, entry, on_activate);
+}
+
+/// Enter: the host may take the typed text (a settings prefix is no row),
+/// and otherwise the selected row is activated.
+fn press_enter(
+    state: &Rc<RefCell<LauncherState>>,
+    results_box: &gtk4::Box,
+    entry: &gtk4::SearchEntry,
+    on_activate: &OnActivate,
+) {
+    let taken = on_activate
+        .borrow()
+        .enter
+        .as_ref()
+        .is_some_and(|take| take(entry.text().trim()));
+    if !taken {
+        activate_selected(state, results_box, entry, on_activate);
+    }
 }
 
 /// Run `item`, count it, and let the host hide, from Enter or a click.

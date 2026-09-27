@@ -389,7 +389,15 @@ impl SettingsSection {
                 let keys = e.keys;
                 let click = gtk4::GestureClick::new();
                 click.set_button(gtk4::gdk::BUTTON_SECONDARY);
-                click.connect_released(move |_, _, _, _| reset_keys(keys));
+                let weak = std::rc::Rc::downgrade(self);
+                click.connect_released(move |_, _, _, _| {
+                    reset_keys(keys);
+                    // The panes read the store when told to, not on every
+                    // change; this one shows the value just put back.
+                    if let Some(this) = weak.upgrade() {
+                        this.refresh_pane(tab);
+                    }
+                });
                 row.add_controller(click);
                 marks.push(Mark { label, keys });
             }
@@ -657,6 +665,23 @@ impl SettingsSection {
         self.input.demo_pick(query);
     }
 
+    /// Re-read one pane from what it edits, by its stack name.
+    fn refresh_pane(&self, name: &str) {
+        match name {
+            "look" => self.look.refresh(),
+            "idle" => self.idle.refresh(),
+            "bar" => self.bar.refresh(),
+            "input" => self.input.refresh(),
+            "alerts" => self.alerts.refresh(),
+            "launcher" => self.launcher.refresh(),
+            "displays" => self.displays.refresh(),
+            "glass" => self.glass.refresh(),
+            "system" => self.system.refresh(),
+            "quality" => self.quality.refresh(),
+            _ => {}
+        }
+    }
+
     /// Re-read every pane from what it edits. Settings refreshes every pane
     /// when it opens.
     pub fn refresh(&self) {
@@ -680,7 +705,10 @@ struct Mark {
     keys: &'static [&'static str],
 }
 
-/// Put the system's value back for `keys`, in the settings file.
+/// Put the system's value back for `keys`, in the settings file. A
+/// section that is then the system's again leaves the file, as the pane's
+/// Reset removes it: kept, it would hold the values of today's system
+/// against a later change to the system's defaults.
 fn reset_keys(keys: &[&str]) {
     let system = store::Settings::default();
     store::update(|s| {
@@ -691,7 +719,35 @@ fn reset_keys(keys: &[&str]) {
                 log::warn!("settings: reset {key}: {e}");
             }
         }
+        *s = without_system_sections(s, &system, keys);
     });
+}
+
+/// `user` without the sections of `keys` that say what the system says.
+fn without_system_sections(
+    user: &store::Settings,
+    system: &store::Settings,
+    keys: &[&str],
+) -> store::Settings {
+    let (Ok(mut file), Ok(effective)) = (
+        serde_json::to_value(user),
+        serde_json::to_value(system.effective()),
+    ) else {
+        return user.clone();
+    };
+    for section in keys
+        .iter()
+        .filter_map(|k| k.split_once('.').map(|(s, _)| s))
+    {
+        if file
+            .get(section)
+            .is_some_and(|v| Some(v) == effective.get(section))
+            && let Some(slot) = file.get_mut(section)
+        {
+            *slot = serde_json::Value::Null;
+        }
+    }
+    serde_json::from_value(file).unwrap_or_else(|_| user.clone())
 }
 
 /// A group's heading in the sidebar: not selectable, not a stop for the
@@ -891,5 +947,28 @@ mod tests {
                 .windows(2)
                 .all(|w| !(w[0] == Group::Machine && w[1] == Group::Settings))
         );
+    }
+
+    #[test]
+    fn a_section_the_system_holds_again_leaves_the_file() {
+        let system = store::Settings::default();
+        let mut user = store::Settings::default();
+        user.set("idle.lock_after_s", serde_json::json!(4242))
+            .unwrap();
+        user.set("bar.clock_24h", system.get("bar.clock_24h").unwrap())
+            .unwrap();
+        // Put back to the system's: the idle section leaves, bar was never
+        // different and leaves too; one still different stays.
+        let mut back = user.clone();
+        back.set(
+            "idle.lock_after_s",
+            system.get("idle.lock_after_s").unwrap(),
+        )
+        .unwrap();
+        let cleaned =
+            without_system_sections(&back, &system, &["idle.lock_after_s", "bar.clock_24h"]);
+        assert!(cleaned.is_default(), "{cleaned:?}");
+        let kept = without_system_sections(&user, &system, &["idle.lock_after_s"]);
+        assert_eq!(kept.get("idle.lock_after_s"), Some(serde_json::json!(4242)));
     }
 }

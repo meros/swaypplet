@@ -301,6 +301,17 @@ pub fn run() {
         );
         panel.window().present();
         panel.window().set_visible(false);
+        {
+            // Never both: the Helm opened by any door (the bar's start
+            // button, a notification's card, a page from settings' search)
+            // puts settings away, so two surfaces never hold the keyboard.
+            let settings = st.settings.as_ref().map(Rc::downgrade);
+            panel.window().connect_map(move |_| {
+                if let Some(settings) = settings.as_ref().and_then(|w| w.upgrade()) {
+                    settings.hide();
+                }
+            });
+        }
 
         // ── Popup manager ────────────────────────────────────────────────────
         let popups = PopupManager::register(app, store_activate.clone());

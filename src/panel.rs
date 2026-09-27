@@ -411,12 +411,16 @@ impl Panel {
         }
 
         // ── A settings prefix, on Enter ──────────────────────────────────────
+        // Taken before the selected row, which for `:capture` would be the
+        // region shot its synonym matches, and for `:set` an app.
         {
             let on_settings = on_settings.clone();
-            launcher.entry().connect_activate(move |entry| {
-                if let Some(open) = Open::for_prefix(entry.text().to_lowercase().trim()) {
+            launcher.set_on_enter(move |text| match Open::for_prefix(&text.to_lowercase()) {
+                Some(open) => {
                     on_settings(open);
+                    true
                 }
+                None => false,
             });
         }
 
@@ -524,9 +528,8 @@ impl Panel {
                 && !query.is_empty()
             {
                 let entry = self.launcher.entry().clone();
-                let typed = query.clone();
                 glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
-                    entry.set_text(&typed)
+                    entry.set_text(&query)
                 });
                 // `SWAYPPLET_PANEL_ACTIVATE=1` then presses Enter 1.5 s
                 // later, or that many milliseconds after opening when it is
@@ -537,13 +540,12 @@ impl Panel {
                     && !v.is_empty()
                 {
                     let ms = v.parse::<u64>().ok().filter(|ms| *ms > 1).unwrap_or(1800);
+                    // Through Enter's own path, so a shot of it is a test of
+                    // it: the hook once opened settings by itself, and a
+                    // settings prefix that Enter never reached looked fine.
                     let launcher = self.launcher.clone();
-                    let on_settings = self.on_settings.clone();
                     glib::timeout_add_local_once(std::time::Duration::from_millis(ms), move || {
-                        match Open::for_prefix(&query.to_lowercase()) {
-                            Some(open) => on_settings(open),
-                            None => launcher.activate_selected(),
-                        }
+                        launcher.press_enter()
                     });
                 }
             }

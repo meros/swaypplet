@@ -223,6 +223,11 @@ impl Action {
             return false;
         }
         let q = words_of(query);
+        // Punctuation alone (`..`) has no words, and every action would
+        // match an empty list.
+        if q.is_empty() {
+            return false;
+        }
         if self.whole {
             return self.phrases.contains(&q);
         }
@@ -540,7 +545,9 @@ mod tests {
         assert!(ids("down").is_empty());
         assert_eq!(ids("shut down"), ["session:poweroff"]);
         assert_eq!(ids("power off"), ["session:poweroff"]);
-        // One letter lists nothing.
+        // One letter lists nothing, nor does punctuation.
         assert!(ids("l").is_empty());
+        assert!(ids("..").is_empty());
+        assert!(ids("::").is_empty());
     }
 }
