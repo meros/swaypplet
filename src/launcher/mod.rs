@@ -625,9 +625,12 @@ fn local_pass(state: &Rc<RefCell<LauncherState>>, text: &str) {
         s.tabbed = false;
         s.local = sources::local(&l, q, &s.pages, &user_shell());
         (s.tail, s.local) = if s.settings_host {
+            // A setting the query names goes above the page rows too: "sudo"
+            // means the sudo row before the Idle & Lock tab its prefix opens.
             let (clear, other) = sources::settings(&l, q);
             let mut local = std::mem::take(&mut s.local);
-            local.extend(clear);
+            let at = local.iter().take_while(|r| r.provider == sources::CALC).count();
+            local.splice(at..at, clear);
             (other, local)
         } else {
             (Vec::new(), std::mem::take(&mut s.local))
