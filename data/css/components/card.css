@@ -11,12 +11,24 @@
 /* ── Card: the glass surface ─────────────────────────────────────────────
    Paints the key only so the compositor finds the card's shape; the
    compositor drops it and draws the material (§4). Never a box-shadow: the
-   compositor would frost its translucent pixels into a halo. */
+   compositor would frost its translucent pixels into a halo.
+
+   No border either. The material's own anti-aliased outline is the card's
+   edge, and it is exact (src/effect_shape.rs sends the card's rounded rect).
+   A hairline painted on that same outline is a second anti-aliased edge over
+   the first: its partly covered pixels composite over a partly covered rim,
+   and the eye reads the pair as a thin grey ring around the glass. The
+   border stays for its width only, in transparent. A state
+   that needs a line draws it inset (the outline rules below), clear of the
+   rim. */
 
 .ui-card {
     background-color: var(--surface-key);
     border-radius: var(--radius-card);
-    border: 1px solid var(--border-strong);
+    /* Transparent, not absent: the card keeps the 1px it has always had
+       between its edge and its content, so nothing inside moves, and the
+       key still fills to the edge under it (background-clip: border-box). */
+    border: 1px solid transparent;
 }
 
 .ui-card.thin {
@@ -25,6 +37,7 @@
 
 .no-glass .ui-card {
     background-color: var(--surface-raised);
+    border: 1px solid var(--border-strong);
     box-shadow: var(--shadow-solid);
 }
 
@@ -37,6 +50,7 @@
 
 .ui-card.solid {
     background-color: var(--surface-raised);
+    border: 1px solid var(--border-strong);
 }
 
 /* The card over the scrim: the key, pre-compensated for the black under it.
@@ -67,11 +81,13 @@
     background-color: var(--surface-key-over-scrim);
 }
 
-/* A card that has just said yes: the border takes the accent, nothing else
-   moves. Approval is stated, not celebrated. */
+/* A card that has just said yes: a hairline in the accent, inset clear of
+   the glass rim, and nothing else moves. Approval is stated, not
+   celebrated. */
 .ui-card.success {
-    border-color: var(--accent-bg);
-    transition: border-color var(--motion-state);
+    outline: 1px solid var(--accent-bg);
+    outline-offset: -3px;
+    transition: outline-color var(--motion-state);
 }
 
 /* A well: sunk below the card rather than laid on it, for text that came
@@ -92,17 +108,17 @@
    nothing. The alpha only rises (the key's 0.50 plus the tint), so the card
    stays clear of the seeding line (glass.nix `maskThreshold`).
 
-   .danger: a critical notification. The glass runs warm, and the hairline
-   picks up the same red at the weight every card edge has.
+   .danger: a critical notification. The glass runs warm, and an inset
+   hairline picks up the same red, clear of the rim like .success's.
    .recessed: a card further back in a stack, dimmer. A fill, not the bar's
    `.ui-receded` opacity: each card owns its surface, and that surface's
    alpha is the material's fade, which an opacity here would fight. */
 .ui-card.danger {
     background-image: linear-gradient(var(--danger-tint), var(--danger-tint));
-    border-color: var(--danger-tint);
+    outline: 1px solid var(--danger-tint);
+    outline-offset: -3px;
 }
 
 .ui-card.recessed {
     background-image: linear-gradient(var(--scrim), var(--scrim));
-    border-color: var(--border-subtle);
 }
