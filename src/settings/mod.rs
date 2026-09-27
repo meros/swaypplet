@@ -226,6 +226,10 @@ pub struct SettingsSection {
     title: gtk4::Label,
     /// What a Helm page among the search hits opens: the Helm, on it.
     on_page: OnPage,
+    /// Every row that edits the settings file, with its keys and its name,
+    /// marked while the file changes it from the system's
+    /// (`mark_changed`).
+    marks: std::cell::RefCell<Vec<Mark>>,
     look: look_pane::LookPane,
     idle: idle_pane::IdlePane,
     bar: bar_pane::BarPane,
@@ -339,6 +343,7 @@ impl SettingsSection {
             stack,
             title,
             on_page: OnPage::default(),
+            marks: std::cell::RefCell::default(),
             look,
             idle,
             bar,
@@ -351,8 +356,83 @@ impl SettingsSection {
             quality,
         });
         this.wire();
+        this.install_marks();
         this.show("look");
         this
+    }
+
+    /// Mark every row the search index gives keys (`search::Entry`) while
+    /// the settings file changes it from the system's, and give it a
+    /// right-click that puts the system's back, for that row alone. The
+    /// pane's Reset does the same for all of it.
+    fn install_marks(self: &std::rc::Rc<Self>) {
+        let mut marks = Vec::new();
+        for (tab, entries) in search::TABLES {
+            let Some(page) = self.stack.child_by_name(tab) else {
+                continue;
+            };
+            for e in entries
+                .iter()
+                .filter(|e| !e.keys.is_empty() && !e.title.is_empty())
+            {
+                let Some(row) = find_row_in(&page, e.group, e.title, false) else {
+                    log::warn!("settings: no row {} › {} to mark", e.group, e.title);
+                    continue;
+                };
+                let Some(label) = descendants(&row).into_iter().find_map(|w| {
+                    w.has_css_class("settings-row-label")
+                        .then(|| w.downcast::<gtk4::Label>().ok())
+                        .flatten()
+                }) else {
+                    continue;
+                };
+                let keys = e.keys;
+                let click = gtk4::GestureClick::new();
+                click.set_button(gtk4::gdk::BUTTON_SECONDARY);
+                click.connect_released(move |_, _, _, _| reset_keys(keys));
+                row.add_controller(click);
+                marks.push(Mark { label, keys });
+            }
+        }
+        *self.marks.borrow_mut() = marks;
+        let weak = std::rc::Rc::downgrade(self);
+        store::observe(move || {
+            if let Some(this) = weak.upgrade() {
+                this.mark_changed();
+            }
+        });
+        self.mark_changed();
+    }
+
+    /// Mark each row the settings file changes from the system's: its name
+    /// in the accent, and a tooltip saying so and how to put it back. The
+    /// name and not a dot beside it, so a marked row keeps its place in the
+    /// pane's column.
+    fn mark_changed(&self) {
+        let values = |s: store::Settings| serde_json::to_value(s.effective()).ok();
+        let (Some(now), Some(system)) =
+            (values(store::current()), values(store::Settings::default()))
+        else {
+            return;
+        };
+        let at = |v: &serde_json::Value, key: &str| {
+            key.split_once('.')
+                .and_then(|(section, field)| v.get(section)?.get(field).cloned())
+        };
+        for mark in self.marks.borrow().iter() {
+            let changed = mark.keys.iter().any(|k| at(&now, k) != at(&system, k));
+            crate::ui::set_tone(
+                &mark.label,
+                if changed {
+                    crate::ui::Tone::Accent
+                } else {
+                    crate::ui::Tone::Fg
+                },
+            );
+            mark.label.set_tooltip_text(changed.then_some(
+                "Changed from the system's default. Right-click the row to put it back.",
+            ));
+        }
     }
 
     fn wire(self: &std::rc::Rc<Self>) {
@@ -593,6 +673,27 @@ impl SettingsSection {
     }
 }
 
+/// A row that edits the settings file: its name, which is marked while the
+/// file changes it, and its keys.
+struct Mark {
+    label: gtk4::Label,
+    keys: &'static [&'static str],
+}
+
+/// Put the system's value back for `keys`, in the settings file.
+fn reset_keys(keys: &[&str]) {
+    let system = store::Settings::default();
+    store::update(|s| {
+        for key in keys {
+            if let Some(value) = system.get(key)
+                && let Err(e) = s.set(key, value)
+            {
+                log::warn!("settings: reset {key}: {e}");
+            }
+        }
+    });
+}
+
 /// A group's heading in the sidebar: not selectable, not a stop for the
 /// keyboard.
 fn group_header(group: Group) -> gtk4::ListBoxRow {
@@ -652,22 +753,47 @@ fn descendants(root: &gtk4::Widget) -> Vec<gtk4::Widget> {
     out
 }
 
-/// The row a search entry names on a tab's page: inside the group whose
-/// overline is `group` (anywhere on the page when no group has that name,
-/// as on Displays, whose group is named after the selected output), the
-/// row whose gutter label is `title`. An empty `title` is the group itself.
+/// The row a search entry names on a pane: inside the group whose overline
+/// is `group` (anywhere on the page when no group has that name, as on
+/// Displays, whose group is named after the selected output), the row
+/// whose gutter label is `title`. An empty `title` is the group itself.
 fn find_row(page: &gtk4::Widget, group: &str, title: &str) -> Option<gtk4::Widget> {
+    find_row_in(page, group, title, true)
+}
+
+/// [`find_row`], and whether a row may be looked for on the whole page
+/// when no group has that name. The marks may not: two groups of a pane
+/// have rows of the same name (Dim after by day and at night), and the
+/// page's first would be marked for the other's key.
+fn find_row_in(
+    page: &gtk4::Widget,
+    group: &str,
+    title: &str,
+    anywhere: bool,
+) -> Option<gtk4::Widget> {
     let text_is = |w: &gtk4::Widget, text: &str| {
         w.downcast_ref::<gtk4::Label>()
             .is_some_and(|l| l.text().as_str() == text)
     };
+    // An overline is written in capitals (`ui::overline`); the tables name
+    // the group as it is written in the pane's code. Compared as written,
+    // no group ever matched, and a row whose name two groups share was
+    // found in whichever came first on the page.
     let group_box = descendants(page).into_iter().find(|w| {
-        w.has_css_class("settings-group") && w.first_child().is_some_and(|o| text_is(&o, group))
+        w.has_css_class("settings-group")
+            && w.first_child().is_some_and(|o| {
+                o.downcast_ref::<gtk4::Label>()
+                    .is_some_and(|l| l.text().to_uppercase() == group.to_uppercase())
+            })
     });
     if title.is_empty() {
         return group_box;
     }
-    let scope = group_box.unwrap_or_else(|| page.clone());
+    let scope = match group_box {
+        Some(g) => g,
+        None if anywhere => page.clone(),
+        None => return None,
+    };
     descendants(&scope)
         .into_iter()
         .find(|w| w.has_css_class("settings-row-label") && text_is(w, title))

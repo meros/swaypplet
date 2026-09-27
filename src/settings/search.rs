@@ -32,6 +32,12 @@ pub struct Entry {
     /// Other words for it. A phrase counts as its words, and as a phrase
     /// when the whole query is that phrase.
     pub keywords: &'static [&'static str],
+    /// The settings the row edits, by dotted key (`schema::Settings::get`),
+    /// so settings can mark it when the file changes it from the system's
+    /// and put the system's back. Empty for a row that edits nothing in the
+    /// settings file: glass (its own file), the displays (sway's state), a
+    /// grid or a list.
+    pub keys: &'static [&'static str],
 }
 
 /// An entry, in the tables' own shorthand.
@@ -46,6 +52,14 @@ pub const fn row(
         title,
         subtitle,
         keywords,
+        keys: &[],
+    }
+}
+
+impl Entry {
+    /// The row edits `keys` (see [`Entry::keys`]).
+    pub const fn keys(self, keys: &'static [&'static str]) -> Entry {
+        Entry { keys, ..self }
     }
 }
 
@@ -543,5 +557,22 @@ mod tests {
         // Scores come out best first.
         let hits = find("screen");
         assert!(hits.windows(2).all(|w| w[0].score >= w[1].score));
+    }
+
+    #[test]
+    fn every_key_a_row_names_is_a_setting() {
+        let settings = crate::settings::store::Settings::default();
+        for (tab, entries) in TABLES {
+            for e in *entries {
+                for key in e.keys {
+                    assert!(
+                        settings.get(key).is_some(),
+                        "{tab} › {} › {} names {key}, which is no setting",
+                        e.group,
+                        e.title
+                    );
+                }
+            }
+        }
     }
 }

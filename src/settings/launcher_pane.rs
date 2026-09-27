@@ -250,18 +250,18 @@ use super::search::{Entry, row};
 /// to the tab gets a line here; the test there fails until it does.
 #[rustfmt::skip]
 pub(super) const SEARCH: &[Entry] = &[
-    row("Results", "Applications", "Installed apps in a search", &["apps", "programs", "desktop"]),
-    row("Results", "Open windows", "Windows already open in a search", &["windows", "switch", "go to"]),
-    row("Results", "Calculator", "Arithmetic as you type it", &["calc", "math", "maths", "qalc"]),
-    row("Results", "Commands", "> runs a line in your shell", &["shell", "run", "terminal", "command"]),
-    row("Results", "Pages and settings", "The panel's pages and settings in a search", &["settings search", "pages"]),
-    row("Results", "Clipboard", "Clipboard history in a search", &["clipboard history", "paste", "copied"]),
-    row("Results", "App actions", "What apps publish, such as a private window", &["actions", "menus", "desktop actions"]),
-    row("Results", "Web search", "Search the web for what you typed", &["google", "duckduckgo", "browser"]),
-    row("Results", "Files", "Files by name", &["documents", "find files"]),
-    row("Results", "Bookmarks", "Browser bookmarks", &["browser", "favourites", "favorites"]),
-    row("Results", "Emoji and symbols", "Emoji and Unicode characters by name", &["emoji", "unicode", "characters", "symbols", "emoticons"]),
-    row("Learning", "Rank by use", "What you launch rises in the results", &["frecency", "history", "ranking", "recent"]),
+    row("Results", "Applications", "Installed apps in a search", &["apps", "programs", "desktop"]).keys(&["launcher.apps"]),
+    row("Results", "Open windows", "Windows already open in a search", &["windows", "switch", "go to"]).keys(&["launcher.windows"]),
+    row("Results", "Calculator", "Arithmetic as you type it", &["calc", "math", "maths", "qalc"]).keys(&["launcher.calculator"]),
+    row("Results", "Commands", "> runs a line in your shell", &["shell", "run", "terminal", "command"]).keys(&["launcher.commands"]),
+    row("Results", "Pages and settings", "The panel's pages and settings in a search", &["settings search", "pages"]).keys(&["launcher.settings"]),
+    row("Results", "Clipboard", "Clipboard history in a search", &["clipboard history", "paste", "copied"]).keys(&["launcher.clipboard"]),
+    row("Results", "App actions", "What apps publish, such as a private window", &["actions", "menus", "desktop actions"]).keys(&["launcher.menus"]),
+    row("Results", "Web search", "Search the web for what you typed", &["google", "duckduckgo", "browser"]).keys(&["launcher.web_search"]),
+    row("Results", "Files", "Files by name", &["documents", "find files"]).keys(&["launcher.files"]),
+    row("Results", "Bookmarks", "Browser bookmarks", &["browser", "favourites", "favorites"]).keys(&["launcher.bookmarks"]),
+    row("Results", "Emoji and symbols", "Emoji and Unicode characters by name", &["emoji", "unicode", "characters", "symbols", "emoticons"]).keys(&["launcher.symbols"]),
+    row("Learning", "Rank by use", "What you launch rises in the results", &["frecency", "history", "ranking", "recent"]).keys(&["launcher.frecency"]),
     row("Learning", "History", "Forget what you launched", &["forget", "clear history", "privacy", "frecency"]),
 ];
 
