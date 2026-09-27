@@ -470,6 +470,11 @@ pub fn run(component: &str) {
                 s.expand_for_page();
                 host.append(s.widget());
             }
+            "users" => {
+                let s = Box::leak(Box::new(crate::widgets::users::UserSection::new()));
+                s.refresh();
+                host.append(s.widget());
+            }
             "power" => {
                 let s = Box::leak(Box::new(PowerSection::new()));
                 s.expand_for_page();

@@ -110,6 +110,9 @@ impl AvatarImage {
 /// is the diameter in px; `logged_in` adds the presence dot. The returned
 /// widget carries `.ui-avatar`; the caller adds `.active` to ring the current
 /// user.
+/// The presence dot's diameter, as `.ui-avatar-presence` sets it.
+const PRESENCE_DOT: i32 = 10;
+
 pub fn avatar(name: &str, icon_path: Option<&str>, size: i32, logged_in: bool) -> gtk4::Widget {
     let texture = icon_path.and_then(|p| gdk::Texture::from_filename(p).ok());
     let letter = name
@@ -128,6 +131,11 @@ pub fn avatar(name: &str, icon_path: Option<&str>, size: i32, logged_in: bool) -
         overlay.add_css_class(&format!("cat-{}", category_for(name) + 1));
     }
     overlay.set_size_request(size, size);
+    // Never stretched: a row or a box that fills its height would make the
+    // overlay taller than wide, and its pill-radius fill and ring with it,
+    // an oval around a round picture.
+    overlay.set_halign(gtk4::Align::Center);
+    overlay.set_valign(gtk4::Align::Center);
     overlay.set_child(Some(&image));
 
     if logged_in {
@@ -135,6 +143,15 @@ pub fn avatar(name: &str, icon_path: Option<&str>, size: i32, logged_in: bool) -
         dot.add_css_class("ui-avatar-presence");
         dot.set_halign(gtk4::Align::End);
         dot.set_valign(gtk4::Align::End);
+        // On the circle's rim at 45°, not in the square's corner, which is
+        // outside the circle: the rim point sits r(1 - 1/√2) in from each
+        // edge, and the dot is centred on it.
+        let inset = (f64::from(size) / 2.0 * (1.0 - std::f64::consts::FRAC_1_SQRT_2)
+            - f64::from(PRESENCE_DOT) / 2.0)
+            .round()
+            .max(0.0) as i32;
+        dot.set_margin_end(inset);
+        dot.set_margin_bottom(inset);
         overlay.add_overlay(&dot);
     }
 
