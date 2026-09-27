@@ -290,7 +290,10 @@ case "$MODE" in
     if [ -n "${SWPP_QUIET_SHARE:-}" ]; then
       export SWAYPPLET_PW_DUMP="$(cd "$(dirname "$0")" && pwd)/fake-screencast.sh" SWPP_SHARE_S="${SWPP_SHARE_S:-8}"
     fi
+    # Signalled by its own pid, not the pid file: another harness run can
+    # rewrite that file between here and the USR1.
     "$BIN" >/tmp/swpp-app.log 2>&1 &
+    app_pid=$!
     for _ in $(seq 1 200); do
       [ -e "$RUNTIME/swaypplet.pid" ] && break; sleep 0.1
     done
@@ -314,8 +317,7 @@ case "$MODE" in
     # lock is the card that reads a LED and changes nothing.
     [ -n "${SWPP_QUIET_SHARE:-}" ] && { "$BIN" osd --caps-lock >>/tmp/swpp-app.log 2>&1 || true; }
     if [ "${SWPP_QUIET_STAGE:-during}" = during ]; then
-      p="$(cat "$RUNTIME/swaypplet.pid" 2>/dev/null || true)"
-      [ -n "$p" ] && kill -USR1 "$p" 2>/dev/null || true
+      kill -USR1 "$app_pid" 2>/dev/null || true
       sleep 1.5
     else
       if [ -n "${SWPP_QUIET_SHARE:-}" ]; then

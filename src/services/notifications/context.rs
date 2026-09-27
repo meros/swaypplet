@@ -307,6 +307,10 @@ fn post(store: &StoreRef, summary: Summary) {
                 ("show".into(), "Show all".into()),
             ],
             transient: true,
+            // Stays until clicked or dismissed. It stands in for every card
+            // that did not pop, and the user may not be looking the moment
+            // the presentation ends; one quiet card is a fair price.
+            expire_timeout: 0,
             timestamp: std::time::SystemTime::now(),
             ..Default::default()
         },

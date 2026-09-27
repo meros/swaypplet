@@ -185,10 +185,10 @@ impl AlertsPane {
 
         let context_group = section_box(
             "Quiet by context",
-            "Popups wait while one of these holds, and one card counts them when it ends. Critical ones still show. The DND tile names the reason and turns it off until the context ends.",
+            "Popups wait while one of these holds, and one card counts them when it ends. Critical ones still show. The DND tile names the reason; one click there lets popups through until the context ends.",
         );
         let (row_context, context) = switch_row(
-            "Quiet by context",
+            "Hold popups",
             "On, the triggers below hold popups by themselves.",
             alerts.context_quiet,
         );
