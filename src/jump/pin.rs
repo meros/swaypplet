@@ -166,6 +166,12 @@ struct Inner {
     /// as tucked: nothing changes in the bar, and they come back on their
     /// own when it closes.
     held: bool,
+    /// The last tree read asked for, and the newest one applied. Reads run
+    /// on threads of their own and can land out of order; an older one
+    /// landing last put back the windows of a moment before, and a window
+    /// opened in between stayed out of the pin until sway next said
+    /// something.
+    reads: Reads,
 }
 
 #[derive(Clone, Default)]
@@ -208,9 +214,15 @@ impl Pins {
 
     /// Follow sway: rebuild a pin whose workspace changed shape, and hide
     /// the ones whose workspace is on a screen.
+    ///
+    /// On every window change too, and not only the ones the bar's model
+    /// sees: that model leaves out where windows are and which they are, so
+    /// a window opened or closed beside another of the same process, moved
+    /// within a workspace, resized, or mapped again under a new identifier
+    /// changed nothing in it, and the pin kept capturing the windows it had.
     pub fn set_sway(&self, sway: Rc<SwayService>) {
         let this = self.clone();
-        sway.connect_change(move || this.refresh());
+        sway.connect_windows(move || this.refresh());
         self.inner.borrow_mut().sway = Some(sway);
         self.refresh();
     }
@@ -507,6 +519,7 @@ impl Pins {
             .map(|p| (p.key.clone(), p.region.as_ref().map(|r| r.id.clone())))
             .collect();
         let this = self.clone();
+        let read = self.inner.borrow_mut().reads.ask();
         crate::spawn::spawn_work(
             move || {
                 let tree = crate::sway::ipc::connect().ok()?.get_tree().ok()?;
@@ -527,6 +540,9 @@ impl Pins {
             move |found| {
                 let Some(found) = found else { return };
                 let mut inner = this.inner.borrow_mut();
+                if !inner.reads.land(read) {
+                    return;
+                }
                 let tucked = inner.tucked;
                 let held = inner.held;
                 // A workspace or a window that is gone takes its pin with it.
@@ -565,6 +581,31 @@ impl Pins {
                 }
             },
         );
+    }
+}
+
+/// Tree reads in the order they were asked for.
+#[derive(Default)]
+struct Reads {
+    asked: u64,
+    applied: u64,
+}
+
+impl Reads {
+    /// A new read's number.
+    fn ask(&mut self) -> u64 {
+        self.asked += 1;
+        self.asked
+    }
+
+    /// Whether read `n`, just landed, is newer than every one applied; if
+    /// so it counts as applied.
+    fn land(&mut self, n: u64) -> bool {
+        if n <= self.applied {
+            return false;
+        }
+        self.applied = n;
+        true
     }
 }
 
@@ -656,9 +697,25 @@ fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: 
         slide.set_margin_end(MARGIN_RIGHT);
     }
 
-    let view = View::new(label, "click to go \u{00b7} right-click to unpin");
+    let mut view = View::new(label, "click to go \u{00b7} right-click to unpin");
+    view.set_scale(f64::from(monitor.map_or(1, |m| m.scale_factor())));
     frame.append(view.widget());
     surface.set_content(view.widget());
 
     Parts { surface, view }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Reads;
+
+    #[test]
+    fn a_read_that_lands_after_a_newer_one_is_dropped() {
+        let mut reads = Reads::default();
+        let (a, b, c) = (reads.ask(), reads.ask(), reads.ask());
+        assert!(reads.land(b));
+        assert!(!reads.land(a), "older than one applied");
+        assert!(reads.land(c));
+        assert!(!reads.land(c), "applied once");
+    }
 }

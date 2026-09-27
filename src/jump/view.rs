@@ -28,21 +28,19 @@ use super::scene::{self, Scene};
 /// aspect, so the card hugs the picture.
 pub const W: i32 = 400;
 pub const H: i32 = 250;
-/// Frames are cut to twice the box, for a 2x output.
-const MAX_EDGE: u32 = (W * 2) as u32;
-
 /// Frames a second per window, for a pin and a peek alike.
 ///
 /// A capture is never cheap: `ext-image-copy-capture` hands over the
 /// window's full-size buffer, so every frame is a full-resolution readback
-/// in the compositor and a copy and a downscale on the worker, for a
-/// picture 400 px wide. Pins used to take every frame (no cap), and a
-/// video or a scrolling build on a pinned workspace then cost the
-/// compositor a readback per refresh, on top of the session it was
-/// drawing. 20 reads as live at this size. One number for both, so a pin
-/// and a peek of the same workspace share a stream without one of them
-/// speeding it up.
-pub const FPS: u32 = 20;
+/// in the compositor and a copy and a downscale on the worker. Pins used to
+/// take every frame (no cap), and a video or a scrolling build on a pinned
+/// workspace then cost the compositor a readback per refresh. 20 was the
+/// first cap, and a pin at 20 read as sub-par next to the real thing. At
+/// 30 a frame lands on every second refresh of a 60 Hz screen, and the
+/// worker's one-grid batching still repaints the picture once per step.
+/// One number for both, so a pin and a peek of the same workspace share a
+/// stream without one of them restarting it faster.
+pub const FPS: u32 = 30;
 
 /// The pin mark, filled and struck through.
 pub const PIN_GLYPH: &str = "\u{f0403}";
@@ -64,6 +62,9 @@ pub struct View {
     live: Rc<RefCell<Live>>,
     feed: Option<Feed>,
     shown: Shown,
+    /// Device pixels to one of GTK's where the card is drawn, for the size
+    /// frames are cut to.
+    scale: f64,
 }
 
 impl View {
@@ -103,6 +104,17 @@ impl View {
             live: Rc::default(),
             feed: None,
             shown: Shown::Nothing,
+            scale: 1.0,
+        }
+    }
+
+    /// The scale of the output the card is on. Frames are cut to the
+    /// pictures' size in device pixels, so a 2x screen gets twice the
+    /// pixels; a change starts the capture again at the new size.
+    pub fn set_scale(&mut self, scale: f64) {
+        if (scale - self.scale).abs() > f64::EPSILON {
+            self.scale = scale;
+            self.feed = None;
         }
     }
 
@@ -151,8 +163,8 @@ impl View {
         });
         let picture = card::preview(scene.as_ref(), w, h, &mut self.live.borrow_mut());
         self.holder.append(&picture);
-        let ids = self.live.borrow().window_ids();
-        self.feed = feed::subscribe(ids, None, MAX_EDGE, fps, &self.live);
+        let wants = self.live.borrow().wants(None, self.scale);
+        self.feed = feed::subscribe(wants, fps, &self.live);
         self.shown = wanted;
     }
 
@@ -175,7 +187,8 @@ impl View {
         picture.set_halign(gtk4::Align::Center);
         self.holder.append(&picture);
         self.live.borrow_mut().add(id.to_string(), picture);
-        self.feed = feed::subscribe(vec![id.to_string()], Some(crop), MAX_EDGE, fps, &self.live);
+        let wants = self.live.borrow().wants(Some(crop), self.scale);
+        self.feed = feed::subscribe(wants, fps, &self.live);
         self.shown = wanted;
     }
 

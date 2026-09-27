@@ -12,9 +12,10 @@
 //! GTK side is an [`Observed`] snapshot behind an `Rc` service (shared
 //! skeleton in `crate::service`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -146,15 +147,20 @@ fn order_candidates(env: Vec<PathBuf>, mut found: Vec<(SystemTime, PathBuf)>) ->
 /// Sway model service; [`Observed`] documents the `Rc` lifetime story.
 pub struct SwayService {
     state: Observed<SwayState>,
+    /// [`windows_signature`] of the last snapshot.
+    windows: Cell<u64>,
+    on_windows: RefCell<Vec<Rc<dyn Fn()>>>,
 }
 
 impl SwayService {
     pub fn start() -> Rc<Self> {
         let service = Rc::new(Self {
             state: Observed::new(SwayState::default()),
+            windows: Cell::new(0),
+            on_windows: RefCell::default(),
         });
 
-        let (tx, rx) = async_channel::unbounded::<SwayState>();
+        let (tx, rx) = async_channel::unbounded::<(SwayState, u64)>();
         std::thread::Builder::new()
             .name("sway-ipc".into())
             .spawn(move || run(tx))
@@ -162,11 +168,18 @@ impl SwayService {
 
         let for_events = service.clone();
         glib::MainContext::default().spawn_local(async move {
-            while let Ok(snapshot) = rx.recv().await {
+            while let Ok((snapshot, windows)) = rx.recv().await {
                 // Window events fire per keystroke in some terminals
                 // (title changes) without altering this model; dropping
                 // no-op snapshots keeps observers from re-rendering.
-                for_events.state.set_if_changed(snapshot);
+                let changed = for_events.state.set_if_changed(snapshot);
+                let moved = for_events.windows.replace(windows) != windows;
+                if changed || moved {
+                    let callbacks: Vec<_> = for_events.on_windows.borrow().clone();
+                    for cb in &callbacks {
+                        cb();
+                    }
+                }
             }
         });
 
@@ -175,6 +188,13 @@ impl SwayService {
 
     pub fn connect_change(&self, cb: impl Fn() + 'static) {
         self.state.connect_change(cb);
+    }
+
+    /// Call `cb` on every change [`Self::connect_change`] reports, and also
+    /// when only the windows changed: one opened, closed or moved, resized,
+    /// or mapped again under a new identifier. A title change is not one.
+    pub fn connect_windows(&self, cb: impl Fn() + 'static) {
+        self.on_windows.borrow_mut().push(Rc::new(cb));
     }
 
     /// Full state snapshot (cloned — the model is a handful of small rows).
@@ -336,7 +356,7 @@ pub fn config_text() -> Result<String, String> {
 
 // ── Worker thread ───────────────────────────────────────────────────────
 
-fn run(tx: async_channel::Sender<SwayState>) {
+fn run(tx: async_channel::Sender<(SwayState, u64)>) {
     let mut backoff = Backoff::new();
     loop {
         let started = Instant::now();
@@ -353,7 +373,7 @@ fn run(tx: async_channel::Sender<SwayState>) {
 
 /// One connection lifetime. `Ok(())` means the GTK side hung up; `Err`
 /// means the socket dropped and the caller should reconnect.
-fn session(tx: &async_channel::Sender<SwayState>) -> Result<(), swayipc::Error> {
+fn session(tx: &async_channel::Sender<(SwayState, u64)>) -> Result<(), swayipc::Error> {
     let mut query = connect()?;
     if tx.send_blocking(snapshot(&mut query)?).is_err() {
         return Ok(());
@@ -375,18 +395,19 @@ fn session(tx: &async_channel::Sender<SwayState>) -> Result<(), swayipc::Error> 
         {
             reloads += 1;
         }
-        let mut state = snapshot(&mut query)?;
+        let (mut state, windows) = snapshot(&mut query)?;
         state.reloads = reloads;
-        if tx.send_blocking(state).is_err() {
+        if tx.send_blocking((state, windows)).is_err() {
             return Ok(());
         }
     }
     Ok(()) // unreachable: the stream only ends by erroring
 }
 
-fn snapshot(query: &mut Connection) -> Result<SwayState, swayipc::Error> {
+fn snapshot(query: &mut Connection) -> Result<(SwayState, u64), swayipc::Error> {
     let tree = query.get_tree()?;
-    Ok(SwayState {
+    let windows = windows_signature(&tree);
+    let state = SwayState {
         workspaces: workspace_infos(query.get_workspaces()?),
         // From the tree we already fetched — get_outputs would be a third
         // round-trip per event for the same two numbers.
@@ -395,7 +416,30 @@ fn snapshot(query: &mut Connection) -> Result<SwayState, swayipc::Error> {
         focused_fullscreen: focused_fullscreen(&tree),
         binding_mode: query.get_binding_state()?,
         reloads: 0,
-    })
+    };
+    Ok((state, windows))
+}
+
+/// A hash of every window's workspace, identity and place: what a live
+/// picture of a workspace (`jump::pin`) is built from, and titles left out.
+fn windows_signature(root: &Node) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    super::tree::for_each(root, |node, workspace| {
+        if let Some(ident) = &node.foreign_toplevel_identifier {
+            let r = &node.rect;
+            let w = &node.window_rect;
+            (
+                workspace,
+                node.id,
+                ident,
+                node.visible,
+                node.fullscreen_mode,
+            )
+                .hash(&mut hasher);
+            (r.x, r.y, r.width, r.height, w.x, w.y, w.width, w.height).hash(&mut hasher);
+        }
+    });
+    hasher.finish()
 }
 
 // ── Pure helpers (unit-tested below) ────────────────────────────────────

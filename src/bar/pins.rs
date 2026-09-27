@@ -227,8 +227,10 @@ fn rows(ui: &Rc<Ui>, scenes: &[(String, Option<crate::jump::scene::Scene>)]) {
     });
     ui.body.append(&tuck);
 
-    let ids = ui.live.borrow().window_ids();
+    let wants = ui
+        .live
+        .borrow()
+        .wants(None, f64::from(ui.btn.scale_factor()));
     ui.feed.replace(None);
-    ui.feed
-        .replace(feed::subscribe(ids, None, (ROW_W * 2) as u32, ROW_FPS, &ui.live));
+    ui.feed.replace(feed::subscribe(wants, ROW_FPS, &ui.live));
 }
