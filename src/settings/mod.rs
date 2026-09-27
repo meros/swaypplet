@@ -1,10 +1,12 @@
 //! The settings pane: a deck page in the Helm card (`panel.rs`), one tab per
 //! thing that can be configured.
 //!
-//! Six tabs. Look, Idle & Lock, Bar, Alerts and Launcher edit
+//! Seven tabs. Look, Idle & Lock, Bar, Alerts and Launcher edit
 //! `store::Settings`, one file with one to three sections each; Glass edits
 //! the compositor material
-//! and keeps its own file (`glass.rs`, for why). Every tab applies live and
+//! and keeps its own file (`glass.rs`, for why). Displays arranges the
+//! outputs through `services::displays` and keeps its profiles in the
+//! `displays` section (`displays_pane.rs`). Every tab applies live and
 //! saves after the fact, and every tab has one Reset that puts the defaults
 //! back and removes its sections from the file, so there is always a way
 //! out of a setting that turned out to be wrong.
@@ -16,13 +18,16 @@
 //! rebuild is too slow a loop for.
 
 mod alerts_pane;
+mod arrange;
 mod bar_pane;
 pub mod cli;
+mod displays_pane;
 mod form;
 pub mod glass;
 mod glass_fade;
 mod glass_pane;
 mod idle_pane;
+mod keep;
 mod launcher_pane;
 mod look_pane;
 pub mod preset;
@@ -39,7 +44,7 @@ struct Tab {
     prefixes: &'static [&'static str],
 }
 
-const TABS: [Tab; 6] = [
+const TABS: [Tab; 7] = [
     Tab {
         name: "look",
         title: "Look",
@@ -66,6 +71,11 @@ const TABS: [Tab; 6] = [
         name: "launcher",
         title: "Launcher",
         prefixes: &[":launch", ":search"],
+    },
+    Tab {
+        name: "displays",
+        title: "Displays",
+        prefixes: &[":monitor", ":output", ":arrange"],
     },
     Tab {
         name: "glass",
@@ -97,6 +107,7 @@ pub struct SettingsSection {
     bar: bar_pane::BarPane,
     alerts: alerts_pane::AlertsPane,
     launcher: launcher_pane::LauncherPane,
+    displays: displays_pane::DisplaysPane,
     glass: glass_pane::GlassPane,
 }
 
@@ -111,6 +122,7 @@ impl SettingsSection {
         let bar = bar_pane::BarPane::new();
         let alerts = alerts_pane::AlertsPane::new();
         let launcher = launcher_pane::LauncherPane::new();
+        let displays = displays_pane::DisplaysPane::new();
         let glass = glass_pane::GlassPane::new();
 
         let stack = crate::ui::page_stack(
@@ -124,6 +136,7 @@ impl SettingsSection {
         stack.add_named(bar.widget(), Some("bar"));
         stack.add_named(alerts.widget(), Some("alerts"));
         stack.add_named(launcher.widget(), Some("launcher"));
+        stack.add_named(displays.widget(), Some("displays"));
         stack.add_named(glass.widget(), Some("glass"));
 
         // Chips in one toggle group rather than a StackSwitcher, so the
@@ -180,6 +193,7 @@ impl SettingsSection {
             bar,
             alerts,
             launcher,
+            displays,
             glass,
         }
     }
@@ -203,6 +217,11 @@ impl SettingsSection {
         }
     }
 
+    /// The Displays tab's apply, for the render harness.
+    pub fn demo_displays(&self) {
+        self.displays.demo_apply();
+    }
+
     /// Re-read every tab from what it edits. The panel refreshes every
     /// section when it opens.
     pub fn refresh(&self) {
@@ -211,6 +230,7 @@ impl SettingsSection {
         self.bar.refresh();
         self.alerts.refresh();
         self.launcher.refresh();
+        self.displays.refresh();
         self.glass.refresh();
     }
 }

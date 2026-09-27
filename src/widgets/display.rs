@@ -198,11 +198,17 @@ fn profile_row(name: &str, current: bool, fits: bool, first: bool) -> Box {
 
 /// Rebuild the profile list from the service's view.
 fn populate_profiles(group: &Box, list: &Box) {
+    group.set_visible(fill_profiles(list));
+}
+
+/// Fill `list` with the profiles, one row each with Apply, raise and
+/// delete; the Displays settings tab shows the same list. False when the
+/// compositor offers no output management, where profiles do nothing.
+pub fn fill_profiles(list: &Box) -> bool {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
     let view = displays::view();
-    group.set_visible(view.available);
     if view.profiles.is_empty() {
         let empty = ui::row(
             icons::DISPLAY_PROFILE,
@@ -215,6 +221,34 @@ fn populate_profiles(group: &Box, list: &Box) {
         let current = view.current.as_deref() == Some(name.as_str());
         list.append(&profile_row(name, current, *fits, i == 0));
     }
+    view.available
+}
+
+/// A name entry and "Save current layout": the layout on screen becomes a
+/// profile of that name, at the top of the list.
+pub fn save_row(label: &str) -> Box {
+    let save = ui::hbox(2);
+    let name = gtk4::Entry::new();
+    name.set_placeholder_text(Some("Profile name"));
+    name.set_hexpand(true);
+    ui::entry::adopt(&name, ui::FieldSize::Normal);
+    let save_btn = ui::button_with(ui::Face::Label(label), ui::Kind::Secondary, ui::Size::Small);
+    {
+        let name_c = name.clone();
+        let save_now = move || {
+            let text = name_c.text();
+            if !text.trim().is_empty() {
+                displays::save_current(&text);
+                name_c.set_text("");
+            }
+        };
+        let s = save_now.clone();
+        save_btn.connect_clicked(move |_| s());
+        name.connect_activate(move |_| save_now());
+    }
+    save.append(&name);
+    save.append(&save_btn);
+    save
 }
 
 // ── DisplaySection ────────────────────────────────────────────────────────────
@@ -298,32 +332,8 @@ impl DisplaySection {
         profiles.append(&profiles_head);
         let profile_list = ui::vbox(1);
         profiles.append(&profile_list);
-        let save = ui::hbox(2);
+        let save = save_row("Save current layout");
         save.add_css_class("display-group-foot");
-        let name = gtk4::Entry::new();
-        name.set_placeholder_text(Some("Profile name"));
-        name.set_hexpand(true);
-        ui::entry::adopt(&name, ui::FieldSize::Normal);
-        let save_btn = ui::button_with(
-            ui::Face::Label("Save current layout"),
-            ui::Kind::Secondary,
-            ui::Size::Small,
-        );
-        {
-            let name_c = name.clone();
-            let save_now = move || {
-                let text = name_c.text();
-                if !text.trim().is_empty() {
-                    displays::save_current(&text);
-                    name_c.set_text("");
-                }
-            };
-            let s = save_now.clone();
-            save_btn.connect_clicked(move |_| s());
-            name.connect_activate(move |_| save_now());
-        }
-        save.append(&name);
-        save.append(&save_btn);
         profiles.append(&save);
         populate_profiles(&profiles, &profile_list);
 

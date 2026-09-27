@@ -1,7 +1,7 @@
 # Settings
 
 The settings pane is a page in the Helm card (`:set` in the omnibox, or the
-gear in the flight deck; a bare `:` lists every prefix). Six tabs,
+gear in the flight deck; a bare `:` lists every prefix). Seven tabs,
 `src/settings/`:
 
 | tab | edits | sections of `~/.config/swaypplet/settings.json` |
@@ -11,11 +11,21 @@ gear in the flight deck; a bare `:` lists every prefix). Six tabs,
 | Bar | clock format, segments, OSD placement, key steps, volume boost | `bar`, `keys` |
 | Alerts | popup linger, corner and depth; quiet hours; what a screenshot becomes | `alerts`, `capture` |
 | Launcher | which kinds of result a search lists; ranking by use, and forgetting it | `launcher` |
+| Displays | where the outputs stand, and each one's mode, scale, rotation and adaptive sync; the profiles | `displays` (the profiles) |
 | Glass | the liquid-glass material | `~/.config/swaypplet/glass.json` |
 
-One section has no tab: `displays`, the display profiles, lives in the
-panel's Displays section (save the current layout, apply, raise, delete),
-because a layout is made by arranging the screens, not by filling a form.
+The Displays tab (`displays_pane.rs`) is the one that does not apply
+live: a layout can turn the only screen dark. Its arithmetic is pure and
+tested (`arrange.rs`): a dragged output lands flush against the nearest
+edge of another, snaps its free edge to theirs, never overlaps and never
+leaves one stranded, and the layout goes back against 0,0. Apply sends the
+draft through `services::displays::configure` (tested, then applied); a
+layout that took is on trial for 15 s (`keep.rs`): Keep, or the layout from
+before is sent back, and it is sent back at once when the page goes away
+(the panel closed, another tab), so disabling the output the panel is on
+from here reverts too. A hand layout is no profile; "Save as profile"
+stores the layout on screen. The panel's Displays section keeps its
+compact profile list (`widgets::display::fill_profiles`, shared).
 
 `data/settings-defaults.json` is every section at the binary's defaults,
 generated from the structs by a test (`cargo test -- --ignored
@@ -188,7 +198,11 @@ switches only ever remove a way in or add a lock.
 ## Trying it without a rebuild
 
 - `dev/render.sh --mode preview:settings.idle` renders one tab
-  (`wallpaper`, `idle`, `bar`, `alerts`, `launcher`, `glass`).
+  (`wallpaper`, `idle`, `bar`, `alerts`, `launcher`, `displays`, `glass`).
+  `settings.displays` drives the nested compositor's outputs;
+  `SWAYPPLET_PREVIEW_DISPLAYS_APPLY=1` moves one and applies it after two
+  seconds (the keep question, then the revert), `=leave` also hides the
+  page three seconds later.
 - `SWAYPPLET_SETTINGS_CONFIG=/path/to/defaults.json` points the system
   layer somewhere else, as `SWAYPPLET_GLASS_CONFIG` does for glass.
 - `journalctl -t swaypplet-idle -f` shows the re-arm as
