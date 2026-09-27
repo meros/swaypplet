@@ -15,6 +15,7 @@
   graphene,
   hicolor-icon-theme,
   adwaita-icon-theme,
+  gsettings-desktop-schemas,
   polkit,
   pam,
   libpulseaudio,
@@ -32,6 +33,7 @@ let
     graphene
     hicolor-icon-theme
     adwaita-icon-theme
+    gsettings-desktop-schemas
     polkit
     pam
     libpulseaudio

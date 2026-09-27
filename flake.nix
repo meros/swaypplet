@@ -28,6 +28,9 @@
           graphene
           hicolor-icon-theme
           adwaita-icon-theme
+          # org.gnome.desktop.interface, which `theme::apps` writes the
+          # appearance to for the desktop portal to serve.
+          gsettings-desktop-schemas
           polkit
           pam
           # Audio: src/services/audio.rs speaks the PulseAudio protocol to
