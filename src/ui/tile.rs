@@ -75,6 +75,9 @@ pub fn tile_split(icon: &str, title: &str) -> SplitTile {
     status.set_xalign(0.0);
     status.set_visible(false);
     status.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    // A reason ("Quiet: screen shared", "Until 14:30") is short; a longer
+    // one ends in … rather than widening the tile until the strip wraps.
+    status.set_max_width_chars(18);
     texts.append(&title_l);
     texts.append(&status);
     line.append(&icon_l);

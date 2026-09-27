@@ -761,7 +761,7 @@ fn push_tile(
     tile: ui::SplitTile,
     spec: tiles::TileSpec,
     tile_pairs: &mut Vec<TileEntry>,
-    group: &gtk4::FlowBox,
+    group: &ui::WrapBox,
 ) {
     tiles::init_tile_state(&tile.toggle, &spec);
     tiles::refresh_status(&tile.status, &spec);
@@ -938,25 +938,14 @@ fn build_flight_deck(
 
     // Flight switches (Left group).
     //
-    // A FlowBox rather than a Box because this strip is what made the card
-    // 1033 logical px wide at minimum: nine switches in a row that could not
-    // break. A FlowBox's minimum is its widest single child, so the strip can
-    // fold onto a second row on a laptop panel with every switch still there
-    // and still clickable.
-    //
-    // `max_children_per_line` is set from the switch count once they are all
-    // in, further down. It has to be exactly that count: it is how many slots
-    // wide the flow box asks to be, so leaving it at the default of 7 wraps
-    // the row on a screen that has room for it, and setting it higher makes
-    // the strip claim width for slots that do not exist and widens the card.
-    let left_group = gtk4::FlowBox::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .selection_mode(gtk4::SelectionMode::None)
-        .min_children_per_line(1)
-        .row_spacing(crate::tokens::space(3) as u32)
-        .column_spacing(crate::tokens::space(3) as u32)
-        .halign(gtk4::Align::Start)
-        .build();
+    // A wrapping box rather than a Box because this strip is what made the
+    // card 1033 logical px wide at minimum: nine switches in a row that
+    // could not break. It folds onto a second line on a laptop panel with
+    // every switch still there, each at its own width (`ui::WrapBox`; a
+    // FlowBox lined them up in columns and opened gaps between the tiles).
+    let left_group = ui::wrap_box(3);
+    left_group.set_halign(gtk4::Align::Start);
+    left_group.set_hexpand(true);
     left_group.add_css_class("deck-switches");
 
     // The durations for the timed switches fold out under the strip; one
@@ -1029,24 +1018,29 @@ fn build_flight_deck(
     };
     dnd.root.add_css_class("deck-tile-btn");
     left_group.append(&dnd.root);
+
+    // The one-click actions travel as one group: when the strip wraps they
+    // move to the next line together, side by side, instead of each taking
+    // a column under a wide tile.
+    let actions = ui::hbox(3);
     *dnd_tile = Some(dnd);
 
     // Screenshot Region
-    left_group.append(&rail_action("󰄀", "Screenshot region", window, {
+    actions.append(&rail_action("󰄀", "Screenshot region", window, {
         let window = window.clone();
         let store = store.clone();
         move || shot(&window, &store, crate::screenshot::Shot::Region)
     }));
 
     // Color Picker Loupe
-    left_group.append(&rail_action("󰏘", "Color picker loupe", window, {
+    actions.append(&rail_action("󰏘", "Color picker loupe", window, {
         let window = window.clone();
         let store = store.clone();
         move || shot(&window, &store, crate::screenshot::Shot::Pick)
     }));
 
     // Record Screen
-    left_group.append(&rail_action("󰑋", "Record screen", window, {
+    actions.append(&rail_action("󰑋", "Record screen", window, {
         let window = window.clone();
         let store = store.clone();
         move || shot(&window, &store, crate::screenshot::Shot::Record)
@@ -1060,7 +1054,7 @@ fn build_flight_deck(
             flip(&stack_c, "clipboard");
         });
     }
-    left_group.append(&clip_btn);
+    actions.append(&clip_btn);
 
     // Settings
     let settings_btn = deck_button("󰒓", "Settings");
@@ -1070,13 +1064,11 @@ fn build_flight_deck(
             flip(&stack_c, "settings");
         });
     }
-    left_group.append(&settings_btn);
+    actions.append(&settings_btn);
+    left_group.append(&actions);
 
     // One slot per switch, counted rather than written down, so adding a
     // switch here does not silently start wrapping the row on every screen.
-    let switches = std::iter::successors(left_group.first_child(), |child| child.next_sibling());
-    left_group.set_max_children_per_line(switches.count() as u32);
-
     deck.append(&left_group);
 
     // Spacer
