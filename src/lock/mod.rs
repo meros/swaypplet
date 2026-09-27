@@ -268,6 +268,10 @@ pub fn run() -> ! {
     // burst because that burst is exactly the interval the compositor holds
     // the live desktop on screen for; the compositor draws the wallpaper now,
     // so there is nothing left to decode.
+    //
+    // Dark tokens in either mode: the card and its text stand on the
+    // wallpaper dimmed over black, on dark glass (`theme::pin_dark`).
+    crate::theme::pin_dark();
     crate::theme::load_css();
     // The motion setting, for the fade and the ring (`anim::duration`).
     crate::settings::store::init();

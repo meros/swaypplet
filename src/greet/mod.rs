@@ -176,6 +176,9 @@ pub fn run() -> ! {
         eprintln!("swaypplet greet: GTK init failed: {e}");
         std::process::exit(EXIT_ERROR);
     }
+    // Dark tokens in either mode, like the lock: the greeter's card is the
+    // shipped dark glass over the wallpaper (`theme::pin_dark`).
+    crate::theme::pin_dark();
     crate::theme::load_css();
 
     // Start from the cheap SWAYPPLET_GREET_USERS name list so the window can

@@ -287,17 +287,30 @@ impl SurfaceSet {
         column.set_halign(gtk4::Align::Center);
         column.set_valign(gtk4::Align::Center);
 
-        // The clock and the date stand on bare wallpaper under the scrim,
-        // with no card behind them: their shadow is what gives the glyphs an
-        // edge on a bright image, which no text colour can.
+        // The clock, the date and the switch-user button stand under the
+        // scrim with no card behind them. Where the compositor blurs and dims
+        // the wallpaper under the lock, that backdrop is what makes them
+        // readable, and they take light ink with a one-pixel shadow. Where it
+        // draws the wallpaper sharp, and always on the greeter, whose
+        // compositor does not, they keep the halo, which is what gives the
+        // glyphs an edge on a bright image.
+        let greet_mode = self.user_field.borrow().is_some();
+        let on_backdrop = !greet_mode && crate::settings::glass::lock_backdrop();
+        let stand = move |w: &gtk4::Widget| {
+            if on_backdrop {
+                ui::on_backdrop::adopt(w);
+            } else {
+                ui::on_wallpaper::adopt(w);
+            }
+        };
         let clock = ui::text("", ui::Text::Hero, ui::Tone::Fg);
         clock.set_xalign(0.5);
         crate::ui::set_numeric(&clock, true);
-        ui::on_wallpaper::adopt(&clock);
+        stand(clock.upcast_ref());
         let date = ui::text("", ui::Text::Title, ui::Tone::Fg);
         date.set_xalign(0.5);
         date.add_css_class("lock-date");
-        ui::on_wallpaper::adopt(&date);
+        stand(date.upcast_ref());
 
         // spacing 0: every gap below is an explicit margin in 10-lock.css,
         // because the gaps are deliberately unequal and a GtkBox has exactly
@@ -317,8 +330,6 @@ impl SurfaceSet {
         if self.crossfade.get() {
             window.add_css_class("lock-crossfade");
         }
-
-        let greet_mode = self.user_field.borrow().is_some();
 
         // The user picker — greeter only. A greeter is asked "who are you",
         // so every account it knows belongs on it. A lock screen is not: the
@@ -353,7 +364,7 @@ impl SurfaceSet {
         // decide, since `available()` is a file on disk rather than a session
         // query.
         let lock_switch =
-            (!greet_mode && switch_user::available()).then(|| build_switch_button(self));
+            (!greet_mode && switch_user::available()).then(|| build_switch_button(self, &stand));
 
         // Username row (greeter mode only) — the lock authenticates the
         // session user implicitly and never shows it.
@@ -921,16 +932,17 @@ fn avatar_chip(user: &str, icon: Option<&str>, logged_in: bool, active: bool) ->
 /// session (a no-op, it already is) and activates a *different* VT. Nothing
 /// here can unlock, and the compositor keeps the session hidden throughout.
 ///
-/// It hangs below the card on bare wallpaper with nothing behind it, and it is
-/// the lock screen's whole switching affordance, so it carries the same shadow
-/// as the date: unobtrusive is a matter of weight (a flat button), and being
-/// unreadable over a bright image is not one colour can fix.
-fn build_switch_button(set: &SurfaceSet) -> gtk4::Button {
+/// It hangs below the card with nothing behind it, and it is the lock
+/// screen's whole switching affordance, so it stands on the wallpaper the way
+/// the date does (`stand`): unobtrusive is a matter of weight (a flat
+/// button), and being unreadable over a bright image is not one colour can
+/// fix.
+fn build_switch_button(set: &SurfaceSet, stand: &dyn Fn(&gtk4::Widget)) -> gtk4::Button {
     let btn = ui::button(
         &format!("{}  Switch user", icons::SWITCH_USER),
         ui::Kind::Flat,
     );
-    ui::on_wallpaper::adopt(&btn);
+    stand(btn.upcast_ref());
     btn.add_css_class("lock-switch-user");
     btn.set_halign(gtk4::Align::Center);
     let set = set.clone();

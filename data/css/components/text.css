@@ -5,7 +5,7 @@
    typographic roles: strong, glyph, mono, numeric, overline, text on bare
    wallpaper, a caption whose tone moves.
 
-   owns: ui-hero ui-display ui-display-sm ui-title ui-title-sm ui-body ui-label ui-caption ui-strong ui-glyph ui-mono ui-numeric ui-muted ui-faint ui-accent ui-success ui-warning ui-danger ui-overline ui-on-wallpaper ui-live-caption
+   owns: ui-hero ui-display ui-display-sm ui-title ui-title-sm ui-body ui-label ui-caption ui-strong ui-glyph ui-mono ui-numeric ui-muted ui-faint ui-accent ui-success ui-warning ui-danger ui-overline ui-on-wallpaper ui-on-backdrop ui-live-caption
    ══════════════════════════════════════════════════════════════════════ */
 
 .ui-hero       { font-size: var(--type-hero);       font-weight: var(--w-light); }
@@ -66,6 +66,17 @@ button.ui-btn.ui-on-wallpaper {
         0 1px 3px var(--halo-on-wallpaper),
         0 1px 3px var(--halo-on-wallpaper),
         0 1px 3px var(--halo-on-wallpaper);
+}
+
+/* Text on the lock's dimmed backdrop: the compositor blurs the wallpaper
+   under the lock and darkens it to at most `BACKDROP_BRIGHTNESS_MAX`
+   (src/tokens/backdrop.rs), so light ink reads over any image in either
+   mode, and a one-pixel shadow is all the edge it needs. The shadow stays
+   under the glass mask's discard line with the scrim under it. */
+.ui-on-backdrop,
+button.ui-btn.ui-on-backdrop {
+    color: var(--fg-on-backdrop);
+    text-shadow: 0 1px 2px var(--shadow-on-backdrop);
 }
 
 /* A caption whose tone changes in place (an error arriving, a success):

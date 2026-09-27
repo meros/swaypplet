@@ -195,9 +195,58 @@ pub fn on_wallpaper(backdrop: Option<Backdrop>, mode: Mode) -> OnWallpaper {
     }
 }
 
+// ── The lock's dimmed backdrop ──────────────────────────────────────────
+//
+// Where the compositor blurs and dims the wallpaper under the lock (nixos
+// `theme/glass.nix` `lockBackdrop`, announced in `/etc/swaypplet/glass.json`
+// as `lock_backdrop`), the lock's text needs no halo: light ink in either
+// mode, as other platforms' lock screens have it, with a one-pixel shadow
+// for depth. The halo above is then the switcher's and the greeter's only.
+
+/// The brightest the compositor may leave the lock's wallpaper (an sRGB
+/// multiply over black, `lock_backdrop.brightness`) for light ink to reach
+/// [`CLOCK_LC`] under it and the scrim. The proof is one backdrop: a white
+/// page is the worst case for every wallpaper, because light ink only gains
+/// as the ground darkens, so no measurement is needed.
+pub const BACKDROP_BRIGHTNESS_MAX: f64 = 0.59;
+
+/// The shadow under text on the dimmed backdrop, black. With the scrim under
+/// it the surface reaches 1 − 0.8 × 0.92 = 0.264, under the compositor's
+/// discard line ([`GLASS_MASK_THRESHOLD`] less 0.12), so it stays a shadow.
+pub const BACKDROP_SHADOW_ALPHA: f64 = 0.08;
+
+/// The contrast of the lock's light ink over a white wallpaper dimmed to
+/// `brightness` and scrimmed: the weakest it gets over any wallpaper.
+#[cfg(test)]
+fn backdrop_lc(brightness: f64) -> f64 {
+    let ground = over(
+        Rgb::BLACK,
+        SCRIM_ALPHA,
+        Rgb(brightness, brightness, brightness),
+    );
+    apca(ON_STATUS, ground).abs()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// §5 on the lock's dimmed backdrop: the clock and the date reach Lc 75
+    /// over a white page at the brightest dim the lock accepts, and the
+    /// shadow stays out of the glass.
+    #[test]
+    fn the_dimmed_backdrop_meets_the_targets_over_white() {
+        let lc = backdrop_lc(BACKDROP_BRIGHTNESS_MAX);
+        assert!(lc >= CLOCK_LC, "Lc {lc:.1} at {BACKDROP_BRIGHTNESS_MAX}");
+        // A darker backdrop never reads worse.
+        for b in 0..=59 {
+            assert!(backdrop_lc(f64::from(b) / 100.0) >= lc - 1e-9);
+        }
+        // A brighter one falls short, so the limit is not loose.
+        assert!(backdrop_lc(BACKDROP_BRIGHTNESS_MAX + 0.02) < CLOCK_LC);
+        let peak = 1.0 - (1.0 - SCRIM_ALPHA) * (1.0 - BACKDROP_SHADOW_ALPHA);
+        assert!(peak < GLASS_MASK_THRESHOLD - 0.12 - 0.01, "{peak:.3}");
+    }
 
     /// A halo that disagrees with the mode's glass stays a shadow: stacked,
     /// under the glass mask threshold with room for GTK's rounding. And the

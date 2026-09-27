@@ -9,7 +9,8 @@
    `layer_effects "session-lock"` and behind the layer surface for
    `layer_effects "swaypplet-greeter"`. The scrim over it is `ui::scrim`,
    whose alpha the card's key arithmetic depends on; the clock and date are
-   type on bare wallpaper (`ui::on_wallpaper`).
+   type on the compositor's blurred, dimmed backdrop (`ui::on_backdrop`)
+   where it draws one, and on bare wallpaper (`ui::on_wallpaper`) where not.
    ════════════════════════════════════════════════════════════════════ */
 
 /* The date sits above the card in the same column, so its size moves the
