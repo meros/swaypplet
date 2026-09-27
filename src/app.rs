@@ -581,6 +581,11 @@ pub fn run() {
             } else {
                 log::warn!("Unknown OSD command: {:?}", &args[2..]);
             }
+        } else if args.len() > 1 && args[1] == "toggle" {
+            // Super+Space (the nixos repo's sway.nix). Over D-Bus to the
+            // running panel, never a signal to a pid file's pid: a second
+            // activation shows or hides the panel.
+            app.activate();
         } else {
             app.activate();
         }
