@@ -71,25 +71,6 @@ button.ui-tile-toggle.on:disabled {
     opacity: 0.5;
 }
 
-/* Alternatives (docs/component-zoo.html), as on the button. */
-.alt-disabled-fade button.ui-tile-toggle:disabled {
-    color: var(--fg);
-    background-color: var(--fill-2);
-    opacity: 0.5;
-}
-
-.alt-press-shrink button.ui-tile-toggle {
-    transition: background-color var(--motion-state),
-                background-image var(--motion-state),
-                color var(--motion-state),
-                opacity var(--motion-state),
-                transform var(--motion-state);
-}
-
-.alt-press-shrink button.ui-tile-toggle:active {
-    transform: scale(0.97);
-}
-
 /* Waiting on the tool the tile drives. */
 .ui-tile-toggle.loading {
     opacity: 0.6;

@@ -112,22 +112,9 @@ fn block(title: &str, lines: impl IntoIterator<Item = gtk4::Box>) -> gtk4::Box {
 }
 
 /// The sheet's page `page` (one of [`PAGES`]), or the first when unknown.
-/// `SWAYPPLET_PREVIEW_ALT=disabled-fade,press-shrink` draws the sheet under
-/// the named alternatives of docs/component-zoo.html.
 pub fn page(page: &str) -> gtk4::Box {
     let root = ui::vbox(6);
     root.set_hexpand(true);
-    for alt in std::env::var("SWAYPPLET_PREVIEW_ALT")
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-    {
-        match alt {
-            "disabled-fade" => root.add_css_class("alt-disabled-fade"),
-            "press-shrink" => root.add_css_class("alt-press-shrink"),
-            _ => {}
-        }
-    }
     match page {
         "inputs" => inputs(&root),
         "lists" => lists(&root),
