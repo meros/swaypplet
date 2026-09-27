@@ -62,13 +62,14 @@ also be a launcher prefix once the `launcher` branch lands.
 
 ## Waiting for a decision
 
-- **Light-mode lock text over a dark or busy wallpaper.** Since 2026-09-26
-  a dark halo in light mode stays under the glass mask, or it turns into
-  milky glass. Light ink there reaches Lc 61 (calm) and 47 (busy) against
-  75. Two fixes, both visible design changes: a glass plate behind the
-  clock and date in light mode (the text then uses the card's tokens), or
-  a deeper scrim over the wallpaper in light mode. `tokens/backdrop.rs`
-  names the floors the tests hold.
+- **The lock's blurred, dimmed backdrop, compositor side.** Decided
+  2026-09-27 over a gradient scrim, a glass plate behind the clock and a
+  heavier clock: only a backdrop the compositor darkens gets the lock's
+  text to Lc 75 over every wallpaper in both modes, because every pixel of
+  the lock surface has to stay under the glass mask's discard line. The
+  swaypplet side is done (`ui::on_backdrop`, `lock_backdrop` in
+  `glass.json`); the nixos side is described in docs/design-system.md,
+  "Text on the lock's backdrop". Until it lands the lock keeps the halo.
 
 ## From the prior-art bank
 

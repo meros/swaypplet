@@ -3,8 +3,8 @@
 use std::fmt::Write as _;
 
 use super::{
-    COMPONENT, DURATION, Inputs, Mode, ON_STATUS, RADIUS, Rgb, SPACE, SURFACE_KEY, TYPE,
-    categorical, levels, motion, on_wallpaper, scales, status,
+    BACKDROP_SHADOW_ALPHA, COMPONENT, DURATION, Inputs, Mode, ON_STATUS, RADIUS, Rgb, SPACE,
+    SURFACE_KEY, TYPE, categorical, levels, motion, on_wallpaper, scales, status,
 };
 
 fn mixed(color: Rgb, share: f64) -> String {
@@ -102,6 +102,13 @@ pub fn css(inputs: Inputs) -> String {
     let ow = on_wallpaper(inputs.backdrop, inputs.mode);
     put("fg-on-wallpaper", ow.ink.css());
     put("halo-on-wallpaper", mixed(ow.halo, ow.halo_alpha));
+    // Text on the lock's dimmed backdrop: light in either mode, like the
+    // backdrop it stands on (`backdrop.rs`).
+    put("fg-on-backdrop", ON_STATUS.css());
+    put(
+        "shadow-on-backdrop",
+        mixed(Rgb::BLACK, BACKDROP_SHADOW_ALPHA),
+    );
     put("danger-tint", mixed(st.danger_bg, 0.16));
     put("warning-tint", mixed(st.warning_bg, 0.16));
     put("success-tint", mixed(st.success_bg, 0.16));
@@ -216,6 +223,8 @@ mod tests {
             "on-status",
             "fg-on-wallpaper",
             "halo-on-wallpaper",
+            "fg-on-backdrop",
+            "shadow-on-backdrop",
             "type-body",
             "space-5",
             "radius-card",
