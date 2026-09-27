@@ -11,6 +11,8 @@
 //! renders once and exits, so freeing them buys nothing and complicates the
 //! `'static` lifetime the hosted widget references need.
 
+mod components;
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -315,7 +317,15 @@ pub fn run(component: &str) {
         // Settings fills the Helm card's width (740 to 1033 px), so its
         // preview opens at that width: at the 440 single-component default
         // the tab strip clips and the columns read wrong.
-        let width = if component.starts_with("settings") { 1100 } else { 440 };
+        // The component sheet (`components.<page>`, src/preview/components.rs)
+        // lays its specimens out in lines across a 1440 output.
+        let width = if component.starts_with("settings") {
+            1100
+        } else if component.starts_with("components") {
+            1400
+        } else {
+            440
+        };
         // SWAYPPLET_PREVIEW_LAYER=1 (the render harness's default) puts the
         // component in a panel card on a layer surface, the way the Helm shows
         // it, so the compositor's glass and the mode's material are behind it.
@@ -475,6 +485,12 @@ pub fn run(component: &str) {
                 }
                 host.append(s.widget());
             }
+            // The component sheet: every component in every state, one page
+            // at a time (`components.controls`, `.inputs`, `.lists`).
+            c if c == "components" || c.starts_with("components.") => {
+                let page = c.strip_prefix("components.").unwrap_or(components::PAGES[0]);
+                host.append(&components::page(page));
+            }
             "network" => {
                 let s = Box::leak(Box::new(NetworkSection::new()));
                 // The panel opens this as a subsheet page (panel.rs), which
@@ -605,7 +621,8 @@ pub fn run(component: &str) {
             other => {
                 host.append(&gtk4::Label::new(Some(&format!(
                     "unknown preview component: {other}\n\nknown: panel, lock, polkit, tiles, audio, \
-                     brightness, network, bluetooth, display, media, notifications, clipboard, power"
+                     brightness, network, bluetooth, display, media, notifications, clipboard, power, \
+                     components.controls, components.inputs, components.lists"
                 ))));
             }
         }
