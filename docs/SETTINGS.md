@@ -1,25 +1,39 @@
 # Settings
 
-The settings pane is a page in the Helm card (`:set` in the omnibox, or the
-gear in the flight deck; a bare `:` lists every prefix). Ten tabs,
-`src/settings/`:
+Settings is a surface of its own (`src/settings/window.rs`): a glass card
+the height of the screen, a sidebar beside the chosen pane. It opens from
+the Helm, which puts itself away first: the gear in the flight deck, `:set`
+or a pane's prefix and Enter in the omnibox (a bare `:` lists every
+prefix), a settings row the launcher found, Arrange displays on the Helm's
+displays page, and the Night Light tile's chevron, which lands on the
+night's warmth. Esc clears settings' search, then closes it; the Helm's key
+closes it too. It wears the Helm's layer namespace, so it has the Helm's
+glass, and the Glass pane changes the material of the card it sits on.
 
-| tab | edits | sections of `~/.config/swaypplet/settings.json` |
+The Helm is for what is done now (a switch, a slider, a device, a shot);
+settings is for what is configured once. Settings was deck page 10 of the
+Helm until 2026-09: ten tab chips over a 420 px scroller, between the
+ribbon and the deck.
+
+The sidebar has search over every pane's rows (below), then the panes in two
+groups, `src/settings/`:
+
+| pane | edits | sections of `~/.config/swaypplet/settings.json` |
 |---|---|---|
-| Look | `output * bg` on the compositor; whether the theme takes its colours from it; how much the shell animates; the night light | `wallpaper`, `look`, `night_light` |
+| **Settings** | | |
+| Appearance | `output * bg` on the compositor; whether the theme takes its colours from it; how much the shell animates; the night light and its warmth | `wallpaper`, `look`, `night_light` |
+| Glass | the liquid-glass material | `~/.config/swaypplet/glass.json` |
 | Idle & Lock | the idle manager's timers; the night window; walk-away lock; face unlock; what sudo and pkexec may ask for | `idle`, `elevate` |
-| Bar | clock format, segments, OSD placement | `bar` |
+| Bar | clock format, segments, OSD placement; pins and previews: size, frame rate, corner | `bar`, `pins` |
 | Input | keyboard layouts, layout switch, Caps Lock, key repeat; touchpad and mouse; key steps, volume boost; the connected devices | `input`, `keys` |
-| Alerts | popup linger, corner and depth; quiet hours; what a screenshot becomes | `alerts`, `capture` |
-| Bar | clock format, segments, OSD placement, key steps, volume boost | `bar`, `keys` |
 | Alerts | popup linger, corner and depth; quiet hours; quiet by context; what a screenshot becomes | `alerts`, `capture` |
 | Launcher | which kinds of result a search lists; ranking by use, and forgetting it | `launcher` |
 | Displays | where the outputs stand, and each one's mode, scale, rotation and adaptive sync; the profiles | `displays` (the profiles) |
-| Glass | the liquid-glass material | `~/.config/swaypplet/glass.json` |
+| **This machine** | | |
 | System | nothing: it shows which nixos-config commit this host runs against origin/main, and runs `nx apply` or `nx` on a press | none |
 | Quality | nothing: the open issues, Auto-fix, and Merge & apply for a ready fix (docs/QUALITY.md) | none; GitHub, through `gh` |
 
-The Displays tab (`displays_pane.rs`) is the one that does not apply
+The Displays pane (`displays_pane.rs`) is the one that does not apply
 live: a layout can turn the only screen dark. Its arithmetic is pure and
 tested (`arrange.rs`): a dragged output lands flush against the nearest
 edge of another, snaps its free edge to theirs, never overlaps and never
@@ -27,12 +41,13 @@ leaves one stranded, and the layout goes back against 0,0. Apply sends the
 draft through `services::displays::configure` (tested, then applied); a
 layout that took is on trial for 15 s (`keep.rs`): Keep, or the layout from
 before is sent back, and it is sent back at once when the page goes away
-(the panel closed, another tab), so disabling the output the panel is on
+(settings closed, another pane), so disabling the output settings is on
 from here reverts too. A hand layout is no profile; "Save as profile"
-stores the layout on screen. The panel's Displays section keeps its
-compact profile list (`widgets::display::fill_profiles`, shared).
+stores the layout on screen. The Helm's displays page applies a profile
+that fits and lists what is connected; ordering, deleting and saving
+profiles, and turning outputs on and off, are this pane's.
 
-The System tab (`system_pane.rs`) is the one with no settings. It reads
+The System pane (`system_pane.rs`) has no settings. It reads
 what `nx status` prints, directly: the `configurationRevision` in each
 generation's `sw/bin/nixos-version`, a staged generation as
 `/nix/var/nix/profiles/system` differing from `/run/current-system`,
@@ -56,9 +71,17 @@ fails when it is stale. The nixos repo's `cross-repo-guard.nix` checks
 the system layer is logged as an error and ignored; one in the user file is
 a warning.
 
-Every tab applies live and saves afterwards (800 ms after the last edit).
-Every tab has one Reset, which puts the system default back and removes
-the section from the user file.
+Every settings pane applies live and saves afterwards (800 ms after the last
+edit). Every settings pane has one Reset, which puts the system default back
+and removes the section from the user file.
+
+A row the user file changes from the system's has its name in the accent,
+with a tooltip saying so; a right-click on it writes the system's value back
+for that row alone. The rows know their keys from the search index (each
+`Entry` names the dotted keys it edits, `.keys(&["idle.lock_after_s"])`; a
+test checks each is a setting), and the comparison is the effective value
+against `Settings::default()`'s, so a file that repeats the system's value
+marks nothing. Glass and Displays carry no keys.
 
 ## Two layers, one shape
 
@@ -242,81 +265,87 @@ and Bar tabs is `nix <section>` into the clipboard.
    `data/settings-defaults.json`.
 3. Add the same field, with the same default, to
    `users/modules/theme/settings.nix` in the nixos repo.
-4. Add a row to the tab (`*_pane.rs`), using the helpers in `ui.rs` so it
+4. Add a row to the pane (`*_pane.rs`), using the helpers in `ui.rs` so it
    lines up with the rest.
 5. Read it where it matters: through `store::current()` plus
    `store::observe` in the panel process, or through `cfg` in the idle
    loop.
 
-6. Add the row to the tab's `SEARCH` table (see below). `cargo test`
-   fails until you do.
+6. Add the row to the pane's `SEARCH` table (see below), with the keys
+   it edits (`.keys(&[…])`). `cargo test` fails until you do.
 
 A setting earns a row when it is a matter of taste that a rebuild is too
 slow a loop for. What is deliberately not here: the bar's position and
-height (the stylesheet is built around bottom, 38 px), the night light's
-temperature (gammastep's config), anything the panel already has a section
-for, and anything whose bad value is "gone" rather than "ugly": no setting
+height (the stylesheet is built around bottom, 38 px), anything done now
+rather than configured (the Helm's), and anything whose bad value is "gone"
+rather than "ugly": no setting
 may leave the machine unlocked or asleep unlocked, which is why the lock
 switches only ever remove a way in or add a lock.
 
 ## Search
 
-Every row is findable from the launcher by its title, a subtitle and the
-words people type for it: "dark" finds Look › Appearance › Mode, "blur"
-Glass › Material › Frost, "screen timeout" Idle & Lock › Idle timers ›
-Screen off after. Activating a result opens the settings page on that
-tab, centres the row in the sheet and lights it for a moment
+Every row is findable, from the launcher and from settings' own search, by
+its title, a subtitle and the words people type for it: "dark" finds
+Appearance › Appearance › Mode, "blur" Glass › Material › Frost, "screen
+timeout" Idle & Lock › Idle timers › Screen off after. Activating a result
+opens settings on that pane, centres the row in the pane and lights it for
+a moment
 (`ui::highlight`: the accent's tint, in and out at the state motion).
-The panel's Wi-Fi, Bluetooth and audio sections are results too
-(`search::QUICK`); they open by their omnibox prefix.
+The Helm's Wi-Fi, Bluetooth and audio pages are results too
+(`search::QUICK`); they open the Helm by their omnibox prefix.
 
-The index is static, one table per tab beside the code that builds it:
+The index is static, one table per pane beside the code that builds it:
 
 ```rust
 // look_pane.rs
 pub(super) const SEARCH: &[Entry] = &[
     //   group          row (gutter label)  subtitle                       keywords
-    row("Appearance", "Mode", "Dark, light, or by the sun", &["dark", "dark mode", "theme"]),
+    row("Appearance", "Mode", "Dark, light, or by the sun", &["dark", "dark mode", "theme"]).keys(&["look.mode"]),
     row("Wallpaper",  "",     "The image behind every output", &["background"]), // "" = the whole group
 ];
 ```
 
-`search::TABLES` lists the tables by tab name. A new tab adds its `SEARCH`
+`search::TABLES` lists the tables by pane name. A new pane adds its `SEARCH`
 there and its source to the test's `SOURCES`. The anchor is what the pane
 already shows, the group's overline and the row's gutter label, so a pane
 carries no ids: `SettingsSection::reveal` finds the `settings-group` whose
-overline is the group and, inside it, the `settings-row-label` with the
-title (the whole page when no group has that name, as on Displays, whose
-group is named after the output). The tests in `search.rs` keep the table
+overline is the group (compared regardless of case: an overline is written
+in capitals) and, inside it, the `settings-row-label` with the title (the
+whole page when no group has that name, as on Displays, whose group is
+named after the output; the marks never look outside their group). The tests in `search.rs` keep the table
 and the pane in step without a display: every entry's group and title is a
 string literal in the pane's source, every row label the pane builds
 (`switch_row("…"`, `dropdown_row(`, `scale_row(`, `kind_row(`, `time_row(`,
 a table's `label: "…"`) has an entry, and each synonym finds its row.
 
 Matching is the launcher's local rule: every query word starts a word of
-the entry. Title words weigh most, then keywords, then the tab and group,
+the entry. Title words weigh most, then keywords, then the pane and group,
 then the subtitle; a whole-word match beats a prefix, and a query that is
 the title or a keyword phrase gets a bonus. A query whose every word is a
 whole word of a title or keyword names the setting, and its rows (at most
 three) go above the apps and the page rows ("sudo" lists the sudo row
-before the Idle & Lock tab); the rest (at most four) go below the apps. The table
+before the Idle & Lock pane); the rest (at most four) go below the apps. The table
 is lowercased on the first query and kept; a closed launcher costs nothing.
-The Launcher tab's "Pages and settings" switch turns the rows off.
+The Launcher pane's "Pages and settings" switch turns the rows off.
 
 ## Trying it without a rebuild
 
-- `dev/render.sh --mode preview:settings.idle` renders one tab
+- `SWAYPPLET_PANEL_QUERY=:idle SWAYPPLET_PANEL_ACTIVATE=900 dev/render.sh
+  --mode panel --res 1440x900` opens settings on a pane, as Enter on a
+  pane's prefix does; `SWAYPPLET_SETTINGS_QUERY=dark` also types into its
+  search, for the hits.
+- `dev/render.sh --mode preview:settings.idle` renders one pane
   (`wallpaper`, `idle`, `bar`, `input`, `alerts`, `launcher`, `displays`,
   `glass`, `quality`; the last with `SWAYPPLET_QUALITY_FIXTURE=<dir>`). `settings.input` sends the saved `input` section to the nested
   compositor and lists its devices.
   (`wallpaper`, `idle`, `bar`, `alerts`, `launcher`, `displays`, `glass`,
   `system`). `SWAYPPLET_SYSTEM_FIXTURE=behind|staged|in-sync|applying`
-  gives the System tab a canned state, and its buttons play a canned log
+  gives the System pane a canned state, and its buttons play a canned log
   instead of running nx.
   (`wallpaper`, `idle`, `bar`, `alerts`, `launcher`, `displays`, `glass`).
 - `SWPP_SETTLE=4 SWAYPPLET_PANEL_QUERY=dark dev/render.sh --mode launcher`
   shows the search results; `SWAYPPLET_PANEL_ACTIVATE=1` also presses
-  Enter, for the row lit on its tab (a larger number is the delay in
+  Enter, for the row lit on its pane (a larger number is the delay in
   milliseconds). The light holds 1.2 s and the harness's first shot comes
   a few seconds after it opens the panel, so add
   `SWAYPPLET_HIGHLIGHT_HOLD_MS=10000` to catch it.
