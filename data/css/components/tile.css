@@ -88,6 +88,14 @@ button.ui-tile-toggle:disabled {
     border-left-color: var(--on-accent-muted);
 }
 
+/* The chevron whose detail is folded out: it turns to point at it. */
+.ui-tile-split > .ui-tile-detail image {
+    transition: -gtk-icon-transform var(--motion-state);
+}
+.ui-tile-split > .ui-tile-detail.open image {
+    -gtk-icon-transform: rotate(90deg);
+}
+
 .ui-tile-status {
     font-size: var(--type-caption);
     color: var(--fg-muted);

@@ -58,3 +58,8 @@
     min-width: 40px;
     min-height: 40px;
 }
+
+/* The timed switches' durations, folded out under the strip. */
+.deck-fold {
+    padding: var(--space-1) var(--space-1) var(--space-2);
+}

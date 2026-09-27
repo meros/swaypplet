@@ -897,6 +897,15 @@ fn build_flight_deck(
         .build();
     left_group.add_css_class("deck-switches");
 
+    // The durations for the timed switches fold out under the strip; one
+    // fold, shared by both (`tiles::DurationFold`).
+    let fold = tiles::DurationFold::new();
+    {
+        // Folded away whenever the panel closes, so it never reopens stale.
+        let fold = fold.clone();
+        window.connect_unmap(move |_| fold.close());
+    }
+
     // Night Light + the session inhibitors, in the order tiles.rs gives
     // them, as split tiles: the body toggles, the chevron opens the detail
     // (the display page; a duration for the inhibitors), and the line under
@@ -908,10 +917,11 @@ fn build_flight_deck(
                 let tile = {
                     let entry = entry.clone();
                     let spec_c = spec.clone();
+                    let fold = fold.clone();
                     tiles::build_split(&spec, move |anchor| {
                         let entry = entry.clone();
                         let spec_c = spec_c.clone();
-                        tiles::duration_menu(anchor, which, move |ok| {
+                        fold.toggle(anchor, which, move |ok| {
                             if let (true, Some((toggle, status))) = (ok, entry.borrow().as_ref()) {
                                 toggle.set_active(true);
                                 tiles::refresh_status(status, &spec_c);
@@ -920,6 +930,15 @@ fn build_flight_deck(
                     })
                 };
                 *entry.borrow_mut() = Some((tile.toggle.clone(), tile.status.clone()));
+                // Harness hook: `SWAYPPLET_PANEL_FOLD="No Sleep"` opens that
+                // switch's durations once the panel is up, for a shot of the
+                // fold (the nested session has no pointer).
+                if std::env::var("SWAYPPLET_PANEL_FOLD").ok().as_deref() == Some(which.label()) {
+                    let detail = tile.detail.clone();
+                    glib::timeout_add_local_once(std::time::Duration::from_millis(600), move || {
+                        detail.emit_clicked();
+                    });
+                }
                 push_tile(tile, spec, tile_pairs, &left_group);
                 continue;
             }
@@ -1005,7 +1024,12 @@ fn build_flight_deck(
     session.set_valign(gtk4::Align::Center);
     deck.append(&session);
 
-    deck
+    // The strip and, under it, the fold its timed switches open.
+    let column = ui::vbox(2);
+    column.set_hexpand(true);
+    column.append(&deck);
+    column.append(&fold.root);
+    column
 }
 
 /// A deck button: a glyph at title size on a component button.

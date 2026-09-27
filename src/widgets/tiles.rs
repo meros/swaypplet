@@ -12,7 +12,7 @@
 //! from [`crate::services::inhibit`], which owns their wording, their actions and their
 //! state; Wi-Fi and Bluetooth delegate the same way to their own modules.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -197,40 +197,141 @@ pub fn refresh_status(label: &gtk4::Label, spec: &TileSpec) {
     }
 }
 
-/// A popover of durations for a timed switch, under `anchor`: each item
-/// arms `which` for that long (or until turned off), then `done` runs with
-/// whether it took.
-pub fn duration_menu(anchor: &gtk4::Button, which: Inhibitor, done: impl Fn(bool) + 'static) {
-    let menu = crate::ui::menu();
-    let pop = crate::ui::popover(&menu, gtk4::PositionType::Top);
-    pop.set_parent(anchor);
-    let done: Rc<dyn Fn(bool)> = Rc::new(done);
-    for (label, minutes) in [
-        ("For 30 minutes", Some(30)),
-        ("For 1 hour", Some(60)),
-        ("For 2 hours", Some(120)),
-        ("For 4 hours", Some(240)),
-        ("Until turned off", None),
-    ] {
-        let item = crate::ui::menu_item(label, "", false);
-        let (pop_c, done) = (pop.clone(), done.clone());
-        item.connect_clicked(move |_| {
-            pop_c.popdown();
+/// The durations a timed switch offers, in minutes; `None` is until the
+/// switch is turned off.
+const DURATIONS: [(&str, Option<u32>); 5] = [
+    ("30 min", Some(30)),
+    ("1 hour", Some(60)),
+    ("2 hours", Some(120)),
+    ("4 hours", Some(240)),
+    ("Until turned off", None),
+];
+
+/// The durations for the timed switches (No Sleep, No Lock), folded out
+/// inline under the switch strip.
+///
+/// It used to be a `GtkPopover` on the chevron. On a layer-shell panel that
+/// is a separate popup surface, outside the glass config and placed by the
+/// compositor, and it came out broken. Inline it is part of the panel: one
+/// strip, shared by both switches, on the panel's own glass. The chevron
+/// opens it for its switch, a second press or the other switch's chevron
+/// changes it, a pick arms the switch and folds it away, and it folds away
+/// whenever the panel closes.
+pub struct DurationFold {
+    pub root: gtk4::Revealer,
+    title: gtk4::Label,
+    /// Which switch it is open for.
+    open: Cell<Option<Inhibitor>>,
+    /// The chevron that opened it, marked while it is open.
+    anchor: RefCell<Option<gtk4::Button>>,
+    /// What a pick does for the switch it is open for.
+    on_pick: RefCell<Option<Rc<dyn Fn(Option<u32>)>>>,
+    /// Set while a pick is arming, so a second click does not arm twice.
+    busy: Cell<bool>,
+}
+
+impl DurationFold {
+    pub fn new() -> Rc<DurationFold> {
+        let root = crate::ui::revealer(
+            gtk4::RevealerTransitionType::SlideDown,
+            crate::tokens::motion::EXPAND,
+        );
+        let body = crate::ui::vbox(2);
+        body.add_css_class("deck-fold");
+        let title = crate::ui::heading("");
+        title.set_halign(gtk4::Align::Start);
+        let row = crate::ui::hbox(2);
+        body.append(&title);
+        body.append(&row);
+        root.set_child(Some(&body));
+        let fold = Rc::new(DurationFold {
+            root,
+            title,
+            open: Cell::new(None),
+            anchor: RefCell::new(None),
+            on_pick: RefCell::new(None),
+            busy: Cell::new(false),
+        });
+        for (label, minutes) in DURATIONS {
+            let b = crate::ui::button_with(
+                crate::ui::Face::Label(label),
+                crate::ui::Kind::Secondary,
+                crate::ui::Size::Small,
+            );
+            let weak = Rc::downgrade(&fold);
+            b.connect_clicked(move |_| {
+                let Some(fold) = weak.upgrade() else { return };
+                if fold.busy.get() {
+                    return;
+                }
+                let pick = fold.on_pick.borrow().clone();
+                if let Some(pick) = pick {
+                    pick(minutes);
+                }
+            });
+            row.append(&b);
+        }
+        fold
+    }
+
+    /// Open for `which` from `anchor`, or close when it is already open for
+    /// it. `done` runs after a pick with whether the switch took.
+    pub fn toggle(
+        self: &Rc<Self>,
+        anchor: &gtk4::Button,
+        which: Inhibitor,
+        done: impl Fn(bool) + 'static,
+    ) {
+        if self.open.get() == Some(which) && self.root.reveals_child() {
+            self.close();
+            return;
+        }
+        self.mark(None);
+        self.title.set_label(&format!("{} for", which.label()));
+        let done: Rc<dyn Fn(bool)> = Rc::new(done);
+        let weak = Rc::downgrade(self);
+        *self.on_pick.borrow_mut() = Some(Rc::new(move |minutes| {
+            let Some(fold) = weak.upgrade() else { return };
+            fold.busy.set(true);
             let done = done.clone();
+            let weak = Rc::downgrade(&fold);
             spawn::spawn_work(
                 move || which.arm_for(true, minutes),
                 move |ok| {
                     if ok {
                         inhibit::publish(which, true);
                     }
+                    if let Some(fold) = weak.upgrade() {
+                        fold.busy.set(false);
+                        fold.close();
+                    }
                     done(ok);
                 },
             );
-        });
-        menu.append(&item);
+        }));
+        self.open.set(Some(which));
+        self.mark(Some(anchor));
+        self.root.set_reveal_child(true);
     }
-    pop.connect_closed(|p| p.unparent());
-    pop.popup();
+
+    /// Fold away and forget the switch it was open for.
+    pub fn close(&self) {
+        self.root.set_reveal_child(false);
+        self.open.set(None);
+        self.on_pick.borrow_mut().take();
+        self.mark(None);
+    }
+
+    /// Mark the chevron that owns the open fold, and unmark the last one.
+    fn mark(&self, anchor: Option<&gtk4::Button>) {
+        if let Some(old) = self.anchor.borrow_mut().take() {
+            old.remove_css_class("open");
+        }
+        if let Some(a) = anchor {
+            a.add_css_class("open");
+            *self.anchor.borrow_mut() = Some(a.clone());
+        }
+    }
 }
 
 /// The optimistic toggle, its revert on failure, and the `loading` state,
