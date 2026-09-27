@@ -1,12 +1,43 @@
-/* ── Settings pane (src/settings/) ──
-   A deck page in the Helm card, one tab per thing that can be configured and
-   one group per run of rows. Dense on purpose: the glass tab alone is twenty
-   knobs, and a settings list that scrolls twice as far as it needs to is a
-   list nobody reads to the bottom of. Hints live in tooltips per row; only
-   the group carries a visible one. The rows are components (src/ui/, through
+/* ── Settings (src/settings/) ──
+   A surface of its own (window.rs): a glass card the height of the screen,
+   a sidebar of panes beside the chosen pane, and one group per run of rows.
+   Dense on purpose: the glass pane alone is twenty knobs, and a settings list
+   that scrolls twice as far as it needs to is a list nobody reads to the
+   bottom of. Hints live in tooltips per row; only the group carries a
+   visible one. The rows are components (src/ui/, through
    src/settings/ui.rs); this file places them. ── */
+.settings-card {
+    padding: 0;
+}
+
 .settings-pane {
-    padding: var(--space-1) var(--space-2) var(--space-2);
+    padding: var(--space-5);
+}
+
+/* The sidebar: search over every pane's rows, then the panes in two groups.
+   A fixed width, so the pane beside it keeps its x as the panes change. */
+.settings-sidebar {
+    min-width: 220px;
+    padding-right: var(--space-4);
+}
+
+.settings-search {
+    margin-bottom: var(--space-2);
+}
+
+/* Navigation, not content: the row component at a sidebar's density. */
+.settings-sidebar .ui-row {
+    min-height: 0;
+    padding: var(--space-3) var(--space-4);
+}
+
+.settings-nav-group {
+    padding: var(--space-3) var(--space-4) var(--space-1);
+}
+
+/* The pane's name over it, where a tab strip used to be. */
+.settings-title {
+    padding: 0 var(--space-2) var(--space-3);
 }
 
 .settings-group {
@@ -78,11 +109,6 @@
    over Apply. */
 .quality-entry {
     padding: var(--space-2) 0;
-}
-
-/* ── Tabs ── */
-.settings-tabs {
-    padding: 0 var(--space-1) var(--space-1);
 }
 
 /* ── Prefixes (a bare `:` in the omnibox, src/panel.rs) ──

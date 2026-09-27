@@ -72,6 +72,7 @@
 list.ui-list,
 list.ui-list > row {
     background: none;
+    background-color: transparent;
     padding: 0;
     border: none;
     box-shadow: none;
@@ -80,6 +81,17 @@ list.ui-list > row {
 list.ui-list > row:hover > .ui-row,
 list.ui-list > row:focus > .ui-row {
     background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+/* A list that holds a choice (`ui::list` given a selection mode, as the
+   settings sidebar is): the chosen row keeps the selected fill and its
+   icon the accent, while the pointer and the keyboard light the others. */
+list.ui-list > row:selected > .ui-row {
+    background-color: var(--fill-2);
+}
+
+list.ui-list > row:selected > .ui-row .ui-row-icon {
+    color: var(--accent);
 }
 
 /* A status tone on the icon (`ui::set_tone`, a weak signal): the icon's

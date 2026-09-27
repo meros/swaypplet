@@ -239,12 +239,15 @@ pub fn save_row(label: &str) -> Box {
 
 // ── DisplaySection ────────────────────────────────────────────────────────────
 
+/// What "Arrange displays…" runs, once the Helm has said.
+type OnArrange = Rc<RefCell<Option<std::boxed::Box<dyn Fn()>>>>;
+
 pub struct DisplaySection {
     section: ui::Section,
     output_list: Box,
     /// What "Arrange displays…" opens: the Displays settings pane, set by
     /// the Helm (`set_on_arrange`).
-    on_arrange: Rc<RefCell<Option<std::boxed::Box<dyn Fn()>>>>,
+    on_arrange: OnArrange,
 }
 
 impl DisplaySection {
@@ -293,7 +296,7 @@ impl DisplaySection {
         outputs.append(&output_list);
 
         // ── Arrange displays…: the settings pane ─────────────────────────────
-        let on_arrange: Rc<RefCell<Option<std::boxed::Box<dyn Fn()>>>> = Rc::default();
+        let on_arrange: OnArrange = Rc::default();
         let arrange = ui::row(
             icons::DISPLAY,
             "Arrange displays…",

@@ -49,6 +49,8 @@ pub(crate) fn panel_surface(app: &gtk4::Application) -> Surface {
 
 struct AppState {
     panel: Option<Panel>,
+    /// Settings' own surface; shown instead of the Helm, never with it.
+    settings: Option<Rc<crate::settings::window::SettingsWindow>>,
     osd: Option<Osd>,
     launcher: Option<Launcher>,
     keybinds: Option<Rc<Keybinds>>,
@@ -135,6 +137,7 @@ pub fn run() {
 
     let state: Rc<RefCell<AppState>> = Rc::new(RefCell::new(AppState {
         panel: None,
+        settings: None,
         osd: None,
         launcher: None,
         keybinds: None,
@@ -201,8 +204,12 @@ pub fn run() {
         // SIGUSR1 toggles panel visibility
         let s = state_clone.clone();
         crate::glib_unix::signal_add_local(10 /* SIGUSR1 */, move || {
-            if let Some(ref panel) = s.borrow().panel {
-                panel.toggle();
+            let st = s.borrow();
+            if let Some(ref panel) = st.panel {
+                match st.settings.as_ref().filter(|s| s.is_shown()) {
+                    Some(settings) => settings.hide(),
+                    None => panel.toggle(),
+                }
             }
             glib::ControlFlow::Continue
         });
@@ -227,7 +234,12 @@ pub fn run() {
     app.connect_activate(move |app| {
         let mut st = state_clone.borrow_mut();
         if let Some(ref panel) = st.panel {
-            panel.toggle();
+            // The Helm's key closes settings when settings is what is open:
+            // one key, one surface to put away.
+            match st.settings.as_ref().filter(|s| s.is_shown()) {
+                Some(settings) => settings.hide(),
+                None => panel.toggle(),
+            }
             return;
         }
 
@@ -238,7 +250,55 @@ pub fn run() {
         // lane's microphone glyph reads the same snapshot.
         let audio = crate::services::audio::AudioService::start();
 
-        let panel = Panel::new(panel_surface(app), store_activate.clone(), audio.clone());
+        // Settings, and the one way into it: the Helm puts itself away and
+        // settings opens where it was asked to.
+        let settings = crate::settings::window::SettingsWindow::new(app);
+        settings.window().present();
+        settings.window().set_visible(false);
+        let on_settings: crate::panel::OnSettings = {
+            let state = Rc::downgrade(&state_clone);
+            let settings = Rc::downgrade(&settings);
+            Rc::new(move |open| {
+                if let Some(state) = state.upgrade()
+                    && let Ok(st) = state.try_borrow()
+                    && let Some(panel) = st.panel.as_ref()
+                {
+                    panel.hide();
+                }
+                if let Some(settings) = settings.upgrade() {
+                    settings.open(open);
+                }
+            })
+        };
+        {
+            // A Helm page among settings' search hits: the other way round.
+            let state = Rc::downgrade(&state_clone);
+            let weak = Rc::downgrade(&settings);
+            settings.set_on_page(move |prefix| {
+                if let Some(settings) = weak.upgrade() {
+                    settings.hide();
+                }
+                let prefix = prefix.to_string();
+                let state = state.clone();
+                // After the hide has let go of the keyboard.
+                glib::idle_add_local_once(move || {
+                    if let Some(state) = state.upgrade()
+                        && let Ok(st) = state.try_borrow()
+                        && let Some(panel) = st.panel.as_ref()
+                    {
+                        panel.open_page(&prefix);
+                    }
+                });
+            });
+        }
+        st.settings = Some(settings);
+
+        let panel = Panel::new(
+            panel_surface(app),
+            store_activate.clone(),
+            audio.clone(),
+            on_settings,
+        );
         panel.window().present();
         panel.window().set_visible(false);
 

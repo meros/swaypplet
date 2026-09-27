@@ -50,6 +50,9 @@ pub fn run(component: &str) {
                 crate::app::panel_surface(app),
                 store.clone(),
                 crate::services::audio::AudioService::start(),
+                // The harness shows the Helm alone; settings has its own
+                // component (`settings`).
+                Rc::new(|_| {}),
             );
             panel.toggle();
             std::mem::forget(panel);
@@ -312,7 +315,7 @@ pub fn run(component: &str) {
         // Settings fills the Helm card's width (740 to 1033 px), so its
         // preview opens at that width: at the 440 single-component default
         // the tab strip clips and the columns read wrong.
-        let width = if component.starts_with("settings") { 820 } else { 440 };
+        let width = if component.starts_with("settings") { 1100 } else { 440 };
         // SWAYPPLET_PREVIEW_LAYER=1 (the render harness's default) puts the
         // component in a panel card on a layer surface, the way the Helm shows
         // it, so the compositor's glass and the mode's material are behind it.
@@ -460,7 +463,7 @@ pub fn run(component: &str) {
                 if c == "settings.displays"
                     && let Some(how) = std::env::var_os("SWAYPPLET_PREVIEW_DISPLAYS_APPLY")
                 {
-                    let s: &'static crate::settings::SettingsSection = s;
+                    let s: &'static crate::settings::SettingsSection = &**s;
                     glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
                         s.demo_displays();
                     });
@@ -470,7 +473,6 @@ pub fn run(component: &str) {
                         });
                     }
                 }
-                host.append(s.tabs_widget());
                 host.append(s.widget());
             }
             "network" => {

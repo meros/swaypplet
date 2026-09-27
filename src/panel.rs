@@ -10,7 +10,7 @@ use gtk4::prelude::*;
 use crate::anim;
 use crate::launcher::LauncherView;
 use crate::services::notifications::store::NotificationStore;
-use crate::settings::SettingsSection;
+use crate::settings::Open;
 use crate::shell::Surface;
 use crate::ui::icons;
 use crate::ui::{self, Kind, Text, Tone};
@@ -46,9 +46,10 @@ const HELM_CARD_SIZE: crate::shell::fit::CardSize = crate::shell::fit::CardSize 
 /// How tall a sub-sheet's body stands on a screen with room for it.
 const SUBSHEET_HEIGHT: i32 = 340;
 
-/// Omnibox prefixes and the deck page each one opens. The settings tabs
-/// carry their own (`settings::TABS`); `:set` alone opens the pane on
-/// whatever tab it was last on. A bare `:` lists all of them on the
+/// Omnibox prefixes and the deck page each one opens. Settings' panes
+/// carry their own (`settings::PANES`) and open settings' own surface, on
+/// Enter rather than as they are typed, since that closes the Helm; `:set`
+/// alone opens it as it was. A bare `:` lists all of them on the
 /// `prefixes` page, which is built from this table so the list cannot go
 /// stale.
 const ROUTES: &[(&[&str], &str, &str)] = &[
@@ -78,23 +79,16 @@ const ROUTES: &[(&[&str], &str, &str)] = &[
     ),
 ];
 
-/// The page a typed prefix opens, and the settings tab when it names one.
-/// The settings tabs are tried before `:set`, so `:sleep` is not `:set`.
-fn route(prefix: &str) -> Option<(&'static str, Option<&'static str>)> {
-    if let Some((_, page, _)) = ROUTES
+/// The deck page a typed prefix opens.
+fn route(prefix: &str) -> Option<&'static str> {
+    ROUTES
         .iter()
         .find(|(prefixes, _, _)| prefixes.iter().any(|p| prefix.starts_with(p)))
-    {
-        return Some((page, None));
-    }
-    if let Some(tab) = crate::settings::tab_for_prefix(prefix) {
-        return Some(("settings", Some(tab)));
-    }
-    if prefix.starts_with(":set") || prefix.starts_with(":pref") {
-        return Some(("settings", None));
-    }
-    None
+        .map(|(_, page, _)| *page)
 }
+
+/// Opens settings' own surface; the app hides the Helm first.
+pub type OnSettings = Rc<dyn Fn(Open)>;
 
 /// What the card's lists shrink to on an output too short for the card at
 /// full density. They still scroll, so this costs visible rows and nothing
@@ -116,7 +110,6 @@ struct Sections {
     power: PowerSection,
     users: UserSection,
     backup: BackupSection,
-    settings: Rc<SettingsSection>,
     /// Quick-strip toggle tiles (Night Light, Caffeine, etc.)
     tiles: RefCell<Vec<TileEntry>>,
     /// The DND tile and the store it shows, for its status on open.
@@ -136,7 +129,6 @@ impl Sections {
         self.power.refresh();
         self.users.refresh();
         self.backup.refresh();
-        self.settings.refresh();
         for (btn, spec, status) in self.tiles.borrow().iter() {
             tiles::init_tile_state(btn, spec);
             if let Some(status) = status {
@@ -160,6 +152,7 @@ pub struct Panel {
     sections: Rc<Sections>,
     launcher: Rc<LauncherView>,
     deck_stack: gtk4::Stack,
+    on_settings: OnSettings,
 }
 
 impl Panel {
@@ -167,6 +160,7 @@ impl Panel {
         surface: Surface,
         store: Rc<RefCell<NotificationStore>>,
         audio_service: Rc<crate::services::audio::AudioService>,
+        on_settings: OnSettings,
     ) -> Self {
         let window = surface.window().clone();
 
@@ -206,8 +200,6 @@ impl Panel {
         // Its own watcher: the panel outlives no bar process in particular,
         // and the status directory is two small files.
         let backup = BackupSection::new(&crate::services::backup::BackupStatusService::start());
-        // Shared with the omnibox router below, which picks a tab by prefix.
-        let settings = Rc::new(SettingsSection::new());
 
         audio.expand_for_page();
         network.expand_for_page();
@@ -333,22 +325,6 @@ impl Panel {
             deck_stack.add_named(&audio_sheet, Some("audio"));
         }
 
-        // Page 10: Settings. Five tabs (src/settings/), and the reason it is
-        // a page in this card rather than a window of its own is the Glass
-        // one: the card is the material, so every slider changes the surface
-        // it is drawn on, live.
-        {
-            let ret = return_to_search.clone();
-            let settings_sheet = build_subsheet_with_tabs(
-                "Settings",
-                "󰒓",
-                Some(settings.tabs_widget()),
-                settings.widget(),
-                move || ret(),
-            );
-            deck_stack.add_named(&settings_sheet, Some("settings"));
-        }
-
         // Page 11: the prefixes, for a bare `:`.
         {
             let ret = return_to_search.clone();
@@ -364,8 +340,14 @@ impl Panel {
         // when the menu opens.
         let mut tile_pairs: Vec<TileEntry> = Vec::new();
         let mut dnd_tile = None;
-        let flight_deck =
-            build_flight_deck(&window, &store, &mut tile_pairs, &mut dnd_tile, &deck_stack);
+        let flight_deck = build_flight_deck(
+            &window,
+            &store,
+            &mut tile_pairs,
+            &mut dnd_tile,
+            &deck_stack,
+            &on_settings,
+        );
 
         // ── Assemble Content ─────────────────────────────────────────────────
         let content = ui::vbox(0);
@@ -408,7 +390,6 @@ impl Panel {
         // ── Prefix routing from Omnibox ──────────────────────────────────────
         {
             let deck_stack_c = deck_stack.clone();
-            let settings_c = settings.clone();
             let network_c = network.clone();
             launcher.entry().connect_search_changed(move |entry| {
                 let text = entry.text().to_string();
@@ -416,10 +397,7 @@ impl Panel {
                 let prefix = lower.trim();
                 if prefix == ":" {
                     deck_stack_c.set_visible_child_name("prefixes");
-                } else if let Some((page, tab)) = route(prefix) {
-                    if let Some(tab) = tab {
-                        settings_c.show(tab);
-                    }
+                } else if let Some(page) = route(prefix) {
                     if page == "wifi" {
                         network_c.trigger_scan();
                     }
@@ -432,21 +410,27 @@ impl Panel {
             });
         }
 
-        // ── Arrange displays… on the displays page ───────────────────────────
+        // ── A settings prefix, on Enter ──────────────────────────────────────
         {
-            let entry = launcher.entry().clone();
-            display.set_on_arrange(move || {
-                entry.set_text(":arrange");
-                entry.set_position(-1);
+            let on_settings = on_settings.clone();
+            launcher.entry().connect_activate(move |entry| {
+                if let Some(open) = Open::for_prefix(entry.text().to_lowercase().trim()) {
+                    on_settings(open);
+                }
             });
         }
 
-        // ── Settings rows from the launcher ──────────────────────────────────
+        // ── Arrange displays… on the displays page ───────────────────────────
         {
-            let deck_stack_c = deck_stack.clone();
-            let settings_c = settings.clone();
+            let on_settings = on_settings.clone();
+            display.set_on_arrange(move || on_settings(Open::Pane("displays")));
+        }
+
+        // ── Settings rows and pages from the launcher ────────────────────────
+        {
+            let on_settings = on_settings.clone();
             let entry = launcher.entry().clone();
-            launcher.set_on_setting(move |id| open_setting(&deck_stack_c, &settings_c, &entry, id));
+            launcher.set_on_setting(move |id| open_setting(&on_settings, &entry, id));
         }
 
         // ── Launcher activation + Esc hide the menu / return to search ───────
@@ -490,7 +474,6 @@ impl Panel {
             power,
             users,
             backup,
-            settings,
             tiles: RefCell::new(tile_pairs),
             dnd: RefCell::new(dnd_tile.map(|t| (t, store.clone()))),
         });
@@ -500,6 +483,7 @@ impl Panel {
             sections,
             launcher,
             deck_stack,
+            on_settings,
         }
     }
 
@@ -522,22 +506,27 @@ impl Panel {
                 && !query.is_empty()
             {
                 let entry = self.launcher.entry().clone();
+                let typed = query.clone();
                 glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
-                    entry.set_text(&query)
+                    entry.set_text(&typed)
                 });
                 // `SWAYPPLET_PANEL_ACTIVATE=1` then presses Enter 1.5 s
                 // later, or that many milliseconds after opening when it is
                 // a larger number: a result opened, a settings row among
-                // them, timed to land between the harness's shots.
+                // them, or settings itself for a settings prefix, timed to
+                // land between the harness's shots.
                 if let Ok(v) = std::env::var("SWAYPPLET_PANEL_ACTIVATE")
                     && !v.is_empty()
                 {
                     let ms = v.parse::<u64>().ok().filter(|ms| *ms > 1).unwrap_or(1800);
                     let launcher = self.launcher.clone();
-                    glib::timeout_add_local_once(
-                        std::time::Duration::from_millis(ms),
-                        move || launcher.activate_selected(),
-                    );
+                    let on_settings = self.on_settings.clone();
+                    glib::timeout_add_local_once(std::time::Duration::from_millis(ms), move || {
+                        match Open::for_prefix(&query.to_lowercase()) {
+                            Some(open) => on_settings(open),
+                            None => launcher.activate_selected(),
+                        }
+                    });
                 }
             }
             // The section reads land as widget churn (sysfs, clipboard rows,
@@ -562,18 +551,34 @@ impl Panel {
         self.deck_stack.set_visible_child_name("notifications");
     }
 
-    /// Open the settings row or the panel section a launcher result names
-    /// (`settings::search`), opening the panel first when it is closed.
+    /// Open what a launcher result names (`settings::search`): a settings
+    /// row in settings, or a Helm page, opening the Helm first.
     pub fn open_setting(&self, id: &str) {
-        if !(self.surface.is_shown() && self.surface.window().is_visible()) {
+        if !id.starts_with(':') || Open::for_prefix(id).is_some() {
+            open_setting(&self.on_settings, self.launcher.entry(), id);
+            return;
+        }
+        self.open_page(id);
+    }
+
+    /// Show the Helm on the page `prefix` opens (`:wifi`).
+    pub fn open_page(&self, prefix: &str) {
+        if !self.is_shown() {
             self.toggle();
         }
-        open_setting(
-            &self.deck_stack,
-            &self.sections.settings,
-            self.launcher.entry(),
-            id,
-        );
+        let entry = self.launcher.entry();
+        entry.set_text(prefix);
+        entry.set_position(-1);
+    }
+
+    pub fn is_shown(&self) -> bool {
+        self.surface.is_shown() && self.surface.window().is_visible()
+    }
+
+    pub fn hide(&self) {
+        if self.is_shown() {
+            self.surface.hide();
+        }
     }
 
     pub fn refresh_audio(&self) {
@@ -620,20 +625,17 @@ fn elastic_lists(
         .collect()
 }
 
-/// A settings search result: a panel section by its prefix, which the
-/// omnibox routes like a typed one, or a settings row, which the settings
-/// page scrolls to and lights.
-fn open_setting(
-    deck_stack: &gtk4::Stack,
-    settings: &SettingsSection,
-    entry: &gtk4::SearchEntry,
-    id: &str,
-) {
-    if id.starts_with(':') {
+/// A launcher result that opens something: a settings pane or row, in
+/// settings; a Helm page by its prefix, which the omnibox routes like a
+/// typed one.
+fn open_setting(on_settings: &OnSettings, entry: &gtk4::SearchEntry, id: &str) {
+    if let Some(open) = Open::for_prefix(id) {
+        on_settings(open);
+    } else if id.starts_with(':') {
         entry.set_text(id);
         entry.set_position(-1);
-    } else if settings.reveal(id) {
-        deck_stack.set_visible_child_name("settings");
+    } else {
+        on_settings(Open::Row(id.to_string()));
     }
 }
 
@@ -644,7 +646,7 @@ fn build_prefix_list() -> gtk4::Box {
     list.add_css_class("prefix-list");
 
     let hint = ui::text(
-        "Type one of these after the colon to open its page. Anything else searches.",
+        "Type one of these after the colon to open its page; a settings one opens on Enter. Anything else searches.",
         Text::Caption,
         Tone::Faint,
     );
@@ -658,7 +660,7 @@ fn build_prefix_list() -> gtk4::Box {
         .chain(crate::settings::prefixes().map(|(prefixes, title)| (prefixes.join("  "), title)))
         .chain(std::iter::once((
             ":set  :pref".to_string(),
-            "Settings · last tab".to_string(),
+            "Settings, as it was".to_string(),
         )))
         .collect();
     for (prefixes, title) in rows {
@@ -915,6 +917,7 @@ fn build_flight_deck(
     tile_pairs: &mut Vec<TileEntry>,
     dnd_tile: &mut Option<ui::SplitTile>,
     deck_stack: &gtk4::Stack,
+    on_settings: &OnSettings,
 ) -> gtk4::Box {
     let deck = ui::hbox(3);
     deck.set_hexpand(true);
@@ -982,11 +985,14 @@ fn build_flight_deck(
                 push_tile(tile, spec, tile_pairs, &left_group);
                 continue;
             }
+            // Night Light: the chevron is how warm, which is a setting; the
+            // body is on or off.
             None => {
-                let stack_c = deck_stack.clone();
-                Box::new(move |_: &gtk4::Button| {
-                    flip(&stack_c, "displays");
-                })
+                let on_settings = on_settings.clone();
+                let warmth =
+                    crate::settings::search::Target::Row("look", "Night light", "Night warmth")
+                        .id();
+                Box::new(move |_: &gtk4::Button| on_settings(Open::Row(warmth.clone())))
             }
         };
         let tile = tiles::build_split(&spec, detail);
@@ -1041,12 +1047,10 @@ fn build_flight_deck(
     actions.append(&clip_btn);
 
     // Settings
-    let settings_btn = deck_button("󰒓", "Settings");
+    let settings_btn = deck_button("󰒓", "Settings (:set)");
     {
-        let stack_c = deck_stack.clone();
-        settings_btn.connect_clicked(move |_| {
-            flip(&stack_c, "settings");
-        });
+        let on_settings = on_settings.clone();
+        settings_btn.connect_clicked(move |_| on_settings(Open::Last));
     }
     actions.append(&settings_btn);
     left_group.append(&actions);
@@ -1138,16 +1142,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prefixes_route_to_their_page_and_the_settings_tabs_before_set() {
-        assert_eq!(route(":wifi"), Some(("wifi", None)));
-        assert_eq!(route(":vpn"), Some(("wifi", None)));
-        assert_eq!(route(":mic"), Some(("audio", None)));
-        assert_eq!(route(":notif"), Some(("notifications", None)));
-        // A settings tab, and one whose prefix starts with `:s` like `:set`.
-        assert_eq!(route(":glass"), Some(("settings", Some("glass"))));
-        assert_eq!(route(":sleep"), Some(("settings", Some("idle"))));
-        assert_eq!(route(":settings"), Some(("settings", None)));
-        assert_eq!(route(":pref"), Some(("settings", None)));
+    fn prefixes_route_to_their_page_and_settings_is_not_a_page() {
+        assert_eq!(route(":wifi"), Some("wifi"));
+        assert_eq!(route(":vpn"), Some("wifi"));
+        assert_eq!(route(":mic"), Some("audio"));
+        assert_eq!(route(":notif"), Some("notifications"));
+        // Settings' prefixes open its own surface, not a deck page.
+        assert_eq!(route(":glass"), None);
+        assert_eq!(route(":settings"), None);
         assert_eq!(route(":nothing"), None);
         assert_eq!(route("firefox"), None);
     }
@@ -1155,11 +1157,7 @@ mod tests {
     #[test]
     fn every_quick_search_result_opens_a_page() {
         for q in crate::settings::search::QUICK {
-            assert!(
-                matches!(route(q.prefix), Some((page, None)) if page != "settings"),
-                "{} routes nowhere",
-                q.prefix
-            );
+            assert!(route(q.prefix).is_some(), "{} routes nowhere", q.prefix);
         }
     }
 

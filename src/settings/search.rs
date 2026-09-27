@@ -1,6 +1,6 @@
 //! The settings as the launcher finds them: every row of every tab, by its
 //! title, a one-line subtitle and the words people type for it ("dark mode"
-//! for Look › Appearance › Mode, "blur" for Glass › Material › Frost).
+//! for Appearance › Appearance › Mode, "blur" for Glass › Material › Frost).
 //!
 //! The index is static. Each pane keeps its own table, `SEARCH`, beside the
 //! code that builds its rows, and [`TABLES`] lists the tables by tab. Nothing
@@ -49,7 +49,7 @@ pub const fn row(
     }
 }
 
-/// Every tab's table, by the tab's stack name (`settings::TABS`). A new tab
+/// Every pane's table, by the pane's stack name (`settings::PANES`). A new pane
 /// adds its pane's `SEARCH` here.
 pub const TABLES: &[(&str, &[Entry])] = &[
     ("look", super::look_pane::SEARCH),
@@ -127,13 +127,9 @@ pub const QUICK: &[Quick] = &[
     },
 ];
 
-/// The tab's title, for the breadcrumb.
+/// The pane's title, for the breadcrumb.
 fn tab_title(tab: &str) -> &'static str {
-    super::TABS
-        .iter()
-        .find(|t| t.name == tab)
-        .map(|t| t.title)
-        .unwrap_or("Settings")
+    super::pane_title(tab).unwrap_or("Settings")
 }
 
 /// Where a hit goes when it is activated.
@@ -179,7 +175,7 @@ impl Target {
 #[derive(Debug, Clone)]
 pub struct Hit {
     pub target: Target,
-    /// "Look › Appearance › Mode".
+    /// "Appearance › Appearance › Mode".
     pub path: String,
     pub subtitle: &'static str,
     pub score: u32,
@@ -370,7 +366,7 @@ mod tests {
 
     #[test]
     fn every_tab_has_a_table_and_a_source() {
-        for tab in &super::super::TABS {
+        for tab in &super::super::PANES {
             assert!(
                 TABLES.iter().any(|(t, e)| *t == tab.name && !e.is_empty()),
                 "the {} tab has no search table",
@@ -473,14 +469,17 @@ mod tests {
     #[test]
     fn synonyms_find_their_row() {
         for (query, path) in [
-            ("dark mode", "Look › Appearance › Mode"),
-            ("dark", "Look › Appearance › Mode"),
-            ("light theme", "Look › Appearance › Mode"),
-            ("wallpaper", "Look › Wallpaper"),
-            ("background image", "Look › Wallpaper"),
-            ("night light", "Look › Night light › Night light"),
-            ("blue light", "Look › Night light › Night light"),
-            ("colour temperature", "Look › Night light › Night warmth"),
+            ("dark mode", "Appearance › Appearance › Mode"),
+            ("dark", "Appearance › Appearance › Mode"),
+            ("light theme", "Appearance › Appearance › Mode"),
+            ("wallpaper", "Appearance › Wallpaper"),
+            ("background image", "Appearance › Wallpaper"),
+            ("night light", "Appearance › Night light › Night light"),
+            ("blue light", "Appearance › Night light › Night light"),
+            (
+                "colour temperature",
+                "Appearance › Night light › Night warmth",
+            ),
             (
                 "screen timeout",
                 "Idle & Lock › Idle timers › Screen off after",
@@ -503,7 +502,7 @@ mod tests {
             ("wireless", "Panel › Wi-Fi"),
             ("headphones", "Panel › Audio output"),
             ("pair", "Panel › Bluetooth"),
-            ("accent colour", "Look › Appearance › Accent"),
+            ("accent colour", "Appearance › Appearance › Accent"),
         ] {
             assert_eq!(top(query), path, "{query:?}");
         }
@@ -511,7 +510,7 @@ mod tests {
 
     #[test]
     fn titles_and_subtitles_find_their_row_too() {
-        assert_eq!(top("launch zoom"), "Look › Motion › Launch zoom");
+        assert_eq!(top("launch zoom"), "Appearance › Motion › Launch zoom");
         assert_eq!(top("refraction"), "Glass › Material › Refraction");
         assert_eq!(top("adaptive"), "Displays › Display › Adaptive sync");
         // A word only the subtitle has.

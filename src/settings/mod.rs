@@ -1,25 +1,29 @@
-//! The settings pane: a deck page in the Helm card (`panel.rs`), one tab per
-//! thing that can be configured.
+//! Settings: a surface of its own (`window.rs`), a sidebar of panes and the
+//! chosen pane at full height beside it.
 //!
-//! Ten tabs. Look, Idle & Lock, Bar, Input, Alerts and Launcher edit
-//! `store::Settings`, one file with one to three sections each; Glass edits
-//! the compositor material
-//! and keeps its own file (`glass.rs`, for why). Displays arranges the
-//! outputs through `services::displays` and keeps its profiles in the
-//! `displays` section (`displays_pane.rs`). System edits nothing: it shows
-//! this host's build against origin/main and runs nx (`system_pane.rs`).
-//! Quality edits nothing either: it shows the open issues and the fixes
-//! for them (`quality_pane.rs`, `crate::quality`). Every other tab applies
-//! live and
-//! saves after the fact, and each has one Reset that puts the defaults
+//! Settings used to be a deck page in the Helm card, reached from a button
+//! among 25 others and read through a 420 px scroller under ten tab chips.
+//! The Helm is for what is done now; this is for what is configured once,
+//! and it gets the room for it. It wears the Helm's glass (the same layer
+//! namespace), so the Glass pane still changes the surface it is drawn on,
+//! live.
+//!
+//! Nine panes in two groups. Settings: Appearance, Glass, Idle & Lock,
+//! Bar, Input, Alerts, Launcher and Displays edit `store::Settings`, one
+//! file with one to three sections each (Glass keeps its own file,
+//! `glass.rs`; Displays keeps its profiles in the `displays` section,
+//! `displays_pane.rs`). This machine: System shows this host's build
+//! against origin/main and runs nx (`system_pane.rs`), and Quality shows
+//! the open issues and the fixes for them (`quality_pane.rs`); they edit
+//! nothing, and say so by where they sit. Every settings pane applies live
+//! and saves after the fact, and each has one Reset that puts the defaults
 //! back and removes its sections from the file, so there is always a way
 //! out of a setting that turned out to be wrong.
 //!
 //! What is deliberately not here: the bar's position and height (a layout
-//! the whole stylesheet is built around), the night light's temperature
-//! (gammastep's config, owned by Nix), and anything the panel already has a
-//! section for. A setting earns a row when it is a matter of taste that a
-//! rebuild is too slow a loop for.
+//! the whole stylesheet is built around), and anything done now rather than
+//! configured, which is the Helm's. A setting earns a row when it is a
+//! matter of taste that a rebuild is too slow a loop for.
 
 mod alerts_pane;
 mod arrange;
@@ -44,91 +48,184 @@ mod system_info;
 mod system_job;
 mod system_pane;
 pub mod wallpaper;
+pub mod window;
 pub mod xkb;
 
 use gtk4::prelude::*;
 
-/// A tab: its stack name, the omnibox prefixes that open it, and its title.
-struct Tab {
+/// Which sidebar group a pane sits in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Group {
+    /// Edits a setting.
+    Settings,
+    /// Shows this host and acts on it; edits nothing.
+    Machine,
+}
+
+impl Group {
+    fn title(self) -> &'static str {
+        match self {
+            Group::Settings => "Settings",
+            Group::Machine => "This machine",
+        }
+    }
+}
+
+/// A pane: its stack name, its sidebar title and glyph, its group, and the
+/// omnibox prefixes that open it.
+struct Pane {
     name: &'static str,
     title: &'static str,
+    glyph: &'static str,
+    group: Group,
     prefixes: &'static [&'static str],
 }
 
-const TABS: [Tab; 10] = [
-    Tab {
+const PANES: [Pane; 10] = [
+    Pane {
         name: "look",
-        title: "Look",
-        prefixes: &[":look", ":wall", ":bg", ":paper", ":motion"],
+        title: "Appearance",
+        glyph: "󰏘",
+        group: Group::Settings,
+        prefixes: &[
+            ":look", ":appear", ":wall", ":bg", ":paper", ":motion", ":theme",
+        ],
     },
-    Tab {
+    Pane {
+        name: "glass",
+        title: "Glass",
+        glyph: "󰂵",
+        group: Group::Settings,
+        prefixes: &[":glass", ":material"],
+    },
+    Pane {
         name: "idle",
         title: "Idle & Lock",
+        glyph: "󰌾",
+        group: Group::Settings,
         prefixes: &[
             ":idle", ":lock", ":timeout", ":sleep", ":sudo", ":elevate", ":admin",
         ],
     },
-    Tab {
+    Pane {
         name: "bar",
         title: "Bar",
-        prefixes: &[":bar", ":clock", ":osd"],
+        glyph: "󰍜",
+        group: Group::Settings,
+        prefixes: &[":bar", ":clock", ":osd", ":pins"],
     },
-    Tab {
+    Pane {
         name: "input",
         title: "Input",
-        prefixes: &[":input", ":keyboard", ":layout", ":touchpad", ":mouse", ":keys"],
+        glyph: crate::ui::icons::KEYBOARD,
+        group: Group::Settings,
+        prefixes: &[
+            ":input",
+            ":keyboard",
+            ":layout",
+            ":touchpad",
+            ":mouse",
+            ":keys",
+        ],
     },
-    Tab {
+    Pane {
         name: "alerts",
         title: "Alerts",
+        glyph: crate::ui::icons::NOTIFICATION,
+        group: Group::Settings,
         prefixes: &[":alerts", ":quiet", ":shot", ":capture"],
     },
-    Tab {
+    Pane {
         name: "launcher",
         title: "Launcher",
+        glyph: "󰍉",
+        group: Group::Settings,
         prefixes: &[":launch", ":search"],
     },
-    Tab {
+    Pane {
         name: "displays",
         title: "Displays",
+        glyph: crate::ui::icons::DISPLAY,
+        group: Group::Settings,
         prefixes: &[":monitor", ":output", ":arrange"],
     },
-    Tab {
-        name: "glass",
-        title: "Glass",
-        prefixes: &[":glass", ":material"],
-    },
-    Tab {
+    Pane {
         name: "system",
         title: "System",
+        glyph: "󱄅",
+        group: Group::Machine,
         prefixes: &[":nixos", ":nx", ":update", ":host"],
     },
-    Tab {
+    Pane {
         name: "quality",
         title: "Quality",
+        glyph: "󰃤",
+        group: Group::Machine,
         prefixes: &[":quality", ":report", ":crash", ":autofix"],
     },
 ];
 
-/// Every prefix and the tab it opens, for the omnibox's help page.
+/// Every prefix and the pane it opens, for the omnibox's help page and the
+/// launcher's page rows.
 pub fn prefixes() -> impl Iterator<Item = (&'static [&'static str], String)> {
-    TABS.iter()
-        .map(|t| (t.prefixes, format!("Settings · {}", t.title)))
+    PANES
+        .iter()
+        .map(|p| (p.prefixes, format!("Settings · {}", p.title)))
 }
 
-/// The tab an omnibox prefix opens, if it names one. `:set` and `:pref`
-/// open the pane on whatever tab it was last on and are not in this table.
-pub fn tab_for_prefix(prefix: &str) -> Option<&'static str> {
-    TABS.iter()
-        .find(|t| t.prefixes.iter().any(|p| prefix.starts_with(p)))
-        .map(|t| t.name)
+/// A pane's title, by its stack name.
+fn pane_title(name: &str) -> Option<&'static str> {
+    PANES.iter().find(|p| p.name == name).map(|p| p.title)
 }
+
+/// The pane an omnibox prefix opens, if it names one. `:set` and `:pref`
+/// open settings on whatever pane it was last on and are not in this table.
+pub fn tab_for_prefix(prefix: &str) -> Option<&'static str> {
+    PANES
+        .iter()
+        .find(|p| p.prefixes.iter().any(|x| prefix.starts_with(x)))
+        .map(|p| p.name)
+}
+
+/// What to open settings on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Open {
+    /// Wherever it was last.
+    Last,
+    /// A pane, by its stack name.
+    Pane(&'static str),
+    /// A row of the search index, by its identifier (`search::Target::id`).
+    Row(String),
+}
+
+impl Open {
+    /// What an omnibox prefix opens here: a pane, or settings as it was
+    /// (`:set`, `:pref`). `None` for a prefix settings does not own.
+    pub fn for_prefix(prefix: &str) -> Option<Open> {
+        if let Some(pane) = tab_for_prefix(prefix) {
+            return Some(Open::Pane(pane));
+        }
+        (prefix.starts_with(":set") || prefix.starts_with(":pref")).then_some(Open::Last)
+    }
+}
+
+type OnPage = std::rc::Rc<std::cell::RefCell<Option<Box<dyn Fn(&str)>>>>;
 
 pub struct SettingsSection {
-    tabs_strip: gtk4::Box,
     root: gtk4::Box,
-    tabs: Vec<(&'static str, gtk4::ToggleButton)>,
+    search: gtk4::SearchEntry,
+    nav: gtk4::ListBox,
+    results: gtk4::ListBox,
+    /// Each hit's target (`search::Target::id`), by its row's index.
+    hits: std::cell::RefCell<Vec<String>>,
+    nav_scroller: gtk4::ScrolledWindow,
+    results_scroller: gtk4::ScrolledWindow,
+    /// The sidebar row of each pane, by stack name.
+    rows: Vec<(&'static str, gtk4::ListBoxRow)>,
     stack: gtk4::Stack,
+    title: gtk4::Label,
+    /// What a Helm page among the search hits opens: the Helm, on it.
+    on_page: OnPage,
     look: look_pane::LookPane,
     idle: idle_pane::IdlePane,
     bar: bar_pane::BarPane,
@@ -142,11 +239,7 @@ pub struct SettingsSection {
 }
 
 impl SettingsSection {
-    pub fn new() -> Self {
-        let root = crate::ui::vbox(3);
-        root.set_hexpand(true);
-        root.add_css_class("settings-pane");
-
+    pub fn new() -> std::rc::Rc<Self> {
         let look = look_pane::LookPane::new();
         let idle = idle_pane::IdlePane::new();
         let bar = bar_pane::BarPane::new();
@@ -165,66 +258,87 @@ impl SettingsSection {
         stack.set_vhomogeneous(false);
         stack.set_hexpand(true);
         stack.add_named(look.widget(), Some("look"));
+        stack.add_named(glass.widget(), Some("glass"));
         stack.add_named(idle.widget(), Some("idle"));
         stack.add_named(bar.widget(), Some("bar"));
         stack.add_named(input.widget(), Some("input"));
         stack.add_named(alerts.widget(), Some("alerts"));
         stack.add_named(launcher.widget(), Some("launcher"));
         stack.add_named(displays.widget(), Some("displays"));
-        stack.add_named(glass.widget(), Some("glass"));
         stack.add_named(system.widget(), Some("system"));
         stack.add_named(quality.widget(), Some("quality"));
 
-        // Chips in one toggle group rather than a StackSwitcher, so the
-        // strip takes the design system's selection (the accent on the
-        // chosen one) instead of the theme's tab bar. The strip sits at the
-        // header level of the settings subsheet so it never scrolls away.
-        let strip = crate::ui::hbox(3);
-        strip.add_css_class("settings-tabs");
-        strip.set_halign(gtk4::Align::Center);
-        let mut tabs = Vec::new();
-        let mut first: Option<gtk4::ToggleButton> = None;
-        for tab in &TABS {
-            let button = crate::ui::toggle_chip(tab.title);
-            if let Some(first) = &first {
-                button.set_group(Some(first));
-            } else {
-                button.set_active(true);
-                first = Some(button.clone());
-            }
-            {
-                let stack = stack.clone();
-                let name = tab.name;
-                button.connect_toggled(move |b| {
-                    if b.is_active() {
-                        stack.set_visible_child_name(name);
-                    }
-                });
-            }
-            strip.append(&button);
-            tabs.push((tab.name, button));
-        }
+        // ── The sidebar: search over the panes' rows, then the panes ─────────
+        let search = gtk4::SearchEntry::new();
+        search.set_placeholder_text(Some("Search settings"));
+        search.add_css_class("settings-search");
 
-        // The horizontal scrolling policy External prevents child width
-        // requests from propagating upward and blowing up the card size, while
-        // hexpand allows the pane to expand to fill the full subsheet width.
-        // Vertical scrolling is handled by the subsheet scroller.
+        let nav = crate::ui::list();
+        nav.set_selection_mode(gtk4::SelectionMode::Single);
+        let mut rows = Vec::new();
+        let mut group = None;
+        for pane in &PANES {
+            if group != Some(pane.group) {
+                group = Some(pane.group);
+                nav.append(&group_header(pane.group));
+            }
+            let row = nav_row(pane);
+            nav.append(&row);
+            rows.push((pane.name, row));
+        }
+        let nav_scroller = sidebar_scroller(&nav);
+
+        let results = crate::ui::list();
+        results.set_selection_mode(gtk4::SelectionMode::Browse);
+        let results_scroller = sidebar_scroller(&results);
+        results_scroller.set_visible(false);
+
+        let sidebar = crate::ui::vbox(3);
+        sidebar.add_css_class("settings-sidebar");
+        sidebar.append(&search);
+        sidebar.append(&nav_scroller);
+        sidebar.append(&results_scroller);
+
+        // ── The pane: its title, and the pane at the surface's full height ──
+        let title = crate::ui::text("", crate::ui::Text::Title, crate::ui::Tone::Fg);
+        title.set_halign(gtk4::Align::Start);
+        title.add_css_class("settings-title");
+        title.set_xalign(0.0);
+        // Horizontal External keeps a wide row from widening the card; the
+        // pane scrolls on its own, whatever the sidebar does.
         let scroller = gtk4::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk4::PolicyType::External)
-            .vscrollbar_policy(gtk4::PolicyType::Never)
+            .hscrollbar_policy(gtk4::PolicyType::Never)
+            .vscrollbar_policy(gtk4::PolicyType::Automatic)
             .propagate_natural_width(false)
-            .propagate_natural_height(true)
             .hexpand(true)
+            .vexpand(true)
             .child(&stack)
             .build();
+        let content = crate::ui::vbox(3);
+        content.set_hexpand(true);
+        content.append(&title);
+        content.append(&scroller);
 
-        root.append(&scroller);
+        let root = crate::ui::hbox(0);
+        root.add_css_class("settings-pane");
+        root.set_hexpand(true);
+        root.set_vexpand(true);
+        root.append(&sidebar);
+        root.append(&crate::ui::separator(gtk4::Orientation::Vertical));
+        root.append(&content);
 
-        SettingsSection {
-            tabs_strip: strip,
+        let this = std::rc::Rc::new(SettingsSection {
             root,
-            tabs,
+            search,
+            nav,
+            results,
+            hits: std::cell::RefCell::default(),
+            nav_scroller,
+            results_scroller,
+            rows,
             stack,
+            title,
+            on_page: OnPage::default(),
             look,
             idle,
             bar,
@@ -235,29 +349,201 @@ impl SettingsSection {
             glass,
             system,
             quality,
+        });
+        this.wire();
+        this.show("look");
+        this
+    }
+
+    fn wire(self: &std::rc::Rc<Self>) {
+        {
+            let weak = std::rc::Rc::downgrade(self);
+            self.nav.connect_row_selected(move |_, row| {
+                let (Some(this), Some(row)) = (weak.upgrade(), row) else {
+                    return;
+                };
+                if let Some((name, _)) = this.rows.iter().find(|(_, r)| r == row) {
+                    this.stack.set_visible_child_name(name);
+                    if let Some(pane) = PANES.iter().find(|p| p.name == *name) {
+                        this.title.set_label(pane.title);
+                    }
+                }
+            });
+        }
+        {
+            let weak = std::rc::Rc::downgrade(self);
+            self.search.connect_search_changed(move |entry| {
+                if let Some(this) = weak.upgrade() {
+                    this.search_for(entry.text().trim());
+                }
+            });
+        }
+        {
+            // Enter takes the first hit; Down walks into the hits.
+            let weak = std::rc::Rc::downgrade(self);
+            self.search.connect_activate(move |_| {
+                if let Some(this) = weak.upgrade()
+                    && let Some(row) = this.results.row_at_index(0)
+                {
+                    this.open_hit(&row);
+                }
+            });
+            let keys = gtk4::EventControllerKey::new();
+            let weak = std::rc::Rc::downgrade(self);
+            keys.connect_key_pressed(move |_, key, _, _| {
+                let Some(this) = weak.upgrade() else {
+                    return glib::Propagation::Proceed;
+                };
+                if key != gtk4::gdk::Key::Down {
+                    return glib::Propagation::Proceed;
+                }
+                let list = if this.results_scroller.is_visible() {
+                    &this.results
+                } else {
+                    &this.nav
+                };
+                match list.selected_row().or_else(|| first_selectable(list)) {
+                    Some(row) => {
+                        row.grab_focus();
+                        glib::Propagation::Stop
+                    }
+                    None => glib::Propagation::Proceed,
+                }
+            });
+            self.search.add_controller(keys);
+        }
+        {
+            let weak = std::rc::Rc::downgrade(self);
+            self.results.connect_row_activated(move |_, row| {
+                if let Some(this) = weak.upgrade() {
+                    this.open_hit(row);
+                }
+            });
         }
     }
 
-    pub fn tabs_widget(&self) -> &gtk4::Box {
-        &self.tabs_strip
+    /// List the index's hits for `query` in place of the panes; the panes
+    /// again when it is empty.
+    fn search_for(&self, query: &str) {
+        while let Some(child) = self.results.first_child() {
+            self.results.remove(&child);
+        }
+        self.hits.borrow_mut().clear();
+        let searching = !query.is_empty();
+        self.nav_scroller.set_visible(!searching);
+        self.results_scroller.set_visible(searching);
+        if !searching {
+            return;
+        }
+        let hits = search::find(query);
+        if hits.is_empty() {
+            let none = crate::ui::row("", "No setting matches", "Try another word");
+            let row = gtk4::ListBoxRow::new();
+            row.set_selectable(false);
+            row.set_activatable(false);
+            row.set_child(Some(&none.root));
+            self.results.append(&row);
+            return;
+        }
+        for hit in hits.iter().take(30) {
+            // The pane first, as the sidebar names it; the row's path under
+            // it.
+            let (pane, rest) = hit
+                .path
+                .split_once(" › ")
+                .unwrap_or((hit.path.as_str(), ""));
+            let glyph = PANES
+                .iter()
+                .find(|p| p.title == pane)
+                .map_or("", |p| p.glyph);
+            let r = crate::ui::row(
+                glyph,
+                if rest.is_empty() { pane } else { rest },
+                hit.subtitle,
+            );
+            crate::ui::glyph::adopt(&r.icon, crate::ui::Text::TitleSm, crate::ui::Tone::Muted);
+            r.title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+            r.title.set_tooltip_text(Some(&hit.path));
+            let row = gtk4::ListBoxRow::new();
+            row.set_child(Some(&r.root));
+            self.results.append(&row);
+            self.hits.borrow_mut().push(hit.target.id());
+        }
+        if let Some(first) = self.results.row_at_index(0) {
+            self.results.select_row(Some(&first));
+        }
+    }
+
+    /// Open a search hit: its row, lit, or the Helm page it names.
+    fn open_hit(&self, row: &gtk4::ListBoxRow) {
+        let Some(id) = usize::try_from(row.index())
+            .ok()
+            .and_then(|i| self.hits.borrow().get(i).cloned())
+        else {
+            return;
+        };
+        if id.starts_with(':') {
+            if let Some(f) = self.on_page.borrow().as_ref() {
+                f(&id);
+            }
+            return;
+        }
+        self.search.set_text("");
+        self.reveal(&id);
+    }
+
+    /// What a Helm page among the search hits opens (`:wifi` and the rest).
+    pub fn set_on_page(&self, f: impl Fn(&str) + 'static) {
+        *self.on_page.borrow_mut() = Some(Box::new(f));
     }
 
     pub fn widget(&self) -> &gtk4::Box {
         &self.root
     }
 
-    /// Switch to a tab by its stack name. Unknown names are ignored.
-    pub fn show(&self, name: &str) {
-        if let Some((_, button)) = self.tabs.iter().find(|(n, _)| *n == name) {
-            // Setting the toggle drives the stack through its handler, so
-            // the strip and the page cannot disagree.
-            button.set_active(true);
-        } else {
-            log::warn!("settings: no tab named {name}");
+    /// Type `query` into the search, for the render harness.
+    pub fn search_text(&self, query: &str) {
+        self.search.set_text(query);
+    }
+
+    /// Put the keyboard in the search field.
+    pub fn focus_search(&self) {
+        self.search.grab_focus();
+    }
+
+    /// Clear the search, and say whether there was one: Esc clears a search
+    /// before it closes settings.
+    pub fn clear_search(&self) -> bool {
+        let had = !self.search.text().is_empty();
+        if had {
+            self.search.set_text("");
+        }
+        had
+    }
+
+    /// Open `what`.
+    pub fn open(&self, what: &Open) {
+        match what {
+            Open::Last => {}
+            Open::Pane(name) => self.show(name),
+            Open::Row(id) => {
+                self.reveal(id);
+            }
         }
     }
 
-    /// Open the tab a search result names, bring its row into view and
+    /// Switch to a pane by its stack name. Unknown names are ignored.
+    pub fn show(&self, name: &str) {
+        if let Some((_, row)) = self.rows.iter().find(|(n, _)| *n == name) {
+            // Selecting the row drives the stack through its handler, so the
+            // sidebar and the pane cannot disagree.
+            self.nav.select_row(Some(row));
+        } else {
+            log::warn!("settings: no pane named {name}");
+        }
+    }
+
+    /// Open the pane a search result names, bring its row into view and
     /// light it up for a moment (`search.rs`). False when `id` names no
     /// row of the index.
     pub fn reveal(&self, id: &str) -> bool {
@@ -274,25 +560,25 @@ impl SettingsSection {
                 true
             }
             None => {
-                log::warn!("settings: no row {group} › {title} on the {tab} tab");
+                log::warn!("settings: no row {group} › {title} on the {tab} pane");
                 false
             }
         }
     }
 
-    /// The Displays tab's apply, for the render harness.
+    /// The Displays pane's apply, for the render harness.
     pub fn demo_displays(&self) {
         self.displays.demo_apply();
     }
 
-    /// The Input tab's layout picker, open on `query`, for the render
+    /// The Input pane's layout picker, open on `query`, for the render
     /// harness.
     pub fn demo_layout_pick(&self, query: &str) {
         self.input.demo_pick(query);
     }
 
-    /// Re-read every tab from what it edits. The panel refreshes every
-    /// section when it opens.
+    /// Re-read every pane from what it edits. Settings refreshes every pane
+    /// when it opens.
     pub fn refresh(&self) {
         self.look.refresh();
         self.idle.refresh();
@@ -305,6 +591,50 @@ impl SettingsSection {
         self.system.refresh();
         self.quality.refresh();
     }
+}
+
+/// A group's heading in the sidebar: not selectable, not a stop for the
+/// keyboard.
+fn group_header(group: Group) -> gtk4::ListBoxRow {
+    let row = gtk4::ListBoxRow::new();
+    row.set_selectable(false);
+    row.set_activatable(false);
+    row.set_focusable(false);
+    let label = crate::ui::overline(group.title(), crate::ui::Tone::Muted);
+    label.set_halign(gtk4::Align::Start);
+    label.add_css_class("settings-nav-group");
+    row.set_child(Some(&label));
+    row
+}
+
+/// A pane's row in the sidebar: its glyph and its title.
+fn nav_row(pane: &Pane) -> gtk4::ListBoxRow {
+    let r = crate::ui::row(pane.glyph, pane.title, "");
+    crate::ui::glyph::adopt(&r.icon, crate::ui::Text::TitleSm, crate::ui::Tone::Muted);
+    let row = gtk4::ListBoxRow::new();
+    row.set_child(Some(&r.root));
+    row
+}
+
+fn sidebar_scroller(list: &gtk4::ListBox) -> gtk4::ScrolledWindow {
+    gtk4::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk4::PolicyType::Never)
+        .vscrollbar_policy(gtk4::PolicyType::Automatic)
+        .vexpand(true)
+        .child(list)
+        .build()
+}
+
+/// The first row of `list` the keyboard can land on.
+fn first_selectable(list: &gtk4::ListBox) -> Option<gtk4::ListBoxRow> {
+    let mut i = 0;
+    while let Some(row) = list.row_at_index(i) {
+        if row.is_selectable() {
+            return Some(row);
+        }
+        i += 1;
+    }
+    None
 }
 
 /// Every widget under `root`, depth first, `root` included.
@@ -402,14 +732,38 @@ mod tests {
     #[test]
     fn every_prefix_opens_exactly_one_tab() {
         let mut seen = std::collections::HashSet::new();
-        for tab in &TABS {
-            for prefix in tab.prefixes {
-                assert_eq!(tab_for_prefix(prefix), Some(tab.name), "{prefix}");
+        for pane in &PANES {
+            for prefix in pane.prefixes {
+                assert_eq!(tab_for_prefix(prefix), Some(pane.name), "{prefix}");
                 assert!(seen.insert(*prefix), "{prefix} is claimed twice");
             }
         }
         assert_eq!(tab_for_prefix(":set"), None);
         assert_eq!(tab_for_prefix(":wallpaper"), Some("look"));
-        assert_eq!(prefixes().count(), TABS.len());
+        assert_eq!(prefixes().count(), PANES.len());
+    }
+
+    #[test]
+    fn a_prefix_opens_its_pane_or_settings_as_it_was() {
+        assert_eq!(Open::for_prefix(":glass"), Some(Open::Pane("glass")));
+        assert_eq!(Open::for_prefix(":sleep"), Some(Open::Pane("idle")));
+        assert_eq!(Open::for_prefix(":settings"), Some(Open::Last));
+        assert_eq!(Open::for_prefix(":pref"), Some(Open::Last));
+        assert_eq!(Open::for_prefix(":wifi"), None);
+    }
+
+    #[test]
+    fn every_search_table_names_a_pane() {
+        for (tab, _) in search::TABLES {
+            assert!(PANES.iter().any(|p| p.name == *tab), "{tab}");
+        }
+        // Machine panes after settings panes, so the sidebar's groups are
+        // each one run.
+        let groups: Vec<Group> = PANES.iter().map(|p| p.group).collect();
+        assert!(
+            groups
+                .windows(2)
+                .all(|w| !(w[0] == Group::Machine && w[1] == Group::Settings))
+        );
     }
 }
