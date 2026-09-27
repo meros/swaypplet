@@ -487,7 +487,8 @@ every pixel of the lock surface has to stay under the compositor's discard
 line (0.28) or become glass, and the 0.20 scrim already spends most of it.
 Measured on renders, the halo leaves the clock at Lc 39–57 over a bright
 image in light mode. So the lock asks the compositor for the backdrop
-instead, the way GNOME, macOS and Windows treat the screen behind a
+instead, the way GNOME (blur radius 90, brightness 0.65) and KDE (radius
+50, brightness 0.7) treat the screen behind a
 password field: the wallpaper under the lock blurred and multiplied by a
 brightness over black. `/etc/swaypplet/glass.json` announces it as
 `lock_backdrop` (`blur`, `brightness`), and where it is there and
