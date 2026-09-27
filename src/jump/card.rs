@@ -180,14 +180,13 @@ pub fn remember(frame: Frame) -> Option<(String, gdk::Texture)> {
 /// panel at one edge. Each picture carries its box in device pixels, which
 /// the capture is cut to and the frame is drawn in.
 pub fn preview(scene: Option<&Scene>, w: i32, h: i32, scale: f64, live: &mut Live) -> gtk4::Widget {
-    // No clip anywhere in a picture. Under the switcher's 3D transform, GTK
-    // draws a clipped node offscreen first, at a scale it estimates from
-    // the transform, and for a place turned left that estimate is low: its
-    // pictures came out blurred (carousel.rs, `placed`). So the box is a
-    // plain `Fixed`, and every window is kept inside it by arithmetic
-    // instead: `scene::fit` never crops, and the rectangle is clamped here
-    // against rounding and the 4 px floor, so the `Fixed` never asks for
-    // more than `w` by `h`.
+    // No clip anywhere in a picture: GTK draws a clipped node through an
+    // offscreen, which is where resolution goes missing (see
+    // `LivePicture::snapshot` for the one that did). So the box is a plain
+    // `Fixed`, and every window is kept inside it by arithmetic instead:
+    // `scene::fit` never crops, and the rectangle is clamped here against
+    // rounding and the 4 px floor, so the `Fixed` never asks for more than
+    // `w` by `h`.
     let fixed = gtk4::Fixed::new();
     fixed.add_css_class("jump-preview");
     fixed.set_size_request(w, h);
@@ -404,7 +403,7 @@ mod picture_imp {
 
     use gtk4::prelude::*;
     use gtk4::subclass::prelude::*;
-    use gtk4::{gdk, glib, graphene, gsk};
+    use gtk4::{gdk, glib, graphene};
 
     #[derive(Default)]
     pub struct LivePicture {
@@ -439,33 +438,30 @@ mod picture_imp {
             if w <= 0.0 || h <= 0.0 || tw <= 0.0 || th <= 0.0 {
                 return;
             }
-            let ((x, y, dw, dh), exact) = super::placed((w, h), (tw, th), scale);
-            snapshot.append_scaled_texture(
-                texture,
-                if exact {
-                    gsk::ScalingFilter::Nearest
-                } else {
-                    gsk::ScalingFilter::Linear
-                },
-                &graphene::Rect::new(x, y, dw, dh),
-            );
+            let ((x, y, dw, dh), _) = super::placed((w, h), (tw, th), scale);
+            // A plain texture node, never a scaled one. GTK 4.22's GPU
+            // renderer draws a scaled texture node (`append_scaled_texture`,
+            // any filter) through an offscreen at scale 1 and stretches that
+            // onto the 2x surface: every live picture came out at half the
+            // display's resolution, its pixels doubled, while the text
+            // around it stayed sharp. A one-pixel checkerboard drawn one to
+            // one showed it: a scaled node turned it white with moiré
+            // (nearest) or flat grey (linear); a plain node keeps it
+            // (dev/render.sh with SWPP_SCALE=2). One to one, a plain node
+            // samples the frame's own pixels; contained, it filters linearly.
+            snapshot.append_texture(texture, &graphene::Rect::new(x, y, dw, dh));
         }
     }
 }
 
 glib::wrapper! {
-    /// A window's live frame, drawn with linear filtering.
+    /// A window's live frame, one frame pixel to one device pixel.
     ///
-    /// Not a `GtkPicture`, whose texture node lets GTK pick a mipmap level
-    /// from the scale it estimates for the transform above it. Under the
-    /// switcher's perspective that estimate is badly low for a place turned
-    /// left (0.26 where the place is drawn at about 1: `graphene_matrix_
-    /// decompose` on a perspective matrix depends on which way the plane
-    /// turns), so its frames were sampled from a quarter-size mip and came
-    /// out blurred while the right side stayed sharp. Linear filtering uses
-    /// no mipmaps and samples the frame itself. The frames are already cut
-    /// to about the size they are drawn at (`live.rs`), so nothing is left
-    /// for mipmaps to smooth.
+    /// Not a `GtkPicture`, which sizes and places its paintable itself:
+    /// the frame is already cut to the picture's box in device pixels
+    /// (`live.rs`), and is drawn at that size from a corner on the device
+    /// grid (`placed`), as a plain texture node (`snapshot`, for why not a
+    /// scaled one).
     pub struct LivePicture(ObjectSubclass<picture_imp::LivePicture>)
         @extends gtk4::Widget,
         @implements gtk4::Accessible, gtk4::Buildable, gtk4::ConstraintTarget;

@@ -28,6 +28,8 @@
 #   SWPP_THEME=light SWPP_BG=black dev/render.sh --mode panel     # light mode over a black desktop
 #   SWPP_BG=~/Pictures/wallpapers/x.jpg dev/render.sh --mode osd   # over a given wallpaper
 #   SWPP_KEYS="'shut down' -k Return" dev/render.sh --mode panel  # typed, as a keyboard would
+#   SWPP_SCALE=2 dev/render.sh --res 2880x1800 --mode jump          # the laptop's 2x
+#   SWPP_TOPLEVELS=1 ...                                            # and every window, grim -T, beside OUT
 #
 # --mode keybinds copies the live session's bindsym lines into the nested
 # config (SWPP_KEYBINDS_FROM overrides the source), because the sheet is
@@ -62,7 +64,7 @@ CFG="$(mktemp /tmp/swpp-sway-XXXX.conf)"
 LOG="$(mktemp /tmp/swpp-sway-XXXX.log)"
 SOCK="$RUNTIME/sway-render-$$.sock"
 {
-  printf 'output HEADLESS-1 resolution %sx%s position 0 0 scale 1\n' "$W" "$H"
+  printf 'output HEADLESS-1 resolution %sx%s position 0 0 scale %s\n' "$W" "$H" "${SWPP_SCALE:-1}"
   printf 'default_border none\nxwayland disable\n'
   # A wallpaper, for a shot that is about one: the glass frosts what is
   # behind it, and `look.tint` takes its hue from whatever sway's `bg` line
@@ -120,7 +122,7 @@ unset I3SOCK
 # the shot covers all of them: for a surface that has to be on every screen.
 OUTPUTS="${SWPP_OUTPUTS:-1}"
 for n in $(seq 2 "$OUTPUTS"); do
-  printf 'output HEADLESS-%s resolution %sx%s position %s 0 scale 1\n' "$n" "$W" "$H" "$(( (n - 1) * W ))" >> "$CFG"
+  printf 'output HEADLESS-%s resolution %sx%s position %s 0 scale %s\n' "$n" "$W" "$H" "$(( (n - 1) * W ))" "${SWPP_SCALE:-1}" >> "$CFG"
 done
 GRIM_OUTPUT=(-o HEADLESS-1)
 [ "$OUTPUTS" -gt 1 ] && GRIM_OUTPUT=()
@@ -517,4 +519,12 @@ fi
 
 [ -z "$mapped" ] && { echo "WARNING: no swaypplet surface in tree"; echo "--- app log ---"; head -30 /tmp/swpp-app.log; }
 [ -z "$captured" ] && echo "WARNING: capture stayed blank after retries"
+# SWPP_TOPLEVELS=1: every window as the compositor captures it (grim -T,
+# ext-image-copy-capture), at its own resolution, as OUT-<id>.png: the
+# reference a live picture of it is compared against.
+if [ -n "${SWPP_TOPLEVELS:-}" ]; then
+  for id in $(swaymsg -t get_tree | jq -r '.. | objects | .foreign_toplevel_identifier? // empty'); do
+    "$GRIM_BIN" -T "$id" "${OUT%.png}-$id.png" 2>/dev/null || echo "render.sh: grim -T $id failed" >&2
+  done
+fi
 echo "wrote $OUT (${W}x${H}, mode=$MODE, display=$WD)"
