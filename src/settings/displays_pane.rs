@@ -63,6 +63,9 @@ struct Details {
 }
 
 struct Pane {
+    /// Apply and Undo, with their status line; shown only while there is
+    /// something to apply.
+    footer: gtk4::Box,
     root: gtk4::Box,
     /// Everything that edits; insensitive while a layout is on trial.
     body: gtk4::Box,
@@ -220,6 +223,7 @@ impl DisplaysPane {
         let pane = Rc::new(Pane {
             root,
             body,
+            footer: footer.clone(),
             unavailable,
             area,
             fixed,
@@ -573,6 +577,9 @@ impl Pane {
         self.apply
             .set_sensitive(idle && self.dirty.get() && problem.is_none());
         self.undo.set_sensitive(idle && self.dirty.get());
+        // Nothing to apply: no row of disabled buttons floating under the
+        // group. It comes back with the first change.
+        self.footer.set_visible(self.dirty.get() || !idle);
         if idle && self.dirty.get() {
             match problem {
                 Some(p) => self.say(&p.say(), true),

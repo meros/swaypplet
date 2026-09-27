@@ -930,10 +930,15 @@ fn build_flight_deck(
                     })
                 };
                 *entry.borrow_mut() = Some((tile.toggle.clone(), tile.status.clone()));
-                // Harness hook: `SWAYPPLET_PANEL_FOLD="No Sleep"` opens that
+                // Harness hook: `SWAYPPLET_PANEL_FOLD=no-sleep` opens that
                 // switch's durations once the panel is up, for a shot of the
                 // fold (the nested session has no pointer).
-                if std::env::var("SWAYPPLET_PANEL_FOLD").ok().as_deref() == Some(which.label()) {
+                // "No Sleep" or "no-sleep": the dash form keeps a space out
+                // of dev/render-all.sh's env field.
+                let asked = std::env::var("SWAYPPLET_PANEL_FOLD")
+                    .map(|v| v.replace('-', " "))
+                    .unwrap_or_default();
+                if asked.eq_ignore_ascii_case(which.label()) {
                     let detail = tile.detail.clone();
                     glib::timeout_add_local_once(std::time::Duration::from_millis(600), move || {
                         detail.emit_clicked();

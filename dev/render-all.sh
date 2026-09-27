@@ -78,6 +78,9 @@ settings-bar|preview:settings.bar|1400x1400|
 settings-alerts|preview:settings.alerts|1400x1400|
 settings-launcher|preview:settings.launcher|1400x1400|
 settings-glass|preview:settings.glass|1400x1400|
+settings-displays|preview:settings.displays|1400x1400|
+users|preview:users|700x600|
+tiles-fold|panel|1600x1000|SWAYPPLET_PANEL_FOLD=no-sleep
 '
 
 wallpaper() {
