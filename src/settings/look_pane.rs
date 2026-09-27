@@ -403,9 +403,10 @@ impl LookPane {
         let grid = gtk4::FlowBox::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .selection_mode(gtk4::SelectionMode::None)
-            // Up to four thumbnails per row across the card width, flowing
-            // down to 3 or 2 when squeezed onto narrower displays.
-            .min_children_per_line(2)
+            // Three or four thumbnails per row: the pictures shrink to the
+            // column (the pixbuf is decoded at 2x for HiDPI, so its natural
+            // width would otherwise wrap the third onto a line of its own).
+            .min_children_per_line(3)
             .max_children_per_line(4)
             .row_spacing(crate::tokens::space(2) as u32)
             .column_spacing(crate::tokens::space(2) as u32)

@@ -25,10 +25,11 @@
     margin-bottom: var(--space-2);
 }
 
-/* Navigation, not content: the row component at a sidebar's density. */
+/* Navigation, not content: the row component at the dense row height,
+   the same rhythm as the pane's own rows beside it. */
 .settings-sidebar .ui-row {
-    min-height: 0;
-    padding: var(--space-3) var(--space-4);
+    min-height: var(--row-height-dense);
+    padding: 0 var(--space-4);
 }
 
 .settings-nav-group {
@@ -48,22 +49,25 @@
     margin-bottom: var(--space-2);
 }
 
-/* One knob: a fixed label gutter so every rail in the pane starts at the same
-   x, the rail taking whatever is left, and a fixed value column (the label's
-   width in characters, src/settings/ui.rs) so the number does not shove the
-   rail as it grows a digit. */
+/* One row, one height: every row of a pane, a switch, a dropdown or a
+   rail, stands on the dense row height, so a group is a column of equal
+   steps. A fixed label gutter, so every rail in the pane starts at the same
+   x, and a fixed value column (the label's width in characters,
+   src/settings/form.rs) so the number does not shove the rail as it grows
+   a digit. */
 .settings-row {
-    min-height: 26px;
+    min-height: var(--row-height-dense);
 }
 
 .settings-row-label {
     min-width: 104px;
 }
 
-/* A switch row keeps the label gutter but lets the label take the width, so
-   the switch sits at the far end of every row and the column lines up. */
-.settings-switch-row {
-    min-height: 30px;
+/* A control at the row's far end (form::Placement::Trailing): never
+   narrower than this, so a column of dropdowns lines up on both edges and
+   the eye lands on the same x for every value. */
+.settings-control {
+    min-width: 220px;
 }
 
 /* The preset and wallpaper grids. GTK wraps each child of a flow box in a
@@ -84,7 +88,7 @@
     margin-bottom: var(--space-3);
 }
 .settings-picker > row > .ui-row {
-    min-height: 26px;
+    min-height: var(--row-height-dense);
     padding: var(--space-1) var(--space-3);
 }
 .settings-footer {
@@ -123,7 +127,7 @@
 }
 
 .prefix-row {
-    min-height: 26px;
+    min-height: var(--row-height-dense);
     padding: var(--space-1) var(--space-2);
 }
 

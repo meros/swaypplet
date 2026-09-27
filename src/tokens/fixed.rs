@@ -43,13 +43,14 @@ pub const DURATION: [(&str, u32); 5] = [
 pub const SURFACE_KEY: (Rgb, f64) = (Rgb::hex(0x32302f), 0.5);
 
 /// Component tokens (§3.9): `--<name>` in px.
-pub const COMPONENT: [(&str, u32); 8] = [
+pub const COMPONENT: [(&str, u32); 9] = [
     ("control-height", 30),
     ("control-height-small", 24),
     ("field-height", 34),
     ("chip-height", 26),
     ("menu-item-height", 32),
     ("row-height", 40),
+    ("row-height-dense", 32),
     ("tile-height", 52),
     ("track-height", 6),
 ];

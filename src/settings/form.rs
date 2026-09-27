@@ -12,6 +12,24 @@ use gtk4::prelude::*;
 
 use crate::ui::{self, Kind, Text, Tone};
 
+/// Where a row's control sits: the alternatives zoo's open decision
+/// (docs/alternatives-zoo.html, "settings-control-placement"). One switch,
+/// read by [`kind_row`]; a slider always fills, and an entry always fills,
+/// because both need the width.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Placement {
+    /// The control at the row's far end, at its natural width but never
+    /// narrower than `.settings-control` (so a column of dropdowns lines up
+    /// on both edges): the row reads label, then value, as a sentence does.
+    /// macOS System Settings, GNOME 47, iOS.
+    Trailing,
+    /// The control takes the rest of the row from a fixed label gutter, so
+    /// every control in the pane starts at one x: a form's column.
+    Fill,
+}
+
+pub const CONTROL_PLACEMENT: Placement = Placement::Trailing;
+
 /// What a wrapping label is allowed to ASK for, in characters.
 ///
 /// A GtkLabel with `wrap` set still requests the whole text on one line as
@@ -55,7 +73,7 @@ fn hint_label(text: &str) -> gtk4::Label {
 
 /// The label in a row's gutter.
 pub fn row_label(label: &str) -> gtk4::Label {
-    let name = ui::text(label, Text::Label, Tone::Fg);
+    let name = ui::text(label, Text::Body, Tone::Fg);
     name.add_css_class("settings-row-label");
     name
 }
@@ -90,10 +108,20 @@ pub fn row() -> gtk4::Box {
 /// A label in the gutter and one control taking the rest of the row.
 pub fn kind_row(label: &str, control: &impl IsA<gtk4::Widget>) -> gtk4::Box {
     let row = row();
-    row.append(&row_label(label));
+    let name = row_label(label);
+    row.append(&name);
 
     let control = control.as_ref();
-    control.set_hexpand(true);
+    // A text field is the one control that is better wide: what you type
+    // into it is read there.
+    let fills = CONTROL_PLACEMENT == Placement::Fill || control.is::<gtk4::Entry>();
+    if fills {
+        control.set_hexpand(true);
+    } else {
+        name.set_hexpand(true);
+        control.set_halign(gtk4::Align::End);
+        control.add_css_class("settings-control");
+    }
     row.append(control);
     row
 }
@@ -101,7 +129,6 @@ pub fn kind_row(label: &str, control: &impl IsA<gtk4::Widget>) -> gtk4::Box {
 /// A label, the hint as its tooltip, and a switch at the far end.
 pub fn switch_row(label: &str, hint: &str, active: bool) -> (gtk4::Box, gtk4::Switch) {
     let row = row();
-    row.add_css_class("settings-switch-row");
     row.set_tooltip_text(Some(hint));
 
     let name = row_label(label);

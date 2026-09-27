@@ -16,9 +16,12 @@ use gtk4::prelude::*;
 use super::{Open, SettingsSection};
 use crate::shell::{Namespace, Surface};
 
-/// The widest the card grows. Past it, rows of a pane stretch into lines
-/// too long to read, and the sidebar drifts from the setting it names.
-const MAX_WIDTH: i32 = 1180;
+/// The widest the card grows: the sidebar and a pane column of about 720
+/// px, the width a settings row is read across in one glance (macOS clamps
+/// its content near 600, GNOME at 600 to 800). Past it, a label and the
+/// control at the row's far end drift apart, and the sidebar from the
+/// setting it names.
+const MAX_WIDTH: i32 = 980;
 /// Between the card and the screen's edges (the bar's exclusive zone is
 /// already outside the surface).
 const MARGIN: i32 = 32;
