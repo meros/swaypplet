@@ -1,4 +1,4 @@
-# Lock transition — work in progress
+# Lock transition
 
 **Goal.** A true cross-fade between the desktop and the lock screen, both
 directions, with no screenshots and no bad frames. Not a fade to black, not a

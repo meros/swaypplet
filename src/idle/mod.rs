@@ -202,7 +202,7 @@ pub fn run() -> ! {
     // Warm the next locker now. The first GTK window a process presents costs
     // ~880 ms and for a locker spawned at lock time that window IS the lock
     // screen, which is why locking used to take about a second to show
-    // anything (swaypplet docs/LOCK_TRANSITION_WIP.md). Paying it here, while
+    // anything (swaypplet docs/LOCK_TRANSITION.md). Paying it here, while
     // the session is unlocked and nobody is waiting, makes it free.
     locker::prewarm();
 

@@ -29,7 +29,7 @@ use super::Ev;
 ///
 /// The first GTK window a process presents costs ~880 ms, and for a locker
 /// spawned at lock time that window is the lock screen (measured;
-/// swaypplet docs/LOCK_TRANSITION_WIP.md). Paying it while nothing is waiting
+/// swaypplet docs/LOCK_TRANSITION.md). Paying it while nothing is waiting
 /// is the difference between a lock screen that appears in a second and one
 /// that appears in a frame.
 static ARMED: std::sync::Mutex<Option<Child>> = std::sync::Mutex::new(None);

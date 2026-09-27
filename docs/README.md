@@ -10,17 +10,16 @@
 | [design-system.md](design-system.md) | Tokens, modes, the wallpaper tint, glass, contrast, components, enforcement |
 | [MOTION.md](MOTION.md) | Motion tokens and what each duration means |
 | [SETTINGS.md](SETTINGS.md) | The settings store, its layers and the panes |
+| [LAUNCHER.md](LAUNCHER.md) | The launcher: sources, ranking, prefixes and keys |
 | [BAR_VISION.md](BAR_VISION.md) | The bar's principles (P1–P10) and its layout; the code cites it throughout |
 | [AUTH_CARD.md](AUTH_CARD.md) | The password, fingerprint and face card shared by the lock screen and polkit |
-| [LOCK_TRANSITION_WIP.md](LOCK_TRANSITION_WIP.md) | The cross-fade between desktop and lock screen: built, with what is still unverified |
-| [PASSKEY_CABLE.md](PASSKEY_CABLE.md) | Why phone-as-passkey unlock (caBLE) is not built: the investigation |
+| [LOCK_TRANSITION.md](LOCK_TRANSITION.md) | The cross-fade between desktop and lock screen: built, with what is still unverified |
 
 ## Plans
 
 | Document | Covers |
 |---|---|
 | [ROADMAP.md](ROADMAP.md) | What is in progress, what is next (ranked), and what was rejected and why |
-| [superpowers/specs/](superpowers/specs/) | Design specs written for single features |
 
 ## Research
 
@@ -29,6 +28,7 @@
 | [research/liquid-glass.md](research/liquid-glass.md) | The liquid-glass optics the compositor's shader follows |
 | [research/adaptive-glass.md](research/adaptive-glass.md) | Glass that responds to its backdrop, beyond the photochromic term |
 | [research/display-profiles.md](research/display-profiles.md) | Display profiles in the process, replacing kanshi |
+| [research/passkey-cable.md](research/passkey-cable.md) | Why phone-as-passkey unlock (caBLE) is not built: the investigation |
 
 ## Prior art
 
@@ -51,9 +51,6 @@ browser.
 |---|---|
 | [design-system-zoo.html](design-system-zoo.html) | The design system's tokens and components, dark and light |
 | [liquid-glass-zoo.html](liquid-glass-zoo.html) | Liquid-glass physics and material variants |
-| [auth-zoo.html](auth-zoo.html) | Surface alignment and motion across the auth, lock and polkit surfaces |
-| [helm-zoo.html](helm-zoo.html) | Concepts for the panel as a command deck ("helm") |
-| [delight-zoo.html](delight-zoo.html) | Micro-gestures: small motion and feedback details |
 
 ## Tools
 

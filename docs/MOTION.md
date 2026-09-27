@@ -136,7 +136,7 @@ overshoot at 60%, and 60% of 500 is 300.
 ## The lock screen is not an exception
 
 It looks like one, because the compositor cross-fades the whole lock surface
-(`src/lock/fade.rs`, `docs/LOCK_TRANSITION_WIP.md`) and the card must not
+(`src/lock/fade.rs`, `docs/LOCK_TRANSITION.md`) and the card must not
 animate itself on top of that — its opacity would become CSS × surface and it
 would visibly lag the wallpaper under it. That is why `.lock-crossfade
 .lock-card { animation: none; }` exists and it stays.

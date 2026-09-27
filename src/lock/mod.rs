@@ -59,7 +59,7 @@ fn face_settle() -> Duration {
 /// Startup timing, in milliseconds since `run()` was entered.
 ///
 /// The lock screen takes about a second to appear, and the cross-fade work
-/// (docs/LOCK_TRANSITION_WIP.md) is gated on where that second goes. Attribute
+/// (docs/LOCK_TRANSITION.md) is gated on where that second goes. Attribute
 /// it rather than guess: every stage below is a point the measurement needed.
 /// Debug level, so it costs a branch in normal use.
 pub(super) fn stage(what: &str) {
@@ -128,7 +128,7 @@ pub fn reason() -> String {
 /// Pay the first-window cost now, then wait to be told to lock.
 ///
 /// The first GTK window a process presents costs ~880 ms (measured;
-/// docs/LOCK_TRANSITION_WIP.md), and it lands on whichever window is first.
+/// docs/LOCK_TRANSITION.md), and it lands on whichever window is first.
 /// For a locker spawned at lock time that is the lock screen itself, which is
 /// why the lock screen takes about a second to appear. Presenting a throwaway
 /// 1x1 transparent layer surface absorbs it, and doing that while nothing is
