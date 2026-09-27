@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use gtk4::prelude::*;
 use gtk4::{gdk, glib};
 
-use super::live::{Crop, Frame, Size, Want};
+use super::live::{Crop, Frame, Pixels, Size, Want};
 use super::scene::{self, Scene};
 
 /// Every picture a window's frames land on, by window identifier. Each
@@ -73,6 +73,16 @@ impl Live {
             .collect()
     }
 
+    /// Device pixels to one of GTK's where the pictures are drawn, from the
+    /// first one on a surface; 1 before any is.
+    pub fn device_scale(&self) -> f64 {
+        self.pictures
+            .values()
+            .flatten()
+            .find(|p| p.native().is_some())
+            .map_or(1.0, device_scale)
+    }
+
     /// Register a picture for a window's frames, drawn by the caller. It
     /// starts from the window's last picture, when one was ever shown.
     pub fn add(&mut self, id: String, picture: LivePicture) {
@@ -95,7 +105,7 @@ impl Live {
         if !self.pictures.contains_key(&frame.id) {
             return None;
         }
-        let (id, texture) = remember(frame);
+        let (id, texture) = remember(frame)?;
         self.show(&id, &texture);
         Some(texture)
     }
@@ -134,8 +144,21 @@ pub fn device_scale(widget: &impl IsA<gtk4::Widget>) -> f64 {
 }
 
 /// A frame as a texture, kept as its window's last picture ([`LAST`]).
-pub fn remember(frame: Frame) -> (String, gdk::Texture) {
-    let texture = texture(frame.width, frame.height, frame.pixels);
+///
+/// `None` when GTK would not take a GPU frame; the GPU path is then off
+/// for the process (`gpu::refuse`), and the pictures keep what they had
+/// until the stream's next start sends frames in memory.
+pub fn remember(frame: Frame) -> Option<(String, gdk::Texture)> {
+    let texture = match frame.pixels {
+        Pixels::Memory(pixels) => texture(frame.width, frame.height, pixels),
+        Pixels::Gpu(gpu) => match gpu.into_texture() {
+            Ok(texture) => texture,
+            Err(e) => {
+                super::gpu::refuse(&e);
+                return None;
+            }
+        },
+    };
     LAST.with(|l| {
         let mut last = l.borrow_mut();
         if last.len() >= LAST_MAX && !last.contains_key(&frame.id) {
@@ -143,7 +166,7 @@ pub fn remember(frame: Frame) -> (String, gdk::Texture) {
         }
         last.insert(frame.id.clone(), texture.clone());
     });
-    (frame.id, texture)
+    Some((frame.id, texture))
 }
 
 /// Premultiplied BGRA, tightly packed, as `live::Frame` carries it.

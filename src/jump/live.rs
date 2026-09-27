@@ -12,12 +12,17 @@
 //! connection for every window on the card, and one shm buffer per window,
 //! reused for every frame.
 //!
-//! Frames are box-filtered down on the worker before they cross to GTK. A
-//! window on a 2x panel is 16 MB a frame, and the card draws it at about
-//! 300 px wide; uploading the full buffer at 20 frames a second for five
-//! windows would spend more memory bandwidth than everything else on screen.
+//! Frames are averaged down before they cross to GTK. A window on a 2x
+//! panel is 20 MB a frame, and the card draws it at about 400 px wide;
+//! uploading the full buffer at 30 frames a second for five windows would
+//! spend more memory bandwidth than everything else on screen. A stream
+//! that may hand GTK textures ([`Stream::start_wants`]) captures into a
+//! dmabuf and averages on the GPU (`gpu.rs`), so no frame touches the CPU;
+//! otherwise, and whenever that is not possible, the capture is shared
+//! memory and the average runs here ([`downscale`]).
 
 use std::os::fd::{AsFd, OwnedFd};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -37,15 +42,40 @@ use wayland_protocols::ext::image_copy_capture::v1::client::{
     ext_image_copy_capture_manager_v1::{self, ExtImageCopyCaptureManagerV1},
     ext_image_copy_capture_session_v1::{self, ExtImageCopyCaptureSessionV1},
 };
+use wayland_protocols::wp::linux_dmabuf::zv1::client::{
+    zwp_linux_buffer_params_v1::{self, ZwpLinuxBufferParamsV1},
+    zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1,
+};
 
-/// One window's pixels, scaled down: premultiplied BGRA, rows `width * 4`
-/// bytes apart, which is `gdk::MemoryFormat::B8g8r8a8Premultiplied`.
+use super::gpu::{self, Gpu, GpuFrame};
+
+/// One window's pixels, scaled down.
 pub struct Frame {
     /// The `foreign_toplevel_identifier` sway reports for the window.
     pub id: String,
     pub width: u32,
     pub height: u32,
-    pub pixels: Vec<u8>,
+    pub pixels: Pixels,
+}
+
+/// Where a frame's pixels are.
+pub enum Pixels {
+    /// Premultiplied BGRA, rows `width * 4` bytes apart, which is
+    /// `gdk::MemoryFormat::B8g8r8a8Premultiplied`.
+    Memory(Vec<u8>),
+    /// A dmabuf on the GPU, the same layout ([`GpuFrame`]).
+    Gpu(GpuFrame),
+}
+
+impl Pixels {
+    /// The bytes, for a caller that needs them in memory; a stream that
+    /// such a caller starts ([`Stream::start`]) never sends a GPU frame.
+    pub fn into_memory(self) -> Option<Vec<u8>> {
+        match self {
+            Pixels::Memory(v) => Some(v),
+            Pixels::Gpu(_) => None,
+        }
+    }
 }
 
 /// A running capture of a set of windows. Dropping it stops the worker, which
@@ -94,7 +124,7 @@ impl Stream {
         fps: u32,
         tx: async_channel::Sender<Frame>,
     ) -> Stream {
-        Stream::start_wants(
+        Stream::spawn(
             ids.into_iter()
                 .map(|id| Want {
                     id,
@@ -103,6 +133,7 @@ impl Stream {
                 })
                 .collect(),
             fps,
+            false,
             tx,
         )
     }
@@ -115,7 +146,19 @@ impl Stream {
     /// same identifier; a lost connection is made again the same way. A
     /// picture fed by a stream therefore never freezes because the stream
     /// died: it freezes only while its window draws nothing.
+    ///
+    /// Its frames are GPU frames where the GPU path works ([`Pixels::Gpu`]),
+    /// for a caller that makes textures of them.
     pub fn start_wants(wants: Vec<Want>, fps: u32, tx: async_channel::Sender<Frame>) -> Stream {
+        Stream::spawn(wants, fps, gpu::allowed(), tx)
+    }
+
+    fn spawn(
+        wants: Vec<Want>,
+        fps: u32,
+        use_gpu: bool,
+        tx: async_channel::Sender<Frame>,
+    ) -> Stream {
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
         let spawned = std::thread::Builder::new()
@@ -128,9 +171,16 @@ impl Stream {
                 let mut backoff = RESTART_MIN;
                 let ids: Vec<&str> = wants.iter().map(|w| w.id.as_str()).collect();
                 log::info!("jump: capture start {ids:?} at {fps} fps");
+                // Made on the first dmabuf device sway names, and kept across
+                // reconnects: the context belongs to this thread.
+                let mut gpu = if use_gpu {
+                    GpuState::Untried
+                } else {
+                    GpuState::Off
+                };
                 while !flag.load(Ordering::Relaxed) && !tx.is_closed() {
                     let started = Instant::now();
-                    match run(&wants, interval, &tx, &flag) {
+                    match run(&wants, interval, &tx, &flag, &mut gpu) {
                         Ok(()) => break,
                         // Every time: the backoff below spaces them out to
                         // one in 5 s at most, and a picture that froze needs
@@ -181,11 +231,40 @@ fn next_backoff(d: Duration) -> Duration {
     (d * 2).clamp(RESTART_MIN, RESTART_MAX)
 }
 
+/// The worker's GPU context, if it has one.
+enum GpuState {
+    /// This stream hands GTK memory, or the context could not be made.
+    Off,
+    /// Not needed yet.
+    Untried,
+    On(Rc<Gpu>),
+}
+
+impl GpuState {
+    /// The context for sway's dmabuf device `dev`, made on first use.
+    fn for_device(&mut self, dev: u64) -> Option<Rc<Gpu>> {
+        if matches!(self, GpuState::Untried) {
+            *self = match Gpu::open(dev) {
+                Ok(g) => GpuState::On(Rc::new(g)),
+                Err(e) => {
+                    log::info!("jump: no gpu frames: {e}");
+                    GpuState::Off
+                }
+            };
+        }
+        match self {
+            GpuState::On(g) if g.serves(dev) && gpu::allowed() => Some(g.clone()),
+            _ => None,
+        }
+    }
+}
+
 fn run(
     wants: &[Want],
     interval: Duration,
     tx: &async_channel::Sender<Frame>,
     stop: &AtomicBool,
+    gpu: &mut GpuState,
 ) -> Result<(), String> {
     let conn = Connection::connect_to_env().map_err(|e| format!("wayland connect: {e}"))?;
     let mut queue = conn.new_event_queue();
@@ -213,6 +292,7 @@ fn run(
         .clone()
         .ok_or("compositor does not advertise ext-foreign-toplevel-image-capture-source-v1")?;
     let shm = state.shm.clone().ok_or("compositor has no wl_shm")?;
+    let dmabuf = state.dmabuf.clone();
 
     state.sessions = wants.iter().cloned().map(Session::new).collect();
 
@@ -273,32 +353,36 @@ fn run(
                 continue;
             }
             if std::mem::take(&mut s.ready)
-                && let Some(buffer) = &s.buffer
+                && let Some(buffer) = &mut s.buffer
+                && let Some(frame) = buffer.frame(&s.want)
             {
-                let (width, height, pixels) = downscale(
-                    buffer.memory.as_slice(),
-                    buffer.width,
-                    region(s.want.crop, buffer.width, buffer.height),
-                    buffer.format,
-                    s.want.size,
-                );
-                batch.push(Frame {
-                    id: s.want.id.clone(),
-                    width,
-                    height,
-                    pixels,
-                });
+                batch.push(frame);
                 batch_since.get_or_insert(now);
             }
             if s.frame.is_some() {
                 continue;
             }
             if s.buffer.is_none() {
-                if let Some(c) = s.constraints.clone() {
-                    s.buffer = Some(Buffer::new(&shm, &c, &qh)?);
-                } else {
+                let Some(c) = s.constraints.clone() else {
                     continue;
-                }
+                };
+                let on_gpu = match (&c.dmabuf, &dmabuf) {
+                    (Some(d), Some(dmabuf)) if !s.gpu_failed => gpu
+                        .for_device(d.device)
+                        .map(|g| Buffer::dmabuf(g, dmabuf, &c, d, &qh)),
+                    _ => None,
+                };
+                s.buffer = Some(match on_gpu {
+                    Some(Ok(b)) => b,
+                    Some(Err(e)) => {
+                        // This window goes through memory from now on; the
+                        // next window still tries.
+                        log::info!("jump: capture {}: gpu buffer: {e}", s.want.id);
+                        s.gpu_failed = true;
+                        Buffer::shm(&shm, &c, &qh)?
+                    }
+                    None => Buffer::shm(&shm, &c, &qh)?,
+                });
             }
             let due = next_step(epoch, s.last, interval);
             if due > now {
@@ -308,8 +392,9 @@ fn run(
             let (_, session) = s.capture.as_ref().expect("checked above");
             let buffer = s.buffer.as_ref().expect("built above");
             let frame = session.create_frame(&qh, (index, s.generation));
-            frame.attach_buffer(&buffer.buffer);
-            frame.damage_buffer(0, 0, buffer.width as i32, buffer.height as i32);
+            let (width, height) = buffer.size();
+            frame.attach_buffer(buffer.wl());
+            frame.damage_buffer(0, 0, width as i32, height as i32);
             frame.capture();
             s.frame = Some(frame);
             // The cap counts from the request, so a compositor that takes a
@@ -427,7 +512,7 @@ fn region(crop: Option<Crop>, w: u32, h: u32) -> (u32, u32, u32, u32) {
 
 /// The size a `w` by `h` region is sent at for `size`, never larger than
 /// it is.
-fn out_size(w: u32, h: u32, size: Size) -> (u32, u32) {
+pub(super) fn out_size(w: u32, h: u32, size: Size) -> (u32, u32) {
     match size {
         Size::MaxEdge(edge) => {
             let f = w.max(h).div_ceil(edge.max(1)).max(1);
@@ -488,7 +573,7 @@ fn cover(len: u32, n: u32) -> Vec<(usize, u32, usize, u32)> {
 /// written opaque; `argb` from the compositor is premultiplied, so its
 /// colour is unpremultiplied before it is decoded and premultiplied again
 /// after, and alpha itself is averaged as it is.
-fn downscale(
+pub(super) fn downscale(
     src: &[u8],
     full_w: u32,
     (x0, y0, w, h): (u32, u32, u32, u32),
@@ -674,19 +759,38 @@ struct Constraints {
     width: u32,
     height: u32,
     format: wl_shm::Format,
+    /// The dmabuf sway can copy into, when it offered one the shader reads.
+    dmabuf: Option<DmabufConstraints>,
 }
 
-struct Buffer {
-    memory: Shm,
-    pool: wl_shm_pool::WlShmPool,
-    buffer: wl_buffer::WlBuffer,
-    width: u32,
-    height: u32,
-    format: wl_shm::Format,
+#[derive(Clone, Debug, PartialEq)]
+struct DmabufConstraints {
+    /// The device number of sway's render node.
+    device: u64,
+    fourcc: u32,
+    modifiers: Vec<u64>,
+}
+
+/// What a window is captured into, and how its frames are made from it.
+enum Buffer {
+    Shm {
+        memory: Shm,
+        pool: wl_shm_pool::WlShmPool,
+        buffer: wl_buffer::WlBuffer,
+        width: u32,
+        height: u32,
+        format: wl_shm::Format,
+    },
+    Dmabuf {
+        gpu: Rc<Gpu>,
+        capture: Option<gpu::CaptureBuffer>,
+        out: gpu::Pool,
+        buffer: wl_buffer::WlBuffer,
+    },
 }
 
 impl Buffer {
-    fn new(
+    fn shm(
         shm: &wl_shm::WlShm,
         c: &Constraints,
         qh: &QueueHandle<State>,
@@ -704,7 +808,7 @@ impl Buffer {
             qh,
             (),
         );
-        Ok(Buffer {
+        Ok(Buffer::Shm {
             memory,
             pool,
             buffer,
@@ -713,12 +817,124 @@ impl Buffer {
             format: c.format,
         })
     }
+
+    /// A dmabuf on sway's device, which sway copies the window into on the
+    /// GPU and the shader reads where it lies.
+    fn dmabuf(
+        gpu: Rc<Gpu>,
+        dmabuf: &ZwpLinuxDmabufV1,
+        c: &Constraints,
+        d: &DmabufConstraints,
+        qh: &QueueHandle<State>,
+    ) -> Result<Buffer, String> {
+        let capture = gpu.capture_buffer(c.width, c.height, d.fourcc, &d.modifiers)?;
+        // The modifier decides the cost: a linear buffer took the shader
+        // 2.2 ms a frame at 2x, Intel's Tile4 0.6 ms (gpu.rs, the bench).
+        log::info!(
+            "jump: capture dmabuf {}x{} {:#x} modifier {:#x}",
+            c.width,
+            c.height,
+            d.fourcc,
+            capture.modifier
+        );
+        let params = dmabuf.create_params(qh, ());
+        for (plane, (fd, offset, stride)) in capture.planes().enumerate() {
+            params.add(
+                fd,
+                plane as u32,
+                offset,
+                stride,
+                (capture.modifier >> 32) as u32,
+                capture.modifier as u32,
+            );
+        }
+        let buffer = params.create_immed(
+            c.width as i32,
+            c.height as i32,
+            d.fourcc,
+            zwp_linux_buffer_params_v1::Flags::empty(),
+            qh,
+            (),
+        );
+        params.destroy();
+        Ok(Buffer::Dmabuf {
+            gpu,
+            capture: Some(capture),
+            out: gpu::Pool::default(),
+            buffer,
+        })
+    }
+
+    fn wl(&self) -> &wl_buffer::WlBuffer {
+        match self {
+            Buffer::Shm { buffer, .. } | Buffer::Dmabuf { buffer, .. } => buffer,
+        }
+    }
+
+    fn size(&self) -> (u32, u32) {
+        match self {
+            Buffer::Shm { width, height, .. } => (*width, *height),
+            Buffer::Dmabuf { capture, .. } => {
+                capture.as_ref().map_or((0, 0), |c| (c.width, c.height))
+            }
+        }
+    }
+
+    /// The frame sway just copied in, averaged to what `want` asks.
+    /// `None` when there is nothing to send: every GPU output buffer is
+    /// still on screen, or the GPU failed (logged; the next frame tries
+    /// again).
+    fn frame(&mut self, want: &Want) -> Option<Frame> {
+        let (width, height) = self.size();
+        let cut = region(want.crop, width, height);
+        let (ow, oh) = out_size(cut.2, cut.3, want.size);
+        let pixels = match self {
+            Buffer::Shm { memory, format, .. } => {
+                Pixels::Memory(downscale(memory.as_slice(), width, cut, *format, want.size).2)
+            }
+            Buffer::Dmabuf {
+                gpu, capture, out, ..
+            } => match gpu.downscale(capture.as_ref()?, cut, (ow, oh), out) {
+                Ok(Some(frame)) => Pixels::Gpu(frame),
+                Ok(None) => {
+                    log::debug!("jump: capture {}: every output buffer busy", want.id);
+                    return None;
+                }
+                Err(e) => {
+                    log::info!("jump: capture {}: gpu frame: {e}", want.id);
+                    return None;
+                }
+            },
+        };
+        Some(Frame {
+            id: want.id.clone(),
+            width: ow,
+            height: oh,
+            pixels,
+        })
+    }
 }
 
 impl Drop for Buffer {
     fn drop(&mut self) {
-        self.buffer.destroy();
-        self.pool.destroy();
+        match self {
+            Buffer::Shm { buffer, pool, .. } => {
+                buffer.destroy();
+                pool.destroy();
+            }
+            Buffer::Dmabuf {
+                gpu,
+                capture,
+                out,
+                buffer,
+            } => {
+                buffer.destroy();
+                if let Some(capture) = capture.take() {
+                    gpu.release_capture(capture);
+                }
+                gpu.release_pool(out);
+            }
+        }
     }
 }
 
@@ -737,7 +953,12 @@ struct Session {
     backoff: Duration,
     pending_size: Option<(u32, u32)>,
     pending_format: Option<wl_shm::Format>,
+    pending_device: Option<u64>,
+    /// Every dmabuf format offered in this round, with its modifiers.
+    pending_dmabuf: Vec<(u32, Vec<u64>)>,
     constraints: Option<Constraints>,
+    /// A dmabuf could not be made for this window; it stays in memory.
+    gpu_failed: bool,
     buffer: Option<Buffer>,
     /// The frame in flight, if any. One at a time per window.
     frame: Option<ExtImageCopyCaptureFrameV1>,
@@ -762,7 +983,10 @@ impl Session {
             backoff: RESTART_MIN,
             pending_size: None,
             pending_format: None,
+            pending_device: None,
+            pending_dmabuf: Vec::new(),
             constraints: None,
+            gpu_failed: false,
             buffer: None,
             frame: None,
             ready: false,
@@ -812,6 +1036,8 @@ impl Session {
         self.constraints = None;
         self.pending_size = None;
         self.pending_format = None;
+        self.pending_device = None;
+        self.pending_dmabuf.clear();
         self.ready = false;
         self.generation = self.generation.wrapping_add(1);
     }
@@ -841,6 +1067,7 @@ struct State {
     manager: Option<ExtImageCopyCaptureManagerV1>,
     toplevel_sources: Option<ExtForeignToplevelImageCaptureSourceManagerV1>,
     shm: Option<wl_shm::WlShm>,
+    dmabuf: Option<ZwpLinuxDmabufV1>,
     toplevels: Vec<(ExtForeignToplevelHandleV1, Option<String>)>,
     /// A toplevel was named or closed since the loop last looked.
     toplevels_changed: bool,
@@ -857,7 +1084,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
         qh: &QueueHandle<Self>,
     ) {
         let wl_registry::Event::Global {
-            name, interface, ..
+            name,
+            interface,
+            version,
         } = event
         else {
             return;
@@ -873,6 +1102,11 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                 let _: ExtForeignToplevelListV1 = registry.bind(name, 1, qh, ());
             }
             "wl_shm" => state.shm = Some(registry.bind(name, 1, qh, ())),
+            // Version 3 has `create_immed`; the formats come from the
+            // capture session, not from this global.
+            "zwp_linux_dmabuf_v1" if version >= 3 => {
+                state.dmabuf = Some(registry.bind(name, 3, qh, ()));
+            }
             _ => {}
         }
     }
@@ -918,12 +1152,37 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, (usize, u32)> for State {
                     }
                 }
             }
+            Event::DmabufDevice { device } => {
+                s.pending_device = device
+                    .get(..8)
+                    .and_then(|b| b.try_into().ok())
+                    .map(u64::from_ne_bytes);
+            }
+            Event::DmabufFormat { format, modifiers } => {
+                let modifiers = modifiers
+                    .chunks_exact(8)
+                    .map(|b| u64::from_ne_bytes(b.try_into().expect("8 bytes")))
+                    .collect();
+                s.pending_dmabuf.push((format, modifiers));
+            }
             Event::Done => {
+                let dmabuf = s.pending_device.and_then(|device| {
+                    std::mem::take(&mut s.pending_dmabuf)
+                        .into_iter()
+                        .filter_map(|(f, m)| gpu::rank(f).map(|r| (r, f, m)))
+                        .min_by_key(|(r, _, _)| *r)
+                        .map(|(_, fourcc, modifiers)| DmabufConstraints {
+                            device,
+                            fourcc,
+                            modifiers,
+                        })
+                });
                 if let (Some((width, height)), Some(format)) = (s.pending_size, s.pending_format) {
                     let next = Constraints {
                         width,
                         height,
                         format,
+                        dmabuf,
                     };
                     // A resized window: the old buffer no longer fits. The
                     // loop builds a new one before the next frame. A frame
@@ -931,8 +1190,9 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, (usize, u32)> for State {
                     // `buffer_constraints` and is asked again.
                     if s.constraints.as_ref() != Some(&next) {
                         log::info!(
-                            "jump: capture {}: buffer {width}x{height} {format:?}",
-                            s.want.id
+                            "jump: capture {}: buffer {width}x{height} {format:?}, dmabuf {:?}",
+                            s.want.id,
+                            next.dmabuf.as_ref().map(|d| (d.fourcc, d.modifiers.len()))
                         );
                         s.buffer = None;
                     }
@@ -940,6 +1200,8 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, (usize, u32)> for State {
                 }
                 s.pending_size = None;
                 s.pending_format = None;
+                s.pending_device = None;
+                s.pending_dmabuf.clear();
             }
             Event::Stopped => s.stopped(),
             _ => {}
@@ -1056,6 +1318,8 @@ delegate_noop!(State: ignore ExtImageCaptureSourceV1);
 delegate_noop!(State: ignore wl_shm::WlShm);
 delegate_noop!(State: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(State: ignore wl_buffer::WlBuffer);
+delegate_noop!(State: ignore ZwpLinuxDmabufV1);
+delegate_noop!(State: ignore ZwpLinuxBufferParamsV1);
 
 // ── Shared memory ───────────────────────────────────────────────────────
 

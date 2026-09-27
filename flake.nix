@@ -36,6 +36,10 @@
           # Audio: src/services/audio.rs speaks the PulseAudio protocol to
           # PipeWire's pulse server instead of parsing `wpctl status`.
           libpulseaudio
+          # Live frames on the GPU (src/jump/gpu.rs): EGL through libglvnd,
+          # buffers through GBM.
+          libglvnd
+          libgbm
         ];
     in
     {

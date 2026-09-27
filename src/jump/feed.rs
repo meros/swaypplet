@@ -232,7 +232,9 @@ fn fan_out(key: &str, frame: live::Frame) {
     }
     // One line per frame shown, for dev/frame-bench.sh --pin to count.
     log::debug!(target: "swaypplet::feed", "frame {} {}x{}", frame.id, frame.width, frame.height);
-    let (id, texture) = card::remember(frame);
+    let Some((id, texture)) = card::remember(frame) else {
+        return;
+    };
     for live in subscribers {
         live.borrow().show(&id, &texture);
     }
@@ -332,7 +334,7 @@ mod tests {
             id: id.to_string(),
             width,
             height: 1,
-            pixels: Vec::new(),
+            pixels: live::Pixels::Memory(Vec::new()),
         }
     }
 

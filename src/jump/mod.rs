@@ -31,6 +31,7 @@
 pub mod card;
 pub mod feed;
 pub mod gesture;
+pub mod gpu;
 pub mod live;
 pub mod pin;
 pub mod place;

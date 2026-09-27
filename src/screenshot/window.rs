@@ -15,7 +15,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 
 use super::capture::Image;
-use crate::jump::card::{Live, LivePicture};
+use crate::jump::card::{self, Live, LivePicture};
 use crate::jump::{live, scene};
 use crate::shell::{Namespace, Surface};
 
@@ -129,12 +129,27 @@ fn show(app: &gtk4::Application, windows: Vec<(scene::Window, String, String)>, 
             }
         });
     }
-    picker.stream.replace(Some(live::Stream::start(
-        ids.clone(),
-        (TILE_W * 2) as u32,
-        GRID_FPS,
-        tx,
-    )));
+    // Cut to each tile's picture in device pixels, which are known once the
+    // surface is on its output.
+    {
+        let picker = picker.clone();
+        let live = live.clone();
+        let tx = RefCell::new(Some(tx));
+        let start = move |window: &gtk4::Window| {
+            let Some(tx) = tx.borrow_mut().take() else {
+                return;
+            };
+            let wants = live.borrow().wants(None, card::device_scale(window));
+            picker
+                .stream
+                .replace(Some(live::Stream::start_wants(wants, GRID_FPS, tx)));
+        };
+        if window.is_mapped() {
+            start(&window);
+        } else {
+            window.connect_map(move |w| start(w.upcast_ref()));
+        }
+    }
 
     {
         let picker = picker.clone();
@@ -255,7 +270,8 @@ fn close(picker: &Rc<Picker>) {
 
 /// A live frame (premultiplied BGRA) as a screenshot image (straight RGBA).
 fn to_image(frame: live::Frame) -> Image {
-    let mut pixels = frame.pixels;
+    // `Stream::start` sends frames in memory, never on the GPU.
+    let mut pixels = frame.pixels.into_memory().unwrap_or_default();
     for px in pixels.chunks_exact_mut(4) {
         let (b, g, r, a) = (px[0], px[1], px[2], px[3]);
         let un = |c: u8| {
@@ -286,7 +302,7 @@ mod tests {
             id: String::new(),
             width: 1,
             height: 1,
-            pixels: px.to_vec(),
+            pixels: live::Pixels::Memory(px.to_vec()),
         }
     }
 

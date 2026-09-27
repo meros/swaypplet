@@ -956,12 +956,13 @@ fn start_live(state: &Rc<RefCell<LauncherState>>) {
             state.borrow().live.borrow().frame(frame);
         }
     });
-    s.stream.replace(Some(crate::jump::live::Stream::start(
-        ids,
-        (WINDOW_THUMB_W * 2) as u32,
-        20,
-        tx,
-    )));
+    // Cut to each row's picture in device pixels, and drawn one to one.
+    let wants = {
+        let live = s.live.borrow();
+        live.wants(None, live.device_scale())
+    };
+    s.stream
+        .replace(Some(crate::jump::live::Stream::start_wants(wants, 20, tx)));
 }
 
 /// A running-window row's picture, at most this box.
