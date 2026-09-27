@@ -180,6 +180,8 @@ fn fan_out(key: &str, frame: live::Frame) {
     if subscribers.is_empty() {
         return;
     }
+    // One line per frame shown, for dev/frame-bench.sh --pin to count.
+    log::debug!(target: "swaypplet::feed", "frame {} {}x{}", frame.id, frame.width, frame.height);
     let (id, texture) = card::remember(frame);
     for live in subscribers {
         live.borrow().show(&id, &texture);
