@@ -11,8 +11,15 @@
 //! the last one and the export is a replay. The canvas draws at whatever size
 //! the window is; the export replays at the capture's own resolution, so
 //! annotating a 2880-wide shot in a 1400-wide window still writes 2880 pixels.
+//!
+//! The capture is a texture, uploaded once and scaled by the GPU; only the
+//! strokes are drawn with cairo, on a transparent layer over it. The canvas
+//! used to rebuild the capture as a cairo surface on every draw, which is
+//! every pointer motion while drawing: 20 MB made and scaled in software per
+//! event at 2x.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use gtk4::gdk;
@@ -57,7 +64,14 @@ struct Stroke {
     colour: (f64, f64, f64),
     /// Freehand path for `Pen` and `Highlight`; first and last point define the rest.
     points: Vec<(f64, f64)>,
+    /// A pixelate's block averages, by block, so each is read from the
+    /// capture once: a drag only adds the blocks at its growing edge.
+    blocks: Blocks,
 }
+
+/// Block rectangle (x, y, right, bottom) to its average colour.
+type BlockMap = HashMap<(u32, u32, u32, u32), (f64, f64, f64)>;
+type Blocks = Rc<RefCell<BlockMap>>;
 
 struct Editor {
     image: Image,
@@ -67,6 +81,7 @@ struct Editor {
     tool: std::cell::Cell<Tool>,
     colour: std::cell::Cell<usize>,
     palette: [(f64, f64, f64); 5],
+    /// The strokes' layer, over the capture's picture.
     area: gtk4::DrawingArea,
     window: gtk4::Window,
 }
@@ -82,11 +97,18 @@ pub fn open(app: &gtk4::Application, image: Image, done: impl Fn(Image) + 'stati
         .build();
     // Checkerboard-free: a screenshot is opaque, so the canvas only ever
     // needs somewhere neutral to letterbox against.
-    let area = gtk4::DrawingArea::builder()
-        .hexpand(true)
-        .vexpand(true)
-        .build();
-    crate::ui::canvas::adopt(&area);
+    let canvas = gtk4::Overlay::new();
+    canvas.set_hexpand(true);
+    canvas.set_vexpand(true);
+    crate::ui::canvas::adopt(&canvas);
+    // The capture, fitted and never enlarged, as `Editor::scale` computes:
+    // the strokes' layer maps through the same numbers.
+    let picture = gtk4::Picture::for_paintable(&texture(&image));
+    picture.set_content_fit(gtk4::ContentFit::ScaleDown);
+    picture.set_can_shrink(true);
+    canvas.set_child(Some(&picture));
+    let area = gtk4::DrawingArea::new();
+    canvas.add_overlay(&area);
 
     let editor = Rc::new(Editor {
         image,
@@ -102,7 +124,7 @@ pub fn open(app: &gtk4::Application, image: Image, done: impl Fn(Image) + 'stati
     let root = crate::ui::vbox(0);
     crate::ui::window::adopt(&root);
     root.append(&toolbar(&editor, done));
-    root.append(&area);
+    root.append(&canvas);
     window.set_child(Some(&root));
 
     editor.wire();
@@ -236,6 +258,7 @@ impl Editor {
                 tool: this.tool.get(),
                 colour: this.palette[this.colour.get()],
                 points: vec![p],
+                blocks: Blocks::default(),
             });
             this.area.queue_draw();
         });
@@ -338,19 +361,14 @@ impl Editor {
         ((x - ox) / scale, (y - oy) / scale)
     }
 
+    /// The strokes, over the capture the picture under this layer shows.
     fn draw(&self, cr: &cairo::Context, _w: f64, _h: f64) {
-        let Some(base) = to_cairo(&self.image) else {
-            return;
-        };
         let scale = self.scale();
         let (ox, oy) = self.origin();
 
         let _ = cr.save();
         cr.translate(ox, oy);
         cr.scale(scale, scale);
-        let _ = cr.set_source_surface(&base, 0.0, 0.0);
-        let _ = cr.paint();
-
         for stroke in self.strokes.borrow().iter() {
             paint(cr, stroke, &self.image);
         }
@@ -449,10 +467,9 @@ fn paint(cr: &cairo::Context, stroke: &Stroke, source: &Image) {
         Tool::Pixelate => pixelate(
             cr,
             source,
-            x0.min(x1),
-            y0.min(y1),
-            (x1 - x0).abs(),
-            (y1 - y0).abs(),
+            (x0, y0),
+            (x1, y1),
+            &mut stroke.blocks.borrow_mut(),
         ),
     }
 }
@@ -463,51 +480,82 @@ fn paint(cr: &cairo::Context, stroke: &Stroke, source: &Image) {
 /// enough that text has been recovered from one. Averaging whole blocks throws
 /// the information away. Sampling is from the untouched capture, so pixelating
 /// twice over the same area cannot slowly reveal it either.
-fn pixelate(cr: &cairo::Context, source: &Image, x: f64, y: f64, w: f64, h: f64) {
-    if w < 1.0 || h < 1.0 {
-        return;
-    }
+///
+/// The grid starts at the corner the drag started from, `from`, and grows
+/// toward `to`, so while dragging the blocks already inside stay the same
+/// and are taken from `memo`; only the new ones read the capture.
+fn pixelate(
+    cr: &cairo::Context,
+    source: &Image,
+    from: (f64, f64),
+    to: (f64, f64),
+    memo: &mut BlockMap,
+) {
     let (sw, sh) = (source.width, source.height);
     let block = (sw.min(sh) / PIXELATE_DIVISOR).max(PIXELATE_MIN);
-    let x0 = x.max(0.0) as u32;
-    let y0 = y.max(0.0) as u32;
-    let x1 = ((x + w) as u32).min(sw);
-    let y1 = ((y + h) as u32).min(sh);
-
-    let mut by = y0;
-    while by < y1 {
-        let mut bx = x0;
-        while bx < x1 {
-            let ex = (bx + block).min(x1);
-            let ey = (by + block).min(y1);
-            let (mut r, mut g, mut b, mut n) = (0u64, 0u64, 0u64, 0u64);
-            for py in by..ey {
-                for px in bx..ex {
-                    let i = ((py * sw + px) * 4) as usize;
-                    r += u64::from(source.pixels[i]);
-                    g += u64::from(source.pixels[i + 1]);
-                    b += u64::from(source.pixels[i + 2]);
-                    n += 1;
-                }
+    let clamp = |v: f64, max: u32| (v.max(0.0) as u32).min(max);
+    // Each axis steps away from the anchor, whichever way the drag went.
+    let steps = |a: f64, b: f64, max: u32| -> Vec<(u32, u32)> {
+        let (a, b) = (clamp(a, max), clamp(b, max));
+        let mut out = Vec::new();
+        if a <= b {
+            let mut s = a;
+            while s < b {
+                out.push((s, (s + block).min(b)));
+                s += block;
             }
-            if n > 0 {
-                cr.set_source_rgb(
-                    r as f64 / n as f64 / 255.0,
-                    g as f64 / n as f64 / 255.0,
-                    b as f64 / n as f64 / 255.0,
-                );
-                cr.rectangle(
-                    f64::from(bx),
-                    f64::from(by),
-                    f64::from(ex - bx),
-                    f64::from(ey - by),
-                );
-                let _ = cr.fill();
+        } else {
+            let mut e = a;
+            while e > b {
+                out.push((e.saturating_sub(block).max(b), e));
+                e = e.saturating_sub(block);
             }
-            bx += block;
         }
-        by += block;
+        out
+    };
+    for (by, ey) in steps(from.1, to.1, sh) {
+        for (bx, ex) in steps(from.0, to.0, sw) {
+            let (r, g, b) = *memo
+                .entry((bx, by, ex, ey))
+                .or_insert_with(|| average(source, bx, by, ex, ey));
+            cr.set_source_rgb(r, g, b);
+            cr.rectangle(
+                f64::from(bx),
+                f64::from(by),
+                f64::from(ex - bx),
+                f64::from(ey - by),
+            );
+            let _ = cr.fill();
+        }
     }
+}
+
+/// The mean colour of a block of the capture, 0 to 1 per channel.
+fn average(source: &Image, bx: u32, by: u32, ex: u32, ey: u32) -> (f64, f64, f64) {
+    let (mut r, mut g, mut b) = (0u64, 0u64, 0u64);
+    for py in by..ey {
+        let row = ((py * source.width + bx) * 4) as usize;
+        for px in source.pixels[row..row + ((ex - bx) * 4) as usize].chunks_exact(4) {
+            r += u64::from(px[0]);
+            g += u64::from(px[1]);
+            b += u64::from(px[2]);
+        }
+    }
+    let n = (u64::from(ex - bx) * u64::from(ey - by)).max(1) as f64 * 255.0;
+    (r as f64 / n, g as f64 / n, b as f64 / n)
+}
+
+/// The capture as a texture, straight RGBA as it is: uploaded once, and
+/// scaled on the GPU however the window is sized.
+fn texture(image: &Image) -> gdk::Texture {
+    gdk::MemoryTexture::new(
+        image.width as i32,
+        image.height as i32,
+        gdk::MemoryFormat::R8g8b8a8,
+        &glib::Bytes::from(&image.pixels[..]),
+        (image.width * 4) as usize,
+    )
+    .upcast()
 }
 
 // ── Pixel format bridging ───────────────────────────────────────────────
@@ -610,7 +658,7 @@ mod tests {
         let mut target = to_cairo(&image(vec![0; 12 * 12 * 4], 12, 12)).unwrap();
         {
             let cr = cairo::Context::new(&target).unwrap();
-            pixelate(&cr, &source, 0.0, 0.0, 12.0, 12.0);
+            pixelate(&cr, &source, (0.0, 0.0), (12.0, 12.0), &mut HashMap::new());
         }
 
         let out = from_cairo(&mut target).unwrap();
@@ -620,5 +668,43 @@ mod tests {
         assert_eq!(at(0), at(5), "left block is flat");
         assert_eq!(at(6), at(11), "right block is flat");
         assert_ne!(at(0), at(6), "the two blocks still differ");
+    }
+
+    #[test]
+    fn a_growing_drag_reads_only_its_new_blocks() {
+        let source = image(vec![200; 60 * 60 * 4], 60, 60);
+        let target = to_cairo(&image(vec![0; 60 * 60 * 4], 60, 60)).unwrap();
+        let cr = cairo::Context::new(&target).unwrap();
+        let mut memo = HashMap::new();
+        // Blocks of 6 (PIXELATE_MIN): 12 by 12 is four.
+        pixelate(&cr, &source, (0.0, 0.0), (12.0, 12.0), &mut memo);
+        assert_eq!(memo.len(), 4);
+        let first: Vec<_> = memo.keys().copied().collect();
+        // Grown to 18 by 12: the four stay, two are added.
+        pixelate(&cr, &source, (0.0, 0.0), (18.0, 12.0), &mut memo);
+        assert_eq!(memo.len(), 6);
+        assert!(first.iter().all(|k| memo.contains_key(k)));
+    }
+
+    #[test]
+    fn a_drag_up_and_left_steps_from_where_it_started() {
+        let source = image(vec![200; 60 * 60 * 4], 60, 60);
+        let target = to_cairo(&image(vec![0; 60 * 60 * 4], 60, 60)).unwrap();
+        let cr = cairo::Context::new(&target).unwrap();
+        let mut memo = HashMap::new();
+        pixelate(&cr, &source, (40.0, 40.0), (29.0, 33.0), &mut memo);
+        let mut keys: Vec<_> = memo.keys().copied().collect();
+        keys.sort();
+        // Full blocks against the start corner, the part-block at the far
+        // edge: x 34..40 and 29..34, y 34..40 and 33..34.
+        assert_eq!(
+            keys,
+            [
+                (29, 33, 34, 34),
+                (29, 34, 34, 40),
+                (34, 33, 40, 34),
+                (34, 34, 40, 40)
+            ]
+        );
     }
 }
