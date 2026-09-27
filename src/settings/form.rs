@@ -17,6 +17,7 @@ use crate::ui::{self, Kind, Text, Tone};
 /// read by [`kind_row`]; a slider always fills, and an entry always fills,
 /// because both need the width.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(dead_code)] // the other variant is the zoo's alternative, one line away
 pub enum Placement {
     /// The control at the row's far end, at its natural width but never
     /// narrower than `.settings-control` (so a column of dropdowns lines up

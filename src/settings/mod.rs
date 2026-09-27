@@ -413,9 +413,11 @@ impl SettingsSection {
     }
 
     /// Mark each row the settings file changes from the system's: its name
-    /// in the accent, and a tooltip saying so and how to put it back. The
-    /// name and not a dot beside it, so a marked row keeps its place in the
-    /// pane's column.
+    /// in the accent and the strong weight, and a tooltip saying so and how
+    /// to put it back. The name and not a dot beside it, so a marked row
+    /// keeps its place in the pane's column; the weight as well as the
+    /// colour, so the mark reads without the colour (the accent at body
+    /// size is under the text tokens' contrast floor, §3.2).
     fn mark_changed(&self) {
         let values = |s: store::Settings| serde_json::to_value(s.effective()).ok();
         let (Some(now), Some(system)) =
@@ -435,6 +437,14 @@ impl SettingsSection {
                     crate::ui::Tone::Accent
                 } else {
                     crate::ui::Tone::Fg
+                },
+            );
+            crate::ui::set_weight(
+                &mark.label,
+                if changed {
+                    crate::ui::Weight::Strong
+                } else {
+                    crate::ui::Weight::Regular
                 },
             );
             mark.label.set_tooltip_text(changed.then_some(
