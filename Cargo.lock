@@ -1927,6 +1927,7 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-wlr",
+ "wayland-scanner",
  "zbus 4.4.0",
 ]
 

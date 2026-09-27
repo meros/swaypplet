@@ -290,6 +290,9 @@ pub fn run() -> ! {
     // After the LOCK command, never before it: creating this arms the
     // compositor's backdrop for one lock, and that arming expires.
     let fade = fade::LockFade::new();
+    // The shape manager's roundtrip, for the same reason as the alpha
+    // modifier's: here, and not inside lock().
+    crate::effect_shape::preload();
 
     let main_loop = glib::MainLoop::new(None, false);
     let exit_code = Rc::new(RefCell::new(EXIT_ERROR));

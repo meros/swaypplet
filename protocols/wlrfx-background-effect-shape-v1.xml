@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="wlrfx_background_effect_shape_v1">
+  <copyright>
+    Copyright © 2026 Alexander Schrab
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice (including the next
+    paragraph) shall be included in all copies or substantial portions of the
+    Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+  </copyright>
+
+  <description summary="exact rounded shapes for background effects">
+    A compositor that draws a background effect (blur, frosted or refracting
+    glass) behind a surface needs the outline of the area the effect covers.
+    wl_region can only describe a union of integer rectangles, so a rounded
+    card becomes a staircase, and a compositor that derives the outline from
+    the buffer's alpha has to reconstruct a shape the client already knows
+    exactly.
+
+    This protocol lets a client describe that area as a set of rounded
+    rectangles in surface-local logical coordinates with sub-pixel precision
+    and a radius per corner. Which effect the compositor draws, and whether it
+    draws one at all, is compositor policy and outside this protocol.
+
+    Warning! The protocol described in this file is currently in the testing
+    phase. Backward compatible changes may be added together with the
+    corresponding interface version bump. Backward incompatible changes can
+    only be done by creating a new major version of the extension.
+  </description>
+
+  <interface name="wlrfx_background_effect_shape_manager_v1" version="1">
+    <description summary="create background effect shape objects">
+      A global to attach a shape object to a wl_surface.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        Existing shape objects are not affected.
+      </description>
+    </request>
+
+    <enum name="error">
+      <entry name="already_constructed" value="0"
+        summary="the surface already has a shape object"/>
+    </enum>
+
+    <request name="get_shape">
+      <description summary="get the shape object of a surface">
+        Create a shape object for the surface. If the surface already has a
+        shape object, the already_constructed protocol error is raised.
+      </description>
+      <arg name="id" type="new_id" interface="wlrfx_background_effect_shape_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
+  </interface>
+
+  <interface name="wlrfx_background_effect_shape_v1" version="1">
+    <description summary="the effect area of one surface">
+      The shape state is double-buffered and applied on the next
+      wl_surface.commit, together with the buffer and the other state of that
+      commit. The initial state is "unset": the compositor determines the
+      effect area by its own means, which is also the state after this object
+      is destroyed (applied on the next commit).
+    </description>
+
+    <enum name="error">
+      <entry name="invalid_shapes" value="0"
+        summary="the array is malformed or a value is out of range"/>
+      <entry name="too_many_shapes" value="1"
+        summary="more shapes than the limit"/>
+      <entry name="surface_destroyed" value="2"
+        summary="the wl_surface was destroyed before this object"/>
+    </enum>
+
+    <request name="destroy" type="destructor">
+      <description summary="unset the shape">
+        Destroy the object. On the next commit of the surface the shape state
+        returns to "unset".
+      </description>
+    </request>
+
+    <request name="set_shapes">
+      <description summary="set the rounded rectangles">
+        Set the effect area to the union of the given rounded rectangles.
+
+        The array holds 8 wl_fixed_t values per rectangle, in this order:
+        x, y, width, height, radius_top_left, radius_top_right,
+        radius_bottom_right, radius_bottom_left. Coordinates are surface-local
+        and logical. width and height must be greater than zero and every
+        radius must be zero or greater; otherwise the invalid_shapes error is
+        raised, as it is when the array length is not a multiple of 8 values.
+        A radius larger than half the shorter side is clamped to it.
+
+        At most 16 rectangles are allowed; more raise too_many_shapes. The
+        rectangles should not overlap; where they do, the compositor may treat
+        each pixel as belonging to any one of them.
+
+        An empty array sets an empty effect area: the surface has no
+        background effect for this commit.
+      </description>
+      <arg name="shapes" type="array"/>
+    </request>
+  </interface>
+</protocol>

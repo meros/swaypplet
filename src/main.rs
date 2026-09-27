@@ -8,6 +8,7 @@ mod bar;
 #[cfg(test)]
 mod design_lint;
 mod dmenu;
+mod effect_shape;
 mod face;
 mod fp;
 mod gdm_shim;

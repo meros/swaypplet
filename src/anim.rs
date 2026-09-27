@@ -1000,6 +1000,7 @@ impl SlideBin {
         }
         self.imp().d.set(dy);
         self.queue_draw();
+        crate::effect_shape::moved(self);
     }
 
     /// Render at `scale`, pinned to the trailing edge. Layout is untouched,
@@ -1010,6 +1011,37 @@ impl SlideBin {
         }
         self.imp().scale.set(scale);
         self.queue_draw();
+        crate::effect_shape::moved(self);
+    }
+
+    /// Where `rect` is drawn, given where layout put it: both in the same
+    /// coordinates, in which this bin's own origin is `origin`: the offset
+    /// and scale `snapshot` applies and layout never sees. The scale comes
+    /// back too, for a radius. For `crate::effect_shape`.
+    pub fn drawn_rect(
+        &self,
+        rect: &graphene::Rect,
+        origin: &graphene::Point,
+    ) -> (graphene::Rect, f64) {
+        let imp = self.imp();
+        let d = imp.d.get() as f32;
+        let (dx, dy) = if imp.horizontal.get() {
+            (d, 0.0)
+        } else {
+            (0.0, d)
+        };
+        let s = imp.scale.get();
+        // The scale's pivot: the bin's top right, in the caller's coordinates.
+        let px = origin.x() + self.width() as f32;
+        let py = origin.y();
+        let sf = s as f32;
+        let rect = graphene::Rect::new(
+            dx + px + sf * (rect.x() - px),
+            dy + py + sf * (rect.y() - py),
+            sf * rect.width(),
+            sf * rect.height(),
+        );
+        (rect, s)
     }
 
     /// Animate the offset to `target` over `ms` on [`standard`], the curve
@@ -1032,6 +1064,7 @@ impl SlideBin {
             let t = (((glib::monotonic_time() - start) as f64 / 1000.0) / ms).clamp(0.0, 1.0);
             bin.imp().d.set(from + (target - from) * standard(t));
             bin.queue_draw();
+            crate::effect_shape::moved(bin);
             if t >= 1.0 {
                 bin.imp().tick.take();
                 glib::ControlFlow::Break

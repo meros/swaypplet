@@ -58,6 +58,8 @@
           protoOrCargo = path: type:
             (builtins.match ".*proto$" path != null) ||
             (builtins.match ".*css$" path != null) ||
+            # protocols/*.xml: read at compile time by wayland-scanner's macros.
+            (builtins.match ".*/protocols/[^/]*\\.xml$" path != null) ||
             # data/swaypplet-{toggle,launcher}.sh: installed verbatim by the
             # postInstall below. Matched by name rather than by extension so a
             # dev/*.sh edit does not churn this derivation's source hash.

@@ -27,6 +27,8 @@ env_logger = "0.11"
 libc = "0.2"
 greetd_ipc = { version = "0.10.3", features = ["sync-codec"] }
 wayland-client = "0.31"
+# Bindings for the protocols in protocols/ that no crate ships.
+wayland-scanner = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 swayipc = "4"
 system-tray = { version = "0.8", default-features = false, features = ["data"] }
