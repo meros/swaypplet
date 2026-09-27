@@ -50,9 +50,7 @@ impl State {
         match self {
             State::Rest => {}
             State::Hover => w.set_state_flags(StateFlags::PRELIGHT, false),
-            State::Pressed => {
-                w.set_state_flags(StateFlags::PRELIGHT | StateFlags::ACTIVE, false)
-            }
+            State::Pressed => w.set_state_flags(StateFlags::PRELIGHT | StateFlags::ACTIVE, false),
             State::Focus => {
                 w.set_state_flags(StateFlags::FOCUSED | StateFlags::FOCUS_VISIBLE, false)
             }
@@ -92,11 +90,7 @@ fn line(name: &str, specimens: impl IntoIterator<Item = gtk4::Box>) -> gtk4::Box
 }
 
 /// A control drawn once per state.
-fn states<W: IsA<gtk4::Widget>>(
-    name: &str,
-    states: &[State],
-    make: impl Fn() -> W,
-) -> gtk4::Box {
+fn states<W: IsA<gtk4::Widget>>(name: &str, states: &[State], make: impl Fn() -> W) -> gtk4::Box {
     line(
         name,
         states.iter().map(|s| {
@@ -118,9 +112,22 @@ fn block(title: &str, lines: impl IntoIterator<Item = gtk4::Box>) -> gtk4::Box {
 }
 
 /// The sheet's page `page` (one of [`PAGES`]), or the first when unknown.
+/// `SWAYPPLET_PREVIEW_ALT=disabled-fade,press-shrink` draws the sheet under
+/// the named alternatives of docs/component-zoo.html.
 pub fn page(page: &str) -> gtk4::Box {
     let root = ui::vbox(6);
     root.set_hexpand(true);
+    for alt in std::env::var("SWAYPPLET_PREVIEW_ALT")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+    {
+        match alt {
+            "disabled-fade" => root.add_css_class("alt-disabled-fade"),
+            "press-shrink" => root.add_css_class("alt-press-shrink"),
+            _ => {}
+        }
+    }
     match page {
         "inputs" => inputs(&root),
         "lists" => lists(&root),
@@ -158,20 +165,28 @@ fn controls(root: &gtk4::Box) {
         .collect::<Vec<_>>();
     destructive.push(armed);
 
-    let toggles = [("off", false, State::Rest), ("on", true, State::Rest),
-        ("on · hover", true, State::Hover), ("on · pressed", true, State::Pressed),
-        ("on · focus", true, State::Focus), ("on · disabled", true, State::Disabled)]
-        .into_iter()
-        .map(|(cap, on, st)| {
-            let b = ui::toggle_button(
-                Face::Glyph { glyph: ui::icons::MIC, tooltip: "Microphone" },
-                Kind::Flat,
-                Size::Normal,
-            );
-            b.set_active(on);
-            st.apply(&b);
-            specimen(&b, cap)
-        });
+    let toggles = [
+        ("off", false, State::Rest),
+        ("on", true, State::Rest),
+        ("on · hover", true, State::Hover),
+        ("on · pressed", true, State::Pressed),
+        ("on · focus", true, State::Focus),
+        ("on · disabled", true, State::Disabled),
+    ]
+    .into_iter()
+    .map(|(cap, on, st)| {
+        let b = ui::toggle_button(
+            Face::Glyph {
+                glyph: ui::icons::MIC,
+                tooltip: "Microphone",
+            },
+            Kind::Flat,
+            Size::Normal,
+        );
+        b.set_active(on);
+        st.apply(&b);
+        specimen(&b, cap)
+    });
 
     let sizes = [
         specimen(&ui::button("Details", Kind::Secondary), "normal · 30"),
@@ -185,7 +200,10 @@ fn controls(root: &gtk4::Box) {
         ),
         specimen(
             &ui::button_with(
-                Face::Glyph { glyph: ui::icons::CLOSE, tooltip: "Close" },
+                Face::Glyph {
+                    glyph: ui::icons::CLOSE,
+                    tooltip: "Close",
+                },
                 Kind::Secondary,
                 Size::Normal,
             ),
@@ -193,7 +211,10 @@ fn controls(root: &gtk4::Box) {
         ),
         specimen(
             &ui::button_with(
-                Face::Glyph { glyph: ui::icons::CLOSE, tooltip: "Close" },
+                Face::Glyph {
+                    glyph: ui::icons::CLOSE,
+                    tooltip: "Close",
+                },
                 Kind::Flat,
                 Size::Small,
             ),
@@ -224,15 +245,19 @@ fn controls(root: &gtk4::Box) {
         s.apply(&c);
         specimen(&c, s.name())
     });
-    let chip_on = [("checked", State::Rest), ("checked · hover", State::Hover),
-        ("checked · focus", State::Focus), ("checked · disabled", State::Disabled)]
-        .into_iter()
-        .map(|(cap, s)| {
-            let c = ui::toggle_chip("Work");
-            c.set_active(true);
-            s.apply(&c);
-            specimen(&c, cap)
-        });
+    let chip_on = [
+        ("checked", State::Rest),
+        ("checked · hover", State::Hover),
+        ("checked · focus", State::Focus),
+        ("checked · disabled", State::Disabled),
+    ]
+    .into_iter()
+    .map(|(cap, s)| {
+        let c = ui::toggle_chip("Work");
+        c.set_active(true);
+        s.apply(&c);
+        specimen(&c, cap)
+    });
     let rich = |name: &str, picked: bool| {
         let face = ui::hbox(3);
         face.append(&ui::avatar(name, None, 24, true));
@@ -257,8 +282,14 @@ fn controls(root: &gtk4::Box) {
         specimen(&ui::badge("12", ui::BadgeTone::Neutral), "badge · neutral"),
         specimen(&ui::key("Super+Space"), "key"),
         specimen(&ui::key("⏎"), "key · glyph"),
-        specimen(&ui::status(ui::Status::Success, "Connected"), "status · success"),
-        specimen(&ui::status(ui::Status::Warning, "Weak signal"), "status · warning"),
+        specimen(
+            &ui::status(ui::Status::Success, "Connected"),
+            "status · success",
+        ),
+        specimen(
+            &ui::status(ui::Status::Warning, "Weak signal"),
+            "status · warning",
+        ),
         specimen(&ui::status(ui::Status::Danger, "Failed"), "status · danger"),
         specimen(&ui::status(ui::Status::Neutral, "Off"), "status · neutral"),
     ];
@@ -294,7 +325,11 @@ fn controls(root: &gtk4::Box) {
     ]
     .into_iter()
     .map(|(tone, cap)| {
-        let size = if tone == Tone::Accent { Text::TitleSm } else { Text::Body };
+        let size = if tone == Tone::Accent {
+            Text::TitleSm
+        } else {
+            Text::Body
+        };
         let l = ui::text("Wi-Fi · Öresund", size, tone);
         if tone == Tone::Accent {
             ui::set_weight(&l, ui::Weight::Strong);
@@ -327,35 +362,49 @@ fn controls(root: &gtk4::Box) {
     ];
     root.append(&block(
         "Text",
-        [line("Scale", scale), line("Tones", tones), line("Roles", roles)],
+        [
+            line("Scale", scale),
+            line("Tones", tones),
+            line("Roles", roles),
+        ],
     ));
 }
 
 // ── Page 2: switch, check, slider, field, dropdown, progress ────────────
 
 fn inputs(root: &gtk4::Box) {
-    let switches = [("off", false, State::Rest), ("off · hover", false, State::Hover),
-        ("on", true, State::Rest), ("on · hover", true, State::Hover),
-        ("on · focus", true, State::Focus), ("off · disabled", false, State::Disabled),
-        ("on · disabled", true, State::Disabled)]
-        .into_iter()
-        .map(|(cap, on, st)| {
-            let s = ui::switch();
-            s.set_active(on);
-            st.apply(&s);
-            specimen(&s, cap)
-        });
-    let checks = [("off", false, State::Rest), ("off · hover", false, State::Hover),
-        ("on", true, State::Rest), ("on · hover", true, State::Hover),
-        ("on · focus", true, State::Focus), ("off · disabled", false, State::Disabled),
-        ("on · disabled", true, State::Disabled)]
-        .into_iter()
-        .map(|(cap, on, st)| {
-            let c = ui::check("Fill the card");
-            c.set_active(on);
-            st.apply(&c);
-            specimen(&c, cap)
-        });
+    let switches = [
+        ("off", false, State::Rest),
+        ("off · hover", false, State::Hover),
+        ("on", true, State::Rest),
+        ("on · hover", true, State::Hover),
+        ("on · focus", true, State::Focus),
+        ("off · disabled", false, State::Disabled),
+        ("on · disabled", true, State::Disabled),
+    ]
+    .into_iter()
+    .map(|(cap, on, st)| {
+        let s = ui::switch();
+        s.set_active(on);
+        st.apply(&s);
+        specimen(&s, cap)
+    });
+    let checks = [
+        ("off", false, State::Rest),
+        ("off · hover", false, State::Hover),
+        ("on", true, State::Rest),
+        ("on · hover", true, State::Hover),
+        ("on · focus", true, State::Focus),
+        ("off · disabled", false, State::Disabled),
+        ("on · disabled", true, State::Disabled),
+    ]
+    .into_iter()
+    .map(|(cap, on, st)| {
+        let c = ui::check("Fill the card");
+        c.set_active(on);
+        st.apply(&c);
+        specimen(&c, cap)
+    });
     root.append(&block(
         "Switch and check",
         [line("Switch", switches), line("Check", checks)],
@@ -363,7 +412,12 @@ fn inputs(root: &gtk4::Box) {
 
     // Sliders: each in its row, at a fixed width.
     let slider = |value: f64, over: bool, st: State, dense: bool| {
-        let r = ui::slider_row(ui::icons::SPEAKER_MED, 0.0, if over { 150.0 } else { 100.0 }, 1.0);
+        let r = ui::slider_row(
+            ui::icons::SPEAKER_MED,
+            0.0,
+            if over { 150.0 } else { 100.0 },
+            1.0,
+        );
         r.scale.set_value(value);
         r.value.set_text(&format!("{value:.0}%"));
         r.root.set_size_request(220, -1);
@@ -411,15 +465,27 @@ fn inputs(root: &gtk4::Box) {
         f.root
     };
     let entries = [
-        specimen(&entry("", "Search", State::Rest, None), "rest · placeholder"),
+        specimen(
+            &entry("", "Search", State::Rest, None),
+            "rest · placeholder",
+        ),
         specimen(&entry("", "Search", State::Hover, None), "hover"),
         specimen(&entry("Öresund", "", State::Focus, None), "focus"),
         specimen(&entry("Öresund", "", State::Disabled, None), "disabled"),
     ];
     let auth = [
-        specimen(&entry("", "Password", State::Rest, Some(ui::FieldState::Armed)), "armed · pulses"),
-        specimen(&entry("••••••", "", State::Rest, Some(ui::FieldState::Busy)), "busy"),
-        specimen(&entry("••••••", "", State::Rest, Some(ui::FieldState::Reject)), "reject · flash"),
+        specimen(
+            &entry("", "Password", State::Rest, Some(ui::FieldState::Armed)),
+            "armed · pulses",
+        ),
+        specimen(
+            &entry("••••••", "", State::Rest, Some(ui::FieldState::Busy)),
+            "busy",
+        ),
+        specimen(
+            &entry("••••••", "", State::Rest, Some(ui::FieldState::Reject)),
+            "reject · flash",
+        ),
         {
             let e = gtk4::Entry::new();
             e.set_placeholder_text(Some("Search apps, settings, files"));
@@ -437,16 +503,20 @@ fn inputs(root: &gtk4::Box) {
     };
     let area = {
         let (scroller, view) = ui::text_area(2);
-        view.buffer().set_text("Describe what went wrong.\nÅ, ä and ö stay.");
+        view.buffer()
+            .set_text("Describe what went wrong.\nÅ, ä and ö stay.");
         scroller.set_size_request(320, -1);
         specimen(&scroller, "text area · 2 lines")
     };
-    let dropdowns = State::ALL.iter().filter(|s| **s != State::Pressed).map(|s| {
-        let d = ui::dropdown(&["Auto: light by day", "Dark", "Light"]);
-        d.set_size_request(200, -1);
-        s.apply(&d);
-        specimen(&d, &format!("dropdown · {}", s.name()))
-    });
+    let dropdowns = State::ALL
+        .iter()
+        .filter(|s| **s != State::Pressed)
+        .map(|s| {
+            let d = ui::dropdown(&["Auto: light by day", "Dark", "Light"]);
+            d.set_size_request(200, -1);
+            s.apply(&d);
+            specimen(&d, &format!("dropdown · {}", s.name()))
+        });
     root.append(&block(
         "Field and dropdown",
         [
@@ -534,13 +604,17 @@ fn lists(root: &gtk4::Box) {
     };
     root.append(&block(
         "Row and list",
-        [line("Row button", rows), line("List", [list, switch_row, busy])],
+        [
+            line("Row button", rows),
+            line("List", [list, switch_row, busy]),
+        ],
     ));
 
     // Sections and disclosures.
     let section = |open: bool| {
         let s = ui::section(ui::icons::BLUETOOTH, "Bluetooth", "2 connected");
-        s.body.append(&ui::text("Body content", Text::Body, Tone::Muted));
+        s.body
+            .append(&ui::text("Body content", Text::Body, Tone::Muted));
         ui::pad(&s.body, 3);
         s.set_open(open);
         s.root.set_size_request(280, -1);
@@ -548,7 +622,8 @@ fn lists(root: &gtk4::Box) {
     };
     let disclosure = |open: bool, st: State| {
         let d = ui::disclosure("More options");
-        d.body.append(&ui::text("Hidden until opened", Text::Label, Tone::Muted));
+        d.body
+            .append(&ui::text("Hidden until opened", Text::Label, Tone::Muted));
         d.set_open(open);
         st.apply(&d.header);
         d.root.set_size_request(200, -1);
@@ -559,7 +634,10 @@ fn lists(root: &gtk4::Box) {
         [
             line(
                 "Section",
-                [specimen(&section(false), "closed"), specimen(&section(true), "open")],
+                [
+                    specimen(&section(false), "closed"),
+                    specimen(&section(true), "open"),
+                ],
             ),
             line(
                 "Disclosure",
@@ -578,8 +656,12 @@ fn lists(root: &gtk4::Box) {
         ui::card::adopt(&card, ui::Card::Solid);
         let m = ui::menu();
         m.set_size_request(220, -1);
-        let items = [("Open", "Enter", false, State::Rest), ("Pin", "P", false, State::Hover),
-            ("Rename", "F2", false, State::Pressed), ("Forget", "Del", true, State::Rest)];
+        let items = [
+            ("Open", "Enter", false, State::Rest),
+            ("Pin", "P", false, State::Hover),
+            ("Rename", "F2", false, State::Pressed),
+            ("Forget", "Del", true, State::Rest),
+        ];
         for (label, accel, danger, st) in items {
             let i = ui::menu_item(label, accel, danger);
             st.apply(&i);
@@ -608,7 +690,10 @@ fn lists(root: &gtk4::Box) {
     let pill_group = {
         let g = ui::pill_group(1);
         let b = ui::button_with(
-            Face::Glyph { glyph: ui::icons::SPEAKER_MED, tooltip: "Mute" },
+            Face::Glyph {
+                glyph: ui::icons::SPEAKER_MED,
+                tooltip: "Mute",
+            },
             Kind::Flat,
             Size::Normal,
         );
@@ -634,7 +719,10 @@ fn lists(root: &gtk4::Box) {
     };
     root.append(&block(
         "Menu, card fills, avatar",
-        [line("Menu · fills", [menu, group, well, pill_group, avatars])],
+        [line(
+            "Menu · fills",
+            [menu, group, well, pill_group, avatars],
+        )],
     ));
 }
 
@@ -673,9 +761,18 @@ fn tiles(root: &gtk4::Box) {
     };
     let splits = [
         specimen(&split(false, "", State::Rest, false), "off"),
-        specimen(&split(true, "Until 07:00", State::Rest, false), "on · status"),
-        specimen(&split(true, "Until 07:00", State::Hover, false), "on · body hover"),
-        specimen(&split(true, "Until 07:00", State::Focus, false), "on · body focus"),
+        specimen(
+            &split(true, "Until 07:00", State::Rest, false),
+            "on · status",
+        ),
+        specimen(
+            &split(true, "Until 07:00", State::Hover, false),
+            "on · body hover",
+        ),
+        specimen(
+            &split(true, "Until 07:00", State::Focus, false),
+            "on · body focus",
+        ),
         specimen(&split(false, "", State::Rest, true), "detail open"),
     ];
     root.append(&block(

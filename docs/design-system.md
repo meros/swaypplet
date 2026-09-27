@@ -781,6 +781,11 @@ The lint also carries a ledger of files not yet migrated, which can only
 shrink (empty today). Contrast (§5) is checked by the tests in
 `src/tokens/`.
 
+`swaypplet --preview components.<page>` (controls, inputs, lists, tiles;
+`src/preview/components.rs`) draws every component in every variant and
+state on one card, the pointer and keyboard states forced through GTK's
+state flags, so a change to a component is judged against its siblings;
+`docs/component-zoo.html` holds the decisions made on it.
 `dev/render-all.sh capture DIR` renders every surface in both modes over
 black and over a wallpaper; `dev/render-all.sh compare BEFORE AFTER` diffs
 two such runs and writes a sheet for every shot that changed. It is the

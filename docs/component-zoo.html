@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>swaypplet Component Zoo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Ubuntu+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+    />
+    <style>
+      /* ── The design system's tokens, the dark set by default (docs/design-system.md §3). ── */
+      :root {
+        color-scheme: dark;
+        --neutral-1: #1d2021;
+        --neutral-3: #32302f;
+        --neutral-12: #ebdbb2;
+        --accent-9: #689d6a;
+        --accent-11: #9fd29e;
+        --fg: var(--neutral-12);
+        --fg-muted: color-mix(in srgb, var(--neutral-12) 84%, transparent);
+        --fg-faint: color-mix(in srgb, var(--neutral-12) 67%, transparent);
+        --fill-1: color-mix(in srgb, currentColor 6%, transparent);
+        --fill-2: color-mix(in srgb, currentColor 10%, transparent);
+        --border-subtle: color-mix(in srgb, var(--neutral-12) 8%, transparent);
+        --border-strong: color-mix(in srgb, var(--neutral-12) 16%, transparent);
+        --accent-bg: var(--accent-9);
+        --accent: var(--accent-11);
+        --accent-tint: color-mix(in srgb, var(--accent-9) 16%, transparent);
+        --font: "Ubuntu Sans", "Noto Sans", sans-serif;
+        --mono: "JetBrains Mono", monospace;
+        --radius-tile: 10px;
+        --radius-card: 18px;
+        --radius-control: 6px;
+        --ground: var(--neutral-1);
+        --card: color-mix(in srgb, var(--neutral-3) 70%, transparent);
+      }
+      @media (prefers-color-scheme: light) {
+        :root:not([data-theme="dark"]) {
+          color-scheme: light;
+          --neutral-1: #f8f7f4;
+          --neutral-3: #ebe9e4;
+          --neutral-12: #282624;
+          --accent-9: #427b58;
+          --accent-11: #2f5e42;
+          --fg-muted: color-mix(in srgb, var(--neutral-12) 82%, transparent);
+          --fg-faint: color-mix(in srgb, var(--neutral-12) 62%, transparent);
+          --border-subtle: color-mix(
+            in srgb,
+            var(--neutral-12) 10%,
+            transparent
+          );
+          --border-strong: color-mix(
+            in srgb,
+            var(--neutral-12) 20%,
+            transparent
+          );
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--ground);
+        color: var(--fg);
+        font-family: var(--font);
+        font-size: 15px;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+      }
+      .page {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 32px 16px 96px;
+        display: grid;
+        gap: 32px;
+      }
+      header h1 {
+        margin: 0;
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      header p,
+      .lede {
+        color: var(--fg-muted);
+        max-width: 72ch;
+        margin: 8px 0 0;
+      }
+      .rule {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--fg-faint);
+      }
+      section.decision {
+        background: var(--card);
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-card);
+        padding: 24px;
+        display: grid;
+        gap: 16px;
+      }
+      section.decision > h2 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 12px;
+      }
+      section.decision > h2 small {
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--fg-faint);
+      }
+      .question {
+        margin: 0;
+        color: var(--fg-muted);
+      }
+      .options {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+        gap: 16px;
+      }
+      .option {
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius-tile);
+        padding: 16px;
+        display: grid;
+        gap: 12px;
+        align-content: start;
+      }
+      .option.recommended {
+        border-color: var(--accent-bg);
+        box-shadow: inset 0 0 0 1px var(--accent-bg);
+      }
+      .option h3 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .badge {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--accent-tint);
+        color: var(--accent);
+      }
+      .option p {
+        margin: 0;
+        font-size: 13px;
+        color: var(--fg-muted);
+      }
+      .option p b {
+        color: var(--fg);
+        font-weight: 600;
+      }
+      .shots {
+        display: grid;
+        gap: 8px;
+      }
+      .shots figure {
+        margin: 0;
+      }
+      .shots img {
+        display: block;
+        width: 100%;
+        height: auto;
+        border-radius: var(--radius-control);
+        border: 1px solid var(--border-strong);
+      }
+      .shots figcaption {
+        font-size: 11px;
+        color: var(--fg-faint);
+        margin-top: 4px;
+      }
+      .reach {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--fg-muted);
+        background: var(--fill-1);
+        border-radius: var(--radius-control);
+        padding: 8px 10px;
+        white-space: pre-wrap;
+      }
+      .decided {
+        display: grid;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--fg-muted);
+      }
+      .decided li b {
+        color: var(--fg);
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header>
+        <h1>Component zoo</h1>
+        <p>
+          The decisions of the 2026-09 component pass (branch
+          <code>component-polish</code>) that had more than one good answer.
+          Every option was built for real and drawn on the component sheet
+          (<code>swaypplet --preview components.&lt;page&gt;</code>,
+          <code>dev/render.sh</code> at 1440×900, scale 1, over the alcohol-ink
+          wallpaper) in both modes. The recommendation is what the branch
+          ships; the other option is one CSS class away, named under it, and
+          the sheet draws it with
+          <code>SWAYPPLET_PREVIEW_ALT=&lt;name&gt;</code>.
+        </p>
+        <p class="rule">
+          Harness limits: scale 1 where the laptop runs at 2, the nested sway's
+          blur stands in for the live session's liquid glass, and a static
+          sheet shows a pressed control's end state, never its motion. Judge
+          shape, contrast and consistency here; judge the press and the
+          material on the live session.
+        </p>
+      </header>
+
+      <!-- ══════════════════════════════════════════════════════════════════ -->
+      <section class="decision" id="disabled">
+        <h2>What a disabled control looks like <small>every control</small></h2>
+        <p class="question">
+          Does a control that cannot be used keep its box and grey its label,
+          or fade whole? And does a disabled switch still say which way it is?
+        </p>
+        <div class="options">
+          <article class="option recommended">
+            <h3>Keep the box <span class="badge">recommended</span></h3>
+            <p>
+              <b>An action greys its label on a box that stays; a value stays
+              a value.</b> The box is <code>--fill-disabled</code>, the ink at
+              the hairline's share and not a currentColor mix, so it does not
+              fade with the label. A primary or destructive action loses its
+              colour: it cannot be taken. A control that is <em>on</em> (a
+              checked toggle, chip or tile) keeps its accent at half strength,
+              and a switch, check or slider fades whole, because its value is
+              its shape. What macOS and iOS do.
+            </p>
+            <p>
+              <b>Trade-off:</b> two mechanisms (a greyed label, a faded whole)
+              for one word, and a new token to explain.
+            </p>
+            <div class="shots">
+              <figure>
+                <img src="screenshots/alternatives/component-disabled-keep-buttons-dark.png" alt="" loading="lazy" />
+                <figcaption>Buttons, dark: the disabled column keeps its box</figcaption>
+              </figure>
+              <figure>
+                <img src="screenshots/alternatives/component-disabled-keep-buttons-light.png" alt="" loading="lazy" />
+                <figcaption>Buttons, light</figcaption>
+              </figure>
+              <figure>
+                <img src="screenshots/alternatives/component-disabled-keep-switch-dark.png" alt="" loading="lazy" />
+                <figcaption>Switch and check, dark: on · disabled still says on</figcaption>
+              </figure>
+              <figure>
+                <img src="screenshots/alternatives/component-disabled-keep-switch-light.png" alt="" loading="lazy" />
+                <figcaption>Switch and check, light</figcaption>
+              </figure>
+              <figure>
+                <img src="screenshots/alternatives/component-disabled-keep-tiles-dark.png" alt="" loading="lazy" />
+                <figcaption>Tiles, dark</figcaption>
+              </figure>
+              <figure>
+                <img src="screenshots/alternatives/component-disabled-keep-tiles-light.png" alt="" loading="lazy" />
+                <figcaption>Tiles, light</figcaption>
+              </figure>
+            </div>
+            <div class="reach">
+              data/css/components/button.css, chip.css, tile.css, slider.css,
+              field.css: the :disabled rules; src/tokens/emit.rs
+              --fill-disabled. Design system §3.2, §3.3.
+            </div>
+          </article>
+
+          <article class="option">
+            <h3>Fade whole</h3>
+            <p>
+              <b>Every disabled control keeps its colours at 50 % opacity.</b>
+              One mechanism for every control, libadwaita's. A disabled primary
+              button stays green, a disabled destructive one stays red.
+            </p>
+            <p>
+              <b>Trade-off:</b> a dim green "Connect" reads as a live button in
+              a dark corner, not as one that cannot be pressed: the colour
+              still says "the primary action", which it is not. On a bright
+              wallpaper the 50 % box of a secondary button vanishes into the
+              glass the way the old 4 % fill did.
+            </p>
+            <div class="shots">
+              <figure>
+                <img src="screenshots/alternatives/component-disabled-fade-buttons-dark.png" alt="" loading="lazy" />
+                <figcaption>Buttons, dark</figcaption>
+              </figure>
+              <figure>
+                <img src="screenshots/alternatives/component-disabled-fade-buttons-light.png" alt="" loading="lazy" />
+                <figcaption>Buttons, light</figcaption>
+              </figure>
+              <figure>
+                <img src="screenshots/alternatives/component-disabled-fade-switch-dark.png" alt="" loading="lazy" />
+                <figcaption>Switch and check, dark: the same as Keep the box here</figcaption>
+              </figure>
+              <figure>
+                <img src="screenshots/alternatives/component-disabled-fade-switch-light.png" alt="" loading="lazy" />
+                <figcaption>Switch and check, light</figcaption>
+              </figure>
+              <figure>
+                <img src="screenshots/alternatives/component-disabled-fade-tiles-dark.png" alt="" loading="lazy" />
+                <figcaption>Tiles, dark</figcaption>
+              </figure>
+              <figure>
+                <img src="screenshots/alternatives/component-disabled-fade-tiles-light.png" alt="" loading="lazy" />
+                <figcaption>Tiles, light</figcaption>
+              </figure>
+            </div>
+            <div class="reach">
+              class alt-disabled-fade on an ancestor (button.css, chip.css,
+              tile.css); SWAYPPLET_PREVIEW_ALT=disabled-fade
+            </div>
+          </article>
+
+          <article class="option">
+            <h3>Grey label only (as shipped before this pass)</h3>
+            <p>
+              <b>The label goes to --fg-disabled and nothing else is said.</b>
+              The fill, a currentColor mix, fades with it to 4 % and the box is
+              gone; a disabled switch drops its accent.
+            </p>
+            <p>
+              <b>Trade-off:</b> a disabled button is a floating grey word, and
+              "on · disabled" and "off · disabled" are the same switch.
+            </p>
+            <div class="shots">
+              <figure>
+                <img src="screenshots/alternatives/component-disabled-grey-buttons-dark.png" alt="" loading="lazy" />
+                <figcaption>Buttons, dark</figcaption>
+              </figure>
+              <figure>
+                <img src="screenshots/alternatives/component-disabled-grey-switch-dark.png" alt="" loading="lazy" />
+                <figcaption>Switch and check, dark: both disabled switches read off</figcaption>
+              </figure>
+            </div>
+            <div class="reach">git show 5c1f5df:data/css/components/button.css</div>
+          </article>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════════════ -->
+      <section class="decision" id="press">
+        <h2>How a press feels <small>button, chip, tile</small></h2>
+        <p class="question">
+          Is a pressed control the state overlay alone, or the overlay and a
+          3 % shrink?
+        </p>
+        <div class="options">
+          <article class="option recommended">
+            <h3>Overlay <span class="badge">recommended</span></h3>
+            <p>
+              <b>One state model for every control.</b> Hover lays 7 % of the
+              control's own ink over it, a press 16 %, in either mode and on
+              any fill (design system §3.3). Nothing moves, so nothing inside a
+              grid or a list is clipped, and a press on a row or a menu item
+              looks the same as one on a button. What GNOME, Windows and
+              Material do.
+            </p>
+            <p>
+              <b>Trade-off:</b> on the accent fill the press goes lighter,
+              toward the ink, where a physical button would go darker; the
+              difference between hover and press is a tone, not a movement.
+            </p>
+            <div class="shots">
+              <figure>
+                <img src="screenshots/alternatives/component-press-flat-dark.png" alt="" loading="lazy" />
+                <figcaption>Dark: the pressed column</figcaption>
+              </figure>
+              <figure>
+                <img src="screenshots/alternatives/component-press-flat-light.png" alt="" loading="lazy" />
+                <figcaption>Light</figcaption>
+              </figure>
+            </div>
+            <div class="reach">
+              data/css/components/button.css button.ui-btn:active (and chip.css,
+              tile.css)
+            </div>
+          </article>
+
+          <article class="option">
+            <h3>Overlay and shrink</h3>
+            <p>
+              <b>The control also sinks: scale(0.97) over --motion-state.</b>
+              iOS's press, where the thing under the finger gives. On a static
+              sheet it is a slightly smaller button; on screen it is the
+              motion that sells it.
+            </p>
+            <p>
+              <b>Trade-off:</b> a transform on a tile in the Helm's grid moves
+              its edge against its neighbours on every click, and a row or a
+              menu item would need the same or the system has two presses.
+              Needs a pointer on the live session to judge.
+            </p>
+            <div class="shots">
+              <figure>
+                <img src="screenshots/alternatives/component-press-shrink-dark.png" alt="" loading="lazy" />
+                <figcaption>Dark: the pressed column, 3 % smaller</figcaption>
+              </figure>
+              <figure>
+                <img src="screenshots/alternatives/component-press-shrink-light.png" alt="" loading="lazy" />
+                <figcaption>Light</figcaption>
+              </figure>
+              <figure>
+                <img src="screenshots/alternatives/component-press-shrink-tiles-light.png" alt="" loading="lazy" />
+                <figcaption>Tiles, light: on · pressed shrinks</figcaption>
+              </figure>
+            </div>
+            <div class="reach">
+              class alt-press-shrink on an ancestor (button.css, chip.css,
+              tile.css); SWAYPPLET_PREVIEW_ALT=press-shrink
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════════════════════════════════════════════ -->
+      <section class="decision" id="decided">
+        <h2>Decided without a zoo <small>one sensible answer</small></h2>
+        <ul class="decided">
+          <li>
+            <b>The switch lights under the pointer</b>, as every other control
+            does: it was the one control with no hover state.
+          </li>
+          <li>
+            <b>The chip presses</b>: it had a hover but no pressed state, no
+            transition (only its rich variant had one) and no focus ring of
+            its own.
+          </li>
+          <li>
+            <b>The dropdown reads as a field</b>: regular weight (GTK's own
+            button weight made it bold beside a regular entry) and the entry's
+            focus ring, which hugs the field; a button's stands off.
+          </li>
+          <li>
+            <b>A glyph on a square button is a step up</b> (15 px, not 13): at
+            body size a 30 px square was mostly air. A small icon button is now
+            square (24 × 24).
+          </li>
+          <li>
+            <b>Pressed goes toward the ink</b> in both modes (lighter on dark,
+            darker on light): the currentColor overlay, which GNOME and
+            Material share; macOS's darker press would need a second model for
+            light mode.
+          </li>
+          <li>
+            <b>No hover on a text entry</b>: neither macOS nor GNOME has one,
+            and the caret is the affordance.
+          </li>
+          <li>
+            <b>Focus rings stay outset (2 px, offset 2)</b> on controls and
+            inset on rows and section headers, where an outset ring would
+            collide with the row above.
+          </li>
+        </ul>
+      </section>
+    </div>
+  </body>
+</html>
