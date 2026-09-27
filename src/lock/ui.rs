@@ -69,6 +69,9 @@ pub fn handoff() -> Duration {
 /// `loginctl activate` still cuts away first.
 const HANDOFF_RECOVER: Duration = Duration::from_secs(2);
 
+/// What a user chip's click does, set once the surface knows.
+type OnUserSelect = Rc<RefCell<Option<Rc<dyn Fn(String)>>>>;
+
 /// Runs `SWAYPPLET_LOCK_WAKE_CMD` (throttled) on any key or pointer activity.
 /// The lock script blanks outputs after locking, and swayidle resume events
 /// only fire for timeouts that already expired — right after a manual lock
@@ -176,7 +179,7 @@ pub struct SurfaceSet {
     /// Known users rendered as clickable chips above the username row (only
     /// when more than one).
     users: Rc<RefCell<Vec<UserChip>>>,
-    on_user_select: Rc<RefCell<Option<Rc<dyn Fn(String)>>>>,
+    on_user_select: OnUserSelect,
     /// The compositor is cross-fading the whole surface, so the surfaces must
     /// not also animate themselves in.
     crossfade: Rc<Cell<bool>>,
@@ -886,7 +889,7 @@ fn fill_chip_row(
     row: &gtk4::Box,
     users: &[UserChip],
     active: &str,
-    on_select: &Rc<RefCell<Option<Rc<dyn Fn(String)>>>>,
+    on_select: &OnUserSelect,
 ) -> Vec<(String, gtk4::Button)> {
     while let Some(child) = row.first_child() {
         row.remove(&child);

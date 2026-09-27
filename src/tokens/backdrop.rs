@@ -89,10 +89,6 @@ const LIGHT_CALM_LC: f64 = 61.0;
 #[cfg(test)]
 const LIGHT_BUSY_LC: f64 = 47.0;
 
-/// The switch-user button and the switcher's caption.
-#[cfg(test)]
-pub const SMALL_LC: f64 = 60.0;
-
 /// What the clock is held to over a bright region busier than 10 %: no
 /// halo short of a card gets it all the way to [`CLOCK_LC`] there.
 #[cfg_attr(not(test), allow(dead_code))]

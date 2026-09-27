@@ -75,6 +75,9 @@ impl Drop for Inner {
     }
 }
 
+/// What wraps a surface's card before it is placed (`Builder::wrap`).
+type Wrap<'a> = Box<dyn FnOnce(&gtk4::Widget) -> gtk4::Widget + 'a>;
+
 /// Describes a [`Surface`]; [`Surface::builder`] starts one.
 #[must_use]
 pub struct Builder<'a> {
@@ -94,7 +97,7 @@ pub struct Builder<'a> {
     /// `None` until the caller says: a card, or none.
     card: Option<Option<crate::ui::Card>>,
     slide: Option<(gtk4::Orientation, f64)>,
-    wrap: Option<Box<dyn FnOnce(&gtk4::Widget) -> gtk4::Widget + 'a>>,
+    wrap: Option<Wrap<'a>>,
 }
 
 impl Surface {

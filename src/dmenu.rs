@@ -208,6 +208,9 @@ struct State {
     query: String,
 }
 
+/// What a finished pick hands its answer to, once.
+type Done = Box<dyn FnOnce(Option<String>)>;
+
 pub(crate) struct Picker {
     /// Dropped by the first `finish`, which destroys the window and with it
     /// the exclusive keyboard grab.
@@ -216,7 +219,7 @@ pub(crate) struct Picker {
     results_box: gtk4::Box,
     state: RefCell<State>,
     /// Taken on the first `finish`; later calls are no-ops.
-    done: RefCell<Option<Box<dyn FnOnce(Option<String>)>>>,
+    done: RefCell<Option<Done>>,
 }
 
 /// Build and present a picker window on `app`. `on_done` runs exactly once —

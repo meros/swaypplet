@@ -281,16 +281,16 @@ mod tests {
         // so the test cannot pass by agreeing with the code under test.
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let outputs = value["nodes"].as_array().unwrap();
-        let eDP = outputs
+        let edp = outputs
             .iter()
             .find(|o| o["name"] == "eDP-1")
             .expect("the recording is from the laptop");
-        let expected: Vec<String> = eDP["focus"]
+        let expected: Vec<String> = edp["focus"]
             .as_array()
             .unwrap()
             .iter()
             .map(|id| {
-                eDP["nodes"]
+                edp["nodes"]
                     .as_array()
                     .unwrap()
                     .iter()

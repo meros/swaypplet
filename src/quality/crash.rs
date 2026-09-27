@@ -80,7 +80,7 @@ fn panic_note(message: &str, location: &str, thread: &str, args: &str, backtrace
 
 fn prune(dir: &Path) {
     let mut files = panic_files(dir);
-    files.sort_by(|a, b| b.1.cmp(&a.1));
+    files.sort_by_key(|f| std::cmp::Reverse(f.1));
     for (path, _) in files.into_iter().skip(KEEP_PANICS) {
         let _ = std::fs::remove_file(path);
     }

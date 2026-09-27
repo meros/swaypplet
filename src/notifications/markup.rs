@@ -1,11 +1,11 @@
-/// Sanitize notification body markup for safe use with Pango.
-///
-/// The Desktop Notifications spec allows a subset of HTML:
-///   `<b>`, `<i>`, `<u>`, `<a href="...">`, `<img>`, `<br>`
-///
-/// Pango markup is XML-based and supports the same tags (minus `<img>`).
-/// We strip unsupported tags and escape raw `&`/`<` that aren't part of
-/// recognized markup, so `set_markup()` won't choke on malformed input.
+//! Sanitize notification body markup for safe use with Pango.
+//!
+//! The Desktop Notifications spec allows a subset of HTML:
+//!   `<b>`, `<i>`, `<u>`, `<a href="...">`, `<img>`, `<br>`
+//!
+//! Pango markup is XML-based and supports the same tags (minus `<img>`).
+//! We strip unsupported tags and escape raw `&`/`<` that aren't part of
+//! recognized markup, so `set_markup()` won't choke on malformed input.
 
 /// Allowed paired tags (lowercased).
 const ALLOWED_PAIRED: &[&str] = &["b", "i", "u", "a"];
@@ -104,12 +104,12 @@ fn is_valid_entity(name: &str) -> bool {
 /// Find the `>` that closes a tag starting after `<` at position `start`.
 fn find_tag_end(bytes: &[u8], start: usize) -> Option<usize> {
     let limit = (start + 500).min(bytes.len());
-    for j in start..limit {
-        if bytes[j] == b'>' {
+    for (j, &b) in bytes.iter().enumerate().take(limit).skip(start) {
+        if b == b'>' {
             return Some(j);
         }
         // Nested `<` means this isn't a well-formed tag
-        if bytes[j] == b'<' {
+        if b == b'<' {
             return None;
         }
     }
@@ -190,12 +190,9 @@ fn extract_href(tag_content: &str) -> Option<String> {
     let rest = rest.strip_prefix('=')?;
     let rest = rest.trim_start();
 
-    let (quote, rest) = if rest.starts_with('"') {
-        ('"', &rest[1..])
-    } else if rest.starts_with('\'') {
-        ('\'', &rest[1..])
-    } else {
-        return None;
+    let (quote, rest) = match rest.strip_prefix('"') {
+        Some(rest) => ('"', rest),
+        None => ('\'', rest.strip_prefix('\'')?),
     };
 
     let end = rest.find(quote)?;

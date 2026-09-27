@@ -307,9 +307,12 @@ pub fn watch(on_material: impl Fn(crate::tokens::Inputs) + 'static) {
     follow_the_sun(changed);
 }
 
+/// A sender of the glass material, as [`watch`] takes it.
+type OnMaterial = Box<dyn Fn(crate::tokens::Inputs)>;
+
 thread_local! {
     /// What [`watch`] was given to send the glass material with.
-    static ON_MATERIAL: RefCell<Option<Box<dyn Fn(crate::tokens::Inputs)>>> = const { RefCell::new(None) };
+    static ON_MATERIAL: RefCell<Option<OnMaterial>> = const { RefCell::new(None) };
 }
 
 /// Resolve the inputs again and, when they moved, reload the stylesheet and

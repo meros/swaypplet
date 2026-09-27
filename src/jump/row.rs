@@ -111,9 +111,12 @@ impl Row {
     }
 }
 
+/// A card's name and where it stands.
+pub type Placed = (String, Look);
+
 /// `names[0]` is the workspace you are on, and `names[selected]` the one
 /// in the middle. Every workspace's look.
-pub fn layout(row: &Row, names: &[String], selected: usize) -> Vec<(String, Look)> {
+pub fn layout(row: &Row, names: &[String], selected: usize) -> Vec<Placed> {
     names
         .iter()
         .enumerate()
@@ -125,7 +128,7 @@ pub fn layout(row: &Row, names: &[String], selected: usize) -> Vec<(String, Look
 /// the one you are on in the middle (a hidden workspace given alpha 0
 /// remembers where, and moves from there when it is next shown), then the
 /// whole strip moves one place left.
-pub fn open(row: &Row, names: &[String]) -> Vec<(String, Look)> {
+pub fn open(row: &Row, names: &[String]) -> Vec<Placed> {
     names
         .iter()
         .enumerate()
@@ -142,7 +145,7 @@ pub fn commit(
     row: &Row,
     names: &[String],
     selected: usize,
-) -> (Vec<(String, Look)>, Option<(String, Look)>) {
+) -> (Vec<Placed>, Option<Placed>) {
     let before = names
         .iter()
         .enumerate()
@@ -156,7 +159,7 @@ pub fn commit(
 /// Cancelling: the one you are on grows back from wherever the strip had
 /// it, and the others move with the strip as it brings it to the middle,
 /// fading out on the way.
-pub fn cancel(row: &Row, names: &[String]) -> Vec<(String, Look)> {
+pub fn cancel(row: &Row, names: &[String]) -> Vec<Placed> {
     names
         .iter()
         .enumerate()

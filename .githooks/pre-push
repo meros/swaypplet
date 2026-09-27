@@ -12,6 +12,12 @@
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
+# The compiler cache's server, started here with nothing of ours: cargo
+# would start it on first use, and a daemon holds every descriptor it was
+# born with. Born under `nx`, it held the pipe nx reads the push through
+# (nx waited for an end of output that never came) and nx's own lock.
+nix develop -c sccache --start-server </dev/null >/dev/null 2>&1 9>&- || true
+
 nix develop -c cargo test --release --quiet 2>&1 | tail -3
 [ "${PIPESTATUS[0]}" -eq 0 ] || { echo "pre-push: tests failed"; exit 1; }
 

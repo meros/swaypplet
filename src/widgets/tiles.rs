@@ -207,6 +207,9 @@ pub const DURATIONS: [(&str, Option<u32>); 5] = [
     ("Until turned off", None),
 ];
 
+/// What picking a duration does for the switch the fold is open for.
+type OnPick = Rc<dyn Fn(Option<u32>)>;
+
 /// The durations for the timed switches (No Sleep, No Lock), folded out
 /// inline under the switch strip.
 ///
@@ -225,7 +228,7 @@ pub struct DurationFold {
     /// The chevron that opened it, marked while it is open.
     anchor: RefCell<Option<gtk4::Button>>,
     /// What a pick does for the switch it is open for.
-    on_pick: RefCell<Option<Rc<dyn Fn(Option<u32>)>>>,
+    on_pick: RefCell<Option<OnPick>>,
     /// Set while a pick is arming, so a second click does not arm twice.
     busy: Cell<bool>,
 }

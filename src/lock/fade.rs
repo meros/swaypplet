@@ -86,8 +86,6 @@ pub struct LockFade {
     surfaces: RefCell<Vec<Entry>>,
     ramp: RefCell<Option<glib::SourceId>>,
     entered: Cell<bool>,
-    settled: Cell<bool>,
-    on_settled: RefCell<Vec<OnceCb>>,
     pending_paints: Cell<usize>,
     armed: Cell<bool>,
     ticker: RefCell<Option<Rc<dyn Fn()>>>,
@@ -120,8 +118,6 @@ impl LockFade {
             surfaces: RefCell::new(Vec::new()),
             ramp: RefCell::new(None),
             entered: Cell::new(false),
-            settled: Cell::new(false),
-            on_settled: RefCell::new(Vec::new()),
             pending_paints: Cell::new(0),
             armed: Cell::new(false),
             ticker: RefCell::new(None),
@@ -183,7 +179,6 @@ impl LockFade {
             // still failed, nobody fades, or the outputs would disagree.
             self.enabled.set(false);
             self.broadcast(1.0);
-            self.settle();
             return;
         };
         alpha.set_pending(self.value.get());
@@ -247,35 +242,6 @@ impl LockFade {
                 fade.begin_enter();
             }
         });
-    }
-
-    /// Run `cb` once the entrance is over, i.e. once the surface is opaque
-    /// and a layout change can no longer be seen through it.
-    ///
-    /// Everything that arrives from a worker while the lock screen is
-    /// see-through has to come through here. A card that grows mid-ramp is a
-    /// jump the fade cannot hide, and the work behind it (a chip rebuild, an
-    /// avatar decode) lands on the frames with the least slack, so a late
-    /// answer costs both the layout and the cadence.
-    pub fn on_settled(self: &Rc<Self>, cb: impl FnOnce() + 'static) {
-        if !self.enabled.get() || self.settled.get() {
-            cb();
-            return;
-        }
-        self.on_settled.borrow_mut().push(Box::new(cb));
-    }
-
-    /// Idempotent, and never skipped: the ramp runs on a wall clock and
-    /// `arm_fallback` guarantees it starts, so anything queued here runs even
-    /// on the paths where no frame is ever painted.
-    fn settle(&self) {
-        if self.settled.replace(true) {
-            return;
-        }
-        let queued: Vec<OnceCb> = self.on_settled.borrow_mut().drain(..).collect();
-        for cb in queued {
-            cb();
-        }
     }
 
     fn broadcast(&self, value: f64) {
@@ -371,7 +337,6 @@ impl LockFade {
                 if let Some(c) = cadence.borrow_mut().take() {
                     c.finish("enter");
                 }
-                this.settle();
                 return glib::ControlFlow::Break;
             }
             glib::ControlFlow::Continue
@@ -392,7 +357,6 @@ impl LockFade {
         self.cancel();
         self.entered.set(true);
         self.broadcast(1.0);
-        self.settle();
     }
 
     /// Ramp out, then run `then` (always `instance.unlock()`).
