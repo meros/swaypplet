@@ -458,8 +458,13 @@ fn measure(card: &gtk4::Widget, window: &gtk4::Window) -> Option<Shape> {
     }
     // The border box, through every allocation and CSS transform.
     let bounds = card.compute_bounds(window)?;
-    let scale = if card.width() > 0 {
-        f64::from(bounds.width()) / f64::from(card.width())
+    // The scale those transforms apply, against the same box untransformed.
+    // `width()` is the content box, which is short of the border box by the
+    // padding and border: the lock card's 50px made this 1.16 at rest and
+    // sent a 20.9px radius for its 18px corners.
+    let own = card.compute_bounds(card)?;
+    let scale = if own.width() > 0.0 {
+        f64::from(bounds.width()) / f64::from(own.width())
     } else {
         1.0
     };
