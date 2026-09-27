@@ -1,4 +1,10 @@
-use std::cell::Cell;
+//! The Helm's displays page: what you do to the displays now. The night
+//! light on or off, a saved layout applied, and what is connected. How the
+//! displays are arranged, the profiles kept, and how warm the night is are
+//! configured once, in settings (Displays, Appearance), which the page's
+//! last row opens.
+
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
@@ -70,80 +76,25 @@ fn trim(v: f64) -> String {
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
-// ── Row builder ───────────────────────────────────────────────────────────────
+// ── Outputs ───────────────────────────────────────────────────────────────────
 
-/// Build a single output row and return it along with the widget that should be
-/// refreshed when the toggle completes (`output_list`).
-fn make_output_row(output: &OutputInfo, shared: &Rc<Cell<usize>>, output_list: &Box) -> Box {
+/// One output, read only: what it is and what it runs at. Turning one on or
+/// off is arranging them, which settings does with the layout in view.
+fn output_row(output: &OutputInfo) -> Box {
     let title = match &output.product {
         Some(p) => format!("{} · {p}", output.name),
         None => output.name.clone(),
     };
-    let r = ui::row(icons::DISPLAY, &title, &describe(output));
-    let active_count = shared.get();
-
-    // Disable button is suppressed when it would turn off the last active display.
-    let can_disable = output.active && active_count > 1;
-    let btn_label = if output.active { "Disable" } else { "Enable" };
-    let toggle_btn = ui::button_with(
-        ui::Face::Label(btn_label),
-        ui::Kind::Secondary,
-        ui::Size::Small,
-    );
-    if !can_disable && output.active {
-        // Last active display: prevent disabling.
-        toggle_btn.set_sensitive(false);
-        toggle_btn.set_tooltip_text(Some("Cannot disable the only active display"));
-    }
-
-    // ── Toggle handler ────────────────────────────────────────────────────────
-    {
-        let name = output.name.clone();
-        let active = output.active;
-        let output_list_c = output_list.clone();
-        let count = shared.clone();
-
-        toggle_btn.connect_clicked(move |btn| {
-            // The shared count, not the row's copy: two rapid Disable clicks
-            // on two active displays must not both pass and leave none. The
-            // first one takes its display off the count before sway answers.
-            if active && count.get() <= 1 {
-                btn.set_tooltip_text(Some("Cannot disable the only active display"));
-                return;
-            }
-            if active {
-                count.set(count.get() - 1);
-            }
-            btn.set_sensitive(false);
-            let cmd = format!("output {name} {}", if active { "disable" } else { "enable" });
-            let output_list_refresh = output_list_c.clone();
-            let count = count.clone();
-            crate::sway::ipc::run_command_result(&cmd, move |_ok| {
-                refresh_list(&output_list_refresh, &count);
-            });
-        });
-    }
-
-    r.end.append(&toggle_btn);
-    r.root
-}
-
-// ── List population ───────────────────────────────────────────────────────────
-
-/// Read the outputs on a worker, then rebuild `list`.
-fn refresh_list(list: &Box, active: &Rc<Cell<usize>>) {
-    let (list, active) = (list.clone(), active.clone());
-    spawn_work(get_outputs, move |outputs| populate_output_list_with_data(&list, &outputs, &active));
+    ui::row(icons::DISPLAY, &title, &describe(output)).root
 }
 
 /// Clear `list` and rebuild it from pre-fetched output data.
-fn populate_output_list_with_data(list: &Box, outputs: &[OutputInfo], active: &Rc<Cell<usize>>) {
+fn populate_output_list_with_data(list: &Box, outputs: &[OutputInfo]) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
-    active.set(outputs.iter().filter(|o| o.active).count());
     for output in outputs {
-        list.append(&make_output_row(output, active, list));
+        list.append(&output_row(output));
     }
 }
 
@@ -196,9 +147,44 @@ fn profile_row(name: &str, current: bool, fits: bool, first: bool) -> Box {
     r.root
 }
 
-/// Rebuild the profile list from the service's view.
-fn populate_profiles(group: &Box, list: &Box) {
-    group.set_visible(fill_profiles(list));
+/// The profiles a click can put on screen now: those that fit these
+/// displays, with Apply, and the one on screen, marked. Ordering, deleting
+/// and saving them is the Displays settings pane's (`fill_profiles`). The
+/// group hides when there is nothing to pick, or no output management.
+fn populate_picks(group: &Box, list: &Box) {
+    while let Some(child) = list.first_child() {
+        list.remove(&child);
+    }
+    let view = displays::view();
+    let mut any = false;
+    for (name, fits) in &view.profiles {
+        let current = view.current.as_deref() == Some(name.as_str());
+        if !(current || *fits) {
+            continue;
+        }
+        any = true;
+        let r = ui::row(
+            icons::DISPLAY_PROFILE,
+            name,
+            if current {
+                "On screen"
+            } else {
+                "Fits these displays"
+            },
+        );
+        if !current {
+            let apply = ui::button_with(
+                ui::Face::Label("Apply"),
+                ui::Kind::Secondary,
+                ui::Size::Small,
+            );
+            let n = name.clone();
+            apply.connect_clicked(move |_| displays::apply(&n));
+            r.end.append(&apply);
+        }
+        list.append(&r.root);
+    }
+    group.set_visible(view.available && any);
 }
 
 /// Fill `list` with the profiles, one row each with Apply, raise and
@@ -256,8 +242,9 @@ pub fn save_row(label: &str) -> Box {
 pub struct DisplaySection {
     section: ui::Section,
     output_list: Box,
-    /// Active outputs as last read, shared by every row's Disable.
-    active: Rc<Cell<usize>>,
+    /// What "Arrange displays…" opens: the Displays settings pane, set by
+    /// the Helm (`set_on_arrange`).
+    on_arrange: Rc<RefCell<Option<std::boxed::Box<dyn Fn()>>>>,
 }
 
 impl DisplaySection {
@@ -266,14 +253,7 @@ impl DisplaySection {
         ui::glyph::adopt(&section.icon, ui::Text::Title, ui::Tone::Fg);
         let output_list = ui::vbox(1);
 
-        // ── Night light warmth, above the outputs ─────────────────────────────
-        let night = ui::group(1);
-        let night_head = ui::heading("Night Light");
-        night_head.set_halign(gtk4::Align::Start);
-        night_head.add_css_class("display-group-head");
-        night.append(&night_head);
-        // On or off, and when: the tile's switch and its schedule, here with
-        // the warmth they apply.
+        // ── Night light: on or off now; how warm is Appearance's ──────────────
         let current = store::current().night_light();
         let (on_row, on) = ui::switch_row("Night light", night_when(current.schedule));
         on.set_active(current.enabled);
@@ -281,50 +261,21 @@ impl DisplaySection {
             let on = s.is_active();
             store::edit::<NightLight>(|n| n.enabled = on);
         });
-        night.append(&on_row.root);
-        let night_row = ui::slider_row(
-            "󰖔",
-            f64::from(NightLight::MIN_K),
-            f64::from(NightLight::DAY_K),
-            100.0,
-        );
-        ui::glyph::adopt(&night_row.icon, ui::Text::Title, ui::Tone::Fg);
-        night_row.scale.adjustment().set_page_increment(500.0);
-        // The night's temperature (`night_light.night_k`): the night light
-        // ramps to it over a second as the slider moves, and the settings
-        // file is written once the drag rests.
-        let night_k = store::current().night_light().night_k;
-        night_row.scale.set_value(f64::from(night_k));
-        night_row.value.set_label(&format!("{night_k}K"));
         {
-            let val_lbl = night_row.value.clone();
-            night_row.scale.connect_value_changed(move |s| {
-                let temp = s.value().round() as u32;
-                val_lbl.set_label(&format!("{temp}K"));
-                store::edit::<NightLight>(|n| n.night_k = temp);
-            });
-        }
-        {
-            // A change from elsewhere (the settings file, the CLI) moves the
-            // slider; the handler above then writes back what is already
-            // there, which the store drops.
-            let scale = night_row.scale.clone();
+            // A change from elsewhere (the deck tile, the settings file, the
+            // CLI) moves the switch; the handler above then writes back what
+            // is already there, which the store drops.
             let (on, when) = (on.clone(), on_row.subtitle.clone());
             store::observe(move || {
                 let n = store::current().night_light();
-                let k = f64::from(n.night_k);
-                if (scale.value() - k).abs() >= 1.0 {
-                    scale.set_value(k);
-                }
                 if on.is_active() != n.enabled {
                     on.set_active(n.enabled);
                 }
                 when.set_label(night_when(n.schedule));
             });
         }
-        night.append(&night_row.root);
 
-        // ── Profiles: kanshi's job (`services::displays`) ─────────────────────
+        // ── Profiles to apply ─────────────────────────────────────────────────
         let profiles = ui::group(1);
         let profiles_head = ui::heading("Profiles");
         profiles_head.set_halign(gtk4::Align::Start);
@@ -332,27 +283,48 @@ impl DisplaySection {
         profiles.append(&profiles_head);
         let profile_list = ui::vbox(1);
         profiles.append(&profile_list);
-        let save = save_row("Save current layout");
-        save.add_css_class("display-group-foot");
-        profiles.append(&save);
-        populate_profiles(&profiles, &profile_list);
+        populate_picks(&profiles, &profile_list);
 
-        let detail_box = ui::vbox(3);
-        detail_box.append(&night);
-        detail_box.append(&profiles);
         let outputs = ui::group(1);
-        let outputs_head = ui::heading("Outputs");
+        let outputs_head = ui::heading("Connected");
         outputs_head.set_halign(gtk4::Align::Start);
         outputs_head.add_css_class("display-group-head");
         outputs.append(&outputs_head);
         outputs.append(&output_list);
+
+        // ── Arrange displays…: the settings pane ─────────────────────────────
+        let on_arrange: Rc<RefCell<Option<std::boxed::Box<dyn Fn()>>>> = Rc::default();
+        let arrange = ui::row(
+            icons::DISPLAY,
+            "Arrange displays…",
+            "Layout, scale, profiles and night warmth, in settings",
+        );
+        let open = ui::button_with(
+            ui::Face::Label("Open"),
+            ui::Kind::Secondary,
+            ui::Size::Small,
+        );
+        {
+            let on_arrange = on_arrange.clone();
+            open.connect_clicked(move |_| {
+                if let Some(f) = on_arrange.borrow().as_ref() {
+                    f();
+                }
+            });
+        }
+        arrange.end.append(&open);
+
+        let detail_box = ui::vbox(3);
+        detail_box.append(&on_row.root);
+        detail_box.append(&profiles);
         detail_box.append(&outputs);
+        detail_box.append(&arrange.root);
         section.body.append(&detail_box);
 
         let display = Self {
             section,
             output_list,
-            active: Rc::new(Cell::new(0)),
+            on_arrange,
         };
 
         {
@@ -360,10 +332,9 @@ impl DisplaySection {
             // summary follow. Only on a change; nothing polls.
             let output_list = display.output_list.clone();
             let summary = display.section.summary.clone();
-            let active = display.active.clone();
             displays::observe(move || {
-                populate_profiles(&profiles, &profile_list);
-                refresh_outputs(&output_list, &summary, &active);
+                populate_picks(&profiles, &profile_list);
+                refresh_outputs(&output_list, &summary);
             });
         }
 
@@ -371,10 +342,15 @@ impl DisplaySection {
         display
     }
 
+    /// What "Arrange displays…" does: open the Displays settings pane.
+    pub fn set_on_arrange(&self, f: impl Fn() + 'static) {
+        *self.on_arrange.borrow_mut() = Some(std::boxed::Box::new(f));
+    }
+
     /// Read the outputs again (on a worker) and rebuild the list and the
     /// summary.
     pub fn refresh(&self) {
-        refresh_outputs(&self.output_list, &self.section.summary, &self.active);
+        refresh_outputs(&self.output_list, &self.section.summary);
     }
 
     /// Switch into page mode: the body alone, open at once.
@@ -390,31 +366,28 @@ impl DisplaySection {
 
 /// Re-query the outputs off the main thread, then rebuild the list and the
 /// summary: the profile on screen, and how many displays.
-fn refresh_outputs(output_list: &Box, summary_text: &Label, active: &Rc<Cell<usize>>) {
+fn refresh_outputs(output_list: &Box, summary_text: &Label) {
     let output_list = output_list.clone();
     let summary_text = summary_text.clone();
-    let active = active.clone();
-    {
-        spawn_work(get_outputs, move |outputs| {
-            populate_output_list_with_data(&output_list, &outputs, &active);
+    spawn_work(get_outputs, move |outputs| {
+        populate_output_list_with_data(&output_list, &outputs);
 
-            let active_count = outputs.iter().filter(|o| o.active).count();
-            let summary = match active_count {
-                0 => "No displays".to_string(),
-                1 => outputs
-                    .iter()
-                    .find(|o| o.active)
-                    .map(|o| o.name.clone())
-                    .unwrap_or_default(),
-                n => format!("{n} displays"),
-            };
-            let summary = match displays::view().current {
-                Some(profile) => format!("{profile} · {summary}"),
-                None => summary,
-            };
-            summary_text.set_label(&summary);
-        });
-    }
+        let active_count = outputs.iter().filter(|o| o.active).count();
+        let summary = match active_count {
+            0 => "No displays".to_string(),
+            1 => outputs
+                .iter()
+                .find(|o| o.active)
+                .map(|o| o.name.clone())
+                .unwrap_or_default(),
+            n => format!("{n} displays"),
+        };
+        let summary = match displays::view().current {
+            Some(profile) => format!("{profile} · {summary}"),
+            None => summary,
+        };
+        summary_text.set_label(&summary);
+    });
 }
 
 /// The night light's schedule, in words.

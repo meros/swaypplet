@@ -357,8 +357,7 @@ impl Panel {
         }
 
         // ── Top Telemetry Ribbon ─────────────────────────────────────────────
-        let telemetry_ribbon =
-            build_telemetry_ribbon(&deck_stack, &audio, &brightness, &store, &network);
+        let telemetry_ribbon = build_telemetry_ribbon(&deck_stack, &audio, &brightness, &network);
 
         // ── Bottom Action Flight Deck ─────────────────────────────────────────
         // Each deck tile is kept beside its spec so `refresh` can re-read it
@@ -430,6 +429,15 @@ impl Panel {
                 {
                     deck_stack_c.set_visible_child_name("launcher");
                 }
+            });
+        }
+
+        // ── Arrange displays… on the displays page ───────────────────────────
+        {
+            let entry = launcher.entry().clone();
+            display.set_on_arrange(move || {
+                entry.set_text(":arrange");
+                entry.set_position(-1);
             });
         }
 
@@ -851,50 +859,39 @@ fn ribbon_slider(
     pill
 }
 
+/// The ribbon: the two sliders you reach for, and the two radios you
+/// switch. The bar already shows the battery and the notifications, so the
+/// ribbon does not repeat them; the power and notification pages open by
+/// name (`:power`, `:notif`) and from the DND tile's chevron.
 fn build_telemetry_ribbon(
     deck_stack: &gtk4::Stack,
     audio: &AudioSection,
     brightness: &BrightnessSection,
-    store: &Rc<RefCell<NotificationStore>>,
     network: &NetworkSection,
 ) -> gtk4::Box {
     let ribbon = ui::hbox(2);
     ribbon.set_hexpand(true);
     ribbon.add_css_class("helm-telemetry-ribbon");
 
-    // 1. Power / Battery pill (dynamic)
-    let (icon_str, label_str) = if let Some(path) = crate::services::power::find_battery_path() {
-        if let Some(bat) = crate::services::power::read_battery(&path) {
-            let icon = crate::services::power::battery_icon(bat.capacity, bat.charging);
-            let state_suffix = if bat.charging { " 󱐋" } else { "" };
-            (icon, format!("{}%{}", bat.capacity, state_suffix))
-        } else {
-            ("󰁹", "Power".to_string())
-        }
-    } else {
-        ("󰁹", "AC".to_string())
-    };
-    ribbon.append(&ribbon_pill(icon_str, &label_str, deck_stack, "power"));
-
-    // 2. Audio Volume scrubber pill (click icon to open audio devices & mixer)
+    // Volume: the glyph opens the devices and the mixer.
     ribbon.append(&ribbon_slider(
         icons::SPEAKER_HIGH,
-        "Open Audio Devices & Mixer (:audio)",
+        "Audio devices and mixer (:audio)",
         &audio.output_volume_scale().adjustment(),
         deck_stack,
         "audio",
     ));
 
-    // 3. Brightness scrubber pill (click icon to open display settings)
+    // Brightness: the glyph opens the displays page, the one door to it.
     ribbon.append(&ribbon_slider(
         icons::BRIGHTNESS,
-        "Open Display & Monitors (:disp)",
+        "Displays (:disp)",
         &brightness.brightness_scale().adjustment(),
         deck_stack,
         "displays",
     ));
 
-    // 4. Wi-Fi Pill: opening the page also starts a scan.
+    // Wi-Fi: opening the page also starts a scan.
     let pill_wifi = ribbon_pill("󰤨", "Wi-Fi", deck_stack, "wifi");
     {
         let stack_c = deck_stack.clone();
@@ -907,20 +904,7 @@ fn build_telemetry_ribbon(
     }
     ribbon.append(&pill_wifi);
 
-    // 5. Bluetooth Pill
     ribbon.append(&ribbon_pill("󰂯", "Bluetooth", deck_stack, "bluetooth"));
-
-    // 6. Displays Pill
-    ribbon.append(&ribbon_pill("󰍹", "Displays", deck_stack, "displays"));
-
-    // 7. Notifications Pill
-    let notif_count = store.borrow().all().len();
-    ribbon.append(&ribbon_pill(
-        "󰂚",
-        &notif_count.to_string(),
-        deck_stack,
-        "notifications",
-    ));
 
     ribbon
 }
