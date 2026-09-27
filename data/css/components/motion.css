@@ -1,10 +1,10 @@
 /* ══════════════════════════════════════════════════════════════════════
    Motion (src/ui/motion.rs).
 
-   Motion that belongs to no one component: the breathing loop and the
-   shake.
+   Motion that belongs to no one component: the breathing loop, the shake
+   and the highlight.
 
-   owns: ui-breathing ui-shake
+   owns: ui-breathing ui-shake ui-highlight
    ══════════════════════════════════════════════════════════════════════ */
 
 /* Breathing: an attention loop for something working in the background (a
@@ -40,4 +40,19 @@ progressbar.ui-breathing progress {
 
 .ui-shake {
     animation: ui-shake var(--dur-spatial) var(--ease-standard);
+}
+
+/* Highlight: the row a launcher result opened on (a settings row), lit in
+   the accent's tint for a moment and faded back. A change of state, so the
+   state motion both ways; the hold is Rust's (`ui::highlight`). The corner
+   is the tile's, so the light reads as the row's own fill. */
+.ui-highlight {
+    border-radius: var(--radius-tile);
+    transition: background-color var(--motion-state),
+                box-shadow var(--motion-state);
+}
+
+.ui-highlight.lit {
+    background-color: var(--accent-tint);
+    box-shadow: inset 0 0 0 1px var(--accent-bg);
 }

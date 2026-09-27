@@ -333,3 +333,22 @@ impl AlertsPane {
         self.state.sync();
     }
 }
+
+// ── Search ──────────────────────────────────────────────────────────────
+
+use super::search::{Entry, row};
+
+/// This tab's rows as the launcher finds them (`search.rs`). A row added
+/// to the tab gets a line here; the test there fails until it does.
+#[rustfmt::skip]
+pub(super) const SEARCH: &[Entry] = &[
+    row("Notifications", "Linger", "How long a notification stays", &["notification timeout", "duration", "popup", "toast", "dismiss"]),
+    row("Notifications", "Corner", "Where notifications appear", &["position", "notification position", "top right", "placement"]),
+    row("Notifications", "Stack", "Cards shown before older ones fold", &["notifications", "count", "collapse"]),
+    row("Quiet hours", "Quiet hours", "Do Not Disturb on a schedule", &["do not disturb", "dnd", "silence", "mute notifications", "focus"]),
+    row("Quiet hours", "From", "When quiet hours start", &["start", "begin"]),
+    row("Quiet hours", "Until", "When quiet hours end", &["end", "stop"]),
+    row("Capture", "Folder", "Where screenshots are saved", &["screenshot", "screenshots", "save location", "directory", "path"]),
+    row("Capture", "After a shot", "Save, copy, or both", &["screenshot", "clipboard", "copy", "save"]),
+    row("Capture", "Annotate every shot", "Open the editor on each screenshot", &["annotate", "edit", "draw", "screenshot", "satty", "swappy"]),
+];
