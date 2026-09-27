@@ -331,31 +331,27 @@ pub fn build_session_row() -> gtk4::Box {
     let lock = rail_btn("󰌾", "Lock", false);
     lock.connect_clicked(|b| {
         hide_panel_for_widget(b.upcast_ref());
-        spawn_session_cmd("loginctl", &["lock-session"]);
+        Session::Lock.run();
     });
     row.append(&lock);
 
     let suspend = rail_btn("󰤄", "Suspend", false);
     suspend.connect_clicked(|b| {
         hide_panel_for_widget(b.upcast_ref());
-        spawn_session_cmd("systemctl", &["suspend"]);
+        Session::Suspend.run();
     });
     row.append(&suspend);
 
     let logout = rail_btn("󰍃", "Logout", false);
-    logout.connect_clicked(|_| spawn_session_cmd("swaymsg", &["exit"]));
+    logout.connect_clicked(|_| Session::Logout.run());
     row.append(&logout);
 
     let reboot = rail_btn("󰜉", "Reboot", true);
-    wire_confirm(&reboot, "Reboot", || {
-        spawn_session_cmd("systemctl", &["reboot"])
-    });
+    wire_confirm(&reboot, "Reboot", || Session::Reboot.run());
     row.append(&reboot);
 
     let shutdown = rail_btn("󰐥", "Shutdown", true);
-    wire_confirm(&shutdown, "Shutdown", || {
-        spawn_session_cmd("systemctl", &["poweroff"])
-    });
+    wire_confirm(&shutdown, "Shutdown", || Session::Poweroff.run());
     row.append(&shutdown);
 
     row
@@ -410,6 +406,29 @@ fn wire_confirm<F: Fn() + 'static>(btn: &gtk4::Button, verb: &'static str, exec:
             glib::ControlFlow::Break
         });
     });
+}
+
+/// What the session rail does, and the Helm's typed rows the same way
+/// (`panel.rs`): one command each, whichever door it came through.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Session {
+    Lock,
+    Suspend,
+    Logout,
+    Reboot,
+    Poweroff,
+}
+
+impl Session {
+    pub(crate) fn run(self) {
+        match self {
+            Session::Lock => spawn_session_cmd("loginctl", &["lock-session"]),
+            Session::Suspend => spawn_session_cmd("systemctl", &["suspend"]),
+            Session::Logout => spawn_session_cmd("swaymsg", &["exit"]),
+            Session::Reboot => spawn_session_cmd("systemctl", &["reboot"]),
+            Session::Poweroff => spawn_session_cmd("systemctl", &["poweroff"]),
+        }
+    }
 }
 
 fn spawn_session_cmd(cmd: &str, args: &[&str]) {

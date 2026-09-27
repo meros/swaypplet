@@ -31,7 +31,7 @@ use gtk4::prelude::*;
 use crate::services::elephant::{self, SearchResult};
 use crate::shell::{Namespace, Surface};
 
-pub use sources::Page;
+pub use sources::{Action, Page};
 use sources::Query;
 
 const MAX_VISIBLE_RESULTS: usize = 10;
@@ -66,9 +66,16 @@ struct Hooks {
     /// row's identifier (`settings::search::Target::id`). Set by the host
     /// that can open them; without one the launcher lists no settings rows.
     setting: Option<OpenSetting>,
+    /// Runs an action row by its identifier (`set_actions`), and says
+    /// whether the host is already out of the way.
+    action: Option<RunAction>,
 }
 
 type OpenSetting = Box<dyn Fn(&str)>;
+type RunAction = Box<dyn Fn(&str) -> bool>;
+
+/// The host's actions, as they stand when a query is typed.
+type Actions = Rc<dyn Fn() -> Vec<sources::Action>>;
 
 type OnActivate = Rc<RefCell<Hooks>>;
 
@@ -88,6 +95,8 @@ struct LauncherState {
     /// The pages a query can open by name; empty in a host that cannot
     /// route a prefix.
     pages: Vec<Page>,
+    /// What this host does by name; none in a host that has no deck.
+    actions: Option<Actions>,
     /// The list shows one app's windows (Tab), not the query's results.
     tabbed: bool,
     selected: usize,
@@ -167,6 +176,7 @@ impl LauncherView {
                 settings_host: false,
                 remote: Vec::new(),
                 pages: Vec::new(),
+                actions: None,
                 tabbed: false,
                 selected: 0,
                 query_generation: 0,
@@ -219,6 +229,20 @@ impl LauncherView {
     /// routes on its own `search-changed`.
     pub fn set_pages(&self, pages: Vec<Page>) {
         self.state.borrow_mut().pages = pages;
+    }
+
+    /// Offer what this host does now by name (`sources::Action`), and run
+    /// one through `run` when its row is activated. `list` is asked on
+    /// every query, so a row says the state its switch is in now. `run`
+    /// answers true when it has put the host away itself (a shot hides it
+    /// at once, before the capture), and the usual hide is skipped.
+    pub fn set_actions(
+        &self,
+        list: impl Fn() -> Vec<sources::Action> + 'static,
+        run: impl Fn(&str) -> bool + 'static,
+    ) {
+        self.state.borrow_mut().actions = Some(Rc::new(list));
+        self.on_activate.borrow_mut().action = Some(Box::new(run));
     }
 
     /// Offer the settings and the panel sections by what they do, and open
@@ -553,6 +577,20 @@ fn activate(item: &SearchResult, entry: &gtk4::SearchEntry, on_activate: &OnActi
         entry.set_position(-1);
         return;
     }
+    if item.provider == sources::ACTION {
+        // Done now, and the host puts itself away: a switch flipped, a
+        // shot taken, the screen locked. Not remembered: the query that
+        // names it is the shortcut.
+        let away = on_activate
+            .borrow()
+            .action
+            .as_ref()
+            .is_some_and(|run| run(&item.identifier));
+        if !away && let Some(done) = on_activate.borrow().done.as_ref() {
+            done();
+        }
+        return;
+    }
     if item.provider == sources::SETTING {
         // The host opens it and stays open on it; nothing is remembered,
         // as for a page.
@@ -623,7 +661,8 @@ fn local_pass(state: &Rc<RefCell<LauncherState>>, text: &str) {
     {
         let mut s = state.borrow_mut();
         s.tabbed = false;
-        s.local = sources::local(&l, q, &s.pages, &user_shell());
+        let actions = s.actions.clone().map(|f| f()).unwrap_or_default();
+        s.local = sources::local(&l, q, &actions, &s.pages, &user_shell());
         (s.tail, s.local) = if s.settings_host {
             // A setting the query names goes above the page rows too: "sudo"
             // means the sudo row before the Idle & Lock tab its prefix opens.
@@ -1139,6 +1178,7 @@ fn provider_label(provider: &str) -> &str {
         sources::CALC => "calc",
         sources::RUN => "run",
         sources::PAGE => "open",
+        sources::ACTION => "do",
         sources::SETTING => "setting",
         other => other,
     }
@@ -1149,6 +1189,7 @@ fn provider_icon(provider: &str) -> &'static str {
         sources::CALC => "󰃬",
         sources::RUN => "",
         sources::PAGE | sources::SETTING => "󰒓",
+        sources::ACTION => "󱐋",
         "desktopapplications" => "󰀻",
         "runner" => "",
         "windows" => "󰖯",

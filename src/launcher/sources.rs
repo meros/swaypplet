@@ -18,6 +18,7 @@ pub const CALC: &str = "swaypplet-calc";
 pub const RUN: &str = "swaypplet-run";
 pub const PAGE: &str = "swaypplet-page";
 pub const SETTING: &str = "swaypplet-setting";
+pub const ACTION: &str = "swaypplet-action";
 
 /// What was typed, read by its prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,6 +166,78 @@ impl Page {
 /// At most this many page rows, above elephant's.
 const MAX_PAGE_ROWS: usize = 2;
 
+/// Something the host does now, offered by name: a deck switch, a deck
+/// action, or a session command. "no sleep" and Enter is the No Sleep
+/// tile; "lock" and Enter locks.
+#[derive(Debug, Clone)]
+pub struct Action {
+    /// What the host runs (`Launcher::set_actions`).
+    pub id: String,
+    pub title: String,
+    /// Its state now, or what it does.
+    pub subtitle: String,
+    /// Its names, the title and the synonyms, each as lowercased words.
+    phrases: Vec<Vec<String>>,
+    /// Shown only for a query that is one of its names, whole: an action
+    /// that ends the session is never a prefix, or a word of its name,
+    /// and an Enter away.
+    whole: bool,
+}
+
+/// Lowercased words of `s`, split on anything not a letter or a digit.
+fn words_of(s: &str) -> Vec<String> {
+    s.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+impl Action {
+    pub fn new(id: &str, title: &str, subtitle: &str, synonyms: &[&str]) -> Action {
+        let phrases = std::iter::once(title)
+            .chain(synonyms.iter().copied())
+            .map(words_of)
+            .collect();
+        Action {
+            id: id.to_string(),
+            title: title.to_string(),
+            subtitle: subtitle.to_string(),
+            phrases,
+            whole: false,
+        }
+    }
+
+    /// Match only a query that is one of its names (restart, shut down,
+    /// log out).
+    pub fn whole_words(mut self) -> Action {
+        self.whole = true;
+        self
+    }
+
+    /// Every query word starts a word of one of the action's names; or,
+    /// for an action that asks for whole words, the query is one of its
+    /// names. Two characters at least, as for a page.
+    fn matches(&self, query: &str) -> bool {
+        if query.trim().chars().count() < 2 {
+            return false;
+        }
+        let q = words_of(query);
+        if self.whole {
+            return self.phrases.contains(&q);
+        }
+        q.iter().all(|w| {
+            self.phrases
+                .iter()
+                .flatten()
+                .any(|aw| aw.starts_with(w.as_str()))
+        })
+    }
+}
+
+/// At most this many action rows, above the page rows.
+const MAX_ACTION_ROWS: usize = 4;
+
 fn row(provider: &str, identifier: String, text: String, subtext: String) -> SearchResult {
     SearchResult {
         identifier,
@@ -178,7 +251,13 @@ fn row(provider: &str, identifier: String, text: String, subtext: String) -> Sea
 }
 
 /// The rows made here for `q`, best first.
-pub fn local(l: &Launcher, q: Query, pages: &[Page], shell: &str) -> Vec<SearchResult> {
+pub fn local(
+    l: &Launcher,
+    q: Query,
+    actions: &[Action],
+    pages: &[Page],
+    shell: &str,
+) -> Vec<SearchResult> {
     let mut out = Vec::new();
     match q {
         Query::Empty => {}
@@ -205,6 +284,14 @@ pub fn local(l: &Launcher, q: Query, pages: &[Page], shell: &str) -> Vec<SearchR
             {
                 out.push(calc_row(text, v));
             }
+            // What the query does now, before the pages it might open.
+            out.extend(
+                actions
+                    .iter()
+                    .filter(|a| a.matches(text))
+                    .take(MAX_ACTION_ROWS)
+                    .map(|a| row(ACTION, a.id.clone(), a.title.clone(), a.subtitle.clone())),
+            );
             if l.settings {
                 out.extend(
                     pages
@@ -343,20 +430,21 @@ mod tests {
     fn local_rows_answer_in_the_same_call() {
         let l = Launcher::default();
         let pages = [Page::new("Settings · Glass", &[":glass", ":material"])];
-        let r = local(&l, Query::Calc("2*21"), &pages, "zsh");
+        let r = local(&l, Query::Calc("2*21"), &[], &pages, "zsh");
         assert_eq!(r[0].text, "= 42");
         assert_eq!(r[0].identifier, "42");
-        let r = local(&l, Query::Plain("2+2"), &pages, "zsh");
+        let r = local(&l, Query::Plain("2+2"), &[], &pages, "zsh");
         assert_eq!(r[0].provider, CALC);
-        let r = local(&l, Query::Plain("mater"), &pages, "zsh");
+        let r = local(&l, Query::Plain("mater"), &[], &pages, "zsh");
         assert_eq!(
             (r[0].provider.as_str(), r[0].identifier.as_str()),
             (PAGE, ":glass")
         );
-        assert!(local(&l, Query::Plain("g"), &pages, "zsh").is_empty());
+        assert!(local(&l, Query::Plain("g"), &[], &pages, "zsh").is_empty());
         let r = local(
             &l,
             Query::Command("make -j"),
+            &[],
             &pages,
             "/run/current-system/sw/bin/zsh",
         );
@@ -379,8 +467,8 @@ mod tests {
             calculator: false,
             ..l
         };
-        assert!(local(&off, Query::Plain("glass"), &pages, "zsh").is_empty());
-        assert!(local(&off, Query::Calc("1+1"), &pages, "zsh").is_empty());
+        assert!(local(&off, Query::Plain("glass"), &[], &pages, "zsh").is_empty());
+        assert!(local(&off, Query::Calc("1+1"), &[], &pages, "zsh").is_empty());
     }
 
     #[test]
@@ -418,5 +506,41 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout), "a 'b' $HOME \"c\"");
+    }
+
+    #[test]
+    fn an_action_answers_its_words_and_a_session_ender_only_whole_ones() {
+        let l = Launcher::default();
+        let actions = [
+            Action::new("tile:No Sleep", "No Sleep", "Off", &["caffeine", "awake"]),
+            Action::new("session:lock", "Lock", "Lock the screen now", &[]),
+            Action::new(
+                "session:poweroff",
+                "Shut down",
+                "Turn the computer off",
+                &["power off"],
+            )
+            .whole_words(),
+        ];
+        let ids = |text| -> Vec<String> {
+            local(&l, Query::Plain(text), &actions, &[], "zsh")
+                .into_iter()
+                .filter(|r| r.provider == ACTION)
+                .map(|r| r.identifier)
+                .collect()
+        };
+        assert_eq!(ids("no sl"), ["tile:No Sleep"]);
+        assert_eq!(ids("caff"), ["tile:No Sleep"]);
+        assert_eq!(ids("lo"), ["session:lock"]);
+        // A prefix of a session ender offers nothing, nor does one word of
+        // its name; the name does.
+        assert!(ids("shu").is_empty());
+        assert!(ids("sh").is_empty());
+        assert!(ids("shut").is_empty());
+        assert!(ids("down").is_empty());
+        assert_eq!(ids("shut down"), ["session:poweroff"]);
+        assert_eq!(ids("power off"), ["session:poweroff"]);
+        // One letter lists nothing.
+        assert!(ids("l").is_empty());
     }
 }

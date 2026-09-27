@@ -478,6 +478,24 @@ impl Panel {
             dnd: RefCell::new(dnd_tile.map(|t| (t, store.clone()))),
         });
 
+        // ── What the deck does, by name: "no sleep", "dnd", "lock" ───────────
+        {
+            let list = {
+                let weak = Rc::downgrade(&sections);
+                move || weak.upgrade().map(|s| deck_actions(&s)).unwrap_or_default()
+            };
+            let run = {
+                let weak = Rc::downgrade(&sections);
+                let window = window.clone();
+                let store = store.clone();
+                move |id: &str| {
+                    weak.upgrade()
+                        .is_some_and(|s| run_deck_action(&s, &window, &store, id))
+                }
+            };
+            launcher.set_actions(list, run);
+        }
+
         Self {
             surface,
             sections,
@@ -1111,6 +1129,194 @@ fn rail_action(
         action();
     });
     btn
+}
+
+/// Words a deck switch also answers to, beyond its name.
+fn synonyms(label: &str) -> &'static [&'static str] {
+    match label {
+        "Night Light" => &["night shift", "warm", "blue light", "gamma"],
+        "No Sleep" => &["caffeine", "keep awake", "awake", "inhibit"],
+        "No Lock" => &["presentation", "keep unlocked", "inhibit"],
+        _ => &[],
+    }
+}
+
+/// A switch's state for its row: on or off, and the tile's reason.
+fn state_line(on: bool, status: Option<&gtk4::Label>) -> String {
+    let state = if on { "On" } else { "Off" };
+    match status.map(|l| l.text()).filter(|t| !t.is_empty()) {
+        Some(why) => format!("{state} · {why}"),
+        None => state.to_string(),
+    }
+}
+
+/// Everything the deck does, as launcher rows: its switches in the state
+/// they are in now, the timed ones for a while, its shots, and the
+/// session. The deck stays for the pointer; this is the same set for the
+/// keyboard, run by the same code (`run_deck_action`).
+fn deck_actions(sections: &Sections) -> Vec<crate::launcher::Action> {
+    use crate::launcher::Action;
+    let mut out = Vec::new();
+    for (toggle, spec, status) in sections.tiles.borrow().iter() {
+        out.push(Action::new(
+            &format!("tile:{}", spec.label),
+            spec.label,
+            &state_line(toggle.is_active(), status.as_ref()),
+            synonyms(spec.label),
+        ));
+        if inhibitor_of(spec).is_some() {
+            for (label, minutes) in tiles::DURATIONS {
+                let Some(m) = minutes else { continue };
+                out.push(Action::new(
+                    &format!("for:{}:{m}", spec.label),
+                    &format!("{} for {label}", spec.label),
+                    "Then off by itself",
+                    synonyms(spec.label),
+                ));
+            }
+        }
+    }
+    if let Some((dnd, _)) = sections.dnd.borrow().as_ref() {
+        out.push(Action::new(
+            "dnd",
+            "Do not disturb",
+            &state_line(dnd.toggle.is_active(), Some(&dnd.status)),
+            &["dnd", "quiet", "silence", "notifications"],
+        ));
+    }
+    out.extend([
+        Action::new(
+            "shot:region",
+            "Screenshot a region",
+            "Drag a rectangle; a click takes the screen",
+            &["capture", "snip", "print"],
+        ),
+        Action::new(
+            "shot:window",
+            "Screenshot a window",
+            "Pick one from a live grid",
+            &["capture", "print"],
+        ),
+        Action::new(
+            "shot:pick",
+            "Pick a colour",
+            "The colour under the pointer",
+            &["color", "picker", "eyedropper", "loupe"],
+        ),
+        Action::new(
+            "shot:record",
+            "Record the screen",
+            "A region, as video",
+            &["screencast", "video", "capture"],
+        ),
+        Action::new(
+            "session:lock",
+            "Lock",
+            "Lock the screen now",
+            &["lock screen"],
+        ),
+        Action::new(
+            "session:suspend",
+            "Suspend",
+            "Sleep now; the session stays",
+            &["sleep"],
+        ),
+        Action::new(
+            "session:logout",
+            "Log out",
+            "End the session now",
+            &["logout", "sign out", "exit"],
+        )
+        .whole_words(),
+        Action::new(
+            "session:reboot",
+            "Restart",
+            "Restart the computer now",
+            &["reboot"],
+        )
+        .whole_words(),
+        Action::new(
+            "session:poweroff",
+            "Shut down",
+            "Turn the computer off now",
+            &["shutdown", "power off", "poweroff"],
+        )
+        .whole_words(),
+    ]);
+    out
+}
+
+/// Run a deck action by its row's identifier (`deck_actions`). True when
+/// the Helm is already out of the way: a shot hides it at once, so the
+/// capture does not hold it.
+fn run_deck_action(
+    sections: &Sections,
+    window: &gtk4::Window,
+    store: &Rc<RefCell<NotificationStore>>,
+    id: &str,
+) -> bool {
+    use crate::widgets::power::Session;
+    if let Some(label) = id.strip_prefix("tile:") {
+        // The tile's own click: its action, its state, its status line.
+        if let Some((toggle, _, _)) = sections
+            .tiles
+            .borrow()
+            .iter()
+            .find(|(_, s, _)| s.label == label)
+        {
+            toggle.emit_clicked();
+        }
+        return false;
+    }
+    if let Some((label, minutes)) = id.strip_prefix("for:").and_then(|r| r.rsplit_once(':')) {
+        let which = crate::services::inhibit::Inhibitor::ALL
+            .into_iter()
+            .find(|w| w.label() == label);
+        if let (Some(which), Ok(m)) = (which, minutes.parse::<u32>()) {
+            crate::spawn::spawn_work(move || which.arm_for(true, Some(m)), |_| {});
+        }
+        return false;
+    }
+    let shot_of = |kind| {
+        shot(window, store, kind);
+        true
+    };
+    match id {
+        "dnd" => {
+            if let Some((dnd, _)) = sections.dnd.borrow().as_ref() {
+                dnd.toggle.emit_clicked();
+            }
+            false
+        }
+        "shot:region" => shot_of(crate::screenshot::Shot::Region),
+        "shot:window" => shot_of(crate::screenshot::Shot::Window),
+        "shot:pick" => shot_of(crate::screenshot::Shot::Pick),
+        "shot:record" => shot_of(crate::screenshot::Shot::Record),
+        "session:lock" => {
+            Session::Lock.run();
+            false
+        }
+        "session:suspend" => {
+            Session::Suspend.run();
+            false
+        }
+        "session:logout" => {
+            Session::Logout.run();
+            false
+        }
+        "session:reboot" => {
+            Session::Reboot.run();
+            false
+        }
+        "session:poweroff" => {
+            Session::Poweroff.run();
+            false
+        }
+        _ => {
+            log::warn!("helm: no action {id}");
+            false
+        }
+    }
 }
 
 /// Hand a shot to `screenshot`, which owns the whole flow.

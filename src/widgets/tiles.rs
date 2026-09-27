@@ -199,7 +199,7 @@ pub fn refresh_status(label: &gtk4::Label, spec: &TileSpec) {
 
 /// The durations a timed switch offers, in minutes; `None` is until the
 /// switch is turned off.
-const DURATIONS: [(&str, Option<u32>); 5] = [
+pub const DURATIONS: [(&str, Option<u32>); 5] = [
     ("30 min", Some(30)),
     ("1 hour", Some(60)),
     ("2 hours", Some(120)),
