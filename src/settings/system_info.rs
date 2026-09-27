@@ -550,7 +550,7 @@ pub fn fixture(name: &str) -> Snapshot {
             ),
             commit(
                 "34f8e3c",
-                "style: nix fmt the guard and the display profiles",
+                "feat(nx): converge stages the generation when a locked session would lose its locker, and every new shell says so through nx pending until the host is switched or rebooted",
             ),
             commit(
                 "2a3f471",

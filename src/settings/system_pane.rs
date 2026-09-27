@@ -185,16 +185,20 @@ impl SystemPane {
         reason.set_wrap(true);
         reason.set_max_width_chars(form::HINT_CHARS);
         actions.append(&reason);
+        // The well paints; the box inside it holds the padding, since
+        // `ui::pad` is margins and would sit outside the frame.
         let job_box = ui::well();
-        ui::pad(&job_box, 2);
+        let job_inner = ui::vbox(1);
+        ui::pad(&job_inner, 3);
+        job_box.append(&job_inner);
         let job_head = ui::status(Status::Neutral, "");
         job_head.set_xalign(0.0);
         let job_tail = ui::text("", Text::Caption, Tone::Muted);
         ui::set_mono(&job_tail, true);
         job_tail.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         job_tail.set_selectable(true);
-        job_box.append(&job_head);
-        job_box.append(&job_tail);
+        job_inner.append(&job_head);
+        job_inner.append(&job_tail);
         job_box.set_visible(false);
         actions.append(&job_box);
 
@@ -514,7 +518,8 @@ impl Pane {
             return;
         };
         let v = info::verdict(s);
-        let a = info::actions(v, s.locked, self.job.borrow().running());
+        let job_running = self.job.borrow().running();
+        let a = info::actions(v, s.locked, job_running);
         self.apply.set_sensitive(a.apply);
         self.update.set_sensitive(a.update);
         ui::set_button_kind(
@@ -526,7 +531,8 @@ impl Pane {
             },
         );
         self.reason.set_text(a.reason.unwrap_or(""));
-        self.reason.set_visible(a.reason.is_some());
+        // Our own run says it is running in the log's head already.
+        self.reason.set_visible(a.reason.is_some() && !job_running);
         ui::set_tone(
             &self.reason,
             if s.locked { Tone::Warning } else { Tone::Faint },
