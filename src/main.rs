@@ -24,6 +24,7 @@ mod osd;
 mod panel;
 mod polkit;
 mod preview;
+mod quality;
 mod screenshot;
 mod service;
 mod services;
@@ -38,7 +39,10 @@ mod ui;
 mod widgets;
 
 fn main() {
-    env_logger::init();
+    // env_logger, plus the tail a report attaches (src/quality/logring.rs).
+    quality::logring::init();
+    // A panic note for the crash reporter (src/quality/crash.rs).
+    quality::crash::install_panic_hook();
 
     // The polkit agent runs as its own GApplication so it coexists with
     // the main panel process. Anything else falls through to `app::run`,
@@ -76,6 +80,9 @@ fn main() {
         // dmenu-style picker — thin client to the panel's picker server,
         // with a standalone GTK fallback when no panel is listening.
         Some("dmenu") => dmenu::run(args),
+        // What systemd's OnFailure= runs when the panel dies: collect, sign,
+        // de-duplicate, file (src/quality/crash.rs). No GTK.
+        Some("crash-report") => quality::crash::run(args),
         // Dev-only: render one component (or the whole panel) in a plain window
         // for visual validation. See src/preview.rs and dev/render.sh.
         Some("--preview") => preview::run(args.next().as_deref().unwrap_or("panel")),

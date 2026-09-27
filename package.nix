@@ -70,7 +70,8 @@ rustPlatform.buildRustPackage {
     CARGO_PROFILE_RELEASE_DEBUG = "0";
     CARGO_PROFILE_RELEASE_LTO = "false";
     CARGO_PROFILE_RELEASE_OPT_LEVEL = "2";
-    RUSTFLAGS = "-C linker=clang -C link-arg=-fuse-ld=mold";
+    # --build-id: see flake.nix.
+    RUSTFLAGS = "-C linker=clang -C link-arg=-fuse-ld=mold -C link-arg=-Wl,--build-id";
     # The xkb layout list the Input tab offers (src/settings/xkb.rs).
     SWAYPPLET_XKB_RULES = "${xkeyboard_config}/share/X11/xkb/rules/evdev.lst";
   };

@@ -30,6 +30,9 @@ pub enum Namespace {
     WindowPicker,
     /// The polkit / sudo card.
     Polkit,
+    /// The report card: a description and a screenshot on their way to an
+    /// issue (`quality/report.rs`).
+    Report,
     /// The look-at-the-camera pill over the polkit card.
     FaceCue,
     /// The held-Super keybinding sheet, one per output.
@@ -53,7 +56,7 @@ pub enum Namespace {
 }
 
 impl Namespace {
-    pub const ALL: [Namespace; 16] = [
+    pub const ALL: [Namespace; 17] = [
         Namespace::Panel,
         Namespace::Bar,
         Namespace::Launcher,
@@ -62,6 +65,7 @@ impl Namespace {
         Namespace::Pin,
         Namespace::WindowPicker,
         Namespace::Polkit,
+        Namespace::Report,
         Namespace::FaceCue,
         Namespace::Keybinds,
         Namespace::Jump,
@@ -83,6 +87,7 @@ impl Namespace {
             Namespace::Pin => "swaypplet-pin",
             Namespace::WindowPicker => "swaypplet-window-picker",
             Namespace::Polkit => "swaypplet-polkit",
+            Namespace::Report => "swaypplet-report",
             Namespace::FaceCue => "swaypplet-face-cue",
             Namespace::Keybinds => "swaypplet-keybinds",
             Namespace::Jump => "swaypplet-jump",
@@ -121,6 +126,7 @@ impl Namespace {
             | Namespace::Pin
             | Namespace::WindowPicker
             | Namespace::Polkit
+            | Namespace::Report
             | Namespace::Keybinds => Some("panel"),
             Namespace::SessionLock => Some("lock"),
             Namespace::Jump

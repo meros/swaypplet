@@ -286,6 +286,8 @@ pub fn run() {
         // activate rather than startup because the editor needs the
         // application to parent its window to.
         crate::screenshot::install(app, &store_activate);
+        // The report notification's Open button (src/quality/report.rs).
+        crate::quality::report::install(&store_activate);
 
         // ── Native bar (one card per output, src/bar/) ──────────────────────
         // SWAYPPLET_NO_BAR=1 skips it so an external bar (waybar) can keep
@@ -506,6 +508,15 @@ pub fn run() {
                 app.activate();
             }
             crate::screenshot::take(app, &store_cmdline, shot);
+        } else if args.len() > 1 && args[1] == "report" {
+            // A screenshot and a description, on their way to an issue.
+            let area = crate::quality::report::Area::parse(args.get(2).map(String::as_str));
+            let st = state_clone.borrow();
+            if st.panel.is_none() {
+                drop(st);
+                app.activate();
+            }
+            crate::quality::report::start(app, &store_cmdline, area);
         } else if args.len() > 1 && args[1] == "keybinds" {
             // The overlay is driven by key press and release, so the client
             // says which edge it saw rather than asking for a toggle it

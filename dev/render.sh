@@ -23,6 +23,7 @@
 #   dev/render.sh --mode quiet --res 1200x900                       # held while fullscreen, the panel's DND tile
 #   SWPP_QUIET_STAGE=after dev/render.sh --mode quiet --res 1200x900 # the count card once it ends
 #   SWPP_QUIET_SHARE=1 dev/render.sh --mode quiet ...               # a shared screen (dev/fake-screencast.sh) instead
+#   SWPP_REPORT_TEXT='It flickers' dev/render.sh --mode report      # the report card
 #   SWPP_SELECT_RECT=120,90,540,330 dev/render.sh --mode screenshot # with a selection drawn
 #   SWPP_THEME=light SWPP_BG=black dev/render.sh --mode panel     # light mode over a black desktop
 #   SWPP_BG=~/Pictures/wallpapers/x.jpg dev/render.sh --mode osd   # over a given wallpaper
@@ -87,7 +88,7 @@ SOCK="$RUNTIME/sway-render-$$.sock"
     # sway's parser wants the block across lines: a one-liner is read as an
     # unmatched '}' and the whole rule is dropped, which renders every
     # surface here unfrosted while looking like it worked.
-    for ns in swaypplet swaypplet-launcher swaypplet-osd swaypplet-notification swaypplet-polkit swaypplet-keybinds swaypplet-pin swaypplet-window-picker; do
+    for ns in swaypplet swaypplet-launcher swaypplet-osd swaypplet-notification swaypplet-polkit swaypplet-keybinds swaypplet-pin swaypplet-window-picker swaypplet-report; do
       printf 'layer_effects "%s" {\n    blur enable\n    blur_ignore_transparent enable\n}\n' "$ns"
     done
   fi
@@ -348,6 +349,29 @@ case "$MODE" in
     # below would otherwise pass on the frame before the selector maps.
     sleep 3
     ;;
+  report)
+    # The report card over a whole-screen capture (src/quality/report.rs):
+    # `swaypplet report screen` needs no pointer. SWPP_REPORT_TEXT types a
+    # description; SWPP_REPORT_SEND=1 presses Send, which files an issue, so
+    # it refuses to without SWAYPPLET_DRY_RUN=1. SWPP_REPORT_AREA=none: the
+    # card after Escape, with no picture.
+    if [ -n "${SWPP_REPORT_SEND:-}" ] && [ -z "${SWAYPPLET_DRY_RUN:-}" ]; then
+      echo "SWPP_REPORT_SEND needs SWAYPPLET_DRY_RUN=1"; exit 2
+    fi
+    SWAYPPLET_REPORT_TEXT="${SWPP_REPORT_TEXT:-}" SWAYPPLET_REPORT_SEND="${SWPP_REPORT_SEND:-}" \
+      "$BIN" >/tmp/swpp-app.log 2>&1 &
+    for _ in $(seq 1 200); do
+      [ -e "$RUNTIME/swaypplet.pid" ] && break; sleep 0.1
+    done
+    sleep 1.5
+    if [ -n "${SWPP_SHOW_PANEL:-}" ]; then
+      p="$(cat "$RUNTIME/swaypplet.pid" 2>/dev/null || true)"
+      [ -n "$p" ] && kill -USR1 "$p" 2>/dev/null || true
+      sleep 1.5
+    fi
+    "$BIN" report "${SWPP_REPORT_AREA:-screen}" >>/tmp/swpp-app.log 2>&1 || true
+    sleep "${SWPP_REPORT_WAIT:-2.5}"
+    ;;
   osd)
     # The caps-lock card: it reads the LED and changes nothing, where a
     # volume or brightness key would move the real machine's level (the
@@ -393,7 +417,7 @@ mapped=""
 # A layer surface is never in the tree, so this wait cannot see one and runs
 # to its 6 s end. For the jump card that is fatal: its watchdog commits and
 # closes it after 3 s, so every shot missed it.
-case "$MODE" in jump|osd|quiet) mapped=layer ;; esac
+case "$MODE" in jump|osd|quiet|report) mapped=layer ;; esac
 for _ in $(seq 1 60); do
   [ -n "$mapped" ] && break
   swaymsg -t get_tree 2>/dev/null | grep -q '"app_id": *"[^"]*swaypplet' && { mapped=1; break; }

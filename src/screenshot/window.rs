@@ -30,7 +30,9 @@ const GRID_FPS: u32 = 15;
 const FULL: u32 = 1 << 15;
 
 /// What happens with the shot.
-type Done = Box<dyn FnOnce(Image)>;
+/// The answer: the picked window's picture, or `None` when the grid was
+/// closed without a pick (Escape) or there was nothing to pick.
+type Done = Box<dyn FnOnce(Option<Image>)>;
 
 struct Picker {
     /// Dropped by `close`, which ends the picker.
@@ -41,7 +43,7 @@ struct Picker {
 
 /// Open the picker. `done` runs with the shot, or not at all when the
 /// picker is left without one.
-pub fn pick(app: &gtk4::Application, done: impl FnOnce(Image) + 'static) {
+pub fn pick(app: &gtk4::Application, done: impl FnOnce(Option<Image>) + 'static) {
     let app = app.clone();
     crate::spawn::spawn_work(
         || {
@@ -55,6 +57,7 @@ pub fn pick(app: &gtk4::Application, done: impl FnOnce(Image) + 'static) {
                 .filter(|(w, _, _)| w.id.is_some())
                 .collect();
             if windows.is_empty() {
+                done(None);
                 return;
             }
             show(&app, windows, Box::new(done));
@@ -232,7 +235,7 @@ fn take(picker: &Rc<Picker>, id: String) {
         let frame = rx.recv().await;
         drop(shot);
         if let (Ok(frame), Some(done)) = (frame, picker.done.borrow_mut().take()) {
-            done(to_image(frame));
+            done(Some(to_image(frame)));
         }
         close(&picker);
     });
@@ -240,7 +243,11 @@ fn take(picker: &Rc<Picker>, id: String) {
 
 fn close(picker: &Rc<Picker>) {
     picker.stream.replace(None);
-    picker.done.borrow_mut().take();
+    // Still here: closed without a pick.
+    let unanswered = picker.done.borrow_mut().take();
+    if let Some(done) = unanswered {
+        done(None);
+    }
     // Taken before it drops: the surface's own handlers hold the picker.
     let surface = picker.surface.borrow_mut().take();
     drop(surface);

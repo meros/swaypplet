@@ -129,6 +129,7 @@ pub fn take(app: &gtk4::Application, store: &StoreRef, shot: Shot) {
     let app_for_editor = app.clone();
     if shot == Shot::Window {
         window::pick(app, move |image| {
+            let Some(image) = image else { return };
             keep(&store, &image);
             if crate::settings::store::current().capture().annotate {
                 let store = store.clone();

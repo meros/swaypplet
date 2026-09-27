@@ -38,6 +38,12 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 [build-dependencies]
 protobuf-codegen = "3.7"
 
+# Symbols stay in a release build (the default strip removes debug info
+# only), so a crash's frames have function names (src/quality/crash.rs).
+# Line tables are left out: they cost 43 MB for swaypplet's own code.
+[profile.release]
+strip = "debuginfo"
+
 [profile.dev]
 opt-level = 0
 debug = 1                # Line tables only: drastically cuts debuginfo emission & linker workload

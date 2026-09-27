@@ -2,9 +2,9 @@
    Field (src/ui/field.rs).
 
    The entry (normal and large), its field and label, the auth field's
-   states, and the dropdown with its list.
+   states, the text area, and the dropdown with its list.
 
-   owns: ui-field ui-field-label ui-entry ui-dropdown
+   owns: ui-field ui-field-label ui-entry ui-text-area ui-dropdown
    ══════════════════════════════════════════════════════════════════════ */
 
 .ui-field-label {
@@ -40,6 +40,34 @@ passwordentry.ui-entry text placeholder {
 
 entry.ui-entry selection,
 passwordentry.ui-entry selection {
+    background-color: var(--accent-tint);
+    color: var(--fg);
+}
+
+/* The text area: the entry's fill, hairline and focus ring on a scroller,
+   so several lines of text read as the same kind of field. The text view
+   inside draws nothing of its own. */
+scrolledwindow.ui-text-area {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-control);
+    background-color: var(--fill-1);
+    box-shadow: inset 0 0 0 1px var(--border-subtle);
+    transition: box-shadow var(--motion-state);
+}
+
+scrolledwindow.ui-text-area:focus-within {
+    box-shadow: inset 0 0 0 1px var(--border-strong), 0 0 0 2px var(--focus-ring);
+}
+
+scrolledwindow.ui-text-area textview,
+scrolledwindow.ui-text-area textview > text {
+    background: none;
+    color: var(--fg);
+    caret-color: var(--accent);
+    font-size: var(--type-body);
+}
+
+scrolledwindow.ui-text-area textview > text selection {
     background-color: var(--accent-tint);
     color: var(--fg);
 }

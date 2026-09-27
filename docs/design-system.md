@@ -580,7 +580,7 @@ The API has three shapes (the module docs of `src/ui/mod.rs`):
 | Toggle tile (`tile`) | `ui::tile_toggle(icon, title)` | | `set_loading` | `.ui-tile(.on)`, `.ui-tile-toggle(.loading)`, `.ui-tile-title` |
 | Split tile (`tile`) | `ui::tile_split(icon, title)` → `SplitTile { root, toggle, detail, status }` | | `set_tile_status`, `set_loading` | `.ui-tile-split(.on)`, `.ui-tile-body`, `.ui-tile-detail`, `.ui-tile-status`: the body toggles, the chevron opens the detail, never the other way round |
 | Slider, switch, check (`slider`) | `ui::slider_row(icon, min, max, step)` → `SliderRow` (`icon_button(tooltip)`), `ui::switch()`, `ui::switch_row(..)`, `ui::check(label)` | `ui::slider::adopt(&scale, Density)` | `set_over_range` | `.ui-slider` (`.dense`, `.over`), `.ui-slider-row` and its parts, `.ui-switch`, `.ui-check` |
-| Field (`field`) | `ui::field(label, &input)`, `ui::dropdown(choices)` | `ui::entry::adopt(&e, FieldSize)`, `ui::dropdown::adopt(&d)` | `set_field_state(FieldState, on)` | `.ui-field` (`.armed`, `.busy`, `.reject`), `.ui-field-label`, `.ui-entry(.large)`, `.ui-dropdown` |
+| Field (`field`) | `ui::field(label, &input)`, `ui::text_area(lines)` → `(ScrolledWindow, TextView)`, `ui::dropdown(choices)` | `ui::entry::adopt(&e, FieldSize)`, `ui::dropdown::adopt(&d)` | `set_field_state(FieldState, on)` | `.ui-field` (`.armed`, `.busy`, `.reject`), `.ui-field-label`, `.ui-entry(.large)`, `.ui-text-area`, `.ui-dropdown` |
 | Menu (`menu`) | `ui::menu()`, `ui::menu_item(label, accel, danger)` | | | `.ui-menu`, `.ui-menu-item(.danger)`, `.ui-menu-accel` |
 | Popover (`popover`) | `ui::popover(&child, position)` (its child is a `Card::Solid`) | | | `.ui-popover` |
 | Progress (`progress`) | `ui::progress(fraction)` | `ui::progress::adopt(&p)` | `set_progress_status(Option<Status>)` | `.ui-progress` (`.success`, `.warning`, `.danger`) |
@@ -656,6 +656,7 @@ the two on load.
 | `Pin` | `swaypplet-pin` | panel | a pinned workspace or region |
 | `WindowPicker` | `swaypplet-window-picker` | panel | screenshot → window |
 | `Polkit` | `swaypplet-polkit` | panel | the polkit / sudo card |
+| `Report` | `swaypplet-report` | panel | the report card (`swaypplet report`) |
 | `FaceCue` | `swaypplet-face-cue` | thin | the look-at-the-camera pill |
 | `Keybinds` | `swaypplet-keybinds` | panel | the held-Super sheet, one per output |
 | `Jump` | `swaypplet-jump` | none | the Super+Tab stage |

@@ -14,6 +14,7 @@
 | [BAR_VISION.md](BAR_VISION.md) | The bar's principles (P1–P10) and its layout; the code cites it throughout |
 | [AUTH_CARD.md](AUTH_CARD.md) | The password, fingerprint and face card shared by the lock screen and polkit |
 | [LOCK_TRANSITION.md](LOCK_TRANSITION.md) | The cross-fade between desktop and lock screen: built, with what is still unverified |
+| [QUALITY.md](QUALITY.md) | Reports, crash reports, the auto-fix runner and the Quality tab; the security rule for a public repo |
 
 ## Plans
 
@@ -59,6 +60,8 @@ browser.
   limits; `.githooks/pre-push` runs it (`git config core.hooksPath .githooks`).
 - `dev/render.sh`, `dev/render-all.sh`: screenshots in a nested sway.
 - `dev/filmstrip.sh`: every frame of one transition, as a contact sheet.
+- `dev/autofix/run.sh`: one auto-fix job (docs/QUALITY.md); `--dry-run`
+  and `--fixture` print what it would send.
 
 ## Rules for this folder
 
