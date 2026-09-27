@@ -62,7 +62,10 @@ const THUMB_H: i32 = 150;
 pub fn tone(f: &Fix) -> ui::Status {
     match f {
         Fix::None | Fix::Closed | Fix::Stopped | Fix::DryRun => ui::Status::Neutral,
-        Fix::Queued | Fix::Working(_) => ui::Status::Warning,
+        // In flight is not a warning; the accent phase line under it says
+        // what is happening. --warning is not held to a text contrast
+        // through the glass (tokens/apca.rs); --fg-muted is.
+        Fix::Queued | Fix::Working(_) => ui::Status::Neutral,
         Fix::Ready | Fix::Merged => ui::Status::Success,
         Fix::Failed(_) => ui::Status::Danger,
     }
@@ -304,6 +307,15 @@ fn stop_job(n: u64) {
         .status();
 }
 
+/// The programs a job needs on this process's PATH (or the user profile),
+/// by name, that are not there.
+fn missing_tools() -> Vec<&'static str> {
+    ["claude", "jq", "gh", "nix", "git", "systemd-run"]
+        .into_iter()
+        .filter(|t| crate::quality::gh::which(t).is_none())
+        .collect()
+}
+
 /// What GitHub says, fetched on a worker thread.
 fn fetch() -> Result<(Vec<Issue>, Vec<Pr>), String> {
     if let Some(dir) = fixture() {
@@ -408,6 +420,8 @@ struct State {
     tick: RefCell<Option<glib::SourceId>>,
     follow: RefCell<Option<glib::SourceId>>,
     deploying: Cell<bool>,
+    /// Whether every program a job needs was found at the last fetch.
+    tools_ok: Cell<bool>,
 }
 
 pub struct QualityPane {
@@ -467,6 +481,7 @@ impl QualityPane {
             tick: RefCell::new(None),
             follow: RefCell::new(None),
             deploying: Cell::new(false),
+            tools_ok: Cell::new(true),
         });
         state.status.set_text("Not fetched yet");
         form::mark_source(&state.status, true);
@@ -595,6 +610,17 @@ fn fill(state: &Rc<State>, issues: Vec<Issue>, prs: &[Pr]) {
         state.list.remove(&child);
     }
     state.entries.borrow_mut().clear();
+    // Checked here rather than by a job that would fail at its first step.
+    let missing = missing_tools();
+    if !missing.is_empty() {
+        let note = caption(
+            &format!("Auto-fix needs: {}", missing.join(", ")),
+            Tone::Muted,
+        );
+        ui::set_weight(&note, ui::Weight::Strong);
+        state.list.append(&note);
+    }
+    state.tools_ok.set(missing.is_empty());
     if issues.is_empty() {
         let empty = ui::text(
             "No open issues. Report a problem, and it shows here.",
@@ -740,7 +766,7 @@ fn build_detail(state: &Rc<State>, entry: &Rc<Entry>, fix: &Fix, job: Option<&Jo
             entry.phase.replace(Some(line));
             let log = caption(
                 &job.map(|j| j.tail.join("\n")).unwrap_or_default(),
-                Tone::Faint,
+                Tone::Muted,
             );
             ui::set_mono(&log, true);
             log.set_ellipsize(gtk4::pango::EllipsizeMode::End);
@@ -824,13 +850,17 @@ fn build_detail(state: &Rc<State>, entry: &Rc<Entry>, fix: &Fix, job: Option<&Jo
         Fix::Merged => {}
         Fix::None | Fix::Stopped | Fix::DryRun | Fix::Closed => {
             if status::needs_confirm(&entry.issue, &crate::quality::owner()) {
-                d.append(&caption(
+                let note = caption(
                     &format!(
                         "Filed by @{}, not you: its text becomes the agent's input, so Auto-fix asks first.",
                         entry.issue.author.login
                     ),
-                    Tone::Warning,
-                ));
+                    Tone::Muted,
+                );
+                // Muted, which is held to its contrast through the glass
+                // over any backdrop; the weight carries the caution.
+                ui::set_weight(&note, ui::Weight::Strong);
+                d.append(&note);
             }
             if let Fix::DryRun = fix {
                 d.append(&caption(
@@ -850,6 +880,11 @@ fn build_detail(state: &Rc<State>, entry: &Rc<Entry>, fix: &Fix, job: Option<&Jo
 /// Auto-fix, asking first for an issue the owner did not write.
 fn autofix_button(state: &Rc<State>, entry: &Rc<Entry>, label: &str) -> gtk4::Button {
     let button = ui::button(label, ui::Kind::Secondary);
+    if !state.tools_ok.get() {
+        button.set_sensitive(false);
+        button.set_tooltip_text(Some("A program Auto-fix needs is missing; see above"));
+        return button;
+    }
     let n = entry.issue.number;
     let author = entry.issue.author.login.clone();
     let stranger = status::needs_confirm(&entry.issue, &crate::quality::owner());
@@ -1175,6 +1210,14 @@ fn follow_deploy(state: &Rc<State>) {
     }
 }
 
+/// The tab in the settings search (`search.rs`): its groups, which have no
+/// settings rows of their own.
+#[rustfmt::skip]
+pub(super) const SEARCH: &[super::search::Entry] = &[
+    super::search::row("Issues", "", "The open issues, and Auto-fix: an agent that prepares a PR for one", &["bug", "report", "crash", "auto-fix", "autofix", "fix", "issue", "github", "quality", "pr", "pull request", "agent", "claude"]),
+    super::search::row("Deploy", "", "Merge a ready fix and run nx: build, switch, push", &["merge", "apply", "nx", "deploy", "rebuild"]),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1182,8 +1225,8 @@ mod tests {
     #[test]
     fn every_fix_has_a_tone() {
         assert_eq!(tone(&Fix::None), ui::Status::Neutral);
-        assert_eq!(tone(&Fix::Queued), ui::Status::Warning);
-        assert_eq!(tone(&Fix::Working("3/5".into())), ui::Status::Warning);
+        assert_eq!(tone(&Fix::Queued), ui::Status::Neutral);
+        assert_eq!(tone(&Fix::Working("3/5".into())), ui::Status::Neutral);
         assert_eq!(tone(&Fix::Ready), ui::Status::Success);
         assert_eq!(tone(&Fix::Failed(String::new())), ui::Status::Danger);
         assert_eq!(tone(&Fix::Merged), ui::Status::Success);

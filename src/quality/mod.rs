@@ -174,7 +174,10 @@ mod tests {
 
     #[test]
     fn the_revision_is_short_or_says_why_it_is_missing() {
-        assert_eq!(short_rev(Some("0123456789abcdef0123456789abcdef01234567")), "0123456789ab");
+        assert_eq!(
+            short_rev(Some("0123456789abcdef0123456789abcdef01234567")),
+            "0123456789ab"
+        );
         assert_eq!(short_rev(Some("abc-dirty")), "abc-dirty");
         assert_eq!(short_rev(Some("")), "unknown (a cargo build)");
         assert_eq!(short_rev(None), "unknown (a cargo build)");

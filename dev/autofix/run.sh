@@ -27,7 +27,8 @@
 #
 # Phases:
 #   1. queued, until the lock is free: one job at a time, the rest wait
-#   2. a worktree on `autofix/<n>` from origin/main; the base binary built
+#   2. a worktree on `autofix/<n>` from origin/main, in
+#      ../.swaypplet-autofix/<n> beside the clone; the base binary built
 #   3. `claude -p` with prompt.md, bounded in time and money
 #   4. the result checked here, not taken on the agent's word: a commit
 #      exists, it touches none of the protected paths, it carries no
@@ -87,7 +88,9 @@ done
 
 JOB="$STATE/jobs/$NUMBER"
 OUT="$JOB/out"
-WT="$STATE/worktrees/$NUMBER"
+# Beside the clone, not in it or under STATE: ~/git/personal/.swaypplet-autofix/<n>
+# never shows in the clone's `git status`.
+WT="${AUTOFIX_WORKTREES:-$(dirname "$CLONE")/.swaypplet-autofix}/$NUMBER"
 BRANCH="autofix/$NUMBER"
 rm -rf "$JOB"
 mkdir -p "$OUT/shots"
@@ -168,6 +171,7 @@ phase "2/5 building the base"
 git -C "$CLONE" fetch --quiet origin main || fail "git fetch failed"
 git -C "$CLONE" worktree remove --force "$WT" 2>/dev/null
 git -C "$CLONE" branch -D "$BRANCH" >/dev/null 2>&1
+mkdir -p "$(dirname "$WT")"
 git -C "$CLONE" worktree add --quiet -b "$BRANCH" "$WT" origin/main || fail "could not make the worktree"
 BASE="$(git -C "$WT" rev-parse HEAD)"
 in_dev() { waiting env -C "$WT" nix develop --quiet -c "$@"; }
