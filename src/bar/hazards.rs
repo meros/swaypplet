@@ -126,9 +126,12 @@ pub fn build(sway: &Rc<SwayService>, audio: &Rc<AudioService>) -> gtk4::Box {
 }
 
 /// A non-default binding mode, if one is active. "" is the pre-snapshot
-/// default of `SwayState` — never a hazard.
+/// default of `SwayState` — never a hazard. Nor is a mode of swaypplet's own
+/// (`swaypplet-jump`, which Super+Tab enters while the switcher is on
+/// screen): its surface already says the keys are captured, so the glyph
+/// would only flash beside it.
 fn armed_mode(mode: &str) -> Option<&str> {
-    (!mode.is_empty() && mode != "default").then_some(mode)
+    (!mode.is_empty() && mode != "default" && !mode.starts_with("swaypplet-")).then_some(mode)
 }
 
 /// One appear-only glyph: a warning-toned label (armed, not act-now: red
@@ -158,5 +161,11 @@ mod tests {
         // Pre-snapshot SwayState default: unknown is not a hazard.
         assert_eq!(armed_mode(""), None);
         assert_eq!(armed_mode("resize"), Some("resize"));
+    }
+
+    #[test]
+    fn swaypplets_own_modes_do_not_arm_the_hazard() {
+        // Super+Tab's switcher holds this mode while its card is up.
+        assert_eq!(armed_mode("swaypplet-jump"), None);
     }
 }
