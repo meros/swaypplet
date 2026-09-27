@@ -242,9 +242,57 @@ fn icon_name(app: &str) -> String {
     }
 }
 
+/// Where a `tw` by `th` frame is drawn in a `w` by `h` picture on a surface
+/// at `scale`, and whether it lands one frame pixel to one device pixel.
+///
+/// The worker cuts a frame to fit the picture in device pixels
+/// (`live::out_size`), so it is drawn at its own size: one pixel to one,
+/// from a corner on the device grid, with nothing for a filter to blend.
+/// Stretched to fill instead, a frame one pixel short of the box was scaled
+/// by 491/492 and centred on a half pixel, and the linear filter blurred
+/// all of it. A frame larger than the box (a window grown since it was
+/// cut) is contained: shown whole, with a sliver of the panel beside it
+/// when its aspect differs from sway's rect.
+fn placed((w, h): (f32, f32), (tw, th): (f32, f32), scale: f32) -> ((f32, f32, f32, f32), bool) {
+    let scale = scale.max(1.0);
+    let (nw, nh) = (tw / scale, th / scale);
+    let exact = nw <= w + 1e-3 && nh <= h + 1e-3;
+    let (dw, dh) = if exact {
+        (nw, nh)
+    } else {
+        let s = (w / tw).min(h / th);
+        (tw * s, th * s)
+    };
+    let snap = |v: f32| (v * scale).round() / scale;
+    ((snap((w - dw) / 2.0), snap((h - dh) / 2.0), dw, dh), exact)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Size, draw_size, place_in};
+    use super::{Size, draw_size, place_in, placed};
+
+    #[test]
+    fn a_frame_cut_to_the_box_is_drawn_one_pixel_to_one_on_the_grid() {
+        // 2x: a 396 by 491 frame in a 198 by 246 picture. Stretched, it was
+        // 492 device pixels tall and began half a device pixel down.
+        let ((x, y, w, h), exact) = placed((198.0, 246.0), (396.0, 491.0), 2.0);
+        assert!(exact);
+        assert_eq!((w * 2.0, h * 2.0), (396.0, 491.0));
+        assert_eq!(((x * 2.0).fract(), (y * 2.0).fract()), (0.0, 0.0));
+        // 1.5x: the corner still falls on a device pixel.
+        let ((x, y, _, _), exact) = placed((200.0, 125.0), (297.0, 186.0), 1.5);
+        assert!(exact);
+        assert!((x * 1.5 - (x * 1.5).round()).abs() < 1e-4);
+        assert!((y * 1.5 - (y * 1.5).round()).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_frame_larger_than_the_box_is_contained() {
+        let ((x, y, w, h), exact) = placed((200.0, 125.0), (800.0, 400.0), 2.0);
+        assert!(!exact);
+        assert_eq!((w, h), (200.0, 100.0));
+        assert_eq!((x, y), (0.0, 12.5));
+    }
 
     #[test]
     fn a_draw_box_is_in_device_pixels_rounded_up() {
@@ -297,20 +345,25 @@ mod picture_imp {
             let Some(texture) = &*self.texture.borrow() else {
                 return;
             };
-            let (w, h) = (self.obj().width() as f32, self.obj().height() as f32);
+            let obj = self.obj();
+            let (w, h) = (obj.width() as f32, obj.height() as f32);
             let (tw, th) = (texture.width() as f32, texture.height() as f32);
             if w <= 0.0 || h <= 0.0 || tw <= 0.0 || th <= 0.0 {
                 return;
             }
-            // Contain: a capture whose aspect differs from sway's rect
-            // (client-side shadows, a resize in flight) shows whole, with a
-            // sliver of the panel beside it, and loses none of its edges.
-            let s = (w / tw).min(h / th);
-            let (dw, dh) = (tw * s, th * s);
+            let scale = obj
+                .native()
+                .and_then(|n| n.surface())
+                .map_or(f64::from(obj.scale_factor()), |s| s.scale()) as f32;
+            let ((x, y, dw, dh), exact) = super::placed((w, h), (tw, th), scale);
             snapshot.append_scaled_texture(
                 texture,
-                gsk::ScalingFilter::Linear,
-                &graphene::Rect::new((w - dw) / 2.0, (h - dh) / 2.0, dw, dh),
+                if exact {
+                    gsk::ScalingFilter::Nearest
+                } else {
+                    gsk::ScalingFilter::Linear
+                },
+                &graphene::Rect::new(x, y, dw, dh),
             );
         }
     }
