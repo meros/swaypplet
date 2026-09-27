@@ -352,6 +352,15 @@ impl<'a> Builder<'a> {
         };
         let window = layer::create_layer_window_on(self.app, &config, self.monitor.as_ref());
         window.set_decorated(false);
+        // When the compositor hands this surface the keyboard: what the
+        // render harness waits for before it types (dev/render.sh,
+        // SWPP_KEYS), since keys sent earlier go nowhere.
+        let namespace = self.namespace;
+        window.connect_is_active_notify(move |w| {
+            if w.is_active() {
+                log::debug!(target: "swaypplet::focus", "{namespace:?}: keyboard focus");
+            }
+        });
         // A surface stretched between two opposite edges takes its size on
         // that axis from the compositor's configure. Non-resizable, GTK would
         // pin it to its natural size instead (a bar that ends after its

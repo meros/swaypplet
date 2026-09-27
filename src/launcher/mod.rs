@@ -31,7 +31,7 @@ use gtk4::prelude::*;
 use crate::services::elephant::{self, SearchResult};
 use crate::shell::{Namespace, Surface};
 
-pub use sources::{Action, Page};
+pub use sources::{Action, Page, Ran};
 use sources::Query;
 
 const MAX_VISIBLE_RESULTS: usize = 10;
@@ -66,16 +66,17 @@ struct Hooks {
     /// row's identifier (`settings::search::Target::id`). Set by the host
     /// that can open them; without one the launcher lists no settings rows.
     setting: Option<OpenSetting>,
-    /// Runs an action row by its identifier (`set_actions`), and says
-    /// whether the host is already out of the way.
+    /// Runs an action row by its identifier (`set_actions`), and says what
+    /// is left to do.
     action: Option<RunAction>,
     /// Offered the typed text on Enter before the selected row is: true
     /// when the host took it (`set_on_enter`).
-    enter: Option<RunAction>,
+    enter: Option<TakeEnter>,
 }
 
 type OpenSetting = Box<dyn Fn(&str)>;
-type RunAction = Box<dyn Fn(&str) -> bool>;
+type RunAction = Box<dyn Fn(&str) -> sources::Ran>;
+type TakeEnter = Box<dyn Fn(&str) -> bool>;
 
 /// The host's actions, as they stand when a query is typed.
 type Actions = Rc<dyn Fn() -> Vec<sources::Action>>;
@@ -240,12 +241,11 @@ impl LauncherView {
     /// Offer what this host does now by name (`sources::Action`), and run
     /// one through `run` when its row is activated. `list` is asked on
     /// every query, so a row says the state its switch is in now. `run`
-    /// answers true when it has put the host away itself (a shot hides it
-    /// at once, before the capture), and the usual hide is skipped.
+    /// says what is left to do (`sources::Ran`).
     pub fn set_actions(
         &self,
         list: impl Fn() -> Vec<sources::Action> + 'static,
-        run: impl Fn(&str) -> bool + 'static,
+        run: impl Fn(&str) -> sources::Ran + 'static,
     ) {
         self.state.borrow_mut().actions = Some(Rc::new(list));
         self.on_activate.borrow_mut().action = Some(Box::new(run));
@@ -612,13 +612,20 @@ fn activate(item: &SearchResult, entry: &gtk4::SearchEntry, on_activate: &OnActi
         // Done now, and the host puts itself away: a switch flipped, a
         // shot taken, the screen locked. Not remembered: the query that
         // names it is the shortcut.
-        let away = on_activate
+        let ran = on_activate
             .borrow()
             .action
             .as_ref()
-            .is_some_and(|run| run(&item.identifier));
-        if !away && let Some(done) = on_activate.borrow().done.as_ref() {
-            done();
+            .map_or(sources::Ran::Hide, |run| run(&item.identifier));
+        match ran {
+            sources::Ran::Hide => {
+                if let Some(done) = on_activate.borrow().done.as_ref() {
+                    done();
+                }
+            }
+            sources::Ran::Away => {}
+            // The rows again, for what the next Enter does.
+            sources::Ran::Stay => entry.emit_by_name::<()>("search-changed", &[]),
         }
         return;
     }

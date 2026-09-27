@@ -203,6 +203,9 @@
               # need the session's swayfx for the frost, and a plain sway on
               # PATH would shadow it and quietly render everything unblurred.
               grim
+              # dev/render.sh's SWPP_KEYS: keys typed into the nested
+              # compositor through its virtual keyboard.
+              wtype
               imagemagick
               # montage labels the frames, and ImageMagick has no font to do
               # it with unless one is on the path.

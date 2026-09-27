@@ -240,6 +240,19 @@ impl Action {
     }
 }
 
+/// What running an action left the host to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ran {
+    /// Done: hide, as after a launch.
+    Hide,
+    /// Done, and the host is already out of the way (a shot hides it at
+    /// once, before the capture).
+    Away,
+    /// Not done yet: stay open and ask the rows again, which now say what
+    /// the next Enter does (a restart waiting for its confirmation).
+    Stay,
+}
+
 /// At most this many action rows, above the page rows.
 const MAX_ACTION_ROWS: usize = 4;
 

@@ -421,6 +421,13 @@ pub(crate) enum Session {
 
 impl Session {
     pub(crate) fn run(self) {
+        // The render harness (dev/render.sh) sets this: its nested session
+        // runs the real binary as the real user, and a typed "restart" there
+        // must not restart the machine it runs on.
+        if std::env::var_os("SWAYPPLET_DRY_SESSION").is_some() {
+            log::info!("session: {self:?} (dry run)");
+            return;
+        }
         match self {
             Session::Lock => spawn_session_cmd("loginctl", &["lock-session"]),
             Session::Suspend => spawn_session_cmd("systemctl", &["suspend"]),

@@ -8,7 +8,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use crate::anim;
-use crate::launcher::LauncherView;
+use crate::launcher::{LauncherView, Ran};
 use crate::services::notifications::store::NotificationStore;
 use crate::settings::Open;
 use crate::shell::Surface;
@@ -112,6 +112,9 @@ struct Sections {
     backup: BackupSection,
     /// Quick-strip toggle tiles (Night Light, Caffeine, etc.)
     tiles: RefCell<Vec<TileEntry>>,
+    /// A typed restart or shut down waiting for its second Enter, and
+    /// until when (`CONFIRM_FOR`).
+    armed: std::cell::Cell<Option<(&'static str, std::time::Instant)>>,
     /// The DND tile and the store it shows, for its status on open.
     dnd: RefCell<Option<(ui::SplitTile, Rc<RefCell<NotificationStore>>)>>,
 }
@@ -479,6 +482,7 @@ impl Panel {
             users,
             backup,
             tiles: RefCell::new(tile_pairs),
+            armed: std::cell::Cell::new(None),
             dnd: RefCell::new(dnd_tile.map(|t| (t, store.clone()))),
         });
 
@@ -490,11 +494,12 @@ impl Panel {
             };
             let run = {
                 let weak = Rc::downgrade(&sections);
+                let launcher = Rc::downgrade(&launcher);
                 let window = window.clone();
                 let store = store.clone();
-                move |id: &str| {
-                    weak.upgrade()
-                        .is_some_and(|s| run_deck_action(&s, &window, &store, id))
+                move |id: &str| match (weak.upgrade(), launcher.upgrade()) {
+                    (Some(s), Some(l)) => run_deck_action(&s, &window, &store, &l, id),
+                    _ => Ran::Hide,
                 }
             };
             launcher.set_actions(list, run);
@@ -1233,14 +1238,14 @@ fn deck_actions(sections: &Sections) -> Vec<crate::launcher::Action> {
         Action::new(
             "session:reboot",
             "Restart",
-            "Restart the computer now",
+            confirm_line(sections, "session:reboot", "restart"),
             &["reboot"],
         )
         .whole_words(),
         Action::new(
             "session:poweroff",
             "Shut down",
-            "Turn the computer off now",
+            confirm_line(sections, "session:poweroff", "shut down"),
             &["shutdown", "power off", "poweroff"],
         )
         .whole_words(),
@@ -1248,16 +1253,41 @@ fn deck_actions(sections: &Sections) -> Vec<crate::launcher::Action> {
     out
 }
 
-/// Run a deck action by its row's identifier (`deck_actions`). True when
-/// the Helm is already out of the way: a shot hides it at once, so the
-/// capture does not hold it.
+/// How long a typed restart or shut down waits for its second Enter, as
+/// the rail's buttons wait for their second click (`power::wire_confirm`).
+const CONFIRM_FOR: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Whether `id` waits for its second Enter now.
+fn is_armed(sections: &Sections, id: &str) -> bool {
+    sections
+        .armed
+        .get()
+        .is_some_and(|(armed, until)| armed == id && std::time::Instant::now() < until)
+}
+
+/// The row's line for a confirmed action: what the first Enter does, or,
+/// once armed, what the second will.
+fn confirm_line(sections: &Sections, id: &str, verb: &str) -> &'static str {
+    match (is_armed(sections, id), verb) {
+        (true, "restart") => "Press Enter again to restart now",
+        (true, _) => "Press Enter again to shut down now",
+        (false, _) => "Enter, then Enter again to confirm",
+    }
+}
+
+/// Run a deck action by its row's identifier (`deck_actions`), and say
+/// what is left: hide, nothing (a shot hides the Helm at once, so the
+/// capture does not hold it), or stay (a restart waiting for its second
+/// Enter).
 fn run_deck_action(
     sections: &Sections,
     window: &gtk4::Window,
     store: &Rc<RefCell<NotificationStore>>,
+    launcher: &Rc<LauncherView>,
     id: &str,
-) -> bool {
+) -> Ran {
     use crate::widgets::power::Session;
+    log::debug!("helm: action {id}");
     if let Some(label) = id.strip_prefix("tile:") {
         // The tile's own click: its action, its state, its status line.
         if let Some((toggle, _, _)) = sections
@@ -1268,7 +1298,7 @@ fn run_deck_action(
         {
             toggle.emit_clicked();
         }
-        return false;
+        return Ran::Hide;
     }
     if let Some((label, minutes)) = id.strip_prefix("for:").and_then(|r| r.rsplit_once(':')) {
         let which = crate::services::inhibit::Inhibitor::ALL
@@ -1277,18 +1307,35 @@ fn run_deck_action(
         if let (Some(which), Ok(m)) = (which, minutes.parse::<u32>()) {
             crate::spawn::spawn_work(move || which.arm_for(true, Some(m)), |_| {});
         }
-        return false;
+        return Ran::Hide;
     }
     let shot_of = |kind| {
         shot(window, store, kind);
-        true
+        Ran::Away
+    };
+    // Restart and shut down act on the second Enter within `CONFIRM_FOR`;
+    // the first arms the row, which says so, and the arm lapses by itself.
+    let confirmed = |id: &'static str, session: Session| {
+        if is_armed(sections, id) {
+            sections.armed.set(None);
+            session.run();
+            return Ran::Hide;
+        }
+        sections
+            .armed
+            .set(Some((id, std::time::Instant::now() + CONFIRM_FOR)));
+        let entry = launcher.entry().clone();
+        glib::timeout_add_local_once(CONFIRM_FOR, move || {
+            entry.emit_by_name::<()>("search-changed", &[]);
+        });
+        Ran::Stay
     };
     match id {
         "dnd" => {
             if let Some((dnd, _)) = sections.dnd.borrow().as_ref() {
                 dnd.toggle.emit_clicked();
             }
-            false
+            Ran::Hide
         }
         "shot:region" => shot_of(crate::screenshot::Shot::Region),
         "shot:window" => shot_of(crate::screenshot::Shot::Window),
@@ -1296,27 +1343,21 @@ fn run_deck_action(
         "shot:record" => shot_of(crate::screenshot::Shot::Record),
         "session:lock" => {
             Session::Lock.run();
-            false
+            Ran::Hide
         }
         "session:suspend" => {
             Session::Suspend.run();
-            false
+            Ran::Hide
         }
         "session:logout" => {
             Session::Logout.run();
-            false
+            Ran::Hide
         }
-        "session:reboot" => {
-            Session::Reboot.run();
-            false
-        }
-        "session:poweroff" => {
-            Session::Poweroff.run();
-            false
-        }
+        "session:reboot" => confirmed("session:reboot", Session::Reboot),
+        "session:poweroff" => confirmed("session:poweroff", Session::Poweroff),
         _ => {
             log::warn!("helm: no action {id}");
-            false
+            Ran::Hide
         }
     }
 }

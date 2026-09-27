@@ -27,6 +27,7 @@
 #   SWPP_SELECT_RECT=120,90,540,330 dev/render.sh --mode screenshot # with a selection drawn
 #   SWPP_THEME=light SWPP_BG=black dev/render.sh --mode panel     # light mode over a black desktop
 #   SWPP_BG=~/Pictures/wallpapers/x.jpg dev/render.sh --mode osd   # over a given wallpaper
+#   SWPP_KEYS="'shut down' -k Return" dev/render.sh --mode panel  # typed, as a keyboard would
 #
 # --mode keybinds copies the live session's bindsym lines into the nested
 # config (SWPP_KEYBINDS_FROM overrides the source), because the sheet is
@@ -139,6 +140,13 @@ export WAYLAND_DISPLAY="$WD"
 [ -n "$CSS" ] && export SWAYPPLET_CSS="$CSS"
 
 rm -f "$RUNTIME/swaypplet.pid"
+# Never the real thing: the app below runs as this user, and a restart, shut
+# down or log out typed or clicked in it would act on this machine
+# (widgets/power.rs, Session::run, logs instead).
+export SWAYPPLET_DRY_SESSION=1
+# The keyboard-focus line SWPP_KEYS waits for, on top of whatever else was
+# asked for.
+export RUST_LOG="${RUST_LOG:-warn},swaypplet::focus=debug"
 # SWPP_THEME=dark|light: the design system's mode (docs/design-system.md
 # §2). swaypplet's own startup replay then sends the mode's glass material,
 # the same path a mode switch takes in the session.
@@ -437,6 +445,31 @@ fi
 # at the first non-blank frame, which is the one with the empty list on it.
 #   SWPP_SETTLE=8 dev/render.sh --mode preview:network
 [ -n "${SWPP_SETTLE:-}" ] && sleep "$SWPP_SETTLE"
+
+# SWPP_KEYS: keyboard input once the surface is up, through the nested
+# compositor's virtual keyboard, so it takes the path a real key takes
+# (the surface's own key controllers, focus, Enter) rather than a harness
+# hook that skips it. The value is wtype's own arguments, in order: text to
+# type, -k Key, -M/-m a modifier down and up, -s milliseconds to wait.
+#   SWPP_KEYS="'no sleep' -s 400 -k Return" dev/render.sh --mode panel
+#   SWPP_KEYS=":idle -k Return -s 900 -k Down -k Down" dev/render.sh --mode panel
+# SWPP_KEYS_DELAY_MS is the wait before the first key (800), SWPP_KEYS_SETTLE
+# how long the shot waits after the last one (1 s).
+if [ -n "${SWPP_KEYS:-}" ]; then
+  # One wtype, which waits before its first key. A headless sway has no
+  # keyboard, so no surface has focus until wtype's virtual keyboard
+  # appears, and keys sent as it appears go nowhere (one run in three lost
+  # them). A second wtype would bring a second keyboard and the same race,
+  # so the wait is inside the same one: -s at the front, while the
+  # compositor hands the surface the keyboard (the app logs the moment,
+  # shell/surface.rs, target swaypplet::focus).
+  eval "keys=( $SWPP_KEYS )"
+  "${WTYPE_BIN:-wtype}" -s "${SWPP_KEYS_DELAY_MS:-800}" "${keys[@]}" \
+    || echo "render.sh: wtype failed" >&2
+  grep -q "keyboard focus" /tmp/swpp-app.log 2>/dev/null \
+    || echo "render.sh: no surface took the keyboard; the keys were lost" >&2
+  sleep "${SWPP_KEYS_SETTLE:-1.0}"
+fi
 
 # SWPP_BG: what is behind the glass, set after swaypplet has replayed its
 # own wallpaper. A colour (black, white, #808080) or an image path. For
