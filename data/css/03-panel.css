@@ -33,8 +33,14 @@
 }
 
 /* Display: the night-light warmth group above the outputs. */
-.display-night {
-    padding: var(--space-3) var(--space-4);
+/* Displays: a group's rows run to its edges and inset their own content
+   (space-4); the heading and the save field take the same inset, so the
+   three line up. */
+.display-group-head {
+    padding: var(--space-3) var(--space-4) var(--space-1);
+}
+.display-group-foot {
+    padding: var(--space-2) var(--space-4) var(--space-3);
 }
 
 /* Power: the charge bar and its health line, at a row's inset. */

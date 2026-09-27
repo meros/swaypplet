@@ -234,8 +234,10 @@ impl DisplaySection {
 
         // ── Night light warmth, above the outputs ─────────────────────────────
         let night = ui::group(1);
-        night.add_css_class("display-night");
-        night.append(&ui::heading("Night Light"));
+        let night_head = ui::heading("Night Light");
+        night_head.set_halign(gtk4::Align::Start);
+        night_head.add_css_class("display-group-head");
+        night.append(&night_head);
         // On or off, and when: the tile's switch and its schedule, here with
         // the warmth they apply.
         let current = store::current().night_light();
@@ -290,10 +292,14 @@ impl DisplaySection {
 
         // ── Profiles: kanshi's job (`services::displays`) ─────────────────────
         let profiles = ui::group(1);
-        profiles.append(&ui::heading("Profiles"));
+        let profiles_head = ui::heading("Profiles");
+        profiles_head.set_halign(gtk4::Align::Start);
+        profiles_head.add_css_class("display-group-head");
+        profiles.append(&profiles_head);
         let profile_list = ui::vbox(1);
         profiles.append(&profile_list);
         let save = ui::hbox(2);
+        save.add_css_class("display-group-foot");
         let name = gtk4::Entry::new();
         name.set_placeholder_text(Some("Profile name"));
         name.set_hexpand(true);
@@ -324,7 +330,13 @@ impl DisplaySection {
         let detail_box = ui::vbox(3);
         detail_box.append(&night);
         detail_box.append(&profiles);
-        detail_box.append(&output_list);
+        let outputs = ui::group(1);
+        let outputs_head = ui::heading("Outputs");
+        outputs_head.set_halign(gtk4::Align::Start);
+        outputs_head.add_css_class("display-group-head");
+        outputs.append(&outputs_head);
+        outputs.append(&output_list);
+        detail_box.append(&outputs);
         section.body.append(&detail_box);
 
         let display = Self {
