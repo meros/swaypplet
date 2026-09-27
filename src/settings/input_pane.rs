@@ -178,6 +178,7 @@ fn describe_default(keys: &Keys) -> String {
 struct State {
     catalogue: &'static xkb::Catalogue,
     layouts: gtk4::Box,
+    add: gtk4::Button,
     picker: gtk4::Revealer,
     search: gtk4::SearchEntry,
     hits: gtk4::ListBox,
@@ -315,12 +316,15 @@ impl State {
         let last = codes.len() - 1;
         for (at, code) in codes.iter().enumerate() {
             let row = form::row();
+            // The name in the gutter, its code beside it: what a hand edit
+            // of the file or `settings set input.layouts` would spell.
             let name = form::row_label(self.catalogue.describe(code).unwrap_or(code));
-            name.set_hexpand(true);
             name.set_xalign(0.0);
             row.append(&name);
-            let code_label = ui::text(code, ui::Text::Caption, ui::Tone::Muted);
+            let code_label = ui::text(code, ui::Text::Caption, ui::Tone::Faint);
             ui::set_mono(&code_label, true);
+            code_label.set_hexpand(true);
+            code_label.set_xalign(0.0);
             row.append(&code_label);
 
             let moves: [(&str, &str, bool, isize); 2] = [
@@ -386,12 +390,13 @@ impl State {
         for hit in &hits {
             let content = ui::hbox(3);
             let name = ui::text(&hit.description, ui::Text::Label, ui::Tone::Fg);
-            name.set_hexpand(true);
             name.set_xalign(0.0);
             name.set_ellipsize(gtk4::pango::EllipsizeMode::End);
             content.append(&name);
-            let code = ui::text(&hit.code, ui::Text::Caption, ui::Tone::Muted);
+            let code = ui::text(&hit.code, ui::Text::Caption, ui::Tone::Faint);
             ui::set_mono(&code, true);
+            code.set_hexpand(true);
+            code.set_xalign(0.0);
             content.append(&code);
             self.hits.append(&ui::list_row(&content));
         }
@@ -473,6 +478,7 @@ impl InputPane {
             .build();
         ui::entry::adopt(&search, ui::FieldSize::Normal);
         let hits = ui::list();
+        hits.add_css_class("settings-picker");
         let hits_scroll = gtk4::ScrolledWindow::builder()
             .hscrollbar_policy(gtk4::PolicyType::Never)
             .max_content_height(200)
@@ -480,6 +486,7 @@ impl InputPane {
             .child(&hits)
             .build();
         let picker_body = ui::vbox(2);
+        picker_body.add_css_class("settings-picker-box");
         picker_body.append(&search);
         picker_body.append(&hits_scroll);
         let picker = ui::revealer(
@@ -665,6 +672,7 @@ impl InputPane {
         let state = Rc::new(State {
             catalogue,
             layouts,
+            add: add.clone(),
             picker: picker.clone(),
             search: search.clone(),
             hits: hits.clone(),
@@ -697,6 +705,7 @@ impl InputPane {
             add.connect_clicked(move |_| {
                 let open = !state.picker.reveals_child();
                 state.picker.set_reveal_child(open);
+                state.add.set_label(if open { "Done" } else { "Add layout" });
                 if open {
                     state.fill_hits();
                     state.search.grab_focus();
@@ -718,6 +727,7 @@ impl InputPane {
                     codes.push(code);
                 }
                 state.picker.set_reveal_child(false);
+                state.add.set_label("Add layout");
                 state.search.set_text("");
                 state.set_layouts(codes);
             });
@@ -865,6 +875,7 @@ impl InputPane {
     /// The layout picker open on `query`, for the render harness.
     pub fn demo_pick(&self, query: &str) {
         self.state.picker.set_reveal_child(true);
+        self.state.add.set_label("Done");
         self.state.search.set_text(query);
         self.state.fill_hits();
     }

@@ -419,7 +419,9 @@ pub fn run(component: &str) {
                     s.refresh();
                     // SWAYPPLET_PREVIEW_LAYOUT_QUERY=dvorak: the layout
                     // picker open on that search.
-                    if let Some(q) = std::env::var_os("SWAYPPLET_PREVIEW_LAYOUT_QUERY") {
+                    if let Some(q) = std::env::var_os("SWAYPPLET_PREVIEW_LAYOUT_QUERY")
+                        .filter(|q| !q.is_empty())
+                    {
                         s.demo_layout_pick(&q.to_string_lossy());
                     }
                 }

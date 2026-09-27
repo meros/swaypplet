@@ -170,7 +170,7 @@ impl BarPane {
         );
         let osd_labels: Vec<&str> = OSD_PLACES.iter().map(|(l, _)| *l).collect();
         let (row_osd, osd) = dropdown_row(
-            "Volume & brightness",
+            "Shown as",
             "The centre card can be read through and works over fullscreen; the bar's decision slot costs a glance to the bottom edge and is skipped over a fullscreen view.",
             &osd_labels,
         );
