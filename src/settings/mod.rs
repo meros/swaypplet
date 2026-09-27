@@ -294,6 +294,7 @@ impl SettingsSection {
 
         let results = crate::ui::list();
         results.set_selection_mode(gtk4::SelectionMode::Browse);
+        results.add_css_class("settings-hits");
         let results_scroller = sidebar_scroller(&results);
         results_scroller.set_visible(false);
 

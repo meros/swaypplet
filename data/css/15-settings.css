@@ -32,6 +32,13 @@
     padding: 0 var(--space-4);
 }
 
+/* A search hit is two lines, a title over its subtitle: the list row's
+   own height and inset, not the navigation's. */
+.settings-sidebar .settings-hits .ui-row {
+    min-height: var(--row-height);
+    padding: var(--space-2) var(--space-4);
+}
+
 .settings-nav-group {
     padding: var(--space-3) var(--space-4) var(--space-1);
 }
