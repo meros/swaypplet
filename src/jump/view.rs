@@ -37,17 +37,15 @@ pub fn picture_box() -> (i32, i32) {
 /// Frames a second per window, for a pin and a peek alike: the setting's,
 /// 30 unless it was changed (`settings::schema::Pins`).
 ///
-/// A capture is never cheap: `ext-image-copy-capture` hands over the
-/// window's full-size buffer, so every frame is a full-resolution readback
-/// in the compositor and a copy and a downscale on the worker. Pins used to
-/// take every frame (no cap), and a video or a scrolling build on a pinned
-/// workspace then cost the compositor a readback per refresh. 20 was the
-/// first cap, and a pin at 20 read as sub-par next to the real thing. At
-/// 30 a frame lands on every second refresh of a 60 Hz screen, and the
-/// worker's one-grid batching still repaints the picture once per step.
-/// One number for both, so a pin and a peek of the same workspace share a
-/// stream without one of them restarting it faster. 15 and 60 are there for
-/// a machine that wants the readback cheaper or the picture smoother.
+/// Every frame costs a GPU copy in sway and a 0.6 ms average on the GPU
+/// here at 2x (`gpu.rs`); neither reads the window back to the CPU any
+/// more. Pins once took every frame (no cap), then 20, which read as
+/// sub-par next to the real thing. At 30 a frame lands on every second
+/// refresh of a 60 Hz screen, and the worker's one-grid batching still
+/// repaints the picture once per step. One number for both, so a pin and a
+/// peek of the same workspace share a stream without one of them
+/// restarting it faster. 60 follows a video frame for frame; 15 is for a
+/// pin that only needs to show that something moves.
 pub fn fps() -> u32 {
     crate::settings::store::with(|s| s.pins().fps)
 }
