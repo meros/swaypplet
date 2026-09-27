@@ -230,7 +230,28 @@ fn between(a: &Tuning, b: &Tuning, t: f64) -> Tuning {
     }
     let n = |x: f64, y: f64| x + (y - x) * t;
     let mut out = b.clone();
-    let (m, ma, mb) = (&mut out.material, &a.material, &b.material);
+    out.material = between_materials(&a.material, &b.material, t);
+    // The always-dark namespaces' own copy moves the same way; one end
+    // without it stands for its plain material.
+    if a.dark.is_some() || b.dark.is_some() {
+        let da = a.dark.as_ref().unwrap_or(&a.material);
+        let db = b.dark.as_ref().unwrap_or(&b.material);
+        out.dark = Some(between_materials(da, db, t));
+    }
+    out.bezel_scale = n(a.bezel_scale, b.bezel_scale);
+    out.crest_scale = n(a.crest_scale, b.crest_scale);
+    out
+}
+
+/// [`between`] for one material.
+fn between_materials(
+    ma: &super::glass::Material,
+    mb: &super::glass::Material,
+    t: f64,
+) -> super::glass::Material {
+    let n = |x: f64, y: f64| x + (y - x) * t;
+    let mut out = mb.clone();
+    let m = &mut out;
     macro_rules! numbers {
         ($($f:ident),*) => { $( m.$f = n(ma.$f, mb.$f); )* };
     }
@@ -265,8 +286,6 @@ fn between(a: &Tuning, b: &Tuning, t: f64) -> Tuning {
     let c = tint::blend(ca, cb, t);
     m.set_fill_rgb(Some((c.0, c.1, c.2)));
     m.fill_alpha = n(aa, ab);
-    out.bezel_scale = n(a.bezel_scale, b.bezel_scale);
-    out.crest_scale = n(a.crest_scale, b.crest_scale);
     out
 }
 
@@ -287,6 +306,7 @@ mod tests {
             crest_scale: 1.0,
             clarity: 0.0,
             frost_scale: 1.0,
+            dark: None,
         }
     }
 

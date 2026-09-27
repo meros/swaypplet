@@ -498,6 +498,13 @@ halo. The proof is one case, a white page (light ink only gains as the
 ground darkens): white × 0.59 under the scrim is Lc 75.9. The greeter, whose
 compositor draws no such backdrop, and the switcher's caption keep the halo.
 
+**The lock and the greeter are dark in both modes.** Their card stands on
+that dimmed wallpaper, so light mode's dark ink and milky glass have no place
+there: both processes call `theme::pin_dark` before loading the stylesheet,
+and the panel sends the `session-lock` namespace dark mode's material
+(`settings::glass::ALWAYS_DARK`) while every other namespace follows the mode.
+The greeter's compositor keeps the shipped material, which is dark.
+
 The compositor's side, for the nixos repo (not in this repository):
 
 - `theme/glass.nix` gains `lockBackdrop = { blur = 45; brightness = 0.55; }`;

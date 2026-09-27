@@ -27,6 +27,31 @@ thread_local! {
     /// The Look mode setting last resolved, to tell a choice made just now
     /// from the sun moving.
     static SETTING: Cell<Option<ThemeMode>> = const { Cell::new(None) };
+    /// Set by [`pin_dark`]: this process draws dark whatever the mode.
+    static PINNED_DARK: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Draw dark in this process whatever the shell's mode is: the lock screen
+/// and the greeter.
+///
+/// Both put their card and text over the wallpaper dimmed to at most
+/// `BACKDROP_BRIGHTNESS_MAX` over black (docs/design-system.md, "Text on the
+/// lock's backdrop"), which is a dark context in either mode, and both cards
+/// are dark glass there: the compositor's `session-lock` material is sent
+/// dark (`settings::glass::ALWAYS_DARK`) and the greeter's is the shipped dark
+/// one. Light mode's dark ink on that card is unreadable. Beats
+/// `SWAYPPLET_MODE` too, so a harness forcing light shows what ships.
+pub fn pin_dark() {
+    PINNED_DARK.with(|p| p.set(true));
+}
+
+/// The mode this process draws in, given the one the shell resolved.
+pub(super) fn drawn_mode(resolved: impl FnOnce() -> Mode) -> Mode {
+    if PINNED_DARK.with(Cell::get) {
+        Mode::Dark
+    } else {
+        resolved()
+    }
 }
 
 /// The mode last resolved.
@@ -133,13 +158,15 @@ pub fn inputs() -> Inputs {
         _ => None,
     };
     // `SWAYPPLET_MODE` forces a mode: the render harness checks both.
-    let mode = forced.unwrap_or_else(|| {
-        match look.mode {
-            // A choice made in the pane applies at once: the person made it.
-            ThemeMode::Dark => Mode::Dark,
-            ThemeMode::Light => Mode::Light,
-            ThemeMode::Auto => auto_mode(sun_mode(), chosen_now),
-        }
+    let mode = drawn_mode(|| {
+        forced.unwrap_or_else(|| {
+            match look.mode {
+                // A choice made in the pane applies at once: the person made it.
+                ThemeMode::Dark => Mode::Dark,
+                ThemeMode::Light => Mode::Light,
+                ThemeMode::Auto => auto_mode(sun_mode(), chosen_now),
+            }
+        })
     });
     // One read of the one-line cache for both of the wallpaper's inputs.
     let (palette, backdrop) = match super::wallpaper::read() {

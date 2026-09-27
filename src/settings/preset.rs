@@ -57,6 +57,7 @@ impl Preset {
             crest_scale: 1.0,
             clarity: self.clarity,
             frost_scale: self.frost_scale,
+            dark: None,
         }
     }
 }

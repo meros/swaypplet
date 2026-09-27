@@ -204,7 +204,7 @@ pub mod sun;
 mod sway;
 pub mod wallpaper;
 
-pub use inputs::inputs;
+pub use inputs::{inputs, pin_dark};
 pub use paint::{Paint, paint};
 
 /// The inputs the stylesheet on screen was generated from: the Look
@@ -415,6 +415,33 @@ pub fn follow_while_locked() {
 
 #[cfg(test)]
 mod tests {
+    use crate::tokens::{Inputs, Mode};
+
+    /// The lock's stylesheet in light mode is dark mode's, token for token,
+    /// once the process has pinned dark (`pin_dark`, which the lock and the
+    /// greeter call before their first `load_css`). Through `drawn_mode`,
+    /// the step `inputs` takes the mode through; the pin is thread-local, so
+    /// it reaches no other test.
+    #[test]
+    fn the_lock_draws_dark_tokens_in_light_mode() {
+        let light = Inputs {
+            mode: Mode::Light,
+            ..Inputs::default()
+        };
+        let dark = Inputs {
+            mode: Mode::Dark,
+            ..light
+        };
+        assert_ne!(super::document(light), super::document(dark));
+        assert_eq!(super::inputs::drawn_mode(|| Mode::Light), Mode::Light);
+
+        super::pin_dark();
+        let drawn = Inputs {
+            mode: super::inputs::drawn_mode(|| light.mode),
+            ..light
+        };
+        assert_eq!(super::document(drawn), super::document(dark));
+    }
     /// The stylesheet, structurally.
     ///
     /// GTK does not fail on a malformed one: it logs the parse error to
