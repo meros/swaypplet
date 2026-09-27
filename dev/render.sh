@@ -20,6 +20,9 @@
 #   SWPP_OUTPUTS=2 dev/render.sh --mode osd --res 1280x800         # the OSD card, on each output
 #   dev/render.sh --mode screenshot --res 1200x800                 # the region selector
 #   dev/render.sh --mode notifications --res 700x900                # the popup stack
+#   dev/render.sh --mode quiet --res 1200x900                       # held while fullscreen, the panel's DND tile
+#   SWPP_QUIET_STAGE=after dev/render.sh --mode quiet --res 1200x900 # the count card once it ends
+#   SWPP_QUIET_SHARE=1 dev/render.sh --mode quiet ...               # a shared screen (dev/fake-screencast.sh) instead
 #   SWPP_SELECT_RECT=120,90,540,330 dev/render.sh --mode screenshot # with a selection drawn
 #   SWPP_THEME=light SWPP_BG=black dev/render.sh --mode panel     # light mode over a black desktop
 #   SWPP_BG=~/Pictures/wallpapers/x.jpg dev/render.sh --mode osd   # over a given wallpaper
@@ -277,6 +280,52 @@ case "$MODE" in
     done
     sleep 1.2
     ;;
+  quiet)
+    # Quiet by context (src/services/notifications/context.rs): a window
+    # fullscreen on the focused output, or with SWPP_QUIET_SHARE=1 a
+    # screen-cast stream from dev/fake-screencast.sh, holds the normal
+    # notifications sent next; the critical one still pops. Stage `during`
+    # (the default) then opens the panel on the DND tile's reason; `after`
+    # ends the context and shoots the count card.
+    if [ -n "${SWPP_QUIET_SHARE:-}" ]; then
+      export SWAYPPLET_PW_DUMP="$(cd "$(dirname "$0")" && pwd)/fake-screencast.sh" SWPP_SHARE_S="${SWPP_SHARE_S:-8}"
+    fi
+    "$BIN" >/tmp/swpp-app.log 2>&1 &
+    for _ in $(seq 1 200); do
+      [ -e "$RUNTIME/swaypplet.pid" ] && break; sleep 0.1
+    done
+    sleep 1.5
+    if [ -z "${SWPP_QUIET_SHARE:-}" ]; then
+      swaymsg -q "exec alacritty --class quiet-test -e sh -c 'sleep 600'" 2>/dev/null
+      for _ in $(seq 1 50); do
+        swaymsg -t get_tree 2>/dev/null | grep -q '"app_id": *"quiet-test"' && break; sleep 0.1
+      done
+      swaymsg -q '[app_id="quiet-test"] fullscreen enable' 2>/dev/null
+      sleep 0.6
+    fi
+    notify-send -a "Chat" "Ada Lovelace" "Are the slides up?" || true
+    notify-send -a "Chat" "Ada Lovelace" "No rush." || true
+    notify-send -a "CI" "Pipeline #412 passed" "418 of 418 on main." || true
+    notify-send -a "Kalender" "Möte om 5 min — Åsa" "Öresund, rum 3." || true
+    notify-send -u low -a "Music" "Next up" "Low urgency: never pops, never counted." || true
+    notify-send -u critical -a "Disk" "Root filesystem 96% full" "Critical: shows through." || true
+    sleep 0.8
+    # The OSD card is held while shared (it would be in the stream); caps
+    # lock is the card that reads a LED and changes nothing.
+    [ -n "${SWPP_QUIET_SHARE:-}" ] && { "$BIN" osd --caps-lock >>/tmp/swpp-app.log 2>&1 || true; }
+    if [ "${SWPP_QUIET_STAGE:-during}" = during ]; then
+      p="$(cat "$RUNTIME/swaypplet.pid" 2>/dev/null || true)"
+      [ -n "$p" ] && kill -USR1 "$p" 2>/dev/null || true
+      sleep 1.5
+    else
+      if [ -n "${SWPP_QUIET_SHARE:-}" ]; then
+        sleep "$SWPP_SHARE_S"
+      else
+        swaymsg -q '[app_id="quiet-test"] fullscreen disable' 2>/dev/null
+      fi
+      sleep 1.5
+    fi
+    ;;
   screenshot)
     "$BIN" >/tmp/swpp-app.log 2>&1 &
     for _ in $(seq 1 200); do
@@ -342,7 +391,7 @@ mapped=""
 # A layer surface is never in the tree, so this wait cannot see one and runs
 # to its 6 s end. For the jump card that is fatal: its watchdog commits and
 # closes it after 3 s, so every shot missed it.
-case "$MODE" in jump|osd) mapped=layer ;; esac
+case "$MODE" in jump|osd|quiet) mapped=layer ;; esac
 for _ in $(seq 1 60); do
   [ -n "$mapped" ] && break
   swaymsg -t get_tree 2>/dev/null | grep -q '"app_id": *"[^"]*swaypplet' && { mapped=1; break; }

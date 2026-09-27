@@ -14,6 +14,7 @@ pub mod backup;
 pub mod battery;
 pub mod bluetooth;
 pub mod bluez;
+pub mod capture;
 pub mod clipboard;
 pub mod displays;
 pub mod elephant;

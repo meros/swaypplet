@@ -60,6 +60,12 @@ pub struct SwayState {
     /// The focused view is fullscreen — OSD interjections route to the
     /// center card instead of the bar (docs/BAR_VISION.md, increment 5).
     pub focused_fullscreen: bool,
+    /// A window is fullscreen on the output holding the focused workspace,
+    /// whether or not it has focus (quiet by context).
+    pub fullscreen_on_focused_output: bool,
+    /// Two outputs show the same part of the layout, or wl-mirror is up
+    /// (quiet by context).
+    pub mirrored: bool,
     /// Current binding mode ("default" at rest; "" only before the first
     /// snapshot). The hazard lane shows non-default modes (increment 7).
     pub binding_mode: String,
@@ -386,8 +392,11 @@ fn session(tx: &async_channel::Sender<SwayState>) -> Result<(), swayipc::Error> 
 
 fn snapshot(query: &mut Connection) -> Result<SwayState, swayipc::Error> {
     let tree = query.get_tree()?;
+    let workspaces = workspace_infos(query.get_workspaces()?);
     Ok(SwayState {
-        workspaces: workspace_infos(query.get_workspaces()?),
+        fullscreen_on_focused_output: fullscreen_on_focused_output(&tree, &workspaces),
+        mirrored: mirrored(&tree),
+        workspaces,
         // From the tree we already fetched — get_outputs would be a third
         // round-trip per event for the same two numbers.
         outputs: output_infos(&tree),
@@ -455,6 +464,65 @@ fn focused_fullscreen(node: &Node) -> bool {
         .iter()
         .chain(&node.floating_nodes)
         .any(focused_fullscreen)
+}
+
+/// A view is fullscreen on the output that holds the focused workspace: on
+/// a workspace visible there, or anywhere as a global fullscreen. The view
+/// need not have focus. The panel, a layer surface, takes the keyboard
+/// without entering the tree, and a floating window can sit on top of the
+/// fullscreen one; the screen is still showing it.
+fn fullscreen_on_focused_output(root: &Node, workspaces: &[WorkspaceInfo]) -> bool {
+    let Some(output) = workspaces.iter().find(|w| w.focused).map(|w| &w.output) else {
+        return false;
+    };
+    let visible: Vec<&str> = workspaces
+        .iter()
+        .filter(|w| w.visible && &w.output == output)
+        .map(|w| w.name.as_str())
+        .collect();
+    super::tree::walk(root, &mut |node, workspace| {
+        let view = matches!(node.node_type, NodeType::Con | NodeType::FloatingCon);
+        let here = workspace.is_some_and(|w| visible.contains(&w));
+        match node.fullscreen_mode.unwrap_or(0) {
+            2 if view => std::ops::ControlFlow::Break(()),
+            1 if view && here => std::ops::ControlFlow::Break(()),
+            _ => std::ops::ControlFlow::Continue(()),
+        }
+    })
+    .is_some()
+}
+
+/// wl-mirror's app id: the usual way to mirror an output on sway, which has
+/// no mirroring of its own.
+const WL_MIRROR: &str = "at.yrlf.wl_mirror";
+
+/// Two outputs overlap in the layout, so both show the same pixels (the
+/// way to duplicate a display with sway's own configuration), or a
+/// wl-mirror window is open.
+fn mirrored(root: &Node) -> bool {
+    let rects: Vec<&swayipc::Rect> = root
+        .nodes
+        .iter()
+        .filter(|n| n.node_type == NodeType::Output)
+        .filter(|n| n.name.as_deref().is_some_and(|s| !s.starts_with("__")))
+        .map(|n| &n.rect)
+        .collect();
+    let overlap = |a: &swayipc::Rect, b: &swayipc::Rect| {
+        a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+    };
+    let overlapping = rects
+        .iter()
+        .enumerate()
+        .any(|(i, a)| rects[i + 1..].iter().any(|b| overlap(a, b)));
+    overlapping
+        || super::tree::walk(root, &mut |node, _| {
+            if node.app_id.as_deref() == Some(WL_MIRROR) {
+                std::ops::ControlFlow::Break(())
+            } else {
+                std::ops::ControlFlow::Continue(())
+            }
+        })
+        .is_some()
 }
 
 #[cfg(test)]
@@ -583,6 +651,104 @@ mod tests {
         // Fullscreen but not focused: the OSD may still use the bar.
         assert!(!focused_fullscreen(&fs(false, 1)));
         assert!(!focused_fullscreen(&fs(true, 0)));
+    }
+
+    fn ws(name: &str, output: &str, focused: bool, visible: bool) -> WorkspaceInfo {
+        WorkspaceInfo {
+            num: name.parse().unwrap_or(-1),
+            name: name.into(),
+            output: output.into(),
+            focused,
+            urgent: false,
+            visible,
+        }
+    }
+
+    /// Two outputs; workspace 1 on eDP-1, 2 and 3 on DP-1 (2 visible). The
+    /// fullscreen view sits on `on` with `mode`.
+    fn two_outputs(on: &str, mode: u8) -> Node {
+        let view = |ws: &str, id: i64| {
+            let mode = if ws == on { mode } else { 0 };
+            node(json!({ "id": id, "pid": id, "name": "v", "fullscreen_mode": mode }))
+        };
+        let workspace = |name: &str, id: i64| {
+            node(json!({ "type": "workspace", "name": name, "nodes": [view(name, id)] }))
+        };
+        tree(node(json!({
+            "type": "root",
+            "nodes": [
+                node(json!({ "type": "output", "name": "eDP-1",
+                             "rect": {"x": 0, "y": 0, "width": 1920, "height": 1200},
+                             "nodes": [workspace("1", 10)] })),
+                node(json!({ "type": "output", "name": "DP-1",
+                             "rect": {"x": 1920, "y": 0, "width": 2560, "height": 1440},
+                             "nodes": [workspace("2", 20), workspace("3", 30)] })),
+            ],
+        })))
+    }
+
+    #[test]
+    fn fullscreen_counts_on_the_focused_output_only_and_only_where_visible() {
+        let focused_on_edp = [
+            ws("1", "eDP-1", true, true),
+            ws("2", "DP-1", false, true),
+            ws("3", "DP-1", false, false),
+        ];
+        assert!(fullscreen_on_focused_output(
+            &two_outputs("1", 1),
+            &focused_on_edp
+        ));
+        // A video fullscreen on the other screen does not quiet this one.
+        assert!(!fullscreen_on_focused_output(
+            &two_outputs("2", 1),
+            &focused_on_edp
+        ));
+        // Global fullscreen covers every output.
+        assert!(fullscreen_on_focused_output(
+            &two_outputs("2", 2),
+            &focused_on_edp
+        ));
+
+        let focused_on_dp = [
+            ws("1", "eDP-1", false, true),
+            ws("2", "DP-1", true, true),
+            ws("3", "DP-1", false, false),
+        ];
+        assert!(fullscreen_on_focused_output(
+            &two_outputs("2", 1),
+            &focused_on_dp
+        ));
+        // Workspace 3 is on the focused output but not showing.
+        assert!(!fullscreen_on_focused_output(
+            &two_outputs("3", 1),
+            &focused_on_dp
+        ));
+        assert!(!fullscreen_on_focused_output(
+            &two_outputs("2", 0),
+            &focused_on_dp
+        ));
+    }
+
+    #[test]
+    fn overlapping_outputs_or_wl_mirror_count_as_mirrored() {
+        assert!(!mirrored(&two_outputs("1", 0)));
+        let same_place = tree(node(json!({
+            "type": "root",
+            "nodes": [
+                node(json!({ "type": "output", "name": "eDP-1",
+                             "rect": {"x": 0, "y": 0, "width": 1920, "height": 1200} })),
+                node(json!({ "type": "output", "name": "HDMI-A-1",
+                             "rect": {"x": 0, "y": 0, "width": 1920, "height": 1080} })),
+            ],
+        })));
+        assert!(mirrored(&same_place));
+        let wl_mirror = tree(node(json!({
+            "type": "root",
+            "nodes": [node(json!({ "type": "output", "name": "HDMI-A-1",
+                "nodes": [node(json!({ "type": "workspace", "name": "9",
+                    "nodes": [node(json!({ "id": 5, "app_id": WL_MIRROR }))] }))] }))],
+        })));
+        assert!(mirrored(&wl_mirror));
     }
 
     #[test]

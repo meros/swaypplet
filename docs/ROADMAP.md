@@ -44,16 +44,7 @@ Why now: the motion tokens (`move`, `travel`) and `anim::Reveal` exist, and
 the design system says what each duration means, so this is the last
 motion piece without a home.
 
-### 2. Focus and quiet modes that know the context (M)
-
-Do not disturb switches on by itself while a screen is shared or a window is
-fullscreen, and off after. Notifications that arrive meanwhile do not pop
-up; afterwards one card says "7 while you were presenting" and opens the
-list. The lock screen gets the same summary row. The screen-share signal is
-the privacy indicator's (camera and screen capture are the blocked half of
-that item in [history](history/shell-ideas-2026-08.md)).
-
-### 3. The overview with a real start (L)
+### 2. The overview with a real start (L)
 
 A long Super hold opens a full-screen overlay whose first frame is an output
 capture, identical to the screen; the windows then fly from their real
@@ -62,7 +53,7 @@ positions into a grid of workspaces. Needs the dmabuf capture path first
 a CPU copy and a box filter each, which the Super+Tab tiles can afford and a
 full screen cannot. Builds on item 1's motion.
 
-### 4. Emoji and character picker that types (M)
+### 3. Emoji and character picker that types (M)
 
 `zwp_input_method_manager_v2` and `zwp_virtual_keyboard_manager_v1` are
 both advertised, so the picker inserts into the focused surface instead of
@@ -87,7 +78,8 @@ the items above. Each names the entries it comes from.
 | Candidate | Size | Why | Source |
 |---|---|---|---|
 | Tell the apps: publish color-scheme, accent, contrast and reduced motion through the XDG settings portal and gsettings when the mode changes. Today nixos `scaling.nix` pins apps to `prefer-dark`, so in light mode the apps stay dark | S | the most visible gap in light mode | [xdg-portal-appearance](prior-art/theming/xdg-portal-appearance.md) |
-| Urgency as interruption level: low never pops, critical breaks through quiet mode and never times out | S | the freedesktop spec already carries it | [ios-interruption-levels](prior-art/notifications-wm/ios-interruption-levels.md) |
+| Per-app demotion of critical ("this app's critical is not critical"): the rest of the interruption levels shipped with quiet by context | S | freedesktop has no entitlement gate, so some apps send critical for trivia | [ios-interruption-levels](prior-art/notifications-wm/ios-interruption-levels.md) |
+| The lock screen's summary row for quiet by context: the "N while you were presenting" count, per app, under the clock | S | the one part of the context item not built; the card covers the unlocked case | [windows-focus-assist](prior-art/notifications-wm/windows-focus-assist.md), [lock-screen-curtain](prior-art/shells/lock-screen-curtain.md) |
 | Frame gate v2: lateness relative to refresh, per-animation tags, the compositor's render time, the shipped glass settings, a cold first open | S–M | the gate should say who dropped the frame | [motion/README](prior-art/motion/README.md) |
 | Launcher learns (prefix → item), fallback rows, per-row actions, `nucleo` fuzzy matching | S–M each | ranked in the launchers synthesis | [launchers/README](prior-art/launchers/README.md) |
 | Settings rows as launcher results, opening the pane on the row | M | every other platform searches settings | [settings-search](prior-art/theming/settings-search.md) |
@@ -117,7 +109,8 @@ Each was proposed at least once. The reason is why it stays out.
   per-minute tick for a surface opened twice a day (BAR_VISION P7).
 - **Notification bell with an unread badge.** A count on the bar is colour
   and change at rest; BAR_VISION P1 keeps the nominal bar still. DND lives
-  in the panel, and item 3 makes it automatic.
+  in the panel, and quiet by context (`services/notifications/context.rs`)
+  switches it by itself.
 - **Bar toggle segments (night light, caffeine) on the bar.** Bar width is
   for state, not controls; the panel holds the tiles.
 - **Media playback underline and hover controls on the bar.** Continuous

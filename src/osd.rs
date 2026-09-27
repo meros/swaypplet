@@ -205,6 +205,7 @@ fn read_lock_display(lock_name: &str, icon_on: &str, icon_off: &str, label: &str
 /// Volume/brightness route into the bar's decision slot (icon, fraction,
 /// text) → handled? Installed by app.rs once the bar exists.
 type BarRoute = Box<dyn Fn(&str, f64, &str) -> bool>;
+type Hold = Box<dyn Fn() -> bool>;
 
 /// How long after the last press the server's own number takes over.
 ///
@@ -372,6 +373,8 @@ pub struct Osd {
     current: Rc<RefCell<Option<OsdDisplay>>>,
     timeout_id: Rc<RefCell<Option<glib::SourceId>>>,
     bar_route: Rc<RefCell<Option<BarRoute>>>,
+    /// [`Osd::set_hold`]'s question.
+    hold: Rc<RefCell<Option<Hold>>>,
     /// Set once the panel exists. Absent only in the standalone paths that
     /// never send a volume command.
     audio: Rc<RefCell<Option<Rc<crate::services::audio::AudioService>>>>,
@@ -390,6 +393,7 @@ impl Osd {
             current: Rc::new(RefCell::new(None)),
             timeout_id: Rc::new(RefCell::new(None)),
             bar_route: Rc::new(RefCell::new(None)),
+            hold: Rc::new(RefCell::new(None)),
             audio: Rc::new(RefCell::new(None)),
             showing: Rc::new(Cell::new(Showing::Other)),
             pending: Rc::new(RefCell::new(Pending::default())),
@@ -416,6 +420,12 @@ impl Osd {
     /// indicators (caps/num/scroll) always keep the card.
     pub fn set_bar_route(&self, route: impl Fn(&str, f64, &str) -> bool + 'static) {
         *self.bar_route.borrow_mut() = Some(Box::new(route));
+    }
+
+    /// Install the question "hold the card now?", asked per display: true
+    /// while the screen is shared (`services::notifications::context`).
+    pub fn set_hold(&self, hold: impl Fn() -> bool + 'static) {
+        *self.hold.borrow_mut() = Some(Box::new(hold));
     }
 
     /// Hand the OSD the sound server connection, so volume keys are answered
@@ -580,6 +590,12 @@ impl Osd {
     }
 
     fn show_display(&self, display: &OsdDisplay) {
+        // Held while the screen is shared: the card would be in the capture.
+        // The key itself has done its work by now; only the picture waits.
+        if self.hold.borrow().as_ref().is_some_and(|hold| hold()) {
+            log::debug!("osd: held while the screen is shared");
+            return;
+        }
         if let OsdDisplay::Bar {
             icon,
             fraction,

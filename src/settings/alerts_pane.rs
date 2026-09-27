@@ -1,10 +1,12 @@
-//! The Alerts tab: the popup stack, the hours it keeps quiet, and what a
-//! screenshot becomes.
+//! The Alerts tab: the popup stack, the hours and the contexts it keeps
+//! quiet, and what a screenshot becomes.
 //!
 //! Two sections, `alerts` and `capture`, on one tab with one footer. The
 //! popup rows are read per card (`notifications/stack.rs`), the schedule by
-//! `services/notifications/quiet.rs` on its tick and on every change here, and the
-//! capture rows by `screenshot/` at the moment of the shot.
+//! `services/notifications/quiet.rs` on its tick and on every change here,
+//! the context switches by `services/notifications/context.rs` on every
+//! change here, and the capture rows by `screenshot/` at the moment of the
+//! shot.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -16,7 +18,7 @@ use super::store::{self, After, Alerts, Capture, Corner, Linger};
 
 fn describe(alerts: &Alerts, capture: &Capture) -> String {
     format!(
-        "System default: {} popups, {}, {} at a time, quiet hours {}; shots {} to {}",
+        "System default: {} popups, {}, {} at a time, quiet hours {}, by context {}; shots {} to {}",
         alerts
             .linger
             .label()
@@ -31,6 +33,7 @@ fn describe(alerts: &Alerts, capture: &Capture) -> String {
         } else {
             "off".to_string()
         },
+        if alerts.context_quiet { "on" } else { "off" },
         match capture.after {
             After::Both => "saved and copied",
             After::Save => "saved",
@@ -51,6 +54,11 @@ struct State {
     quiet: gtk4::Switch,
     quiet_from: gtk4::DropDown,
     quiet_to: gtk4::DropDown,
+    context: gtk4::Switch,
+    sharing: gtk4::Switch,
+    mirrored: gtk4::Switch,
+    fullscreen: gtk4::Switch,
+    calls: gtk4::Switch,
     folder: gtk4::Entry,
     after: gtk4::DropDown,
     annotate: gtk4::Switch,
@@ -93,6 +101,16 @@ impl State {
             .set_selected(u32::from(alerts.quiet_to_h.min(23)));
         self.quiet_from.set_sensitive(alerts.quiet);
         self.quiet_to.set_sensitive(alerts.quiet);
+        self.context.set_active(alerts.context_quiet);
+        for (switch, on) in [
+            (&self.sharing, alerts.quiet_when_sharing),
+            (&self.mirrored, alerts.quiet_when_mirrored),
+            (&self.fullscreen, alerts.quiet_when_fullscreen),
+            (&self.calls, alerts.quiet_in_calls),
+        ] {
+            switch.set_active(on);
+            switch.set_sensitive(alerts.context_quiet);
+        }
         if self.folder.text() != capture.folder {
             self.folder.set_text(&capture.folder);
         }
@@ -165,6 +183,41 @@ impl AlertsPane {
         );
         quiet_group.append(&row_to);
 
+        let context_group = section_box(
+            "Quiet by context",
+            "Popups wait while one of these holds, and one card counts them when it ends. Critical ones still show. The DND tile names the reason and turns it off until the context ends.",
+        );
+        let (row_context, context) = switch_row(
+            "Quiet by context",
+            "On, the triggers below hold popups by themselves.",
+            alerts.context_quiet,
+        );
+        context_group.append(&row_context);
+        let (row_sharing, sharing) = switch_row(
+            "Screen shared",
+            "A screen-cast stream exists in PipeWire: a browser or call app sharing through the portal. The volume and brightness card waits too, since it would be in the stream.",
+            alerts.quiet_when_sharing,
+        );
+        context_group.append(&row_sharing);
+        let (row_mirrored, mirrored) = switch_row(
+            "Display mirrored",
+            "Two outputs overlap in the layout, or wl-mirror is open.",
+            alerts.quiet_when_mirrored,
+        );
+        context_group.append(&row_mirrored);
+        let (row_fullscreen, fullscreen) = switch_row(
+            "Full screen",
+            "A window is fullscreen on the screen you are using.",
+            alerts.quiet_when_fullscreen,
+        );
+        context_group.append(&row_fullscreen);
+        let (row_calls, calls) = switch_row(
+            "In a call",
+            "The camera is on, or a call app or a browser records the microphone. A guess from names, so off by default.",
+            alerts.quiet_in_calls,
+        );
+        context_group.append(&row_calls);
+
         let capture_group = section_box(
             "Capture",
             "What a screenshot becomes. The colour picker and recordings are not affected.",
@@ -221,6 +274,11 @@ impl AlertsPane {
             quiet: quiet.clone(),
             quiet_from: quiet_from.clone(),
             quiet_to: quiet_to.clone(),
+            context: context.clone(),
+            sharing: sharing.clone(),
+            mirrored: mirrored.clone(),
+            fullscreen: fullscreen.clone(),
+            calls: calls.clone(),
             folder: folder.clone(),
             after: after.clone(),
             annotate: annotate.clone(),
@@ -273,6 +331,23 @@ impl AlertsPane {
             });
         }
         {
+            type Field = fn(&mut Alerts, bool);
+            let rows: [(&gtk4::Switch, Field); 5] = [
+                (&context, |a, on| a.context_quiet = on),
+                (&sharing, |a, on| a.quiet_when_sharing = on),
+                (&mirrored, |a, on| a.quiet_when_mirrored = on),
+                (&fullscreen, |a, on| a.quiet_when_fullscreen = on),
+                (&calls, |a, on| a.quiet_in_calls = on),
+            ];
+            for (switch, field) in rows {
+                let state = state.clone();
+                switch.connect_active_notify(move |s| {
+                    let on = s.is_active();
+                    state.edit_alerts(|a| field(a, on));
+                });
+            }
+        }
+        {
             // On focus-out and Enter rather than per keystroke: a folder is
             // typed as a whole, and half a path is not a folder.
             let state = state.clone();
@@ -318,6 +393,7 @@ impl AlertsPane {
 
         root.append(&popups);
         root.append(&quiet_group);
+        root.append(&context_group);
         root.append(&capture_group);
         root.append(&footer);
         state.sync();

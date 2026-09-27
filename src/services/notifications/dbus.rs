@@ -291,6 +291,7 @@ impl NotificationServer {
             // Resolved by the store at add time (set_task_resolver).
             task: None,
             suppressed: false,
+            held: false,
             icon,
             image,
             category,

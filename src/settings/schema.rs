@@ -555,7 +555,8 @@ impl Corner {
     }
 }
 
-/// Notifications: the popup stack, and the hours it keeps quiet.
+/// Notifications: the popup stack, and the hours and contexts it keeps
+/// quiet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Alerts {
     #[serde(default)]
@@ -575,6 +576,23 @@ pub struct Alerts {
     pub quiet_from_h: u8,
     #[serde(default = "Alerts::default_quiet_to")]
     pub quiet_to_h: u8,
+    /// Hold popups while the context says so: the master switch over the
+    /// four triggers below (`services/notifications/context.rs`).
+    #[serde(default = "yes")]
+    pub context_quiet: bool,
+    /// A screen is being shared: a screen-cast stream exists in PipeWire.
+    #[serde(default = "yes")]
+    pub quiet_when_sharing: bool,
+    /// Two outputs show the same part of the layout.
+    #[serde(default = "yes")]
+    pub quiet_when_mirrored: bool,
+    /// A window is fullscreen on the focused output.
+    #[serde(default = "yes")]
+    pub quiet_when_fullscreen: bool,
+    /// The camera runs, or a call app records the microphone. Off by
+    /// default: a guess from the stream's name, where the others are facts.
+    #[serde(default)]
+    pub quiet_in_calls: bool,
 }
 
 impl Alerts {
@@ -620,6 +638,11 @@ impl Default for Alerts {
             quiet: false,
             quiet_from_h: 22,
             quiet_to_h: 7,
+            context_quiet: true,
+            quiet_when_sharing: true,
+            quiet_when_mirrored: true,
+            quiet_when_fullscreen: true,
+            quiet_in_calls: false,
         }
     }
 }

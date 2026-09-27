@@ -47,7 +47,12 @@
     "stack": 3,
     "quiet": false,
     "quiet_from_h": 22,
-    "quiet_to_h": 7
+    "quiet_to_h": 7,
+    "context_quiet": true,
+    "quiet_when_sharing": true,
+    "quiet_when_mirrored": true,
+    "quiet_when_fullscreen": true,
+    "quiet_in_calls": false
   },
   "capture": {
     "folder": "",

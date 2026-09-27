@@ -394,26 +394,64 @@ pub fn init_tile_state(btn: &gtk4::ToggleButton, spec: &TileSpec) {
 }
 
 /// Do Not Disturb as a split tile: the body flips the store, the chevron
-/// runs `on_detail`, and the status line says why ([`dnd_status`]).
+/// runs `on_detail`, and the status line says why ([`dnd_view`]).
+///
+/// While the context holds popups (a shared screen, say) the tile is on and
+/// names the reason, and one click is the override for the rest of that
+/// stretch: popups come back, and the tile says what it overrode. A second
+/// click takes the override back.
 pub fn build_dnd_split(
     store: Rc<RefCell<NotificationStore>>,
     on_detail: impl Fn(&gtk4::Button) + 'static,
 ) -> crate::ui::SplitTile {
     let tile = crate::ui::tile_split("󰍷", "DND");
     tile.root.set_hexpand(true);
-    let active = store.borrow().is_dnd();
+    let (active, text) = dnd_view(&store.borrow());
     tile.toggle.set_active(active);
-    crate::ui::set_tile_status(&tile, &dnd_status(active));
+    crate::ui::set_tile_status(&tile, &text);
     let status = tile.status.clone();
     tile.toggle.connect_clicked(move |b| {
         let on = b.is_active();
-        store.borrow_mut().set_dnd(on);
-        let text = dnd_status(on);
+        let (manual, context) = {
+            let s = store.borrow();
+            (s.is_dnd(), s.context().reason().is_some())
+        };
+        if on {
+            if context {
+                crate::services::notifications::context::set_override(&store, false);
+            } else {
+                store.borrow_mut().set_dnd(true);
+            }
+        } else {
+            if manual {
+                store.borrow_mut().set_dnd(false);
+            }
+            if context {
+                crate::services::notifications::context::set_override(&store, true);
+            }
+        }
+        let (active, text) = dnd_view(&store.borrow());
+        if active != on {
+            b.set_active(active);
+        }
         status.set_visible(!text.is_empty());
         status.set_label(&text);
     });
     tile.detail.connect_clicked(on_detail);
     tile
+}
+
+/// The tile's state and status line from the store: on while DND is on or
+/// the context holds popups, and the reason in words.
+pub fn dnd_view(store: &NotificationStore) -> (bool, String) {
+    let context = store.context();
+    match context.reason() {
+        Some(reason) if context.is_quiet() => (true, reason.quiet_label().to_string()),
+        Some(reason) if context.is_overridden() && !store.is_dnd() => {
+            (false, reason.override_label().to_string())
+        }
+        _ => (store.is_dnd(), dnd_status(store.is_dnd())),
+    }
 }
 
 // ── Widget helpers ──────────────────────────────────────────────────────────
@@ -485,6 +523,7 @@ fn read_night_state() -> TileState {
     }
 }
 
+
 // ── Status lines ─────────────────────────────────────────────────────────────
 
 /// "Until 14:30" for a timed inhibitor, "Until turned off" for one armed
@@ -523,4 +562,3 @@ pub fn dnd_status(on: bool) -> String {
         _ => String::new(),
     }
 }
-

@@ -271,6 +271,7 @@ pub fn run() {
         // SWAYPPLET_NO_BAR=1 skips it so an external bar (waybar) can keep
         // the strip — the nixos side sets this only during the migration
         // window. Delete the guard once waybar is gone from the config.
+        let mut sway_model = None;
         if std::env::var_os("SWAYPPLET_NO_BAR").is_none_or(|v| v != "1") {
             // In-process hosting: the start button toggles the panel
             // directly instead of the standalone bar's SIGUSR1 fallback.
@@ -281,6 +282,7 @@ pub fn run() {
                 }
             });
             let sway = SwayService::start();
+            sway_model = Some(sway.clone());
             pins.set_sway(sway.clone());
             popups.set_sway(sway.clone());
             // A `swaymsg reload` puts every layer_effects back to the config,
@@ -347,6 +349,28 @@ pub fn run() {
                 });
             }
             st._bar = Some(bar);
+        }
+
+        // Quiet by context: popups held while a screen is shared, mirrored
+        // or fullscreen, and one card at the end if anything was held.
+        {
+            let s = state_clone.clone();
+            let open_centre: Rc<dyn Fn()> = Rc::new(move || {
+                if let Some(ref panel) = s.borrow().panel {
+                    panel.show_notifications();
+                }
+            });
+            crate::services::notifications::context::install(
+                store_activate.clone(),
+                crate::services::notifications::context::Sources {
+                    sway: sway_model,
+                    capture: Some(crate::services::capture::CaptureService::start()),
+                    audio: Some(audio.clone()),
+                    open_centre,
+                },
+            );
+            let store = store_activate.clone();
+            osd.set_hold(move || store.borrow().context().holds_osd());
         }
 
         st.panel = Some(panel);
