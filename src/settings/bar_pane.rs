@@ -1,22 +1,20 @@
-//! The Bar tab: what the bar does that is a matter of taste, and what the
-//! volume and brightness keys do.
+//! The Bar tab: what the bar does that is a matter of taste, and where a
+//! volume or brightness press draws. How far a press goes is on the Input
+//! tab (`input_pane.rs`), with the rest of the keys.
 //!
 //! Every row here is read live by something in this process — the clock
 //! (`bar/clock.rs`), the segments (`bar/mod.rs`), the OSD and its route
 //! (`osd.rs`, `app.rs`), the panel's volume rail (`widgets/audio.rs`) —
 //! through `store::observe` or per press, so a switch takes effect on
 //! release and the file is only there for the next start.
-//!
-//! Two sections on one tab: `bar` and `keys`. They share a footer, so Reset
-//! and Copy as Nix cover both.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use super::form::{self, dropdown_row, scale_row, section_box, switch_row};
-use super::store::{self, Bar, Keys};
+use super::form::{self, dropdown_row, section_box, switch_row};
+use super::store::{self, Bar};
 
 /// Where a volume or brightness press draws, in the order the dropdown
 /// lists them.
@@ -70,14 +68,14 @@ const SEGMENTS: [Segment; 6] = [
 ];
 
 /// The status line at the system default, naming what the default is.
-fn describe(bar: &Bar, keys: &Keys) -> String {
+fn describe(bar: &Bar) -> String {
     let hidden: Vec<&str> = SEGMENTS
         .iter()
         .filter(|s| !(s.get)(bar))
         .map(|s| s.label)
         .collect();
     format!(
-        "System default: {} clock{}, volume and brightness {}, {} hidden, {}% steps{}",
+        "System default: {} clock{}, volume and brightness {}, {} hidden",
         if bar.clock_24h { "24-hour" } else { "12-hour" },
         if bar.clock_date { " with the date" } else { "" },
         if bar.osd_in_bar {
@@ -90,12 +88,6 @@ fn describe(bar: &Bar, keys: &Keys) -> String {
         } else {
             hidden.join(" and ").to_lowercase()
         },
-        keys.volume_step,
-        if keys.volume_boost {
-            ", boost allowed"
-        } else {
-            ""
-        },
     )
 }
 
@@ -104,9 +96,6 @@ struct State {
     clock_date: gtk4::Switch,
     osd: gtk4::DropDown,
     segments: Vec<gtk4::Switch>,
-    volume_step: gtk4::Scale,
-    brightness_step: gtk4::Scale,
-    boost: gtk4::Switch,
     status: gtk4::Label,
     updating: Cell<bool>,
 }
@@ -120,19 +109,10 @@ impl State {
         self.sync();
     }
 
-    fn edit_keys(&self, f: impl FnOnce(&mut Keys)) {
-        if self.updating.get() {
-            return;
-        }
-        store::edit(f);
-        self.sync();
-    }
-
     fn sync(&self) {
         self.updating.set(true);
         let settings = store::current();
         let bar = settings.bar();
-        let keys = settings.keys();
         self.clock_24h.set_active(bar.clock_24h);
         self.clock_date.set_active(bar.clock_date);
         let osd = OSD_PLACES
@@ -142,15 +122,7 @@ impl State {
         for (segment, switch) in SEGMENTS.iter().zip(&self.segments) {
             switch.set_active((segment.get)(&bar));
         }
-        self.volume_step.set_value(f64::from(keys.volume_step));
-        self.brightness_step
-            .set_value(f64::from(keys.brightness_step));
-        self.boost.set_active(keys.volume_boost);
-        form::set_source(
-            &self.status,
-            settings.bar.is_some() || settings.keys.is_some(),
-            &describe(&bar, &keys),
-        );
+        form::set_source(&self.status, settings.bar.is_some(), &describe(&bar));
         self.updating.set(false);
     }
 }
@@ -166,7 +138,6 @@ impl BarPane {
 
         let settings = store::current();
         let bar = settings.bar();
-        let keys = settings.keys();
 
         let clock = section_box(
             "Clock",
@@ -193,54 +164,26 @@ impl BarPane {
             segments.push(switch);
         }
 
-        let keys_group = section_box(
-            "Keys",
-            "The volume and brightness keys: where the press draws, and how far it goes.",
+        let osd_group = section_box(
+            "Volume & brightness",
+            "Where a press of a volume or brightness key draws.",
         );
         let osd_labels: Vec<&str> = OSD_PLACES.iter().map(|(l, _)| *l).collect();
         let (row_osd, osd) = dropdown_row(
-            "Volume & brightness",
+            "Shown as",
             "The centre card can be read through and works over fullscreen; the bar's decision slot costs a glance to the bottom edge and is skipped over a fullscreen view.",
             &osd_labels,
         );
-        keys_group.append(&row_osd);
-        let (row_vol, volume_step) = scale_row(
-            "Volume step",
-            "Percent per press of a volume key.",
-            (1.0, 25.0, 1.0),
-            |v| format!("{v:.0}%"),
-        );
-        keys_group.append(&row_vol);
-        let (row_bri, brightness_step) = scale_row(
-            "Brightness step",
-            "Percent per press of a brightness key.",
-            (1.0, 25.0, 1.0),
-            |v| format!("{v:.0}%"),
-        );
-        keys_group.append(&row_bri);
-        let (row_boost, boost) = switch_row(
-            "Volume past 100 %",
-            "Let the keys and the panel's rail go to the 150 % the sound server allows.",
-            keys.volume_boost,
-        );
-        keys_group.append(&row_boost);
-
+        osd_group.append(&row_osd);
         let reset = form::action_button(
             "Reset to system",
-            "Put the system's choices back and drop the bar and keys sections from the settings file.",
+            "Put the system's choices back and drop the bar section from the settings file.",
         );
         let (footer, status) = form::footer(&[&reset]);
         let copy = form::copy_nix_button(
             &status,
-            "The bar and keys sections as theme/settings.nix holds them, for promoting a keeper into the Nix side by hand.",
-            || {
-                let s = store::current();
-                Some(format!(
-                    "{}{}",
-                    s.section_as_nix("bar")?,
-                    s.section_as_nix("keys")?
-                ))
-            },
+            "The bar section as theme/settings.nix holds it, for promoting a keeper into the Nix side by hand.",
+            || store::current().section_as_nix("bar"),
         );
         if let Some(row) = reset.parent().and_downcast::<gtk4::Box>() {
             row.append(&copy);
@@ -251,9 +194,6 @@ impl BarPane {
             clock_date: clock_date.clone(),
             osd: osd.clone(),
             segments: segments.clone(),
-            volume_step: volume_step.clone(),
-            brightness_step: brightness_step.clone(),
-            boost: boost.clone(),
             status,
             updating: Cell::new(false),
         });
@@ -289,40 +229,18 @@ impl BarPane {
         }
         {
             let state = state.clone();
-            volume_step.connect_value_changed(move |s| {
-                let step = s.value().round() as u8;
-                state.edit_keys(|k| k.volume_step = step);
-            });
-        }
-        {
-            let state = state.clone();
-            brightness_step.connect_value_changed(move |s| {
-                let step = s.value().round() as u8;
-                state.edit_keys(|k| k.brightness_step = step);
-            });
-        }
-        {
-            let state = state.clone();
-            boost.connect_active_notify(move |s| {
-                let on = s.is_active();
-                state.edit_keys(|k| k.volume_boost = on);
-            });
-        }
-        {
-            let state = state.clone();
             reset.connect_clicked(move |_| {
                 if state.updating.get() {
                     return;
                 }
                 store::reset::<Bar>();
-                store::reset::<Keys>();
                 state.sync();
             });
         }
 
         root.append(&clock);
         root.append(&segments_group);
-        root.append(&keys_group);
+        root.append(&osd_group);
         root.append(&footer);
         state.sync();
 

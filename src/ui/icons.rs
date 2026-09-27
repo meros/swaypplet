@@ -26,6 +26,8 @@ pub const DISPLAY: &str = "󰍹";
 pub const DISPLAY_PROFILE: &str = "󰍺";
 /// Move up one place in an ordered list.
 pub const RAISE: &str = "󰁝";
+/// Move down one place in an ordered list.
+pub const LOWER: &str = "󰁅";
 
 // Media controls
 pub const MEDIA_PREV: &str = "󰒮";

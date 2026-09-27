@@ -90,6 +90,10 @@
           swayppletPkg = craneLib.buildPackage (commonArgs // {
             inherit cargoArtifacts;
             doCheck = false;
+            # The xkb layout list the Input tab offers (src/settings/xkb.rs).
+            # Only here, not in commonArgs, so the dependency cache keeps its
+            # hash.
+            SWAYPPLET_XKB_RULES = "${pkgs.xkeyboard_config}/share/X11/xkb/rules/evdev.lst";
             postInstall = ''
               # Installed from data/, not written here. This postInstall and
               # package.nix's used to carry a copy each, only this one ships

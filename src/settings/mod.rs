@@ -1,7 +1,7 @@
 //! The settings pane: a deck page in the Helm card (`panel.rs`), one tab per
 //! thing that can be configured.
 //!
-//! Seven tabs. Look, Idle & Lock, Bar, Alerts and Launcher edit
+//! Eight tabs. Look, Idle & Lock, Bar, Input, Alerts and Launcher edit
 //! `store::Settings`, one file with one to three sections each; Glass edits
 //! the compositor material
 //! and keeps its own file (`glass.rs`, for why). Displays arranges the
@@ -27,6 +27,7 @@ pub mod glass;
 mod glass_fade;
 mod glass_pane;
 mod idle_pane;
+mod input_pane;
 mod keep;
 mod launcher_pane;
 mod look_pane;
@@ -34,6 +35,7 @@ pub mod preset;
 pub mod schema;
 pub mod store;
 pub mod wallpaper;
+pub mod xkb;
 
 use gtk4::prelude::*;
 
@@ -44,7 +46,7 @@ struct Tab {
     prefixes: &'static [&'static str],
 }
 
-const TABS: [Tab; 7] = [
+const TABS: [Tab; 8] = [
     Tab {
         name: "look",
         title: "Look",
@@ -60,7 +62,12 @@ const TABS: [Tab; 7] = [
     Tab {
         name: "bar",
         title: "Bar",
-        prefixes: &[":bar", ":clock", ":osd", ":keys"],
+        prefixes: &[":bar", ":clock", ":osd"],
+    },
+    Tab {
+        name: "input",
+        title: "Input",
+        prefixes: &[":input", ":keyboard", ":layout", ":touchpad", ":mouse", ":keys"],
     },
     Tab {
         name: "alerts",
@@ -105,6 +112,7 @@ pub struct SettingsSection {
     look: look_pane::LookPane,
     idle: idle_pane::IdlePane,
     bar: bar_pane::BarPane,
+    input: input_pane::InputPane,
     alerts: alerts_pane::AlertsPane,
     launcher: launcher_pane::LauncherPane,
     displays: displays_pane::DisplaysPane,
@@ -120,6 +128,7 @@ impl SettingsSection {
         let look = look_pane::LookPane::new();
         let idle = idle_pane::IdlePane::new();
         let bar = bar_pane::BarPane::new();
+        let input = input_pane::InputPane::new();
         let alerts = alerts_pane::AlertsPane::new();
         let launcher = launcher_pane::LauncherPane::new();
         let displays = displays_pane::DisplaysPane::new();
@@ -134,6 +143,7 @@ impl SettingsSection {
         stack.add_named(look.widget(), Some("look"));
         stack.add_named(idle.widget(), Some("idle"));
         stack.add_named(bar.widget(), Some("bar"));
+        stack.add_named(input.widget(), Some("input"));
         stack.add_named(alerts.widget(), Some("alerts"));
         stack.add_named(launcher.widget(), Some("launcher"));
         stack.add_named(displays.widget(), Some("displays"));
@@ -191,6 +201,7 @@ impl SettingsSection {
             look,
             idle,
             bar,
+            input,
             alerts,
             launcher,
             displays,
@@ -222,12 +233,19 @@ impl SettingsSection {
         self.displays.demo_apply();
     }
 
+    /// The Input tab's layout picker, open on `query`, for the render
+    /// harness.
+    pub fn demo_layout_pick(&self, query: &str) {
+        self.input.demo_pick(query);
+    }
+
     /// Re-read every tab from what it edits. The panel refreshes every
     /// section when it opens.
     pub fn refresh(&self) {
         self.look.refresh();
         self.idle.refresh();
         self.bar.refresh();
+        self.input.refresh();
         self.alerts.refresh();
         self.launcher.refresh();
         self.displays.refresh();

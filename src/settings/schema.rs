@@ -945,6 +945,124 @@ impl Displays {
     }
 }
 
+// ── Input ───────────────────────────────────────────────────────────────
+
+/// libinput's acceleration curve, spelled as sway's `accel_profile` takes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccelProfile {
+    Adaptive,
+    Flat,
+}
+
+/// How a touchpad without buttons makes a right or middle click, spelled as
+/// sway's `click_method` takes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClickMethod {
+    None,
+    ButtonAreas,
+    Clickfinger,
+}
+
+/// How a touchpad scrolls, spelled as sway's `scroll_method` takes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScrollMethod {
+    None,
+    TwoFinger,
+    Edge,
+    OnButtonDown,
+}
+
+/// Keyboard, touchpad and mouse, sent to sway by device type
+/// (`services::input`). Every field is optional, and `None` leaves the sway
+/// config's own `input` block in force for that one knob: the section holds
+/// only what was changed here, so it never fights the config over the rest.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct Input {
+    /// Keyboard layouts in switch order, in xkb's spelling: `se`,
+    /// `us(dvorak)` for a variant.
+    #[serde(default)]
+    pub layouts: Option<Vec<String>>,
+    /// The `grp:` xkb option that switches layout, `grp:win_space_toggle`;
+    /// empty for none.
+    #[serde(default)]
+    pub layout_switch: Option<String>,
+    /// The xkb option for Caps Lock, `caps:escape`, `ctrl:nocaps`; empty for
+    /// Caps Lock as itself.
+    #[serde(default)]
+    pub caps: Option<String>,
+    /// Milliseconds a key is held before it repeats.
+    #[serde(default)]
+    pub repeat_delay_ms: Option<u32>,
+    /// Repeats per second.
+    #[serde(default)]
+    pub repeat_rate: Option<u32>,
+    #[serde(default)]
+    pub touchpad_tap: Option<bool>,
+    #[serde(default)]
+    pub touchpad_natural_scroll: Option<bool>,
+    /// libinput's pointer speed, −1 to 1.
+    #[serde(default)]
+    pub touchpad_speed: Option<f64>,
+    #[serde(default)]
+    pub touchpad_accel_profile: Option<AccelProfile>,
+    /// Disable while typing.
+    #[serde(default)]
+    pub touchpad_dwt: Option<bool>,
+    #[serde(default)]
+    pub touchpad_click_method: Option<ClickMethod>,
+    #[serde(default)]
+    pub touchpad_scroll_method: Option<ScrollMethod>,
+    #[serde(default)]
+    pub mouse_speed: Option<f64>,
+    #[serde(default)]
+    pub mouse_accel_profile: Option<AccelProfile>,
+    #[serde(default)]
+    pub mouse_natural_scroll: Option<bool>,
+}
+
+impl Input {
+    pub const REPEAT_DELAY_MS: (u32, u32) = (100, 1000);
+    pub const REPEAT_RATE: (u32, u32) = (1, 100);
+
+    /// An xkb name as sway will be handed it inside double quotes: letters,
+    /// digits and the punctuation xkb names use, nothing that could end the
+    /// quote or the command.
+    pub fn is_xkb_name(s: &str) -> bool {
+        s.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '(' | ')' | ':' | '+' | '.')
+        })
+    }
+
+    fn sanitized(self) -> Input {
+        let speed = |s: Option<f64>| s.filter(|v| v.is_finite()).map(|v| v.clamp(-1.0, 1.0));
+        let name = |s: Option<String>| s.filter(|v| Self::is_xkb_name(v));
+        Input {
+            layouts: self
+                .layouts
+                .map(|l| {
+                    l.into_iter()
+                        .filter(|n| !n.is_empty() && Self::is_xkb_name(n))
+                        .collect::<Vec<_>>()
+                })
+                .filter(|l| !l.is_empty()),
+            layout_switch: name(self.layout_switch),
+            caps: name(self.caps),
+            repeat_delay_ms: self
+                .repeat_delay_ms
+                .map(|v| v.clamp(Self::REPEAT_DELAY_MS.0, Self::REPEAT_DELAY_MS.1)),
+            repeat_rate: self
+                .repeat_rate
+                .map(|v| v.clamp(Self::REPEAT_RATE.0, Self::REPEAT_RATE.1)),
+            touchpad_speed: speed(self.touchpad_speed),
+            mouse_speed: speed(self.mouse_speed),
+            ..self
+        }
+    }
+}
+
 // ── The file ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -971,11 +1089,13 @@ pub struct Settings {
     pub night_light: Option<NightLight>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub displays: Option<Displays>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<Input>,
 }
 
 impl Settings {
     /// The section names, in the order the file and the pane list them.
-    pub const SECTIONS: [&'static str; 11] = [
+    pub const SECTIONS: [&'static str; 12] = [
         "wallpaper",
         "look",
         "idle",
@@ -987,11 +1107,12 @@ impl Settings {
         "launcher",
         "night_light",
         "displays",
+        "input",
     ];
 
     /// The sections with a system layer, which is every one but the
     /// wallpaper: its system default is the sway config's `bg` line.
-    pub const NIX_SECTIONS: [&'static str; 10] = [
+    pub const NIX_SECTIONS: [&'static str; 11] = [
         "look",
         "idle",
         "bar",
@@ -1002,6 +1123,7 @@ impl Settings {
         "launcher",
         "night_light",
         "displays",
+        "input",
     ];
 
     /// The section in force: the user's, else the system's, else the
@@ -1044,6 +1166,12 @@ impl Settings {
             .or_else(|| system().displays.clone())
             .unwrap_or_default()
     }
+    pub fn input(&self) -> Input {
+        self.input
+            .clone()
+            .or_else(|| system().input.clone())
+            .unwrap_or_default()
+    }
 
     /// True when nothing is overridden, which is when the file should not
     /// exist.
@@ -1065,6 +1193,7 @@ impl Settings {
             launcher: Some(self.launcher()),
             night_light: Some(self.night_light()),
             displays: Some(self.displays()),
+            input: Some(self.input()),
         }
     }
 
@@ -1092,6 +1221,7 @@ impl Settings {
             launcher: Some(Launcher::default()),
             night_light: Some(NightLight::default()),
             displays: Some(Displays::default()),
+            input: Some(Input::default()),
         }
     }
 
@@ -1104,6 +1234,7 @@ impl Settings {
             alerts: self.alerts.map(Alerts::sanitized),
             night_light: self.night_light.map(NightLight::sanitized),
             displays: self.displays.map(Displays::sanitized),
+            input: self.input.map(Input::sanitized),
             ..self
         }
     }
@@ -1217,11 +1348,15 @@ impl Settings {
     }
 }
 
-/// A JSON scalar as Nix would have it written. Every field here is a
-/// number, a bool or a string, so this is the whole translation.
+/// A JSON value as Nix would have it written: a scalar, `null`, or a list
+/// of them (`input.layouts`).
 fn nix_literal(value: &Value) -> String {
     match value {
         Value::String(s) => format!("\"{}\"", s.replace('"', "\\\"")),
+        Value::Array(items) => {
+            let items: Vec<String> = items.iter().map(nix_literal).collect();
+            format!("[ {} ]", items.join(" "))
+        }
         other => other.to_string(),
     }
 }
@@ -1261,6 +1396,7 @@ section!(Elevate, elevate, elevate);
 section!(Launcher, launcher, launcher);
 section!(NightLight, night_light, night_light);
 section!(Displays, displays, displays);
+section!(Input, input, input);
 
 /// Every `section` or `section.field` in `value` that the structs do not
 /// have.
@@ -1357,6 +1493,46 @@ mod tests {
         // An unset field is left out of the file, not written as null.
         let json = serde_json::to_string(&s).unwrap();
         assert!(!json.contains("null"), "{json}");
+    }
+
+    #[test]
+    fn the_input_sanitizer_keeps_anything_that_could_end_the_quote_out() {
+        let s: Settings = serde_json::from_str(
+            r#"{"input": {"layouts": ["se", "us\"; exec rm", ""], "caps": "caps:escape\"",
+                          "touchpad_speed": 4.0, "repeat_rate": 0}}"#,
+        )
+        .unwrap();
+        let input = s.sanitized().input.unwrap();
+        assert_eq!(input.layouts, Some(vec!["se".to_string()]));
+        assert_eq!(input.caps, None);
+        assert_eq!(input.touchpad_speed, Some(1.0));
+        assert_eq!(input.repeat_rate, Some(1));
+        assert_eq!(input.touchpad_tap, None);
+    }
+
+    #[test]
+    fn the_input_section_sets_by_key_and_exports_a_nix_list() {
+        let mut s = Settings::default();
+        s.set(
+            "input.layouts",
+            Value::String(r#"["se", "us(dvorak)"]"#.into()),
+        )
+        .unwrap();
+        s.set("input.touchpad_tap", Value::Bool(true)).unwrap();
+        assert_eq!(s.input().touchpad_tap, Some(true));
+        let nix = s.section_as_nix("input").unwrap();
+        assert!(
+            nix.contains(r#"  layouts = [ "se" "us(dvorak)" ];"#),
+            "{nix}"
+        );
+        assert!(nix.contains("  mouse_speed = null;"), "{nix}");
+        assert!(
+            s.set(
+                "input.touchpad_click_method",
+                Value::String("sideways".into())
+            )
+            .is_err()
+        );
     }
 
     #[test]

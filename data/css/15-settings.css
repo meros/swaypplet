@@ -47,6 +47,15 @@
     outline: none;
 }
 
+/* The Input tab's layout picker: search hits at the density of the rows
+   around them rather than a device list's height. */
+.settings-picker-box {
+    margin-bottom: var(--space-3);
+}
+.settings-picker > row > .ui-row {
+    min-height: 26px;
+    padding: var(--space-1) var(--space-3);
+}
 .settings-footer {
     padding-top: var(--space-2);
 }

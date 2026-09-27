@@ -399,16 +399,31 @@ pub fn run(component: &str) {
             // /etc/swaypplet/glass.json existing on the build host; without
             // one it draws the "no glass configuration" note, which is the
             // other state worth a screenshot.
-            // `settings` or `settings.<tab>` (look, idle, bar, alerts,
-            // launcher, displays, glass). Displays drives the nested
+            // `settings` or `settings.<tab>` (look, idle, bar, input, alerts,
+            // launcher, displays, glass). Displays and Input drive the nested
             // compositor the preview runs in, as `display` does.
             c if c == "settings" || c.starts_with("settings.") => {
                 if c == "settings.displays" {
                     crate::services::displays::start(store.clone());
                 }
+                if c == "settings.input" {
+                    crate::services::input::follow();
+                }
                 let s = Box::leak(Box::new(crate::settings::SettingsSection::new()));
                 if let Some(tab) = c.strip_prefix("settings.") {
                     s.show(tab);
+                }
+                // The Input tab reads the devices on refresh, as the panel
+                // does when it opens.
+                if c == "settings.input" {
+                    s.refresh();
+                    // SWAYPPLET_PREVIEW_LAYOUT_QUERY=dvorak: the layout
+                    // picker open on that search.
+                    if let Some(q) = std::env::var_os("SWAYPPLET_PREVIEW_LAYOUT_QUERY")
+                        .filter(|q| !q.is_empty())
+                    {
+                        s.demo_layout_pick(&q.to_string_lossy());
+                    }
                 }
                 // SWAYPPLET_PREVIEW_DISPLAYS_APPLY=1: after two seconds the
                 // Displays tab moves an output and applies it, so the keep
