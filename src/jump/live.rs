@@ -425,34 +425,43 @@ fn out_size(w: u32, h: u32, size: Size) -> (u32, u32) {
     }
 }
 
-/// How `n` output pixels cover `len` source pixels from `start`: for each,
-/// the first source pixel it covers and the share of it each covered one
-/// has, summing to 1.
-fn spans(start: u32, len: u32, n: u32) -> Vec<(usize, Vec<f32>)> {
-    let step = f64::from(len) / f64::from(n.max(1));
+/// What each of `n` output pixels covers of `len` source pixels, for
+/// `n <= len`, in units where a source pixel is `n` wide and an output
+/// pixel `len` wide, so every share is whole: the first source pixel and
+/// its share,
+/// how many whole pixels follow it, and the share of the one after those
+/// (0 when the output ends on a pixel edge).
+fn cover(len: u32, n: u32) -> Vec<(usize, u32, usize, u32)> {
     (0..n)
         .map(|o| {
-            let (a, b) = (f64::from(o) * step, f64::from(o + 1) * step);
-            let first = a.floor() as u32;
-            let last = (b.ceil() as u32).clamp(first + 1, len.max(first + 1));
-            let weights = (first..last)
-                .map(|i| ((b.min(f64::from(i) + 1.0) - a.max(f64::from(i))) / step) as f32)
-                .collect();
-            ((start + first) as usize, weights)
+            let (from, to) = (o * len, (o + 1) * len);
+            let first = from / n;
+            let first_end = (first + 1) * n;
+            if to <= first_end {
+                return (first as usize, to - from, 0, 0);
+            }
+            let whole_to = to / n;
+            (
+                first as usize,
+                first_end - from,
+                (whole_to - first - 1) as usize,
+                to - whole_to * n,
+            )
         })
         .collect()
 }
 
 /// Scale the region `(x0, y0, w, h)` of a buffer `full_w` pixels wide down
-/// to [`out_size`], every output pixel the average of the source area it
-/// covers, fractions of pixels at its edges included.
+/// to [`out_size`], every output pixel the exact average of the source
+/// area it covers, the pixels cut at its edges counted by the part inside.
 ///
-/// An area average and not a whole-factor box then GTK's linear filter:
-/// the two in a row blurred a terminal's text in a pin (a 3x box, then
-/// 233 px drawn at 200), and a linear filter alone over more than 2x skips
-/// pixels and shimmers. `xrgb` carries no alpha, so it is written opaque;
-/// `argb` from the compositor is already premultiplied, and an average of
-/// premultiplied pixels stays premultiplied.
+/// Not a whole-factor box and GTK's linear filter for the rest: the two in
+/// a row blurred a terminal's text in a pin (a 3x box, then 233 px drawn at
+/// 200), and a linear filter alone over more than 2x skips pixels and
+/// shimmers. One pass over the source in memory order ([`area_sums`]).
+/// `xrgb` carries no
+/// alpha, so it is written opaque; `argb` from the compositor is already
+/// premultiplied, and an average of premultiplied pixels stays so.
 fn downscale(
     src: &[u8],
     full_w: u32,
@@ -466,49 +475,78 @@ fn downscale(
     // Both ABGR formats are RGBA in memory; the card wants BGRA.
     let swap = matches!(format, wl_shm::Format::Xbgr8888 | wl_shm::Format::Abgr8888);
 
-    // Across each source row first, then down the columns.
-    let across = spans(x0, w, ow);
-    let row_w = ow as usize * 4;
-    let mut rows = vec![0f32; h as usize * row_w];
-    for sy in 0..h as usize {
-        let line = (y0 as usize + sy) * stride;
-        let dst = &mut rows[sy * row_w..(sy + 1) * row_w];
-        for (ox, (first, weights)) in across.iter().enumerate() {
-            let mut acc = [0f32; 4];
-            for (k, wt) in weights.iter().enumerate() {
-                let i = line + (first + k) * 4;
-                for c in 0..4 {
-                    acc[c] += wt * f32::from(src[i + c]);
-                }
-            }
-            dst[ox * 4..ox * 4 + 4].copy_from_slice(&acc);
-        }
-    }
-
-    let mut out = vec![0u8; ow as usize * oh as usize * 4];
-    for (oy, (first, weights)) in spans(0, h, oh).iter().enumerate() {
-        for ox in 0..ow as usize {
-            let mut acc = [0f32; 4];
-            for (k, wt) in weights.iter().enumerate() {
-                let i = (first + k) * row_w + ox * 4;
-                for c in 0..4 {
-                    acc[c] += wt * rows[i + c];
-                }
-            }
-            let px = |v: f32| v.round().clamp(0.0, 255.0) as u8;
-            let (b, r) = if swap {
-                (acc[2], acc[0])
-            } else {
-                (acc[0], acc[2])
-            };
-            let o = (oy * ow as usize + ox) * 4;
-            out[o] = px(b);
-            out[o + 1] = px(acc[1]);
-            out[o + 2] = px(r);
-            out[o + 3] = if opaque { 0xff } else { px(acc[3]) };
-        }
+    let sums = area_sums(src, stride, (x0, y0, w, h), (ow, oh));
+    let per = 1.0 / (w as f32 * h as f32);
+    let mut out = vec![0u8; sums.len()];
+    for (o, px) in out.chunks_exact_mut(4).zip(sums.chunks_exact(4)) {
+        let v = |c: usize| (px[c] * per + 0.5).min(255.0) as u8;
+        let (b, r) = if swap { (v(2), v(0)) } else { (v(0), v(2)) };
+        o[0] = b;
+        o[1] = v(1);
+        o[2] = r;
+        o[3] = if opaque { 0xff } else { v(3) };
     }
     (ow, oh, out)
+}
+
+/// For every output pixel and channel of the region scaled to `ow` by
+/// `oh`, the sum of the source under it weighted by the share covered, in
+/// [`cover`]'s units: `w * h` times the average.
+///
+/// Down first, then across. The rows under an output row add into one row
+/// of the region's width, contiguous work the compiler turns into vector
+/// adds; only then is that row gathered into columns, once per output row
+/// rather than once per source row. In `f32`, because the build targets
+/// baseline x86-64, whose vector unit multiplies floats but not 32-bit
+/// integers: the same sums in `u32` took 2.4x the old box on a large
+/// window. The shares are whole numbers and a row's sum stays below 2^24,
+/// so the rows are exact; across, the error is a part in 10^7.
+fn area_sums(
+    src: &[u8],
+    stride: usize,
+    (x0, y0, w, h): (u32, u32, u32, u32),
+    (ow, oh): (u32, u32),
+) -> Vec<f32> {
+    let across = cover(w, ow);
+    let row_len = w as usize * 4;
+    let line = |sy: usize| {
+        let start = (y0 as usize + sy) * stride + x0 as usize * 4;
+        &src[start..start + row_len]
+    };
+    let mut col = vec![0f32; row_len];
+    let mut sums = Vec::with_capacity(ow as usize * oh as usize * 4);
+    for (first, a, whole, b) in cover(h, oh) {
+        col.fill(0.0);
+        let mut add = |sy: usize, share: u32| {
+            let share = share as f32;
+            for (d, &v) in col.iter_mut().zip(line(sy)) {
+                *d += share * f32::from(v);
+            }
+        };
+        add(first, a);
+        for sy in first + 1..first + 1 + whole {
+            add(sy, oh);
+        }
+        if b > 0 {
+            add(first + 1 + whole, b);
+        }
+        let ow_ = ow as f32;
+        for &(fx, ax, wx, bx) in &across {
+            let px = |i: usize| -> [f32; 4] { [0, 1, 2, 3].map(|c| col[i * 4 + c]) };
+            let mut mid = [0f32; 4];
+            for p in col[(fx + 1) * 4..(fx + 1 + wx) * 4].chunks_exact(4) {
+                for c in 0..4 {
+                    mid[c] += p[c];
+                }
+            }
+            let f = px(fx);
+            let l = if bx > 0 { px(fx + 1 + wx) } else { [0.0; 4] };
+            for c in 0..4 {
+                sums.push(ax as f32 * f[c] + ow_ * mid[c] + bx as f32 * l[c]);
+            }
+        }
+    }
+    sums
 }
 
 // ── Per-window state ────────────────────────────────────────────────────
@@ -899,6 +937,23 @@ impl Drop for Shm {
 mod tests {
     use super::*;
 
+    /// The reference for [`cover`], from the source side.
+    /// Where each of `len` source pixels lands among `n` output pixels, for
+    /// `n <= len`: the output it starts in, and how much of it goes there and
+    /// to the next, in units where a source pixel is `n` wide and an output
+    /// pixel `len` wide. Whole numbers, so every output pixel's shares add up
+    /// to exactly `len`.
+    fn taps(len: u32, n: u32) -> Vec<(usize, u32, u32)> {
+        (0..len)
+            .map(|i| {
+                let (from, to) = (i * n, (i + 1) * n);
+                let o = from / len;
+                let here = to.min((o + 1) * len) - from;
+                (o as usize, here, n - here)
+            })
+            .collect()
+    }
+
     #[test]
     fn requests_land_on_one_grid() {
         let epoch = Instant::now();
@@ -957,15 +1012,46 @@ mod tests {
     }
 
     #[test]
-    fn fractional_spans_share_their_edge_pixels() {
-        // Three pixels into two: 1.5 each, the middle one split.
-        let s = spans(10, 3, 2);
-        assert_eq!(s[0].0, 10);
-        assert_eq!(s[0].1, vec![2.0 / 3.0, 1.0 / 3.0]);
-        assert_eq!(s[1].0, 11);
-        assert_eq!(s[1].1, vec![1.0 / 3.0, 2.0 / 3.0]);
-        // One to one: a copy.
-        assert!(spans(0, 4, 4).iter().all(|(_, w)| w == &vec![1.0]));
+    fn cover_agrees_with_taps() {
+        for (len, n) in [(3, 2), (3, 3), (870, 245), (700, 197), (1400, 400), (10, 1)] {
+            let mut want = vec![vec![0u32; len as usize]; n as usize];
+            for (i, (o, a, b)) in taps(len, n).into_iter().enumerate() {
+                want[o][i] += a;
+                if b > 0 {
+                    want[o + 1][i] += b;
+                }
+            }
+            for (o, (first, a, whole, b)) in cover(len, n).into_iter().enumerate() {
+                let mut got = vec![0u32; len as usize];
+                got[first] += a;
+                for g in got.iter_mut().skip(first + 1).take(whole) {
+                    *g += n;
+                }
+                if b > 0 {
+                    got[first + 1 + whole] += b;
+                }
+                assert_eq!(got, want[o], "{len} into {n}, output {o}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_source_pixel_on_an_output_edge_is_split_by_area() {
+        // Three pixels into two: in units of 2 per source pixel and 3 per
+        // output, the middle one gives 1 to each side.
+        assert_eq!(taps(3, 2), vec![(0, 2, 0), (0, 1, 1), (1, 2, 0)]);
+        // One to one: every pixel whole into its own.
+        assert_eq!(taps(3, 3), vec![(0, 3, 0), (1, 3, 0), (2, 3, 0)]);
+        // Every output gets exactly `len`.
+        let t = taps(870, 245);
+        let mut got = vec![0; 245];
+        for (o, a, b) in t {
+            got[o] += a;
+            if b > 0 {
+                got[o + 1] += b;
+            }
+        }
+        assert!(got.iter().all(|&g| g == 870));
     }
 
     #[test]
