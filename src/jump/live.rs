@@ -155,6 +155,9 @@ const RESTART_MIN: Duration = Duration::from_millis(100);
 const RESTART_MAX: Duration = Duration::from_secs(5);
 /// How long a window goes without a frame before the journal hears of it.
 const STALL: Duration = Duration::from_secs(10);
+/// How soon a frame that found every output buffer on screen tries again:
+/// GTK lets one go after its next render, well within a refresh.
+const SLOT_RETRY: Duration = Duration::from_millis(4);
 
 /// The delay after `d` when the retry after `d` failed too.
 fn next_backoff(d: Duration) -> Duration {
@@ -284,14 +287,28 @@ fn run(
                 log::info!("jump: capture {}: session open", s.want.id);
                 continue;
             }
-            if std::mem::take(&mut s.ready)
+            if s.ready
                 && let Some(buffer) = &mut s.buffer
-                && let Some(frame) = buffer.frame(&s.want)
             {
-                batch.push(frame);
-                batch_since.get_or_insert(now);
+                match buffer.frame(&s.want) {
+                    Made::Frame(frame) => {
+                        s.ready = false;
+                        batch.push(frame);
+                        batch_since.get_or_insert(now);
+                    }
+                    // Every output buffer is still GTK's. The frame stays in
+                    // the capture buffer, and no new capture is asked for
+                    // until it is out: sway answers one only on new damage,
+                    // so a window that just went idle would otherwise keep
+                    // showing an older frame until it next drew.
+                    Made::Busy => {
+                        wake = wake.min(now + SLOT_RETRY);
+                        continue;
+                    }
+                    Made::Failed => s.ready = false,
+                }
             }
-            if s.frame.is_some() {
+            if s.frame.is_some() || !gpu::usable() {
                 continue;
             }
             if s.buffer.is_none() {
@@ -466,6 +483,14 @@ struct Constraints {
     modifiers: Vec<u64>,
 }
 
+/// What averaging a captured frame gave.
+enum Made {
+    Frame(Frame),
+    /// Every output buffer is still on screen; try the same frame again.
+    Busy,
+    Failed,
+}
+
 /// A window's dmabuf, which sway copies it into on the GPU, and the output
 /// buffers its frames are averaged into.
 struct Buffer {
@@ -527,29 +552,25 @@ impl Buffer {
     }
 
     /// The frame sway just copied in, averaged to what `want` asks.
-    /// `None` when there is nothing to send: every output buffer is still
-    /// on screen, or the draw failed (logged; the next frame tries again).
-    fn frame(&mut self, want: &Want) -> Option<Frame> {
+    fn frame(&mut self, want: &Want) -> Made {
         let (width, height) = self.size();
         let cut = region(want.crop, width, height);
         let (ow, oh) = out_size(cut.2, cut.3, want.size);
-        match self
-            .gpu
-            .downscale(self.capture.as_ref()?, cut, (ow, oh), &mut self.out)
-        {
-            Ok(Some(buffer)) => Some(Frame {
+        let Some(capture) = self.capture.as_ref() else {
+            return Made::Failed;
+        };
+        match self.gpu.downscale(capture, cut, (ow, oh), &mut self.out) {
+            Ok(Some(buffer)) => Made::Frame(Frame {
                 id: want.id.clone(),
                 width: ow,
                 height: oh,
                 buffer,
             }),
-            Ok(None) => {
-                log::debug!("jump: capture {}: every output buffer busy", want.id);
-                None
-            }
+            Ok(None) => Made::Busy,
+            // Logged, and the frame let go: the next one tries again.
             Err(e) => {
                 log::info!("jump: capture {}: gpu frame: {e}", want.id);
-                None
+                Made::Failed
             }
         }
     }
@@ -799,6 +820,9 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, (usize, u32)> for State {
                         );
                         s.buffer = None;
                         s.no_buffer = None;
+                        // A frame waiting for an output buffer was in the old
+                        // capture buffer; the new one holds nothing yet.
+                        s.ready = false;
                     }
                     s.constraints = Some(next);
                 }

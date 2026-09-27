@@ -149,6 +149,10 @@ pub fn device_scale(widget: &impl IsA<gtk4::Widget>) -> f64 {
 /// then off for the process (`gpu::refuse`), and the pictures keep what
 /// they had.
 pub fn remember(frame: Frame) -> Option<(String, gdk::Texture)> {
+    if !super::gpu::usable() {
+        // Dropped: its output buffer goes back at once.
+        return None;
+    }
     let texture = match frame.buffer.into_texture() {
         Ok(texture) => texture,
         Err(e) => {

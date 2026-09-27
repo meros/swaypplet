@@ -39,7 +39,8 @@ const MOD_INVALID: u64 = 0x00ff_ffff_ffff_ffff;
 
 /// Most output buffers one window keeps. One is on screen (and in
 /// `card::LAST`), one is being drawn, one covers GTK letting go late; a
-/// frame that finds all of them busy is skipped, and the next one comes.
+/// frame that finds all of them busy waits in the capture buffer until one
+/// is free (`live.rs`).
 const OUT_SLOTS: usize = 3;
 
 static REFUSED: AtomicBool = AtomicBool::new(false);
@@ -106,17 +107,24 @@ impl GpuFrame {
             .set_n_planes(1)
             .set_stride(0, self.stride)
             .set_offset(0, self.offset);
-        // The fd and the hold on the slot go to the release function, which
-        // GTK calls once nothing draws from the buffer.
+        // The fd and the hold on the slot are let go by the release function,
+        // which GTK calls once nothing draws from the buffer. They sit in a
+        // shared slot rather than in the closure alone: when the build fails,
+        // gtk4-rs has handed the closure to GTK and nothing ever runs or
+        // frees it, and the fd and the output buffer would leak with it.
         let builder = unsafe { builder.set_fd(0, self.fd.as_raw_fd()) };
         let GpuFrame { fd, busy, .. } = self;
-        unsafe {
+        let hold = Arc::new(std::sync::Mutex::new(Some((fd, busy))));
+        let release = hold.clone();
+        let built = unsafe {
             builder.build_with_release_func(move || {
-                drop(fd);
-                drop(busy);
+                release.lock().map(|mut h| h.take()).ok();
             })
+        };
+        if built.is_err() {
+            hold.lock().map(|mut h| h.take()).ok();
         }
-        .map_err(|e| e.to_string())
+        built.map_err(|e| e.to_string())
     }
 }
 
