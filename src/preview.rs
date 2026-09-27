@@ -463,7 +463,7 @@ pub fn run(component: &str) {
                 if c == "settings.displays"
                     && let Some(how) = std::env::var_os("SWAYPPLET_PREVIEW_DISPLAYS_APPLY")
                 {
-                    let s: &'static crate::settings::SettingsSection = &**s;
+                    let s: &'static crate::settings::SettingsSection = s;
                     glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
                         s.demo_displays();
                     });
