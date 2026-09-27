@@ -1,7 +1,7 @@
 # Settings
 
 The settings pane is a page in the Helm card (`:set` in the omnibox, or the
-gear in the flight deck; a bare `:` lists every prefix). Seven tabs,
+gear in the flight deck; a bare `:` lists every prefix). Eight tabs,
 `src/settings/`:
 
 | tab | edits | sections of `~/.config/swaypplet/settings.json` |
@@ -13,6 +13,7 @@ gear in the flight deck; a bare `:` lists every prefix). Seven tabs,
 | Launcher | which kinds of result a search lists; ranking by use, and forgetting it | `launcher` |
 | Displays | where the outputs stand, and each one's mode, scale, rotation and adaptive sync; the profiles | `displays` (the profiles) |
 | Glass | the liquid-glass material | `~/.config/swaypplet/glass.json` |
+| System | nothing: it shows which nixos-config commit this host runs against origin/main, and runs `nx apply` or `nx` on a press | none |
 
 The Displays tab (`displays_pane.rs`) is the one that does not apply
 live: a layout can turn the only screen dark. Its arithmetic is pure and
@@ -26,6 +27,21 @@ before is sent back, and it is sent back at once when the page goes away
 from here reverts too. A hand layout is no profile; "Save as profile"
 stores the layout on screen. The panel's Displays section keeps its
 compact profile list (`widgets::display::fill_profiles`, shared).
+
+The System tab (`system_pane.rs`) is the one with no settings. It reads
+what `nx status` prints, directly: the `configurationRevision` in each
+generation's `sw/bin/nixos-version`, a staged generation as
+`/nix/var/nix/profiles/system` differing from `/run/current-system`,
+origin/main by `git ls-remote` (the local ref when the network does not
+answer), and the swaypplet each commit ships from its `flake.lock`; the
+running swaypplet is `SWAYPPLET_REV`, which the flake sets at build time
+(`system_info.rs`, pure and tested). It reads when shown, every 30 s while
+it stays on screen and on Refresh, and holds no timer when hidden. Apply
+now and Update run `nx apply` and `nx` in a transient user unit
+(`systemd-run --user`, `system_job.rs`), because the switch restarts the
+panel; the log goes to `$XDG_RUNTIME_DIR/swaypplet/nx.log`, which a
+restarted panel reads back for the result. Both are off while the screen is
+locked or a switch runs.
 
 `data/settings-defaults.json` is every section at the binary's defaults,
 generated from the structs by a test (`cargo test -- --ignored
@@ -198,7 +214,10 @@ switches only ever remove a way in or add a lock.
 ## Trying it without a rebuild
 
 - `dev/render.sh --mode preview:settings.idle` renders one tab
-  (`wallpaper`, `idle`, `bar`, `alerts`, `launcher`, `displays`, `glass`).
+  (`wallpaper`, `idle`, `bar`, `alerts`, `launcher`, `displays`, `glass`,
+  `system`). `SWAYPPLET_SYSTEM_FIXTURE=behind|staged|in-sync|applying`
+  gives the System tab a canned state, and its buttons play a canned log
+  instead of running nx.
   `settings.displays` drives the nested compositor's outputs;
   `SWAYPPLET_PREVIEW_DISPLAYS_APPLY=1` moves one and applies it after two
   seconds (the keep question, then the revert), `=leave` also hides the

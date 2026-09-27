@@ -1,12 +1,14 @@
 //! The settings pane: a deck page in the Helm card (`panel.rs`), one tab per
 //! thing that can be configured.
 //!
-//! Seven tabs. Look, Idle & Lock, Bar, Alerts and Launcher edit
+//! Eight tabs. Look, Idle & Lock, Bar, Alerts and Launcher edit
 //! `store::Settings`, one file with one to three sections each; Glass edits
 //! the compositor material
 //! and keeps its own file (`glass.rs`, for why). Displays arranges the
 //! outputs through `services::displays` and keeps its profiles in the
-//! `displays` section (`displays_pane.rs`). Every tab applies live and
+//! `displays` section (`displays_pane.rs`). System edits nothing: it shows
+//! this host's build against origin/main and runs nx (`system_pane.rs`).
+//! Every other tab applies live and
 //! saves after the fact, and every tab has one Reset that puts the defaults
 //! back and removes its sections from the file, so there is always a way
 //! out of a setting that turned out to be wrong.
@@ -33,6 +35,9 @@ mod look_pane;
 pub mod preset;
 pub mod schema;
 pub mod store;
+mod system_info;
+mod system_job;
+mod system_pane;
 pub mod wallpaper;
 
 use gtk4::prelude::*;
@@ -44,7 +49,7 @@ struct Tab {
     prefixes: &'static [&'static str],
 }
 
-const TABS: [Tab; 7] = [
+const TABS: [Tab; 8] = [
     Tab {
         name: "look",
         title: "Look",
@@ -82,6 +87,11 @@ const TABS: [Tab; 7] = [
         title: "Glass",
         prefixes: &[":glass", ":material"],
     },
+    Tab {
+        name: "system",
+        title: "System",
+        prefixes: &[":nixos", ":nx", ":update", ":host"],
+    },
 ];
 
 /// Every prefix and the tab it opens, for the omnibox's help page.
@@ -109,6 +119,7 @@ pub struct SettingsSection {
     launcher: launcher_pane::LauncherPane,
     displays: displays_pane::DisplaysPane,
     glass: glass_pane::GlassPane,
+    system: system_pane::SystemPane,
 }
 
 impl SettingsSection {
@@ -124,6 +135,7 @@ impl SettingsSection {
         let launcher = launcher_pane::LauncherPane::new();
         let displays = displays_pane::DisplaysPane::new();
         let glass = glass_pane::GlassPane::new();
+        let system = system_pane::SystemPane::new();
 
         let stack = crate::ui::page_stack(
             gtk4::StackTransitionType::Crossfade,
@@ -138,6 +150,7 @@ impl SettingsSection {
         stack.add_named(launcher.widget(), Some("launcher"));
         stack.add_named(displays.widget(), Some("displays"));
         stack.add_named(glass.widget(), Some("glass"));
+        stack.add_named(system.widget(), Some("system"));
 
         // Chips in one toggle group rather than a StackSwitcher, so the
         // strip takes the design system's selection (the accent on the
@@ -195,6 +208,7 @@ impl SettingsSection {
             launcher,
             displays,
             glass,
+            system,
         }
     }
 
@@ -232,6 +246,7 @@ impl SettingsSection {
         self.launcher.refresh();
         self.displays.refresh();
         self.glass.refresh();
+        self.system.refresh();
     }
 }
 
