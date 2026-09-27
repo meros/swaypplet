@@ -575,6 +575,93 @@ impl Corner {
     }
 }
 
+/// How big a pin's picture is, and the bar's peek's with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PinSize {
+    Small,
+    /// 400 by 250, the size pins had before this was a setting.
+    #[default]
+    Medium,
+    Large,
+}
+
+impl PinSize {
+    pub const ALL: [PinSize; 3] = [PinSize::Small, PinSize::Medium, PinSize::Large];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            PinSize::Small => "Small — 320 × 200",
+            PinSize::Medium => "Medium — 400 × 250",
+            PinSize::Large => "Large — 520 × 325",
+        }
+    }
+
+    /// The picture's box, in GTK's pixels. 16:10 at every size, so a
+    /// workspace is fitted into the same shape and only the scale moves.
+    pub fn picture(self) -> (i32, i32) {
+        match self {
+            PinSize::Small => (320, 200),
+            PinSize::Medium => (400, 250),
+            PinSize::Large => (520, 325),
+        }
+    }
+}
+
+/// Pins and previews: the floating pins (`jump/pin.rs`) and the bar's peek
+/// (`bar/peek.rs`), which are one view (`jump/view.rs`).
+///
+/// One frame rate for both, not one each: a pin and a peek of the same
+/// workspace share one capture stream (`jump/feed.rs`), and two rates would
+/// have the faster one restart it for the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pins {
+    #[serde(default)]
+    pub size: PinSize,
+    /// Frames a second per captured window, one of [`Pins::FRAME_RATES`].
+    /// `jump/view.rs` has why 30 is the default.
+    #[serde(default = "Pins::default_fps")]
+    pub fps: u32,
+    /// Where the pins stand. The bottom corners keep clear of the bar, which
+    /// is at the bottom edge.
+    #[serde(default = "Pins::default_corner")]
+    pub corner: Corner,
+}
+
+impl Pins {
+    /// What the pane offers. A capture is a readback in the compositor per
+    /// frame, so the choice is a short list rather than a rail.
+    pub const FRAME_RATES: [u32; 3] = [15, 30, 60];
+
+    fn default_fps() -> u32 {
+        30
+    }
+    fn default_corner() -> Corner {
+        Corner::BottomRight
+    }
+
+    /// A hand-edited rate lands on the nearest one offered: 0 would be
+    /// every frame, which is the uncapped readback the cap exists to stop,
+    /// and 1000 is the same thing spelled differently.
+    fn sanitized(self) -> Pins {
+        let fps = Self::FRAME_RATES
+            .into_iter()
+            .min_by_key(|r| r.abs_diff(self.fps))
+            .unwrap_or_else(Self::default_fps);
+        Pins { fps, ..self }
+    }
+}
+
+impl Default for Pins {
+    fn default() -> Self {
+        Pins {
+            size: PinSize::default(),
+            fps: Self::default_fps(),
+            corner: Self::default_corner(),
+        }
+    }
+}
+
 /// Notifications: the popup stack, and the hours and contexts it keeps
 /// quiet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -959,7 +1046,10 @@ impl Displays {
                 .filter(|p| !p.name.trim().is_empty() && !p.outputs.is_empty())
                 .map(|mut p| {
                     for o in &mut p.outputs {
-                        o.scale = o.scale.filter(|s| s.is_finite()).map(|s| s.clamp(0.25, 8.0));
+                        o.scale = o
+                            .scale
+                            .filter(|s| s.is_finite())
+                            .map(|s| s.clamp(0.25, 8.0));
                     }
                     p
                 })
@@ -1099,6 +1189,8 @@ pub struct Settings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bar: Option<Bar>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pins: Option<Pins>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keys: Option<Keys>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alerts: Option<Alerts>,
@@ -1118,11 +1210,12 @@ pub struct Settings {
 
 impl Settings {
     /// The section names, in the order the file and the pane list them.
-    pub const SECTIONS: [&'static str; 12] = [
+    pub const SECTIONS: [&'static str; 13] = [
         "wallpaper",
         "look",
         "idle",
         "bar",
+        "pins",
         "keys",
         "alerts",
         "capture",
@@ -1135,10 +1228,11 @@ impl Settings {
 
     /// The sections with a system layer, which is every one but the
     /// wallpaper: its system default is the sway config's `bg` line.
-    pub const NIX_SECTIONS: [&'static str; 11] = [
+    pub const NIX_SECTIONS: [&'static str; 12] = [
         "look",
         "idle",
         "bar",
+        "pins",
         "keys",
         "alerts",
         "capture",
@@ -1159,6 +1253,9 @@ impl Settings {
     }
     pub fn bar(&self) -> Bar {
         self.bar.or(system().bar).unwrap_or_default()
+    }
+    pub fn pins(&self) -> Pins {
+        self.pins.or(system().pins).unwrap_or_default()
     }
     pub fn keys(&self) -> Keys {
         self.keys.or(system().keys).unwrap_or_default()
@@ -1209,6 +1306,7 @@ impl Settings {
             look: Some(self.look()),
             idle: Some(self.idle()),
             bar: Some(self.bar()),
+            pins: Some(self.pins()),
             keys: Some(self.keys()),
             alerts: Some(self.alerts()),
             capture: Some(self.capture()),
@@ -1237,6 +1335,7 @@ impl Settings {
             look: Some(Look::default()),
             idle: Some(Idle::default()),
             bar: Some(Bar::default()),
+            pins: Some(Pins::default()),
             keys: Some(Keys::default()),
             alerts: Some(Alerts::default()),
             capture: Some(Capture::default()),
@@ -1253,6 +1352,7 @@ impl Settings {
     pub(super) fn sanitized(self) -> Settings {
         Settings {
             idle: self.idle.map(Idle::sanitized),
+            pins: self.pins.map(Pins::sanitized),
             keys: self.keys.map(Keys::sanitized),
             alerts: self.alerts.map(Alerts::sanitized),
             night_light: self.night_light.map(NightLight::sanitized),
@@ -1412,6 +1512,7 @@ macro_rules! section {
 section!(Look, look, look);
 section!(Idle, idle, idle);
 section!(Bar, bar, bar);
+section!(Pins, pins, pins);
 section!(Keys, keys, keys);
 section!(Alerts, alerts, alerts);
 section!(Capture, capture, capture);
@@ -1473,6 +1574,7 @@ mod tests {
         // build sandbox), so the section in force is the binary's.
         assert_eq!(s.idle(), Idle::default());
         assert_eq!(s.bar(), Bar::default());
+        assert_eq!(s.pins(), Pins::default());
         assert_eq!(s.keys(), Keys::default());
         assert_eq!(s.alerts(), Alerts::default());
         assert_eq!(s.capture(), Capture::default());
@@ -1485,11 +1587,15 @@ mod tests {
     fn a_list_from_the_command_line_sets_the_profiles() {
         let mut s = Settings::default();
         let raw = r#"[{"name": "desk", "outputs": [{"match": {"name": "eDP-1"}}]}]"#;
-        s.set("displays.profiles", Value::String(raw.into())).unwrap();
+        s.set("displays.profiles", Value::String(raw.into()))
+            .unwrap();
         assert_eq!(s.displays().profiles[0].name, "desk");
         // A string field keeps a JSON-looking string as the string it is.
         s.set("wallpaper.path", Value::String("[1]".into())).ok();
-        assert!(s.set("displays.profiles", Value::String("desk".into())).is_err());
+        assert!(
+            s.set("displays.profiles", Value::String("desk".into()))
+                .is_err()
+        );
     }
 
     #[test]
@@ -1579,6 +1685,33 @@ mod tests {
         assert_eq!(idle.suspend_after_s, 1200);
         assert_eq!(idle.dim_level, 10);
         assert!(idle.walk_away_lock && idle.face_unlock);
+    }
+
+    #[test]
+    fn the_pins_section_sets_by_key_and_lands_on_an_offered_rate() {
+        let mut s = Settings::default();
+        s.set("pins.size", serde_json::json!("large")).unwrap();
+        s.set("pins.corner", serde_json::json!("top_left")).unwrap();
+        let p = s.pins();
+        assert_eq!(p.size.picture(), (520, 325));
+        assert_eq!(p.corner, Corner::TopLeft);
+        // The field nobody named is still the default.
+        assert_eq!(p.fps, 30);
+        // A rate the pane does not offer lands on the nearest it does.
+        s.set("pins.fps", serde_json::json!(0)).unwrap();
+        assert_eq!(s.pins().fps, 15);
+        s.set("pins.fps", serde_json::json!(1000)).unwrap();
+        assert_eq!(s.pins().fps, 60);
+        s.set("pins.fps", serde_json::json!(40)).unwrap();
+        assert_eq!(s.pins().fps, 30);
+        assert!(s.set("pins.size", serde_json::json!("huge")).is_err());
+        // The default corner is the pins' own, not the notifications'.
+        assert_eq!(Pins::default().corner, Corner::BottomRight);
+        // Every size is 16:10, so a workspace fits each the same way.
+        for size in PinSize::ALL {
+            let (w, h) = size.picture();
+            assert_eq!(w * 10, h * 16, "{size:?}");
+        }
     }
 
     #[test]

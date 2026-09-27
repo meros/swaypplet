@@ -31,6 +31,8 @@ sections and fields (data/settings-defaults.json has every default):
   idle       dim_after_s, dim_level, lock_after_s, blank_after_s,
              suspend_after_s (0 is never), walk_away_lock, face_unlock
   bar        clock_24h, clock_date, osd_in_bar, board, media, tray, battery, presence
+  pins       size (small|medium|large), fps (15|30|60),
+             corner (bottom_right|bottom_left|top_right|top_left)
   keys       volume_step, brightness_step, volume_boost
   alerts     linger (short|normal|long), corner (top_right|top_left|bottom_right|bottom_left),
              stack, quiet, quiet_from_h, quiet_to_h

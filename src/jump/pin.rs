@@ -21,6 +21,10 @@
 //! when you move. A layer surface belongs to one output, so moving is
 //! rebuilding the surface there.
 //!
+//! Which corner, how big, and how many frames a second is the Pins &
+//! previews setting, on the settings' Bar tab. It applies live, down the
+//! same rebuild ([`Pins::follow_setting`]).
+//!
 //! The bar is where pins live when they are not floating (`bar/pins.rs`): a
 //! mark while any exist, a popover with every pin live, and a tuck that takes
 //! the floating cards away without unpinning anything.
@@ -36,16 +40,19 @@ use gtk4_layer_shell::{Edge, LayerShell as _};
 use super::live;
 use super::scene::{self, Scene};
 use super::view::{self, PIN_GLYPH, UNPIN_GLYPH, View};
+use crate::settings::store::{self, Corner};
 use crate::shell::{Namespace, Surface, layer};
 use crate::sway::ipc::SwayService;
 
-/// From the screen's corner, clear of the bar.
-const MARGIN_RIGHT: i32 = crate::tokens::space(5);
+/// From the screen's side, left or right.
+const MARGIN_SIDE: i32 = crate::tokens::space(5);
+/// From the bottom edge, clear of the bar, which is there.
 const MARGIN_BOTTOM: i32 = 2 * crate::tokens::space(7);
+/// From the top edge. Nothing of the shell's is up there, so the same gap as
+/// from the side.
+const MARGIN_TOP: i32 = MARGIN_SIDE;
 /// Between stacked pins.
 const GAP: i32 = crate::tokens::space(4);
-/// A pin's full height on screen: the picture, the footer, the padding.
-const PIN_STEP: i32 = view::H + 32 + 16 + GAP;
 /// How long a new pin shows itself before its workspace's own screen hides
 /// it: long enough to see where it lives.
 const INTRODUCE: Duration = Duration::from_millis(1600);
@@ -56,6 +63,43 @@ const INTRODUCE: Duration = Duration::from_millis(1600);
 const ARRIVAL: Duration = Duration::from_millis(1000);
 /// A pin slides in from, and out to, the screen's edge by this much.
 const SLIDE_PX: f64 = 48.0;
+
+/// A pin's full height on screen, for a picture box `h` tall: the picture,
+/// the footer, the padding, and the gap to the next.
+fn pin_step(h: i32) -> i32 {
+    h + 32 + 16 + GAP
+}
+
+/// Where the pins stand in their corner (the Pins & previews setting).
+struct Placement {
+    /// The edge they stack away from, oldest nearest, and its margin.
+    stack: Edge,
+    margin: i32,
+    /// The side they stand against, and slide in from.
+    side: Edge,
+    /// The slide, signed the way `anim::SlideBin` takes it: positive is
+    /// toward the right edge.
+    slide: f64,
+}
+
+fn placement(corner: Corner) -> Placement {
+    let (stack, margin) = if corner.is_bottom() {
+        (Edge::Bottom, MARGIN_BOTTOM)
+    } else {
+        (Edge::Top, MARGIN_TOP)
+    };
+    let (side, slide) = if corner.is_left() {
+        (Edge::Left, -SLIDE_PX)
+    } else {
+        (Edge::Right, SLIDE_PX)
+    };
+    Placement {
+        stack,
+        margin,
+        side,
+        slide,
+    }
+}
 
 // ── Who is pinned, for the bar and the Super+Tab card ───────────────────
 
@@ -181,6 +225,9 @@ struct Inner {
     /// screen until sway says it is or [`ARRIVAL`] runs out. See
     /// [`Pins::expect_arrival`].
     arriving: Option<(String, Instant)>,
+    /// The Pins & previews setting the surfaces were built for. See
+    /// [`Pins::follow_setting`].
+    setting: store::Pins,
 }
 
 #[derive(Clone, Default)]
@@ -191,9 +238,44 @@ pub struct Pins {
 impl Pins {
     pub fn new(app: &gtk4::Application) -> Pins {
         let pins = Pins::default();
-        pins.inner.borrow_mut().app = Some(app.clone());
+        {
+            let mut inner = pins.inner.borrow_mut();
+            inner.app = Some(app.clone());
+            inner.setting = store::with(|s| s.pins());
+        }
+        {
+            let pins = pins.clone();
+            store::observe(move || pins.follow_setting());
+        }
         HANDLE.with(|h| h.replace(Some(pins.clone())));
         pins
+    }
+
+    /// Follow the Pins & previews setting, live. A new size or corner
+    /// rebuilds every pin's surface where it stands, down the path
+    /// [`Self::follow`] takes to move one to another screen; a new frame
+    /// rate lets go of every capture, and the refresh after starts each
+    /// shown pin again at the new rate. Hidden pins capture nothing, so
+    /// they pick the rate up when they next show.
+    fn follow_setting(&self) {
+        let now = store::with(|s| s.pins());
+        let was = std::mem::replace(&mut self.inner.borrow_mut().setting, now);
+        if was == now {
+            return;
+        }
+        if was.size != now.size || was.corner != now.corner {
+            let n = self.inner.borrow().pins.len();
+            for i in 0..n {
+                let output = self.inner.borrow().pins[i].output.clone();
+                self.rebuild(i, output);
+            }
+            self.stack();
+        } else {
+            for pin in &mut self.inner.borrow_mut().pins {
+                pin.view.stop();
+            }
+        }
+        self.refresh();
     }
 
     /// Take the floating pins away, or bring them back. Nothing is unpinned:
@@ -328,7 +410,8 @@ impl Pins {
         };
         let monitor = output.as_deref().and_then(layer::monitor_by_connector);
         let label = crate::sway::workspace::label_for_name(&workspace);
-        let parts = build_window(&app, monitor.as_ref(), &label);
+        let corner = self.inner.borrow().setting.corner;
+        let parts = build_window(&app, monitor.as_ref(), &label, corner);
 
         self.wire(&parts, &workspace);
 
@@ -361,7 +444,8 @@ impl Pins {
         };
         let monitor = output.as_deref().and_then(layer::monitor_by_connector);
         let label = region_label(&region.window.app, &region.workspace);
-        let parts = build_window(&app, monitor.as_ref(), &label);
+        let corner = self.inner.borrow().setting.corner;
+        let parts = build_window(&app, monitor.as_ref(), &label, corner);
         self.wire(&parts, &key);
         self.inner.borrow_mut().pins.push(Pin {
             key,
@@ -471,9 +555,6 @@ impl Pins {
     /// there, and let the next update draw its picture on it.
     fn follow(&self, output: Option<&str>) {
         let Some(output) = output else { return };
-        let Some(app) = self.inner.borrow().app.clone() else {
-            return;
-        };
         let moving: Vec<usize> = self
             .inner
             .borrow()
@@ -486,31 +567,49 @@ impl Pins {
         if moving.is_empty() {
             return;
         }
-        let monitor = layer::monitor_by_connector(output);
         for i in moving {
-            let (key, label) = {
-                let inner = self.inner.borrow();
-                (inner.pins[i].key.clone(), inner.pins[i].label.clone())
-            };
-            let parts = build_window(&app, monitor.as_ref(), &label);
-            self.wire(&parts, &key);
-            let mut inner = self.inner.borrow_mut();
-            let pin = &mut inner.pins[i];
-            // The old surface goes as the new one comes, its capture first.
-            pin.view.stop();
-            pin.surface = parts.surface;
-            pin.view = parts.view;
-            pin.output = Some(output.to_string());
+            self.rebuild(i, Some(output.to_string()));
         }
         self.stack();
     }
 
-    /// Stack the pins up from the corner, oldest lowest.
+    /// Build pin `i` a new surface on `output`, in the corner and at the
+    /// size the setting says, and let the next update draw its picture on
+    /// it. How a pin moves to another screen, and how it takes a new size
+    /// or corner where it is. The caller restacks.
+    fn rebuild(&self, i: usize, output: Option<String>) {
+        let Some(app) = self.inner.borrow().app.clone() else {
+            return;
+        };
+        let (key, label, corner) = {
+            let inner = self.inner.borrow();
+            (
+                inner.pins[i].key.clone(),
+                inner.pins[i].label.clone(),
+                inner.setting.corner,
+            )
+        };
+        let monitor = output.as_deref().and_then(layer::monitor_by_connector);
+        let parts = build_window(&app, monitor.as_ref(), &label, corner);
+        self.wire(&parts, &key);
+        let mut inner = self.inner.borrow_mut();
+        let pin = &mut inner.pins[i];
+        // The old surface goes as the new one comes, its capture first.
+        pin.view.stop();
+        pin.surface = parts.surface;
+        pin.view = parts.view;
+        pin.output = output;
+    }
+
+    /// Stack the pins away from their corner, oldest nearest it.
     fn stack(&self) {
-        for (i, pin) in self.inner.borrow().pins.iter().enumerate() {
+        let inner = self.inner.borrow();
+        let at = placement(inner.setting.corner);
+        let step = pin_step(inner.setting.size.picture().1);
+        for (i, pin) in inner.pins.iter().enumerate() {
             pin.surface
                 .window()
-                .set_margin(Edge::Bottom, MARGIN_BOTTOM + i as i32 * PIN_STEP);
+                .set_margin(at.stack, at.margin + i as i32 * step);
         }
     }
 
@@ -690,7 +789,7 @@ fn update_region(pin: &mut Pin, window: &scene::Window, show: bool) {
         return;
     };
     pin.view
-        .show_region(&region.id, region.crop, (window.w, window.h), view::FPS);
+        .show_region(&region.id, region.crop, (window.w, window.h), view::fps());
     if !pin.surface.is_shown() {
         pin.surface.show();
     }
@@ -702,7 +801,7 @@ fn update(pin: &mut Pin, scene: Option<Scene>, show: bool) {
         hide(pin);
         return;
     }
-    pin.view.show_scene(scene, view::FPS);
+    pin.view.show_scene(scene, view::fps());
     if !pin.surface.is_shown() {
         pin.surface.show();
     }
@@ -721,30 +820,40 @@ struct Parts {
     view: View,
 }
 
-fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: &str) -> Parts {
+fn build_window(
+    app: &gtk4::Application,
+    monitor: Option<&gdk::Monitor>,
+    label: &str,
+    corner: Corner,
+) -> Parts {
+    let at = placement(corner);
     let surface = Surface::builder(app, Namespace::Pin)
         .monitor(monitor)
         // Top, not Overlay: a fullscreen window covers a pin, the way it
         // covers the bar.
         .layer(gtk4_layer_shell::Layer::Top)
-        .anchor(&[Edge::Bottom, Edge::Right])
-        // No right margin on the surface: it reaches the screen's edge, and
+        .anchor(&[at.stack, at.side])
+        // No side margin on the surface: it reaches the screen's edge, and
         // the gap to the card is the card's own (below). The entrance slides
         // the card toward that edge and back, and a card moving inside its
         // surface is what the compositor's glass follows (the pin
         // namespace's glass entry masks it to the card's pixels, as the
         // notifications' does); a surface that ended at the card clipped it
         // instead, and its glass stood still.
-        .margin(Edge::Bottom, MARGIN_BOTTOM)
+        .margin(at.stack, at.margin)
         .card(crate::ui::Card::Floating)
-        // Slides in from the screen's edge and fades up, and leaves the same
+        // Slides in from the side's edge and fades up, and leaves the same
         // way (anim::Reveal, the shell's one entrance).
-        .slide(gtk4::Orientation::Horizontal, SLIDE_PX)
+        .slide(gtk4::Orientation::Horizontal, at.slide)
         .build();
     let frame = surface.card();
     frame.add_css_class("jump-pin");
     if let Some(slide) = surface.slide() {
-        slide.set_margin_end(MARGIN_RIGHT);
+        if at.side == Edge::Left {
+            slide.set_margin_start(MARGIN_SIDE);
+        } else {
+            slide.set_margin_end(MARGIN_SIDE);
+        }
     }
 
     let mut view = View::new(label, "click to go \u{00b7} right-click to unpin");
@@ -759,8 +868,45 @@ fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: 
 
 #[cfg(test)]
 mod tests {
-    use super::{Reads, with_arrival};
+    use super::{MARGIN_BOTTOM, MARGIN_TOP, Reads, SLIDE_PX, pin_step, placement, with_arrival};
+    use crate::settings::store::{Corner, PinSize};
+    use gtk4_layer_shell::Edge;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn pins_stand_in_their_corner_and_slide_in_from_its_side() {
+        for corner in Corner::ALL {
+            let at = placement(corner);
+            // The bottom corners keep the bar's margin; the top ones only
+            // the edge's.
+            if corner.is_bottom() {
+                assert!(at.stack == Edge::Bottom && at.margin == MARGIN_BOTTOM);
+            } else {
+                assert!(at.stack == Edge::Top && at.margin == MARGIN_TOP);
+            }
+            // In from the side they stand against: a left corner's slide is
+            // negative, which `SlideBin` and sway's motion both read as left.
+            if corner.is_left() {
+                assert!(at.side == Edge::Left && at.slide == -SLIDE_PX);
+            } else {
+                assert!(at.side == Edge::Right && at.slide == SLIDE_PX);
+            }
+        }
+    }
+
+    #[test]
+    fn the_stack_step_grows_with_the_picture() {
+        let steps: Vec<i32> = PinSize::ALL
+            .iter()
+            .map(|s| pin_step(s.picture().1))
+            .collect();
+        assert!(steps.windows(2).all(|w| w[0] < w[1]), "{steps:?}");
+        // Medium is the step pins always had: 250 + footer + padding + gap.
+        assert_eq!(
+            pin_step(PinSize::Medium.picture().1),
+            250 + 32 + 16 + super::GAP
+        );
+    }
 
     #[test]
     fn a_workspace_on_its_way_counts_as_on_screen_until_it_lands() {

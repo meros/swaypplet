@@ -4,7 +4,7 @@
 //! The two showed the same thing and were built twice: the pin hugged the
 //! workspace's own shape and said what it was, the peek letterboxed it into
 //! a fixed 16:10 box with no name. Now both are a [`View`]: the picture,
-//! fitted to the workspace's aspect inside [`W`] by [`H`], over a footer
+//! fitted to the workspace's aspect inside [`picture_box`], over a footer
 //! with the pin mark, the workspace's name, a hint that shows while the
 //! pointer is on the card, and the caller's actions (the pin's ×, the
 //! peek's pin button). The caller owns only where the card is: a corner
@@ -24,11 +24,18 @@ use super::feed::{self, Feed};
 use super::live::Crop;
 use super::scene::{self, Scene};
 
-/// The picture's box, 16:10. A workspace is fitted inside it at its own
+/// The picture's box, 16:10, at the size the Pins & previews setting names
+/// (`settings::schema::PinSize`). A workspace is fitted inside it at its own
 /// aspect, so the card hugs the picture.
-pub const W: i32 = 400;
-pub const H: i32 = 250;
-/// Frames a second per window, for a pin and a peek alike.
+///
+/// Read once, when a view is made. A pin takes a new size by having its
+/// surface rebuilt (`pin.rs`), a peek on its next open.
+pub fn picture_box() -> (i32, i32) {
+    crate::settings::store::with(|s| s.pins().size.picture())
+}
+
+/// Frames a second per window, for a pin and a peek alike: the setting's,
+/// 30 unless it was changed (`settings::schema::Pins`).
 ///
 /// A capture is never cheap: `ext-image-copy-capture` hands over the
 /// window's full-size buffer, so every frame is a full-resolution readback
@@ -39,8 +46,11 @@ pub const H: i32 = 250;
 /// 30 a frame lands on every second refresh of a 60 Hz screen, and the
 /// worker's one-grid batching still repaints the picture once per step.
 /// One number for both, so a pin and a peek of the same workspace share a
-/// stream without one of them restarting it faster.
-pub const FPS: u32 = 30;
+/// stream without one of them restarting it faster. 15 and 60 are there for
+/// a machine that wants the readback cheaper or the picture smoother.
+pub fn fps() -> u32 {
+    crate::settings::store::with(|s| s.pins().fps)
+}
 
 /// The pin mark, filled and struck through.
 pub const PIN_GLYPH: &str = "\u{f0403}";
@@ -65,6 +75,8 @@ pub struct View {
     /// Device pixels to one of GTK's where the card is drawn, for the size
     /// frames are cut to.
     scale: f64,
+    /// The picture's box, [`picture_box`] when the view was made.
+    size: (i32, i32),
 }
 
 impl View {
@@ -105,6 +117,7 @@ impl View {
             feed: None,
             shown: Shown::Nothing,
             scale: 1.0,
+            size: picture_box(),
         }
     }
 
@@ -155,11 +168,12 @@ impl View {
             unreachable!()
         };
         self.clear();
-        let (w, h) = scene.as_ref().map_or((W, H), |scene| {
-            let (s, _, _) = scene::fit(scene.width, scene.height, W, H);
+        let (bw, bh) = self.size;
+        let (w, h) = scene.as_ref().map_or((bw, bh), |scene| {
+            let (s, _, _) = scene::fit(scene.width, scene.height, bw, bh);
             (
-                ((f64::from(scene.width) * s).round() as i32).clamp(8, W),
-                ((f64::from(scene.height) * s).round() as i32).clamp(8, H),
+                ((f64::from(scene.width) * s).round() as i32).clamp(8, bw),
+                ((f64::from(scene.height) * s).round() as i32).clamp(8, bh),
             )
         });
         let picture = card::preview(
@@ -185,7 +199,8 @@ impl View {
         // The piece's own shape, fitted into the box.
         let (_, _, fw, fh) = crop;
         let (pw, ph) = (f64::from(size.0) * fw, f64::from(size.1) * fh);
-        let (s, _, _) = scene::fit(pw.round() as i32, ph.round() as i32, W, H);
+        let (bw, bh) = self.size;
+        let (s, _, _) = scene::fit(pw.round() as i32, ph.round() as i32, bw, bh);
         let picture = LivePicture::new();
         picture.set_size_request(
             ((pw * s).round() as i32).max(8),
