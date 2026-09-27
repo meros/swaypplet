@@ -67,6 +67,11 @@ struct Sheet {
     rect: Rc<RefCell<Option<Rect>>>,
     /// Live pointer coordinates for the color picker loupe in `Mode::Pick`.
     pointer: Rc<RefCell<Option<(f64, f64)>>>,
+    /// The controllers `wire` added, and the widget each is on. Teardown
+    /// removes these and only these: a window also carries GTK's own
+    /// controllers, and removing those left the window pointing at freed
+    /// ones, which crashed on the next key press.
+    controllers: RefCell<Vec<(gtk4::Widget, gtk4::EventController)>>,
 }
 
 impl Sheet {
@@ -213,6 +218,7 @@ fn present(app: &gtk4::Application, mode: Mode, captured: Vec<(String, Image)>, 
             area,
             rect: Rc::new(RefCell::new(None)),
             pointer: Rc::new(RefCell::new(None)),
+            controllers: RefCell::new(Vec::new()),
         });
     }
 
@@ -270,7 +276,11 @@ fn wire(session: &Rc<Session>, index: usize, mode: Mode) {
         *pointer.borrow_mut() = Some((x, y));
         area.queue_draw();
     });
-    sheet.area.add_controller(motion);
+    sheet.area.add_controller(motion.clone());
+    sheet
+        .controllers
+        .borrow_mut()
+        .push((sheet.area.clone().upcast(), motion.upcast()));
 
     // ── Drawing ──
     let rect = sheet.rect.clone();
@@ -339,7 +349,11 @@ fn wire(session: &Rc<Session>, index: usize, mode: Mode) {
         let (sx, sy) = start_c.get();
         session_c.finish(index, mode, (sx, sy), (sx + dx, sy + dy));
     });
-    sheet.area.add_controller(drag);
+    sheet.area.add_controller(drag.clone());
+    sheet
+        .controllers
+        .borrow_mut()
+        .push((sheet.area.clone().upcast(), drag.upcast()));
 
     // ── Keys ──
     let keys = gtk4::EventControllerKey::new();
@@ -361,7 +375,11 @@ fn wire(session: &Rc<Session>, index: usize, mode: Mode) {
         }
         glib::Propagation::Stop
     });
-    sheet.surface.window().add_controller(keys);
+    sheet.surface.window().add_controller(keys.clone());
+    sheet
+        .controllers
+        .borrow_mut()
+        .push((sheet.surface.window().clone().upcast(), keys.upcast()));
 }
 
 /// Draw a magnified pixel loupe with live RGB/Hex readout for color picking.
@@ -571,29 +589,24 @@ impl Session {
             // controller on the window (Escape / Enter). Missing either one
             // leaves the cycle intact and one full copy of every output
             // behind, which measured 50 MB on this display pair.
-            for (widget, controllers) in [
-                (
-                    sheet.area.upcast_ref::<gtk4::Widget>(),
-                    sheet.area.observe_controllers(),
-                ),
-                (
-                    sheet.surface.window().upcast_ref::<gtk4::Widget>(),
-                    sheet.surface.window().observe_controllers(),
-                ),
-            ] {
-                for i in (0..controllers.n_items()).rev() {
-                    if let Some(controller) = controllers
-                        .item(i)
-                        .and_then(|o| o.downcast::<gtk4::EventController>().ok())
-                    {
+            //
+            // Only the ones `wire` added (`Sheet::controllers`), and on the
+            // next idle: this runs from inside the key controller's own
+            // handler (Escape, Enter), and removing a controller while it
+            // dispatches, or removing GTK's own from the window, crashed the
+            // process on the next event.
+            let ours = std::mem::take(&mut *sheet.controllers.borrow_mut());
+            let root = sheet.surface.root().clone();
+            glib::idle_add_local_once(move || {
+                for (widget, controller) in ours {
+                    if controller.widget().as_ref() == Some(&widget) {
                         widget.remove_controller(&controller);
                     }
                 }
-            }
-            let root = sheet.surface.root();
-            while let Some(child) = root.first_child() {
-                root.remove(&child);
-            }
+                while let Some(child) = root.first_child() {
+                    root.remove(&child);
+                }
+            });
             // The window itself goes with the Surface, when the session
             // drops: the cycle above is what used to keep it.
         }
