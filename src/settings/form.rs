@@ -12,25 +12,6 @@ use gtk4::prelude::*;
 
 use crate::ui::{self, Kind, Text, Tone};
 
-/// Where a row's control sits: the alternatives zoo's open decision
-/// (docs/alternatives-zoo.html, "settings-control-placement"). One switch,
-/// read by [`kind_row`]; a slider always fills, and an entry always fills,
-/// because both need the width.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[allow(dead_code)] // the other variant is the zoo's alternative, one line away
-pub enum Placement {
-    /// The control at the row's far end, at its natural width but never
-    /// narrower than `.settings-control` (so a column of dropdowns lines up
-    /// on both edges): the row reads label, then value, as a sentence does.
-    /// macOS System Settings, GNOME 47, iOS.
-    Trailing,
-    /// The control takes the rest of the row from a fixed label gutter, so
-    /// every control in the pane starts at one x: a form's column.
-    Fill,
-}
-
-pub const CONTROL_PLACEMENT: Placement = Placement::Trailing;
-
 /// What a wrapping label is allowed to ASK for, in characters.
 ///
 /// A GtkLabel with `wrap` set still requests the whole text on one line as
@@ -106,7 +87,13 @@ pub fn row() -> gtk4::Box {
     row
 }
 
-/// A label in the gutter and one control taking the rest of the row.
+/// A label, then one control at the row's far end, at its natural width
+/// but never narrower than `.settings-control`, so a column of dropdowns
+/// lines up on both edges: the row reads label, then value, as a sentence
+/// does (macOS System Settings, GNOME 47, iOS). A text field fills the
+/// row instead. Filling every row from a fixed gutter was the other answer
+/// the 2026-09 alternatives zoo rendered (docs/alternatives-zoo.html); the
+/// owner chose this one.
 pub fn kind_row(label: &str, control: &impl IsA<gtk4::Widget>) -> gtk4::Box {
     let row = row();
     let name = row_label(label);
@@ -115,8 +102,7 @@ pub fn kind_row(label: &str, control: &impl IsA<gtk4::Widget>) -> gtk4::Box {
     let control = control.as_ref();
     // A text field is the one control that is better wide: what you type
     // into it is read there.
-    let fills = CONTROL_PLACEMENT == Placement::Fill || control.is::<gtk4::Entry>();
-    if fills {
+    if control.is::<gtk4::Entry>() {
         control.set_hexpand(true);
     } else {
         name.set_hexpand(true);

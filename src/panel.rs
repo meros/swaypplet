@@ -29,50 +29,19 @@ use crate::widgets::{
     users::UserSection,
 };
 
-/// How the flight deck is laid out, and with it how wide the card is: the
-/// alternatives zoo's open decision (docs/alternatives-zoo.html,
-/// "helm-width"). One switch, read by [`build_flight_deck`] and
-/// [`helm_card_size`].
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[allow(dead_code)] // the other variant is the zoo's alternative, one line away
-enum HelmLayout {
-    /// A grid: the four switches on one line at equal widths, the actions
-    /// and the session cluster on the next, every control at the tile's
-    /// height. The card is a launcher's width (`GRID_WIDTH`), so the
-    /// results list is read at one glance and the card stands on the
-    /// screen rather than across it. macOS Control Center, Raycast.
-    Grid,
-    /// One strip: every switch and button on one line, and the card as
-    /// wide as that strip wants (about 1220 logical px), wrapping only
-    /// where the output is narrower. Every action in one scan line.
-    Strip,
-}
-
-const HELM_LAYOUT: HelmLayout = HelmLayout::Grid;
-
-/// The card's width in the grid layout: a launcher's width, and room for
-/// the four switches at their natural widths on one line.
-const GRID_WIDTH: i32 = 800;
-
-/// What the Helm card asks for on a screen with room for it. No height: the
-/// sections decide how tall the card is, and the deck stack has no sensible
-/// fixed height to fall back on.
-///
-/// In the grid layout the width is the width the card renders at: no row
-/// wants more. In the strip layout it is a floor: laid out with room to
-/// spare the strip takes 1033 logical px, the width its widest row wants;
-/// squeezed onto a laptop panel that row wraps and the card comes down to
-/// around 620. The number only sets how far `install_monitor_fit` is
-/// allowed to clamp it before the rows start giving up space.
-const fn helm_card_size() -> crate::shell::fit::CardSize {
-    crate::shell::fit::CardSize {
-        width: match HELM_LAYOUT {
-            HelmLayout::Grid => GRID_WIDTH,
-            HelmLayout::Strip => 740,
-        },
-        height: None,
-    }
-}
+/// What the Helm card asks for on a screen with room for it: a launcher's
+/// width, room for the four switches at their natural widths on one line,
+/// and the width it renders at, since no row wants more. The results list
+/// is read at one glance and the card stands on the screen rather than
+/// across it (macOS Control Center, Raycast). One strip of every control
+/// on a card about 1300 px wide was the other answer the 2026-09
+/// alternatives zoo rendered (docs/alternatives-zoo.html); the owner chose
+/// this one. No height: the sections decide how tall the card is, and the
+/// deck stack has no sensible fixed height to fall back on.
+const HELM_CARD_SIZE: crate::shell::fit::CardSize = crate::shell::fit::CardSize {
+    width: 800,
+    height: None,
+};
 
 /// How tall a sub-sheet's body stands on a screen with room for it.
 const SUBSHEET_HEIGHT: i32 = 340;
@@ -402,7 +371,7 @@ impl Panel {
             &window,
             &top_spacer,
             &root,
-            helm_card_size(),
+            HELM_CARD_SIZE,
             Some(Rc::new(move |compact| {
                 for (list, full) in &lists {
                     list.set_min_content_height(if compact { COMPACT_LIST_HEIGHT } else { *full });
@@ -979,37 +948,18 @@ fn build_flight_deck(
     deck_stack: &gtk4::Stack,
     on_settings: &OnSettings,
 ) -> gtk4::Box {
-    // The switches, and where they go.
-    //
-    // Strip: a wrapping box rather than a Box because this strip is what
-    // made the card 1033 logical px wide at minimum: nine switches in a row
-    // that could not break. It folds onto a second line on a laptop panel
-    // with every switch still there, each at its own width (`ui::WrapBox`;
-    // a FlowBox lined them up in columns and opened gaps between the
-    // tiles).
-    //
-    // Grid: the four switches share one line at equal widths, a row of the
-    // grid; the actions and the session take the next.
-    let strip: ui::WrapBox = ui::wrap_box(3);
-    strip.set_halign(gtk4::Align::Start);
-    strip.set_hexpand(true);
-    strip.add_css_class("deck-switches");
+    // The switches: one line of the grid, at equal widths; the actions and
+    // the session take the next.
     let switches = ui::hbox(3);
     switches.set_homogeneous(true);
     switches.set_hexpand(true);
     switches.add_css_class("deck-switches");
-    let add_switch: Box<dyn Fn(&gtk4::Box)> = match HELM_LAYOUT {
-        HelmLayout::Grid => {
-            let switches = switches.clone();
-            Box::new(move |w| switches.append(w))
-        }
-        HelmLayout::Strip => {
-            let strip = strip.clone();
-            Box::new(move |w| strip.append(w))
-        }
+    let add_switch: Box<dyn Fn(&gtk4::Box)> = {
+        let switches = switches.clone();
+        Box::new(move |w| switches.append(w))
     };
 
-    // The durations for the timed switches fold out under the strip; one
+    // The durations for the timed switches fold out under the deck; one
     // fold, shared by both (`tiles::DurationFold`).
     let fold = tiles::DurationFold::new();
     {
@@ -1083,9 +1033,7 @@ fn build_flight_deck(
     dnd.root.add_css_class("deck-tile-btn");
     add_switch(&dnd.root);
 
-    // The one-click actions travel as one group: when the strip wraps they
-    // move to the next line together, side by side, instead of each taking
-    // a column under a wide tile.
+    // The one-click actions, as one group on the deck's second row.
     let actions = ui::hbox(3);
     *dnd_tile = Some(dnd);
 
@@ -1128,39 +1076,22 @@ fn build_flight_deck(
     }
     actions.append(&settings_btn);
 
-    // Session cluster (Right group). Centred rather than filling, because
-    // once the switches beside it wrap to a second row the deck is twice as
-    // tall and these buttons would stretch to match it.
+    // Session cluster, at the second row's far end. Centred rather than
+    // filling, so the buttons keep their own height.
     let session = power::build_session_row();
     session.set_valign(gtk4::Align::Center);
 
     let spacer = ui::hbox(0);
     spacer.set_hexpand(true);
 
-    let deck: gtk4::Box = match HELM_LAYOUT {
-        HelmLayout::Grid => {
-            // Two rows: the switches, then the actions left and the
-            // session right.
-            let deck = ui::vbox(3);
-            deck.append(&switches);
-            let second = ui::hbox(3);
-            second.append(&actions);
-            second.append(&spacer);
-            second.append(&session);
-            deck.append(&second);
-            deck
-        }
-        HelmLayout::Strip => {
-            // One line: the switches and the actions travel as one wrapping
-            // group, the session at the far end.
-            strip.append(&actions);
-            let deck = ui::hbox(3);
-            deck.append(&strip);
-            deck.append(&spacer);
-            deck.append(&session);
-            deck
-        }
-    };
+    // Two rows: the switches, then the actions left and the session right.
+    let deck = ui::vbox(3);
+    deck.append(&switches);
+    let second = ui::hbox(3);
+    second.append(&actions);
+    second.append(&spacer);
+    second.append(&session);
+    deck.append(&second);
     deck.set_hexpand(true);
     deck.add_css_class("helm-action-deck");
 

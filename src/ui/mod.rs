@@ -47,7 +47,6 @@ pub mod slider;
 pub mod surface;
 mod text;
 mod tile;
-mod wrap;
 
 pub use avatar::avatar;
 pub use bar::{
@@ -79,7 +78,6 @@ pub use text::{
     set_mono, set_numeric, set_text_style, set_tone, set_weight, text,
 };
 pub use tile::{SplitTile, set_loading, set_tile_status, tile_split, tile_toggle};
-pub use wrap::{WrapBox, wrap_box};
 
 // ── Cairo ───────────────────────────────────────────────────────────────
 
