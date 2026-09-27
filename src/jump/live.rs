@@ -479,9 +479,15 @@ fn cover(len: u32, n: u32) -> Vec<(usize, u32, usize, u32)> {
 /// a row blurred a terminal's text in a pin (a 3x box, then 233 px drawn at
 /// 200), and a linear filter alone over more than 2x skips pixels and
 /// shimmers. One pass over the source in memory order ([`area_sums`]).
-/// `xrgb` carries no
-/// alpha, so it is written opaque; `argb` from the compositor is already
-/// premultiplied, and an average of premultiplied pixels stays so.
+///
+/// The average is of light, not of sRGB code values: colour is decoded to
+/// linear light, averaged, and encoded again. Averaged as codes, a pixel
+/// half white and half black came out 128, which is the light of 22 %
+/// white, so light text on a dark terminal went thin and dim in a pin and
+/// dark text on a light page went heavy. `xrgb` carries no alpha, so it is
+/// written opaque; `argb` from the compositor is premultiplied, so its
+/// colour is unpremultiplied before it is decoded and premultiplied again
+/// after, and alpha itself is averaged as it is.
 fn downscale(
     src: &[u8],
     full_w: u32,
@@ -495,37 +501,116 @@ fn downscale(
     // Both ABGR formats are RGBA in memory; the card wants BGRA.
     let swap = matches!(format, wl_shm::Format::Xbgr8888 | wl_shm::Format::Abgr8888);
 
-    let sums = area_sums(src, stride, (x0, y0, w, h), (ow, oh));
+    let sums = area_sums(src, stride, (x0, y0, w, h), (ow, oh), opaque);
     let per = 1.0 / (w as f32 * h as f32);
     let mut out = vec![0u8; sums.len()];
     for (o, px) in out.chunks_exact_mut(4).zip(sums.chunks_exact(4)) {
-        let v = |c: usize| (px[c] * per + 0.5).min(255.0) as u8;
+        // Alpha as a fraction; colour is linear light premultiplied by it.
+        let a = (px[3] * per).clamp(0.0, 1.0);
+        let a8 = (a * 255.0 + 0.5) as u8;
+        let v = |c: usize| {
+            if a8 == 0 {
+                return 0;
+            }
+            let lin = (px[c] * per / a).clamp(0.0, 1.0);
+            let code = f32::from(encode(lin));
+            if a8 == 255 {
+                code as u8
+            } else {
+                (code * a + 0.5) as u8
+            }
+        };
         let (b, r) = if swap { (v(2), v(0)) } else { (v(0), v(2)) };
         o[0] = b;
         o[1] = v(1);
         o[2] = r;
-        o[3] = if opaque { 0xff } else { v(3) };
+        o[3] = a8;
     }
     (ow, oh, out)
 }
 
+/// sRGB code value to linear light, for every code.
+static DECODE: std::sync::LazyLock<[f32; 256]> = std::sync::LazyLock::new(|| {
+    std::array::from_fn(|i| {
+        let c = i as f32 / 255.0;
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    })
+});
+
+/// Steps in [`ENCODE`]. Fine enough that one step is under a fifth of a
+/// code value even at the dark end, where sRGB is steepest.
+const ENCODE_STEPS: usize = 16384;
+
+/// Linear light to sRGB code value, in [`ENCODE_STEPS`] steps.
+static ENCODE: std::sync::LazyLock<Vec<u8>> = std::sync::LazyLock::new(|| {
+    (0..=ENCODE_STEPS)
+        .map(|i| {
+            let l = i as f32 / ENCODE_STEPS as f32;
+            let c = if l <= 0.003_130_8 {
+                l * 12.92
+            } else {
+                1.055 * l.powf(1.0 / 2.4) - 0.055
+            };
+            (c * 255.0 + 0.5).clamp(0.0, 255.0) as u8
+        })
+        .collect()
+});
+
+fn encode(linear: f32) -> u8 {
+    ENCODE[(linear * ENCODE_STEPS as f32 + 0.5) as usize]
+}
+
+/// A row of premultiplied pixels as linear light, premultiplied, with
+/// alpha as a fraction: the values [`area_sums`] adds up. An `xrgb`
+/// buffer takes a faster path there.
+fn decode_row(row: &[u8], out: &mut [f32]) {
+    let lin = &*DECODE;
+    for (o, p) in out.chunks_exact_mut(4).zip(row.chunks_exact(4)) {
+        match p[3] {
+            255 => {
+                for c in 0..3 {
+                    o[c] = lin[usize::from(p[c])];
+                }
+                o[3] = 1.0;
+            }
+            0 => o.fill(0.0),
+            a => {
+                let af = f32::from(a) / 255.0;
+                for c in 0..3 {
+                    // Unpremultiplied, to the nearest code: a colour byte
+                    // above its alpha is out of range, and clamped.
+                    let straight = (u32::from(p[c]) * 255 + u32::from(a) / 2) / u32::from(a);
+                    o[c] = lin[straight.min(255) as usize] * af;
+                }
+                o[3] = af;
+            }
+        }
+    }
+}
+
 /// For every output pixel and channel of the region scaled to `ow` by
-/// `oh`, the sum of the source under it weighted by the share covered, in
-/// [`cover`]'s units: `w * h` times the average.
+/// `oh`, the sum of the source under it as linear light ([`decode_row`]'s
+/// values) weighted by the share covered, in [`cover`]'s units: `w * h`
+/// times the average. `opaque` ignores the alpha byte, which `xrgb` leaves
+/// undefined.
 ///
 /// Down first, then across. The rows under an output row add into one row
-/// of the region's width, contiguous work the compiler turns into vector
-/// adds; only then is that row gathered into columns, once per output row
-/// rather than once per source row. In `f32`, because the build targets
-/// baseline x86-64, whose vector unit multiplies floats but not 32-bit
-/// integers: the same sums in `u32` took 2.4x the old box on a large
-/// window. The shares are whole numbers and a row's sum stays below 2^24,
-/// so the rows are exact; across, the error is a part in 10^7.
+/// of the region's width; only then is that row gathered into columns,
+/// once per output row rather than once per source row. In `f32`, because
+/// the build targets baseline x86-64, whose vector unit multiplies floats
+/// but not 32-bit integers. The decode is a table lookup per byte, which
+/// that target cannot do in vectors: on a 2900x1736 frame cut to 800 wide
+/// the average takes 23 ms, against 13.5 ms averaging the codes.
 fn area_sums(
     src: &[u8],
     stride: usize,
     (x0, y0, w, h): (u32, u32, u32, u32),
     (ow, oh): (u32, u32),
+    opaque: bool,
 ) -> Vec<f32> {
     let across = cover(w, ow);
     let row_len = w as usize * 4;
@@ -534,13 +619,26 @@ fn area_sums(
         &src[start..start + row_len]
     };
     let mut col = vec![0f32; row_len];
+    let mut row = vec![0f32; row_len];
     let mut sums = Vec::with_capacity(ow as usize * oh as usize * 4);
     for (first, a, whole, b) in cover(h, oh) {
         col.fill(0.0);
         let mut add = |sy: usize, share: u32| {
             let share = share as f32;
-            for (d, &v) in col.iter_mut().zip(line(sy)) {
-                *d += share * f32::from(v);
+            if opaque {
+                // Decoded as it is added: no row to write and read back.
+                let lin = &*DECODE;
+                for (d, p) in col.chunks_exact_mut(4).zip(line(sy).chunks_exact(4)) {
+                    d[0] += share * lin[usize::from(p[0])];
+                    d[1] += share * lin[usize::from(p[1])];
+                    d[2] += share * lin[usize::from(p[2])];
+                    d[3] += share;
+                }
+                return;
+            }
+            decode_row(line(sy), &mut row);
+            for (d, &v) in col.iter_mut().zip(&row) {
+                *d += share * v;
             }
         };
         add(first, a);
@@ -1128,7 +1226,8 @@ mod tests {
 
     #[test]
     fn an_edge_between_two_colours_averages_by_area() {
-        // 3x1 XRGB, blue 0, 90, 180 in BGRX: into 2x1, 1.5 source each.
+        // 3x1 XRGB, blue 0, 90, 180 in BGRX: into 2x1, 1.5 source each,
+        // averaged as light (0.034 and 0.100, then 0.456 and 0.340).
         let src = [0, 0, 0, 0, 90, 0, 0, 0, 180, 0, 0, 0];
         let (w, h, px) = downscale(
             &src,
@@ -1138,7 +1237,56 @@ mod tests {
             Size::Draw(2, 1),
         );
         assert_eq!((w, h), (2, 1));
-        assert_eq!((px[0], px[4]), (30, 150));
+        assert_eq!((px[0], px[4]), (52, 157));
+    }
+
+    #[test]
+    fn half_white_and_half_black_is_half_the_light() {
+        // A 2x1 XRGB pair, white and black, into one pixel: code 188, the
+        // sRGB of half the light. The average of the codes is 128.
+        let src = [255, 255, 255, 0, 0, 0, 0, 0];
+        let (_, _, px) = downscale(
+            &src,
+            2,
+            (0, 0, 2, 1),
+            wl_shm::Format::Xrgb8888,
+            Size::Draw(1, 1),
+        );
+        assert_eq!(px, vec![188, 188, 188, 0xff]);
+    }
+
+    #[test]
+    fn one_to_one_gives_back_every_code() {
+        // Decoded and encoded again, no code value moves.
+        let src: Vec<u8> = (0..=255u8).flat_map(|v| [v, v, v, 0]).collect();
+        let (w, _, px) = downscale(
+            &src,
+            256,
+            (0, 0, 256, 1),
+            wl_shm::Format::Xrgb8888,
+            Size::Draw(256, 1),
+        );
+        assert_eq!(w, 256);
+        assert!(
+            px.chunks_exact(4)
+                .enumerate()
+                .all(|(i, p)| p[..3] == [i as u8; 3])
+        );
+    }
+
+    #[test]
+    fn premultiplied_colour_stays_within_alpha() {
+        // Half-transparent white beside transparent: alpha averages as it
+        // is, and the colour is white at that alpha.
+        let src = [255, 255, 255, 255, 0, 0, 0, 0];
+        let (_, _, px) = downscale(
+            &src,
+            2,
+            (0, 0, 2, 1),
+            wl_shm::Format::Argb8888,
+            Size::Draw(1, 1),
+        );
+        assert_eq!(px, vec![128, 128, 128, 128]);
     }
 
     #[test]
@@ -1157,7 +1305,8 @@ mod tests {
 
     #[test]
     fn each_output_pixel_averages_its_square() {
-        // 2x2 XRGB, BGRX in memory: two black pixels, two at blue 200.
+        // 2x2 XRGB, BGRX in memory: two black pixels, two at blue 200,
+        // whose light is 0.578; half of it is code 146.
         let src = [0, 0, 0, 0, 0, 0, 0, 0, 200, 0, 0, 0, 200, 0, 0, 0];
         let (w, h, px) = downscale(
             &src,
@@ -1167,7 +1316,7 @@ mod tests {
             Size::MaxEdge(1),
         );
         assert_eq!((w, h), (1, 1));
-        assert_eq!(px, vec![100, 0, 0, 0xff]);
+        assert_eq!(px, vec![146, 0, 0, 0xff]);
     }
 
     #[test]
