@@ -49,6 +49,11 @@ const PIN_STEP: i32 = view::H + 32 + 16 + GAP;
 /// How long a new pin shows itself before its workspace's own screen hides
 /// it: long enough to see where it lives.
 const INTRODUCE: Duration = Duration::from_millis(1600);
+/// How long a workspace the switcher committed to counts as on screen
+/// before sway confirms it. The switch lands in tens of milliseconds; the
+/// limit is for a switch that never comes (something else moved you first,
+/// and the switcher put the row away instead).
+const ARRIVAL: Duration = Duration::from_millis(1000);
 /// A pin slides in from, and out to, the screen's edge by this much.
 const SLIDE_PX: f64 = 48.0;
 
@@ -172,6 +177,10 @@ struct Inner {
     /// opened in between stayed out of the pin until sway next said
     /// something.
     reads: Reads,
+    /// The workspace the switcher has just committed to, counted as on
+    /// screen until sway says it is or [`ARRIVAL`] runs out. See
+    /// [`Pins::expect_arrival`].
+    arriving: Option<(String, Instant)>,
 }
 
 #[derive(Clone, Default)]
@@ -205,6 +214,24 @@ impl Pins {
         }
         self.inner.borrow_mut().held = held;
         self.refresh();
+    }
+
+    /// The switcher committed to `workspace`: its pin stays hidden through
+    /// the switch.
+    ///
+    /// The switcher lets go of the pins as it closes, and the switch it
+    /// commits reaches sway a moment later. In between, a pin of the
+    /// workspace being switched to saw it off screen, slid in, and slid out
+    /// again once the switch landed: a sub-second flash of exactly the pin
+    /// the switch makes pointless. Call this before [`Self::set_held`]
+    /// `(false)`.
+    pub fn expect_arrival(&self, workspace: &str) {
+        self.inner.borrow_mut().arriving = Some((workspace.to_string(), Instant::now() + ARRIVAL));
+        // Look again once the wait is over, in case no sway event comes.
+        let this = self.clone();
+        glib::timeout_add_local_once(ARRIVAL + Duration::from_millis(20), move || {
+            this.refresh();
+        });
     }
 
     /// Go to a pinned workspace.
@@ -510,6 +537,11 @@ impl Pins {
                 }
                 None => (Vec::new(), None),
             };
+        let on_screen = with_arrival(
+            on_screen,
+            &mut self.inner.borrow_mut().arriving,
+            Instant::now(),
+        );
         self.follow(focused_output.as_deref());
         let wanted: Vec<(String, Option<String>)> = self
             .inner
@@ -582,6 +614,24 @@ impl Pins {
             },
         );
     }
+}
+
+/// The workspaces on screen, `visible` plus one the switcher is switching
+/// to, while it is still on its way: until `visible` has it, or its time is
+/// up, after which it is forgotten.
+fn with_arrival(
+    mut visible: Vec<String>,
+    arriving: &mut Option<(String, Instant)>,
+    now: Instant,
+) -> Vec<String> {
+    if let Some((name, until)) = arriving.as_ref() {
+        if visible.contains(name) || now >= *until {
+            *arriving = None;
+        } else {
+            visible.push(name.clone());
+        }
+    }
+    visible
 }
 
 /// Tree reads in the order they were asked for.
@@ -707,7 +757,28 @@ fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: 
 
 #[cfg(test)]
 mod tests {
-    use super::Reads;
+    use super::{Reads, with_arrival};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_workspace_on_its_way_counts_as_on_screen_until_it_lands() {
+        let now = Instant::now();
+        let later = now + Duration::from_millis(1000);
+        let mut arriving = Some(("7".to_string(), later));
+        // Switch not landed yet: 7 counts as shown, so its pin stays hidden.
+        let shown = with_arrival(vec!["1".into()], &mut arriving, now);
+        assert_eq!(shown, ["1", "7"]);
+        assert!(arriving.is_some());
+        // Landed: sway reports it, and the expectation is spent.
+        let shown = with_arrival(vec!["7".into()], &mut arriving, now);
+        assert_eq!(shown, ["7"]);
+        assert!(arriving.is_none());
+        // Never landed: forgotten once its time is up.
+        let mut arriving = Some(("7".to_string(), later));
+        let shown = with_arrival(vec!["1".into()], &mut arriving, later);
+        assert_eq!(shown, ["1"]);
+        assert!(arriving.is_none());
+    }
 
     #[test]
     fn a_read_that_lands_after_a_newer_one_is_dropped() {
