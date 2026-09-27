@@ -26,8 +26,6 @@ const TILE_H: i32 = 150;
 const COLUMNS: u32 = 4;
 /// Live at a glance's rate; the shot itself is captured separately.
 const GRID_FPS: u32 = 15;
-/// Larger than any window: the shot is taken unscaled.
-const FULL: u32 = 1 << 15;
 
 /// What happens with the shot.
 /// The answer: the picked window's picture, or `None` when the grid was
@@ -242,18 +240,23 @@ fn take(picker: &Rc<Picker>, id: String) {
     if let Some(surface) = &*picker.surface.borrow() {
         surface.window().set_visible(false);
     }
-    let (tx, rx) = async_channel::bounded::<live::Frame>(1);
-    let shot = live::Stream::start(vec![id], FULL, 0, tx);
+    // The window at its own resolution, straight from the compositor: a
+    // shot is a copy, never scaled.
     let picker = picker.clone();
-    glib::spawn_future_local(async move {
-        // One frame is the shot; dropping the stream ends the capture.
-        let frame = rx.recv().await;
-        drop(shot);
-        if let (Ok(frame), Some(done)) = (frame, picker.done.borrow_mut().take()) {
-            done(Some(to_image(frame)));
-        }
-        close(&picker);
-    });
+    crate::spawn::spawn_work(
+        move || super::capture::window(&id),
+        move |shot| {
+            match shot {
+                Ok(image) => {
+                    if let Some(done) = picker.done.borrow_mut().take() {
+                        done(Some(image));
+                    }
+                }
+                Err(e) => log::warn!("screenshot: window: {e}"),
+            }
+            close(&picker);
+        },
+    );
 }
 
 fn close(picker: &Rc<Picker>) {
@@ -266,60 +269,4 @@ fn close(picker: &Rc<Picker>) {
     // Taken before it drops: the surface's own handlers hold the picker.
     let surface = picker.surface.borrow_mut().take();
     drop(surface);
-}
-
-/// A live frame (premultiplied BGRA) as a screenshot image (straight RGBA).
-fn to_image(frame: live::Frame) -> Image {
-    // `Stream::start` sends frames in memory, never on the GPU.
-    let mut pixels = frame.pixels.into_memory().unwrap_or_default();
-    for px in pixels.chunks_exact_mut(4) {
-        let (b, g, r, a) = (px[0], px[1], px[2], px[3]);
-        let un = |c: u8| {
-            if a == 0 || a == 255 {
-                c
-            } else {
-                ((u32::from(c) * 255 + u32::from(a) / 2) / u32::from(a)).min(255) as u8
-            }
-        };
-        px[0] = un(r);
-        px[1] = un(g);
-        px[2] = un(b);
-        px[3] = a;
-    }
-    Image {
-        width: frame.width,
-        height: frame.height,
-        pixels,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn frame(px: [u8; 4]) -> live::Frame {
-        live::Frame {
-            id: String::new(),
-            width: 1,
-            height: 1,
-            pixels: live::Pixels::Memory(px.to_vec()),
-        }
-    }
-
-    #[test]
-    fn an_opaque_pixel_only_swaps_to_rgba() {
-        assert_eq!(
-            to_image(frame([10, 20, 30, 255])).pixels,
-            vec![30, 20, 10, 255]
-        );
-    }
-
-    #[test]
-    fn a_translucent_pixel_is_unpremultiplied() {
-        // Premultiplied at half alpha: 100 of a straight 200.
-        assert_eq!(
-            to_image(frame([50, 100, 0, 128])).pixels,
-            vec![0, 199, 100, 128]
-        );
-    }
 }

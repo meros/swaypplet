@@ -1,25 +1,23 @@
-//! Live frames scaled down on the GPU, from the compositor's buffer to
-//! GTK's texture without a pixel crossing to the CPU.
+//! Live frames averaged on the GPU, from the compositor's buffer to GTK's
+//! texture without a pixel crossing to the CPU.
 //!
-//! The shm path (`live.rs`) costs twice for every frame. sway reads the
-//! window back from the GPU into shared memory, 20 MB at 2x, on its main
-//! thread; then the worker averages it on the CPU, 23 ms for a 2900x1736
-//! frame. Here the capture is a dmabuf on the same GPU, so sway's copy stays
+//! The capture is a dmabuf on sway's GPU, so sway's copy of the window stays
 //! on the GPU, and one fragment shader pass averages it into a small dmabuf
-//! that GTK draws as it is.
+//! that GTK draws as it is. A 2x window (2900x1736 into 800x479) takes
+//! 0.6 ms with a Tile4 capture buffer (`bench`). The CPU average this
+//! replaced took 23 ms, and sway's readback of the full frame into shared
+//! memory, on its main thread, came on top.
 //!
-//! The shader computes what `live::downscale` does: every output pixel the
-//! exact average of the source area under it, the texels cut at its edges
-//! weighted by the part inside, in linear light, premultiplied alpha kept.
-//! No mipmaps and no bilinear taps: both average a different area than the
-//! one the pixel covers. The CPU path's tests are the reference
-//! (`matches_the_cpu_path`).
+//! The shader computes the exact area average: every output pixel the mean
+//! of the source area under it, the texels cut at its edges weighted by the
+//! part inside, in linear light, premultiplied alpha kept. No mipmaps and
+//! no bilinear taps: both average a different area than the one the pixel
+//! covers. The tests check it against a plain reference in `f64`.
 //!
 //! A context is made on the worker thread and lives with it; EGL contexts
-//! belong to one thread. Anything that fails here falls back to the shm
-//! path for that window, and a failure GTK reports turns the GPU path off
-//! for the process ([`refuse`]), so a driver that cannot do it costs one
-//! frame, not a broken pin.
+//! belong to one thread. There is no CPU path to fall back to. Where the
+//! context cannot be made, or GTK refuses its frames ([`refuse`]), live
+//! pictures show their app icons, and the journal says why.
 
 use std::ffi::c_void;
 use std::fs::File;
@@ -46,17 +44,17 @@ const OUT_SLOTS: usize = 3;
 
 static REFUSED: AtomicBool = AtomicBool::new(false);
 
-/// Turn the GPU path off for the rest of the process: GTK could not take
-/// one of its frames. New captures use the shm path.
+/// Turn live frames off for the rest of the process: GTK could not take
+/// one of them, and would not take the next.
 pub fn refuse(why: &str) {
     if !REFUSED.swap(true, Ordering::Relaxed) {
-        log::warn!("jump: gpu frames refused ({why}); live frames go through memory");
+        log::warn!("jump: gtk refused a live frame ({why}); live pictures stop");
     }
 }
 
-/// Whether the GPU path may be tried.
-pub fn allowed() -> bool {
-    !REFUSED.load(Ordering::Relaxed) && std::env::var_os("SWAYPPLET_NO_GPU").is_none()
+/// Whether GTK still takes live frames.
+pub fn usable() -> bool {
+    !REFUSED.load(Ordering::Relaxed)
 }
 
 /// The capture formats the shader reads, best first: alpha over none, so a
@@ -699,8 +697,6 @@ unsafe fn build_program(gl: &glow::Context) -> Result<(glow::Program, glow::Vert
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::jump::live::{Size, downscale, out_size};
-    use wayland_client::protocol::wl_shm;
 
     /// The context on this machine's first render node, or `None` (and a
     /// line saying so) where there is none, as in CI.
@@ -713,6 +709,92 @@ mod tests {
                 None
             }
         }
+    }
+
+    fn decode(c: f64) -> f64 {
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    fn encode(l: f64) -> f64 {
+        if l <= 0.003_130_8 {
+            l * 12.92
+        } else {
+            1.055 * l.powf(1.0 / 2.4) - 0.055
+        }
+    }
+
+    /// What the shader must produce, the slow and obvious way: for every
+    /// output pixel, every texel of the region, weighted by the area of it
+    /// under the pixel, in linear light, in `f64`. Pixels are four bytes in
+    /// memory order, the shader's result in ARGB8888's (B, G, R, A);
+    /// `rgba` says the source's order is R, G, B instead.
+    fn reference(
+        src: &[u8],
+        full_w: u32,
+        (x0, y0, w, h): (u32, u32, u32, u32),
+        (ow, oh): (u32, u32),
+        opaque: bool,
+        rgba: bool,
+    ) -> Vec<u8> {
+        let (rx, ry) = (f64::from(w) / f64::from(ow), f64::from(h) / f64::from(oh));
+        let mut out = Vec::with_capacity((ow * oh * 4) as usize);
+        for oy in 0..oh {
+            for ox in 0..ow {
+                let (ax, ay) = (f64::from(ox) * rx, f64::from(oy) * ry);
+                let (bx, by) = (ax + rx, ay + ry);
+                let mut sum = [0f64; 4];
+                for y in ay.floor() as u32..(by.ceil() as u32).min(h) {
+                    let wy = by.min(f64::from(y + 1)) - ay.max(f64::from(y));
+                    for x in ax.floor() as u32..(bx.ceil() as u32).min(w) {
+                        let wx = bx.min(f64::from(x + 1)) - ax.max(f64::from(x));
+                        let i = (((y0 + y) * full_w + x0 + x) * 4) as usize;
+                        let p = &src[i..i + 4];
+                        let (r, g, b) = if rgba {
+                            (p[0], p[1], p[2])
+                        } else {
+                            (p[2], p[1], p[0])
+                        };
+                        let a = if opaque { 1.0 } else { f64::from(p[3]) / 255.0 };
+                        let lin = |c: u8| {
+                            if a > 0.0 {
+                                decode((f64::from(c) / 255.0 / a).min(1.0)) * a
+                            } else {
+                                0.0
+                            }
+                        };
+                        for (s, v) in sum.iter_mut().zip([lin(r), lin(g), lin(b), a]) {
+                            *s += wx * wy * v;
+                        }
+                    }
+                }
+                let area = rx * ry;
+                let a = (sum[3] / area).clamp(0.0, 1.0);
+                let c = |l: f64| {
+                    if a > 0.0 {
+                        ((encode((l / area / a).clamp(0.0, 1.0)) * a * 255.0).round()) as u8
+                    } else {
+                        0
+                    }
+                };
+                out.extend([c(sum[2]), c(sum[1]), c(sum[0]), (a * 255.0).round() as u8]);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_reference_averages_light() {
+        // White beside black into one pixel: half the light, code 188. The
+        // average of the codes would be 128.
+        let src = [255, 255, 255, 255, 0, 0, 0, 255];
+        assert_eq!(
+            reference(&src, 2, (0, 0, 2, 1), (1, 1), true, false),
+            vec![188, 188, 188, 255]
+        );
     }
 
     /// A premultiplied test image: edges, gradients and text-like strokes,
@@ -773,30 +855,22 @@ mod tests {
             .expect("map out")
     }
 
-    fn compare(
-        fourcc: u32,
-        format: wl_shm::Format,
-        (w, h): (u32, u32),
-        cut: (u32, u32, u32, u32),
-        size: Size,
-    ) {
+    fn compare(fourcc: u32, (w, h): (u32, u32), cut: (u32, u32, u32, u32), size: (u32, u32)) {
         let Some(gpu) = gpu() else { return };
         let pixels = image(w, h, !opaque(fourcc));
         let mut buffer = gpu
             .capture_buffer(w, h, fourcc, &[MOD_LINEAR])
             .expect("capture buffer");
         fill(&mut buffer, &pixels);
-        let (ow, oh) = out_size(cut.2, cut.3, size);
+        let (ow, oh) = crate::jump::live::out_size(cut.2, cut.3, size);
         let mut pool = Pool::default();
         let frame = gpu
             .downscale(&buffer, cut, (ow, oh), &mut pool)
             .expect("draw")
             .expect("a free slot");
         let got = read(&pool, &frame);
-        let (cw, ch, want) = downscale(&pixels, w, cut, format, size);
-        assert_eq!((frame.width, frame.height), (cw, ch));
-        // Both in BGRA memory order: ARGB8888 is B, G, R, A in memory, and
-        // the CPU path writes BGRA for every format.
+        let rgba = matches!(fourcc, ABGR8888 | XBGR8888);
+        let want = reference(&pixels, w, cut, (ow, oh), opaque(fourcc), rgba);
         let worst = got
             .iter()
             .zip(&want)
@@ -815,48 +889,24 @@ mod tests {
     }
 
     #[test]
-    fn matches_the_cpu_path_opaque() {
+    fn matches_the_reference_opaque() {
         // An odd ratio each way (3.79 and 3.78), as a pin at 2x draws.
-        compare(
-            XRGB8888,
-            wl_shm::Format::Xrgb8888,
-            (997, 613),
-            (0, 0, 997, 613),
-            Size::Draw(263, 200),
-        );
+        compare(XRGB8888, (997, 613), (0, 0, 997, 613), (263, 200));
     }
 
     #[test]
-    fn matches_the_cpu_path_with_alpha() {
-        compare(
-            ARGB8888,
-            wl_shm::Format::Argb8888,
-            (997, 613),
-            (0, 0, 997, 613),
-            Size::Draw(263, 200),
-        );
+    fn matches_the_reference_with_alpha() {
+        compare(ARGB8888, (997, 613), (0, 0, 997, 613), (263, 200));
     }
 
     #[test]
-    fn matches_the_cpu_path_for_a_crop_and_rgba_order() {
-        compare(
-            XBGR8888,
-            wl_shm::Format::Xbgr8888,
-            (640, 480),
-            (101, 57, 333, 211),
-            Size::Draw(150, 150),
-        );
+    fn matches_the_reference_for_a_crop_and_rgba_order() {
+        compare(XBGR8888, (640, 480), (101, 57, 333, 211), (150, 150));
     }
 
     #[test]
     fn one_to_one_is_exact() {
-        compare(
-            ABGR8888,
-            wl_shm::Format::Abgr8888,
-            (64, 48),
-            (0, 0, 64, 48),
-            Size::Draw(64, 48),
-        );
+        compare(ABGR8888, (64, 48), (0, 0, 64, 48), (64, 48));
     }
 }
 

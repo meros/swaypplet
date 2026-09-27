@@ -1,4 +1,6 @@
-//! Pixels off an output, over `ext-image-copy-capture-v1`.
+//! Pixels off an output or a window, over `ext-image-copy-capture-v1`, in
+//! memory: what a screenshot needs. Live pictures of windows use the same
+//! protocol with a dmabuf and never read pixels back (`jump::live`).
 //!
 //! This is the half of a screenshot that `grim` used to be. The protocol is
 //! the staging successor to wlr-screencopy, and the compositor advertises both;
@@ -6,7 +8,7 @@
 //! (docs/history/shell-ideas-2026-08.md item 5), so there is one capture path in the process rather
 //! than two.
 //!
-//! The flow is fixed: ask an output for a capture source, open a session on it,
+//! The flow is fixed: ask an output or a window for a capture source, open a session on it,
 //! wait for the session to say how big a buffer it needs and in what format,
 //! hand it one backed by a memfd, and wait for the frame to go `ready`. All of
 //! it blocks, so all of it happens on a worker thread with its own Wayland
@@ -99,6 +101,27 @@ pub fn output(name: &str) -> Result<Image, String> {
             .map(|(o, _)| o.clone())
             .ok_or_else(|| format!("no output named {name}"))?;
         Ok(sources.create_source(&output, qh, ()))
+    })
+}
+
+/// Capture one window whole, by the `foreign_toplevel_identifier` sway
+/// reports for it, at its own resolution.
+///
+/// Blocking. `Err` when there is no such window, the compositor does not
+/// advertise the capture protocol, or the copy fails.
+pub fn window(identifier: &str) -> Result<Image, String> {
+    with_source(|state, qh| {
+        let sources = state
+            .toplevels_manager
+            .clone()
+            .ok_or("compositor does not advertise ext-foreign-toplevel-image-capture-source-v1")?;
+        let handle = state
+            .toplevels
+            .iter()
+            .find(|(_, id)| id.as_deref() == Some(identifier))
+            .map(|(h, _)| h.clone())
+            .ok_or_else(|| format!("no window {identifier}"))?;
+        Ok(sources.create_source(&handle, qh, ()))
     })
 }
 
@@ -226,22 +249,28 @@ fn with_source(
 /// The two formats a compositor offers for this are byte-order-reversed
 /// little-endian words, so both are BGRA in memory; `xrgb8888` simply has no
 /// meaningful alpha byte, and a screenshot of an opaque output is opaque.
+/// With alpha the compositor's pixels are premultiplied, and an image is
+/// straight, so colour is divided back out: a translucent window's shot
+/// would otherwise come out darker where it lets the desktop through.
 fn to_rgba(src: &[u8], width: u32, height: u32, format: wl_shm::Format) -> Vec<u8> {
     let mut out = vec![0u8; (width * height * 4) as usize];
     let opaque = matches!(format, wl_shm::Format::Xrgb8888 | wl_shm::Format::Xbgr8888);
     let swap = matches!(format, wl_shm::Format::Xrgb8888 | wl_shm::Format::Argb8888);
 
     for (dst, px) in out.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
-        if swap {
-            dst[0] = px[2];
-            dst[1] = px[1];
-            dst[2] = px[0];
-        } else {
-            dst[0] = px[0];
-            dst[1] = px[1];
-            dst[2] = px[2];
-        }
-        dst[3] = if opaque { 0xff } else { px[3] };
+        let a = if opaque { 0xff } else { px[3] };
+        let un = |c: u8| {
+            if a == 0 || a == 255 {
+                c
+            } else {
+                ((u32::from(c) * 255 + u32::from(a) / 2) / u32::from(a)).min(255) as u8
+            }
+        };
+        let (r, b) = if swap { (px[2], px[0]) } else { (px[0], px[2]) };
+        dst[0] = un(r);
+        dst[1] = un(px[1]);
+        dst[2] = un(b);
+        dst[3] = a;
     }
     out
 }
@@ -617,9 +646,19 @@ mod tests {
 
     #[test]
     fn abgr_keeps_its_byte_order_and_its_alpha() {
+        // Premultiplied at half alpha, straight out: twice the colour.
         let src = [10u8, 20, 30, 128];
         let out = to_rgba(&src, 1, 1, wl_shm::Format::Abgr8888);
-        assert_eq!(out, vec![10, 20, 30, 128]);
+        assert_eq!(out, vec![20, 40, 60, 128]);
+    }
+
+    #[test]
+    fn a_translucent_argb_pixel_is_unpremultiplied() {
+        // B, G, R, A in memory, premultiplied at half alpha: 100 of a
+        // straight 200.
+        let src = [50u8, 100, 0, 128];
+        let out = to_rgba(&src, 1, 1, wl_shm::Format::Argb8888);
+        assert_eq!(out, vec![0, 199, 100, 128]);
     }
 }
 

@@ -211,12 +211,24 @@ fn start(key: &str, wants: &[Want], fps: u32) -> live::Stream {
     live::Stream::start_wants(wants.to_vec(), fps, tx)
 }
 
+/// A frame, by the window it is of.
+trait Keyed {
+    fn window(&self) -> &str;
+}
+
+impl Keyed for live::Frame {
+    fn window(&self) -> &str {
+        &self.id
+    }
+}
+
 /// `first` and everything queued behind it, keeping each window's newest
-/// frame only, in the order the windows first appeared.
-fn newest(first: live::Frame, rx: &async_channel::Receiver<live::Frame>) -> Vec<live::Frame> {
+/// frame only, in the order the windows first appeared. A frame replaced
+/// here is dropped, and its GPU buffer goes back to the worker at once.
+fn newest<F: Keyed>(first: F, rx: &async_channel::Receiver<F>) -> Vec<F> {
     let mut frames = vec![first];
     while let Ok(frame) = rx.try_recv() {
-        match frames.iter_mut().find(|f| f.id == frame.id) {
+        match frames.iter_mut().find(|f| f.window() == frame.window()) {
             Some(older) => *older = frame,
             None => frames.push(frame),
         }
@@ -248,7 +260,7 @@ mod tests {
         Want {
             id: id.to_string(),
             crop,
-            size: live::Size::Draw(w, w),
+            size: (w, w),
         }
     }
 
@@ -329,13 +341,16 @@ mod tests {
         assert!(hub.subscribers("ws").is_empty());
     }
 
-    fn frame(id: &str, width: u32) -> live::Frame {
-        live::Frame {
-            id: id.to_string(),
-            width,
-            height: 1,
-            pixels: live::Pixels::Memory(Vec::new()),
+    struct Frame(String, u32);
+
+    impl Keyed for Frame {
+        fn window(&self) -> &str {
+            &self.0
         }
+    }
+
+    fn frame(id: &str, width: u32) -> Frame {
+        Frame(id.to_string(), width)
     }
 
     #[test]
@@ -345,7 +360,7 @@ mod tests {
             tx.try_send(frame(id, w)).unwrap();
         }
         let got = newest(frame("a", 1), &rx);
-        let got: Vec<(&str, u32)> = got.iter().map(|f| (f.id.as_str(), f.width)).collect();
+        let got: Vec<(&str, u32)> = got.iter().map(|f| (f.0.as_str(), f.1)).collect();
         assert_eq!(got, [("a", 5), ("b", 4)]);
         assert!(rx.try_recv().is_err());
     }

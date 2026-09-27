@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use gtk4::prelude::*;
 use gtk4::{gdk, glib};
 
-use super::live::{Crop, Frame, Pixels, Size, Want};
+use super::live::{Crop, Frame, Want};
 use super::scene::{self, Scene};
 
 /// Every picture a window's frames land on, by window identifier. Each
@@ -67,7 +67,7 @@ impl Live {
                 Want {
                     id: id.clone(),
                     crop,
-                    size: Size::Draw(w, h),
+                    size: (w, h),
                 }
             })
             .collect()
@@ -145,19 +145,16 @@ pub fn device_scale(widget: &impl IsA<gtk4::Widget>) -> f64 {
 
 /// A frame as a texture, kept as its window's last picture ([`LAST`]).
 ///
-/// `None` when GTK would not take a GPU frame; the GPU path is then off
-/// for the process (`gpu::refuse`), and the pictures keep what they had
-/// until the stream's next start sends frames in memory.
+/// `None` when GTK would not take the frame's dmabuf; live frames are
+/// then off for the process (`gpu::refuse`), and the pictures keep what
+/// they had.
 pub fn remember(frame: Frame) -> Option<(String, gdk::Texture)> {
-    let texture = match frame.pixels {
-        Pixels::Memory(pixels) => texture(frame.width, frame.height, pixels),
-        Pixels::Gpu(gpu) => match gpu.into_texture() {
-            Ok(texture) => texture,
-            Err(e) => {
-                super::gpu::refuse(&e);
-                return None;
-            }
-        },
+    let texture = match frame.buffer.into_texture() {
+        Ok(texture) => texture,
+        Err(e) => {
+            super::gpu::refuse(&e);
+            return None;
+        }
     };
     LAST.with(|l| {
         let mut last = l.borrow_mut();
@@ -167,19 +164,6 @@ pub fn remember(frame: Frame) -> Option<(String, gdk::Texture)> {
         last.insert(frame.id.clone(), texture.clone());
     });
     Some((frame.id, texture))
-}
-
-/// Premultiplied BGRA, tightly packed, as `live::Frame` carries it.
-pub fn texture(width: u32, height: u32, pixels: Vec<u8>) -> gdk::Texture {
-    let bytes = glib::Bytes::from_owned(pixels);
-    gdk::MemoryTexture::new(
-        width as i32,
-        height as i32,
-        gdk::MemoryFormat::B8g8r8a8Premultiplied,
-        &bytes,
-        (width * 4) as usize,
-    )
-    .upcast()
 }
 
 /// A live picture of a workspace in a box of `w` by `h`: every window at
