@@ -297,7 +297,8 @@ the entry. Title words weigh most, then keywords, then the tab and group,
 then the subtitle; a whole-word match beats a prefix, and a query that is
 the title or a keyword phrase gets a bonus. A query whose every word is a
 whole word of a title or keyword names the setting, and its rows (at most
-three) go above the apps; the rest (at most four) go below them. The table
+three) go above the apps and the page rows ("sudo" lists the sudo row
+before the Idle & Lock tab); the rest (at most four) go below the apps. The table
 is lowercased on the first query and kept; a closed launcher costs nothing.
 The Launcher tab's "Pages and settings" switch turns the rows off.
 
@@ -314,9 +315,10 @@ The Launcher tab's "Pages and settings" switch turns the rows off.
   (`wallpaper`, `idle`, `bar`, `alerts`, `launcher`, `displays`, `glass`).
 - `SWPP_SETTLE=4 SWAYPPLET_PANEL_QUERY=dark dev/render.sh --mode launcher`
   shows the search results; `SWAYPPLET_PANEL_ACTIVATE=1` also presses
-  Enter, for the row lit on its tab. The light holds 1.2 s and the harness
-  shoots about 5 s after it opens the panel, so pass a delay in
-  milliseconds (`=4500`) with `SWPP_SETTLE=0` to catch it.
+  Enter, for the row lit on its tab (a larger number is the delay in
+  milliseconds). The light holds 1.2 s and the harness's first shot comes
+  a few seconds after it opens the panel, so add
+  `SWAYPPLET_HIGHLIGHT_HOLD_MS=10000` to catch it.
   `settings.displays` drives the nested compositor's outputs;
   `SWAYPPLET_PREVIEW_DISPLAYS_APPLY=1` moves one and applies it after two
   seconds (the keep question, then the revert), `=leave` also hides the

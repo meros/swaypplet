@@ -158,9 +158,16 @@ pub fn highlight(w: &impl IsA<gtk4::Widget>) {
         let w = w.clone();
         move || w.add_css_class("lit")
     });
+    // Harness hook: dev/render.sh starts its shots a few seconds after it
+    // opens the panel, give or take, so `SWAYPPLET_HIGHLIGHT_HOLD_MS` holds
+    // the light long enough for a shot to land on it.
+    let hold = std::env::var("SWAYPPLET_HIGHLIGHT_HOLD_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(HIGHLIGHT_HOLD_MS);
     let weak = w.downgrade();
     gtk4::glib::timeout_add_local_once(
-        std::time::Duration::from_millis(HIGHLIGHT_HOLD_MS),
+        std::time::Duration::from_millis(hold),
         move || {
             if let Some(w) = weak.upgrade() {
                 w.remove_css_class("lit");

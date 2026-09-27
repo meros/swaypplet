@@ -45,14 +45,21 @@ progressbar.ui-breathing progress {
 /* Highlight: the row a launcher result opened on (a settings row), lit in
    the accent's tint for a moment and faded back. A change of state, so the
    state motion both ways; the hold is Rust's (`ui::highlight`). The corner
-   is the tile's, so the light reads as the row's own fill. */
+   is the tile's, and a spread shadow of the same tint carries the fill a
+   step past the row's edge, so the label does not sit flush against it
+   and nothing reflows. The accent hairline round it is what finds the row
+   on light glass over a busy wallpaper, where the tint alone washes out. */
 .ui-highlight {
     border-radius: var(--radius-tile);
+    outline: 1px solid transparent;
+    outline-offset: var(--space-1);
     transition: background-color var(--motion-state),
-                box-shadow var(--motion-state);
+                box-shadow var(--motion-state),
+                outline-color var(--motion-state);
 }
 
 .ui-highlight.lit {
     background-color: var(--accent-tint);
-    box-shadow: inset 0 0 0 1px var(--accent-bg);
+    box-shadow: 0 0 0 var(--space-1) var(--accent-tint);
+    outline-color: var(--accent-bg);
 }
