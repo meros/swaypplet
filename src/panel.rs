@@ -144,9 +144,9 @@ impl Sections {
             }
         }
         if let Some((dnd, store)) = self.dnd.borrow().as_ref() {
-            let on = store.borrow().is_dnd();
+            let (on, text) = tiles::dnd_view(&store.borrow());
             dnd.toggle.set_active(on);
-            ui::set_tile_status(dnd, &tiles::dnd_status(on));
+            ui::set_tile_status(dnd, &text);
         }
     }
 }
@@ -521,6 +521,15 @@ impl Panel {
                 move || sections.refresh(),
             );
         }
+    }
+
+    /// Open on the notification centre: the quiet summary card's click
+    /// (`services::notifications::context`).
+    pub fn show_notifications(&self) {
+        if !(self.surface.is_shown() && self.surface.window().is_visible()) {
+            self.toggle();
+        }
+        self.deck_stack.set_visible_child_name("notifications");
     }
 
     pub fn refresh_audio(&self) {

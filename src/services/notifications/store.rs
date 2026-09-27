@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use super::context::Context;
 use super::{CloseReason, Notification, Urgency};
 
 type NotifyCb = Rc<dyn Fn(&Notification)>;
@@ -42,6 +43,8 @@ pub struct NotificationStore {
     open_ids: std::collections::HashSet<u32>,
     next_id: u32,
     dnd_enabled: bool,
+    /// Quiet by context: what holds popups while presenting.
+    context: Context,
     /// Apps silenced from the card itself, each until an instant. Popups
     /// only: a muted app's notifications still reach history, because muting
     /// is "stop interrupting me", not "throw this away".
@@ -101,6 +104,7 @@ impl NotificationStore {
             open_ids: std::collections::HashSet::new(),
             next_id: 1,
             dnd_enabled: false,
+            context: Context::default(),
             muted_apps: std::collections::HashMap::new(),
             on_notify: Vec::new(),
             on_close: Vec::new(),
@@ -180,6 +184,15 @@ impl NotificationStore {
         self.dnd_enabled = enabled;
     }
 
+    pub fn context(&self) -> &Context {
+        &self.context
+    }
+
+    /// Through `context::update`, which posts the summary it may return.
+    pub fn context_mut(&mut self) -> &mut Context {
+        &mut self.context
+    }
+
     // ── Core operations ──────────────────────────────────────────────────
 
     /// Add or replace a notification. Returns `(assigned_id, pending_callbacks)`.
@@ -242,6 +255,14 @@ impl NotificationStore {
         let id = notif.id;
         self.open_ids.insert(id);
 
+        // Held by the context only when it would have popped: a card that
+        // DND, a mute or a visible session already kept down was not
+        // missed, so it is not counted either.
+        notif.held = self.would_pop(&notif) && self.context.hold(&notif);
+        if let Some(stored) = self.notifications.iter_mut().find(|n| n.id == id) {
+            stored.held = notif.held;
+        }
+
         // Trim oldest notifications if over the limit
         while self.notifications.len() > MAX_NOTIFICATIONS {
             self.notifications.remove(0);
@@ -262,6 +283,7 @@ impl NotificationStore {
         // `open_ids` covers transient notifications too, so this is the only
         // reliable way to tell a real close from a no-op on an unknown id.
         if self.open_ids.remove(&id) {
+            self.context.forget(id);
             self.notifications.retain(|n| n.id != id);
             for cb in &self.on_close {
                 pending.close.push((cb.clone(), id, reason));
@@ -280,6 +302,7 @@ impl NotificationStore {
         let mut any = false;
         for id in ids {
             if self.open_ids.remove(id) {
+                self.context.forget(*id);
                 any = true;
                 for cb in &self.on_close {
                     pending.close.push((cb.clone(), *id, reason));
@@ -299,6 +322,7 @@ impl NotificationStore {
         self.notifications.clear();
         for id in &ids {
             self.open_ids.remove(id);
+            self.context.forget(*id);
         }
 
         let mut pending = PendingCallbacks::new();
@@ -328,6 +352,17 @@ impl NotificationStore {
 
     /// Check whether a notification should show a popup.
     pub fn should_popup(&self, notif: &Notification) -> bool {
+        // Held while presenting (`context.rs`). Critical is never held.
+        if notif.held && notif.urgency != Urgency::Critical {
+            return false;
+        }
+        self.would_pop(notif)
+    }
+
+    /// [`should_popup`] before the context has its say.
+    ///
+    /// [`should_popup`]: Self::should_popup
+    fn would_pop(&self, notif: &Notification) -> bool {
         // Low urgency → silent-to-center (no popup)
         if notif.urgency == Urgency::Low {
             return false;
@@ -548,6 +583,56 @@ mod tests {
         assert_eq!(stored.task, None);
         assert!(!stored.suppressed);
         assert!(store.should_popup(&stored));
+    }
+
+    fn presenting(store: &mut NotificationStore) {
+        store
+            .context_mut()
+            .set_signals(crate::services::notifications::context::Signals {
+                sharing: true,
+                ..Default::default()
+            });
+    }
+
+    #[test]
+    fn a_held_notification_reaches_history_without_popping() {
+        let mut store = NotificationStore::new();
+        presenting(&mut store);
+        let held = add_one(&mut store, notif(None, Urgency::Normal));
+        assert!(held.held && !store.should_popup(&held));
+        assert_eq!(store.all().len(), 1);
+
+        let urgent = add_one(&mut store, notif(None, Urgency::Critical));
+        assert!(store.should_popup(&urgent), "critical breaks through");
+
+        let summary = store
+            .context_mut()
+            .set_signals(Default::default())
+            .expect("one was held");
+        assert_eq!(summary.total(), 1);
+    }
+
+    #[test]
+    fn what_dnd_or_a_mute_kept_down_is_not_counted_as_held() {
+        let mut store = NotificationStore::new();
+        presenting(&mut store);
+        store.set_dnd(true);
+        add_one(&mut store, notif(None, Urgency::Normal));
+        store.set_dnd(false);
+        store.mute_app("claude", std::time::Duration::from_secs(60));
+        add_one(&mut store, notif(None, Urgency::Normal));
+        assert_eq!(store.context_mut().set_signals(Default::default()), None);
+    }
+
+    #[test]
+    fn closing_a_held_notification_takes_it_off_the_count() {
+        let mut store = NotificationStore::new();
+        presenting(&mut store);
+        let a = add_one(&mut store, notif(None, Urgency::Normal));
+        add_one(&mut store, notif(None, Urgency::Normal));
+        let _ = store.close(a.id, CloseReason::Dismissed);
+        let summary = store.context_mut().set_signals(Default::default()).unwrap();
+        assert_eq!(summary.total(), 1);
     }
 
     #[test]

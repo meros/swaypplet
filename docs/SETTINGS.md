@@ -11,6 +11,8 @@ gear in the flight deck; a bare `:` lists every prefix). Eight tabs,
 | Bar | clock format, segments, OSD placement | `bar` |
 | Input | keyboard layouts, layout switch, Caps Lock, key repeat; touchpad and mouse; key steps, volume boost; the connected devices | `input`, `keys` |
 | Alerts | popup linger, corner and depth; quiet hours; what a screenshot becomes | `alerts`, `capture` |
+| Bar | clock format, segments, OSD placement, key steps, volume boost | `bar`, `keys` |
+| Alerts | popup linger, corner and depth; quiet hours; quiet by context; what a screenshot becomes | `alerts`, `capture` |
 | Launcher | which kinds of result a search lists; ranking by use, and forgetting it | `launcher` |
 | Displays | where the outputs stand, and each one's mode, scale, rotation and adaptive sync; the profiles | `displays` (the profiles) |
 | Glass | the liquid-glass material | `~/.config/swaypplet/glass.json` |
@@ -165,7 +167,15 @@ and Bar tabs is `nix <section>` into the clipboard.
 - **Alerts**: a popup reads linger, corner and depth as it is created and
   keeps them (`notifications/stack.rs`); quiet hours is a 30 s tick plus an
   observer (`services/notifications/quiet.rs`), edge-triggered so a manual DND
-  toggle inside the window stands. Capture is read at the moment of the
+  toggle inside the window stands. Quiet by context (`context_quiet`, the
+  master switch, over `quiet_when_sharing`, `quiet_when_mirrored`,
+  `quiet_when_fullscreen` and `quiet_in_calls`) is re-read on every
+  `store::observe` by `services/notifications/context.rs`; turning a switch
+  off mid-stretch ends the stretch and posts its count. The signals push:
+  the sway snapshot (fullscreen on the focused output, overlapping outputs
+  or wl-mirror), the PipeWire graph through `pw-dump --monitor`
+  (`services/capture.rs`: a portal screen-cast stream, a running camera)
+  and the sound server's recorders. Capture is read at the moment of the
   shot (`screenshot/deliver.rs`, `screenshot/mod.rs`).
 - **Launcher** is read on every query (`launcher::sources`), so a switch
   applies to the next key typed. The ranking history is not a setting: it

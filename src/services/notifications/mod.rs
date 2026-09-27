@@ -1,3 +1,4 @@
+pub mod context;
 pub mod dbus;
 pub mod group;
 pub mod quiet;
@@ -83,6 +84,9 @@ pub struct Notification {
     /// The session's workspace was visible when the notification arrived —
     /// the popup is suppressed (history keeps it; Critical overrides).
     pub suppressed: bool,
+    /// Held by the context (`context.rs`): no popup while a screen is
+    /// shared, mirrored or fullscreen. Decided once, at add time.
+    pub held: bool,
 
     /// The sending application's icon: the `app_icon` argument, or the
     /// `desktop-entry` hint when that is empty. Identity, not content.
@@ -128,6 +132,7 @@ impl Default for Notification {
             claude_pid: None,
             task: None,
             suppressed: false,
+            held: false,
             icon: None,
             image: None,
             category: None,
