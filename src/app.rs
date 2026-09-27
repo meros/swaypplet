@@ -183,6 +183,10 @@ pub fn run() {
         // compositor reports and applied in one step (`services::displays`).
         crate::services::displays::start(store_startup.clone());
 
+        // Keyboard, touchpad and mouse: the saved `input` section on sway,
+        // again after a hotplug or a reload (`services::input`).
+        crate::services::input::follow();
+
         // Start D-Bus notification server
         dbus::start_server(store_startup.clone());
 

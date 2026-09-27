@@ -322,6 +322,43 @@ pub fn focused_output() -> Option<String> {
     })
 }
 
+/// `get_inputs` as sway sends it, on a fresh connection.
+///
+/// Blocking, for a worker thread. Raw JSON rather than swayipc's typed
+/// reply, which drops `accel_profile` and the keyboard's repeat settings,
+/// the values the Input tab shows beside its rows.
+pub fn inputs_json() -> Result<serde_json::Value, String> {
+    let mut failure = "no sway socket".to_string();
+    for path in socket_candidates() {
+        match UnixStream::connect(&path) {
+            Ok(stream) => {
+                return raw_request(stream, GET_INPUTS)
+                    .map_err(|e| format!("sway ipc: get_inputs failed: {e}"));
+            }
+            Err(e) => failure = e.to_string(),
+        }
+    }
+    Err(format!("sway ipc: get_inputs cannot connect: {failure}"))
+}
+
+const GET_INPUTS: u32 = 100;
+
+/// One i3-ipc message with an empty payload, and its reply parsed. The
+/// header is the magic, the payload length and the type, in host order.
+fn raw_request(mut stream: UnixStream, kind: u32) -> std::io::Result<serde_json::Value> {
+    use std::io::{Read, Write};
+    let mut message = b"i3-ipc".to_vec();
+    message.extend_from_slice(&0u32.to_ne_bytes());
+    message.extend_from_slice(&kind.to_ne_bytes());
+    stream.write_all(&message)?;
+    let mut header = [0u8; 14];
+    stream.read_exact(&mut header)?;
+    let len = u32::from_ne_bytes([header[6], header[7], header[8], header[9]]) as usize;
+    let mut body = vec![0u8; len];
+    stream.read_exact(&mut body)?;
+    Ok(serde_json::from_slice(&body)?)
+}
+
 /// The config sway actually loaded, as text.
 ///
 /// Blocking, so it runs on a worker thread (`spawn::spawn_work`); the reply is

@@ -35,6 +35,11 @@ sections and fields (data/settings-defaults.json has every default):
   alerts     linger (short|normal|long), corner (top_right|top_left|bottom_right|bottom_left),
              stack, quiet, quiet_from_h, quiet_to_h
   capture    folder, after (both|save|copy), annotate
+  input      layouts (a JSON list: [\"se\", \"us(dvorak)\"]), layout_switch, caps,
+             repeat_delay_ms, repeat_rate, touchpad_tap, touchpad_natural_scroll,
+             touchpad_speed, touchpad_accel_profile, touchpad_dwt,
+             touchpad_click_method, touchpad_scroll_method,
+             mouse_speed, mouse_accel_profile, mouse_natural_scroll
 A value is JSON where it parses (600, true) and a string otherwise (fit, /path/to.png).";
 
 pub fn run(args: impl Iterator<Item = String>) {

@@ -81,5 +81,22 @@
   },
   "displays": {
     "profiles": []
+  },
+  "input": {
+    "layouts": null,
+    "layout_switch": null,
+    "caps": null,
+    "repeat_delay_ms": null,
+    "repeat_rate": null,
+    "touchpad_tap": null,
+    "touchpad_natural_scroll": null,
+    "touchpad_speed": null,
+    "touchpad_accel_profile": null,
+    "touchpad_dwt": null,
+    "touchpad_click_method": null,
+    "touchpad_scroll_method": null,
+    "mouse_speed": null,
+    "mouse_accel_profile": null,
+    "mouse_natural_scroll": null
   }
 }

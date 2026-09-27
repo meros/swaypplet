@@ -1,14 +1,15 @@
 # Settings
 
 The settings pane is a page in the Helm card (`:set` in the omnibox, or the
-gear in the flight deck; a bare `:` lists every prefix). Seven tabs,
+gear in the flight deck; a bare `:` lists every prefix). Eight tabs,
 `src/settings/`:
 
 | tab | edits | sections of `~/.config/swaypplet/settings.json` |
 |---|---|---|
 | Look | `output * bg` on the compositor; whether the theme takes its colours from it; how much the shell animates; the night light | `wallpaper`, `look`, `night_light` |
 | Idle & Lock | the idle manager's timers; the night window; walk-away lock; face unlock; what sudo and pkexec may ask for | `idle`, `elevate` |
-| Bar | clock format, segments, OSD placement, key steps, volume boost | `bar`, `keys` |
+| Bar | clock format, segments, OSD placement | `bar` |
+| Input | keyboard layouts, layout switch, Caps Lock, key repeat; touchpad and mouse; key steps, volume boost; the connected devices | `input`, `keys` |
 | Alerts | popup linger, corner and depth; quiet hours; what a screenshot becomes | `alerts`, `capture` |
 | Launcher | which kinds of result a search lists; ranking by use, and forgetting it | `launcher` |
 | Displays | where the outputs stand, and each one's mode, scale, rotation and adaptive sync; the profiles | `displays` (the profiles) |
@@ -143,6 +144,26 @@ and Bar tabs is `nix <section>` into the clipboard.
   history deletes it (docs/LAUNCHER.md).
 - **Keys** are read per press by the OSD; the panel's volume rail takes
   the ceiling when it refreshes.
+- **Input** (`input`: `layouts` as xkb codes, `se`, `us(dvorak)`;
+  `layout_switch` and `caps` as xkb options, `grp:win_space_toggle`,
+  `caps:escape`; `repeat_delay_ms`, `repeat_rate`; `touchpad_*` and
+  `mouse_*` for tap, natural scrolling, speed −1 to 1, `accel_profile`
+  adaptive | flat, dwt, `click_method` button_areas | clickfinger | none,
+  `scroll_method` two_finger | edge | on_button_down | none) goes to sway
+  as `input type:keyboard|touchpad|pointer …` commands
+  (`services::input`), in the panel process. Every field is optional, and
+  one left `null` is never sent, so the sway config's own `input` blocks
+  stay in force for it: the section holds what was changed and nothing
+  else. A store observer sends only the knobs that changed (each xkb
+  command compiles a keymap); a knob that goes back to `null` costs a
+  `swaymsg reload`, the one way to get the config's value back. A thread
+  on the IPC socket re-applies the whole section after a device is added
+  and after a reload. `layout_switch` and `caps` share sway's one
+  `xkb_options` line, so either one set replaces a config `xkb_options`
+  line whole. The tab shows the value the devices report (`get_inputs`,
+  read when the panel opens) for a row that has no override; the layout
+  picker lists xkeyboard-config's `rules/evdev.lst` (`settings/xkb.rs`;
+  the package build names the file in `SWAYPPLET_XKB_RULES`).
 - **Wallpaper** is one `output * bg` command over sway IPC.
   `wallpaper::apply_saved` replays it at panel start, and
   `swaypplet settings apply` from the config's `exec_always` replays it on
@@ -198,7 +219,9 @@ switches only ever remove a way in or add a lock.
 ## Trying it without a rebuild
 
 - `dev/render.sh --mode preview:settings.idle` renders one tab
-  (`wallpaper`, `idle`, `bar`, `alerts`, `launcher`, `displays`, `glass`).
+  (`wallpaper`, `idle`, `bar`, `input`, `alerts`, `launcher`, `displays`,
+  `glass`). `settings.input` sends the saved `input` section to the nested
+  compositor and lists its devices.
   `settings.displays` drives the nested compositor's outputs;
   `SWAYPPLET_PREVIEW_DISPLAYS_APPLY=1` moves one and applies it after two
   seconds (the keep question, then the revert), `=leave` also hides the

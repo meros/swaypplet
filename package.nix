@@ -10,6 +10,7 @@
   glib,
   cairo,
   pango,
+  xkeyboard_config,
   harfbuzz,
   gdk-pixbuf,
   graphene,
@@ -68,6 +69,8 @@ rustPlatform.buildRustPackage {
     CARGO_PROFILE_RELEASE_LTO = "false";
     CARGO_PROFILE_RELEASE_OPT_LEVEL = "2";
     RUSTFLAGS = "-C linker=clang -C link-arg=-fuse-ld=mold";
+    # The xkb layout list the Input tab offers (src/settings/xkb.rs).
+    SWAYPPLET_XKB_RULES = "${xkeyboard_config}/share/X11/xkb/rules/evdev.lst";
   };
 
   postInstall = ''

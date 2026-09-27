@@ -19,6 +19,7 @@ pub mod displays;
 pub mod elephant;
 pub mod gamma;
 pub mod inhibit;
+pub mod input;
 pub mod lid;
 pub mod mpris;
 pub mod network;
