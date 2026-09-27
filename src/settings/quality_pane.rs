@@ -1011,6 +1011,7 @@ fn apply_fix(state: &Rc<State>, pr: u64) {
     state.deploy_bar.set_visible(true);
     ui::set_mono(&state.deploy_line, true);
     ui::set_tone(&state.deploy_line, Tone::Muted);
+    ui::set_weight(&state.deploy_line, ui::Weight::Regular);
     state
         .deploy_line
         .set_text(&format!("Merging PR #{pr}\u{2026}"));
@@ -1043,10 +1044,13 @@ fn apply_fix(state: &Rc<State>, pr: u64) {
         move |result| match result {
             Ok(()) => follow_deploy(&state),
             Err(e) => {
-                // A refusal, not a run: words in the warning tone, no bar.
+                // A refusal, not a run: plain words, no bar. Muted and strong
+                // rather than --warning, which is not held to a text
+                // contrast through the glass.
                 state.deploy_bar.set_visible(false);
                 ui::set_mono(&state.deploy_line, false);
-                ui::set_tone(&state.deploy_line, Tone::Warning);
+                ui::set_tone(&state.deploy_line, Tone::Muted);
+                ui::set_weight(&state.deploy_line, ui::Weight::Strong);
                 state
                     .deploy_line
                     .set_text(&format!("Not applied: {}", body::cut(&e, 200)));
