@@ -51,6 +51,18 @@
     padding-top: var(--space-2);
 }
 
+/* ── Displays (src/settings/displays_pane.rs) ──
+   The arrangement canvas: a well tall enough for a row of three outputs
+   and a column of two, which the tiles are fitted into; the chips under it
+   pick an output, the switched-off ones included. */
+.displays-canvas {
+    min-height: 220px;
+}
+
+.displays-chips {
+    padding-top: var(--space-2);
+}
+
 /* ── Tabs ── */
 .settings-tabs {
     padding: 0 var(--space-1) var(--space-1);

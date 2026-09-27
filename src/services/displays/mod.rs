@@ -29,8 +29,9 @@ mod wayland;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-pub use matcher::HeadState;
-use matcher::{HeadPlan, PlanError};
+pub use matcher::{HeadPlan, HeadState, Mode, ModeChoice, dpi_scale};
+use matcher::PlanError;
+pub use wayland::Outcome;
 
 use crate::service::Observed;
 use crate::services::notifications::store::{StoreRef, store_add};
@@ -66,12 +67,20 @@ pub fn observe(cb: impl Fn() + 'static) {
 
 /// The name a density scale for unnamed outputs is sent under.
 const DEFAULT: &str = "(scale from density)";
+/// The name a layout from the Displays tab is sent under.
+const BY_HAND: &str = "(arranged by hand)";
+
+/// Who asked for a configuration and wants its answer.
+type Reply = Box<dyn FnOnce(Outcome)>;
 
 struct Pending {
     id: u64,
     profile: String,
     /// Already retried once after a `cancelled`.
     retried: bool,
+    /// A layout from the Displays tab: the answer goes back to it, and
+    /// nothing is retried or notified here.
+    reply: Option<Reply>,
 }
 
 /// Where a configuration goes: the compositor, or a test's recorder.
@@ -165,6 +174,61 @@ pub fn apply(name: &str) {
         return;
     };
     e.show(profile, &assignment, &heads);
+}
+
+/// Send `plans`, one per head of `heads` (the view the caller built them
+/// from), as one configuration: tested, then applied. `reply` gets the
+/// answer, always once and never inside this call. The plans are matched to
+/// the outputs as they are now, by connector, so a layout built from an
+/// older view (a revert) is judged against what is on screen: one already
+/// there answers `Succeeded` without a modeset, and one that enables
+/// nothing is refused here as `Failed`. A hand layout is no profile, so the
+/// profile on screen is forgotten when it succeeds.
+pub fn configure(heads: &[HeadState], plans: Vec<HeadPlan>, reply: impl FnOnce(Outcome) + 'static) {
+    let answer = |reply: Reply, outcome| {
+        glib::idle_add_local_once(move || reply(outcome));
+    };
+    let reply: Reply = Box::new(reply);
+    let Some(e) = engine() else {
+        return answer(reply, Outcome::Failed);
+    };
+    let now = e.heads.borrow().clone();
+    let Some(plans) = onto(heads, &plans, &now) else {
+        return answer(reply, Outcome::Failed);
+    };
+    if matcher::satisfied(&plans, &now) {
+        return answer(reply, Outcome::Succeeded);
+    }
+    e.send_with(BY_HAND, &plans, &now, Some(reply));
+}
+
+/// `plans` (one per head of `from`) for the heads in `now`, by connector.
+/// A head the plans do not name stays as it is. `None` when the plans do
+/// not line up with `from`, or when nothing would be left on.
+fn onto(from: &[HeadState], plans: &[HeadPlan], now: &[HeadState]) -> Option<Vec<HeadPlan>> {
+    if plans.len() != from.len() {
+        return None;
+    }
+    let out: Vec<HeadPlan> = now
+        .iter()
+        .map(|h| {
+            from.iter()
+                .position(|f| f.name == h.name)
+                .map(|i| plans[i].clone())
+                .unwrap_or(if h.enabled {
+                    HeadPlan::Enable {
+                        mode: None,
+                        position: None,
+                        scale: None,
+                        transform: None,
+                        adaptive_sync: None,
+                    }
+                } else {
+                    HeadPlan::Disable
+                })
+        })
+        .collect();
+    (!out.iter().all(|p| *p == HeadPlan::Disable)).then_some(out)
 }
 
 /// Save the layout on screen as `name`, replacing a profile of that name
@@ -266,9 +330,18 @@ impl Engine {
     }
 
     fn outcome(&self, id: u64, outcome: wayland::Outcome) {
-        let Some(pending) = self.pending.borrow_mut().take_if(|p| p.id == id) else {
+        let Some(mut pending) = self.pending.borrow_mut().take_if(|p| p.id == id) else {
             return;
         };
+        if let Some(reply) = pending.reply.take() {
+            log::info!("displays: layout by hand: {outcome:?}");
+            if outcome == Outcome::Succeeded {
+                *self.current.borrow_mut() = None;
+            }
+            reply(outcome);
+            self.publish();
+            return;
+        }
         match outcome {
             wayland::Outcome::Succeeded => {
                 log::info!("displays: profile {} applied", pending.profile);
@@ -344,13 +417,23 @@ impl Engine {
     }
 
     fn send(&self, name: &str, plans: &[HeadPlan], heads: &[HeadState]) {
+        self.send_with(name, plans, heads, None);
+    }
+
+    fn send_with(&self, name: &str, plans: &[HeadPlan], heads: &[HeadState], reply: Option<Reply>) {
         let id = self.next_id.get();
         self.next_id.set(id + 1);
-        *self.pending.borrow_mut() = Some(Pending {
+        let before = self.pending.replace(Some(Pending {
             id,
             profile: name.to_string(),
             retried: self.retrying.get(),
-        });
+            reply,
+        }));
+        // The one before is superseded and its answer will be dropped; a
+        // caller waiting on it hears so now rather than never.
+        if let Some(reply) = before.and_then(|p| p.reply) {
+            glib::idle_add_local_once(move || reply(Outcome::Cancelled));
+        }
         log::info!("displays: applying profile {name}");
         self.sink.apply(id, self.serial.get(), heads, plans);
     }
@@ -485,6 +568,72 @@ mod tests {
         cancel(&e, &rec);
         e.event(heads(3, 1.0));
         assert_eq!(rec.sent.borrow().len(), 2, "only one retry");
+    }
+
+    #[test]
+    fn a_layout_by_hand_answers_its_caller_and_forgets_the_profile() {
+        let (e, rec, said) = engine(vec![profile("big", 2.0)]);
+        e.event(heads(1, 1.0));
+        let id = rec.sent.borrow()[0].0;
+        e.event(wayland::Event::Outcome {
+            id,
+            outcome: wayland::Outcome::Succeeded,
+        });
+        assert_eq!(e.current.borrow().as_deref(), Some("big"));
+        let got = Rc::new(Cell::new(None));
+        let g = got.clone();
+        let h = e.heads.borrow().clone();
+        let plan = vec![HeadPlan::Enable {
+            mode: None,
+            position: Some((10, 0)),
+            scale: None,
+            transform: None,
+            adaptive_sync: None,
+        }];
+        e.send_with(BY_HAND, &plan, &h, Some(Box::new(move |o| g.set(Some(o)))));
+        let id = rec.sent.borrow()[1].0;
+        e.event(wayland::Event::Outcome {
+            id,
+            outcome: wayland::Outcome::Failed,
+        });
+        assert_eq!(got.get(), Some(Outcome::Failed));
+        assert!(said.borrow().is_empty(), "the tab says it, not a notification");
+        assert_eq!(e.current.borrow().as_deref(), Some("big"), "a refusal changes nothing");
+        let g = got.clone();
+        e.send_with(BY_HAND, &plan, &h, Some(Box::new(move |o| g.set(Some(o)))));
+        let id = rec.sent.borrow()[2].0;
+        e.event(wayland::Event::Outcome {
+            id,
+            outcome: wayland::Outcome::Succeeded,
+        });
+        assert_eq!(got.get(), Some(Outcome::Succeeded));
+        assert!(e.current.borrow().is_none(), "a hand layout is no profile");
+    }
+
+    #[test]
+    fn a_revert_is_judged_against_the_outputs_now() {
+        // The plan puts DP-1 back at scale 1, built from the view before an
+        // apply moved it to 2: against that old view it is "already there",
+        // against the outputs now it has to be sent.
+        let mut before = head("DP-1", "X", "Y");
+        before.scale = 1.0;
+        let mut now = before.clone();
+        now.scale = 2.0;
+        let back = vec![HeadPlan::Enable {
+            mode: None,
+            position: None,
+            scale: Some(1.0),
+            transform: None,
+            adaptive_sync: None,
+        }];
+        let plans = onto(&[before.clone()], &back, &[now.clone()]).unwrap();
+        assert!(matcher::satisfied(&plans, &[before.clone()]));
+        assert!(!matcher::satisfied(&plans, &[now.clone()]));
+        // A head the plans do not name stays as it is; nothing on is refused.
+        let other = head("HDMI-A-1", "S", "TV");
+        let plans = onto(&[before.clone()], &back, &[now.clone(), other]).unwrap();
+        assert!(matches!(plans[1], HeadPlan::Enable { scale: None, .. }));
+        assert!(onto(&[before], &[HeadPlan::Disable], &[now]).is_none());
     }
 
     #[test]
