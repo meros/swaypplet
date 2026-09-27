@@ -175,11 +175,11 @@ pub fn tailscale(name: &str) -> Option<Status> {
         state: "Running".into(),
         tailnet: Some("example.github".into()),
         self_ip: Some("100.64.0.1".into()),
-        self_name: Some("meros-laptop".into()),
+        self_name: Some("laptop".into()),
         exit_node: None,
         exit_options: vec![
             Peer {
-                name: "meros-server".into(),
+                name: "server".into(),
                 ip: "100.64.0.2".into(),
                 online: true,
             },

@@ -210,7 +210,7 @@ case "$SURFACE" in
     # loop has been killed. The flag below is not one dmenu knows, so the
     # run exits 2 on it — after the dynamic linker has done its work.
     "$BIN" dmenu --filmstrip-warmup </dev/null >/dev/null 2>&1
-    printf 'Personal\nWork\nSales\nBrokers\nADMIN\n' \
+    printf 'Personal\nWork\nSales\nBrokers\nAdmin\n' \
       | "$BIN" dmenu --prompt "Chrome Profile" >/dev/null 2>&1 &
     DMENU_PID=$!
     sleep $(awk "BEGIN{print 8 + 400*$SCALE/1000}")
