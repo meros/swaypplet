@@ -29,19 +29,50 @@ use crate::widgets::{
     users::UserSection,
 };
 
+/// How the flight deck is laid out, and with it how wide the card is: the
+/// alternatives zoo's open decision (docs/alternatives-zoo.html,
+/// "helm-width"). One switch, read by [`build_flight_deck`] and
+/// [`helm_card_size`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(dead_code)] // the other variant is the zoo's alternative, one line away
+enum HelmLayout {
+    /// A grid: the four switches on one line at equal widths, the actions
+    /// and the session cluster on the next, every control at the tile's
+    /// height. The card is a launcher's width (`GRID_WIDTH`), so the
+    /// results list is read at one glance and the card stands on the
+    /// screen rather than across it. macOS Control Center, Raycast.
+    Grid,
+    /// One strip: every switch and button on one line, and the card as
+    /// wide as that strip wants (about 1220 logical px), wrapping only
+    /// where the output is narrower. Every action in one scan line.
+    Strip,
+}
+
+const HELM_LAYOUT: HelmLayout = HelmLayout::Grid;
+
+/// The card's width in the grid layout: a launcher's width, and room for
+/// the four switches at their natural widths on one line.
+const GRID_WIDTH: i32 = 800;
+
 /// What the Helm card asks for on a screen with room for it. No height: the
 /// sections decide how tall the card is, and the deck stack has no sensible
 /// fixed height to fall back on.
 ///
-/// The width is a floor rather than the width the card renders at. Laid out
-/// with room to spare it takes 1033 logical px, the width its widest row
-/// wants; squeezed onto a laptop panel that row wraps and the card comes down
-/// to around 620. This number only sets how far `install_monitor_fit` is
+/// In the grid layout the width is the width the card renders at: no row
+/// wants more. In the strip layout it is a floor: laid out with room to
+/// spare the strip takes 1033 logical px, the width its widest row wants;
+/// squeezed onto a laptop panel that row wraps and the card comes down to
+/// around 620. The number only sets how far `install_monitor_fit` is
 /// allowed to clamp it before the rows start giving up space.
-const HELM_CARD_SIZE: crate::shell::fit::CardSize = crate::shell::fit::CardSize {
-    width: 740,
-    height: None,
-};
+const fn helm_card_size() -> crate::shell::fit::CardSize {
+    crate::shell::fit::CardSize {
+        width: match HELM_LAYOUT {
+            HelmLayout::Grid => GRID_WIDTH,
+            HelmLayout::Strip => 740,
+        },
+        height: None,
+    }
+}
 
 /// How tall a sub-sheet's body stands on a screen with room for it.
 const SUBSHEET_HEIGHT: i32 = 340;
@@ -371,7 +402,7 @@ impl Panel {
             &window,
             &top_spacer,
             &root,
-            HELM_CARD_SIZE,
+            helm_card_size(),
             Some(Rc::new(move |compact| {
                 for (list, full) in &lists {
                     list.set_min_content_height(if compact { COMPACT_LIST_HEIGHT } else { *full });
@@ -691,17 +722,20 @@ fn build_prefix_list() -> gtk4::Box {
     for (prefixes, title) in rows {
         let row = ui::hbox(4);
         row.add_css_class("prefix-row");
-        // What you type, in the mono keys are set in; the page it opens
-        // beside it, a level quieter.
-        let keys = ui::text(&prefixes, Text::Label, Tone::Fg);
+        // The page first, in a fixed gutter, because that is what the list
+        // is scanned by; what you type for it beside it, in the mono keys
+        // are set in, a level quieter, wrapping where a page has many.
+        let page = ui::text(&title, Text::Body, Tone::Fg);
+        page.set_width_chars(22);
+        page.set_xalign(0.0);
+        page.set_valign(gtk4::Align::Start);
+        let keys = ui::text(&prefixes, Text::Label, Tone::Muted);
         crate::ui::set_mono(&keys, true);
-        keys.set_width_chars(26);
-        keys.set_max_width_chars(26);
+        keys.set_hexpand(true);
         keys.set_wrap(true);
-        let page = ui::text(&title, Text::Body, Tone::Muted);
-        page.set_hexpand(true);
-        row.append(&keys);
+        keys.set_valign(gtk4::Align::Start);
         row.append(&page);
+        row.append(&keys);
         list.append(&row);
     }
     list
@@ -791,17 +825,18 @@ fn inhibitor_of(spec: &tiles::TileSpec) -> Option<crate::services::inhibit::Inhi
         .find(|w| w.label() == spec.label)
 }
 
-/// Put a built split tile on the deck and in the refresh list.
+/// Put a built split tile on the deck (through `add`, the strip's or the
+/// grid's own append) and in the refresh list.
 fn push_tile(
     tile: ui::SplitTile,
     spec: tiles::TileSpec,
     tile_pairs: &mut Vec<TileEntry>,
-    group: &ui::WrapBox,
+    add: &dyn Fn(&gtk4::Box),
 ) {
     tiles::init_tile_state(&tile.toggle, &spec);
     tiles::refresh_status(&tile.status, &spec);
     tile.root.add_css_class("deck-tile-btn");
-    group.append(&tile.root);
+    add(&tile.root);
     tile_pairs.push((tile.toggle, spec, Some(tile.status)));
 }
 
@@ -944,21 +979,35 @@ fn build_flight_deck(
     deck_stack: &gtk4::Stack,
     on_settings: &OnSettings,
 ) -> gtk4::Box {
-    let deck = ui::hbox(3);
-    deck.set_hexpand(true);
-    deck.add_css_class("helm-action-deck");
-
-    // Flight switches (Left group).
+    // The switches, and where they go.
     //
-    // A wrapping box rather than a Box because this strip is what made the
-    // card 1033 logical px wide at minimum: nine switches in a row that
-    // could not break. It folds onto a second line on a laptop panel with
-    // every switch still there, each at its own width (`ui::WrapBox`; a
-    // FlowBox lined them up in columns and opened gaps between the tiles).
-    let left_group = ui::wrap_box(3);
-    left_group.set_halign(gtk4::Align::Start);
-    left_group.set_hexpand(true);
-    left_group.add_css_class("deck-switches");
+    // Strip: a wrapping box rather than a Box because this strip is what
+    // made the card 1033 logical px wide at minimum: nine switches in a row
+    // that could not break. It folds onto a second line on a laptop panel
+    // with every switch still there, each at its own width (`ui::WrapBox`;
+    // a FlowBox lined them up in columns and opened gaps between the
+    // tiles).
+    //
+    // Grid: the four switches share one line at equal widths, a row of the
+    // grid; the actions and the session take the next.
+    let strip: ui::WrapBox = ui::wrap_box(3);
+    strip.set_halign(gtk4::Align::Start);
+    strip.set_hexpand(true);
+    strip.add_css_class("deck-switches");
+    let switches = ui::hbox(3);
+    switches.set_homogeneous(true);
+    switches.set_hexpand(true);
+    switches.add_css_class("deck-switches");
+    let add_switch: Box<dyn Fn(&gtk4::Box)> = match HELM_LAYOUT {
+        HelmLayout::Grid => {
+            let switches = switches.clone();
+            Box::new(move |w| switches.append(w))
+        }
+        HelmLayout::Strip => {
+            let strip = strip.clone();
+            Box::new(move |w| strip.append(w))
+        }
+    };
 
     // The durations for the timed switches fold out under the strip; one
     // fold, shared by both (`tiles::DurationFold`).
@@ -1007,7 +1056,7 @@ fn build_flight_deck(
                         detail.emit_clicked();
                     });
                 }
-                push_tile(tile, spec, tile_pairs, &left_group);
+                push_tile(tile, spec, tile_pairs, &add_switch);
                 continue;
             }
             // Night Light: the chevron is how warm, which is a setting; the
@@ -1021,7 +1070,7 @@ fn build_flight_deck(
             }
         };
         let tile = tiles::build_split(&spec, detail);
-        push_tile(tile, spec, tile_pairs, &left_group);
+        push_tile(tile, spec, tile_pairs, &add_switch);
     }
 
     // DND: the chevron opens the notification centre.
@@ -1032,7 +1081,7 @@ fn build_flight_deck(
         })
     };
     dnd.root.add_css_class("deck-tile-btn");
-    left_group.append(&dnd.root);
+    add_switch(&dnd.root);
 
     // The one-click actions travel as one group: when the strip wraps they
     // move to the next line together, side by side, instead of each taking
@@ -1078,25 +1127,44 @@ fn build_flight_deck(
         settings_btn.connect_clicked(move |_| on_settings(Open::Last));
     }
     actions.append(&settings_btn);
-    left_group.append(&actions);
-
-    // One slot per switch, counted rather than written down, so adding a
-    // switch here does not silently start wrapping the row on every screen.
-    deck.append(&left_group);
-
-    // Spacer
-    let spacer = ui::hbox(0);
-    spacer.set_hexpand(true);
-    deck.append(&spacer);
 
     // Session cluster (Right group). Centred rather than filling, because
     // once the switches beside it wrap to a second row the deck is twice as
     // tall and these buttons would stretch to match it.
     let session = power::build_session_row();
     session.set_valign(gtk4::Align::Center);
-    deck.append(&session);
 
-    // The strip and, under it, the fold its timed switches open.
+    let spacer = ui::hbox(0);
+    spacer.set_hexpand(true);
+
+    let deck: gtk4::Box = match HELM_LAYOUT {
+        HelmLayout::Grid => {
+            // Two rows: the switches, then the actions left and the
+            // session right.
+            let deck = ui::vbox(3);
+            deck.append(&switches);
+            let second = ui::hbox(3);
+            second.append(&actions);
+            second.append(&spacer);
+            second.append(&session);
+            deck.append(&second);
+            deck
+        }
+        HelmLayout::Strip => {
+            // One line: the switches and the actions travel as one wrapping
+            // group, the session at the far end.
+            strip.append(&actions);
+            let deck = ui::hbox(3);
+            deck.append(&strip);
+            deck.append(&spacer);
+            deck.append(&session);
+            deck
+        }
+    };
+    deck.set_hexpand(true);
+    deck.add_css_class("helm-action-deck");
+
+    // The deck and, under it, the fold its timed switches open.
     let column = ui::vbox(2);
     column.set_hexpand(true);
     column.append(&deck);
