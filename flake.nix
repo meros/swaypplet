@@ -94,6 +94,10 @@
             # Only here, not in commonArgs, so the dependency cache keeps its
             # hash.
             SWAYPPLET_XKB_RULES = "${pkgs.xkeyboard_config}/share/X11/xkb/rules/evdev.lst";
+            # The commit the Settings · System tab says is running
+            # (src/settings/system_info.rs). Here and not in commonArgs, so a
+            # new commit does not rebuild the dependencies.
+            SWAYPPLET_REV = self.rev or self.dirtyRev or "";
             postInstall = ''
               # Installed from data/, not written here. This postInstall and
               # package.nix's used to carry a copy each, only this one ships
