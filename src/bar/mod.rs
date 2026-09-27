@@ -194,7 +194,9 @@ fn build_bar_window(bar: &BarManager, monitor: &gdk::Monitor) -> (Surface, decis
     right.append(&follow_setting(media::build(mpris, audio), |bar| bar.media));
     // Where pinned workspaces live when they are not floating (jump/pin.rs).
     right.append(&pins::build());
-    right.append(&follow_setting(tray::build(tray), |bar| bar.tray));
+    // The tray follows the Bar tab's switch itself: it also hides while no
+    // item is registered, which `follow_setting` would override.
+    right.append(&tray::build(tray));
     right.append(&hazards::build(sway, audio));
     // Battery + board + clock fuse into one segmented track (waybar's
     // group/right-track); a batteryless machine skips the segment so the

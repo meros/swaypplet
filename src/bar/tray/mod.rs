@@ -32,6 +32,10 @@ pub fn build(tray: &Rc<TrayService>) -> gtk4::Box {
     crate::ui::segment::adopt(&container, false);
     container.add_css_class("bar-tray");
     // Hidden until an item registers, so the empty pill never renders.
+    // The tray owns its visibility rather than going through the bar's
+    // `follow_setting`: that would show the empty pill on every settings
+    // change, so the Bar tab's switch is one input here and the item count
+    // the other.
     container.set_visible(false);
 
     let items: Rc<RefCell<HashMap<String, ItemUi>>> = Rc::new(RefCell::new(HashMap::new()));
@@ -46,7 +50,24 @@ pub fn build(tray: &Rc<TrayService>) -> gtk4::Box {
     });
     sync();
 
+    // A weak ref, as in the bar's `follow_setting`, so a bar whose output was
+    // unplugged does not keep its tray alive through the observer list.
+    let weak = container.downgrade();
+    let items_seen = items.clone();
+    crate::settings::store::observe(move || {
+        if let Some(container) = weak.upgrade() {
+            show_if_wanted(&container, !items_seen.borrow().is_empty());
+        }
+    });
+
     container
+}
+
+/// Show the pill when the Bar tab has the tray on and an item is there to
+/// show; either one alone leaves it hidden.
+fn show_if_wanted(container: &gtk4::Box, has_items: bool) {
+    let wanted = crate::settings::store::with(|s| s.bar().tray);
+    container.set_visible(wanted && has_items);
 }
 
 /// Reconcile item buttons against the snapshot: per-address widgets are
@@ -81,7 +102,7 @@ fn sync_items(
         prev = Some(ui.button.clone());
     }
 
-    container.set_visible(!snapshot.is_empty());
+    show_if_wanted(container, !snapshot.is_empty());
 }
 
 /// Icon inputs of the last render — icon resolution (texture upload) only
