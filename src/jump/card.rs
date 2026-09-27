@@ -51,20 +51,23 @@ impl Live {
     }
 
     /// What to capture for every window drawn: each cut to the largest box
-    /// any of its pictures is drawn in, at `scale` device pixels to one of
-    /// GTK's, and to `crop` of it when given.
+    /// any of its pictures is drawn in, in device pixels (its own device
+    /// box, or its size at `scale` device pixels to one of GTK's), and to
+    /// `crop` of it when given.
     pub fn wants(&self, crop: Option<Crop>, scale: f64) -> Vec<Want> {
         self.pictures
             .iter()
             .map(|(id, pics)| {
                 let (w, h) = pics.iter().fold((1, 1), |(w, h), p| {
-                    let (pw, ph) = p.size_request();
+                    let (pw, ph) = p
+                        .device_box()
+                        .unwrap_or_else(|| draw_size(p.width_request(), p.height_request(), scale));
                     (w.max(pw), h.max(ph))
                 });
                 Want {
                     id: id.clone(),
                     crop,
-                    size: draw_size(w, h, scale),
+                    size: Size::Draw(w, h),
                 }
             })
             .collect()
@@ -115,9 +118,19 @@ impl Live {
 
 /// A box `w` by `h` in GTK's pixels, in device pixels at `scale`. Rounded
 /// up, so a fractional scale never cuts a frame below what it is drawn at.
-fn draw_size(w: i32, h: i32, scale: f64) -> Size {
+fn draw_size(w: i32, h: i32, scale: f64) -> (u32, u32) {
     let px = |v: i32| (f64::from(v.max(1)) * scale.max(1.0)).ceil() as u32;
-    Size::Draw(px(w), px(h))
+    (px(w), px(h))
+}
+
+/// Device pixels to one of GTK's where `widget` is drawn: its surface's
+/// scale, fractional when the output is, or the whole-number scale factor
+/// before it has a surface.
+pub fn device_scale(widget: &impl IsA<gtk4::Widget>) -> f64 {
+    widget
+        .native()
+        .and_then(|n| n.surface())
+        .map_or(f64::from(widget.scale_factor()), |s| s.scale())
 }
 
 /// A frame as a texture, kept as its window's last picture ([`LAST`]).
@@ -149,7 +162,13 @@ pub fn texture(width: u32, height: u32, pixels: Vec<u8>) -> gdk::Texture {
 /// A live picture of a workspace in a box of `w` by `h`: every window at
 /// its place (`scene::fit`), each registered in `live` for its frames. An
 /// empty or vanished workspace says so.
-pub fn preview(scene: Option<&Scene>, w: i32, h: i32, live: &mut Live) -> gtk4::Widget {
+///
+/// Windows are placed on the device grid at `scale`, not on GTK's: a
+/// rectangle rounded to whole GTK pixels was up to a device pixel off the
+/// window's shape at 2x, and its frame, contained in it, left a sliver of
+/// panel at one edge. Each picture carries its box in device pixels, which
+/// the capture is cut to and the frame is drawn in.
+pub fn preview(scene: Option<&Scene>, w: i32, h: i32, scale: f64, live: &mut Live) -> gtk4::Widget {
     // No clip anywhere in a picture. Under the switcher's 3D transform, GTK
     // draws a clipped node offscreen first, at a scale it estimates from
     // the transform, and for a place turned left that estimate is low: its
@@ -168,18 +187,16 @@ pub fn preview(scene: Option<&Scene>, w: i32, h: i32, live: &mut Live) -> gtk4::
         Some(scene) if !scene.windows.is_empty() => {
             let (s, dx, dy) = scene::fit(scene.width, scene.height, w, h);
             for win in &scene.windows {
-                let (x, y, ww, wh) = place_in(
-                    (
-                        dx + f64::from(win.x) * s,
-                        dy + f64::from(win.y) * s,
-                        f64::from(win.w) * s,
-                        f64::from(win.h) * s,
-                    ),
-                    w,
-                    h,
+                let rect = (
+                    dx + f64::from(win.x) * s,
+                    dy + f64::from(win.y) * s,
+                    f64::from(win.w) * s,
+                    f64::from(win.h) * s,
                 );
-                let (slot, pic) = window_slot(&win.app, ww, wh);
-                fixed.put(&slot, f64::from(x), f64::from(y));
+                let ((x, y), (lw, lh), (dw, dh)) = on_grid(rect, w, h, scale);
+                let (slot, pic) = window_slot(&win.app, lw, lh);
+                pic.set_device_box(dw, dh);
+                fixed.put(&slot, x, y);
                 if let Some(id) = &win.id {
                     live.add(id.clone(), pic);
                 }
@@ -203,6 +220,40 @@ fn place_in((x, y, ww, wh): (f64, f64, f64, f64), w: i32, h: i32) -> (i32, i32, 
     let x = (x.round() as i32).clamp(0, w - ww);
     let y = (y.round() as i32).clamp(0, h - wh);
     (x, y, ww, wh)
+}
+
+/// A window's rectangle in a `w` by `h` box, in GTK's pixels, placed on the
+/// device grid at `scale`: its corner in GTK's pixels (on a device pixel),
+/// its slot in whole GTK pixels, and its box in device pixels.
+///
+/// The slot is the device box rounded down, so the preview never asks for
+/// more than `w` by `h`; the picture draws its whole device box from the
+/// slot's corner, past the slot by less than one of GTK's pixels, and
+/// nothing clips it (see `preview`).
+fn on_grid(
+    rect: (f64, f64, f64, f64),
+    w: i32,
+    h: i32,
+    scale: f64,
+) -> ((f64, f64), (i32, i32), (u32, u32)) {
+    let scale = scale.max(1.0);
+    let device = |v: i32| (f64::from(v) * scale).floor() as i32;
+    let (x, y, dw, dh) = place_in(
+        (
+            rect.0 * scale,
+            rect.1 * scale,
+            rect.2 * scale,
+            rect.3 * scale,
+        ),
+        device(w),
+        device(h),
+    );
+    let slot = |v: i32| ((f64::from(v) / scale).floor() as i32).max(1);
+    (
+        (f64::from(x) / scale, f64::from(y) / scale),
+        (slot(dw), slot(dh)),
+        (dw as u32, dh as u32),
+    )
 }
 
 /// A window's spot: the app icon on a panel, with the live picture over it.
@@ -269,7 +320,7 @@ fn placed((w, h): (f32, f32), (tw, th): (f32, f32), scale: f32) -> ((f32, f32, f
 
 #[cfg(test)]
 mod tests {
-    use super::{Size, draw_size, place_in, placed};
+    use super::{draw_size, on_grid, place_in, placed};
 
     #[test]
     fn a_frame_cut_to_the_box_is_drawn_one_pixel_to_one_on_the_grid() {
@@ -295,11 +346,29 @@ mod tests {
     }
 
     #[test]
+    fn a_window_is_placed_on_the_device_grid() {
+        // At 2x, a window 180.3 by 100.6 at 10.3, 20.2: to the nearest
+        // device pixel, where whole GTK pixels were up to one device pixel
+        // off each way.
+        let ((x, y), slot, device) = on_grid((10.3, 20.2, 180.3, 100.6), 400, 250, 2.0);
+        assert_eq!(device, (361, 201));
+        assert_eq!((x, y), (10.5, 20.0));
+        assert_eq!(slot, (180, 100));
+        // At the box's edge the slot, rounded down, stays inside it.
+        let ((x, _), (sw, _), (dw, _)) = on_grid((219.7, 0.0, 180.3, 50.0), 400, 250, 2.0);
+        assert!(x + f64::from(sw) <= 400.0);
+        assert!(x * 2.0 + f64::from(dw) <= 800.0);
+        // 1.5x: the corner is on a device pixel.
+        let ((x, y), _, _) = on_grid((10.3, 20.2, 100.0, 60.0), 400, 250, 1.5);
+        assert_eq!(((x * 1.5).fract(), (y * 1.5).fract()), (0.0, 0.0));
+    }
+
+    #[test]
     fn a_draw_box_is_in_device_pixels_rounded_up() {
-        assert_eq!(draw_size(200, 125, 2.0), Size::Draw(400, 250));
-        assert_eq!(draw_size(201, 125, 1.5), Size::Draw(302, 188));
+        assert_eq!(draw_size(200, 125, 2.0), (400, 250));
+        assert_eq!(draw_size(201, 125, 1.5), (302, 188));
         // Never below one pixel, never below 1x.
-        assert_eq!(draw_size(0, -3, 0.5), Size::Draw(1, 1));
+        assert_eq!(draw_size(0, -3, 0.5), (1, 1));
     }
 
     #[test]
@@ -329,6 +398,10 @@ mod picture_imp {
     #[derive(Default)]
     pub struct LivePicture {
         pub texture: RefCell<Option<gdk::Texture>>,
+        /// The box the frame is drawn in, in device pixels, when the caller
+        /// placed the picture on the device grid (`preview`); otherwise the
+        /// widget's own size.
+        pub device_box: std::cell::Cell<Option<(u32, u32)>>,
     }
 
     #[glib::object_subclass]
@@ -346,15 +419,15 @@ mod picture_imp {
                 return;
             };
             let obj = self.obj();
-            let (w, h) = (obj.width() as f32, obj.height() as f32);
+            let scale = super::device_scale(&*obj) as f32;
+            let (w, h) = match self.device_box.get() {
+                Some((bw, bh)) => (bw as f32 / scale.max(1.0), bh as f32 / scale.max(1.0)),
+                None => (obj.width() as f32, obj.height() as f32),
+            };
             let (tw, th) = (texture.width() as f32, texture.height() as f32);
             if w <= 0.0 || h <= 0.0 || tw <= 0.0 || th <= 0.0 {
                 return;
             }
-            let scale = obj
-                .native()
-                .and_then(|n| n.surface())
-                .map_or(f64::from(obj.scale_factor()), |s| s.scale()) as f32;
             let ((x, y, dw, dh), exact) = super::placed((w, h), (tw, th), scale);
             snapshot.append_scaled_texture(
                 texture,
@@ -390,6 +463,21 @@ glib::wrapper! {
 impl LivePicture {
     pub fn new() -> Self {
         glib::Object::new()
+    }
+
+    /// Draw the frame in a box of `w` by `h` device pixels from the
+    /// picture's corner, which may reach past its allocation by less than
+    /// one of GTK's pixels.
+    pub fn set_device_box(&self, w: u32, h: u32) {
+        use gtk4::subclass::prelude::ObjectSubclassIsExt;
+        self.imp().device_box.set(Some((w.max(1), h.max(1))));
+        self.queue_draw();
+    }
+
+    /// The box set by [`Self::set_device_box`].
+    pub fn device_box(&self) -> Option<(u32, u32)> {
+        use gtk4::subclass::prelude::ObjectSubclassIsExt;
+        self.imp().device_box.get()
     }
 
     pub fn set_texture(&self, texture: gdk::Texture) {

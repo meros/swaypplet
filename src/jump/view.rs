@@ -108,9 +108,10 @@ impl View {
         }
     }
 
-    /// The scale of the output the card is on. Frames are cut to the
-    /// pictures' size in device pixels, so a 2x screen gets twice the
-    /// pixels; a change starts the capture again at the new size.
+    /// The scale of the output the card is on, fractional when the output
+    /// is. Frames are cut to the pictures' size in device pixels, so a 2x
+    /// screen gets twice the pixels; a change starts the capture again at
+    /// the new size. Call it before a show.
     pub fn set_scale(&mut self, scale: f64) {
         if (scale - self.scale).abs() > f64::EPSILON {
             self.scale = scale;
@@ -161,7 +162,13 @@ impl View {
                 ((f64::from(scene.height) * s).round() as i32).clamp(8, H),
             )
         });
-        let picture = card::preview(scene.as_ref(), w, h, &mut self.live.borrow_mut());
+        let picture = card::preview(
+            scene.as_ref(),
+            w,
+            h,
+            self.scale,
+            &mut self.live.borrow_mut(),
+        );
         self.holder.append(&picture);
         let wants = self.live.borrow().wants(None, self.scale);
         self.feed = feed::subscribe(wants, fps, &self.live);

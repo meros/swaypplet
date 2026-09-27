@@ -6,7 +6,7 @@ license = "MIT"
 
 [dependencies]
 
-gtk4 = { version = "0.11", features = ["v4_12"] }
+gtk4 = { version = "0.11", features = ["v4_14"] }
 gtk4-layer-shell = "0.8"
 # v1_2 gates `Instance` and the typed `connect_monitor` binding; the linked
 # gtk4-layer-shell C library must be >= 1.2 (nixpkgs ships 1.3).

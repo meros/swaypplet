@@ -169,7 +169,13 @@ fn rows(ui: &Rc<Ui>, scenes: &[(String, Option<crate::jump::scene::Scene>)]) {
     for (name, scene) in scenes {
         let row = ui::hbox(3);
         row.add_css_class("bar-pinned-row");
-        let picture = card::preview(scene.as_ref(), ROW_W, ROW_H, &mut ui.live.borrow_mut());
+        let picture = card::preview(
+            scene.as_ref(),
+            ROW_W,
+            ROW_H,
+            card::device_scale(&ui.btn),
+            &mut ui.live.borrow_mut(),
+        );
         row.append(&picture);
 
         let side = ui::vbox(3);
@@ -227,10 +233,7 @@ fn rows(ui: &Rc<Ui>, scenes: &[(String, Option<crate::jump::scene::Scene>)]) {
     });
     ui.body.append(&tuck);
 
-    let wants = ui
-        .live
-        .borrow()
-        .wants(None, f64::from(ui.btn.scale_factor()));
+    let wants = ui.live.borrow().wants(None, card::device_scale(&ui.btn));
     ui.feed.replace(None);
     ui.feed.replace(feed::subscribe(wants, ROW_FPS, &ui.live));
 }

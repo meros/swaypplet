@@ -748,7 +748,9 @@ fn build_window(app: &gtk4::Application, monitor: Option<&gdk::Monitor>, label: 
     }
 
     let mut view = View::new(label, "click to go \u{00b7} right-click to unpin");
-    view.set_scale(f64::from(monitor.map_or(1, |m| m.scale_factor())));
+    // The output's own scale, fractional when it is: the surface does not
+    // exist yet to ask.
+    view.set_scale(monitor.map_or(1.0, |m| m.scale()));
     frame.append(view.widget());
     surface.set_content(view.widget());
 
