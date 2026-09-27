@@ -43,7 +43,9 @@ const DEBOUNCE_MS: u64 = 40;
 /// Frecent rows the empty query opens with, above elephant's app list.
 const MAX_FRECENT_ROWS: usize = 6;
 
-/// How tall the results list stands on a screen with room for it.
+/// How tall the results list stands on a screen with room for it, in a host
+/// that gives it a fixed height (the panel). The standalone launcher drops
+/// this floor and lets the list follow its rows (`LAUNCHER_CARD_SIZE`).
 const RESULTS_HEIGHT: i32 = 360;
 
 /// Slack left above and below the selected row when the list scrolls to it,
@@ -52,6 +54,9 @@ const RESULTS_HEIGHT: i32 = 360;
 const SCROLL_MARGIN: f64 = 8.0;
 
 /// What the standalone launcher card asks for on a screen with room for it.
+/// The height is a ceiling: the card follows the field and its rows up to it,
+/// growing downward from a field that stays put, and the list scrolls past it
+/// (`install_monitor_fit`'s `list`).
 const LAUNCHER_CARD_SIZE: crate::shell::fit::CardSize = crate::shell::fit::CardSize {
     width: 560,
     height: Some(520),
@@ -437,7 +442,8 @@ impl Launcher {
         backdrop.prepend(&top_spacer);
 
         // Size requests come from install_monitor_fit below, which clamps
-        // them to the output the launcher opens on.
+        // them to the output the launcher opens on and lets the card's height
+        // follow its results.
         let container = surface.card();
         container.set_halign(gtk4::Align::Center);
         container.add_css_class("launcher-container");
@@ -451,6 +457,7 @@ impl Launcher {
             container,
             LAUNCHER_CARD_SIZE,
             None,
+            Some(view.scroller()),
         );
 
         // Enter/exit transition (motion on glass, anim.rs): the container is

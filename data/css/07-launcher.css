@@ -11,8 +11,8 @@
    a titled card with the caller's prompt, the filter entry, then the items.
    Used by chrome-profile-launcher, jump-to-task and settask. ── */
 
-/* The card hugs its (usually short) item list instead of the launcher's
-   fixed 520px stage. */
+/* The card hugs its (usually short) item list, as the launcher's does up to
+   its 520px ceiling. */
 .dmenu .launcher-scroller {
     min-height: 0;
 }

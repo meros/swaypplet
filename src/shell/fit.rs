@@ -33,6 +33,10 @@ const FALLBACK_TOP_OFFSET: i32 = 270;
 /// `height` is `None` for a card that sizes itself to its content, which is
 /// then never given a height request at all. The panel is that case: its
 /// sections decide how tall it is.
+///
+/// A `height` is the tallest the card stands. With a list to scroll
+/// ([`install_monitor_fit`]'s `list`) the card follows its content up to it
+/// and the list scrolls past it; without one the card is always that tall.
 pub struct CardSize {
     pub width: i32,
     pub height: Option<i32>,
@@ -50,6 +54,8 @@ pub struct CardSize {
 struct Fit {
     size: CardSize,
     on_compact: Option<Rc<dyn Fn(bool)>>,
+    /// The list that scrolls once a card with a `height` has grown to it.
+    list: Option<gtk4::ScrolledWindow>,
     /// The output size the card was last fitted to.
     ///
     /// Deciding whether the card has to thin out means asking it for full
@@ -89,17 +95,24 @@ impl Fit {
 /// The card is not re-fitted while it stays mapped and its content grows.
 /// Doing that would mean queueing a resize from inside layout, and both cards
 /// settle their content before they are shown, so map time is late enough.
+///
+/// A card given a `list` is the exception that needs no re-fit: the fit only
+/// caps how tall the list may grow, so the card's height follows its rows
+/// from one query to the next without the fit running again, and its top
+/// edge stays where the fit put it.
 pub fn install_monitor_fit(
     window: &gtk4::Window,
     top_spacer: &gtk4::Box,
     card: &impl IsA<gtk4::Widget>,
     size: CardSize,
     on_compact: Option<Rc<dyn Fn(bool)>>,
+    list: Option<&gtk4::ScrolledWindow>,
 ) {
     let card = card.as_ref().clone();
     let fit = Rc::new(Fit {
         size,
         on_compact,
+        list: list.cloned(),
         fitted_to: std::cell::Cell::new(None),
     });
 
@@ -108,7 +121,18 @@ pub fn install_monitor_fit(
     // never flashes at some placeholder size on the way there.
     card.set_width_request(fit.size.width);
     if let Some(height) = fit.size.height {
-        card.set_height_request(height);
+        match &fit.list {
+            // The card hugs its content from the top down; the list's natural
+            // height is what it grows by, up to the cap set in `fit_card`.
+            Some(list) => {
+                card.set_valign(gtk4::Align::Start);
+                list.set_vexpand(false);
+                list.set_min_content_height(0);
+                list.set_propagate_natural_height(true);
+                list.set_max_content_height(height);
+            }
+            None => card.set_height_request(height),
+        }
     }
     top_spacer.set_height_request(FALLBACK_TOP_OFFSET);
 
@@ -294,11 +318,14 @@ fn fit_card(
     let (width, _, _, _) = card.measure(gtk4::Orientation::Horizontal, -1);
 
     let room = (screen_height - CARD_BOTTOM_MARGIN).max(0);
-    if let Some(height) = fit.size.height {
-        // A fixed-height card flush against the top is the tallest it can
-        // ever be here, so that is the ceiling. The offset below then decides
-        // where in the remaining room it actually sits.
-        card.set_height_request(height.min(room));
+    // A fixed-height card flush against the top is the tallest it can ever be
+    // here, so that is the ceiling. The offset below then decides where in
+    // the remaining room it actually sits.
+    let ceiling = fit.size.height.map(|height| height.min(room));
+    match (ceiling, &fit.list) {
+        (Some(ceiling), Some(list)) => cap_list(card, list, width, ceiling),
+        (Some(ceiling), None) => card.set_height_request(ceiling),
+        (None, _) => {}
     }
 
     // A short output needs the card thinned before it is placed, because the
@@ -323,6 +350,30 @@ fn fit_card(
     // A card taller than three quarters of the screen has to start above the
     // sweet spot, or its bottom rows, the launcher's last results among them,
     // sit off-screen where nothing can reach them.
-    let limit = (room - card_min).max(0);
+    //
+    // A card that grows with its list is placed for the tallest it can grow
+    // to, not for what it holds now, so its top edge (the launcher's search
+    // field) stays put while the rows below come and go.
+    let tallest = match (ceiling, &fit.list) {
+        (Some(ceiling), Some(_)) => card_min.max(ceiling),
+        _ => card_min,
+    };
+    let limit = (room - tallest).max(0);
     top_spacer.set_height_request((screen_height / 4).min(limit));
+}
+
+/// Cap `list` so the card around it grows to `ceiling` and no further.
+///
+/// What the card spends around the list (its padding, the search field) is
+/// measured rather than assumed: the list is capped at nothing, and the card
+/// and the list measured, and the difference to `ceiling` is what the rows
+/// may have. The list's own height at that cap is taken back out, because it
+/// is not nothing: a scrolled window stands at least as tall as its
+/// scrollbar's minimum length, which the rows fill once there are any.
+fn cap_list(card: &gtk4::Widget, list: &gtk4::ScrolledWindow, width: i32, ceiling: i32) {
+    list.set_max_content_height(0);
+    let card_height = card.measure(gtk4::Orientation::Vertical, width).1;
+    let list_height = list.measure(gtk4::Orientation::Vertical, -1).1;
+    let around = card_height - list_height;
+    list.set_max_content_height((ceiling - around).max(0));
 }

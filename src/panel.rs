@@ -377,6 +377,7 @@ impl Panel {
                     list.set_min_content_height(if compact { COMPACT_LIST_HEIGHT } else { *full });
                 }
             })),
+            None,
         );
 
         // Enter/exit transition for the glass menu: fast pane tint,
