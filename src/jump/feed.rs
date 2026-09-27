@@ -143,7 +143,7 @@ impl Drop for Feed {
         // The stream leaves the map before it is dropped, so its Drop never
         // runs inside a borrow of the map.
         let gone = HUB.with(|h| h.borrow_mut().leave(&self.key, self.id));
-        log::debug!(target: "swaypplet::feed", "leave {} last={}", self.key, gone.is_some());
+        log::info!(target: "swaypplet::feed", "leave {} last={}", self.key, gone.is_some());
         drop(gone);
     }
 }
@@ -187,7 +187,7 @@ pub fn subscribe(wants: Vec<Want>, fps: u32, live: &Rc<RefCell<Live>>) -> Option
             start(&key, &wants, fps)
         })
     });
-    log::debug!(target: "swaypplet::feed", "join {key} {joined:?}");
+    log::info!(target: "swaypplet::feed", "join {key} {joined:?}");
     if joined == Join::Faster {
         // Faster for everyone. The old stream stops as it is replaced; the
         // pictures keep their last frame until the new one sends.

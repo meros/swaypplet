@@ -126,18 +126,16 @@ impl Stream {
                     fps => Duration::from_millis(1000 / u64::from(fps)),
                 };
                 let mut backoff = RESTART_MIN;
-                let mut warned = false;
+                let ids: Vec<&str> = wants.iter().map(|w| w.id.as_str()).collect();
+                log::info!("jump: capture start {ids:?} at {fps} fps");
                 while !flag.load(Ordering::Relaxed) && !tx.is_closed() {
                     let started = Instant::now();
                     match run(&wants, interval, &tx, &flag) {
                         Ok(()) => break,
-                        // Warn once; a compositor without the protocol
-                        // would otherwise say so every few seconds.
-                        Err(e) if !warned => {
-                            log::warn!("jump: live capture: {e}; trying again");
-                            warned = true;
-                        }
-                        Err(e) => log::debug!("jump: live capture: {e}"),
+                        // Every time: the backoff below spaces them out to
+                        // one in 5 s at most, and a picture that froze needs
+                        // the reason in the journal.
+                        Err(e) => log::info!("jump: capture {ids:?}: {e}; again in {backoff:?}"),
                     }
                     if started.elapsed() > Duration::from_secs(10) {
                         backoff = RESTART_MIN;
@@ -148,6 +146,12 @@ impl Stream {
                     }
                     backoff = next_backoff(backoff);
                 }
+                let why = if flag.load(Ordering::Relaxed) {
+                    "dropped"
+                } else {
+                    "nobody listening"
+                };
+                log::info!("jump: capture end {ids:?} ({why})");
             });
         if let Err(e) = spawned {
             log::warn!("jump: live capture thread: {e}");
@@ -169,6 +173,8 @@ const IDLE_POLL: Duration = Duration::from_millis(50);
 /// again, and the longest one: each failure in a row doubles it.
 const RESTART_MIN: Duration = Duration::from_millis(100);
 const RESTART_MAX: Duration = Duration::from_secs(5);
+/// How long a window goes without a frame before the journal hears of it.
+const STALL: Duration = Duration::from_secs(10);
 
 /// The delay after `d` when the retry after `d` failed too.
 fn next_backoff(d: Duration) -> Duration {
@@ -225,6 +231,15 @@ fn run(
         let toplevels_changed = std::mem::take(&mut state.toplevels_changed);
 
         for (index, s) in state.sessions.iter_mut().enumerate() {
+            if !s.stalled && now.saturating_duration_since(s.last_frame) > STALL {
+                s.stalled = true;
+                log::info!(
+                    "jump: capture {}: no frame for {:?} ({})",
+                    s.want.id,
+                    STALL,
+                    s.waiting_on(now)
+                );
+            }
             if s.capture.is_none() {
                 if now < s.retry_at && !toplevels_changed {
                     wake = wake.min(s.retry_at);
@@ -236,7 +251,11 @@ fn run(
                     .find(|(_, ident)| ident.as_deref() == Some(s.want.id.as_str()))
                     .map(|(h, _)| h.clone());
                 let Some(handle) = handle else {
-                    log::debug!("jump: no toplevel with identifier {}", s.want.id);
+                    // The first miss of a run; the retries after it say
+                    // nothing new.
+                    if s.backoff == RESTART_MIN {
+                        log::info!("jump: capture {}: no such window yet", s.want.id);
+                    }
                     s.retry_at = now + s.backoff;
                     s.backoff = next_backoff(s.backoff);
                     wake = wake.min(s.retry_at);
@@ -250,6 +269,7 @@ fn run(
                     (index, s.generation),
                 );
                 s.capture = Some((source, session));
+                log::info!("jump: capture {}: session open", s.want.id);
                 continue;
             }
             if std::mem::take(&mut s.ready)
@@ -627,6 +647,10 @@ struct Session {
     ready: bool,
     /// When the last frame was asked for, for the frame cap.
     last: Instant,
+    /// When the last frame arrived, for the stall line in the journal.
+    last_frame: Instant,
+    /// The stall line was written, and no frame has come since.
+    stalled: bool,
 }
 
 impl Session {
@@ -645,7 +669,36 @@ impl Session {
             frame: None,
             ready: false,
             last: now - Duration::from_secs(1),
+            last_frame: now,
+            stalled: false,
         }
+    }
+
+    /// What a window without frames is waiting on, for the journal. A
+    /// frame asked for and unanswered is the compositor's (it answers only
+    /// when the window draws, so an idle window lands here too); anything
+    /// else is this side's.
+    fn waiting_on(&self, now: Instant) -> String {
+        if self.capture.is_none() {
+            return "no session: the window is not found or sway stopped it".into();
+        }
+        let Some(c) = &self.constraints else {
+            return "session open, sway sent no buffer size".into();
+        };
+        if self.frame.is_some() {
+            return format!(
+                "frame asked {:?} ago, unanswered; buffer {}x{}",
+                now.saturating_duration_since(self.last),
+                c.width,
+                c.height
+            );
+        }
+        format!(
+            "nothing asked; buffer {}x{} {}",
+            c.width,
+            c.height,
+            if self.buffer.is_some() { "built" } else { "not built" }
+        )
     }
 
     /// Let go of the capture and everything made for it.
@@ -669,6 +722,11 @@ impl Session {
     /// go of what it captured from. Try again after the delay; a window
     /// that is still there, or back under the same identifier, picks up.
     fn stopped(&mut self) {
+        log::info!(
+            "jump: capture {}: stopped by sway; again in {:?}",
+            self.want.id,
+            self.backoff
+        );
         self.release();
         self.retry_at = Instant::now() + self.backoff;
         self.backoff = next_backoff(self.backoff);
@@ -774,6 +832,10 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, (usize, u32)> for State {
                     // in flight in the old one fails with
                     // `buffer_constraints` and is asked again.
                     if s.constraints.as_ref() != Some(&next) {
+                        log::info!(
+                            "jump: capture {}: buffer {width}x{height} {format:?}",
+                            s.want.id
+                        );
                         s.buffer = None;
                     }
                     s.constraints = Some(next);
@@ -810,11 +872,21 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, (usize, u32)> for State {
                 frame.destroy();
                 s.frame = None;
                 s.ready = true;
+                let now = Instant::now();
+                if std::mem::take(&mut s.stalled) {
+                    log::info!(
+                        "jump: capture {}: frames again after {:?}",
+                        s.want.id,
+                        now.saturating_duration_since(s.last_frame)
+                    );
+                }
+                s.last_frame = now;
                 s.backoff = RESTART_MIN;
             }
             Event::Failed { reason } => {
                 frame.destroy();
                 s.frame = None;
+                log::info!("jump: capture {}: frame failed: {reason:?}", s.want.id);
                 match reason.into_result() {
                     // New constraints come before this; the `done` that
                     // closed them dropped the buffer.
