@@ -63,7 +63,7 @@ pub use chip::{
 };
 pub use expander::{Disclosure, Section, disclosure, section};
 pub use face::{FacePill, FaceState, face_pill, set_face_enter, set_face_state};
-pub use field::{FieldSize, FieldState, dropdown, entry, field, set_field_state};
+pub use field::{FieldSize, FieldState, dropdown, entry, field, set_field_state, text_area};
 pub use layout::{hbox, pad, pill_group, separator, toolbar, vbox};
 pub use media::{choice_grid, lifted, pick_thumb, placeholder, ring, set_pinned, swatch, thumb};
 pub use menu::{menu, menu_item};

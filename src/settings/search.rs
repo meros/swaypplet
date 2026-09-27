@@ -61,6 +61,7 @@ pub const TABLES: &[(&str, &[Entry])] = &[
     ("displays", super::displays_pane::SEARCH),
     ("glass", super::glass_pane::SEARCH),
     ("system", super::system_pane::SEARCH),
+    ("quality", super::quality_pane::SEARCH),
 ];
 
 /// A section of the panel a query can land on, by its omnibox prefix
@@ -355,6 +356,7 @@ mod tests {
         ("displays", include_str!("displays_pane.rs")),
         ("glass", include_str!("glass_pane.rs")),
         ("system", include_str!("system_pane.rs")),
+        ("quality", include_str!("quality_pane.rs")),
     ];
 
     /// The pane's source without its `SEARCH` table, so an entry cannot

@@ -80,7 +80,9 @@
             CARGO_PROFILE_RELEASE_DEBUG = "0";
             CARGO_PROFILE_RELEASE_LTO = "false";
             CARGO_PROFILE_RELEASE_OPT_LEVEL = "2";
-            RUSTFLAGS = "-C linker=clang -C link-arg=-fuse-ld=mold";
+            # --build-id: mold writes none by default, and without one
+            # systemd-coredump and debuginfod cannot tie a core to its binary.
+            RUSTFLAGS = "-C linker=clang -C link-arg=-fuse-ld=mold -C link-arg=-Wl,--build-id";
           };
 
           # 1. Build & cache ALL third-party dependencies independently into /nix/store

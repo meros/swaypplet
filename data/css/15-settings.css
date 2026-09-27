@@ -72,6 +72,14 @@
     padding-top: var(--space-2);
 }
 
+/* ── Quality (src/settings/quality_pane.rs) ──
+   One issue per block: its status and title, a line of facts, the
+   runner's progress, and for a ready fix the before and after pictures
+   over Apply. */
+.quality-entry {
+    padding: var(--space-2) 0;
+}
+
 /* ── Tabs ── */
 .settings-tabs {
     padding: 0 var(--space-1) var(--space-1);

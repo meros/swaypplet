@@ -155,6 +155,8 @@ pub fn finish(store: &StoreRef, image: &Image) -> (u32, Option<PathBuf>) {
         store,
         Notification {
             app_name: "Screenshot".into(),
+            // The default is the epoch, which the card shows as its age.
+            timestamp: std::time::SystemTime::now(),
             summary: format!("{} × {} copied", image.width, image.height),
             body,
             actions,

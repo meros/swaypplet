@@ -1,7 +1,7 @@
 //! Fields: the entry, the dropdown, and the auth field's states.
 //!
 //! `ui::field(label, &input)`, `ui::entry::adopt(&input, FieldSize)`,
-//! `ui::dropdown(choices)`, `ui::dropdown::adopt(&d)`;
+//! `ui::text_area(lines)`, `ui::dropdown(choices)`, `ui::dropdown::adopt(&d)`;
 //! `ui::set_field_state` at runtime.
 
 use gtk4::prelude::*;
@@ -49,6 +49,25 @@ pub mod entry {
             input.add_css_class("large");
         }
     }
+}
+
+/// Several lines of text: a text view in a scroller that wears the entry's
+/// fill and hairline. `lines` is the height it opens at, in body lines; it
+/// scrolls past that rather than growing the card.
+pub fn text_area(lines: i32) -> (gtk4::ScrolledWindow, gtk4::TextView) {
+    let view = gtk4::TextView::builder()
+        .wrap_mode(gtk4::WrapMode::WordChar)
+        .accepts_tab(false)
+        .build();
+    let scroller = gtk4::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk4::PolicyType::Never)
+        .vscrollbar_policy(gtk4::PolicyType::Automatic)
+        .child(&view)
+        .build();
+    // A body line is about 22 px at the type scale's body size.
+    scroller.set_min_content_height(lines.max(1) * 22);
+    scroller.add_css_class("ui-text-area");
+    (scroller, view)
 }
 
 /// A dropdown over `choices`, control-sized.

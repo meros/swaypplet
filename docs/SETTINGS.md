@@ -1,7 +1,7 @@
 # Settings
 
 The settings pane is a page in the Helm card (`:set` in the omnibox, or the
-gear in the flight deck; a bare `:` lists every prefix). Eight tabs,
+gear in the flight deck; a bare `:` lists every prefix). Ten tabs,
 `src/settings/`:
 
 | tab | edits | sections of `~/.config/swaypplet/settings.json` |
@@ -17,6 +17,7 @@ gear in the flight deck; a bare `:` lists every prefix). Eight tabs,
 | Displays | where the outputs stand, and each one's mode, scale, rotation and adaptive sync; the profiles | `displays` (the profiles) |
 | Glass | the liquid-glass material | `~/.config/swaypplet/glass.json` |
 | System | nothing: it shows which nixos-config commit this host runs against origin/main, and runs `nx apply` or `nx` on a press | none |
+| Quality | nothing: the open issues, Auto-fix, and Merge & apply for a ready fix (docs/QUALITY.md) | none; GitHub, through `gh` |
 
 The Displays tab (`displays_pane.rs`) is the one that does not apply
 live: a layout can turn the only screen dark. Its arithmetic is pure and
@@ -306,7 +307,7 @@ The Launcher tab's "Pages and settings" switch turns the rows off.
 
 - `dev/render.sh --mode preview:settings.idle` renders one tab
   (`wallpaper`, `idle`, `bar`, `input`, `alerts`, `launcher`, `displays`,
-  `glass`). `settings.input` sends the saved `input` section to the nested
+  `glass`, `quality`; the last with `SWAYPPLET_QUALITY_FIXTURE=<dir>`). `settings.input` sends the saved `input` section to the nested
   compositor and lists its devices.
   (`wallpaper`, `idle`, `bar`, `alerts`, `launcher`, `displays`, `glass`,
   `system`). `SWAYPPLET_SYSTEM_FIXTURE=behind|staged|in-sync|applying`

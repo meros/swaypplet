@@ -56,6 +56,30 @@ pub fn run(component: &str) {
             return;
         }
 
+        // The report card (src/quality/report.rs), on its own glass.
+        // `SWAYPPLET_PREVIEW_IMAGE=<png>` stands in for the capture; without
+        // one the card opens as it does after Escape. Send prints the draft,
+        // and with `SWAYPPLET_DRY_RUN=1` goes on to print the issue.
+        if component == "report" {
+            let image = std::env::var("SWAYPPLET_PREVIEW_IMAGE")
+                .ok()
+                .and_then(|p| crate::screenshot::deliver::load_png(std::path::Path::new(&p)).ok());
+            let store = store.clone();
+            let surface = crate::quality::report::card(app, image, move |draft| {
+                eprintln!(
+                    "report preview: send {} chars, picture {}, log {}",
+                    draft.description.len(),
+                    draft.image.is_some(),
+                    draft.attach_log
+                );
+                if crate::quality::dry_run() {
+                    crate::quality::report::send(&store, draft);
+                }
+            });
+            std::mem::forget(surface);
+            return;
+        }
+
         // Lock screen: full-window content in a plain toplevel — no session
         // lock is taken, so it's safe to iterate on styling while unlocked.
         // Submitting "ok" flashes success; anything else shakes.
