@@ -7,26 +7,20 @@
    The window stays transparent (01-base.css) on both: the compositor draws
    the wallpaper and the glass, into the lock's own scene tree for
    `layer_effects "session-lock"` and behind the layer surface for
-   `layer_effects "swaypplet-greeter"`. Nothing tints the wallpaper: the
-   clock and date sit on their own glass plate (`.lock-plate`), and only the
+   `layer_effects "swaypplet-greeter"`. The clock and date stand on the
+   wallpaper over a soft shade (`.lock-stamp`, `ui::on_shade`); the
    switch-user button and the greeter's users stand on bare wallpaper
    (`ui::on_wallpaper`).
    ════════════════════════════════════════════════════════════════════ */
 
-/* The plate: the clock and the date on the card's glass, the card's width.
-   The hero's line box carries its own air above the digits, so the top pad
-   is a step lighter than the bottom one. */
-.lock-plate {
-    padding: var(--space-4) var(--space-6) var(--space-6) var(--space-6);
-}
-
-/* The date sits under the clock on the plate; the clock stays dominant
-   however solid the date gets. */
+/* The date sits tight under the clock: the hero's line box already carries
+   air under the digits. */
 .lock-date {
-    margin-top: var(--space-1);
+    margin-top: calc(-1 * var(--space-3));
 }
 
-/* The card hangs a group's gap under the plate: two cards, one column. */
+/* The card starts where the shade ends (lock/ui.rs SHADE_SIZE), never on
+   it: the shade's fade under the clock and date is the gap. */
 .lock-card {
-    margin-top: var(--space-5);
+    margin-top: 0;
 }

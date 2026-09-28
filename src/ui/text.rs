@@ -177,6 +177,18 @@ pub mod on_wallpaper {
     }
 }
 
+pub mod on_shade {
+    use gtk4::prelude::*;
+
+    /// The lock's clock and date: light ink with one wide, faint shadow,
+    /// over the soft shade the lock draws behind them (`tokens::backdrop`,
+    /// "The lock's clock on its shade"). Never on bare wallpaper without the
+    /// shade: the shadow alone does not hold the contrast.
+    pub fn adopt(w: &impl IsA<gtk4::Widget>) {
+        w.add_css_class("ui-on-shade");
+    }
+}
+
 pub mod live_caption {
     use gtk4::prelude::*;
 

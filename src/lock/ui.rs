@@ -53,6 +53,40 @@ const CHIP_AVATAR_SIZE: i32 = 24;
 /// discard line, so it never becomes glass.
 const INVISIBLE_INK: crate::tokens::Rgb = crate::tokens::Rgb::BLACK;
 
+/// The shade behind the lock's clock, in logical pixels: wider than the
+/// clock by a margin each side, so the fade happens on picture, not on the
+/// digits. The card starts where the shade ends and never overlaps it: a
+/// card over a shaded pixel composites off the glass key and draws a flat
+/// tint instead of the material.
+const SHADE_SIZE: (i32, i32) = (1000, 360);
+
+/// The soft black oval behind the lock's clock and date: `SHADE_PEAK` at its
+/// centre, falling to nothing at its rim along a smoothstep, so it has no
+/// edge to see (`tokens::backdrop`, "The lock's clock on its shade").
+fn clock_shade() -> gtk4::DrawingArea {
+    let area = gtk4::DrawingArea::new();
+    area.set_content_width(SHADE_SIZE.0);
+    area.set_content_height(SHADE_SIZE.1);
+    area.set_can_target(false);
+    area.set_can_focus(false);
+    area.set_draw_func(|_, cr, w, h| {
+        let (w, h) = (f64::from(w), f64::from(h));
+        let ink = crate::tokens::Rgb::BLACK;
+        cr.translate(w / 2.0, h / 2.0);
+        cr.scale(w / 2.0, h / 2.0);
+        let shade = gtk4::cairo::RadialGradient::new(0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+        for i in 0..=16 {
+            let t = f64::from(i) / 16.0;
+            let fall = 1.0 - t * t * (3.0 - 2.0 * t);
+            shade.add_color_stop_rgba(t, ink.0, ink.1, ink.2, crate::tokens::SHADE_PEAK * fall);
+        }
+        let _ = cr.set_source(&shade);
+        cr.arc(0.0, 0.0, 1.0, 0.0, std::f64::consts::TAU);
+        let _ = cr.fill();
+    });
+    area
+}
+
 /// How long [`SurfaceSet::begin_handoff`] runs before the caller actually
 /// switches: the picker's exit (`--motion-exit`, the same token the chips
 /// and the card leave on in the stylesheet). Long enough to read as a
@@ -280,29 +314,34 @@ impl SurfaceSet {
         column.set_halign(gtk4::Align::Center);
         column.set_valign(gtk4::Align::Center);
 
-        // The clock and the date sit on a glass plate of their own, the
-        // card's width, above it. On bare wallpaper no halo holds the clock's
-        // contrast over a bright, busy picture, and dimming the whole
-        // wallpaper to rescue it spoils the picture; the plate frosts only
-        // what is behind the clock, and its text takes the card's own ink in
-        // either mode.
+        // The clock and the date stand on the wallpaper, large, over a soft
+        // shade: a black oval that fades out with no edge, darkest behind
+        // the digits (`clock_shade`). It darkens only what is behind the
+        // clock, so the rest of the picture stays as it is, and it keeps
+        // the clock readable over a bright, busy region where no outline
+        // around the glyphs does. A glass plate here read as a second card.
         //
-        // What still stands on the wallpaper, the switch-user button and the
-        // greeter's users, keeps the halo that follows the wallpaper behind
-        // it (`ui::on_wallpaper`).
+        // What still stands on bare wallpaper, the switch-user button and
+        // the greeter's users, keeps the halo that follows the wallpaper
+        // behind it (`ui::on_wallpaper`).
         let greet_mode = self.greeter.get();
-        let plate = ui::vbox(0);
-        plate.set_width_request(360);
-        ui::card::adopt(&plate, ui::Card::Floating);
-        plate.add_css_class("lock-plate");
         let clock = ui::text("", ui::Text::Hero, ui::Tone::Fg);
         clock.set_xalign(0.5);
         crate::ui::set_numeric(&clock, true);
+        ui::on_shade::adopt(&clock);
         let date = ui::text("", ui::Text::Title, ui::Tone::Fg);
         date.set_xalign(0.5);
         date.add_css_class("lock-date");
-        plate.append(&clock);
-        plate.append(&date);
+        ui::on_shade::adopt(&date);
+        let stamp = ui::vbox(0);
+        stamp.set_halign(gtk4::Align::Center);
+        stamp.set_valign(gtk4::Align::Center);
+        stamp.append(&clock);
+        stamp.append(&date);
+        let plate = gtk4::Overlay::new();
+        plate.add_css_class("lock-stamp");
+        plate.set_child(Some(&clock_shade()));
+        plate.add_overlay(&stamp);
 
         // spacing 0: every gap below is an explicit margin in 10-lock.css,
         // because the gaps are deliberately unequal and a GtkBox has exactly
@@ -317,6 +356,9 @@ impl SurfaceSet {
         // frames after it.
         ui::card::adopt(&card, ui::Card::Floating);
         card.add_css_class("lock-card");
+        // The shade is wider than the card, and the column is as wide as
+        // its widest child.
+        card.set_halign(gtk4::Align::Center);
 
         if self.crossfade.get() {
             window.add_css_class("lock-crossfade");

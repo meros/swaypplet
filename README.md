@@ -58,7 +58,7 @@ Region, window, screen, a colour picker and screen recording, from one selector.
 
 ![The lock screen in dark and light mode](docs/screenshots/lock.webp)
 
-The lock screen shows the wallpaper as it is, with no dimming or blur. The clock and date sit on their own glass plate, so they read on any wallpaper in either mode. Password, fingerprint and face unlock run at the same time, and whichever finishes first unlocks. The lock cross-fades in from the desktop and out again. The greeter at login uses the same card.
+The lock screen shows the wallpaper as it is, with no dimming or blur. The clock is large and stands on the wallpaper itself, over a soft shade that darkens only what is behind it. Password, fingerprint and face unlock run at the same time, and whichever finishes first unlocks. The lock cross-fades in from the desktop and out again. The greeter at login uses the same card.
 
 | | |
 |---|---|

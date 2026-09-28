@@ -19,7 +19,7 @@ pub const TYPE: [(&str, u32); 8] = [
     ("title", 18),
     ("display-sm", 28),
     ("display", 36),
-    ("hero", 96),
+    ("hero", 136),
 ];
 
 pub const RADIUS: [(&str, u32); 5] = [

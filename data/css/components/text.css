@@ -5,7 +5,7 @@
    typographic roles: strong, glyph, mono, numeric, overline, text on bare
    wallpaper, a caption whose tone moves.
 
-   owns: ui-hero ui-display ui-display-sm ui-title ui-title-sm ui-body ui-label ui-caption ui-strong ui-glyph ui-mono ui-numeric ui-muted ui-faint ui-accent ui-success ui-warning ui-danger ui-overline ui-on-wallpaper ui-live-caption
+   owns: ui-hero ui-display ui-display-sm ui-title ui-title-sm ui-body ui-label ui-caption ui-strong ui-glyph ui-mono ui-numeric ui-muted ui-faint ui-accent ui-success ui-warning ui-danger ui-overline ui-on-wallpaper ui-on-shade ui-live-caption
    ══════════════════════════════════════════════════════════════════════ */
 
 .ui-hero       { font-size: var(--type-hero);       font-weight: var(--w-light); }
@@ -66,6 +66,16 @@ button.ui-btn.ui-on-wallpaper {
         0 1px 3px var(--halo-on-wallpaper),
         0 1px 3px var(--halo-on-wallpaper),
         0 1px 3px var(--halo-on-wallpaper);
+}
+
+/* The lock's clock and date, on the shade the lock draws behind them
+   (src/tokens/backdrop.rs, "The lock's clock on its shade"). The shade holds
+   the contrast; the one wide, faint shadow only gives the digits depth, so
+   there is no outline around each glyph. Light ink in either mode: the shade
+   is dark in both. */
+.ui-on-shade {
+    color: var(--on-status);
+    text-shadow: 0 3px 28px var(--shadow-on-shade);
 }
 
 /* A caption whose tone changes in place (an error arriving, a success):

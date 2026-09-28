@@ -362,7 +362,7 @@ and a light one for the hero.
 
 | Token | Size | Weight | Use |
 |---|---|---|---|
-| `--type-hero` | 96 | 300 | the lock screen's clock, and nothing else |
+| `--type-hero` | 136 | 300 | the lock screen's clock, and nothing else |
 | `--type-display` | 36 | 700 | the OSD icon, a big number on a card |
 | `--type-display-sm` | 28 | 700 | a greeting, a big number on a card |
 | `--type-title` | 18 | 600 | a card's title (polkit, a notification's summary) |
@@ -372,7 +372,7 @@ and a light one for the hero.
 | `--type-caption` | 11 | 400 | metadata, timestamps, footnotes |
 
 Weights: `--w-regular` 400, `--w-strong` 600, `--w-heavy` 700, and
-`--w-light` 300 for the hero size only: at 96 px a heavy face shouts.
+`--w-light` 300 for the hero size only: at 136 px a heavy face shouts.
 Families: `--font` (Ubuntu Sans Nerd Font, then Ubuntu Sans, Noto Sans,
 sans-serif) and `--mono` (JetBrains Mono Nerd Font, monospace) for keys,
 code and tabular numbers. Numbers that change in place (clock, percentages,
@@ -506,17 +506,22 @@ and it is held to Lc 68 (it reaches 69–75). The smaller text's Lc 60
 holds everywhere. With no sample yet the answer is the shipped look: white
 ink on a black halo at 0.20.
 
-**The lock's clock stands on glass.** A halo cannot hold the hero clock
-over every wallpaper: every pixel of the lock surface that is not a card has
-to stay under the compositor's discard line (0.28) or become glass, and
-measured on renders the halo leaves the clock at Lc 39–57 over a bright
-image in light mode. Dimming or blurring the whole wallpaper fixes the
-contrast and spoils the picture (tried 2026-09-27 as a compositor backdrop,
-removed 2026-09-28). So the clock and the date sit on a glass plate of their
-own (`.lock-plate`, a `Card::Floating` the auth card's width), and take the
-card's ink in either mode. Nothing else tints the wallpaper: no scrim, no
-backdrop, and every lock card paints the plain key. The switch-user button
-and the greeter's users still stand on the wallpaper and keep the halo.
+**The lock's clock stands on a shade.** The clock (`--type-hero`, 136 px,
+light weight) and the date stand on the wallpaper with no card. A halo of
+tight stacked shadows made an outline around every glyph, and a glass
+plate read as a second card, so the lock draws a shade instead: a soft black
+oval behind the clock, `SHADE_PEAK` 0.22 at the centre and fading along a
+smoothstep to nothing, with light ink and one wide text shadow
+(`--shadow-on-shade`, 0.05) for depth (`ui::on_shade`). Every lock-surface
+pixel that is not a card must stay under the discard line (0.28), and the
+shade and the text shadow stacked at full strength, as they are inside a
+digit's counter, reach 0.259 (a test holds it). Measured on renders over the
+alcohol-ink wallpaper, the clock's light ink reaches Lc 52 over the median
+ground behind it and Lc 37 over the brightest tenth; APCA asks about Lc 45
+of 136 px text at weight 300, so the brightest busy regions fall short, and
+no treatment under the discard line closes that gap (a glass plate does). Nothing else tints the wallpaper: no scrim, no backdrop, and every
+lock card paints the plain key. The switch-user button and the greeter's
+users keep the halo.
 
 The lock and the greeter follow the mode: the plate's and the card's glass
 follow it like every other namespace. The greeter reads the system's Look
@@ -614,7 +619,7 @@ The API has three shapes (the module docs of `src/ui/mod.rs`):
 | Component (module, stylesheet) | Build | Adopt | State | Classes |
 |---|---|---|---|---|
 | Surface (`surface`) | | `ui::surface::adopt(&root)`, `ui::window::adopt(&root)` (solid), `ui::canvas::adopt(&w)` | | `.ui-surface`, `.ui-window`, `.ui-canvas` |
-| Text (`text`) | `ui::text(s, Text, Tone)`, `ui::heading(s)`, `ui::overline(s, Tone)` | `ui::glyph::adopt(&l, Text, Tone)`, `ui::overline::adopt(&l)`, `ui::on_wallpaper::adopt(&w)`, `ui::live_caption::adopt(&l)` | `set_text_style`, `set_tone`, `set_weight(Weight)`, `set_numeric`, `set_mono` | `.ui-hero` … `.ui-caption`, `.ui-muted` … `.ui-danger`, `.ui-strong`, `.ui-glyph`, `.ui-mono`, `.ui-numeric`, `.ui-overline`, `.ui-on-wallpaper`, `.ui-live-caption` |
+| Text (`text`) | `ui::text(s, Text, Tone)`, `ui::heading(s)`, `ui::overline(s, Tone)` | `ui::glyph::adopt(&l, Text, Tone)`, `ui::overline::adopt(&l)`, `ui::on_wallpaper::adopt(&w)`, `ui::on_shade::adopt(&w)`, `ui::live_caption::adopt(&l)` | `set_text_style`, `set_tone`, `set_weight(Weight)`, `set_numeric`, `set_mono` | `.ui-hero` … `.ui-caption`, `.ui-muted` … `.ui-danger`, `.ui-strong`, `.ui-glyph`, `.ui-mono`, `.ui-numeric`, `.ui-overline`, `.ui-on-wallpaper`, `.ui-on-shade`, `.ui-live-caption` |
 | Layout (`layout`) | `ui::vbox(n)`, `ui::hbox(n)`, `ui::stack(o, n)`, `ui::separator(Orientation)`, `ui::pill_group(n)`, `ui::toolbar(n)`; `ui::pad(&w, n)` | | | `.ui-separator(.vertical)`, `.ui-pill-group`, `.ui-toolbar` |
 | Card (`card`) | `ui::group(n)`, `ui::well()` | `ui::card::adopt(&w, Card)` (`Floating`, `Thin`, `Solid`) | `set_card_tint(CardTint, on)`, `set_success` | `.ui-card` (`.thin`, `.solid`, `.success`, `.danger`, `.recessed`), `.ui-group`, `.ui-well` |
 | Button (`button`) | `ui::button(label, Kind)`, `ui::button_with(Face, Kind, Size)`, `ui::toggle_button(Face, Kind, Size)` | `ui::button::adopt(&b, Kind, Size)` | `set_button_kind`, `set_armed` | `.ui-btn` (`.primary`, `.flat`, `.destructive`, `.small`, `.icon`, `.pill`, `.armed`) |

@@ -36,7 +36,9 @@ mod semantic;
 pub mod tint;
 
 pub use apca::apca;
-pub use backdrop::{Backdrop, on_wallpaper, scrim_for};
+pub use backdrop::{
+    Backdrop, SHADE_PEAK, SHADE_TEXT_SHADOW_ALPHA, on_wallpaper, scrim_for,
+};
 pub use color::{Oklch, Rgb};
 pub use emit::css;
 pub use fixed::{COMPONENT, DURATION, RADIUS, SPACE, SURFACE_KEY, TYPE, space};

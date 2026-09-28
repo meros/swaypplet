@@ -191,6 +191,27 @@ pub fn on_wallpaper(backdrop: Option<Backdrop>, mode: Mode) -> OnWallpaper {
     }
 }
 
+// ── The lock's clock on its shade ───────────────────────────────────────
+//
+// The lock's clock and date stand on the wallpaper with no card. A halo of
+// tight stacked shadows (above) outlines each glyph and reads as a sticker;
+// the clock gets a shade instead: a soft black oval behind it, fading out
+// with no edge (`lock::ui`, drawn in Cairo), and one wide, faint text shadow
+// that gives the digits a little depth. Light ink in either mode.
+//
+// Every pixel of the lock surface that is not a card must stay under the
+// compositor's discard line (GLASS_MASK_THRESHOLD less 0.12) or it becomes
+// glass. The text shadow and the shade stack, and inside a digit's counter
+// (the holes of 8, 9, 0) a wide shadow reaches its full alpha: measured over
+// a white page, 0.25 of darkening under a 0.24 shadow. So the budget is the
+// two alphas stacked at full strength.
+
+/// The shade's alpha at its centre, black.
+pub const SHADE_PEAK: f64 = 0.22;
+
+/// The alpha of the wide text shadow on the shade, black.
+pub const SHADE_TEXT_SHADOW_ALPHA: f64 = 0.05;
+
 /// The scrim under a modal (`--scrim`, the well's ground): black at
 /// [`SCRIM_ALPHA`] in dark mode, none in light mode.
 pub fn scrim_for(mode: Mode) -> (Rgb, f64) {
@@ -233,6 +254,15 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The shade and the text shadow on it, stacked at full strength (a
+    /// digit's counter), stay under the discard line with room for GTK's
+    /// rounding, so the lock's clock never draws a slab of glass.
+    #[test]
+    fn the_clock_shade_never_becomes_glass() {
+        let peak = 1.0 - (1.0 - SHADE_PEAK) * (1.0 - SHADE_TEXT_SHADOW_ALPHA);
+        assert!(peak < GLASS_MASK_THRESHOLD - 0.12 - 0.015, "{peak:.3}");
     }
 
     fn at(luminance: u8, spread: u8) -> Backdrop {
