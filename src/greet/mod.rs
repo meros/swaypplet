@@ -17,11 +17,15 @@
 //! parallel with the armed reader, and switching users retargets the reader
 //! and cancels/recreates the conversation instantly.
 //!
-//! Selecting a user who already has a live session skips greetd entirely
-//! and jumps to that session via the host switcher — going through greetd
-//! would start a second session, and the session command's "activate the
-//! existing session and exit" fallback makes greetd respawn the greeter,
-//! which used to bounce the VT straight back here.
+//! Every user authenticates here, signed in or not, once. For a user who
+//! already has a graphical session, greetd then runs the session command as
+//! that user, and the dispatcher's `swaypplet switch-user --resume` asks
+//! logind to activate and unlock the running session instead of starting a
+//! second one: the pattern GDM, LightDM and SDDM share. The greeter only
+//! says which of the two is about to happen ("Resuming…"); it needs no
+//! privilege for either. It used to jump to a running session without
+//! asking anything, which landed on that session's lock screen and asked
+//! for the password a second time.
 //!
 //! Env: SWAYPPLET_GREET_USER (prefilled username), SWAYPPLET_GREET_USERS
 //! (comma-separated users shown as clickable chips; first one is the
@@ -94,11 +98,9 @@ struct State {
     /// selected user gets the reader armed for them. Empty (no `--list`) →
     /// assume enrolled and let the fp-agent's own enrollment check decide.
     enrolled: HashMap<String, bool>,
-    /// Users with a live graphical session from `--list` — their chips jump
-    /// to the session instead of starting a greetd conversation.
+    /// Users with a live graphical session from `--list`: signing in as one
+    /// resumes that session (the dispatcher's `switch-user --resume`).
     logged_in: HashMap<String, bool>,
-    /// Whether this host does user switching at all (dev boxes don't).
-    can_switch: bool,
     fp_tx: tokio::sync::mpsc::UnboundedSender<FpCmd>,
 }
 
@@ -121,45 +123,19 @@ impl State {
     }
 
     /// Whether `user` already has a live graphical session. Unknown (no
-    /// `--list` yet) → `false`, so the greeter behaves as it always did and
-    /// self-corrects once the list lands.
+    /// `--list` yet) → `false`; only the wording depends on it, since the
+    /// dispatcher decides for itself.
     fn has_session(&self, user: &str) -> bool {
         self.logged_in.get(user).copied().unwrap_or(false)
     }
 
-    /// Hand `user` off to their existing session via the host switcher.
-    /// `false` when there is nothing to hand off to (no session, or no
-    /// switcher on this host) and the caller should fall back to greetd.
-    ///
-    /// Authenticating here would be wasted work *and* a second password
-    /// prompt: greetd would create a session, `sessionDispatch` would notice
-    /// the other one and `loginctl activate` it, and the user would land on
-    /// that session's own lock screen and have to authenticate again. The
-    /// session that owns the screen does the auth; we only get you there.
-    fn jump_to_session(&mut self, user: &str) -> bool {
-        if !self.has_session(user) || !self.can_switch {
-            return false;
-        }
-        self.surfaces.set_status("Switching…", StatusKind::Info);
-        // Same handoff beat as the lock screen's Switch user — this is a jump
-        // between sessions either way, so it should look like one.
-        let delay = self.surfaces.begin_handoff(Some(user));
-        let user = user.to_string();
-        glib::timeout_add_local_once(delay, move || switch_user::switch_to(&user));
-        true
-    }
-
     /// Point the fp-agent at the currently selected user (or stand it down
     /// for an unenrolled one). The pill hides until the agent reports Ready
-    /// for the new target.
-    ///
-    /// A user with a live session gets the reader stood down too: a match
-    /// there could only mint a token for a greetd conversation we are never
-    /// going to run (see `jump_to_session`), and arming it would promise an
-    /// unlock this surface cannot deliver.
+    /// for the new target. A signed-in user gets it too: the finger resumes
+    /// their session the way the password does.
     fn retarget_fp(&mut self) {
         match self.username() {
-            Some(user) if self.fp_enrolled(&user) && !self.has_session(&user) => {
+            Some(user) if self.fp_enrolled(&user) => {
                 self.surfaces.set_fp_armed(false);
                 let _ = self.fp_tx.send(FpCmd::Verify { user });
             }
@@ -215,7 +191,7 @@ pub fn run() -> ! {
     let exit_code = Rc::new(RefCell::new(EXIT_ERROR));
 
     let surfaces = SurfaceSet::new();
-    surfaces.enable_user_field(&default_user);
+    surfaces.enable_greeter(&default_user);
 
     let st = Rc::new(RefCell::new(State {
         tx,
@@ -232,7 +208,6 @@ pub fn run() -> ! {
         switch_pending: None,
         enrolled,
         logged_in,
-        can_switch: switch_user::available(),
         fp_tx,
     }));
 
@@ -407,13 +382,6 @@ fn submit(st: &Rc<RefCell<State>>, password: String) {
         return;
     };
 
-    // The selected user is already logged in somewhere — hand off instead of
-    // authenticating. Reachable when `--list` lands after the prefilled user
-    // has been targeted, so the chip-click guard never ran.
-    if s.jump_to_session(&user) {
-        return;
-    }
-
     if s.canceling {
         // Restart already in flight — this secret rides along.
         s.pending = Some(Pending {
@@ -447,14 +415,10 @@ fn submit(st: &Rc<RefCell<State>>, password: String) {
     }
 }
 
-/// A user chip was clicked. A user with a live session gets jumped to
-/// directly (their lock screen still guards it); anyone else gets the
-/// greetd conversation restarted for them and the reader retargeted.
+/// A user was picked under the card: the greetd conversation restarts for
+/// them and the reader is retargeted, signed in or not.
 fn switch_user(st: &Rc<RefCell<State>>, user: String) {
     let mut s = st.borrow_mut();
-    if s.jump_to_session(&user) {
-        return;
-    }
     let already_current = s.session_user.as_deref() == Some(user.as_str())
         && s.username().as_deref() == Some(user.as_str());
     if already_current {
@@ -586,6 +550,9 @@ fn handle_event(
             // locker (or the next greeter) can claim it cleanly.
             let _ = s.fp_tx.send(FpCmd::Stop);
             s.surfaces.flash_success();
+            if s.session_user.as_deref().is_some_and(|u| s.has_session(u)) {
+                s.surfaces.set_status("Resuming\u{2026}", StatusKind::Info);
+            }
             let cmd = s.session_cmd.clone();
             let env = s.session_env.clone();
             s.send(ipc::Req::Start { cmd, env });

@@ -112,9 +112,8 @@ pub struct AuthField {
 }
 
 impl AuthField {
-    /// Wrap `input` in the field. The caller owns the entry because the
-    /// greeter's username row is a plain `Entry` and everything else is a
-    /// `PasswordEntry`; the chrome around them is identical either way.
+    /// Wrap `input` in the field. The caller owns the entry, a
+    /// `PasswordEntry` on every card today; the chrome is the field's.
     pub fn new(input: &impl IsA<gtk4::Widget>) -> Self {
         input.as_ref().set_hexpand(true);
         let field = crate::ui::field("", input);

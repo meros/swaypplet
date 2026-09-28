@@ -327,7 +327,7 @@ is built and never changes again.** Anything that can arrive late is laid out
 from the first frame and only painted or not — a fingerprint pill in a
 reserved row, one message line carrying the status and the Caps Lock warning
 between them. Anything that genuinely differs card to card (a greeter's
-username row, a polkit identity picker, whether there is a fingerprint reader
+user row, a polkit identity picker, whether there is a fingerprint reader
 on this machine at all) is settled *before* the surface is presented, where a
 size change costs nothing.
 

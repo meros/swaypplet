@@ -9,6 +9,9 @@
 //!                a fresh one on a free spare VT.
 //!   `<user>`     resume that user's live session, else put a greeter in front
 //!                of them.
+//!   `--resume`   from the session command, as the user greetd just signed
+//!                in: activate and unlock their running graphical session.
+//!                Exits 0 when it did, 3 when there is none (start one).
 //!   (none)       cycle to the next session.
 //!
 //! Every mode locks the current session first. [`host`] does the D-Bus work,
@@ -122,7 +125,10 @@ fn block_on<T>(fut: impl Future<Output = zbus::Result<T>>) -> zbus::Result<T> {
         .block_on(fut)
 }
 
-/// `swaypplet switch-user [--list|--greeter|<user>]`. Never returns.
+/// `--resume`'s exit code when the user has no session to resume.
+const EXIT_NOTHING_TO_RESUME: i32 = 3;
+
+/// `swaypplet switch-user [--list|--greeter|--resume|<user>]`. Never returns.
 pub fn run(mut args: impl Iterator<Item = String>) -> ! {
     let Some(cfg) = host::config() else {
         eprintln!("swaypplet switch-user: this host has no switch-user config");
@@ -140,6 +146,11 @@ pub fn run(mut args: impl Iterator<Item = String>) -> ! {
                 Err(e) => Err(e.to_string()),
             },
             Some("--greeter") => host::goto_greeter(&conn, &cfg).await,
+            Some("--resume") => match host::resume(&conn).await {
+                Ok(host::Resumed::Yes) => Ok(()),
+                Ok(host::Resumed::Nothing) => std::process::exit(EXIT_NOTHING_TO_RESUME),
+                Err(e) => Err(e),
+            },
             Some(user) => host::switch_to(&conn, &cfg, user).await,
             None => host::cycle(&conn, &cfg).await,
         })

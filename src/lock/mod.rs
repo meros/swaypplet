@@ -240,6 +240,36 @@ fn warm_and_wait() {
     stage("lock commanded");
 }
 
+/// Call `on_unlock` on the main thread whenever logind emits Unlock for this
+/// process's session. Best-effort: without the bus the lock still unlocks by
+/// password, fingerprint and face.
+fn follow_unlock(on_unlock: impl Fn() + 'static) {
+    use zbus::export::futures_util::StreamExt;
+    let (tx, rx) = async_channel::unbounded::<()>();
+    crate::spawn::spawn_tokio_thread("lock-unlock-signal", async move {
+        let run = async {
+            let conn = zbus::Connection::system().await?;
+            let manager = crate::idle::logind::ManagerProxy::new(&conn).await?;
+            let session = crate::idle::logind::session(&conn, &manager).await?;
+            let mut unlocks = session.receive_unlock().await?;
+            while unlocks.next().await.is_some() {
+                if tx.send(()).await.is_err() {
+                    break;
+                }
+            }
+            zbus::Result::Ok(())
+        };
+        if let Err(e) = run.await {
+            log::warn!("lock: not following logind Unlock: {e}");
+        }
+    });
+    glib::spawn_future_local(async move {
+        while rx.recv().await.is_ok() {
+            on_unlock();
+        }
+    });
+}
+
 const EXIT_UNLOCKED: i32 = 0;
 const EXIT_ERROR: i32 = 1;
 const EXIT_UNAVAILABLE: i32 = 2;
@@ -419,6 +449,26 @@ pub fn run() -> ! {
             *code.borrow_mut() = EXIT_UNAVAILABLE;
             let ml = ml.clone();
             glib::idle_add_local_once(move || ml.quit());
+        });
+    }
+
+    // logind's Unlock for this session ends the lock like a password does.
+    // The greeter's "resume" path sends it: the person authenticated there,
+    // and `switch-user --resume`, running as this same user after greetd's
+    // PAM success, asks logind to unlock and activate this session, which is
+    // what GDM, LightDM and SDDM do. logind only lets this user (or root)
+    // send it, and the signal comes from logind's own bus name.
+    {
+        let end_lock = end_lock.clone();
+        let unlocking = unlocking.clone();
+        let surfaces = surfaces.clone();
+        follow_unlock(move || {
+            if unlocking.replace(true) {
+                return;
+            }
+            log::info!("lock: logind Unlock, ending the lock");
+            surfaces.flash_success();
+            end_lock();
         });
     }
 

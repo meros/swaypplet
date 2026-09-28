@@ -77,6 +77,9 @@ trait Logind {
     fn get_session(&self, id: &str) -> zbus::Result<OwnedObjectPath>;
     /// `loginctl activate` — the VT switch itself.
     fn activate_session(&self, id: &str) -> zbus::Result<()>;
+    /// `loginctl unlock-session`: logind emits Unlock on that session, and
+    /// its locker ends. Allowed without polkit for the session's own user.
+    fn unlock_session(&self, id: &str) -> zbus::Result<()>;
 }
 
 #[zbus::proxy(
@@ -133,6 +136,7 @@ async fn snapshot(conn: &Connection) -> zbus::Result<Vec<Session>> {
             user,
             tty: prop(&all, "TTY"),
             class: prop(&all, "Class"),
+            kind: prop(&all, "Type"),
         });
     }
     Ok(out)
@@ -237,16 +241,39 @@ async fn activate(conn: &Connection, session: &str) -> zbus::Result<()> {
         .await
 }
 
-/// Start a switch greeter on `vt`. Fails when the host has no
-/// `/etc/greetd/switch-ttyN.toml` for it, which is how a spare-VT list wider
-/// than the configured greeters stays harmless.
+/// Start a switch greeter on `vt` and put it on screen. Fails when the host
+/// has no `/etc/greetd/switch-ttyN.toml` for it, which is how a spare-VT list
+/// wider than the configured greeters stays harmless.
+///
+/// greetd runs with `terminal.switch = false`, so that a greeter it restarts
+/// after `--resume` does not pull the screen back to its VT; the cost is
+/// that it no longer moves there on start either. So this waits for the
+/// greeter's logind session to appear and activates it: a few hundred
+/// milliseconds after the unit starts, bounded at [`GREETER_WAIT`].
 async fn start_greeter(conn: &Connection, vt: u32) -> zbus::Result<()> {
     SystemdProxy::new(conn)
         .await?
         .start_unit(&format!("greetd-switch@tty{vt}.service"), "replace")
-        .await
-        .map(|_| ())
+        .await?;
+    let tty = format!("tty{vt}");
+    let deadline = std::time::Instant::now() + GREETER_WAIT;
+    while std::time::Instant::now() < deadline {
+        let sessions = snapshot(conn).await?;
+        if let Some(g) = sessions
+            .iter()
+            .find(|s| s.class == "greeter" && s.tty == tty)
+        {
+            return activate(conn, &g.session).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    Err(zbus::Error::Failure(format!(
+        "no greeter session on {tty} after {GREETER_WAIT:?}"
+    )))
 }
+
+/// How long [`start_greeter`] waits for the greeter's session.
+const GREETER_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Land on a greeter: reuse an idle one, else start one on a free spare VT.
 ///
@@ -292,6 +319,59 @@ pub async fn switch_to(conn: &Connection, cfg: &Config, target: &str) -> Result<
     }
     lock_own(conn).await;
     to_greeter(conn, cfg, &sessions).await
+}
+
+/// What `--resume` found.
+pub enum Resumed {
+    /// The user's running session is active and unlocked.
+    Yes,
+    /// The user has no other graphical session: start a new one.
+    Nothing,
+}
+
+/// `--resume`: run as the user greetd just authenticated, from the session
+/// command, before any desktop starts. When that user already has a
+/// graphical session, activate it and unlock it, which is what GDM, LightDM
+/// and SDDM do after a sign-in at the login screen. The greeter asked for
+/// the password or the finger; nothing here authenticates.
+///
+/// No polkit rule is involved: logind lets a user activate and unlock their
+/// own sessions. Activate first, so the lock screen is on screen when its
+/// Unlock arrives and plays its exit rather than vanishing unseen.
+///
+/// The greetd that ran this restarts its greeter on its own VT when this
+/// exits. It runs with `terminal.switch = false`, so that greeter stays
+/// behind the resumed session instead of pulling the screen back to itself.
+/// Stopping a switch greeter's unit here instead would need a polkit rule
+/// for inactive sessions, and that unit also hosts the sessions it started.
+pub async fn resume(conn: &Connection) -> Result<Resumed, String> {
+    let user = crate::lock::auth::current_username().ok_or("cannot tell who is running this")?;
+    let own = std::env::var("XDG_SESSION_ID").unwrap_or_default();
+    let sessions = snapshot(conn).await.map_err(|e| e.to_string())?;
+    let Some(target) = rows::resume_target(&sessions, &user, &own) else {
+        return Ok(Resumed::Nothing);
+    };
+    activate(conn, &target.session)
+        .await
+        .map_err(|e| format!("could not activate {}: {e}", target.session))?;
+    // Past the activate, the seat is that session's either way: a failed
+    // unlock leaves its lock screen up, which asks again and is still the
+    // right place to be. Only a failed activate is a failed resume.
+    let unlocked = async {
+        LogindProxy::new(conn)
+            .await?
+            .unlock_session(&target.session)
+            .await
+    }
+    .await;
+    match unlocked {
+        Ok(()) => log::info!("switch-user: resumed session {} for {user}", target.session),
+        Err(e) => log::warn!(
+            "switch-user: activated session {} for {user}, could not unlock it: {e}",
+            target.session
+        ),
+    }
+    Ok(Resumed::Yes)
 }
 
 /// No argument: cycle. Next live session above ours, else a greeter for a

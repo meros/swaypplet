@@ -24,15 +24,21 @@
     padding: var(--space-6) var(--space-6) var(--space-5) var(--space-6);
 }
 
-/* Gaps between the lock card's rows. The box carries spacing 0 and every gap
-   is declared here, because they are deliberately unequal: the tightest binds
-   the greeter's username to the password under it, a wider one separates the
-   picker as a different kind of decision, and the switch-user button below
-   the card sits a group away from the caption, so it reads as its own
-   register rather than as a fourth item in one loose list. */
-.lock-chip-row     { margin-bottom: var(--space-5); }
-.auth-field-user   { margin-bottom: var(--space-3); }
-.lock-switch-user  { margin-top: var(--space-5); }
+/* What stands under the card. The card is the same on the lock and on the
+   greeter (the field and the caption); the lock puts its switch-user button
+   below it and the greeter its row of users, in the same slot, a group away
+   from the caption so it reads as its own register rather than as a third
+   item in one loose list. */
+.lock-switch-user,
+.lock-user-row     { margin-top: var(--space-5); }
+
+/* The greeter's users: flat buttons on the wallpaper, like switch-user. The
+   one the card is for stands at full ink; the others step back, which is the
+   whole of the selection, since a fill on the wallpaper would read as a
+   second card. The avatar's presence dot marks who is signed in. */
+button.lock-user                 { opacity: 0.6; }
+button.lock-user:hover,
+button.lock-user.selected        { opacity: 1; }
 
 /* ── The caption ──
    Two reserved lines that are never empty. Top-aligned so a one-line message

@@ -118,7 +118,7 @@ pub fn run(component: &str) {
             };
             let set = crate::lock::ui::SurfaceSet::new();
             // Greeter-mode preview: SWAYPPLET_GREET_USERS=meros,melvin adds
-            // the user chips + username row on top of the lock card.
+            // the user row under the lock card.
             let users: Vec<String> = std::env::var("SWAYPPLET_GREET_USERS")
                 .unwrap_or_default()
                 .split(',')
@@ -127,7 +127,7 @@ pub fn run(component: &str) {
                 .map(str::to_string)
                 .collect();
             if let Some(first) = users.first() {
-                set.enable_user_field(first);
+                set.enable_greeter(first);
                 // Mock avatar data so the preview exercises the new chips:
                 // the first user shows a logged-in presence dot, and
                 // SWAYPPLET_PREVIEW_AVATAR=<image> gives it a real picture

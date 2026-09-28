@@ -82,15 +82,16 @@ GtkLabel .auth-caption        wrap, lines(2), ellipsize End, xalign 0, yalign 0
 
 `.auth-field` takes over `background-color`, `border`, `border-radius`,
 `:focus-within`, the arm pulse and the reject flash. `.auth-input` is stripped
-to a text node with a caret. The greeter's username row is the same
-`.auth-field` with both marks unpainted.
+to a text node with a caret. The greeter's card is the lock's card: it has no
+username row, and the user it is for is picked in the row under the card and
+named in the field's placeholder ("Password for melvin").
 
 `src/slot.rs` does not survive. It existed to hold rows open and fade them in
 place, and once the rows were gone it had no callers: the field paints its own
 marks and the caption is never empty, so there is nothing left to reserve. The
 rule it carried moved to `src/auth_field.rs`, which is where it is now
 enforced. What genuinely varies card-to-card — the polkit identity row, the
-elevate face rows, the greeter's username field — is still decided before the
+elevate face rows, the greeter's user row under the card — is still decided before the
 surface is presented, which is the same rule stated without a helper.
 
 ## Lock card
@@ -171,9 +172,9 @@ Two chips, editable username, the same field twice. **360×292** (was 379).
 | 271 | padding bottom | 20 |
 | | **total** | **292** |
 
-The username field's unpainted mark slot is why both fields' text starts at the
-same x. That is the justification for reserving it, and it is a visible benefit
-rather than a hole, because the space sits inside a painted border.
+The greeter's card is this card, pixel for pixel. Its user row stands under
+the card in the slot the lock gives "Switch user", so the card itself never
+changes height between the two surfaces.
 
 ## Polkit
 

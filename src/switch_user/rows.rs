@@ -19,6 +19,8 @@ pub struct Session {
     pub tty: String,
     /// logind's `Class`: "user", "greeter", "manager"…
     pub class: String,
+    /// logind's `Type`: "wayland", "x11", "tty", "unspecified"…
+    pub kind: String,
 }
 
 impl Session {
@@ -44,6 +46,22 @@ impl Session {
 /// in logind's own listing order.
 pub fn session_for<'a>(sessions: &'a [Session], user: &str) -> Option<&'a Session> {
     sessions.iter().find(|s| s.user == user && s.seated())
+}
+
+/// The session `--resume` hands the seat to: `user`'s graphical session
+/// other than `own` (the short one greetd opened to run the dispatcher).
+///
+/// Only a graphical one counts. A text login on VT2 has a tty too, and
+/// resuming it after a graphical sign-in flips the screen to a console,
+/// which looks exactly like the desktop crashing on login.
+pub fn resume_target<'a>(sessions: &'a [Session], user: &str, own: &str) -> Option<&'a Session> {
+    sessions.iter().find(|s| {
+        s.user == user
+            && s.session != own
+            && s.class == "user"
+            && s.seated()
+            && matches!(s.kind.as_str(), "wayland" | "x11" | "mir")
+    })
 }
 
 /// Build one picker row.
@@ -131,6 +149,7 @@ mod tests {
             user: user.into(),
             tty: tty.into(),
             class: class.into(),
+            kind: "wayland".into(),
         }
     }
 
@@ -243,6 +262,30 @@ mod tests {
         ];
         assert!(next_above(&s, 0).is_none());
         assert!(wrap_target(&s, 0).is_none());
+    }
+
+    #[test]
+    fn resume_finds_the_other_graphical_session_of_the_same_user() {
+        let mut console = sess("4", "melvin", "tty2", "user");
+        console.kind = "tty".into();
+        let s = vec![
+            console,
+            sess("7", "melvin", "tty8", "user"),
+            sess("9", "melvin", "tty9", "user"),
+            sess("3", "meros", "tty1", "user"),
+        ];
+        // "9" is the dispatcher's own session; "4" is a text login.
+        assert_eq!(resume_target(&s, "melvin", "9").unwrap().session, "7");
+        assert!(resume_target(&s[..1], "melvin", "9").is_none());
+        assert!(resume_target(&s, "nobody", "9").is_none());
+    }
+
+    #[test]
+    fn a_greeter_or_a_session_without_a_tty_is_never_resumed() {
+        let mut detached = sess("5", "melvin", "", "user");
+        detached.kind = "wayland".into();
+        let s = vec![sess("6", "melvin", "tty8", "greeter"), detached];
+        assert!(resume_target(&s, "melvin", "9").is_none());
     }
 
     #[test]
