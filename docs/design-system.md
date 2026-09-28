@@ -500,12 +500,23 @@ halo. The proof is one case, a white page (light ink only gains as the
 ground darkens): white × 0.59 under the scrim is Lc 75.9. The greeter, whose
 compositor draws no such backdrop, and the switcher's caption keep the halo.
 
-**The lock and the greeter are dark in both modes.** Their card stands on
-that dimmed wallpaper, so light mode's dark ink and milky glass have no place
-there: both processes call `theme::pin_dark` before loading the stylesheet,
-and the panel sends the `session-lock` namespace dark mode's material
-(`settings::glass::ALWAYS_DARK`) while every other namespace follows the mode.
-The greeter's compositor keeps the shipped material, which is dark.
+**The lock and the greeter follow the mode.** In light mode the compositor
+lifts the wallpaper under the lock toward white instead of dimming it toward
+black: the same multiply over white (`lock_backdrop.light_brightness`, sent
+with `lock_backdrop_light` by the panel when the mode turns light), and the
+text on it takes dark ink under a white shadow. The proof mirrors the dark
+one with the worst case reversed, a black page: dark ink reaches Lc 75 over
+it lifted to `BACKDROP_LIFT_MAX` (0.19), so the picture shows at a fifth of
+its strength. Light mode has no scrim: a white one under the card could not
+be compensated to the glass key (it would need a negative colour), so the
+compositor's lift does all of it, and the card over no scrim paints the plain
+key (`--surface-key-over-scrim`, computed per mode). The card's glass follows
+the mode like every other namespace. The greeter reads the system's Look
+from `/etc/swaypplet/settings.json`, which the machine's owner sets in the
+nixos flake, resolves `auto` by the sun itself, and sends its own compositor
+the matching material (`settings::glass::apply_greeter`). A compositor that
+cannot lift (no `light_brightness`) fails `lock_backdrop`'s check, and the
+lock's text keeps its halo in both modes.
 
 The compositor's side, for the nixos repo (not in this repository):
 

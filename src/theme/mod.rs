@@ -204,7 +204,7 @@ pub mod sun;
 mod sway;
 pub mod wallpaper;
 
-pub use inputs::{inputs, mode_file, own_mode, pin_dark};
+pub use inputs::{inputs, mode_file, own_mode};
 pub use paint::{Paint, paint};
 
 /// The inputs the stylesheet on screen was generated from: the Look
@@ -429,10 +429,13 @@ pub fn follow_while_locked() {
     locked::assume_locked();
     reload();
     let monitors = crate::watch::files(
-        &[Some(crate::settings::store::path()), wallpaper::cache_file()]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>(),
+        &[
+            Some(crate::settings::store::path()),
+            wallpaper::cache_file(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>(),
         || {
             crate::settings::store::init();
             reload();
@@ -449,13 +452,11 @@ pub fn follow_while_locked() {
 mod tests {
     use crate::tokens::{Inputs, Mode};
 
-    /// The lock's stylesheet in light mode is dark mode's, token for token,
-    /// once the process has pinned dark (`pin_dark`, which the lock and the
-    /// greeter call before their first `load_css`). Through `drawn_mode`,
-    /// the step `inputs` takes the mode through; the pin is thread-local, so
-    /// it reaches no other test.
+    /// The lock and the greeter follow the mode like everything else: light
+    /// mode has no scrim and the card over it paints the plain key, dark mode
+    /// the black scrim and the key compensated for it.
     #[test]
-    fn the_lock_draws_dark_tokens_in_light_mode() {
+    fn the_lock_follows_the_mode() {
         let light = Inputs {
             mode: Mode::Light,
             ..Inputs::default()
@@ -464,15 +465,19 @@ mod tests {
             mode: Mode::Dark,
             ..light
         };
-        assert_ne!(super::document(light), super::document(dark));
-        assert_eq!(super::inputs::drawn_mode(|| Mode::Light), Mode::Light);
-
-        super::pin_dark();
-        let drawn = Inputs {
-            mode: super::inputs::drawn_mode(|| light.mode),
-            ..light
-        };
-        assert_eq!(super::document(drawn), super::document(dark));
+        let (l, d) = (super::document(light), super::document(dark));
+        assert_ne!(l, d);
+        assert!(
+            l.contains("--scrim: color-mix(in srgb, #000000 0%, transparent);"),
+            "light scrim"
+        );
+        assert!(
+            d.contains("--scrim: color-mix(in srgb, #000000 20%, transparent);"),
+            "dark scrim"
+        );
+        assert!(d.contains(
+            "--surface-key-over-scrim: color(srgb 0.261438 0.250980 0.245752 / 0.375000);"
+        ));
     }
     /// The stylesheet, structurally.
     ///

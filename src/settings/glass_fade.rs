@@ -231,13 +231,6 @@ fn between(a: &Tuning, b: &Tuning, t: f64) -> Tuning {
     let n = |x: f64, y: f64| x + (y - x) * t;
     let mut out = b.clone();
     out.material = between_materials(&a.material, &b.material, t);
-    // The always-dark namespaces' own copy moves the same way; one end
-    // without it stands for its plain material.
-    if a.dark.is_some() || b.dark.is_some() {
-        let da = a.dark.as_ref().unwrap_or(&a.material);
-        let db = b.dark.as_ref().unwrap_or(&b.material);
-        out.dark = Some(between_materials(da, db, t));
-    }
     out.bezel_scale = n(a.bezel_scale, b.bezel_scale);
     out.crest_scale = n(a.crest_scale, b.crest_scale);
     out
@@ -306,7 +299,7 @@ mod tests {
             crest_scale: 1.0,
             clarity: 0.0,
             frost_scale: 1.0,
-            dark: None,
+            light: false,
         }
     }
 

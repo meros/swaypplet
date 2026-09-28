@@ -94,8 +94,6 @@ pub fn run(component: &str) {
         // its card are the compositor's, from `layer_effects "session-lock"`,
         // and no plain toplevel gets either.
         if component == "lock" {
-            // What the locker draws: dark in either mode (`theme::pin_dark`).
-            crate::theme::pin_dark();
             crate::theme::reload();
             // SWAYPPLET_PREVIEW_LAYER=1 hosts the lock content on a layer
             // surface named like the session lock, so the harness's real

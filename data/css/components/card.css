@@ -53,30 +53,19 @@
     border: 1px solid var(--border-strong);
 }
 
-/* The card over the scrim: the key, pre-compensated for the black under it.
+/* The card over the scrim: the key, pre-compensated for the scrim under it.
 
-   The lock and the greeter paint --scrim (black at 0.20) under the whole
-   screen and the card on top of it, and the compositor has to find the
-   card's composite on exactly the key every other card paints (--surface-key,
-   #32302f at 0.50; `fillKey` in the nixos repo's users/modules/theme/glass.nix)
-   so it drops those pixels and draws the material. Two layers reach 0.50 when
-   the card is painted at a = (0.50 − 0.20) / (1 − 0.20) = 0.375, which is the
-   key's alpha × 0.75. Its colour has to come back up by what the black under
-   it takes away: the scrim adds nothing to the premultiplied sum, so the card
-   carries the key's premultiplied colour at the lower alpha, the key's colour
-   × 0.50 / 0.375 = × 4/3. Composited: 0.375 × 4/3 × #32302f = 0.50 × #32302f
-   at alpha 0.375 + 0.20 × 0.625 = 0.500, which is #32302f at 0.500 exactly.
-   (The legacy literal was #43403f, the same product rounded to 8 bits.)
-
-   Derived from the key rather than written down, so the two cannot drift.
-   Change --scrim and both factors move: check the result against the table
-   in glass.nix (discard line 0.28, seeding line 0.40), not against either
+   The lock and the greeter paint --scrim under the whole screen and the card
+   on top of it, and the compositor has to find the card's composite on
+   exactly the key every other card paints (--surface-key, #32302f at 0.50;
+   `fillKey` in the nixos repo's users/modules/theme/glass.nix) so it drops
+   those pixels and draws the material. The token --surface-key-over-scrim is
+   that pre-compensated key, computed per mode in src/tokens/emit.rs: in dark
+   mode, over black at 0.20, the key's alpha × 0.75 (0.375) and its colour
+   × 4/3, which composite to #32302f at 0.500 exactly; in light mode, which
+   has no scrim, the key itself. Check a change against the table in
+   glass.nix (discard line 0.28, seeding line 0.40), not against either
    number alone. */
-:root {
-    --surface-key-over-scrim: color(from var(--surface-key) srgb
-        calc(r * 4 / 3) calc(g * 4 / 3) calc(b * 4 / 3) / calc(alpha * 0.75));
-}
-
 .ui-card.over-scrim {
     background-color: var(--surface-key-over-scrim);
 }

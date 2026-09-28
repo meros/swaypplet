@@ -152,10 +152,17 @@ pub fn run() -> ! {
         eprintln!("swaypplet greet: GTK init failed: {e}");
         std::process::exit(EXIT_ERROR);
     }
-    // Dark tokens in either mode, like the lock: the greeter's card is the
-    // shipped dark glass over the wallpaper (`theme::pin_dark`).
-    crate::theme::pin_dark();
+    // The system's Look, as Nix writes it (/etc/swaypplet/settings.json;
+    // the greeter user has no settings of its own), resolved here: `auto`
+    // follows the sun from /etc/swaypplet/theme.json. The machine's owner
+    // decides it in the flake, which is the only place a system-wide
+    // setting lives. Then follow it, and put the matching glass on this
+    // compositor, whose config ships the dark material.
+    crate::settings::store::init();
     crate::theme::load_css();
+    crate::theme::follow();
+    crate::settings::glass::apply_greeter(crate::theme::shown());
+    crate::theme::observe(|| crate::settings::glass::apply_greeter(crate::theme::shown()));
 
     // Start from the cheap SWAYPPLET_GREET_USERS name list so the window can
     // present without blocking on the session query (a logind round trip per

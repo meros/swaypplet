@@ -597,7 +597,10 @@ mod tests {
             // Another build's file is a miss, not a colour.
             assert!(parse(&text.replace(&format!("v{VERSION}"), "v3")).is_none());
         }
-        assert!(parse("swaypplet-wallpaper v3 key=0 primary=#3a6ea5 ground=#3a6ea5 secondary=none").is_none());
+        assert!(
+            parse("swaypplet-wallpaper v3 key=0 primary=#3a6ea5 ground=#3a6ea5 secondary=none")
+                .is_none()
+        );
     }
 
     /// Luminance per cell, on an image made up of known greys.
@@ -752,4 +755,3 @@ mod tests {
         println!("text on {:?}", sample.grid.text_backdrop());
     }
 }
-

@@ -206,6 +206,40 @@ pub fn on_wallpaper(backdrop: Option<Backdrop>, mode: Mode) -> OnWallpaper {
 /// as the ground darkens, so no measurement is needed.
 pub const BACKDROP_BRIGHTNESS_MAX: f64 = 0.59;
 
+/// The brightest light mode may leave the lock's wallpaper: an sRGB multiply
+/// over white (`lock_backdrop.light_brightness`), a lift where dark mode has
+/// a dim, under dark ink ([`INK_DARK`]) and no scrim (light mode has none: a
+/// white scrim under the card cannot be compensated to the glass key, see
+/// `scrim_for`). The proof is one backdrop again, a black page, because dark
+/// ink only gains as the ground lightens. The price is a faint picture: a
+/// fifth of the wallpaper over white.
+pub const BACKDROP_LIFT_MAX: f64 = 0.19;
+
+/// The scrim under the lock and the greeter in `mode`, as a colour and an
+/// alpha: black at [`SCRIM_ALPHA`] in dark mode, none in light mode.
+///
+/// A white scrim is what light mode would want, and it cannot be had: the
+/// card over it must composite to the glass key (dark, at 0.50), and white
+/// under a card at the alpha that sums to 0.50 would need a negative colour
+/// to cancel. So light mode's backdrop gets its whole lift from the
+/// compositor ([`BACKDROP_LIFT_MAX`] is proven without a scrim).
+pub fn scrim_for(mode: Mode) -> (Rgb, f64) {
+    match mode {
+        Mode::Dark => (Rgb::BLACK, SCRIM_ALPHA),
+        Mode::Light => (Rgb::BLACK, 0.0),
+    }
+}
+
+/// The ink and the shadow colour for text on the lock's backdrop in `mode`:
+/// light ink under a black shadow on dark mode's dim, dark ink under a white
+/// one on light mode's lift.
+pub fn on_backdrop(mode: Mode) -> (Rgb, Rgb) {
+    match mode {
+        Mode::Dark => (ON_STATUS, Rgb::BLACK),
+        Mode::Light => (INK_DARK, Rgb::WHITE),
+    }
+}
+
 /// The shadow under text on the dimmed backdrop, black. With the scrim under
 /// it the surface reaches 1 − 0.8 × 0.92 = 0.264, under the compositor's
 /// discard line ([`GLASS_MASK_THRESHOLD`] less 0.12), so it stays a shadow.
@@ -213,6 +247,14 @@ pub const BACKDROP_SHADOW_ALPHA: f64 = 0.08;
 
 /// The contrast of the lock's light ink over a white wallpaper dimmed to
 /// `brightness` and scrimmed: the weakest it gets over any wallpaper.
+#[cfg(test)]
+fn lift_lc(brightness: f64) -> f64 {
+    let (scrim, alpha) = scrim_for(Mode::Light);
+    let lifted = 1.0 - brightness;
+    let ground = over(scrim, alpha, Rgb(lifted, lifted, lifted));
+    apca(on_backdrop(Mode::Light).0, ground).abs()
+}
+
 #[cfg(test)]
 fn backdrop_lc(brightness: f64) -> f64 {
     let ground = over(
@@ -244,6 +286,22 @@ mod tests {
         assert!(peak < GLASS_MASK_THRESHOLD - 0.12 - 0.01, "{peak:.3}");
     }
 
+    /// §5 on light mode's lifted backdrop: dark ink reaches Lc 75 over a
+    /// black page at the strongest lift the lock accepts, and the limit is
+    /// tight.
+    #[test]
+    fn the_lifted_backdrop_meets_the_targets_over_black() {
+        let lc = lift_lc(BACKDROP_LIFT_MAX);
+        assert!(lc >= CLOCK_LC, "Lc {lc:.1} at {BACKDROP_LIFT_MAX}");
+        for b in 0..=19 {
+            assert!(lift_lc(f64::from(b) / 100.0) >= lc - 1e-9);
+        }
+        assert!(lift_lc(BACKDROP_LIFT_MAX + 0.02) < CLOCK_LC);
+        // The shadow under dark ink is white and stays out of the glass on
+        // its own, with no scrim under it.
+        const { assert!(BACKDROP_SHADOW_ALPHA < GLASS_MASK_THRESHOLD - 0.12 - 0.01) };
+    }
+
     /// A halo that disagrees with the mode's glass stays a shadow: stacked,
     /// under the glass mask threshold with room for GTK's rounding. And the
     /// choice never hands out a strong halo of the wrong colour.
@@ -251,7 +309,10 @@ mod tests {
     fn a_halo_of_the_other_modes_colour_never_becomes_glass() {
         for a in SHADOW_ALPHAS {
             let peak = 1.0 - (1.0 - a).powi(LAYERS);
-            assert!(peak < GLASS_MASK_THRESHOLD - 0.02, "{a} stacks to {peak:.3}");
+            assert!(
+                peak < GLASS_MASK_THRESHOLD - 0.02,
+                "{a} stacks to {peak:.3}"
+            );
         }
         for mode in Mode::ALL {
             let wrong = match mode {
@@ -262,7 +323,10 @@ mod tests {
                 for s in 0..=30 {
                     let c = on_wallpaper(Some(at(l, s)), mode);
                     if c.halo == wrong {
-                        assert!(SHADOW_ALPHAS.contains(&c.halo_alpha), "{mode:?} L{l} S{s}: {c:?}");
+                        assert!(
+                            SHADOW_ALPHAS.contains(&c.halo_alpha),
+                            "{mode:?} L{l} S{s}: {c:?}"
+                        );
                     }
                 }
             }
@@ -317,7 +381,10 @@ mod tests {
     #[test]
     fn every_region_meets_the_targets() {
         let mut failures = Vec::new();
-        for (mode, l) in Mode::ALL.into_iter().flat_map(|m| (0..=100).map(move |l| (m, l))) {
+        for (mode, l) in Mode::ALL
+            .into_iter()
+            .flat_map(|m| (0..=100).map(move |l| (m, l)))
+        {
             for s in 0..=30 {
                 let b = at(l, s);
                 let c = on_wallpaper(Some(b), mode);

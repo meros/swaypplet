@@ -56,9 +56,10 @@ async fn run(tx: &async_channel::Sender<bool>) -> zbus::Result<()> {
     }
     while let Some(change) = changes.next().await {
         if let Ok(v) = change.get().await
-            && tx.send(v).await.is_err() {
-                break;
-            }
+            && tx.send(v).await.is_err()
+        {
+            break;
+        }
     }
     Ok(())
 }

@@ -4,7 +4,8 @@ use std::fmt::Write as _;
 
 use super::{
     BACKDROP_SHADOW_ALPHA, COMPONENT, DURATION, Inputs, Mode, ON_STATUS, RADIUS, Rgb, SPACE,
-    SURFACE_KEY, TYPE, categorical, levels, motion, on_wallpaper, scales, status,
+    SURFACE_KEY, TYPE, categorical, levels, motion, on_backdrop, on_wallpaper, scales, scrim_for,
+    status,
 };
 
 fn mixed(color: Rgb, share: f64) -> String {
@@ -41,7 +42,26 @@ pub fn css(inputs: Inputs) -> String {
     // Surfaces.
     put("surface-key", mixed(SURFACE_KEY.0, SURFACE_KEY.1));
     put("surface-raised", s.neutral[3].css());
-    put("scrim", "rgb(0 0 0 / 0.2)".into());
+    // The scrim under the lock and the greeter, and the key a card over it
+    // paints so the two composite to exactly `surface-key`: at alpha
+    // a' = (A − s) / (1 − s) and colour K × A / a', the premultiplied sum is
+    // A × K and the alpha A. Dark mode's black 0.20 gives 0.375 and × 4/3;
+    // light mode has no scrim (`scrim_for`), and the key is the key.
+    let (scrim, scrim_alpha) = scrim_for(inputs.mode);
+    put("scrim", mixed(scrim, scrim_alpha));
+    let (key, key_alpha) = SURFACE_KEY;
+    let under = (key_alpha - scrim_alpha) / (1.0 - scrim_alpha);
+    let gain = key_alpha / under;
+    put(
+        "surface-key-over-scrim",
+        format!(
+            "color(srgb {:.6} {:.6} {:.6} / {:.6})",
+            key.0 * gain,
+            key.1 * gain,
+            key.2 * gain,
+            under
+        ),
+    );
 
     // Text.
     put("fg", fg.css());
@@ -105,13 +125,11 @@ pub fn css(inputs: Inputs) -> String {
     let ow = on_wallpaper(inputs.backdrop, inputs.mode);
     put("fg-on-wallpaper", ow.ink.css());
     put("halo-on-wallpaper", mixed(ow.halo, ow.halo_alpha));
-    // Text on the lock's dimmed backdrop: light in either mode, like the
-    // backdrop it stands on (`backdrop.rs`).
-    put("fg-on-backdrop", ON_STATUS.css());
-    put(
-        "shadow-on-backdrop",
-        mixed(Rgb::BLACK, BACKDROP_SHADOW_ALPHA),
-    );
+    // Text on the lock's backdrop: light ink on dark mode's dim, dark ink
+    // on light mode's lift, like the backdrop it stands on (`backdrop.rs`).
+    let (ink, shadow) = on_backdrop(inputs.mode);
+    put("fg-on-backdrop", ink.css());
+    put("shadow-on-backdrop", mixed(shadow, BACKDROP_SHADOW_ALPHA));
     put("danger-tint", mixed(st.danger_bg, 0.16));
     put("warning-tint", mixed(st.warning_bg, 0.16));
     put("success-tint", mixed(st.success_bg, 0.16));

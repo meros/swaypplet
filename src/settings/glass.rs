@@ -264,7 +264,6 @@ impl Material {
     }
 }
 
-
 fn isotropic() -> f64 {
     1.0
 }
@@ -309,20 +308,13 @@ pub struct Tuning {
     /// Multiplies the mode's frost. 1 is what the mode ships.
     #[serde(default = "unit")]
     pub frost_scale: f64,
-    /// The material as dark mode tunes it, for the namespaces that are dark
-    /// glass in either mode ([`ALWAYS_DARK`]). [`for_mode`] fills it in;
-    /// `None` sends them `material` like every other namespace. Derived, so
-    /// never saved: the override file holds the person's tuning, not a mode.
+    /// The mode is light: the lock's backdrop is lifted toward white rather
+    /// than dimmed toward black (`lock_backdrop_light`), at light mode's
+    /// brightness. [`for_mode`] sets it. Derived, so never saved: the
+    /// override file holds the person's tuning, not a mode.
     #[serde(skip)]
-    pub dark: Option<Material>,
+    pub light: bool,
 }
-
-/// The namespaces whose glass is dark in both modes: the lock card, which
-/// stands on the wallpaper dimmed over black and draws dark-mode text
-/// (`theme::pin_dark`). Light glass there is a milky card under light ink.
-/// The greeter's `swaypplet-greeter` is not here only because nothing sends
-/// to its compositor: it keeps the shipped material, which is dark.
-pub const ALWAYS_DARK: &[&str] = &["session-lock"];
 
 fn unit() -> f64 {
     1.0
@@ -338,7 +330,7 @@ impl Tuning {
             crest_scale: 1.0,
             clarity: 0.0,
             frost_scale: 1.0,
-            dark: None,
+            light: false,
         }
     }
 
@@ -401,21 +393,33 @@ pub struct System {
 }
 
 /// The wallpaper under the lock as the compositor draws it: blurred, then
-/// multiplied by `brightness` over black. Read, never written: the numbers
-/// are the compositor's, and swaypplet only needs to know that they hold.
+/// multiplied by `brightness` over black in dark mode and by
+/// `light_brightness` over white in light mode. The numbers are the
+/// compositor's config; swaypplet checks that they hold, and sends the one
+/// for the mode on screen (`System::effects`).
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct LockBackdrop {
     /// The blur's radius in logical pixels.
     pub blur: f64,
-    /// The sRGB multiply after the blur, 0–1.
+    /// Dark mode's sRGB multiply over black, 0–1.
     pub brightness: f64,
+    /// Light mode's sRGB multiply over white, 0–1. Absent on a compositor
+    /// that cannot lift (no `lock_backdrop_light`).
+    #[serde(default)]
+    pub light_brightness: Option<f64>,
 }
 
 impl LockBackdrop {
-    /// Dark enough for the tokens' proof (`tokens::BACKDROP_BRIGHTNESS_MAX`)
-    /// and blurred at all.
+    /// Blurred, dark enough in dark mode for the tokens' proof
+    /// (`tokens::BACKDROP_BRIGHTNESS_MAX`), and light enough in light mode
+    /// (`tokens::BACKDROP_LIFT_MAX`). Both, because the mode can change while
+    /// the lock is up, and its text style is chosen once, when it is built.
     fn holds(self) -> bool {
-        self.blur > 0.0 && (0.0..=crate::tokens::BACKDROP_BRIGHTNESS_MAX).contains(&self.brightness)
+        self.blur > 0.0
+            && (0.0..=crate::tokens::BACKDROP_BRIGHTNESS_MAX).contains(&self.brightness)
+            && self
+                .light_brightness
+                .is_some_and(|l| (0.0..=crate::tokens::BACKDROP_LIFT_MAX).contains(&l))
     }
 }
 
@@ -430,8 +434,9 @@ pub fn lock_backdrop() -> bool {
     };
     if !b.holds() {
         log::warn!(
-            "glass: lock_backdrop {b:?} is unblurred or brighter than {}; the lock keeps its halo",
-            crate::tokens::BACKDROP_BRIGHTNESS_MAX
+            "glass: lock_backdrop {b:?} is unblurred, brighter than {} or lifts past {}; the lock keeps its halo",
+            crate::tokens::BACKDROP_BRIGHTNESS_MAX,
+            crate::tokens::BACKDROP_LIFT_MAX
         );
     }
     b.holds()
@@ -508,10 +513,7 @@ impl System {
         })?;
         let geometry = tuning.geometry(shipped);
 
-        let m = match &tuning.dark {
-            Some(dark) if ALWAYS_DARK.contains(&namespace) => dark,
-            _ => &tuning.material,
-        };
+        let m = &tuning.material;
         let mut out = String::with_capacity(512);
         // Named rather than looped over a serialised map: the order is stable,
         // the two enums are spelled by hand anyway, and a field added to
@@ -560,6 +562,24 @@ impl System {
             m.fill_color,
             m.edge_glow_color
         );
+        // The lock's backdrop follows the mode: dimmed over black in dark
+        // mode, lifted toward white in light mode, each at its own proven
+        // brightness. Sent only where the backdrop holds, so a compositor
+        // that draws the wallpaper sharp is never asked for a lift.
+        if namespace == "session-lock"
+            && let Some(b) = self.lock_backdrop.filter(|b| b.holds())
+            && let Some(lift) = b.light_brightness
+        {
+            let (light, brightness) = if tuning.light {
+                ("enable", lift)
+            } else {
+                ("disable", b.brightness)
+            };
+            let _ = write!(
+                out,
+                "; lock_backdrop_light {light}; lock_backdrop_brightness {brightness:.6}"
+            );
+        }
         Some(out)
     }
 
@@ -691,6 +711,24 @@ pub fn apply_saved_for(inputs: crate::tokens::Inputs) {
     super::glass_fade::send(&system, for_mode(tuning, inputs));
 }
 
+/// Put the mode's glass on the greeter's own compositor.
+///
+/// The greeter's sway config ships the lock's dark material on
+/// `swaypplet-greeter`, and nothing else sends to that compositor, so the
+/// greeter sends it itself when its mode is light or changes. The system
+/// material, never an override: the greeter user has none, and a login
+/// screen is the machine's, not a person's.
+pub fn apply_greeter(inputs: crate::tokens::Inputs) {
+    let Some(mut system) = System::load() else {
+        return;
+    };
+    system.surfaces = BTreeMap::from([(
+        crate::shell::Namespace::Greeter.as_str().to_string(),
+        "lock".to_string(),
+    )]);
+    super::glass_fade::send(&system, for_mode(Tuning::system(&system), inputs));
+}
+
 /// The material as the theme's mode tunes it (docs/design-system.md §4).
 ///
 /// The mode owns six values (fill colour and alpha, absorb, photochromic,
@@ -702,16 +740,11 @@ pub fn apply_saved_for(inputs: crate::tokens::Inputs) {
 /// highlight, grain, geometry) is one material in both modes and passes
 /// through as tuned.
 ///
-/// [`ALWAYS_DARK`] namespaces get the same tuning with dark mode's six
-/// values, in `dark`.
+/// The lock's glass follows the mode like every other namespace, and so does
+/// its backdrop ([`Tuning::light`]).
 pub fn for_mode(mut tuning: Tuning, inputs: crate::tokens::Inputs) -> Tuning {
-    let dark_inputs = crate::tokens::Inputs {
-        mode: crate::tokens::Mode::Dark,
-        ..inputs
-    };
-    let dark = mode_material(&tuning, dark_inputs);
     tuning.material = mode_material(&tuning, inputs);
-    tuning.dark = Some(dark);
+    tuning.light = inputs.mode == crate::tokens::Mode::Light;
     tuning
 }
 
@@ -1037,7 +1070,7 @@ mod tests {
                 crest_scale: 1.0,
                 clarity: 0.0,
                 frost_scale: 1.0,
-                dark: None,
+                light: false,
             }
         };
         let g = t.geometry(shipped);
@@ -1060,7 +1093,7 @@ mod tests {
             crest_scale: 1.0,
             clarity: 0.0,
             frost_scale: 1.0,
-            dark: None,
+            light: false,
         };
         let g = t.geometry(shipped);
         assert_eq!(g.bezel, 15.0);
@@ -1099,7 +1132,7 @@ mod tests {
             crest_scale: 1.0,
             clarity: 0.0,
             frost_scale: 1.0,
-            dark: None,
+            light: false,
         };
         let json = serde_json::to_vec_pretty(&before).unwrap();
         let after: Tuning = serde_json::from_slice(&json).unwrap();
@@ -1124,10 +1157,9 @@ mod tests {
         assert!(bare.contains("grain = \"none\";"), "{bare}");
     }
 
-    /// The lock backdrop is optional in the file, and only a dark enough,
-    /// blurred one lets the lock drop its halo.
+    /// The lock card's glass follows the mode like every other card.
     #[test]
-    fn the_lock_card_is_sent_dark_glass_in_light_mode() {
+    fn the_lock_card_follows_the_mode() {
         let system = every_glass_surface();
         let light = crate::tokens::Inputs {
             mode: crate::tokens::Mode::Light,
@@ -1148,17 +1180,14 @@ mod tests {
                 .map_or(cmd.len(), |i| start + 1 + i);
             cmd[start..end].to_string()
         };
-        // The lock gets exactly what dark mode sends it; the bar keeps light.
-        assert_eq!(
-            block(&light_cmd, "session-lock"),
-            block(&dark_cmd, "session-lock")
-        );
-        assert_ne!(
-            block(&light_cmd, "swaypplet-bar"),
-            block(&dark_cmd, "swaypplet-bar")
-        );
+        for ns in ["session-lock", "swaypplet-bar"] {
+            assert_ne!(block(&light_cmd, ns), block(&dark_cmd, ns), "{ns}");
+        }
     }
 
+    /// The lock backdrop is optional in the file, and only a blurred one,
+    /// dark enough in dark mode and light enough in light mode, lets the
+    /// lock drop its halo.
     #[test]
     fn a_lock_backdrop_is_read_and_checked() {
         let json = |extra: &str| {
@@ -1170,20 +1199,90 @@ mod tests {
         let bare: System = serde_json::from_str(&json("")).unwrap();
         assert!(bare.lock_backdrop.is_none());
         let with: System = serde_json::from_str(&json(
-            r#", "lock_backdrop": {"blur": 45, "brightness": 0.55}"#,
+            r#", "lock_backdrop": {"blur": 45, "brightness": 0.55, "light_brightness": 0.19}"#,
         ))
         .unwrap();
         assert!(with.lock_backdrop.unwrap().holds());
-        let bright = LockBackdrop {
+        // A compositor that cannot lift does not hold: light mode would put
+        // dark ink on the dim.
+        let dark_only: System = serde_json::from_str(&json(
+            r#", "lock_backdrop": {"blur": 45, "brightness": 0.55}"#,
+        ))
+        .unwrap();
+        assert!(!dark_only.lock_backdrop.unwrap().holds());
+        let ok = LockBackdrop {
             blur: 45.0,
-            brightness: 0.65,
+            brightness: 0.55,
+            light_brightness: Some(0.19),
         };
-        assert!(!bright.holds());
-        let sharp = LockBackdrop {
-            blur: 0.0,
-            brightness: 0.5,
+        for bad in [
+            LockBackdrop {
+                brightness: 0.65,
+                ..ok
+            },
+            LockBackdrop { blur: 0.0, ..ok },
+            LockBackdrop {
+                light_brightness: Some(0.3),
+                ..ok
+            },
+        ] {
+            assert!(!bad.holds(), "{bad:?}");
+        }
+    }
+
+    /// The lock's backdrop goes out with the lock's material, as the mode
+    /// asks: lifted in light mode, dimmed in dark mode, and never to any
+    /// other namespace.
+    #[test]
+    fn the_lock_backdrop_follows_the_mode() {
+        let mut system = System {
+            material: preset::plain(),
+            mask_threshold: 0.4,
+            geometries: BTreeMap::from([(
+                "lock".to_string(),
+                Geometry {
+                    bezel: 10.0,
+                    thickness: 5.0,
+                    crest_radius: 0.0,
+                },
+            )]),
+            surfaces: BTreeMap::from([
+                ("session-lock".to_string(), "lock".to_string()),
+                ("swaypplet".to_string(), "lock".to_string()),
+            ]),
+            lock_backdrop: Some(LockBackdrop {
+                blur: 45.0,
+                brightness: 0.55,
+                light_brightness: Some(0.19),
+            }),
         };
-        assert!(!sharp.holds());
+        let mode = |mode| crate::tokens::Inputs {
+            mode,
+            ..crate::tokens::Inputs::default()
+        };
+        let light = system.command(&for_mode(
+            Tuning::system(&system),
+            mode(crate::tokens::Mode::Light),
+        ));
+        let dark = system.command(&for_mode(
+            Tuning::system(&system),
+            mode(crate::tokens::Mode::Dark),
+        ));
+        assert!(
+            light.contains("lock_backdrop_light enable; lock_backdrop_brightness 0.190000\""),
+            "{light}"
+        );
+        assert!(
+            dark.contains("lock_backdrop_light disable; lock_backdrop_brightness 0.550000\""),
+            "{dark}"
+        );
+        assert_eq!(light.matches("lock_backdrop").count(), 2);
+        system.lock_backdrop = None;
+        let bare = system.command(&for_mode(
+            Tuning::system(&system),
+            mode(crate::tokens::Mode::Light),
+        ));
+        assert!(!bare.contains("lock_backdrop"));
     }
 
     #[test]
