@@ -1,92 +1,114 @@
-# swaypplet
+<h1 align="center">swaypplet</h1>
 
-**A desktop shell for [sway](https://swaywm.org)/[swayfx](https://github.com/WillPower3309/swayfx), in one Rust process: bar, launcher, control panel, notifications, lock screen, workspace switcher and settings, all on one glass design system.**
+<p align="center">
+  <b>A whole desktop shell for sway, in one Rust program, made of glass.</b><br>
+  Bar, launcher, control panel, notifications, lock screen, switcher and settings,<br>
+  on one design system that turns from dark to light with the sun.
+</p>
 
-![The control panel in dark and light mode](docs/screenshots/hero.webp)
+<p align="center">
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-3a7d6e"></a>
+  <img alt="Rust and GTK 4" src="https://img.shields.io/badge/Rust-GTK%204-b7410e">
+  <img alt="swayfx" src="https://img.shields.io/badge/compositor-swayfx-5b5fc7">
+</p>
 
-A sway desktop is usually a set of small tools that each bring their own look and their own config: a bar, a launcher, a notification daemon, a locker, a night-light daemon, an output-profile daemon. swaypplet replaces them with one GTK 4 program. Every surface shares one settings store, one set of colour, contrast and motion rules, and one glass material that the compositor draws.
+<p align="center">
+  <img src="docs/screenshots/hero.webp" alt="The control panel over two terminals, wiping from dark mode to light mode and back" width="100%">
+</p>
+
+A sway desktop is usually six small tools, each with its own look and its own config: a bar, a launcher, a notification daemon, a locker, a night-light daemon and an output-profile daemon. swaypplet is one GTK 4 program that replaces them. Every surface reads one settings store, one set of colour, contrast and motion rules, and one glass material that the compositor draws. When the theme changes, everything changes together.
+
+- **Liquid glass, drawn by the compositor.** Refraction through a bevelled slab, frost, dispersion and a Fresnel rim, the same on every card.
+- **Dark and light, by the sun.** Automatic mode waits until nobody is looking, then fades the whole shell and your apps together.
+- **Nothing to glue together.** One binary, one settings file, defaults from Nix, and `swaypplet settings set` for any setting from a key binding.
 
 ## A tour
 
 ### The bar
 
-![The right end of the bar in dark and light mode](docs/screenshots/bar.webp)
+<p align="center"><img src="docs/screenshots/bar.webp" alt="The right end of the bar in dark and light mode" width="560"></p>
 
-The bar is still unless something needs you. On the left are the start button and the workspaces, grouped by the screen they are on. The right end is one segmented track: media, battery, the nightly backup's glyph, the light/dark/auto switch and the clock. A volume or brightness key can show its level in the bar's centre slot instead of as a card. Hovering a workspace shows a live picture of it.
+The bar is still unless something needs you. On the left are the start button and the workspaces, grouped by the screen they are on. The right end is one segmented track: media, battery, the nightly backup, the light/dark/auto switch and the clock. Hover a workspace to see a live picture of it.
 
-### The control panel and the launcher
+### The control panel is the launcher
 
-The panel (Super+Space, above) is also the launcher: type and it searches apps, open windows and every setting. `=` calculates and `>` runs a command. The results learn what you open. Under the list are the quick switches (Night Light, No Sleep, No Lock, Do Not Disturb), and a timed switch folds out a duration picker in place.
+Super+Space opens the panel. Type and it searches apps, open windows and every setting; `=` calculates and `>` runs a command, and the results learn what you open. Under the list sit the quick switches (Night Light, No Sleep, No Lock, Do Not Disturb); a timed one folds out a duration picker in place.
 
-Each tile at the top opens a full page:
+Each tile at the top opens a full page in the same card:
 
-| | | |
-|---|---|---|
-| ![Network: Wi-Fi, VPN and Tailscale](docs/screenshots/network.webp) | ![Audio: outputs, per-app volume and inputs](docs/screenshots/audio.webp) | ![Bluetooth: pairing in place](docs/screenshots/bluetooth.webp) |
+<p align="center"><img src="docs/screenshots/network.webp" alt="The network page, half in dark mode and half in light mode" width="100%"></p>
 
-- **Network**: Wi-Fi with signal, security and band, saved networks, VPNs, Tailscale with an exit node, airplane mode.
-- **Audio**: the output picker, Bluetooth headset profiles, per-app volume, the microphone and a level test.
-- **Bluetooth**: connect, forget and pair in place, with the pairing code on the card.
+<table>
+  <tr>
+    <td width="33%"><img src="docs/screenshots/audio.webp" alt="Audio: outputs, per-app volume and inputs"></td>
+    <td width="33%"><img src="docs/screenshots/bluetooth.webp" alt="Bluetooth: pairing in place"><br><br><img src="docs/screenshots/power.webp" alt="Power: battery, draw, health and profile"></td>
+    <td>
+      <b>Network</b>: Wi-Fi with signal, security and band, saved networks, VPNs, Tailscale with an exit node, airplane mode.<br><br>
+      <b>Audio</b>: the output picker, Bluetooth headset profiles, per-app volume, the microphone and a level test.<br><br>
+      <b>Bluetooth</b>: connect, forget and pair in place, with the pairing code on the card.<br><br>
+      <b>Power</b>: charge, draw, battery health, the charge limit and the power profile.
+    </td>
+  </tr>
+</table>
 
-![Power: battery, draw, health and profile](docs/screenshots/power.webp)
+### Super+Tab and the key sheet
 
-### Switching work: Super+Tab
+<p align="center"><img src="docs/screenshots/switcher.webp" alt="The Super+Tab switcher with live workspace pictures" width="100%"></p>
 
-![The Super+Tab switcher with live workspace pictures](docs/screenshots/switcher.webp)
+Super+Tab shows every workspace as a live picture and grows the one you pick to full size. Pin a workspace as a small live view in a corner of another. Hold Super for a sheet of every key binding, generated from the sway config that is loaded right now:
 
-Super+Tab shows every workspace as a live picture and grows the one you pick to full size. A workspace can be pinned as a small live view in a corner of another. Hold Super for a sheet of every key binding, generated from the sway config that is actually loaded:
+<p align="center"><img src="docs/screenshots/keybinds.webp" alt="The key binding sheet" width="100%"></p>
 
-![The key binding sheet](docs/screenshots/keybinds.webp)
+### Notifications that know when to wait
 
-### Notifications and the OSD
+<table>
+  <tr>
+    <td width="58%"><img src="docs/screenshots/notifications.webp" alt="Grouped notifications, one of them urgent"></td>
+    <td>
+      Notifications group per app and wait in a notification centre. Quiet hours hold them at night, and they hold by themselves while you share your screen, mirror an output or run something full screen. When you are back, one card says what arrived.<br><br>
+      The volume and brightness keys show a small card, and Caps Lock says what it did:<br><br>
+      <img src="docs/screenshots/osd.webp" alt="The Caps Lock card above the bar">
+    </td>
+  </tr>
+</table>
 
-![Grouped notifications](docs/screenshots/notifications.webp)
+### Lock screen, face unlock and polkit
 
-Notifications group per app and wait in a notification centre. Quiet hours hold them at night, and they also hold by themselves while you share your screen, mirror an output or run something full screen. When you are back, one card says what arrived. The volume and brightness keys show a small card, and Caps Lock says what it did:
+<p align="center"><img src="docs/screenshots/lock.webp" alt="The lock screen, half in dark mode and half in light mode" width="100%"></p>
 
-![The Caps Lock card](docs/screenshots/osd.webp)
+The lock screen shows the wallpaper as it is. The clock stands on the wallpaper itself, over a soft shade that darkens only what is behind it. Password, fingerprint and face unlock run at the same time, and whichever finishes first unlocks. The lock cross-fades in from the desktop and out again, and the greeter at login uses the same card.
+
+<table>
+  <tr>
+    <td width="40%"><img src="docs/screenshots/lock-face.webp" alt="Face unlock looking for you"></td>
+    <td><img src="docs/screenshots/polkit.webp" alt="The polkit authentication card"><br><br>The polkit agent asks for administrator rights on the same card, with the fingerprint reader as an alternative to the password.</td>
+  </tr>
+</table>
 
 ### Screenshots and recording
 
-| | |
-|---|---|
-| ![Region selector](docs/screenshots/screenshot.webp) | ![Annotation editor](docs/screenshots/annotate.webp) |
-
 Region, window, screen, a colour picker and screen recording, from one selector. The annotation editor crops, draws arrows, boxes and highlights, and pixelates what should not be shared, before you save or copy.
 
-### Lock screen, face unlock and authentication
+### Settings, inside the shell
 
-![The lock screen in dark and light mode](docs/screenshots/lock.webp)
+<p align="center"><img src="docs/screenshots/glass.webp" alt="The Glass settings tab, half in dark mode and half in light mode" width="100%"></p>
 
-The lock screen shows the wallpaper as it is, with no dimming or blur. The clock is large and stands on the wallpaper itself, over a soft shade that darkens only what is behind it. Password, fingerprint and face unlock run at the same time, and whichever finishes first unlocks. The lock cross-fades in from the desktop and out again. The greeter at login uses the same card.
+Settings opens in place of the panel, over whatever you were doing. Ten tabs (Appearance, Glass, Idle & Lock, Bar, Input, Alerts, Launcher, Displays, System, Quality), and the launcher searches every setting in them. Nix provides the defaults, and `swaypplet settings get|set` changes any setting from a script or a key binding.
 
-| | |
-|---|---|
-| ![Face unlock looking for you](docs/screenshots/lock-face.webp) | ![The polkit authentication card](docs/screenshots/polkit.webp) |
-
-The polkit agent asks for administrator rights on the same card, with the fingerprint reader as an alternative to the password.
-
-### Settings
-
-| | |
-|---|---|
-| ![Glass settings](docs/screenshots/glass.webp) | ![Display settings](docs/screenshots/displays.webp) |
-| ![System settings](docs/screenshots/system.webp) | ![Quality: issues and auto-fix](docs/screenshots/quality.webp) |
-
-Ten tabs (Look, Idle & Lock, Bar, Input, Alerts, Launcher, Displays, Glass, System, Quality), and the launcher searches every setting in them. Nix provides the defaults, and `swaypplet settings get|set` changes any setting from a script or a key binding.
-
+- **Glass** tunes the material: presets, clarity, frost and the bevel, one tuning that means the same in both modes.
 - **Displays** saves output layouts as profiles and applies one by itself when its screens connect.
-- **Glass** tunes the material: presets, clarity, frost and the bevel, in both modes at once.
-- **Quality** lists the open issues. Super+Alt+Print files a problem with a screenshot and the recent log, and a crash files one by itself. Auto-fix has an agent on this machine reproduce the problem in a nested session, fix it and open a pull request with before and after pictures. Merge & apply puts the fix on the machine.
+- **Quality** lists the open issues. Super+Alt+Print files a problem with a screenshot and the recent log, and a crash files one by itself. Auto-fix has an agent on this machine reproduce the problem in a nested session, fix it and open a pull request with before and after pictures.
 
-All the screenshots above come from the project's own harness (`dev/render.sh`): a nested headless swayfx with default settings and invented test data. The panel's app list and the key binding sheet come from the machine that rendered them.
+<p align="center"><img src="docs/screenshots/displays.webp" alt="The Displays settings tab" width="100%"></p>
+
+<sub>Every picture here comes from the project's own harness (`SWPP_LOOK=live dev/render.sh`): a nested headless swayfx with the look of a real sway config, over a generated gradient, at scale 2. Devices, networks and notifications are invented test data; the app list and the key bindings come from the machine that rendered them.</sub>
 
 ## Why one program
 
 Most of what swaypplet does, a separate tool can do too. What one program adds is agreement: everything on screen comes from the same numbers at the same moment.
 
-- **One theme, one answer.** The panel resolves the theme (dark or light by the sun, the accent, contrast, the wallpaper's hues) and publishes it once. The lock screen, the polkit agent and every other process draw that answer and reload when it changes, and the compositor gets the matching glass from the same answer. The text on a card cannot disagree with the glass behind it.
-- **A switch never happens in front of you.** Automatic mode turns light and dark with the sun, and waits for the lock, for idle or for ten minutes with nothing open, then fades everything over one motion token. Apps follow the mode too.
+- **One theme, one answer.** The panel resolves the theme (dark or light by the sun, the accent, contrast, the wallpaper's hues) and publishes it once. The lock screen, the polkit agent and every other process draw that answer, and the compositor gets the matching glass from it. The text on a card cannot disagree with the glass behind it.
+- **A switch never happens in front of you.** Automatic mode waits for the lock, for idle or for ten minutes with nothing open, then fades everything over one motion token. Apps follow the mode too.
 - **The look is generated.** Colour scales come from a few inputs in OKLCH and are emitted as CSS tokens. Components use semantic tokens only, and a lint test enforces it.
 - **Contrast is proven.** Every text colour is checked with APCA over the glass as the compositor draws it: a model of the shader, over white, grey and black backdrops, for every combination of inputs. The same model holds the two modes to about the same colour from what is behind the glass, so dark and light feel alike.
 - **Motion has meaning.** Seven durations (state, expand, enter, exit, move, travel, page), each for one kind of change, all scaled by one setting and by reduced motion.
@@ -98,7 +120,7 @@ The rules behind this are in [docs/design-system.md](docs/design-system.md).
 ## Requirements
 
 - **swayfx with patches.** swaypplet draws its surfaces as GTK 4 layer-shell windows and asks the compositor for the glass. The liquid-glass material, the fill key, the workspace transitions and the lock screen's cross-fade come from patches to swayfx and scenefx that are not published yet. Without them the shell runs, but the cards are not glass.
-- GTK 4.12 or newer, gtk4-layer-shell, gtk4-session-lock, PAM, PipeWire with its PulseAudio server, NetworkManager, BlueZ, UPower, and logind.
+- GTK 4.12 or newer, gtk4-layer-shell, gtk4-session-lock, PAM, PipeWire with its PulseAudio server, NetworkManager, BlueZ, UPower and logind.
 - Optional: [elephant](https://github.com/abenz1267/elephant) as the launcher's search backend, fprintd for fingerprint unlock, an IR camera and a `howdy-verify <user>` helper for face unlock, and `gh`, `jq` and the [Claude Code](https://claude.com/claude-code) CLI for reports and auto-fix.
 
 ## Build and run
@@ -134,13 +156,11 @@ cargo test --release
 
 ## Development
 
-- `dev/render.sh --mode <surface>` renders one surface in a nested headless sway and saves a PNG; `dev/render-all.sh capture DIR` renders every surface in dark and light over two backdrops.
+- `dev/render.sh --mode <surface>` renders one surface in a nested headless sway and saves a PNG. `SWPP_LOOK=live` takes the look of the running session's sway config, `SWPP_BEFORE` opens windows behind the glass, and `SWPP_SCALE=2` renders at HiDPI. `dev/render-all.sh capture DIR` renders every surface in dark and light over two backdrops.
 - `dev/frame-bench.sh` measures frame timing; `--gate` is what `.githooks/pre-push` runs (`git config core.hooksPath .githooks`).
 - The harness never touches the running session: it starts its own compositor, its own cache and its own D-Bus session.
 
-[docs/QUALITY.md](docs/QUALITY.md) describes reports, crash reports and the auto-fix runner (`dev/autofix/run.sh`).
-
-[docs/README.md](docs/README.md) indexes the rest of the documentation: the roadmap, the motion and settings references, the research notes, and a databank of 332 entries on prior art in desktop shells.
+[docs/QUALITY.md](docs/QUALITY.md) describes reports, crash reports and the auto-fix runner (`dev/autofix/run.sh`). [docs/README.md](docs/README.md) indexes the rest of the documentation: the roadmap, the motion and settings references, the research notes, and a databank of 332 entries on prior art in desktop shells.
 
 ## License
 
