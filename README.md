@@ -2,51 +2,102 @@
 
 **A desktop shell for [sway](https://swaywm.org)/[swayfx](https://github.com/WillPower3309/swayfx), in one Rust process: bar, launcher, control panel, notifications, lock screen, workspace switcher and settings, all on one glass design system.**
 
-![swaypplet in dark and light mode](docs/screenshots/hero.webp)
+![The control panel in dark and light mode](docs/screenshots/hero.webp)
 
-swaypplet replaces the collection of small tools a sway desktop is usually made of (a bar, a launcher, a notification daemon, a locker, a night-light daemon, an output-profile daemon) with one GTK 4 program that shares one look, one settings store and one set of rules for colour, contrast and motion.
+A sway desktop is usually a set of small tools that each bring their own look and their own config: a bar, a launcher, a notification daemon, a locker, a night-light daemon, an output-profile daemon. swaypplet replaces them with one GTK 4 program. Every surface shares one settings store, one set of colour, contrast and motion rules, and one glass material that the compositor draws.
 
-## What it does
+## A tour
 
-- **Bar** with workspaces, a task board, media, battery, network and a clock. It is still unless something needs you.
-- **Launcher** that learns what you open, calculates (`=`), runs commands (`>`), finds open windows, and searches settings.
-- **Control panel** with rebuilt network (Wi-Fi, VPN, Tailscale, airplane mode), audio (per-app volume, output picker, Bluetooth profiles), Bluetooth (pairing in place), power, displays and quick switches. Timed switches (No Sleep, No Lock) fold out a duration picker in place.
-- **Notifications** grouped per app, with a notification centre, quiet hours, and quiet by context: they hold while you share your screen, mirror an output or run something full screen, and one card says what arrived while you were busy.
-- **Lock screen and greeter** with password, fingerprint and face unlock, a cross-fade from the desktop, and the wallpaper blurred and dimmed behind a clock that reads on any wallpaper.
-- **Super+Tab switcher** with live workspace pictures, a hover peek on the bar, and pinned live views of other workspaces.
-- **Screenshots and recording**: region, window, screen, colour picker and an annotation editor.
-- **Night light and display profiles** in the process: the colour temperature follows the sun, and output layouts apply by themselves when displays connect.
-- **Dark and light for the apps too**: GTK apps follow the shell's mode.
-- **Settings** in ten tabs (Look, Idle & Lock, Bar, Input, Alerts, Launcher, Displays, Glass, System, Quality), with a search over every setting and Nix-provided defaults.
-- **Reports and auto-fix**: Super+Alt+Print files a problem as an issue with a screenshot and the recent log, and a crash files one by itself. The Quality tab lists the open issues; Auto-fix has an agent on this machine reproduce the problem in a nested session, fix it and open a pull request with before and after pictures, and Merge & apply puts the fix on the machine.
+### The bar
 
-## Screenshots
+![The right end of the bar in dark and light mode](docs/screenshots/bar.webp)
+
+The bar is still unless something needs you. On the left are the start button and the workspaces, grouped by the screen they are on. The right end is one segmented track: media, battery, the nightly backup's glyph, the light/dark/auto switch and the clock. A volume or brightness key can show its level in the bar's centre slot instead of as a card. Hovering a workspace shows a live picture of it.
+
+### The control panel and the launcher
+
+The panel (Super+Space, above) is also the launcher: type and it searches apps, open windows and every setting. `=` calculates and `>` runs a command. The results learn what you open. Under the list are the quick switches (Night Light, No Sleep, No Lock, Do Not Disturb), and a timed switch folds out a duration picker in place.
+
+Each tile at the top opens a full page:
+
+| | | |
+|---|---|---|
+| ![Network: Wi-Fi, VPN and Tailscale](docs/screenshots/network.webp) | ![Audio: outputs, per-app volume and inputs](docs/screenshots/audio.webp) | ![Bluetooth: pairing in place](docs/screenshots/bluetooth.webp) |
+
+- **Network**: Wi-Fi with signal, security and band, saved networks, VPNs, Tailscale with an exit node, airplane mode.
+- **Audio**: the output picker, Bluetooth headset profiles, per-app volume, the microphone and a level test.
+- **Bluetooth**: connect, forget and pair in place, with the pairing code on the card.
+
+![Power: battery, draw, health and profile](docs/screenshots/power.webp)
+
+### Switching work: Super+Tab
+
+![The Super+Tab switcher with live workspace pictures](docs/screenshots/switcher.webp)
+
+Super+Tab shows every workspace as a live picture and grows the one you pick to full size. A workspace can be pinned as a small live view in a corner of another. Hold Super for a sheet of every key binding, generated from the sway config that is actually loaded:
+
+![The key binding sheet](docs/screenshots/keybinds.webp)
+
+### Notifications and the OSD
+
+![Grouped notifications](docs/screenshots/notifications.webp)
+
+Notifications group per app and wait in a notification centre. Quiet hours hold them at night, and they also hold by themselves while you share your screen, mirror an output or run something full screen. When you are back, one card says what arrived. The volume and brightness keys show a small card, and Caps Lock says what it did:
+
+![The Caps Lock card](docs/screenshots/osd.webp)
+
+### Screenshots and recording
 
 | | |
 |---|---|
-| ![Network](docs/screenshots/network.webp) | ![Audio](docs/screenshots/audio.webp) |
-| ![Bluetooth](docs/screenshots/bluetooth.webp) | ![Notifications](docs/screenshots/notifications.webp) |
+| ![Region selector](docs/screenshots/screenshot.webp) | ![Annotation editor](docs/screenshots/annotate.webp) |
+
+Region, window, screen, a colour picker and screen recording, from one selector. The annotation editor crops, draws arrows, boxes and highlights, and pixelates what should not be shared, before you save or copy.
+
+### Lock screen, face unlock and authentication
+
+![The lock screen in dark and light mode](docs/screenshots/lock.webp)
+
+The lock screen shows the wallpaper as it is, with no dimming or blur. The clock and date sit on their own glass plate, so they read on any wallpaper in either mode. Password, fingerprint and face unlock run at the same time, and whichever finishes first unlocks. The lock cross-fades in from the desktop and out again. The greeter at login uses the same card.
+
+| | |
+|---|---|
+| ![Face unlock looking for you](docs/screenshots/lock-face.webp) | ![The polkit authentication card](docs/screenshots/polkit.webp) |
+
+The polkit agent asks for administrator rights on the same card, with the fingerprint reader as an alternative to the password.
+
+### Settings
+
+| | |
+|---|---|
 | ![Glass settings](docs/screenshots/glass.webp) | ![Display settings](docs/screenshots/displays.webp) |
 | ![System settings](docs/screenshots/system.webp) | ![Quality: issues and auto-fix](docs/screenshots/quality.webp) |
 
-![Lock screen](docs/screenshots/lock.webp)
+Ten tabs (Look, Idle & Lock, Bar, Input, Alerts, Launcher, Displays, Glass, System, Quality), and the launcher searches every setting in them. Nix provides the defaults, and `swaypplet settings get|set` changes any setting from a script or a key binding.
 
-Every screenshot is rendered by the project's own harness (`dev/render.sh`) in a nested headless sway, with default settings, from invented test data, over a generated background.
+- **Displays** saves output layouts as profiles and applies one by itself when its screens connect.
+- **Glass** tunes the material: presets, clarity, frost and the bevel, in both modes at once.
+- **Quality** lists the open issues. Super+Alt+Print files a problem with a screenshot and the recent log, and a crash files one by itself. Auto-fix has an agent on this machine reproduce the problem in a nested session, fix it and open a pull request with before and after pictures. Merge & apply puts the fix on the machine.
 
-## The design system
+All the screenshots above come from the project's own harness (`dev/render.sh`): a nested headless swayfx with default settings and invented test data. The panel's app list and the key binding sheet come from the machine that rendered them.
 
-The look is generated, not hand-written. [docs/design-system.md](docs/design-system.md) is the full specification; the short version:
+## Why one program
 
-- **Tokens from Rust.** Colour scales are generated in OKLCH from a few inputs (mode, accent, neutral, contrast, wallpaper palette) and emitted as CSS custom properties. Components use semantic tokens only; a lint test enforces it.
-- **Contrast through the glass.** Every text colour is checked with APCA over the glass material as the compositor draws it, over white, grey and black backdrops, for every combination of inputs.
-- **Dark and light by the sun.** Automatic mode switches around sunset and sunrise, and waits until the screen is locked or nobody is looking, so the desktop never flips under you.
-- **A palette from the wallpaper.** The accent, the surface tint and the category colours can follow the wallpaper's hues, without ever changing a colour's lightness.
-- **Motion tokens with meaning.** Seven durations (state, expand, enter, exit, move, travel, page), each for one kind of change, all scaled by one setting and by reduced motion.
-- **Measured smoothness.** `dev/frame-bench.sh --gate` times every frame of the panel and notifications in a nested session and fails a push that drops frames.
+Most of what swaypplet does, a separate tool can do too. What one program adds is agreement: everything on screen comes from the same numbers at the same moment.
+
+- **One theme, one answer.** The panel resolves the theme (dark or light by the sun, the accent, contrast, the wallpaper's hues) and publishes it once. The lock screen, the polkit agent and every other process draw that answer and reload when it changes, and the compositor gets the matching glass from the same answer. The text on a card cannot disagree with the glass behind it.
+- **A switch never happens in front of you.** Automatic mode turns light and dark with the sun, and waits for the lock, for idle or for ten minutes with nothing open, then fades everything over one motion token. Apps follow the mode too.
+- **The look is generated.** Colour scales come from a few inputs in OKLCH and are emitted as CSS tokens. Components use semantic tokens only, and a lint test enforces it.
+- **Contrast is proven.** Every text colour is checked with APCA over the glass as the compositor draws it: a model of the shader, over white, grey and black backdrops, for every combination of inputs. The same model holds the two modes to about the same colour from what is behind the glass, so dark and light feel alike.
+- **Motion has meaning.** Seven durations (state, expand, enter, exit, move, travel, page), each for one kind of change, all scaled by one setting and by reduced motion.
+- **Smoothness is measured.** `dev/frame-bench.sh --gate` times every frame of the panel and the notifications in a nested session, and the pre-push hook fails a push that drops frames.
+- **The shell reports its own bugs.** A crash files an issue with its log. A report takes a screenshot. The Quality tab can have an agent fix one in a nested session and show you the pictures before it merges.
+
+The rules behind this are in [docs/design-system.md](docs/design-system.md).
 
 ## Requirements
 
-- **swayfx.** swaypplet draws its surfaces as GTK 4 layer-shell windows and asks the compositor for the glass. The liquid-glass material, the fill key, the workspace transitions and the lock screen's blurred backdrop come from patches to swayfx and scenefx that are not published yet; without them the shell runs, but the cards are not glass.
+- **swayfx with patches.** swaypplet draws its surfaces as GTK 4 layer-shell windows and asks the compositor for the glass. The liquid-glass material, the fill key, the workspace transitions and the lock screen's cross-fade come from patches to swayfx and scenefx that are not published yet. Without them the shell runs, but the cards are not glass.
 - GTK 4.12 or newer, gtk4-layer-shell, gtk4-session-lock, PAM, PipeWire with its PulseAudio server, NetworkManager, BlueZ, UPower, and logind.
 - Optional: [elephant](https://github.com/abenz1267/elephant) as the launcher's search backend, fprintd for fingerprint unlock, an IR camera and a `howdy-verify <user>` helper for face unlock, and `gh`, `jq` and the [Claude Code](https://claude.com/claude-code) CLI for reports and auto-fix.
 
