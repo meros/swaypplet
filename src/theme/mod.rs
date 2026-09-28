@@ -227,6 +227,13 @@ fn document(inputs: crate::tokens::Inputs) -> String {
 }
 
 pub fn load_css() {
+    // Classic scrollbars, in every process: GTK's overlay scrollbar is drawn
+    // over the content's right edge, where every row keeps its switches and
+    // buttons, and covered them whenever it showed. A classic one takes its
+    // width only while the list overflows, and the rows move aside.
+    if let Some(settings) = gtk4::Settings::default() {
+        settings.set_gtk_overlay_scrolling(false);
+    }
     let provider = CssProvider::new();
     let inputs = inputs();
     provider.load_from_string(&document(inputs));

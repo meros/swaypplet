@@ -70,10 +70,23 @@ separator {
     margin: var(--space-2) 0;
 }
 
+/* Classic, not overlay (`theme::load_css`): it takes its own width beside
+   the content instead of covering the controls at the rows' right end. So
+   it is slim, sits on no trough, and keeps a step of air from the rows. */
+scrollbar {
+    background-color: transparent;
+    border: none;
+}
+
+scrollbar.vertical {
+    padding-left: var(--space-1);
+}
+
 scrollbar slider {
     background-color: var(--fill-3);
     border-radius: var(--radius-pill);
-    min-width: 3px;
+    min-width: 4px;
+    min-height: 24px;
 }
 
 scrollbar slider:hover {
