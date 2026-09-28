@@ -81,7 +81,7 @@ impl Engine {
     fn target(&self) -> f64 {
         let settings = self.settings.get();
         let elevation = match settings.schedule {
-            NightSchedule::Sun => crate::theme::sun::elevation_now(),
+            NightSchedule::Sun => crate::theme::sun::daylight_now(),
             NightSchedule::Always => None,
         };
         color::target_kelvin(settings, elevation)

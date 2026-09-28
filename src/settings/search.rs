@@ -364,6 +364,8 @@ mod tests {
     /// Each tab's pane source, for the anchor check.
     const SOURCES: &[(&str, &str)] = &[
         ("look", include_str!("look_pane.rs")),
+        // The Look tab's Day and night group lives in its own file.
+        ("look", include_str!("daylight_group.rs")),
         ("idle", include_str!("idle_pane.rs")),
         ("bar", include_str!("bar_pane.rs")),
         ("input", include_str!("input_pane.rs")),
@@ -403,8 +405,12 @@ mod tests {
     #[test]
     fn every_entry_names_a_group_and_a_row_its_pane_builds() {
         for (tab, entries) in TABLES {
-            let (_, src) = SOURCES.iter().find(|(t, _)| t == tab).unwrap();
-            let src = code(src);
+            let src: String = SOURCES
+                .iter()
+                .filter(|(t, _)| t == tab)
+                .map(|(_, s)| code(s))
+                .collect();
+            let src = src.as_str();
             for e in *entries {
                 // The group: a section_box title (or, on Displays, the
                 // selected output's group, whose overline is the output).

@@ -47,9 +47,10 @@ wallpaper's hue for the tint) into one `tokens::Inputs`, and `tokens::css`
 
 ### 2.1 Auto mode follows the sun
 
-`auto` is dark from dusk to dawn and light in between, at the location the
-night light uses (`gammastep.nix`: 55.6 N, 13.0 E; Nix writes it to
-`/etc/swaypplet/theme.json` so both read one value).
+`auto` is dark from dusk to dawn and light in between, at the same place
+the night light uses: the one picked on the map in the Day and night group.
+Sunrise and sunset are instants in UTC that follow from that place; the
+time zone only formats them as clock times.
 
 - **Light** once the sun is 3° above the horizon, **dark** once it is 3°
   below, with the state held in between. The 6° band stops a switch from
@@ -63,6 +64,10 @@ night light uses (`gammastep.nix`: 55.6 N, 13.0 E; Nix writes it to
   over `--motion-page` (§2.3).
 - Choosing `dark` or `light` in the pane sets that mode until you choose
   `auto` again.
+- **Day and night can be moved.** The Look pane's Day and night group
+  (`daylight`) takes the place on a map, moves sunrise and sunset
+  earlier or later, or replaces the sun with fixed clock times. The night
+  light follows the same day and night.
 - **One process decides, every other one draws its answer.** The panel
   resolves the inputs (the mode, the Look settings, the wallpaper's tint and
   text backdrop), writes them to `$XDG_RUNTIME_DIR/swaypplet/theme-<display>.json`,

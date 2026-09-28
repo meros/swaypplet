@@ -150,7 +150,7 @@ fn tint(reach: Reach, sample: Option<&Sample>, pick: u8) -> Tint {
 
 /// The mode the sun asks for, or dark where no location is known.
 fn sun_mode() -> Mode {
-    super::sun::elevation_now()
+    super::sun::daylight_now()
         .map(|e| super::sun::mode(e, shown_mode()))
         .unwrap_or(Mode::Dark)
 }

@@ -21,7 +21,7 @@ use gtk4::prelude::*;
 
 use super::form::{self, dropdown_row, section_box};
 use super::schema::ThemeMode;
-use super::store::{self, Look, Motion, NightLight, NightSchedule, Tint, Wallpaper, WallpaperMode};
+use super::store::{self, Daylight, Look, Motion, NightLight, NightSchedule, Tint, Wallpaper, WallpaperMode};
 use super::wallpaper::{apply, candidates, candidates_dir, system_default};
 use crate::theme::wallpaper::Sample;
 use crate::tokens::{Accent, Contrast, Neutral, Palette, Tint as Reach};
@@ -129,7 +129,7 @@ fn rounded_rect(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f6
 // ── Appearance ──────────────────────────────────────────────────────────
 
 /// The night light dropdown: off, or which schedule.
-const NIGHT_CHOICES: [&str; 3] = ["Off", "Follow the sun", "Always on"];
+const NIGHT_CHOICES: [&str; 3] = ["Off", "At night", "Always on"];
 
 fn night_choice(n: NightLight) -> usize {
     match (n.enabled, n.schedule) {
@@ -305,6 +305,7 @@ impl State {
         store::update(|s| s.wallpaper = None);
         store::reset::<Look>();
         store::reset::<NightLight>();
+        store::reset::<Daylight>();
         match self.system.borrow().as_ref() {
             Some(system) => apply(system),
             // Nothing to put back: the config sets no wallpaper, so what is
@@ -321,7 +322,8 @@ impl State {
         let settings = store::current();
         let overridden = settings.wallpaper.is_some()
             || settings.look.is_some()
-            || settings.night_light.is_some();
+            || settings.night_light.is_some()
+            || settings.daylight.is_some();
         let look = settings.look();
         let theme_mode = ThemeMode::ALL.iter().position(|m| *m == look.mode);
         self.theme_mode.set_selected(theme_mode.unwrap_or(0) as u32);
@@ -361,7 +363,7 @@ impl State {
         form::set_source(
             &self.status,
             overridden,
-            "System default: the sway config's wallpaper, auto mode in aqua on gruvbox, full motion, night light from the sun at 3500 K",
+            "System default: the sway config's wallpaper, auto mode in aqua on gruvbox, full motion, day and night by the sun at the system's location, night light at 3500 K",
         );
         self.updating.set(false);
     }
@@ -533,7 +535,7 @@ impl LookPane {
         let mode_labels: Vec<&str> = ThemeMode::ALL.iter().map(|m| m.label()).collect();
         let (theme_mode_row, theme_mode) = dropdown_row(
             "Mode",
-            "Dark, light, or by the sun at this machine's location: light from 3° above the horizon, dark from 3° below.",
+            "Dark, light, or automatic: light by day and dark by night, as the Day and night group below sets them.",
             &mode_labels,
         );
         appearance.append(&theme_mode_row);
@@ -626,11 +628,11 @@ impl LookPane {
 
         let night_box = section_box(
             "Night light",
-            "Warms every screen after dark, from the same sun the automatic mode follows. The panel's display section has the same warmth.",
+            "Warms every screen at night, by the same day and night the automatic mode follows. The panel's display section has the same warmth.",
         );
         let (night_row, night) = dropdown_row(
             "Night light",
-            "Follow the sun warms across civil twilight, dusk to dawn.",
+            "At night warms across the dusk and cools across the dawn the Day and night group sets.",
             &NIGHT_CHOICES,
         );
         night_box.append(&night_row);
@@ -657,7 +659,7 @@ impl LookPane {
         );
         let reset = form::action_button(
             "Reset to system",
-            "Put the sway config's wallpaper back, and the system's theme colour, motion and night light.",
+            "Put the sway config's wallpaper back, and the system's theme colour, motion, day and night, and night light.",
         );
         let (footer, status) = form::footer(&[&browse, &reset]);
 
@@ -896,6 +898,7 @@ impl LookPane {
         root.append(&appearance);
         root.append(&theme);
         root.append(&look);
+        root.append(&super::daylight_group::build());
         root.append(&night_box);
         root.append(&footer);
 
@@ -941,6 +944,13 @@ pub(super) const SEARCH: &[Entry] = &[
     row("Theme colour", "Accent from", "Which of the wallpaper's colours is the accent", &["wallpaper accent", "palette", "second colour", "second color", "wallpaper colours", "wallpaper colors"]).keys(&["look.tint_colour"]),
     row("Motion", "Motion", "Full, half or no animation", &["animation", "animations", "reduced motion", "reduce motion", "speed", "effects", "transitions"]).keys(&["look.motion"]),
     row("Motion", "Launch zoom", "Apps grow out of their launcher row", &["open animation", "handoff"]).keys(&["look.launch_zoom"]),
+    row("Day and night", "Fixed times", "Day and night at set clock times instead of by the sun", &["schedule", "clock", "time", "manual", "set time"]).keys(&["daylight.fixed_times"]),
+    row("Day and night", "Day from", "When the day starts", &["morning", "sunrise time", "light from", "start"]).keys(&["daylight.day_from_h", "daylight.day_from_m"]),
+    row("Day and night", "Night from", "When the night starts", &["evening", "sunset time", "dark from", "bedtime"]).keys(&["daylight.night_from_h", "daylight.night_from_m"]),
+    row("Day and night", "Place", "Where you are, picked on a map, for sunrise and sunset", &["location", "map", "city", "coordinates", "latitude", "longitude", "where", "gps"]).keys(&["daylight.latitude", "daylight.longitude"]),
+    row("Day and night", "Sunrise", "Move the morning switch earlier or later", &["sunrise offset", "dawn", "morning", "offset", "earlier", "later"]).keys(&["daylight.sunrise_offset_m"]),
+    row("Day and night", "Sunset", "Move the evening switch earlier or later", &["sunset offset", "dusk", "evening", "offset", "earlier", "later"]).keys(&["daylight.sunset_offset_m"]),
+    row("Day and night", "Today", "When the mode switches today", &["sunrise", "sunset", "when dark", "when light"]),
     row("Night light", "Night light", "A warmer screen after dark", &["night light", "night shift", "blue light", "warm", "gamma", "redshift", "gammastep", "evening"]).keys(&["night_light.enabled", "night_light.schedule"]),
     row("Night light", "Night warmth", "How warm the night gets, in kelvin", &["colour temperature", "color temperature", "temperature", "kelvin", "warmth", "warm"]).keys(&["night_light.night_k"]),
     row("Appearance", "Apps follow the shell's appearance", "Apps switch dark and light with the shell", &["dark mode apps", "light mode apps", "gtk theme", "color scheme", "portal", "libadwaita", "prefer dark"]).keys(&["look.apps_follow"]),

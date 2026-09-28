@@ -92,6 +92,17 @@
     "schedule": "sun",
     "night_k": 3500
   },
+  "daylight": {
+    "fixed_times": false,
+    "day_from_h": 7,
+    "day_from_m": 0,
+    "night_from_h": 21,
+    "night_from_m": 0,
+    "latitude": null,
+    "longitude": null,
+    "sunrise_offset_m": 0,
+    "sunset_offset_m": 0
+  },
   "displays": {
     "profiles": []
   },

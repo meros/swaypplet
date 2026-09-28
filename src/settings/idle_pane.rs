@@ -21,7 +21,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use super::form::{self, Durations, dropdown_row, kind_row, scale_row, section_box, switch_row};
+use super::form::{self, Durations, dropdown_row, scale_row, section_box, switch_row, time_row};
 use super::store::{self, Elevate, Idle};
 
 /// The rungs each dropdown offers. The saved value is added if it is not
@@ -98,49 +98,6 @@ const NIGHT_TIMERS: [Timer; 3] = [
         set: |i, v| i.night_blank_after_s = v,
     },
 ];
-
-/// The minute rungs a clock dropdown offers, five apart, plus whatever the
-/// file says. Same reasoning as `form::Durations`: a minute typed by hand
-/// (`"night_from_m": 37`) shows itself rather than being snapped away.
-fn minute_rungs(current: u8) -> Vec<u8> {
-    let mut rungs: Vec<u8> = (0..60).step_by(5).map(|m| m as u8).collect();
-    if !rungs.contains(&current) {
-        rungs.push(current);
-        rungs.sort_unstable();
-    }
-    rungs
-}
-
-/// A label and one clock time: an hour dropdown, a colon, a minute
-/// dropdown. Returns the rungs the minute dropdown was built from, which
-/// `sync` needs to turn a saved minute back into an index.
-fn time_row(
-    label: &str,
-    hint: &str,
-    minute: u8,
-) -> (gtk4::Box, gtk4::DropDown, gtk4::DropDown, Vec<u8>) {
-    let hours: Vec<String> = (0..24).map(|h| format!("{h:02}")).collect();
-    let hours: Vec<&str> = hours.iter().map(String::as_str).collect();
-    let hour = form::dropdown(&hours);
-
-    let rungs = minute_rungs(minute);
-    let labels: Vec<String> = rungs.iter().map(|m| format!("{m:02}")).collect();
-    let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let minutes = form::dropdown(&labels);
-
-    let clock = crate::ui::hbox(2);
-    clock.append(&hour);
-    clock.append(&crate::ui::text(
-        ":",
-        crate::ui::Text::Body,
-        crate::ui::Tone::Fg,
-    ));
-    clock.append(&minutes);
-
-    let row = kind_row(label, &clock);
-    row.set_tooltip_text(Some(hint));
-    (row, hour, minutes, rungs)
-}
 
 /// The status line at the system default, so it says what the default is
 /// rather than that there is one.
@@ -731,19 +688,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn minute_rungs_are_five_apart_and_admit_a_typed_value() {
-        let five = minute_rungs(0);
-        assert_eq!(five.len(), 12);
-        assert_eq!(five[0], 0);
-        assert_eq!(*five.last().unwrap(), 55);
-        assert!(five.windows(2).all(|w| w[1] - w[0] == 5));
-
-        let typed = minute_rungs(37);
-        assert_eq!(typed.len(), 13);
-        assert_eq!(typed.iter().position(|m| *m == 37), Some(8));
-        assert!(typed.windows(2).all(|w| w[0] < w[1]));
-        // A value already on the ladder is not doubled.
-        assert_eq!(minute_rungs(30).len(), 12);
-    }
 }

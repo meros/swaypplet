@@ -400,8 +400,8 @@ impl Tint {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ThemeMode {
-    /// Dark from dusk to dawn, light in between, at the location in
-    /// /etc/swaypplet/theme.json. Dark when no location is known.
+    /// Dark by night and light by day, as [`Daylight`] draws them. Dark
+    /// when no location is known.
     #[default]
     Auto,
     Dark,
@@ -919,9 +919,9 @@ impl Default for Launcher {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum NightSchedule {
-    /// Warm from dusk to dawn, across civil twilight, from the sun at
-    /// `/etc/swaypplet/theme.json`'s location: the one the automatic mode
-    /// uses.
+    /// Warm at night, across the dusk and the dawn [`Daylight`] draws: the
+    /// sun at its location with its offsets, or its fixed times. The same
+    /// day and night the automatic mode follows.
     #[default]
     Sun,
     /// Warm all day.
@@ -964,6 +964,114 @@ impl Default for NightLight {
             enabled: true,
             schedule: NightSchedule::Sun,
             night_k: Self::default_night_k(),
+        }
+    }
+}
+
+/// When day and night are, for the two things that follow them: the
+/// automatic mode and the night light (`theme::sun`). One section, so the
+/// theme darkens and the screen warms at the same moment.
+///
+/// The sun decides, at the place picked on the Look pane's map: sunrise and
+/// sunset are instants in UTC that follow from a latitude and a longitude,
+/// whatever the local clock's time zone says. Until a place is picked there
+/// is no sun to follow. The switches move that: a location of your own,
+/// sunrise and sunset shifted earlier or later, or fixed clock times instead
+/// of the sun.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Daylight {
+    /// Day and night at the clock times below instead of by the sun. Off,
+    /// every `day_*`/`night_*` field is inert.
+    #[serde(default)]
+    pub fixed_times: bool,
+    /// When the day starts, local time: the mode turns light and the night
+    /// light has cooled back to day.
+    #[serde(default = "Daylight::default_day_from_h")]
+    pub day_from_h: u8,
+    #[serde(default)]
+    pub day_from_m: u8,
+    /// When the night starts: the mode turns dark and the night light is
+    /// most of the way warm.
+    #[serde(default = "Daylight::default_night_from_h")]
+    pub night_from_h: u8,
+    #[serde(default)]
+    pub night_from_m: u8,
+    /// Where the sun is computed for, picked on the map: degrees, north
+    /// positive, −90–90. `null` until a place is picked.
+    #[serde(default)]
+    pub latitude: Option<f64>,
+    /// Degrees, east positive, −180–180.
+    #[serde(default)]
+    pub longitude: Option<f64>,
+    /// Minutes to move sunrise by: negative is earlier, positive later.
+    /// −180–180; 0 is the sun as it is.
+    #[serde(default)]
+    pub sunrise_offset_m: i16,
+    /// Minutes to move sunset by, the same way.
+    #[serde(default)]
+    pub sunset_offset_m: i16,
+}
+
+impl Daylight {
+    pub const MAX_OFFSET_M: i16 = 180;
+
+    fn default_day_from_h() -> u8 {
+        7
+    }
+    fn default_night_from_h() -> u8 {
+        21
+    }
+
+    /// Clamped rather than rejected, like `Idle`'s window: a typo in the
+    /// file costs a wrong time, never the section.
+    fn sanitized(self) -> Daylight {
+        let finite =
+            |v: Option<f64>, max: f64| v.filter(|v| v.is_finite()).map(|v| v.clamp(-max, max));
+        Daylight {
+            day_from_h: self.day_from_h.min(23),
+            day_from_m: self.day_from_m.min(59),
+            night_from_h: self.night_from_h.min(23),
+            night_from_m: self.night_from_m.min(59),
+            latitude: finite(self.latitude, 90.0),
+            longitude: finite(self.longitude, 180.0),
+            sunrise_offset_m: self
+                .sunrise_offset_m
+                .clamp(-Self::MAX_OFFSET_M, Self::MAX_OFFSET_M),
+            sunset_offset_m: self
+                .sunset_offset_m
+                .clamp(-Self::MAX_OFFSET_M, Self::MAX_OFFSET_M),
+            ..self
+        }
+    }
+
+    /// The day's start as minutes since midnight.
+    pub fn day_from(&self) -> u16 {
+        u16::from(self.day_from_h) * 60 + u16::from(self.day_from_m)
+    }
+
+    /// The picked place, when both halves of it are there.
+    pub fn place(&self) -> Option<(f64, f64)> {
+        Some((self.latitude?, self.longitude?))
+    }
+
+    /// The night's start as minutes since midnight.
+    pub fn night_from(&self) -> u16 {
+        u16::from(self.night_from_h) * 60 + u16::from(self.night_from_m)
+    }
+}
+
+impl Default for Daylight {
+    fn default() -> Self {
+        Daylight {
+            fixed_times: false,
+            day_from_h: Self::default_day_from_h(),
+            day_from_m: 0,
+            night_from_h: Self::default_night_from_h(),
+            night_from_m: 0,
+            latitude: None,
+            longitude: None,
+            sunrise_offset_m: 0,
+            sunset_offset_m: 0,
         }
     }
 }
@@ -1216,6 +1324,8 @@ pub struct Settings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub night_light: Option<NightLight>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daylight: Option<Daylight>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub displays: Option<Displays>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<Input>,
@@ -1223,7 +1333,7 @@ pub struct Settings {
 
 impl Settings {
     /// The section names, in the order the file and the pane list them.
-    pub const SECTIONS: [&'static str; 13] = [
+    pub const SECTIONS: [&'static str; 14] = [
         "wallpaper",
         "look",
         "idle",
@@ -1235,13 +1345,14 @@ impl Settings {
         "elevate",
         "launcher",
         "night_light",
+        "daylight",
         "displays",
         "input",
     ];
 
     /// The sections with a system layer, which is every one but the
     /// wallpaper: its system default is the sway config's `bg` line.
-    pub const NIX_SECTIONS: [&'static str; 12] = [
+    pub const NIX_SECTIONS: [&'static str; 13] = [
         "look",
         "idle",
         "bar",
@@ -1252,6 +1363,7 @@ impl Settings {
         "elevate",
         "launcher",
         "night_light",
+        "daylight",
         "displays",
         "input",
     ];
@@ -1293,6 +1405,9 @@ impl Settings {
             .or(system().night_light)
             .unwrap_or_default()
     }
+    pub fn daylight(&self) -> Daylight {
+        self.daylight.or(system().daylight).unwrap_or_default()
+    }
     pub fn displays(&self) -> Displays {
         self.displays
             .clone()
@@ -1326,6 +1441,7 @@ impl Settings {
             elevate: Some(self.elevate()),
             launcher: Some(self.launcher()),
             night_light: Some(self.night_light()),
+            daylight: Some(self.daylight()),
             displays: Some(self.displays()),
             input: Some(self.input()),
         }
@@ -1355,6 +1471,7 @@ impl Settings {
             elevate: Some(Elevate::default()),
             launcher: Some(Launcher::default()),
             night_light: Some(NightLight::default()),
+            daylight: Some(Daylight::default()),
             displays: Some(Displays::default()),
             input: Some(Input::default()),
         }
@@ -1369,6 +1486,7 @@ impl Settings {
             keys: self.keys.map(Keys::sanitized),
             alerts: self.alerts.map(Alerts::sanitized),
             night_light: self.night_light.map(NightLight::sanitized),
+            daylight: self.daylight.map(Daylight::sanitized),
             displays: self.displays.map(Displays::sanitized),
             input: self.input.map(Input::sanitized),
             ..self
@@ -1532,6 +1650,7 @@ section!(Capture, capture, capture);
 section!(Elevate, elevate, elevate);
 section!(Launcher, launcher, launcher);
 section!(NightLight, night_light, night_light);
+section!(Daylight, daylight, daylight);
 section!(Displays, displays, displays);
 section!(Input, input, input);
 

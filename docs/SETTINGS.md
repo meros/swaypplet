@@ -21,7 +21,7 @@ groups, `src/settings/`:
 | pane | edits | sections of `~/.config/swaypplet/settings.json` |
 |---|---|---|
 | **Settings** | | |
-| Appearance | `output * bg` on the compositor; whether the theme takes its colours from it; how much the shell animates; the night light and its warmth | `wallpaper`, `look`, `night_light` |
+| Appearance | `output * bg` on the compositor; whether the theme takes its colours from it; how much the shell animates; when day and night are; the night light and its warmth | `wallpaper`, `look`, `daylight`, `night_light` |
 | Glass | the liquid-glass material | `~/.config/swaypplet/glass.json` |
 | Idle & Lock | the idle manager's timers; the night window; walk-away lock; face unlock; what sudo and pkexec may ask for | `idle`, `elevate` |
 | Bar | clock format, segments, OSD placement; pins and previews: size, frame rate, corner | `bar`, `pins` |
@@ -183,10 +183,25 @@ and Bar tabs is `nix <section>` into the clipboard.
   `night_k` 1700–6500) is read in this process by `services::gamma`, which
   holds the compositor's gamma tables over `zwlr_gamma_control_v1` in place
   of gammastep. `store::observe` retargets it: a change ramps over a second.
-  With `schedule: sun` it asks `theme::sun` once a minute, the same
-  elevation and location the automatic mode uses, and warms linearly in
-  mired from +3° (day, 6500 K, no control held at all) to −6° (the end of
-  civil twilight, `night_k`). The panel's Night Light tile and the display
+  With `schedule: sun` ("At night") it asks `theme::sun::daylight_now`
+  once a minute, the same day and night the automatic mode uses, and warms
+  linearly in mired from +3° (day, 6500 K, no control held at all) to −6°
+  (the end of civil twilight, `night_k`).
+- **Day and night** (`daylight`: `fixed_times`, `day_from_h`/`_m`,
+  `night_from_h`/`_m`, `latitude`, `longitude`,
+  `sunrise_offset_m`, `sunset_offset_m`) is when the automatic mode and the
+  night light switch. `theme::sun::daylight_now` turns it into one number,
+  a sun elevation in degrees, so both keep their bands: the sun's own at
+  the `latitude`/`longitude` picked on the group's map (computed in UTC;
+  the time zone only formats the clock times the group shows; `null`
+  until a place is picked, and then the mode stays dark and the night
+  light off),
+  taken that many minutes earlier or later while it rises or sets, or, with
+  `fixed_times`, an elevation drawn from the clock that is exactly +3° at
+  the day's start and −3° at the night's, moving 9° per half hour. The mode
+  switches on the minute; the night light fades over the half hour around
+  it. The Look pane's group shows the day's resulting switch times
+  (`theme::sun::switches_today`). The panel's Night Light tile and the display
   section's warmth slider edit this section too.
 - **Alerts**: a popup reads linger, corner and depth as it is created and
   keeps them (`notifications/stack.rs`); quiet hours is a 30 s tick plus an

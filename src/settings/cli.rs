@@ -32,6 +32,8 @@ sections and fields (data/settings-defaults.json has every default):
              suspend_after_s (0 is never), walk_away_lock, face_unlock
   bar        clock_24h, clock_date, osd_in_bar, board, media, tray, battery, presence,
              backup, look_mode
+  daylight   fixed_times, day_from_h, day_from_m, night_from_h, night_from_m,
+             latitude, longitude, sunrise_offset_m, sunset_offset_m
   pins       size (small|medium|large), fps (15|30|60),
              corner (bottom_right|bottom_left|top_right|top_left)
   keys       volume_step, brightness_step, volume_boost

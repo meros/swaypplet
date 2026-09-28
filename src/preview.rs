@@ -451,6 +451,12 @@ pub fn run(component: &str) {
                 if let Some(tab) = c.strip_prefix("settings.") {
                     s.show(tab);
                 }
+                // SWAYPPLET_PREVIEW_REVEAL=<tab>\t<group>\t<title>: open on that
+                // row, scrolled into view, as a search hit does.
+                if let Some(id) = std::env::var_os("SWAYPPLET_PREVIEW_REVEAL") {
+                    let id = id.to_string_lossy().replace("\\t", "\t");
+                    s.reveal(&id);
+                }
                 // The Input tab reads the devices on refresh, as the panel
                 // does when it opens.
                 if c == "settings.input" {
