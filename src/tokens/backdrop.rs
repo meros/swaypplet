@@ -230,13 +230,17 @@ pub fn scrim_for(mode: Mode) -> (Rgb, f64) {
     }
 }
 
-/// The ink and the shadow colour for text on the lock's backdrop in `mode`:
-/// light ink under a black shadow on dark mode's dim, dark ink under a white
-/// one on light mode's lift.
-pub fn on_backdrop(mode: Mode) -> (Rgb, Rgb) {
-    match mode {
-        Mode::Dark => (ON_STATUS, Rgb::BLACK),
-        Mode::Light => (INK_DARK, Rgb::WHITE),
+/// The ink and the shadow colour for text on the lock's backdrop: dark ink
+/// under a white shadow where it is lifted (light mode, on a compositor that
+/// lifts), light ink under a black one on the dim everywhere else. The ink
+/// follows what the compositor draws, not the mode alone, so a compositor
+/// that is older than the shell (the session a switch has not restarted yet)
+/// never gets dark text on its dim.
+pub fn on_backdrop(mode: Mode, lifted: bool) -> (Rgb, Rgb) {
+    if mode == Mode::Light && lifted {
+        (INK_DARK, Rgb::WHITE)
+    } else {
+        (ON_STATUS, Rgb::BLACK)
     }
 }
 
@@ -252,7 +256,7 @@ fn lift_lc(brightness: f64) -> f64 {
     let (scrim, alpha) = scrim_for(Mode::Light);
     let lifted = 1.0 - brightness;
     let ground = over(scrim, alpha, Rgb(lifted, lifted, lifted));
-    apca(on_backdrop(Mode::Light).0, ground).abs()
+    apca(on_backdrop(Mode::Light, true).0, ground).abs()
 }
 
 #[cfg(test)]

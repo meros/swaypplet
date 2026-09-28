@@ -127,7 +127,7 @@ pub fn css(inputs: Inputs) -> String {
     put("halo-on-wallpaper", mixed(ow.halo, ow.halo_alpha));
     // Text on the lock's backdrop: light ink on dark mode's dim, dark ink
     // on light mode's lift, like the backdrop it stands on (`backdrop.rs`).
-    let (ink, shadow) = on_backdrop(inputs.mode);
+    let (ink, shadow) = on_backdrop(inputs.mode, inputs.lifted);
     put("fg-on-backdrop", ink.css());
     put("shadow-on-backdrop", mixed(shadow, BACKDROP_SHADOW_ALPHA));
     put("danger-tint", mixed(st.danger_bg, 0.16));

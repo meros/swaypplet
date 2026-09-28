@@ -419,8 +419,49 @@ impl LockBackdrop {
             && (0.0..=crate::tokens::BACKDROP_BRIGHTNESS_MAX).contains(&self.brightness)
             && self
                 .light_brightness
-                .is_some_and(|l| (0.0..=crate::tokens::BACKDROP_LIFT_MAX).contains(&l))
+                .is_none_or(|l| (0.0..=crate::tokens::BACKDROP_LIFT_MAX).contains(&l))
     }
+}
+
+/// Whether the running compositor can lift the lock's backdrop toward white
+/// (`lock_backdrop_light`, nixos patches/swayfx-lock-backdrop-light.patch).
+///
+/// Asked of the compositor actually running, not of the system: a switch
+/// updates swaypplet at once but sway only at the next login, and a sway
+/// that does not know the effect rejects every line sent with it. Its binary
+/// is found through the pid in `SWAYSOCK` (sway names the socket
+/// `sway-ipc.<uid>.<pid>.sock`) and read once per process for the effect's
+/// name, which the parser holds as a string literal. Anything unreadable
+/// counts as no: the lock then keeps the dim and the light text that go
+/// with it, which is readable in both modes.
+pub fn compositor_lifts() -> bool {
+    static LIFTS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *LIFTS.get_or_init(|| {
+        let lifts = sway_binary()
+            .and_then(|exe| std::fs::read(exe).ok())
+            .is_some_and(|bin| bin.windows(LIFT_EFFECT.len()).any(|w| w == LIFT_EFFECT));
+        log::info!(
+            "glass: the running compositor {} the lock backdrop",
+            if lifts { "lifts" } else { "cannot lift" }
+        );
+        lifts
+    })
+}
+
+/// The effect name [`compositor_lifts`] looks for in the compositor.
+const LIFT_EFFECT: &[u8] = b"lock_backdrop_light";
+
+/// The running sway's executable, from the pid in `SWAYSOCK`.
+fn sway_binary() -> Option<PathBuf> {
+    let sock = std::env::var("SWAYSOCK").ok()?;
+    let name = std::path::Path::new(&sock).file_name()?.to_str()?;
+    let pid: u32 = name
+        .strip_suffix(".sock")?
+        .rsplit('.')
+        .next()?
+        .parse()
+        .ok()?;
+    std::fs::read_link(format!("/proc/{pid}/exe")).ok()
 }
 
 /// Whether the lock's text may drop its halo: the compositor blurs the
@@ -562,24 +603,6 @@ impl System {
             m.fill_color,
             m.edge_glow_color
         );
-        // The lock's backdrop follows the mode: dimmed over black in dark
-        // mode, lifted toward white in light mode, each at its own proven
-        // brightness. Sent only where the backdrop holds, so a compositor
-        // that draws the wallpaper sharp is never asked for a lift.
-        if namespace == "session-lock"
-            && let Some(b) = self.lock_backdrop.filter(|b| b.holds())
-            && let Some(lift) = b.light_brightness
-        {
-            let (light, brightness) = if tuning.light {
-                ("enable", lift)
-            } else {
-                ("disable", b.brightness)
-            };
-            let _ = write!(
-                out,
-                "; lock_backdrop_light {light}; lock_backdrop_brightness {brightness:.6}"
-            );
-        }
         Some(out)
     }
 
@@ -593,15 +616,52 @@ impl System {
     /// per command, because a parse failure destroys the whole replacement
     /// criteria and leaves the surface with no material — so the smaller the
     /// number of commands that can fail independently, the better.
+    ///
+    /// The lock's backdrop goes as a command of its own after its material
+    /// ([`Self::backdrop`]): `layer_criteria_add` merges it into what is
+    /// there, and a compositor that rejects it keeps the material it was
+    /// just sent rather than losing both.
     pub fn command(&self, tuning: &Tuning) -> String {
+        self.command_for(tuning, compositor_lifts())
+    }
+
+    /// [`Self::command`] for a compositor that can lift the lock's backdrop
+    /// or cannot (`lifts`).
+    fn command_for(&self, tuning: &Tuning, lifts: bool) -> String {
         self.surfaces
             .keys()
-            .filter_map(|ns| {
-                let effects = self.effects(ns, tuning)?;
-                Some(format!("layer_effects \"{ns}\" \"{effects}\""))
+            .flat_map(|ns| {
+                let material = self
+                    .effects(ns, tuning)
+                    .map(|effects| format!("layer_effects \"{ns}\" \"{effects}\""));
+                let backdrop = self
+                    .backdrop(ns, tuning, lifts)
+                    .map(|effects| format!("layer_effects \"{ns}\" \"{effects}\""));
+                material.into_iter().chain(backdrop)
             })
             .collect::<Vec<_>>()
             .join("; ")
+    }
+
+    /// The lock's backdrop for the mode: dimmed over black in dark mode,
+    /// lifted toward white in light mode, each at its own proven brightness.
+    /// Only for `session-lock`, only where the backdrop holds, and only to a
+    /// compositor that knows the lift ([`compositor_lifts`]); any other
+    /// keeps the dim its config gave it, and the lock's text matches that.
+    fn backdrop(&self, namespace: &str, tuning: &Tuning, lifts: bool) -> Option<String> {
+        let b = self.lock_backdrop.filter(|b| b.holds())?;
+        let lift = b.light_brightness?;
+        if namespace != "session-lock" || !lifts {
+            return None;
+        }
+        let (light, brightness) = if tuning.light {
+            ("enable", lift)
+        } else {
+            ("disable", b.brightness)
+        };
+        Some(format!(
+            "lock_backdrop_light {light}; lock_backdrop_brightness {brightness:.6}"
+        ))
     }
 
     /// Push `material` at the running compositor, stopping a fade in
@@ -1203,13 +1263,13 @@ mod tests {
         ))
         .unwrap();
         assert!(with.lock_backdrop.unwrap().holds());
-        // A compositor that cannot lift does not hold: light mode would put
-        // dark ink on the dim.
+        // A config without the lift still holds: the backdrop is dimmed in
+        // both modes, and the text on it light (`tokens::on_backdrop`).
         let dark_only: System = serde_json::from_str(&json(
             r#", "lock_backdrop": {"blur": 45, "brightness": 0.55}"#,
         ))
         .unwrap();
-        assert!(!dark_only.lock_backdrop.unwrap().holds());
+        assert!(dark_only.lock_backdrop.unwrap().holds());
         let ok = LockBackdrop {
             blur: 45.0,
             brightness: 0.55,
@@ -1260,14 +1320,14 @@ mod tests {
             mode,
             ..crate::tokens::Inputs::default()
         };
-        let light = system.command(&for_mode(
-            Tuning::system(&system),
-            mode(crate::tokens::Mode::Light),
-        ));
-        let dark = system.command(&for_mode(
-            Tuning::system(&system),
-            mode(crate::tokens::Mode::Dark),
-        ));
+        let light = system.command_for(
+            &for_mode(Tuning::system(&system), mode(crate::tokens::Mode::Light)),
+            true,
+        );
+        let dark = system.command_for(
+            &for_mode(Tuning::system(&system), mode(crate::tokens::Mode::Dark)),
+            true,
+        );
         assert!(
             light.contains("lock_backdrop_light enable; lock_backdrop_brightness 0.190000\""),
             "{light}"
@@ -1277,11 +1337,23 @@ mod tests {
             "{dark}"
         );
         assert_eq!(light.matches("lock_backdrop").count(), 2);
+        // Its own command after the material, so a compositor that rejects
+        // it keeps the material.
+        assert!(
+            light.contains("\"; layer_effects \"session-lock\" \"lock_backdrop_light"),
+            "{light}"
+        );
+        // A compositor that cannot lift is never sent the lines at all.
+        let old = system.command_for(
+            &for_mode(Tuning::system(&system), mode(crate::tokens::Mode::Light)),
+            false,
+        );
+        assert!(!old.contains("lock_backdrop"), "{old}");
         system.lock_backdrop = None;
-        let bare = system.command(&for_mode(
-            Tuning::system(&system),
-            mode(crate::tokens::Mode::Light),
-        ));
+        let bare = system.command_for(
+            &for_mode(Tuning::system(&system), mode(crate::tokens::Mode::Light)),
+            true,
+        );
         assert!(!bare.contains("lock_backdrop"));
     }
 
