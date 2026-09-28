@@ -267,7 +267,7 @@ These are the only colour names a rule may use.
 |---|---|---|
 | `--surface-key` | `#32302f` at 0.50 | what a glass card paints, and only so the compositor finds its shape (§4). Never shown. |
 | `--surface-raised` | `--neutral-4` | a surface with no glass behind it (the `.no-glass` fallback, the greeter's bare card) |
-| `--scrim` | black at 0.20 | the dimming layer behind modal surfaces; the lock screen's arithmetic depends on it |
+| `--scrim` | black at 0.20 | the ground of a well and of an editor's canvas |
 
 **Text**
 
@@ -465,11 +465,8 @@ Only these, because no semantic token gives their value:
 | `--track-height` | 6 px | slider and progress tracks |
 | `--knob` | dark `--neutral-12`, light white | the slider and switch knob |
 | `--on-accent-muted` | `--on-accent` at 80 % | the second line on an accent fill, a tile's state under its name |
-| `--fg-on-wallpaper` | `--on-status` (white) or a dark ink (`#1d2021`), from the wallpaper | text standing on bare wallpaper (the lock's clock, date and switch-user button, the switcher's caption); see below |
+| `--fg-on-wallpaper` | `--on-status` (white) or a dark ink (`#1d2021`), from the wallpaper | text standing on bare wallpaper (the lock's switch-user button, the greeter's users, the switcher's caption); see below |
 | `--halo-on-wallpaper` | black or white, 0.20–0.40 per layer | the halo under that text, the opposite of the ink |
-| `--fg-on-backdrop` | `--on-status` (white), in both modes | the lock's clock, date and switch-user button where the compositor blurs and dims the wallpaper under the lock; see below |
-| `--shadow-on-backdrop` | black at 0.08 | the one-pixel shadow under that text |
-| `--surface-key-over-scrim` | the key, pre-compensated | a glass card over the 0.20 scrim (the lock, the greeter), so the pair composites to exactly the key |
 
 **Text on the wallpaper.** Text with no card behind it stands on whatever
 the wallpaper is, and the mode does not change the wallpaper, so its tone
@@ -486,76 +483,34 @@ deviation, and `src/tokens/backdrop.rs` picks the ink and the halo:
 - the halo is four tight layers at 0.20, 0.30, 0.40 or 0.50 alpha each (a
   core of 0.59 to 0.94), denser over a busy image;
 - the ground the contrast is measured on is the region's mean minus and
-  plus one deviation, with and without the lock's 0.20 scrim, blended with
+  plus one deviation, blended with
   the half of the halo's core that reaches a glyph edge (the shadows are
   blurred, so the edge sits on the halo's shoulder; 0.5 is calibrated on
   renders, where the full core called white on a white page readable).
 
-Every region from black to white is tested: up to 10 % deviation the clock
+Every region from black to white is tested: up to 10 % deviation the text
 reaches Lc 75; over a bright region busier than that, no halo gets there
-and the clock is held to Lc 68 (it reaches 69–75). The smaller text's Lc 60
+and it is held to Lc 68 (it reaches 69–75). The smaller text's Lc 60
 holds everywhere. With no sample yet the answer is the shipped look: white
 ink on a black halo at 0.20.
 
-**Text on the lock's backdrop.** A halo cannot do better than that, because
-every pixel of the lock surface has to stay under the compositor's discard
-line (0.28) or become glass, and the 0.20 scrim already spends most of it.
-Measured on renders, the halo leaves the clock at Lc 39–57 over a bright
-image in light mode. So the lock asks the compositor for the backdrop
-instead, the way GNOME (blur radius 90, brightness 0.65) and KDE (radius
-50, brightness 0.7) treat the screen behind a
-password field: the wallpaper under the lock blurred and multiplied by a
-brightness over black. `/etc/swaypplet/glass.json` announces it as
-`lock_backdrop` (`blur`, `brightness`), and where it is there and
-`brightness` is at most `BACKDROP_BRIGHTNESS_MAX` (0.59), the lock's text
-takes `ui::on_backdrop`: light ink in either mode and a 1 px shadow, no
-halo. The proof is one case, a white page (light ink only gains as the
-ground darkens): white × 0.59 under the scrim is Lc 75.9. The greeter, whose
-compositor draws no such backdrop, and the switcher's caption keep the halo.
+**The lock's clock stands on glass.** A halo cannot hold the hero clock
+over every wallpaper: every pixel of the lock surface that is not a card has
+to stay under the compositor's discard line (0.28) or become glass, and
+measured on renders the halo leaves the clock at Lc 39–57 over a bright
+image in light mode. Dimming or blurring the whole wallpaper fixes the
+contrast and spoils the picture (tried 2026-09-27 as a compositor backdrop,
+removed 2026-09-28). So the clock and the date sit on a glass plate of their
+own (`.lock-plate`, a `Card::Floating` the auth card's width), and take the
+card's ink in either mode. Nothing else tints the wallpaper: no scrim, no
+backdrop, and every lock card paints the plain key. The switch-user button
+and the greeter's users still stand on the wallpaper and keep the halo.
 
-**The lock and the greeter follow the mode.** In light mode the compositor
-lifts the wallpaper under the lock toward white instead of dimming it toward
-black: the same multiply over white (`lock_backdrop.light_brightness`, sent
-with `lock_backdrop_light` by the panel when the mode turns light), and the
-text on it takes dark ink under a white shadow. The proof mirrors the dark
-one with the worst case reversed, a black page: dark ink reaches Lc 75 over
-it lifted to `BACKDROP_LIFT_MAX` (0.19), so the picture shows at a fifth of
-its strength. Light mode has no scrim: a white one under the card could not
-be compensated to the glass key (it would need a negative colour), so the
-compositor's lift does all of it, and the card over no scrim paints the plain
-key (`--surface-key-over-scrim`, computed per mode). The card's glass follows
-the mode like every other namespace. The greeter reads the system's Look
+The lock and the greeter follow the mode: the plate's and the card's glass
+follow it like every other namespace. The greeter reads the system's Look
 from `/etc/swaypplet/settings.json`, which the machine's owner sets in the
 nixos flake, resolves `auto` by the sun itself, and sends its own compositor
-the matching material (`settings::glass::apply_greeter`). A compositor that
-cannot lift (no `light_brightness`) fails `lock_backdrop`'s check, and the
-lock's text keeps its halo in both modes.
-
-The compositor's side, for the nixos repo (not in this repository):
-
-- `theme/glass.nix` gains `lockBackdrop = { blur = 45; brightness = 0.55; }`;
-  `glass-config.nix` emits it in the `session-lock` block and in
-  `settingsJson.lock_backdrop`, so the file and the compositor agree.
-- The swayfx lock patch multiplies the lock wallpaper's opacity
-  (`sway_session_lock_wallpaper_opacity`) by `brightness`, over the black
-  backdrop rect: the sRGB multiply the proof assumes, with the fade intact.
-- A second `wlr_scene_blur` in `session_lock_output_create`, between the
-  wallpaper buffer and the material node, output-sized, with no
-  transparency mask and no liquid glass: a plain blur of the wallpaper. Its
-  strength and alpha follow `sway_session_lock_material_alpha`, as the
-  material's do, so it ramps with the cross-fade and nothing pops
-  (docs/LOCK_TRANSITION.md). The session's `blur_passes 1`, `blur_radius 5`
-  is far too little; the node needs its own passes and radius (a
-  per-node override in the scenefx patch), or the material's frost at a
-  45 px `frost_radius` with bevel, rim and specular at zero.
-- The card's material then refracts the blurred, dimmed wallpaper, which is
-  what it frosts anyway; the card's key arithmetic does not change.
-
-A client-side blur cannot stand in for it: an opaque picture on the lock
-surface is above the mask threshold everywhere, so the whole screen becomes
-one slab of glass and the card loses its bevel and rim (tried on the
-harness, 2026-09-27: a flat grey card, and dark card text on it in light
-mode).
+the matching material (`settings::glass::apply_greeter`).
 
 ## 4. Glass and the modes
 
@@ -568,7 +523,7 @@ term, mixes in the body fill, then draws the client's content and the rim.
 the compositor can see its shape; the compositor drops those pixels
 (`fillKey` in `glass.nix`). What the glass shows is the material's own body
 fill. So a mode switch never touches the mask, the key, the mask threshold
-or the lock screen's scrim arithmetic. It changes the tokens and these
+It changes the tokens and these
 material values, per glass namespace, over IPC, fading both (§2.3):
 
 | Value | dark | light | Why |
@@ -646,10 +601,10 @@ The API has three shapes (the module docs of `src/ui/mod.rs`):
 
 | Component (module, stylesheet) | Build | Adopt | State | Classes |
 |---|---|---|---|---|
-| Surface (`surface`) | `ui::scrim()` | `ui::surface::adopt(&root)`, `ui::window::adopt(&root)` (solid), `ui::canvas::adopt(&w)` | | `.ui-surface`, `.ui-window`, `.ui-scrim`, `.ui-canvas` |
-| Text (`text`) | `ui::text(s, Text, Tone)`, `ui::heading(s)`, `ui::overline(s, Tone)` | `ui::glyph::adopt(&l, Text, Tone)`, `ui::overline::adopt(&l)`, `ui::on_wallpaper::adopt(&w)`, `ui::on_backdrop::adopt(&w)`, `ui::live_caption::adopt(&l)` | `set_text_style`, `set_tone`, `set_weight(Weight)`, `set_numeric`, `set_mono` | `.ui-hero` … `.ui-caption`, `.ui-muted` … `.ui-danger`, `.ui-strong`, `.ui-glyph`, `.ui-mono`, `.ui-numeric`, `.ui-overline`, `.ui-on-wallpaper`, `.ui-on-backdrop`, `.ui-live-caption` |
+| Surface (`surface`) | | `ui::surface::adopt(&root)`, `ui::window::adopt(&root)` (solid), `ui::canvas::adopt(&w)` | | `.ui-surface`, `.ui-window`, `.ui-canvas` |
+| Text (`text`) | `ui::text(s, Text, Tone)`, `ui::heading(s)`, `ui::overline(s, Tone)` | `ui::glyph::adopt(&l, Text, Tone)`, `ui::overline::adopt(&l)`, `ui::on_wallpaper::adopt(&w)`, `ui::live_caption::adopt(&l)` | `set_text_style`, `set_tone`, `set_weight(Weight)`, `set_numeric`, `set_mono` | `.ui-hero` … `.ui-caption`, `.ui-muted` … `.ui-danger`, `.ui-strong`, `.ui-glyph`, `.ui-mono`, `.ui-numeric`, `.ui-overline`, `.ui-on-wallpaper`, `.ui-live-caption` |
 | Layout (`layout`) | `ui::vbox(n)`, `ui::hbox(n)`, `ui::stack(o, n)`, `ui::separator(Orientation)`, `ui::pill_group(n)`, `ui::toolbar(n)`; `ui::pad(&w, n)` | | | `.ui-separator(.vertical)`, `.ui-pill-group`, `.ui-toolbar` |
-| Card (`card`) | `ui::group(n)`, `ui::well()` | `ui::card::adopt(&w, Card)` (`Floating`, `Thin`, `Solid`, `OverScrim`) | `set_card_tint(CardTint, on)`, `set_success` | `.ui-card` (`.thin`, `.solid`, `.over-scrim`, `.success`, `.danger`, `.recessed`), `.ui-group`, `.ui-well` |
+| Card (`card`) | `ui::group(n)`, `ui::well()` | `ui::card::adopt(&w, Card)` (`Floating`, `Thin`, `Solid`) | `set_card_tint(CardTint, on)`, `set_success` | `.ui-card` (`.thin`, `.solid`, `.success`, `.danger`, `.recessed`), `.ui-group`, `.ui-well` |
 | Button (`button`) | `ui::button(label, Kind)`, `ui::button_with(Face, Kind, Size)`, `ui::toggle_button(Face, Kind, Size)` | `ui::button::adopt(&b, Kind, Size)` | `set_button_kind`, `set_armed` | `.ui-btn` (`.primary`, `.flat`, `.destructive`, `.small`, `.icon`, `.pill`, `.armed`) |
 | Chip, badge, key, status (`chip`) | `ui::chip(Face)`, `ui::toggle_chip(label)`, `ui::badge(text, BadgeTone)`, `ui::key(text)`, `ui::status(Status, label)` | | `set_status(Status)`, `set_handoff(Option<Handoff>)` | `.ui-chip` (`.rich`, `.picked`, `.dropped`), `.ui-badge(.neutral)`, `.ui-key`, `.ui-status` (`.success`, `.warning`, `.danger`, `.neutral`) |
 | Row (`row`) | `ui::row(icon, title, subtitle)` → `Row`, `ui::row_button(..)`, `ui::list()`, `ui::list_row(&content)`; `Row::set_icon_image` | | `set_selected`, `set_instant`, `set_busy` | `.ui-row` (`.activatable`, `.selected`, `.instant`, `.busy`) and its parts, `.ui-list` |

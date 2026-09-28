@@ -22,10 +22,9 @@
 //! a look, it is the contract between a surface's alpha and whether the
 //! compositor treats it as a card at all, and it has a band on either side
 //! that nothing may land in (see `glass.nix`, "The threshold has two lines").
-//! The lock screen's scrim sits 0.08 under the discard line and its card 0.10
-//! over the seeding line, so the usable range is about 0.32–0.375 and the
-//! failure outside it is a lock screen with no card on it. A slider is the
-//! wrong instrument for that.
+//! Every card paints the key at 0.50, 0.10 over the seeding line, and a value
+//! past it is a shell with no cards on it. A slider is the wrong instrument
+//! for that.
 //!
 //! `liquid_glass enable|disable` is not written either, and neither are
 //! `blur_ignore_transparent` or `corner_radius`. The first belongs to
@@ -308,12 +307,6 @@ pub struct Tuning {
     /// Multiplies the mode's frost. 1 is what the mode ships.
     #[serde(default = "unit")]
     pub frost_scale: f64,
-    /// The mode is light: the lock's backdrop is lifted toward white rather
-    /// than dimmed toward black (`lock_backdrop_light`), at light mode's
-    /// brightness. [`for_mode`] sets it. Derived, so never saved: the
-    /// override file holds the person's tuning, not a mode.
-    #[serde(skip)]
-    pub light: bool,
 }
 
 fn unit() -> f64 {
@@ -330,7 +323,6 @@ impl Tuning {
             crest_scale: 1.0,
             clarity: 0.0,
             frost_scale: 1.0,
-            light: false,
         }
     }
 
@@ -385,102 +377,6 @@ pub struct System {
     /// the sway config's `layer_effects` blocks are, so a live edit reaches
     /// exactly the surfaces the config configures.
     pub surfaces: BTreeMap<String, String>,
-    /// What the compositor does to the wallpaper under the lock, when it
-    /// blurs and dims it. Absent on a compositor that draws it sharp, and
-    /// then the lock's text keeps its halo ([`lock_backdrop`]).
-    #[serde(default)]
-    pub lock_backdrop: Option<LockBackdrop>,
-}
-
-/// The wallpaper under the lock as the compositor draws it: blurred, then
-/// multiplied by `brightness` over black in dark mode and by
-/// `light_brightness` over white in light mode. The numbers are the
-/// compositor's config; swaypplet checks that they hold, and sends the one
-/// for the mode on screen (`System::effects`).
-#[derive(Debug, Clone, Copy, Deserialize)]
-pub struct LockBackdrop {
-    /// The blur's radius in logical pixels.
-    pub blur: f64,
-    /// Dark mode's sRGB multiply over black, 0–1.
-    pub brightness: f64,
-    /// Light mode's sRGB multiply over white, 0–1. Absent on a compositor
-    /// that cannot lift (no `lock_backdrop_light`).
-    #[serde(default)]
-    pub light_brightness: Option<f64>,
-}
-
-impl LockBackdrop {
-    /// Blurred, dark enough in dark mode for the tokens' proof
-    /// (`tokens::BACKDROP_BRIGHTNESS_MAX`), and light enough in light mode
-    /// (`tokens::BACKDROP_LIFT_MAX`). Both, because the mode can change while
-    /// the lock is up, and its text style is chosen once, when it is built.
-    fn holds(self) -> bool {
-        self.blur > 0.0
-            && (0.0..=crate::tokens::BACKDROP_BRIGHTNESS_MAX).contains(&self.brightness)
-            && self
-                .light_brightness
-                .is_none_or(|l| (0.0..=crate::tokens::BACKDROP_LIFT_MAX).contains(&l))
-    }
-}
-
-/// Whether the running compositor can lift the lock's backdrop toward white
-/// (`lock_backdrop_light`, nixos patches/swayfx-lock-backdrop-light.patch).
-///
-/// Asked of the compositor actually running, not of the system: a switch
-/// updates swaypplet at once but sway only at the next login, and a sway
-/// that does not know the effect rejects every line sent with it. Its binary
-/// is found through the pid in `SWAYSOCK` (sway names the socket
-/// `sway-ipc.<uid>.<pid>.sock`) and read once per process for the effect's
-/// name, which the parser holds as a string literal. Anything unreadable
-/// counts as no: the lock then keeps the dim and the light text that go
-/// with it, which is readable in both modes.
-pub fn compositor_lifts() -> bool {
-    static LIFTS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *LIFTS.get_or_init(|| {
-        let lifts = sway_binary()
-            .and_then(|exe| std::fs::read(exe).ok())
-            .is_some_and(|bin| bin.windows(LIFT_EFFECT.len()).any(|w| w == LIFT_EFFECT));
-        log::info!(
-            "glass: the running compositor {} the lock backdrop",
-            if lifts { "lifts" } else { "cannot lift" }
-        );
-        lifts
-    })
-}
-
-/// The effect name [`compositor_lifts`] looks for in the compositor.
-const LIFT_EFFECT: &[u8] = b"lock_backdrop_light";
-
-/// The running sway's executable, from the pid in `SWAYSOCK`.
-fn sway_binary() -> Option<PathBuf> {
-    let sock = std::env::var("SWAYSOCK").ok()?;
-    let name = std::path::Path::new(&sock).file_name()?.to_str()?;
-    let pid: u32 = name
-        .strip_suffix(".sock")?
-        .rsplit('.')
-        .next()?
-        .parse()
-        .ok()?;
-    std::fs::read_link(format!("/proc/{pid}/exe")).ok()
-}
-
-/// Whether the lock's text may drop its halo: the compositor blurs the
-/// wallpaper under the lock and darkens it at least as far as the contrast
-/// proof needs. A backdrop that does not hold is logged and treated as none,
-/// so a config typo costs the look and never the contrast. One file read;
-/// the lock asks once per surface.
-pub fn lock_backdrop() -> bool {
-    let Some(b) = System::load().and_then(|s| s.lock_backdrop) else {
-        return false;
-    };
-    if !b.holds() {
-        log::warn!(
-            "glass: lock_backdrop {b:?} is unblurred, brighter than {} or lifts past {}; the lock keeps its halo",
-            crate::tokens::BACKDROP_BRIGHTNESS_MAX,
-            crate::tokens::BACKDROP_LIFT_MAX
-        );
-    }
-    b.holds()
 }
 
 impl System {
@@ -616,52 +512,15 @@ impl System {
     /// per command, because a parse failure destroys the whole replacement
     /// criteria and leaves the surface with no material — so the smaller the
     /// number of commands that can fail independently, the better.
-    ///
-    /// The lock's backdrop goes as a command of its own after its material
-    /// ([`Self::backdrop`]): `layer_criteria_add` merges it into what is
-    /// there, and a compositor that rejects it keeps the material it was
-    /// just sent rather than losing both.
     pub fn command(&self, tuning: &Tuning) -> String {
-        self.command_for(tuning, compositor_lifts())
-    }
-
-    /// [`Self::command`] for a compositor that can lift the lock's backdrop
-    /// or cannot (`lifts`).
-    fn command_for(&self, tuning: &Tuning, lifts: bool) -> String {
         self.surfaces
             .keys()
-            .flat_map(|ns| {
-                let material = self
-                    .effects(ns, tuning)
-                    .map(|effects| format!("layer_effects \"{ns}\" \"{effects}\""));
-                let backdrop = self
-                    .backdrop(ns, tuning, lifts)
-                    .map(|effects| format!("layer_effects \"{ns}\" \"{effects}\""));
-                material.into_iter().chain(backdrop)
+            .filter_map(|ns| {
+                self.effects(ns, tuning)
+                    .map(|effects| format!("layer_effects \"{ns}\" \"{effects}\""))
             })
             .collect::<Vec<_>>()
             .join("; ")
-    }
-
-    /// The lock's backdrop for the mode: dimmed over black in dark mode,
-    /// lifted toward white in light mode, each at its own proven brightness.
-    /// Only for `session-lock`, only where the backdrop holds, and only to a
-    /// compositor that knows the lift ([`compositor_lifts`]); any other
-    /// keeps the dim its config gave it, and the lock's text matches that.
-    fn backdrop(&self, namespace: &str, tuning: &Tuning, lifts: bool) -> Option<String> {
-        let b = self.lock_backdrop.filter(|b| b.holds())?;
-        let lift = b.light_brightness?;
-        if namespace != "session-lock" || !lifts {
-            return None;
-        }
-        let (light, brightness) = if tuning.light {
-            ("enable", lift)
-        } else {
-            ("disable", b.brightness)
-        };
-        Some(format!(
-            "lock_backdrop_light {light}; lock_backdrop_brightness {brightness:.6}"
-        ))
     }
 
     /// Push `material` at the running compositor, stopping a fade in
@@ -800,11 +659,9 @@ pub fn apply_greeter(inputs: crate::tokens::Inputs) {
 /// highlight, grain, geometry) is one material in both modes and passes
 /// through as tuned.
 ///
-/// The lock's glass follows the mode like every other namespace, and so does
-/// its backdrop ([`Tuning::light`]).
+/// The lock's glass follows the mode like every other namespace.
 pub fn for_mode(mut tuning: Tuning, inputs: crate::tokens::Inputs) -> Tuning {
     tuning.material = mode_material(&tuning, inputs);
-    tuning.light = inputs.mode == crate::tokens::Mode::Light;
     tuning
 }
 
@@ -970,7 +827,6 @@ mod tests {
                 (Namespace::Bar.as_str().into(), "thin".into()),
                 (Namespace::Panel.as_str().into(), "panel".into()),
             ]),
-            lock_backdrop: None,
         }
     }
 
@@ -1130,7 +986,6 @@ mod tests {
                 crest_scale: 1.0,
                 clarity: 0.0,
                 frost_scale: 1.0,
-                light: false,
             }
         };
         let g = t.geometry(shipped);
@@ -1153,7 +1008,6 @@ mod tests {
             crest_scale: 1.0,
             clarity: 0.0,
             frost_scale: 1.0,
-            light: false,
         };
         let g = t.geometry(shipped);
         assert_eq!(g.bezel, 15.0);
@@ -1192,7 +1046,6 @@ mod tests {
             crest_scale: 1.0,
             clarity: 0.0,
             frost_scale: 1.0,
-            light: false,
         };
         let json = serde_json::to_vec_pretty(&before).unwrap();
         let after: Tuning = serde_json::from_slice(&json).unwrap();
@@ -1243,118 +1096,6 @@ mod tests {
         for ns in ["session-lock", "swaypplet-bar"] {
             assert_ne!(block(&light_cmd, ns), block(&dark_cmd, ns), "{ns}");
         }
-    }
-
-    /// The lock backdrop is optional in the file, and only a blurred one,
-    /// dark enough in dark mode and light enough in light mode, lets the
-    /// lock drop its halo.
-    #[test]
-    fn a_lock_backdrop_is_read_and_checked() {
-        let json = |extra: &str| {
-            format!(
-                r#"{{"material": {}, "mask_threshold": 0.4, "geometries": {{}}, "surfaces": {{}}{extra}}}"#,
-                serde_json::to_string(&preset::plain()).unwrap()
-            )
-        };
-        let bare: System = serde_json::from_str(&json("")).unwrap();
-        assert!(bare.lock_backdrop.is_none());
-        let with: System = serde_json::from_str(&json(
-            r#", "lock_backdrop": {"blur": 45, "brightness": 0.55, "light_brightness": 0.19}"#,
-        ))
-        .unwrap();
-        assert!(with.lock_backdrop.unwrap().holds());
-        // A config without the lift still holds: the backdrop is dimmed in
-        // both modes, and the text on it light (`tokens::on_backdrop`).
-        let dark_only: System = serde_json::from_str(&json(
-            r#", "lock_backdrop": {"blur": 45, "brightness": 0.55}"#,
-        ))
-        .unwrap();
-        assert!(dark_only.lock_backdrop.unwrap().holds());
-        let ok = LockBackdrop {
-            blur: 45.0,
-            brightness: 0.55,
-            light_brightness: Some(0.19),
-        };
-        for bad in [
-            LockBackdrop {
-                brightness: 0.65,
-                ..ok
-            },
-            LockBackdrop { blur: 0.0, ..ok },
-            LockBackdrop {
-                light_brightness: Some(0.3),
-                ..ok
-            },
-        ] {
-            assert!(!bad.holds(), "{bad:?}");
-        }
-    }
-
-    /// The lock's backdrop goes out with the lock's material, as the mode
-    /// asks: lifted in light mode, dimmed in dark mode, and never to any
-    /// other namespace.
-    #[test]
-    fn the_lock_backdrop_follows_the_mode() {
-        let mut system = System {
-            material: preset::plain(),
-            mask_threshold: 0.4,
-            geometries: BTreeMap::from([(
-                "lock".to_string(),
-                Geometry {
-                    bezel: 10.0,
-                    thickness: 5.0,
-                    crest_radius: 0.0,
-                },
-            )]),
-            surfaces: BTreeMap::from([
-                ("session-lock".to_string(), "lock".to_string()),
-                ("swaypplet".to_string(), "lock".to_string()),
-            ]),
-            lock_backdrop: Some(LockBackdrop {
-                blur: 45.0,
-                brightness: 0.55,
-                light_brightness: Some(0.19),
-            }),
-        };
-        let mode = |mode| crate::tokens::Inputs {
-            mode,
-            ..crate::tokens::Inputs::default()
-        };
-        let light = system.command_for(
-            &for_mode(Tuning::system(&system), mode(crate::tokens::Mode::Light)),
-            true,
-        );
-        let dark = system.command_for(
-            &for_mode(Tuning::system(&system), mode(crate::tokens::Mode::Dark)),
-            true,
-        );
-        assert!(
-            light.contains("lock_backdrop_light enable; lock_backdrop_brightness 0.190000\""),
-            "{light}"
-        );
-        assert!(
-            dark.contains("lock_backdrop_light disable; lock_backdrop_brightness 0.550000\""),
-            "{dark}"
-        );
-        assert_eq!(light.matches("lock_backdrop").count(), 2);
-        // Its own command after the material, so a compositor that rejects
-        // it keeps the material.
-        assert!(
-            light.contains("\"; layer_effects \"session-lock\" \"lock_backdrop_light"),
-            "{light}"
-        );
-        // A compositor that cannot lift is never sent the lines at all.
-        let old = system.command_for(
-            &for_mode(Tuning::system(&system), mode(crate::tokens::Mode::Light)),
-            false,
-        );
-        assert!(!old.contains("lock_backdrop"), "{old}");
-        system.lock_backdrop = None;
-        let bare = system.command_for(
-            &for_mode(Tuning::system(&system), mode(crate::tokens::Mode::Light)),
-            true,
-        );
-        assert!(!bare.contains("lock_backdrop"));
     }
 
     #[test]

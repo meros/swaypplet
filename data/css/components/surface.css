@@ -2,10 +2,9 @@
    Surface (src/ui/surface.rs).
 
    A window's root: the design-system surface (type and ink), the solid
-   window an editor sits in, the scrim under a modal, the canvas an editor
-   letterboxes against.
+   window an editor sits in, the canvas an editor letterboxes against.
 
-   owns: ui-surface ui-scrim ui-window ui-canvas
+   owns: ui-surface ui-window ui-canvas
    ══════════════════════════════════════════════════════════════════════ */
 
 .ui-surface {
@@ -13,14 +12,6 @@
     font-size: var(--type-body);
     font-weight: var(--w-regular);
     color: var(--fg);
-}
-
-/* The scrim: the dimming layer under a modal full-screen surface. Its alpha
-   is below the compositor's discard line (0.28), so it stays backdrop and
-   only the cards above it stencil glass. The lock card's key arithmetic
-   above depends on it. */
-.ui-scrim {
-    background-color: var(--scrim);
 }
 
 /* ── Window, toolbar, canvas ──

@@ -116,10 +116,6 @@ pub struct Inputs {
     /// What the wallpaper is behind text that stands on it, when the panel
     /// has measured it (§3.3, `backdrop.rs`).
     pub backdrop: Option<Backdrop>,
-    /// The running compositor lifts the lock's backdrop toward white in light
-    /// mode (`settings::glass::compositor_lifts`). Without it the backdrop is
-    /// dimmed in both modes, and the text on it stays light.
-    pub lifted: bool,
 }
 
 impl Default for Inputs {
@@ -132,7 +128,6 @@ impl Default for Inputs {
             motion: 100,
             tint: Tint::Off,
             backdrop: None,
-            lifted: false,
         }
     }
 }
@@ -188,7 +183,6 @@ pub(super) mod every {
                                 motion: 100,
                                 tint,
                                 backdrop: None,
-                                lifted: true,
                             });
                         }
                     }

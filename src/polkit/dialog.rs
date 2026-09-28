@@ -161,10 +161,7 @@ impl PolkitDialog {
         //
         // Transparent, like the launcher and OSD aprons, and deliberately not
         // a scrim: the compositor discards alpha-0 pixels, so the glass clips
-        // to the card instead of frosting the whole screen. It is also why
-        // this card is not `Card::OverScrim`: with nothing under it, a
-        // card painted at the lock's 0.375 lands in the band glass.nix
-        // reserves for nothing, a flat slab with no bevel and no rim.
+        // to the card instead of frosting the whole screen.
         let backdrop = surface.root();
         backdrop.set_hexpand(true);
         backdrop.set_vexpand(true);

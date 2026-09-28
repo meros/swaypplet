@@ -16,8 +16,8 @@
 //! with fprintd fingerprint (see `fprint.rs`). Unlock only ever follows a
 //! PAM success or a fingerprint match.
 //!
-//! What this process draws is a transparent surface: the scrim, the clock and
-//! a translucent card. The wallpaper under it and the glass behind the card
+//! What this process draws is a transparent surface: the clock's plate and
+//! the card, both glass. The wallpaper under it and the glass behind the card
 //! are the compositor's, drawn into the lock's own scene tree from the
 //! `layer_effects "session-lock"` block (sway.nix, patches/swayfx-liquid-
 //! glass.patch). The locker used to carry both — a wallpaper decode and a GL

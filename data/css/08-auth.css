@@ -17,9 +17,8 @@
 }
 
 /* ── The lock and greeter card ──
-   Its fill is `Card::OverScrim`: pre-compensated for the scrim under it
-   so the two layers land on the compositor's key. The polkit card has no
-   scrim under it, which is why it is a plain card. */
+   A plain glass card, like the polkit one: nothing tints the wallpaper
+   under it. */
 .lock-card {
     padding: var(--space-6) var(--space-6) var(--space-5) var(--space-6);
 }
@@ -81,6 +80,7 @@ button.lock-user.selected        { opacity: 1; }
     to   { opacity: 1; transform: translateY(0); }
 }
 
+.lock-plate,
 .lock-card:not(.ui-shake) {
     animation: auth-card-enter var(--motion-enter);
 }
@@ -90,6 +90,7 @@ button.lock-user.selected        { opacity: 1; }
    opacity css x surface, so the card visibly lags the wallpaper under it.
    A shake still plays: it is the component's (`.ui-shake`), and this rule
    stands aside for it by selector rather than by coming first. */
+.lock-crossfade .lock-plate,
 .lock-crossfade .lock-card:not(.ui-shake) {
     animation: none;
 }

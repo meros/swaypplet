@@ -18,14 +18,6 @@ pub enum Card {
     /// No glass behind it (a popup, outside the compositor's layer
     /// effects): the floating shape, a solid raised fill.
     Solid,
-    /// The glass card that sits over a [`scrim`](super::scrim): the lock's
-    /// and the greeter's. It paints the key pre-compensated for the black
-    /// under it, so the two layers composite to exactly the key every other
-    /// card paints and the compositor drops them (`.ui-card.over-scrim` in
-    /// the card's stylesheet has the arithmetic). Only ever over a scrim: on
-    /// its own it lands in the band `glass.nix` reserves for nothing, a flat
-    /// slab with no bevel.
-    OverScrim,
 }
 
 /// Make `w` a card of `kind`. A glass card also tells the compositor its
@@ -40,7 +32,6 @@ pub fn adopt(w: &impl IsA<gtk4::Widget>, kind: Card) {
         Card::Floating => {}
         Card::Thin => w.add_css_class("thin"),
         Card::Solid => w.add_css_class("solid"),
-        Card::OverScrim => w.add_css_class("over-scrim"),
     }
 }
 

@@ -452,11 +452,9 @@ pub fn follow_while_locked() {
 mod tests {
     use crate::tokens::{Inputs, Mode};
 
-    /// The lock and the greeter follow the mode like everything else: light
-    /// mode has no scrim and the card over it paints the plain key, dark mode
-    /// the black scrim and the key compensated for it.
+    /// The scrim follows the mode: none in light mode, black 0.20 in dark.
     #[test]
-    fn the_lock_follows_the_mode() {
+    fn the_scrim_follows_the_mode() {
         let light = Inputs {
             mode: Mode::Light,
             ..Inputs::default()
@@ -475,9 +473,6 @@ mod tests {
             d.contains("--scrim: color-mix(in srgb, #000000 20%, transparent);"),
             "dark scrim"
         );
-        assert!(d.contains(
-            "--surface-key-over-scrim: color(srgb 0.261438 0.250980 0.245752 / 0.375000);"
-        ));
     }
     /// The stylesheet, structurally.
     ///

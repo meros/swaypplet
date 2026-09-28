@@ -60,17 +60,6 @@ both advertised, so the picker inserts into the focused surface instead of
 going through the clipboard. The dmenu chassis is most of the UI. Could
 also be a launcher prefix once the `launcher` branch lands.
 
-## Waiting for a decision
-
-- **The lock's blurred, dimmed backdrop, compositor side.** Decided
-  2026-09-27 over a gradient scrim, a glass plate behind the clock and a
-  heavier clock: only a backdrop the compositor darkens gets the lock's
-  text to Lc 75 over every wallpaper in both modes, because every pixel of
-  the lock surface has to stay under the glass mask's discard line. The
-  swaypplet side is done (`ui::on_backdrop`, `lock_backdrop` in
-  `glass.json`); the nixos side is described in docs/design-system.md,
-  "Text on the lock's backdrop". Until it lands the lock keeps the halo.
-
 ## From the prior-art bank
 
 Candidates from [prior-art/](prior-art/README.md), not yet ranked against

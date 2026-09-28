@@ -119,7 +119,6 @@ fn build(look: &Look, mode: Mode, tint: Tint, backdrop: Option<Backdrop>) -> Inp
         motion: (look.motion.scale() * 100.0).round() as u8,
         tint,
         backdrop,
-        lifted: crate::settings::glass::compositor_lifts(),
     }
 }
 

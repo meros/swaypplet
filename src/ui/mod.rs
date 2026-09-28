@@ -72,10 +72,10 @@ pub use progress::{progress, set_progress_status};
 pub use row::{Row, list, list_row, row, row_button, set_busy, set_instant, set_selected};
 #[allow(unused_imports)]
 pub use slider::{Density, check, set_over_range, slider_row, switch, switch_row};
-pub use surface::{canvas, scrim, window};
+pub use surface::{canvas, window};
 pub use text::{
-    Text, Tone, Weight, glyph, heading, live_caption, on_backdrop, on_wallpaper, overline,
-    set_mono, set_numeric, set_text_style, set_tone, set_weight, text,
+    Text, Tone, Weight, glyph, heading, live_caption, on_wallpaper, overline, set_mono,
+    set_numeric, set_text_style, set_tone, set_weight, text,
 };
 pub use tile::{SplitTile, set_loading, set_tile_status, tile_split, tile_toggle};
 

@@ -177,17 +177,6 @@ pub mod on_wallpaper {
     }
 }
 
-pub mod on_backdrop {
-    use gtk4::prelude::*;
-
-    /// Text on the lock's backdrop where the compositor blurs and dims the
-    /// wallpaper (`settings::glass::lock_backdrop`): light ink in either
-    /// mode, with no halo (`tokens::backdrop`).
-    pub fn adopt(w: &impl IsA<gtk4::Widget>) {
-        w.add_css_class("ui-on-backdrop");
-    }
-}
-
 pub mod live_caption {
     use gtk4::prelude::*;
 

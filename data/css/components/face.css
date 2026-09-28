@@ -196,8 +196,7 @@
 }
 
 /* A match glows once and stops, on the pill's own border and fill. The end
-   is left to the pill's own values, so it settles on whichever key it
-   paints (the plain one, or the one over a scrim). */
+   is left to the pill's own values, so it settles on the key it paints. */
 .ui-face-pill.ok {
     animation: ui-face-pill-ok var(--motion-enter);
 }

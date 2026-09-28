@@ -49,8 +49,8 @@ const CHIP_AVATAR_SIZE: i32 = 24;
 
 /// What the commit pixel paints when it only needs *a* commit, never a
 /// visible pixel: drawn at 1–2/255 alpha so GSK sees a changed node and
-/// nobody sees anything. Black is the scrim's colour, so even that one
-/// 255th adds nothing the scrim under it does not already.
+/// nobody sees anything. Two 255ths of black is far under the compositor's
+/// discard line, so it never becomes glass.
 const INVISIBLE_INK: crate::tokens::Rgb = crate::tokens::Rgb::BLACK;
 
 /// How long [`SurfaceSet::begin_handoff`] runs before the caller actually
@@ -235,30 +235,24 @@ impl SurfaceSet {
         let overlay = gtk4::Overlay::new();
         ui::surface::adopt(&overlay);
 
-        // The scrim, and nothing else full-screen. On both surfaces this
-        // builds, the wallpaper under it and the glass behind the card are the
-        // compositor's: the lock reads `layer_effects "session-lock"` and draws
-        // the wallpaper into the lock's own scene tree, and the greeter gets
-        // the same material keyed on its layer-shell namespace,
-        // `swaypplet-greeter`, over its compositor's `output * bg`. Either way
-        // a picture here would cover the very pixels the material refracts,
-        // which is why the wallpaper decode this used to do is gone rather than
-        // made conditional.
+        // Nothing full-screen: the wallpaper stands as it is. On both
+        // surfaces this builds, the wallpaper and the glass behind the cards
+        // are the compositor's: the lock reads `layer_effects "session-lock"`
+        // and draws the wallpaper into the lock's own scene tree, and the
+        // greeter gets the same material keyed on its layer-shell namespace,
+        // `swaypplet-greeter`, over its compositor's `output * bg`. A picture
+        // here would cover the very pixels the material refracts.
         //
-        // The scrim's alpha is deliberately below the compositor's discard
-        // line (users/modules/theme/glass.nix: mask threshold 0.40 less 0.12,
-        // so 0.28) so it reads as backdrop and only the card and the face
-        // pill stencil the glass. A scrim between the discard and the seeding
-        // line would be drawn as material that seeds no bevel, and the whole
-        // screen would become a flat slab.
-        //
-        // It is also half of the card's key arithmetic: the card is painted
-        // pre-compensated for exactly this black (`Card::OverScrim`), so
-        // the two composite to the key the compositor drops. It dims the
-        // card's backdrop as well as the screen, which is why it is 0.20 and
-        // not the 0.45 it carried when the locker painted its own wallpaper.
-        let backdrop = ui::scrim();
-        overlay.set_child(Some(&backdrop));
+        // There used to be a 0.20 black scrim here, and on the lock the
+        // compositor also blurred and dimmed the wallpaper under it. Both
+        // tinted the whole picture to make the clock readable; the clock sits
+        // on its own glass plate now (below), so the wallpaper stays sharp
+        // and at full brightness everywhere else, and every card paints the
+        // plain key.
+        let ground = ui::vbox(0);
+        ground.set_hexpand(true);
+        ground.set_vexpand(true);
+        overlay.set_child(Some(&ground));
 
         // One pixel that changes on demand, so the surface has something to
         // commit. See `pulse` for why a lock screen needs that.
@@ -286,44 +280,42 @@ impl SurfaceSet {
         column.set_halign(gtk4::Align::Center);
         column.set_valign(gtk4::Align::Center);
 
-        // The clock, the date and the switch-user button stand under the
-        // scrim with no card behind them. Where the compositor blurs and dims
-        // the wallpaper under the lock, that backdrop is what makes them
-        // readable, and they take light ink with a one-pixel shadow. Where it
-        // draws the wallpaper sharp, and always on the greeter, whose
-        // compositor does not, they keep the halo, which is what gives the
-        // glyphs an edge on a bright image.
+        // The clock and the date sit on a glass plate of their own, the
+        // card's width, above it. On bare wallpaper no halo holds the clock's
+        // contrast over a bright, busy picture, and dimming the whole
+        // wallpaper to rescue it spoils the picture; the plate frosts only
+        // what is behind the clock, and its text takes the card's own ink in
+        // either mode.
+        //
+        // What still stands on the wallpaper, the switch-user button and the
+        // greeter's users, keeps the halo that follows the wallpaper behind
+        // it (`ui::on_wallpaper`).
         let greet_mode = self.greeter.get();
-        let on_backdrop = !greet_mode && crate::settings::glass::lock_backdrop();
-        let stand = move |w: &gtk4::Widget| {
-            if on_backdrop {
-                ui::on_backdrop::adopt(w);
-            } else {
-                ui::on_wallpaper::adopt(w);
-            }
-        };
+        let plate = ui::vbox(0);
+        plate.set_width_request(360);
+        ui::card::adopt(&plate, ui::Card::Floating);
+        plate.add_css_class("lock-plate");
         let clock = ui::text("", ui::Text::Hero, ui::Tone::Fg);
         clock.set_xalign(0.5);
         crate::ui::set_numeric(&clock, true);
-        stand(clock.upcast_ref());
         let date = ui::text("", ui::Text::Title, ui::Tone::Fg);
         date.set_xalign(0.5);
         date.add_css_class("lock-date");
-        stand(date.upcast_ref());
+        plate.append(&clock);
+        plate.append(&date);
 
         // spacing 0: every gap below is an explicit margin in 10-lock.css,
         // because the gaps are deliberately unequal and a GtkBox has exactly
         // one spacing to give.
         let card = ui::vbox(0);
         card.set_width_request(360);
-        // The card is what makes the glass: its composite over the scrim is
-        // the key, above the compositor's mask threshold, so the material is
+        // The card is what makes the glass: it paints the key, above the compositor's mask threshold, so the material is
         // stencilled to exactly this box. The card used to be hosted in a
         // GlassPane that drew a blurred copy of the wallpaper behind it and
         // ramped its sigma in; the compositor owns that now, and it has the
         // material up before this surface's first frame rather than a few
         // frames after it.
-        ui::card::adopt(&card, ui::Card::OverScrim);
+        ui::card::adopt(&card, ui::Card::Floating);
         card.add_css_class("lock-card");
 
         if self.crossfade.get() {
@@ -342,7 +334,7 @@ impl SurfaceSet {
         // there. It stays hidden until there is more than one face to pick.
         let users = self.users.borrow().clone();
         let mut user_chips: Vec<(String, gtk4::Button)> = Vec::new();
-        let stand: Rc<dyn Fn(&gtk4::Widget)> = Rc::new(stand);
+        let stand: Rc<dyn Fn(&gtk4::Widget)> = Rc::new(ui::on_wallpaper::adopt);
         let chip_row = greet_mode.then(|| {
             let row = ui::hbox(3);
             row.set_halign(gtk4::Align::Center);
@@ -376,8 +368,7 @@ impl SurfaceSet {
         card.append(field.widget());
         card.append(caption.widget());
 
-        column.append(&clock);
-        column.append(&date);
+        column.append(&plate);
         column.append(&card);
         // Outside the card, deliberately. Inside it, the button bounded the
         // caption's reserved second line on both sides and turned it back
@@ -412,18 +403,15 @@ impl SurfaceSet {
         // two independent animations.
         //
         // Frosted like everything else, and by the same route as the card: it
-        // sits over the same scrim, so it paints the same pre-compensated key
-        // and the two layers land on the key the compositor drops. It used to
-        // paint the plain key, which over the scrim composited to 0.60 and
-        // came out as a dark tint laid over the material rather than as the
-        // material; before that it carried a client-side glass pane.
+        // paints the plain key, and the compositor draws the material there.
+        // Before that it carried a client-side glass pane.
         let ui::FacePill {
             wrap: face_wrap,
             pill: face_pill,
             ring: face_ring,
             label: face_label,
         } = ui::face_pill(22);
-        ui::card::adopt(&face_pill, ui::Card::OverScrim);
+        ui::card::adopt(&face_pill, ui::Card::Floating);
         face_pill.add_css_class("face-pill");
         face_pill.set_visible(false);
 

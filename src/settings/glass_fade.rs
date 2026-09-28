@@ -299,7 +299,6 @@ mod tests {
             crest_scale: 1.0,
             clarity: 0.0,
             frost_scale: 1.0,
-            light: false,
         }
     }
 

@@ -1,8 +1,9 @@
 //! Text on bare wallpaper (docs/design-system.md §3.3, "on wallpaper"): the
 //! ink and the halo, chosen from what the wallpaper is behind the text.
 //!
-//! The lock screen's clock, date and switch-user button, and the switcher's
-//! caption, stand on the wallpaper with no card behind them. White ink with
+//! The lock screen's switch-user button, the greeter's users and the
+//! switcher's caption stand on the wallpaper with no card behind them (the
+//! lock's clock and date sit on a glass plate instead). White ink with
 //! a dark halo reads on a dark image and turns into white on white on a
 //! bright one, in either mode: the mode does not change the wallpaper. So
 //! the tone follows the wallpaper instead. The panel measures the region
@@ -18,7 +19,7 @@
 //! APCA over the region blended with the part of the halo that reaches the
 //! edge. It aims for [`CLOCK_LC`] (the clock and date) against the darkest
 //! and the brightest the region can be, taken as the mean minus and plus
-//! one standard deviation, with and without the lock's scrim darkening it.
+//! one standard deviation.
 //! Over a bright and busy region the densest halo falls a few points short
 //! ([`BUSY_CLOCK_LC`]). In light mode the dark halo has to stay under the
 //! glass mask ([`SHADOW_ALPHAS`]), so light ink there is weaker; the tests
@@ -72,10 +73,11 @@ pub const SHADOW_ALPHAS: [f64; 4] = [0.05, 0.07, 0.09, 0.105];
 /// Tight halo layers stacked under the glyphs (`text.css`).
 const LAYERS: i32 = 4;
 
-/// The lock's full-screen scrim over the wallpaper (`--scrim`), black.
+/// The scrim under a modal (`--scrim`), black, in dark mode.
 pub const SCRIM_ALPHA: f64 = 0.2;
 
-/// The clock and the date: body text on the wallpaper.
+/// Text on the wallpaper, held to what the lock's clock was held to when it
+/// stood there.
 pub const CLOCK_LC: f64 = 75.0;
 
 /// What the tests hold each case to, where it falls short of
@@ -129,13 +131,11 @@ fn grey(y: f64) -> Rgb {
 }
 
 /// The grounds a glyph edge can land on: the darkest and brightest the
-/// region can be, each with and without the lock's scrim.
-fn grounds(b: Backdrop) -> [Rgb; 4] {
+/// region can be.
+fn grounds(b: Backdrop) -> [Rgb; 2] {
     let mean = f64::from(b.luminance) / 100.0;
     let spread = f64::from(b.spread) / 100.0;
-    let (lo, hi) = (grey(mean - spread), grey(mean + spread));
-    let scrimmed = |c: Rgb| over(Rgb::BLACK, SCRIM_ALPHA, c);
-    [lo, hi, scrimmed(lo), scrimmed(hi)]
+    [grey(mean - spread), grey(mean + spread)]
 }
 
 /// The weakest contrast `choice` gives over `b`.
@@ -191,38 +191,8 @@ pub fn on_wallpaper(backdrop: Option<Backdrop>, mode: Mode) -> OnWallpaper {
     }
 }
 
-// ── The lock's dimmed backdrop ──────────────────────────────────────────
-//
-// Where the compositor blurs and dims the wallpaper under the lock (nixos
-// `theme/glass.nix` `lockBackdrop`, announced in `/etc/swaypplet/glass.json`
-// as `lock_backdrop`), the lock's text needs no halo: light ink in either
-// mode, as other platforms' lock screens have it, with a one-pixel shadow
-// for depth. The halo above is then the switcher's and the greeter's only.
-
-/// The brightest the compositor may leave the lock's wallpaper (an sRGB
-/// multiply over black, `lock_backdrop.brightness`) for light ink to reach
-/// [`CLOCK_LC`] under it and the scrim. The proof is one backdrop: a white
-/// page is the worst case for every wallpaper, because light ink only gains
-/// as the ground darkens, so no measurement is needed.
-pub const BACKDROP_BRIGHTNESS_MAX: f64 = 0.59;
-
-/// The brightest light mode may leave the lock's wallpaper: an sRGB multiply
-/// over white (`lock_backdrop.light_brightness`), a lift where dark mode has
-/// a dim, under dark ink ([`INK_DARK`]) and no scrim (light mode has none: a
-/// white scrim under the card cannot be compensated to the glass key, see
-/// `scrim_for`). The proof is one backdrop again, a black page, because dark
-/// ink only gains as the ground lightens. The price is a faint picture: a
-/// fifth of the wallpaper over white.
-pub const BACKDROP_LIFT_MAX: f64 = 0.19;
-
-/// The scrim under the lock and the greeter in `mode`, as a colour and an
-/// alpha: black at [`SCRIM_ALPHA`] in dark mode, none in light mode.
-///
-/// A white scrim is what light mode would want, and it cannot be had: the
-/// card over it must composite to the glass key (dark, at 0.50), and white
-/// under a card at the alpha that sums to 0.50 would need a negative colour
-/// to cancel. So light mode's backdrop gets its whole lift from the
-/// compositor ([`BACKDROP_LIFT_MAX`] is proven without a scrim).
+/// The scrim under a modal (`--scrim`, the well's ground): black at
+/// [`SCRIM_ALPHA`] in dark mode, none in light mode.
 pub fn scrim_for(mode: Mode) -> (Rgb, f64) {
     match mode {
         Mode::Dark => (Rgb::BLACK, SCRIM_ALPHA),
@@ -230,81 +200,9 @@ pub fn scrim_for(mode: Mode) -> (Rgb, f64) {
     }
 }
 
-/// The ink and the shadow colour for text on the lock's backdrop: dark ink
-/// under a white shadow where it is lifted (light mode, on a compositor that
-/// lifts), light ink under a black one on the dim everywhere else. The ink
-/// follows what the compositor draws, not the mode alone, so a compositor
-/// that is older than the shell (the session a switch has not restarted yet)
-/// never gets dark text on its dim.
-pub fn on_backdrop(mode: Mode, lifted: bool) -> (Rgb, Rgb) {
-    if mode == Mode::Light && lifted {
-        (INK_DARK, Rgb::WHITE)
-    } else {
-        (ON_STATUS, Rgb::BLACK)
-    }
-}
-
-/// The shadow under text on the dimmed backdrop, black. With the scrim under
-/// it the surface reaches 1 − 0.8 × 0.92 = 0.264, under the compositor's
-/// discard line ([`GLASS_MASK_THRESHOLD`] less 0.12), so it stays a shadow.
-pub const BACKDROP_SHADOW_ALPHA: f64 = 0.08;
-
-/// The contrast of the lock's light ink over a white wallpaper dimmed to
-/// `brightness` and scrimmed: the weakest it gets over any wallpaper.
-#[cfg(test)]
-fn lift_lc(brightness: f64) -> f64 {
-    let (scrim, alpha) = scrim_for(Mode::Light);
-    let lifted = 1.0 - brightness;
-    let ground = over(scrim, alpha, Rgb(lifted, lifted, lifted));
-    apca(on_backdrop(Mode::Light, true).0, ground).abs()
-}
-
-#[cfg(test)]
-fn backdrop_lc(brightness: f64) -> f64 {
-    let ground = over(
-        Rgb::BLACK,
-        SCRIM_ALPHA,
-        Rgb(brightness, brightness, brightness),
-    );
-    apca(ON_STATUS, ground).abs()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// §5 on the lock's dimmed backdrop: the clock and the date reach Lc 75
-    /// over a white page at the brightest dim the lock accepts, and the
-    /// shadow stays out of the glass.
-    #[test]
-    fn the_dimmed_backdrop_meets_the_targets_over_white() {
-        let lc = backdrop_lc(BACKDROP_BRIGHTNESS_MAX);
-        assert!(lc >= CLOCK_LC, "Lc {lc:.1} at {BACKDROP_BRIGHTNESS_MAX}");
-        // A darker backdrop never reads worse.
-        for b in 0..=59 {
-            assert!(backdrop_lc(f64::from(b) / 100.0) >= lc - 1e-9);
-        }
-        // A brighter one falls short, so the limit is not loose.
-        assert!(backdrop_lc(BACKDROP_BRIGHTNESS_MAX + 0.02) < CLOCK_LC);
-        let peak = 1.0 - (1.0 - SCRIM_ALPHA) * (1.0 - BACKDROP_SHADOW_ALPHA);
-        assert!(peak < GLASS_MASK_THRESHOLD - 0.12 - 0.01, "{peak:.3}");
-    }
-
-    /// §5 on light mode's lifted backdrop: dark ink reaches Lc 75 over a
-    /// black page at the strongest lift the lock accepts, and the limit is
-    /// tight.
-    #[test]
-    fn the_lifted_backdrop_meets_the_targets_over_black() {
-        let lc = lift_lc(BACKDROP_LIFT_MAX);
-        assert!(lc >= CLOCK_LC, "Lc {lc:.1} at {BACKDROP_LIFT_MAX}");
-        for b in 0..=19 {
-            assert!(lift_lc(f64::from(b) / 100.0) >= lc - 1e-9);
-        }
-        assert!(lift_lc(BACKDROP_LIFT_MAX + 0.02) < CLOCK_LC);
-        // The shadow under dark ink is white and stays out of the glass on
-        // its own, with no scrim under it.
-        const { assert!(BACKDROP_SHADOW_ALPHA < GLASS_MASK_THRESHOLD - 0.12 - 0.01) };
-    }
 
     /// A halo that disagrees with the mode's glass stays a shadow: stacked,
     /// under the glass mask threshold with room for GTK's rounding. And the
