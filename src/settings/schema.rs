@@ -432,6 +432,13 @@ pub struct Look {
     pub motion: Motion,
     #[serde(default)]
     pub tint: Tint,
+    /// Which of the wallpaper's colours the accent takes under a tint, by
+    /// rank: 0 is the primary, the one the image is about. The Look pane
+    /// offers the ones the last sample found (`theme::wallpaper::CHOICES`
+    /// at most) and puts this back to 0 when a new wallpaper is picked; a
+    /// rank the current wallpaper does not have means the primary.
+    #[serde(default)]
+    pub tint_colour: u8,
     /// A launched app grows out of its launcher row (sway's `handoff open`).
     /// Off by default: on a real desktop the window's first frames rarely
     /// match the icon it grows from, and it read as a glitch more than as a
@@ -454,6 +461,7 @@ impl Default for Look {
             contrast: crate::tokens::Contrast::default(),
             motion: Motion::default(),
             tint: Tint::default(),
+            tint_colour: 0,
             launch_zoom: false,
             apps_follow: true,
         }

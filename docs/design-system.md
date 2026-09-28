@@ -70,13 +70,24 @@ The tint is an input like the others: the generator builds the scales from
 it, so the stylesheet, the glass body, Cairo drawing and sway's window
 borders all move together, and §5 tests the tinted sets. What it needs from
 outside the settings is a **palette** of up to three OKLCH hues of the
-wallpaper, in whole degrees, each with one job:
+wallpaper, in whole degrees, each with one job. The wallpaper offers up to
+four colours: Material's `Score` over the quantized image (area and
+chroma), in its order, each at least 30° from every one before it and 2 %
+of the image. The Look pane shows them as swatches under the tint
+(**Accent from**, the setting `look.tint_colour`, a rank), the first
+selected; picking a new wallpaper selects its first again.
 
 | Hue | Picked as | Threshold |
 |---|---|---|
-| primary | Material's `Score` over the quantized image: area and chroma | the first ranked colour; none, and the tint is off |
-| ground | the chromatic hue with the most of the image within ±15° of it | at least 20 % of the image, else the primary |
-| secondary | the next `Score` colour far enough from the primary | at least 45° from it and 5 % of the image, else none |
+| primary | the offered colour picked in the Look pane; by default the first, `Score`'s top | none offered, and the tint is off |
+| ground | the chromatic hue with the most of the image within ±15° of it | at least 20 % of the image, else the first offered colour |
+| secondary | the best-ranked other offered colour far enough from the primary | at least 45° from it, else none |
+
+Before 2026-09 the sample kept only the primary and one secondary (45° and
+5 % of the image), and nothing on screen showed the secondary: it only
+turned the categorical set by up to 15°. A muted wallpaper (whose primary
+was itself 1 % of the image by that count) then read as one colour, whatever
+it had in it.
 
 The image gives hue only. Taking its lightness is what breaks the contrast
 of palette generators that do (pywal); Material and KDE take hue and keep
@@ -98,7 +109,9 @@ where a hue does not fit in sRGB.
 | status | each turns toward the nearest palette hue by at most 12° | red stays red: 12° keeps it out of orange |
 | neutral | `full` only: the three anchors take the ground at a chroma held within 0.010–0.025 | a cast, not a colour. The ground and not the primary, so a blue sky with a red boat gives blue-grey glass and a red accent; the glass body (`fill_color`) follows |
 
-There is no second accent token. One is added when a component needs it.
+There is no second accent token; the other offered colours reach the
+screen as the accent when picked, and through the categorical and status
+rules. One is added when a component needs it.
 
 `off` is the untinted token set, byte for byte.
 

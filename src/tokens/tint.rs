@@ -11,8 +11,9 @@
 //! hue only: every rule keeps a colour's **lightness**, because lightness is
 //! what the contrast is made of.
 //!
-//! - **Primary**, the colour the image is about (Material's `Score`, which
-//!   ranks by area and chroma). The **accent** family takes it, each step
+//! - **Primary**, the accent's colour: one of the up to four the image
+//!   offers (Material's `Score`, which ranks by area and chroma), the first
+//!   unless the Look pane picked another. The **accent** family takes it, each step
 //!   keeping its lightness and chroma. The accent input still decides how
 //!   loud the accent is; the wallpaper decides which colour it is.
 //! - **Ground**, the hue that covers the most of the image. Under
@@ -20,7 +21,7 @@
 //!   inside [`CAST`], so the surfaces pick up the wallpaper's ground while the
 //!   accent can be its highlight: a blue sky with a red boat gives blue-grey
 //!   glass and a red accent.
-//! - **Secondary**, a second colour of the image, at least
+//! - **Secondary**, another offered colour of the image, at least
 //!   [`SECONDARY_APART`] from the primary. The **categorical** set is turned
 //!   rigidly, all six by one angle, so they stay as far apart as gruvbox put
 //!   them: they exist to be told apart. The angle puts slot 1 on the primary,
@@ -44,7 +45,8 @@ use super::{Oklch, Rgb};
 /// and a change below a degree does not reload the stylesheet).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Palette {
-    /// The accent's hue: the colour the image is about.
+    /// The accent's hue: the offered colour picked in the Look pane, by
+    /// default the one the image is about.
     pub primary: u16,
     /// The neutral cast's hue: the colour most of the image is.
     pub ground: u16,

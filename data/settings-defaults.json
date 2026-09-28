@@ -6,6 +6,7 @@
     "contrast": "standard",
     "motion": "full",
     "tint": "off",
+    "tint_colour": 0,
     "launch_zoom": false,
     "apps_follow": true
   },

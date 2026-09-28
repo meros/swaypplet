@@ -5,8 +5,9 @@
 use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
 
+use super::wallpaper::Sample;
 use crate::settings::schema::{Look, ThemeMode, Tint as Reach};
-use crate::tokens::{Backdrop, Inputs, Mode, Palette, Tint};
+use crate::tokens::{Backdrop, Inputs, Mode, Tint};
 
 /// How long a sun-driven switch may wait for the session to be locked
 /// before it happens anyway (§2.1).
@@ -122,13 +123,14 @@ fn build(look: &Look, mode: Mode, tint: Tint, backdrop: Option<Backdrop>) -> Inp
 }
 
 /// The Look setting's reach with the wallpaper's hues, as the panel last
-/// sampled it (`super::wallpaper`). Off until a sample exists: a wallpaper
-/// with no usable colour, or one not sampled yet, leaves the tokens shipped.
-fn tint(reach: Reach, palette: Option<Palette>) -> Tint {
+/// sampled it (`super::wallpaper`), the accent on the colour the Look pane
+/// picked. Off until a sample exists: a wallpaper with no usable colour, or
+/// one not sampled yet, leaves the tokens shipped.
+fn tint(reach: Reach, sample: Option<&Sample>, pick: u8) -> Tint {
     if reach == Reach::Off {
         return Tint::Off;
     }
-    match (reach, palette) {
+    match (reach, sample.map(|s| s.palette(usize::from(pick)))) {
         (Reach::Accents, Some(p)) => Tint::Accents(p),
         (Reach::Full, Some(p)) => Tint::Full(p),
         _ => Tint::Off,
@@ -209,11 +211,11 @@ pub fn inputs() -> Inputs {
         publish(mode);
     }
     // One read of the one-line cache for both of the wallpaper's inputs.
-    let (palette, backdrop) = match super::wallpaper::read() {
-        Some((palette, backdrop)) => (palette, Some(backdrop)),
+    let (sample, backdrop) = match super::wallpaper::read() {
+        Some((sample, backdrop)) => (sample, Some(backdrop)),
         None => (None, None),
     };
-    let tint = tint(look.tint, palette);
+    let tint = tint(look.tint, sample.as_ref(), look.tint_colour);
     SHOWN.with(|s| s.set(mode));
     TINT.with(|t| t.set(tint));
     BACKDROP.with(|b| b.set(backdrop));

@@ -6,8 +6,9 @@
 //! setting and reading it back; the appearance group is the design system's
 //! first four inputs (mode, accent, neutral, contrast; docs/design-system.md §2),
 //! which `theme::watch` turns into the stylesheet within a second; the theme
-//! colour group is the wallpaper tint (another token input, §2.2) with the
-//! token scales it produces drawn below it; the motion group is one dropdown, read per
+//! colour group is the wallpaper tint (another token input, §2.2), the
+//! wallpaper's colours to take the accent from, and the token scales it
+//! produces drawn below them; the motion group is one dropdown, read per
 //! animation by `anim::duration` and scaled into the motion tokens.
 
 use std::cell::{Cell, RefCell};
@@ -22,7 +23,8 @@ use super::form::{self, dropdown_row, section_box};
 use super::schema::ThemeMode;
 use super::store::{self, Look, Motion, NightLight, NightSchedule, Tint, Wallpaper, WallpaperMode};
 use super::wallpaper::{apply, candidates, candidates_dir, system_default};
-use crate::tokens::{Accent, Contrast, Neutral};
+use crate::theme::wallpaper::Sample;
+use crate::tokens::{Accent, Contrast, Neutral, Palette, Tint as Reach};
 
 /// Thumbnail size, in logical pixels. 16:9, four to a row in the card.
 const THUMB_W: i32 = 132;
@@ -189,7 +191,46 @@ fn accent_swatch(accent: Accent) -> (gtk4::ToggleButton, gtk4::DrawingArea) {
     (button, dot)
 }
 
+/// One of the wallpaper's colours to take the accent from: a dot in
+/// `--accent-bg` as the tokens would generate it with `palette` (that colour
+/// as the accent's hue) and every other input as it is on screen, as
+/// [`accent_swatch`] draws the presets.
+fn wallpaper_swatch(palette: Palette, rank: usize) -> (gtk4::ToggleButton, gtk4::DrawingArea) {
+    let dot = gtk4::DrawingArea::builder()
+        .content_width(16)
+        .content_height(16)
+        .build();
+    dot.set_draw_func(move |_, cr, w, h| {
+        let shown = crate::theme::shown();
+        // The reach on screen, so a `full` tint's dot is the `full` accent;
+        // with the tint off the row is hidden and this is never drawn.
+        let tint = match shown.tint {
+            Reach::Full(_) => Reach::Full(palette),
+            _ => Reach::Accents(palette),
+        };
+        let tone = crate::tokens::scales(crate::tokens::Inputs { tint, ..shown }).accent_bg;
+        let (w, h) = (f64::from(w), f64::from(h));
+        crate::ui::set_source(cr, tone, 1.0);
+        cr.arc(w / 2.0, h / 2.0, w.min(h) / 2.0, 0.0, std::f64::consts::TAU);
+        let _ = cr.fill();
+    });
+    let button = crate::ui::swatch(&dot);
+    button.set_tooltip_text(Some(&if rank == 0 {
+        format!("The wallpaper's main colour (hue {}°)", palette.primary)
+    } else {
+        format!(
+            "The wallpaper's colour {} (hue {}°)",
+            rank + 1,
+            palette.primary
+        )
+    }));
+    (button, dot)
+}
+
 // ── The tab ─────────────────────────────────────────────────────────────
+
+/// A swatch and the dot it draws, to repaint when the tokens move.
+type Swatch = (gtk4::ToggleButton, gtk4::DrawingArea);
 
 struct State {
     grid: gtk4::FlowBox,
@@ -206,6 +247,13 @@ struct State {
     launch_zoom: gtk4::Switch,
     apps_follow: gtk4::Switch,
     tint: gtk4::DropDown,
+    /// The row offering the wallpaper's colours, shown while a tint is on
+    /// and the wallpaper has been sampled.
+    colour_row: gtk4::Box,
+    /// The swatches in it; rebuilt when the sample's hues move.
+    colour_box: gtk4::Box,
+    /// The hues the swatches were built for, and each swatch with its dot.
+    colours: RefCell<(Vec<u16>, Vec<Swatch>)>,
     night: gtk4::DropDown,
     night_k: gtk4::Scale,
     /// The token scales, for the strip to repaint.
@@ -228,6 +276,11 @@ impl State {
     }
 
     fn pick(self: &Rc<Self>, path: PathBuf) {
+        // A new image's colours are ranked afresh: its primary first, not
+        // whatever it has at the rank picked on the last one.
+        if store::with(|s| s.look().tint_colour) != 0 {
+            store::edit::<Look>(|l| l.tint_colour = 0);
+        }
         let mode = self.shown().map(|w| w.mode).unwrap_or_default();
         self.set(Wallpaper { path, mode });
     }
@@ -262,7 +315,7 @@ impl State {
     }
 
     /// Bring the grid and the dropdown in line with the store.
-    fn sync(&self) {
+    fn sync(self: &Rc<Self>) {
         self.updating.set(true);
         let shown = self.shown();
         let settings = store::current();
@@ -296,6 +349,7 @@ impl State {
         // wallpaper's hue after the panel samples it; this paints what is on
         // screen now and `theme::observe` paints the rest when it lands.
         self.strip.queue_draw();
+        self.sync_colours();
         for (path, button) in self.thumbs.borrow().iter() {
             let selected = shown.as_ref().is_some_and(|w| w.path == *path);
             crate::ui::set_selected(button, selected);
@@ -310,6 +364,55 @@ impl State {
             "System default: the sway config's wallpaper, auto mode in aqua on gruvbox, full motion, night light from the sun at 3500 K",
         );
         self.updating.set(false);
+    }
+
+    /// Bring the wallpaper's colours in line with the last sample and the
+    /// store: one swatch per colour the sample offers, the picked one
+    /// selected. Called from [`Self::sync`] and whenever the stylesheet
+    /// moves, which is also when a new sample lands.
+    fn sync_colours(self: &Rc<Self>) {
+        let was = self.updating.replace(true);
+        let look = store::with(|s| s.look());
+        let sample: Option<Sample> = crate::theme::wallpaper::read().and_then(|(s, _)| s);
+        let hues = sample.as_ref().map(Sample::hues).unwrap_or_default();
+        self.colour_row
+            .set_visible(look.tint != Tint::Off && !hues.is_empty());
+        let mut colours = self.colours.borrow_mut();
+        if colours.0 != hues {
+            while let Some(child) = self.colour_box.first_child() {
+                self.colour_box.remove(&child);
+            }
+            colours.1.clear();
+            if let Some(sample) = &sample {
+                let mut first: Option<gtk4::ToggleButton> = None;
+                for rank in 0..hues.len() {
+                    let (button, dot) = wallpaper_swatch(sample.palette(rank), rank);
+                    match &first {
+                        Some(group) => button.set_group(Some(group)),
+                        None => first = Some(button.clone()),
+                    }
+                    let state = self.clone();
+                    button.connect_toggled(move |b| {
+                        if state.updating.get() || !b.is_active() {
+                            return;
+                        }
+                        store::edit::<Look>(|l| l.tint_colour = rank as u8);
+                        state.sync();
+                    });
+                    self.colour_box.append(&button);
+                    colours.1.push((button, dot));
+                }
+            }
+            colours.0 = hues;
+        }
+        // A rank this wallpaper does not have is its primary (`Sample::palette`).
+        let picked = usize::from(look.tint_colour);
+        let picked = if picked < colours.1.len() { picked } else { 0 };
+        for (rank, (button, dot)) in colours.1.iter().enumerate() {
+            button.set_active(rank == picked);
+            dot.queue_draw();
+        }
+        self.updating.set(was);
     }
 
     /// Put the candidates, the pick and the system default in the grid,
@@ -483,12 +586,23 @@ impl LookPane {
         let tint_labels: Vec<&str> = Tint::ALL.iter().map(|t| t.label()).collect();
         let (tint_row, tint) = dropdown_row(
             "Tint",
-            "Off keeps the shipped colours. Accents gives the accent the \
-             wallpaper's hue and turns the app colours with it. Full tints the \
-             greys and the glass too. Red stays red either way.",
+            "Off keeps the shipped colours. Accents gives the accent one of \
+             the wallpaper's colours, picked below, and turns the app colours \
+             toward the others. Full tints the greys and the glass too. Red \
+             stays red either way.",
             &tint_labels,
         );
         theme.append(&tint_row);
+        let colour_box = crate::ui::hbox(2);
+        colour_box.set_halign(gtk4::Align::Start);
+        let colour_row = form::kind_row("Accent from", &colour_box);
+        colour_row.set_tooltip_text(Some(
+            "The wallpaper's distinct colours, the main one first. The one \
+             picked is the accent; the others turn the app colours with it. \
+             The accent above still sets how bright it is.",
+        ));
+        colour_row.set_visible(false);
+        theme.append(&colour_row);
         let strip = swatch_strip();
         theme.append(&strip);
 
@@ -559,6 +673,9 @@ impl LookPane {
             launch_zoom: launch_zoom.clone(),
             apps_follow: apps_follow.clone(),
             tint: tint.clone(),
+            colour_row: colour_row.clone(),
+            colour_box: colour_box.clone(),
+            colours: RefCell::new((Vec::new(), Vec::new())),
             night: night.clone(),
             night_k: night_k.clone(),
             strip: strip.clone(),
@@ -768,8 +885,11 @@ impl LookPane {
             });
         }
         {
-            let strip = strip.clone();
-            crate::theme::observe(move || strip.queue_draw());
+            let state = state.clone();
+            crate::theme::observe(move || {
+                state.strip.queue_draw();
+                state.sync_colours();
+            });
         }
 
         root.append(&group);
@@ -818,6 +938,7 @@ pub(super) const SEARCH: &[Entry] = &[
     row("Appearance", "Neutral", "The greys of the glass, the text and the lines", &["grey", "gray", "neutral colour", "palette"]).keys(&["look.neutral"]),
     row("Appearance", "Contrast", "Stronger text, lines and glass", &["high contrast", "accessibility", "a11y", "readability", "legibility"]).keys(&["look.contrast"]),
     row("Theme colour", "Tint", "The shell's colours from the wallpaper", &["tint", "material you", "dynamic colour", "dynamic color", "wallpaper colour", "wallpaper color", "hue", "colour", "color"]).keys(&["look.tint"]),
+    row("Theme colour", "Accent from", "Which of the wallpaper's colours is the accent", &["wallpaper accent", "palette", "second colour", "second color", "wallpaper colours", "wallpaper colors"]).keys(&["look.tint_colour"]),
     row("Motion", "Motion", "Full, half or no animation", &["animation", "animations", "reduced motion", "reduce motion", "speed", "effects", "transitions"]).keys(&["look.motion"]),
     row("Motion", "Launch zoom", "Apps grow out of their launcher row", &["open animation", "handoff"]).keys(&["look.launch_zoom"]),
     row("Night light", "Night light", "A warmer screen after dark", &["night light", "night shift", "blue light", "warm", "gamma", "redshift", "gammastep", "evening"]).keys(&["night_light.enabled", "night_light.schedule"]),

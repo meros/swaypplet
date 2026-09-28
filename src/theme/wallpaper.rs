@@ -1,10 +1,12 @@
 //! The wallpaper's colours, for the tint input (docs/design-system.md §2.2).
 //!
-//! This module's whole job is up to three colours of the wallpaper: the
-//! primary (what the image is about), the ground (what most of it is) and a
-//! secondary (another colour it has). `theme::inputs` reads their hues and
-//! hands them to the token generator as a `tokens::Palette` inside `Tint`,
-//! and `tokens::tint` decides what each colour family does with them.
+//! This module's whole job is a few colours of the wallpaper: up to
+//! [`CHOICES`] distinct ones, ranked (the first is the primary, what the
+//! image is about), and the ground (what most of it is). The Look pane
+//! offers the ranked colours as the accent; `theme::inputs` turns the one
+//! picked into a `tokens::Palette` inside `Tint` (the pick as the primary,
+//! another of them as the secondary), and `tokens::tint` decides what each
+//! colour family does with them.
 //! Nothing here knows what a colour is for, and nothing here takes a
 //! lightness: the tokens own every tone.
 //!
@@ -15,7 +17,7 @@
 //! the key press and the password field. So exactly one process samples: the
 //! panel, off the main thread, whenever the wallpaper or the setting changes.
 //! It writes `$XDG_CACHE_HOME/swaypplet/wallpaper-source` (one line: a
-//! version, a key over the image's path, mtime and size, and the three
+//! version, a key over the image's path, mtime and size, and the
 //! colours), and every process reads that line. A missing or foreign file is
 //! not an error and never blocks: the tint is off until the sample lands.
 
@@ -30,7 +32,7 @@ use crate::tokens::{Backdrop, Oklch, Palette, Rgb, tint};
 
 /// Bump when the sampling changes, so a cache written by the old rule is a
 /// miss rather than a stale colour that looks right.
-const VERSION: u32 = 4;
+const VERSION: u32 = 5;
 
 /// The wallpaper is decoded down to this before it is quantized. 128²
 /// pixels is 16 k samples, which is more than Celebi needs to find the
@@ -40,6 +42,18 @@ const SAMPLE: i32 = 128;
 
 /// Colours the quantizer reduces the image to, before `Score` ranks them.
 const MAX_COLORS: usize = 64;
+
+/// The most colours one image offers the accent. Four fit in the Look pane's
+/// row beside each other and are about as many distinct colours as a photo
+/// has; `Score` is asked for twice as many, so the spacing below still has
+/// some to choose from after it drops the ones too close together.
+pub const CHOICES: usize = 4;
+
+/// How far apart two of the offered colours must be. At an accent's chroma
+/// 30° is plainly another colour (blue beside violet); `tint::SECONDARY_APART`
+/// is wider because the categorical set needs a second colour that is far
+/// from the first, not merely distinct from it.
+const CHOICE_APART: f64 = 30.0;
 
 /// The OKLCH chroma below which a colour of the image is a grey and gives no
 /// hue: about HCT chroma 5, which is where `Score` draws the same line.
@@ -54,15 +68,19 @@ const WINDOW: f64 = 15.0;
 /// primary, as the single-hue tint was.
 const GROUND_SHARE: f64 = 0.20;
 
-/// The secondary must cover at least this share, so a speck is not a colour.
-const SECONDARY_SHARE: f64 = 0.05;
+/// A colour after the primary must cover at least this share of the image,
+/// so a speck is not a colour. Counted in OKLCH with the greys left out,
+/// which is strict on a muted photo: the primary of a dusky one can itself
+/// be 1 %, and the 5 % this used to be left such images one colour.
+const CHOICE_SHARE: f64 = 0.02;
 
 /// The colours the tokens take from one image.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Sample {
-    pub primary: Rgb,
+    /// Up to [`CHOICES`], at least [`CHOICE_APART`] from each other, in
+    /// `Score`'s order; never empty, and the first is the primary.
+    pub colours: Vec<Rgb>,
     pub ground: Rgb,
-    pub secondary: Option<Rgb>,
 }
 
 /// The side of the luminance grid: the image as 4 × 4 cells.
@@ -131,7 +149,7 @@ impl Grid {
 }
 
 /// Everything one sample of the wallpaper leaves in the cache.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Cached {
     /// The colours for the tint; `None` for an image with no usable colour.
     pub colours: Option<Sample>,
@@ -140,12 +158,32 @@ pub struct Cached {
 }
 
 impl Sample {
-    /// The hues, in whole OKLCH degrees.
-    fn palette(self) -> Palette {
+    /// The offered colours' hues, in whole OKLCH degrees, primary first.
+    pub fn hues(&self) -> Vec<u16> {
+        self.colours.iter().copied().map(hue_of).collect()
+    }
+
+    /// The hues the tokens take when the accent is colour `pick` (by rank;
+    /// one past the end is the primary, so a pick made on another wallpaper
+    /// never leaves the tint off). The secondary is the best-ranked other
+    /// colour at least `tint::SECONDARY_APART` from the pick, so picking the
+    /// second colour makes the first one the categorical set's second.
+    pub fn palette(&self, pick: usize) -> Palette {
+        let hues = self.hues();
+        let pick = if pick < hues.len() { pick } else { 0 };
+        let primary = hues[pick];
+        let secondary = hues
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != pick)
+            .map(|(_, h)| *h)
+            .find(|h| {
+                tint::difference(f64::from(primary), f64::from(*h)).abs() >= tint::SECONDARY_APART
+            });
         Palette {
-            primary: hue_of(self.primary),
+            primary,
             ground: hue_of(self.ground),
-            secondary: self.secondary.map(hue_of),
+            secondary,
         }
     }
 }
@@ -160,7 +198,7 @@ fn no_colour() -> Argb {
 // ── The colours ─────────────────────────────────────────────────────────
 
 /// The wallpaper's colours to build a tint on: Material's quantizer over the
-/// image, then Material's `Score` for the primary and the secondary (it drops
+/// image, then Material's `Score` for the offered colours (it drops
 /// the near-greys, the colours with too little of the image behind them, and
 /// the dark yellow-greens its `dislike` module calls out, and hands back
 /// hues at least 15° apart), and the population for the ground; and the
@@ -173,7 +211,7 @@ pub fn sample_image(path: &Path) -> Option<Cached> {
     let quantized = QuantizerCelebi::quantize(&pixels, MAX_COLORS);
     let ranked = Score::score(
         &quantized.color_to_count,
-        Some(4),
+        Some(2 * CHOICES as i32),
         Some(no_colour()),
         Some(true),
     );
@@ -218,15 +256,25 @@ fn share(counts: &[(Rgb, u32)], hue: f64) -> f64 {
     f64::from(near) / f64::from(total)
 }
 
-/// The three colours out of the quantized image and `Score`'s ranking.
-/// Pure, so the rules are tested on made-up images.
+/// The colours out of the quantized image and `Score`'s ranking. Pure, so
+/// the rules are tested on made-up images.
 fn pick(counts: &[(Rgb, u32)], ranked: &[Rgb]) -> Option<Sample> {
     let primary = *ranked.first()?;
     let hue = |c: Rgb| Oklch::from(c).2;
-    let secondary = ranked[1..].iter().copied().find(|c| {
-        tint::difference(hue(primary), hue(*c)).abs() >= tint::SECONDARY_APART
-            && share(counts, hue(*c)) >= SECONDARY_SHARE
-    });
+    // `Score`'s order, each far enough from every one already taken to read
+    // as another colour, and enough of the image to be one.
+    let mut colours = vec![primary];
+    for c in &ranked[1..] {
+        if colours.len() == CHOICES {
+            break;
+        }
+        let apart = colours
+            .iter()
+            .all(|t| tint::difference(hue(*t), hue(*c)).abs() >= CHOICE_APART);
+        if apart && share(counts, hue(*c)) >= CHOICE_SHARE {
+            colours.push(*c);
+        }
+    }
     // The ground: the chromatic colour with the most of the image around its
     // hue, if that is enough of the image to be a ground at all.
     let ground = counts
@@ -236,11 +284,7 @@ fn pick(counts: &[(Rgb, u32)], ranked: &[Rgb]) -> Option<Sample> {
         .max_by(|a, b| a.1.total_cmp(&b.1).then(a.2.cmp(&b.2)))
         .filter(|(_, sh, _)| *sh >= GROUND_SHARE)
         .map_or(primary, |(c, _, _)| c);
-    Some(Sample {
-        primary,
-        ground,
-        secondary,
-    })
+    Some(Sample { colours, ground })
 }
 
 /// The image, decoded small, as opaque pixels, and its luminance grid.
@@ -378,15 +422,22 @@ fn key(image: &Path) -> String {
     format!("{h:016x}")
 }
 
-/// The cache's one line.
+/// The cache's one line: the offered colours comma separated, primary first.
 fn line(key: &str, c: &Cached) -> String {
-    let word = |c: Option<Rgb>| c.map_or_else(|| "none".to_string(), |c| c.css());
     let hex = |v: &[u8]| v.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let (colours, ground) = match &c.colours {
+        Some(s) => (
+            s.colours
+                .iter()
+                .map(|c| c.css())
+                .collect::<Vec<_>>()
+                .join(","),
+            s.ground.css(),
+        ),
+        None => ("none".to_string(), "none".to_string()),
+    };
     format!(
-        "swaypplet-wallpaper v{VERSION} key={key} primary={} ground={} secondary={} luma={} spread={}\n",
-        word(c.colours.map(|s| s.primary)),
-        word(c.colours.map(|s| s.ground)),
-        word(c.colours.and_then(|s| s.secondary)),
+        "swaypplet-wallpaper v{VERSION} key={key} colours={colours} ground={ground} luma={} spread={}\n",
         hex(&c.grid.mean),
         hex(&c.grid.spread),
     )
@@ -421,21 +472,23 @@ fn parse(text: &str) -> Option<(String, Cached)> {
     (words.next()? == "swaypplet-wallpaper").then_some(())?;
     (words.next()? == format!("v{VERSION}")).then_some(())?;
     let key = words.next()?.strip_prefix("key=")?.to_string();
-    let optional = |word: &str| match word {
-        "none" => Some(None),
-        word => colour(word).map(Some),
+    let colours = match words.next()?.strip_prefix("colours=")? {
+        "none" => None,
+        list => Some(
+            list.split(',')
+                .map(colour)
+                .collect::<Option<Vec<Rgb>>>()
+                .filter(|v| (1..=CHOICES).contains(&v.len()))?,
+        ),
     };
-    let primary = optional(words.next()?.strip_prefix("primary=")?)?;
-    let ground = optional(words.next()?.strip_prefix("ground=")?)?;
-    let secondary = optional(words.next()?.strip_prefix("secondary=")?)?;
+    let ground = match words.next()?.strip_prefix("ground=")? {
+        "none" => None,
+        word => Some(colour(word)?),
+    };
     let mean = cells(words.next()?.strip_prefix("luma=")?)?;
     let spread = cells(words.next()?.strip_prefix("spread=")?)?;
-    let colours = match (primary, ground) {
-        (Some(primary), Some(ground)) => Some(Sample {
-            primary,
-            ground,
-            secondary,
-        }),
+    let colours = match (colours, ground) {
+        (Some(colours), Some(ground)) => Some(Sample { colours, ground }),
         _ => None,
     };
     Some((
@@ -452,12 +505,12 @@ fn read_cache() -> Option<(String, Cached)> {
 }
 
 /// What the tokens take from the wallpaper, as the last sample left it: its
-/// hues (when it has usable ones) and the backdrop text on it stands on.
+/// colours (when it has usable ones) and the backdrop text on it stands on.
 /// One bare file read: it runs in every process that builds the stylesheet,
 /// on the main thread, the lock screen among them, so it asks neither sway
 /// nor the image.
-pub fn read() -> Option<(Option<Palette>, Backdrop)> {
-    read_cache().map(|(_, c)| (c.colours.map(Sample::palette), c.grid.text_backdrop()))
+pub fn read() -> Option<(Option<Sample>, Backdrop)> {
+    read_cache().map(|(_, c)| (c.colours, c.grid.text_backdrop()))
 }
 
 /// Write the cache next to itself and rename over it, so a reader in another
@@ -532,7 +585,7 @@ fn refresh() {
             log::info!(
                 "wallpaper: {} -> {:?}, text on {:?}",
                 image.display(),
-                sample.colours.map(Sample::palette),
+                sample.colours.as_ref().map(Sample::hues),
                 sample.grid.text_backdrop()
             );
             write_cache(&line(&key, &sample))
@@ -582,12 +635,16 @@ mod tests {
             grid.mean[i] = (i * 6) as u8;
             grid.spread[i] = (i * 2) as u8;
         }
-        let with = |secondary| Sample {
-            primary: Rgb::hex(0x3a6ea5),
+        let with = |colours: &[u32]| Sample {
+            colours: colours.iter().copied().map(Rgb::hex).collect(),
             ground: Rgb::hex(0x203040),
-            secondary,
         };
-        for colours in [None, Some(with(None)), Some(with(Some(Rgb::hex(0xd65d0e))))] {
+        for colours in [
+            None,
+            Some(with(&[0x3a6ea5])),
+            Some(with(&[0x3a6ea5, 0xd65d0e])),
+            Some(with(&[0x3a6ea5, 0xd65d0e, 0x98971a, 0xb16286])),
+        ] {
             let cached = Cached { colours, grid };
             let text = line(&key(Path::new("/tmp/a.png")), &cached);
             assert_eq!(text.lines().count(), 1);
@@ -595,12 +652,23 @@ mod tests {
             assert_eq!(k, key(Path::new("/tmp/a.png")));
             assert_eq!(back, cached);
             // Another build's file is a miss, not a colour.
-            assert!(parse(&text.replace(&format!("v{VERSION}"), "v3")).is_none());
+            assert!(parse(&text.replace(&format!("v{VERSION}"), "v4")).is_none());
         }
-        assert!(
-            parse("swaypplet-wallpaper v3 key=0 primary=#3a6ea5 ground=#3a6ea5 secondary=none")
-                .is_none()
-        );
+        // The line the one-secondary build wrote is a miss, not one colour.
+        assert!(parse("swaypplet-wallpaper v4 key=0 primary=#3a6ea5 ground=#3a6ea5 secondary=none luma=00000000000000000000000000000000 spread=00000000000000000000000000000000").is_none());
+        // A list with a bad colour in it, or more than the pane offers, is a
+        // miss too.
+        let luma = "luma=00000000000000000000000000000000 spread=00000000000000000000000000000000";
+        for colours in [
+            "#3a6ea5,#zzzzzz",
+            "#111111,#222222,#333333,#444444,#555555",
+            "",
+        ] {
+            let text = format!(
+                "swaypplet-wallpaper v{VERSION} key=0 colours={colours} ground=#203040 {luma}"
+            );
+            assert!(parse(&text).is_none(), "{colours}");
+        }
     }
 
     /// Luminance per cell, on an image made up of known greys.
@@ -666,23 +734,65 @@ mod tests {
         let (sky, boat) = (at(250.0), at(25.0));
         let counts = [(sky, 800), (boat, 60), (Rgb(0.5, 0.5, 0.5), 140)];
         let s = pick(&counts, &[boat, sky]).unwrap();
-        assert_eq!(s.primary, boat);
+        assert_eq!(s.colours, vec![boat, sky]);
         assert_eq!(s.ground, sky);
-        assert_eq!(s.secondary, Some(sky));
+        assert_eq!(s.palette(0).secondary, Some(hue_of(sky)));
     }
 
     #[test]
-    fn a_second_colour_needs_distance_and_area() {
-        let (a, near, far, speck) = (at(250.0), at(280.0), at(60.0), at(140.0));
-        // 30° away: the same colour, no secondary.
+    fn another_colour_needs_distance_and_area() {
+        let (a, near, far, speck) = (at(250.0), at(270.0), at(60.0), at(140.0));
+        // 20° away: the same colour.
         let s = pick(&[(a, 700), (near, 300)], &[a, near]).unwrap();
-        assert_eq!(s.secondary, None);
-        // Far enough but a speck: no secondary.
-        let s = pick(&[(a, 980), (speck, 20)], &[a, speck]).unwrap();
-        assert_eq!(s.secondary, None);
+        assert_eq!(s.colours, vec![a]);
+        // Far enough but a speck.
+        let s = pick(&[(a, 990), (speck, 10)], &[a, speck]).unwrap();
+        assert_eq!(s.colours, vec![a]);
         // Far and big enough.
         let s = pick(&[(a, 700), (far, 300)], &[a, far]).unwrap();
-        assert_eq!(s.secondary, Some(far));
+        assert_eq!(s.colours, vec![a, far]);
+    }
+
+    /// The user's report: a wallpaper with four colours in it offered one.
+    /// A muted photo, `Score`'s ranking as it came from a real one (pluto),
+    /// each colour a few percent of the image: all four distinct ones are
+    /// offered, the close ones and the near-grey are not, and no more than
+    /// [`CHOICES`] whatever `Score` hands over.
+    #[test]
+    fn a_wallpaper_offers_several_colours() {
+        let muted = |h: f64| Rgb::from(Oklch(0.6, 0.04, h));
+        let hues = [10.0, 105.0, 139.0, 34.0, 161.0, 185.0, 255.0, 213.0];
+        let ranked: Vec<Rgb> = hues.iter().copied().map(muted).collect();
+        let mut counts: Vec<(Rgb, u32)> = ranked.iter().map(|c| (*c, 40)).collect();
+        counts.push((Rgb(0.1, 0.1, 0.1), 700));
+        let s = pick(&counts, &ranked).unwrap();
+        let got: Vec<u16> = s.hues();
+        assert_eq!(got.len(), CHOICES, "{got:?}");
+        assert_eq!(got[..3], [10, 105, 139], "{got:?}");
+        for (i, a) in got.iter().enumerate() {
+            for b in &got[i + 1..] {
+                let d = tint::difference(f64::from(*a), f64::from(*b)).abs();
+                assert!(d >= CHOICE_APART - 1.0, "{got:?}");
+            }
+        }
+    }
+
+    /// Picking another colour makes it the accent's hue, and the primary
+    /// moves to the secondary when it is far enough; a pick past the end is
+    /// the primary.
+    #[test]
+    fn the_pick_is_the_accent_and_the_rest_stay_in_the_palette() {
+        let (red, gold, blue) = (at(25.0), at(90.0), at(250.0));
+        let s = Sample {
+            colours: vec![red, gold, blue],
+            ground: blue,
+        };
+        let p = s.palette(0);
+        assert_eq!((p.primary, p.secondary), (hue_of(red), Some(hue_of(gold))));
+        let p = s.palette(2);
+        assert_eq!((p.primary, p.secondary), (hue_of(blue), Some(hue_of(red))));
+        assert_eq!(p.ground, hue_of(blue));
+        assert_eq!(s.palette(7), s.palette(0));
     }
 
     /// A grey photo with one coloured detail has no ground of its own; the
@@ -693,7 +803,7 @@ mod tests {
         let counts = [(Rgb(0.4, 0.4, 0.4), 900), (detail, 100)];
         let s = pick(&counts, &[detail]).unwrap();
         assert_eq!(s.ground, detail);
-        assert_eq!(s.palette(), Palette::single(hue_of(detail)));
+        assert_eq!(s.palette(0), Palette::single(hue_of(detail)));
         assert!(pick(&counts, &[]).is_none());
     }
 
@@ -729,7 +839,7 @@ mod tests {
         match sample_image(&image) {
             Some(s) => println!(
                 "{s:?} {:?} text on {:?} from {}",
-                s.colours.map(Sample::palette),
+                s.colours.as_ref().map(Sample::hues),
                 s.grid.text_backdrop(),
                 image.display()
             ),
