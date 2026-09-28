@@ -204,7 +204,7 @@ pub mod sun;
 mod sway;
 pub mod wallpaper;
 
-pub use inputs::{inputs, pin_dark};
+pub use inputs::{inputs, mode_file, own_mode, pin_dark};
 pub use paint::{Paint, paint};
 
 /// The inputs the stylesheet on screen was generated from: the Look
@@ -305,6 +305,9 @@ pub fn watch(on_material: impl Fn(crate::tokens::Inputs) + 'static) {
     locked::on_change(changed);
     crate::settings::store::observe(changed);
     follow_the_sun(changed);
+    // A process that does not own the mode (the standalone bar) draws the
+    // owner's answer, so it follows the file the owner writes.
+    std::mem::forget(crate::watch::files(&[mode_file()], changed));
 }
 
 /// A sender of the glass material, as [`watch`] takes it.
@@ -390,9 +393,11 @@ fn follow_the_sun(check: fn()) {
 /// The agent starts with the session and parks until a request, so without
 /// this its stylesheet was from whenever it started. After a change of mode
 /// the panel had moved the glass, and the card drew dark mode's white text
-/// on light glass. The triggers are [`watch`]'s: the live settings copy
-/// (the agent runs `settings::store::watch`), the wallpaper's cache line
-/// (the sampler runs in the panel, not here), the lock state and the sun.
+/// on light glass. The triggers: the live settings copy (the agent runs
+/// `settings::store::watch`), the wallpaper's cache line (the sampler runs
+/// in the panel, not here) and the mode the panel resolved `auto` to
+/// ([`mode_file`]). The lock state and the sun are the panel's to act on;
+/// they stay here only for a session where the panel has published nothing.
 pub fn follow() {
     fn reparse() {
         reload();
@@ -400,9 +405,11 @@ pub fn follow() {
     locked::follow();
     locked::on_change(reparse);
     crate::settings::store::observe(reparse);
-    if let Some(cache) = wallpaper::cache_file() {
-        std::mem::forget(crate::watch::files(&[cache], reparse));
-    }
+    let files: Vec<_> = [wallpaper::cache_file(), Some(mode_file())]
+        .into_iter()
+        .flatten()
+        .collect();
+    std::mem::forget(crate::watch::files(&files, reparse));
     follow_the_sun(reparse);
 }
 

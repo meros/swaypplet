@@ -29,6 +29,65 @@ thread_local! {
     static SETTING: Cell<Option<ThemeMode>> = const { Cell::new(None) };
     /// Set by [`pin_dark`]: this process draws dark whatever the mode.
     static PINNED_DARK: Cell<bool> = const { Cell::new(false) };
+    /// Set by [`own_mode`]: this process resolves `auto` and publishes it.
+    static OWNER: Cell<bool> = const { Cell::new(false) };
+    /// The mode last written to [`mode_file`], so a tick that moved nothing
+    /// writes nothing.
+    static PUBLISHED: Cell<Option<Mode>> = const { Cell::new(None) };
+}
+
+/// Make this process the one that resolves `auto` (the panel).
+///
+/// The sun's band holds whatever mode a process already shows, and a sun
+/// switch waits for the lock or for `PATIENCE`, so eight processes that each
+/// resolved `auto` from their own start time could disagree: the panel sent
+/// light glass while another process kept dark mode's white text on it. Now
+/// one process resolves, writes the answer to [`mode_file`], and every other
+/// process draws what that file says. The glass is sent from the same
+/// resolution, so the text and the glass cannot differ.
+pub fn own_mode() {
+    OWNER.with(|o| o.set(true));
+}
+
+/// Where the owner writes the mode `auto` resolved to: one word, `dark` or
+/// `light`. In the runtime directory, so a new session never reads the last
+/// one's answer.
+pub fn mode_file() -> std::path::PathBuf {
+    let dir = std::env::var_os("XDG_RUNTIME_DIR").unwrap_or_else(|| "/tmp".into());
+    std::path::PathBuf::from(dir).join("swaypplet").join("mode")
+}
+
+/// The mode the owner published, or `None` before it has (the panel is not
+/// up yet, or not running).
+fn published() -> Option<Mode> {
+    match std::fs::read_to_string(mode_file()).ok()?.trim() {
+        "dark" => Some(Mode::Dark),
+        "light" => Some(Mode::Light),
+        _ => None,
+    }
+}
+
+/// Write `mode` for the other processes, when it moved. Next to the file and
+/// renamed over it, so a reader sees the old word or the new one.
+fn publish(mode: Mode) {
+    if PUBLISHED.with(|p| p.replace(Some(mode))) == Some(mode) {
+        return;
+    }
+    let path = mode_file();
+    let word = match mode {
+        Mode::Dark => "dark\n",
+        Mode::Light => "light\n",
+    };
+    let tmp = path.with_extension("tmp");
+    let written = path
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::write(&tmp, word))
+        .and_then(|()| std::fs::rename(&tmp, &path));
+    if let Err(e) = written {
+        log::warn!("theme: cannot write {}: {e}", path.display());
+        PUBLISHED.with(|p| p.set(None));
+    }
 }
 
 /// Draw dark in this process whatever the shell's mode is: the lock screen
@@ -164,10 +223,18 @@ pub fn inputs() -> Inputs {
                 // A choice made in the pane applies at once: the person made it.
                 ThemeMode::Dark => Mode::Dark,
                 ThemeMode::Light => Mode::Light,
+                // The owner resolves; everyone else draws what it resolved,
+                // and resolves alone only while it has published nothing.
+                ThemeMode::Auto if !OWNER.with(Cell::get) => {
+                    published().unwrap_or_else(|| auto_mode(sun_mode(), chosen_now))
+                }
                 ThemeMode::Auto => auto_mode(sun_mode(), chosen_now),
             }
         })
     });
+    if OWNER.with(Cell::get) {
+        publish(mode);
+    }
     // One read of the one-line cache for both of the wallpaper's inputs.
     let (palette, backdrop) = match super::wallpaper::read() {
         Some((palette, backdrop)) => (palette, Some(backdrop)),

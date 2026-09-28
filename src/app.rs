@@ -152,6 +152,9 @@ pub fn run() {
     let state_clone = state.clone();
     let store_startup = store.clone();
     app.connect_startup(move |app| {
+        // Before the first resolution: this process resolves `auto` for
+        // every other one (`theme::own_mode`).
+        theme::own_mode();
         theme::load_css();
         crate::frame_stats::init();
 
