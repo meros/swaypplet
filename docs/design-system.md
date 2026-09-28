@@ -63,6 +63,13 @@ night light uses (`gammastep.nix`: 55.6 N, 13.0 E; Nix writes it to
   over `--motion-page` (§2.3).
 - Choosing `dark` or `light` in the pane sets that mode until you choose
   `auto` again.
+- **One process decides, every other one draws its answer.** The panel
+  resolves the inputs (the mode, the Look settings, the wallpaper's tint and
+  text backdrop), writes them to `$XDG_RUNTIME_DIR/swaypplet/theme-<display>.json`,
+  and only then sends the glass from the same answer. The lock screen, the
+  polkit agent and every other process read that file and reload when it
+  changes (`theme::follow`), so their text changes with the glass. On the
+  login screen the greeter is the one that decides.
 
 ### 2.2 The wallpaper tint
 
@@ -509,8 +516,8 @@ and the greeter's users still stand on the wallpaper and keep the halo.
 The lock and the greeter follow the mode: the plate's and the card's glass
 follow it like every other namespace. The greeter reads the system's Look
 from `/etc/swaypplet/settings.json`, which the machine's owner sets in the
-nixos flake, resolves `auto` by the sun itself, and sends its own compositor
-the matching material (`settings::glass::apply_greeter`).
+nixos flake, owns the theme on its compositor as the panel does in a
+session, and sends that compositor the matching material (`settings::glass::apply_greeter`).
 
 ## 4. Glass and the modes
 

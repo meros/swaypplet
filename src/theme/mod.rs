@@ -6,18 +6,22 @@
 //! of [`RULES`]. The order is the cascade: the files are contiguous pieces of
 //! what was one stylesheet.
 //!
-//! [`load_css`] runs in all eight processes that draw something. Only the
-//! long-lived ones ([`watch`]) follow the inputs after startup: the Look
-//! settings, the sun, and the wallpaper's hue (`wallpaper`), which the panel
-//! samples and every process reads.
+//! [`load_css`] runs in all eight processes that draw something. One of
+//! them owns the theme ([`own_mode`]: the panel, or the greeter on the login
+//! screen): it resolves the inputs from the Look settings, the sun and the
+//! wallpaper's hue, follows them ([`watch`]), and publishes every answer to
+//! [`theme_file`] before it sends the glass from the same answer. Every
+//! other process resolves nothing: it reads that file, and the long-lived
+//! ones follow it ([`follow`]). One answer, one channel, so the text in any
+//! process cannot disagree with the glass the owner sent.
 //!
 //! The theme is the runtime around the pure generator in `crate::tokens`:
 //!
 //! | file | holds |
 //! |---|---|
-//! | `mod.rs` | the stylesheet, [`reload`], [`observe`], [`watch`] |
+//! | `mod.rs` | the stylesheet, [`reload`], [`observe`], [`watch`], [`follow`] |
 //! | `fade.rs` | the colours fading from one set of inputs to the next |
-//! | `inputs.rs` | [`inputs`] and [`shown`]: the one `Inputs` builder |
+//! | `inputs.rs` | [`inputs`] and [`shown`]: the one `Inputs` builder, and the published file |
 //! | `sun.rs` | the sun's elevation, for `auto` (§2.1) |
 //! | `wallpaper.rs` | the wallpaper's hue, for the tint (§2.2) |
 //! | `locked.rs` | logind's LockedHint, to time a sun switch |
@@ -204,7 +208,7 @@ pub mod sun;
 mod sway;
 pub mod wallpaper;
 
-pub use inputs::{inputs, mode_file, own_mode};
+pub use inputs::{inputs, own_mode, theme_file};
 pub use paint::{Paint, paint};
 
 /// The inputs the stylesheet on screen was generated from: the Look
@@ -305,9 +309,6 @@ pub fn watch(on_material: impl Fn(crate::tokens::Inputs) + 'static) {
     locked::on_change(changed);
     crate::settings::store::observe(changed);
     follow_the_sun(changed);
-    // A process that does not own the mode (the standalone bar) draws the
-    // owner's answer, so it follows the file the owner writes.
-    std::mem::forget(crate::watch::files(&[mode_file()], changed));
 }
 
 /// A sender of the glass material, as [`watch`] takes it.
@@ -387,65 +388,22 @@ fn follow_the_sun(check: fn()) {
     crate::settings::store::observe(arm);
 }
 
-/// [`watch`] for the polkit agent: the stylesheet only, for as long as the
-/// process lives. The panel sends the glass material and the borders.
+/// Follow the owner's theme, for every process that does not own it (the
+/// lock screen, the polkit agent, the standalone bar): the stylesheet only,
+/// reloaded whenever the owner publishes. The owner sends the glass and the
+/// borders; a second sender would race it.
 ///
-/// The agent starts with the session and parks until a request, so without
-/// this its stylesheet was from whenever it started. After a change of mode
-/// the panel had moved the glass, and the card drew dark mode's white text
-/// on light glass. The triggers: the live settings copy (the agent runs
-/// `settings::store::watch`), the wallpaper's cache line (the sampler runs
-/// in the panel, not here) and the mode the panel resolved `auto` to
-/// ([`mode_file`]). The lock state and the sun are the panel's to act on;
-/// they stay here only for a session where the panel has published nothing.
+/// This is the only trigger a follower needs. The owner resolves on every
+/// event that moves the inputs (the settings, the wallpaper's hue, the lock
+/// state, the sun) and writes the file before it sends the glass, so a
+/// follower reloads `watch::SETTLE` after the glass starts to move, with the
+/// same answer. Reloads once now as well, for a process that was parked (the
+/// lock screen is started ahead of time) or started before the owner.
 pub fn follow() {
-    fn reparse() {
-        reload();
-    }
-    locked::follow();
-    locked::on_change(reparse);
-    crate::settings::store::observe(reparse);
-    let files: Vec<_> = [wallpaper::cache_file(), Some(mode_file())]
-        .into_iter()
-        .flatten()
-        .collect();
-    std::mem::forget(crate::watch::files(&files, reparse));
-    follow_the_sun(reparse);
-}
-
-/// [`watch`] for the lock screen, from the moment it locks: the stylesheet
-/// only. The panel sends the glass material and the borders; a second
-/// sender would race it.
-///
-/// The lock process is started ahead of time and parks until the lock, so
-/// its stylesheet is from whenever it started. A sun switch waits for the
-/// lock (§2.1), which is exactly when the panel moves the glass to the new
-/// mode; a lock screen that kept its old stylesheet then drew dark mode's
-/// white text on light glass. So it reloads here, before the surfaces are
-/// built, and follows while it is up: the settings file and the
-/// wallpaper's cache line by inotify, and the sun once a minute. Each call
-/// compares the inputs and reparses only when they moved.
-pub fn follow_while_locked() {
-    locked::assume_locked();
     reload();
-    let monitors = crate::watch::files(
-        &[
-            Some(crate::settings::store::path()),
-            wallpaper::cache_file(),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>(),
-        || {
-            crate::settings::store::init();
-            reload();
-        },
-    );
-    std::mem::forget(monitors);
-    glib::timeout_add_seconds_local(60, || {
+    std::mem::forget(crate::watch::files(&[theme_file()], || {
         reload();
-        glib::ControlFlow::Continue
-    });
+    }));
 }
 
 #[cfg(test)]

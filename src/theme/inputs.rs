@@ -28,60 +28,67 @@ thread_local! {
     /// The Look mode setting last resolved, to tell a choice made just now
     /// from the sun moving.
     static SETTING: Cell<Option<ThemeMode>> = const { Cell::new(None) };
-    /// Set by [`own_mode`]: this process resolves `auto` and publishes it.
+    /// Set by [`own_mode`]: this process resolves the inputs and publishes
+    /// them.
     static OWNER: Cell<bool> = const { Cell::new(false) };
-    /// The mode last written to [`mode_file`], so a tick that moved nothing
-    /// writes nothing.
-    static PUBLISHED: Cell<Option<Mode>> = const { Cell::new(None) };
+    /// What the owner last wrote to [`theme_file`], so a resolution that
+    /// moved nothing writes nothing.
+    static PUBLISHED: Cell<Option<Inputs>> = const { Cell::new(None) };
+    /// What this process last read from [`theme_file`], when it is not the
+    /// owner: `shown` answers from it.
+    static FOLLOWED: Cell<Option<Inputs>> = const { Cell::new(None) };
 }
 
-/// Make this process the one that resolves `auto` (the panel).
+/// Make this process the one that resolves the theme (the panel in a
+/// session, the greeter on the login screen).
 ///
-/// The sun's band holds whatever mode a process already shows, and a sun
-/// switch waits for the lock or for `PATIENCE`, so eight processes that each
-/// resolved `auto` from their own start time could disagree: the panel sent
-/// light glass while another process kept dark mode's white text on it. Now
-/// one process resolves, writes the answer to [`mode_file`], and every other
-/// process draws what that file says. The glass is sent from the same
-/// resolution, so the text and the glass cannot differ.
+/// Resolving is more than reading the settings: `auto` follows the sun with
+/// a hysteresis band, a sun switch waits for the lock or for `PATIENCE`, and
+/// the tint and the text backdrop come from the wallpaper sampler. Processes
+/// that each resolved from their own start time and their own triggers
+/// disagreed: the panel sent light glass while the lock screen, which only
+/// looked again once a minute, kept dark mode's white text on it. So exactly
+/// one process resolves, writes the whole answer to [`theme_file`] before it
+/// sends the glass from the same answer, and every other process draws what
+/// that file says ([`super::follow`]).
 pub fn own_mode() {
     OWNER.with(|o| o.set(true));
 }
 
-/// Where the owner writes the mode `auto` resolved to: one word, `dark` or
-/// `light`. In the runtime directory, so a new session never reads the last
-/// one's answer.
-pub fn mode_file() -> std::path::PathBuf {
+/// Where the owner publishes the inputs it resolved, as JSON: one file per
+/// compositor (named by `WAYLAND_DISPLAY`), in the runtime directory. Per
+/// compositor, because the theme is what one screen shows: a nested session
+/// (the render harness) or the greeter has its own. In the runtime
+/// directory, so a new session never reads the last one's answer.
+pub fn theme_file() -> std::path::PathBuf {
     let dir = std::env::var_os("XDG_RUNTIME_DIR").unwrap_or_else(|| "/tmp".into());
-    std::path::PathBuf::from(dir).join("swaypplet").join("mode")
+    let display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-0".into());
+    std::path::PathBuf::from(dir)
+        .join("swaypplet")
+        .join(format!("theme-{display}.json"))
 }
 
-/// The mode the owner published, or `None` before it has (the panel is not
-/// up yet, or not running).
-fn published() -> Option<Mode> {
-    match std::fs::read_to_string(mode_file()).ok()?.trim() {
-        "dark" => Some(Mode::Dark),
-        "light" => Some(Mode::Light),
-        _ => None,
-    }
+/// The inputs the owner published, or `None` before it has (the panel is not
+/// up yet, or not running) or when the file is from another build.
+fn published() -> Option<Inputs> {
+    serde_json::from_str(&std::fs::read_to_string(theme_file()).ok()?).ok()
 }
 
-/// Write `mode` for the other processes, when it moved. Next to the file and
-/// renamed over it, so a reader sees the old word or the new one.
-fn publish(mode: Mode) {
-    if PUBLISHED.with(|p| p.replace(Some(mode))) == Some(mode) {
+/// Write `inputs` for the other processes, when they moved. Next to the file
+/// and renamed over it, so a reader sees the old answer or the new one.
+fn publish(inputs: Inputs) {
+    if PUBLISHED.with(|p| p.replace(Some(inputs))) == Some(inputs) {
         return;
     }
-    let path = mode_file();
-    let word = match mode {
-        Mode::Dark => "dark\n",
-        Mode::Light => "light\n",
-    };
+    let path = theme_file();
     let tmp = path.with_extension("tmp");
-    let written = path
-        .parent()
-        .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::write(&tmp, word))
+    let written = serde_json::to_string(&inputs)
+        .map_err(std::io::Error::other)
+        .and_then(|json| {
+            path.parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::write(&tmp, json))
+        })
         .and_then(|()| std::fs::rename(&tmp, &path));
     if let Err(e) = written {
         log::warn!("theme: cannot write {}: {e}", path.display());
@@ -95,8 +102,12 @@ fn shown_mode() -> Mode {
 }
 
 /// The inputs with the mode and the tint as they were last resolved rather
-/// than resolved again: see `theme::shown`.
+/// than resolved again: see `theme::shown`. In a process that follows the
+/// owner, the inputs it last read.
 pub(super) fn shown() -> Inputs {
+    if let Some(followed) = FOLLOWED.with(Cell::get) {
+        return followed;
+    }
     let look = crate::settings::store::with(|s| s.look());
     build(
         &look,
@@ -182,34 +193,48 @@ fn auto_mode(sun: Mode, chosen_now: bool) -> Mode {
     when_unseen(sun)
 }
 
-/// The theme inputs right now.
+/// `SWAYPPLET_MODE` forces a mode: the render harness checks both.
+fn forced() -> Option<Mode> {
+    match std::env::var("SWAYPPLET_MODE").as_deref() {
+        Ok("light") => Some(Mode::Light),
+        Ok("dark") => Some(Mode::Dark),
+        _ => None,
+    }
+}
+
+/// The theme inputs right now: the owner's answer, published, in every
+/// process but the owner; resolved here in the owner, and in a process that
+/// finds nothing published yet (the owner is not up).
 pub fn inputs() -> Inputs {
+    if !OWNER.with(Cell::get)
+        && let Some(mut inputs) = published()
+    {
+        if let Some(mode) = forced() {
+            inputs.mode = mode;
+        }
+        FOLLOWED.with(|f| f.set(Some(inputs)));
+        return inputs;
+    }
+    let inputs = resolve();
+    if OWNER.with(Cell::get) {
+        publish(inputs);
+    }
+    inputs
+}
+
+/// Resolve the inputs from the Look settings, the sun and the wallpaper's
+/// cache line.
+fn resolve() -> Inputs {
     let look = crate::settings::store::with(|s| s.look());
     // Whether the mode setting moved since the last resolution: then the
     // person just chose it, and Auto shows the sun's answer at once.
     let chosen_now = SETTING.with(|c| c.replace(Some(look.mode))) != Some(look.mode);
-    let forced = match std::env::var("SWAYPPLET_MODE").as_deref() {
-        Ok("light") => Some(Mode::Light),
-        Ok("dark") => Some(Mode::Dark),
-        _ => None,
-    };
-    // `SWAYPPLET_MODE` forces a mode: the render harness checks both.
-    let mode = forced.unwrap_or_else(|| {
-        match look.mode {
-            // A choice made in the pane applies at once: the person made it.
-            ThemeMode::Dark => Mode::Dark,
-            ThemeMode::Light => Mode::Light,
-            // The owner resolves; everyone else draws what it resolved,
-            // and resolves alone only while it has published nothing.
-            ThemeMode::Auto if !OWNER.with(Cell::get) => {
-                published().unwrap_or_else(|| auto_mode(sun_mode(), chosen_now))
-            }
-            ThemeMode::Auto => auto_mode(sun_mode(), chosen_now),
-        }
+    let mode = forced().unwrap_or_else(|| match look.mode {
+        // A choice made in the pane applies at once: the person made it.
+        ThemeMode::Dark => Mode::Dark,
+        ThemeMode::Light => Mode::Light,
+        ThemeMode::Auto => auto_mode(sun_mode(), chosen_now),
     });
-    if OWNER.with(Cell::get) {
-        publish(mode);
-    }
     // One read of the one-line cache for both of the wallpaper's inputs.
     let (sample, backdrop) = match super::wallpaper::read() {
         Some((sample, backdrop)) => (sample, Some(backdrop)),
@@ -243,5 +268,26 @@ mod tests {
         // Choosing Auto again clears the wait and applies.
         assert_eq!(auto_mode(Mode::Light, true), Mode::Light);
         assert!(PENDING.with(|p| p.borrow().is_none()));
+    }
+
+    /// What the owner writes is what a follower reads, tint and backdrop
+    /// included.
+    #[test]
+    fn the_published_inputs_round_trip() {
+        let inputs = Inputs {
+            mode: Mode::Light,
+            tint: crate::tokens::Tint::Full(crate::tokens::Palette {
+                primary: 200,
+                ground: 30,
+                secondary: Some(310),
+            }),
+            backdrop: Some(Backdrop {
+                luminance: 62,
+                spread: 9,
+            }),
+            ..Inputs::default()
+        };
+        let json = serde_json::to_string(&inputs).unwrap();
+        assert_eq!(serde_json::from_str::<Inputs>(&json).unwrap(), inputs);
     }
 }

@@ -35,7 +35,7 @@ use super::{Mode, ON_STATUS, Rgb, apca};
 /// stays `Eq` and a change below a percent does not reload the stylesheet.
 ///
 /// [`Inputs`]: super::Inputs
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Backdrop {
     /// Mean relative (linear) luminance, 0–100.
     pub luminance: u8,

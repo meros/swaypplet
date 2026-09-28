@@ -299,12 +299,9 @@ pub fn run() {
             return;
         }
         theme::load_css();
-        // The bar outlives every wallpaper change in a session, so it follows
-        // the theme inputs (the wallpaper's hue the panel samples among them)
-        // instead of keeping the ones it started with. Nothing here writes
-        // them; the glass goes back through the settings' replay, as in the
-        // panel.
-        theme::watch(crate::settings::glass::apply_saved_for);
+        // Next to a live panel, which owns the theme and sends the glass:
+        // this bar draws the panel's answer and follows it.
+        theme::follow();
         crate::settings::store::init();
         // Keeps itself alive through its main-context event loop.
         let sway = SwayService::start();

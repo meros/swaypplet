@@ -299,10 +299,11 @@ pub fn run() -> ! {
     // the live desktop on screen for; the compositor draws the wallpaper now,
     // so there is nothing left to decode.
     //
-    // The mode's tokens, like every other surface: the compositor dims the
-    // wallpaper under the lock in dark mode and lifts it in light mode, and
-    // the card's glass follows the mode too (`settings::glass::for_mode`).
+    // The panel's theme, like every other surface, and followed from here
+    // on, parked or locked: the panel publishes the inputs before it sends
+    // the glass, so the text and the glass change together (`theme::follow`).
     crate::theme::load_css();
+    crate::theme::follow();
     // The motion setting, for the fade and the ring (`anim::duration`).
     crate::settings::store::init();
     stage("css");
@@ -312,10 +313,6 @@ pub fn run() -> ! {
     if std::env::var_os("SWAYPPLET_LOCK_WAIT").is_some() {
         warm_and_wait();
     }
-
-    // The mode may have changed while this process was parked, and a sun
-    // switch waits for exactly this moment (`theme::follow_while_locked`).
-    crate::theme::follow_while_locked();
 
     // After the LOCK command, never before it: creating this arms the
     // compositor's backdrop for one lock, and that arming expires.

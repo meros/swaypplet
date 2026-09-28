@@ -43,7 +43,7 @@ use super::{Oklch, Rgb};
 
 /// The wallpaper's hues, in whole OKLCH degrees (so `Inputs` stays `Eq`
 /// and a change below a degree does not reload the stylesheet).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Palette {
     /// The accent's hue: the offered colour picked in the Look pane, by
     /// default the one the image is about.
@@ -76,7 +76,8 @@ impl Palette {
 }
 
 /// How far the wallpaper reaches into the tokens.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Tint {
     /// The shipped tokens, byte for byte.
     #[default]

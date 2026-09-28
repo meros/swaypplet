@@ -158,11 +158,13 @@ pub fn run() -> ! {
     // decides it in the flake, which is the only place a system-wide
     // setting lives. Then follow it, and put the matching glass on this
     // compositor, whose config ships the dark material.
+    // The greeter is alone on its compositor, so it owns the theme there,
+    // as the panel does in a session (`theme::own_mode`).
     crate::settings::store::init();
+    crate::theme::own_mode();
     crate::theme::load_css();
-    crate::theme::follow();
     crate::settings::glass::apply_greeter(crate::theme::shown());
-    crate::theme::observe(|| crate::settings::glass::apply_greeter(crate::theme::shown()));
+    crate::theme::watch(crate::settings::glass::apply_greeter);
 
     // Start from the cheap SWAYPPLET_GREET_USERS name list so the window can
     // present without blocking on the session query (a logind round trip per

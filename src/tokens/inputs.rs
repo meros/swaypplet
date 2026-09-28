@@ -7,7 +7,8 @@
 
 use super::{Backdrop, Rgb, Tint};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Mode {
     Dark,
     Light,
@@ -103,7 +104,9 @@ impl Neutral {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Serialisable because the panel publishes the inputs it resolved and every
+/// other process draws those (`theme::inputs`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Inputs {
     pub mode: Mode,
     pub accent: Accent,
