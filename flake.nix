@@ -64,6 +64,9 @@
             # postInstall below. Matched by name rather than by extension so a
             # dev/*.sh edit does not churn this derivation's source hash.
             (builtins.match ".*/data/swaypplet-(toggle|launcher).sh$" path != null) ||
+            # data/land-mask.txt: the Day and night map's land, read by
+            # include_str! in src/settings/location_map.rs.
+            (builtins.match ".*/data/land-mask\\.txt$" path != null) ||
             (craneLib.filterCargoSources path type);
 
           src = pkgs.lib.cleanSourceWith {
