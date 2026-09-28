@@ -384,6 +384,28 @@ fn follow_the_sun(check: fn()) {
     crate::settings::store::observe(arm);
 }
 
+/// [`watch`] for the polkit agent: the stylesheet only, for as long as the
+/// process lives. The panel sends the glass material and the borders.
+///
+/// The agent starts with the session and parks until a request, so without
+/// this its stylesheet was from whenever it started. After a change of mode
+/// the panel had moved the glass, and the card drew dark mode's white text
+/// on light glass. The triggers are [`watch`]'s: the live settings copy
+/// (the agent runs `settings::store::watch`), the wallpaper's cache line
+/// (the sampler runs in the panel, not here), the lock state and the sun.
+pub fn follow() {
+    fn reparse() {
+        reload();
+    }
+    locked::follow();
+    locked::on_change(reparse);
+    crate::settings::store::observe(reparse);
+    if let Some(cache) = wallpaper::cache_file() {
+        std::mem::forget(crate::watch::files(&[cache], reparse));
+    }
+    follow_the_sun(reparse);
+}
+
 /// [`watch`] for the lock screen, from the moment it locks: the stylesheet
 /// only. The panel sends the glass material and the borders; a second
 /// sender would race it.

@@ -194,6 +194,7 @@ pub fn run() {
     let state_startup = state.clone();
     app.connect_startup(move |app| {
         theme::load_css();
+        theme::follow();
 
         let dialog = PolkitDialog::new(app);
         // After the dialog on purpose: sway stacks surfaces within a layer in
