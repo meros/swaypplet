@@ -1,4 +1,4 @@
-//! Backup segment — right instrument track, between presence and the clock.
+//! Backup segment — right instrument track, before the mode glyph.
 //!
 //! Deliberately not a hazard: the hazard lane is zero width when healthy
 //! (docs/BAR_VISION.md, increment 7), and this instrument is wanted while

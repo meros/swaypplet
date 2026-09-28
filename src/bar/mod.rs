@@ -17,6 +17,7 @@ mod board;
 mod clock;
 mod decision;
 mod hazards;
+mod look_mode;
 mod media;
 mod peek;
 mod pins;
@@ -227,6 +228,7 @@ fn build_bar_window(bar: &BarManager, monitor: &gdk::Monitor) -> (Surface, decis
         track.append(&follow_setting(presence, |bar| bar.presence));
     }
     track.append(&follow_setting(backup::build(backup), |bar| bar.backup));
+    track.append(&follow_setting(look_mode::build(), |bar| bar.look_mode));
     track.append(&clock::build());
     right.append(&track);
 

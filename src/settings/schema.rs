@@ -304,6 +304,10 @@ pub struct Bar {
     /// The nightly backup's one-glyph verdict, beside the clock.
     #[serde(default = "yes")]
     pub backup: bool,
+    /// The Look mode's glyph beside the clock: Auto, Dark or Light, and a
+    /// click moves to the next (`bar/look_mode.rs`).
+    #[serde(default = "yes")]
+    pub look_mode: bool,
 }
 
 fn yes() -> bool {
@@ -322,6 +326,7 @@ impl Default for Bar {
             battery: true,
             presence: true,
             backup: true,
+            look_mode: true,
         }
     }
 }

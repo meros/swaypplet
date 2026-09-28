@@ -36,7 +36,8 @@
     "tray": true,
     "battery": true,
     "presence": true,
-    "backup": true
+    "backup": true,
+    "look_mode": true
   },
   "pins": {
     "size": "medium",

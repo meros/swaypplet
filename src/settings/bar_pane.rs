@@ -35,7 +35,7 @@ struct Segment {
     set: fn(&mut Bar, bool),
 }
 
-const SEGMENTS: [Segment; 6] = [
+const SEGMENTS: [Segment; 7] = [
     Segment {
         label: "Media mark",
         hint: "What is playing, at the left of the right cluster.",
@@ -65,6 +65,12 @@ const SEGMENTS: [Segment; 6] = [
         hint: "One glyph for the nightly backup: quiet when both jobs are fresh, amber when one failed or is two nights old.",
         get: |b| b.backup,
         set: |b, v| b.backup = v,
+    },
+    Segment {
+        label: "Light or dark",
+        hint: "The mode's glyph beside the clock. A click moves Auto to Dark to Light.",
+        get: |b| b.look_mode,
+        set: |b, v| b.look_mode = v,
     },
     Segment {
         label: "Task board",
@@ -378,6 +384,7 @@ pub(super) const SEARCH: &[Entry] = &[
     row("Segments", "Battery", "The battery segment of the bar", &["power", "charge", "percentage"]).keys(&["bar.battery"]),
     row("Segments", "Presence", "The presence sensor's mark", &["sensor", "proximity"]).keys(&["bar.presence"]),
     row("Segments", "Backup", "The nightly backup's glyph", &["restic", "borg", "backup status"]).keys(&["bar.backup"]),
+    row("Segments", "Light or dark", "Switch the mode from the bar", &["dark mode", "light mode", "theme", "mode toggle", "night mode", "auto"]).keys(&["bar.look_mode"]),
     row("Segments", "Task board", "Tasks 1–4 on the bar", &["tasks", "todo", "board"]).keys(&["bar.board"]),
     row("Volume & brightness", "Shown as", "Where a volume or brightness key shows", &["osd", "on screen display", "popup", "volume popup", "overlay"]).keys(&["bar.osd_in_bar"]),
     row("Pins & previews", "Size", "How big pins and the peek are", &["pin size", "pinned workspace", "preview size", "peek", "thumbnail", "picture in picture", "pip"]).keys(&["pins.size"]),
@@ -418,7 +425,7 @@ mod tests {
         moved.sort();
         assert_eq!(
             moved,
-            ["backup", "battery", "board", "media", "presence", "tray"]
+            ["backup", "battery", "board", "look_mode", "media", "presence", "tray"]
         );
     }
 }
