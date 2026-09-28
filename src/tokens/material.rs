@@ -120,6 +120,11 @@ pub fn readable(inputs: Inputs, m: &Material) -> bool {
 /// full path, the photochromic ceiling or lift, then the body fill. The
 /// shader draws it; this model is what [`readable`] and the contrast tests
 /// measure through.
+/// The most light glass's lift may multiply a colour by (the shader's
+/// `LIFT_GAIN_MAX`): at 4 a colour behind light glass keeps about the chroma
+/// dark glass leaves it, so the two modes feel alike.
+const LIFT_GAIN_MAX: f64 = 4.0;
+
 pub fn glass_body(backdrop: Rgb, m: &Material) -> Rgb {
     let k = (-m.absorb).exp();
     let mut t = backdrop.to_linear().map(|x| x * k);
@@ -129,13 +134,23 @@ pub fn glass_body(backdrop: Rgb, m: &Material) -> Rgb {
         let s = p * (1.0 - (-lum / p).exp()) / lum;
         t = t.map(|x| x * s);
     } else if m.photochromic < 0.0 {
+        // As the shader does (nixos patches/scenefx-photochromic-lift.patch):
+        // the floor reaches the colour as a gain of at most LIFT_GAIN_MAX,
+        // never past 1.0 on a channel, and the rest as white. The luminance
+        // lands on the floor either way. An uncapped gain of lifted/lum
+        // turned a dark red diff line behind light glass into neon.
         let f = -m.photochromic;
         let lifted = lum + f * (-lum / f).exp();
-        t = if lum > 0.0005 {
-            t.map(|x| x * lifted / lum)
+        let mut gain = if lum > 0.0005 {
+            (lifted / lum).min(LIFT_GAIN_MAX)
         } else {
-            [lifted; 3]
+            0.0
         };
+        let top = t[0].max(t[1]).max(t[2]);
+        if top > lum + 1e-6 {
+            gain = gain.min((1.0 - lifted).max(0.0) / (top - lum));
+        }
+        t = t.map(|x| x * gain + lifted - lum * gain);
     }
     let fill = m.fill_color.to_linear();
     let a = m.fill_alpha.clamp(0.0, 1.0);
@@ -154,6 +169,50 @@ mod tests {
         every::input()
             .into_iter()
             .filter(|i| i.tint.hue().is_none_or(|h| (h as u32).is_multiple_of(30)))
+    }
+
+    /// OKLCH chroma, for comparing how much colour survives the glass.
+    fn chroma(c: Rgb) -> f64 {
+        let [r, g, b] = c.to_linear();
+        let cbrt = |x: f64| x.max(0.0).cbrt();
+        let l = cbrt(0.412_221_470_8 * r + 0.536_332_536_3 * g + 0.051_445_992_9 * b);
+        let m = cbrt(0.211_903_498_2 * r + 0.680_699_545_1 * g + 0.107_396_956_6 * b);
+        let s = cbrt(0.088_302_461_9 * r + 0.281_718_837_6 * g + 0.629_978_700_5 * b);
+        let a = 1.977_998_495_1 * l - 2.428_592_205 * m + 0.450_593_709_9 * s;
+        let bb = 0.025_904_037_1 * l + 0.782_771_766_2 * m - 0.808_675_766 * s;
+        a.hypot(bb)
+    }
+
+    /// Light glass shows a colour behind it about as strongly as dark glass
+    /// does, and never brighter than its gamut: no neon from a terminal's
+    /// dark red diff line or a pure red. Measured on the body (before the
+    /// client's content), in OKLCH chroma, with the uncapped lift at 0.085
+    /// over the diff line against dark glass's 0.031.
+    #[test]
+    fn light_and_dark_glass_carry_a_colour_alike() {
+        let light = material(Inputs {
+            mode: Mode::Light,
+            ..Inputs::default()
+        });
+        let dark = material(Inputs::default());
+        assert!(light.photochromic < 0.0 && dark.photochromic > 0.0);
+        // Dark colours (a diff line's ground, a dim photo): within a
+        // factor of 1.6 of dark glass either way.
+        for c in [0x5f0000, 0x003f00, 0x3c1414, 0x458588, 0x00003f, 0xf4a6c0, 0x8ec8f0] {
+            let c = Rgb::hex(c);
+            let (l, d) = (chroma(glass_body(c, &light)), chroma(glass_body(c, &dark)));
+            assert!(
+                l <= d * 1.6 && l >= d / 1.6,
+                "{c:?}: light {l:.3}, dark {d:.3}"
+            );
+        }
+        // Vivid colours: never more than dark glass shows, where the old
+        // gain clipped them to neon.
+        for c in [0xff0000, 0xff00aa, 0x0000ff, 0xcc241d] {
+            let c = Rgb::hex(c);
+            let (l, d) = (chroma(glass_body(c, &light)), chroma(glass_body(c, &dark)));
+            assert!(l <= d, "{c:?}: light {l:.3}, dark {d:.3}");
+        }
     }
 
     #[test]
