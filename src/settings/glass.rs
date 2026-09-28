@@ -595,26 +595,43 @@ pub fn clear_override() {
 /// The sway config has already put the system material on every namespace by
 /// the time anything here runs, so this is a no-op on a session that has never
 /// been tuned — which is why it is a plain call in `app::run` rather than
-/// something the panel has to remember to do.
+/// something the panel has to remember to do. The same holds after a
+/// `swaymsg reload`, the other caller: the config's material is back on.
 pub fn apply_saved() {
-    apply_saved_for(crate::theme::inputs());
+    replay(crate::theme::inputs(), true);
 }
 
 /// [`apply_saved`] for `inputs` already resolved: what `theme::watch` hands
 /// its material callback when the mode, the contrast or a full tint moved
 /// the material, so the replay matches the stylesheet just loaded instead of
 /// resolving the theme a second time.
+///
+/// Always sends. The compositor holds whatever the last switch sent, not the
+/// config's material, so a switch back to the default look has to send it:
+/// skipping it here is what left light glass under a dark stylesheet.
 pub fn apply_saved_for(inputs: crate::tokens::Inputs) {
+    replay(inputs, false);
+}
+
+/// Whether the compositor already shows what a replay would send: only when
+/// it holds the sway config's material (`on_config`), nothing overrides it,
+/// and the look is the one the config ships (dark, standard contrast, no
+/// neutral cast).
+fn config_already_shows(on_config: bool, overridden: bool, inputs: crate::tokens::Inputs) -> bool {
+    on_config
+        && !overridden
+        && inputs.mode == crate::tokens::Mode::Dark
+        && inputs.contrast == crate::tokens::Contrast::Standard
+        && !inputs.tint.casts_neutral()
+}
+
+fn replay(inputs: crate::tokens::Inputs, on_config: bool) {
     let Some(system) = System::load() else {
         return;
     };
     let saved = load_override();
-    let default_look = inputs.mode == crate::tokens::Mode::Dark
-        && inputs.contrast == crate::tokens::Contrast::Standard
-        && !inputs.tint.casts_neutral();
-    if saved.is_none() && default_look {
-        // The sway config already carries exactly this: nothing to send, but
-        // a later mode switch fades from it.
+    if config_already_shows(on_config, saved.is_some(), inputs) {
+        // Nothing to send, but a later mode switch fades from it.
         super::glass_fade::assume(for_mode(Tuning::system(&system), inputs));
         return;
     }
@@ -800,6 +817,23 @@ mod tests {
     use super::*;
     use crate::settings::preset;
     use crate::shell::Namespace;
+
+    /// A switch back to the default dark look sends the glass: the
+    /// compositor holds the light material the last switch sent. Only a
+    /// compositor fresh from its config may skip it.
+    #[test]
+    fn a_switch_to_dark_sends_the_glass() {
+        let dark = crate::tokens::Inputs::default();
+        assert_eq!(dark.mode, crate::tokens::Mode::Dark);
+        assert!(!config_already_shows(false, false, dark));
+        let light = crate::tokens::Inputs {
+            mode: crate::tokens::Mode::Light,
+            ..dark
+        };
+        assert!(!config_already_shows(true, false, light));
+        assert!(!config_already_shows(true, true, dark));
+        assert!(config_already_shows(true, false, dark));
+    }
 
     fn system() -> System {
         System {
