@@ -428,6 +428,20 @@ case "$MODE" in
     sleep 1.5
     "$BIN" osd --caps-lock >>/tmp/swpp-app.log 2>&1 || true
     ;;
+  lock)
+    # The real locker, through ext-session-lock, rather than preview:lock's
+    # copy of its content on a layer surface: what the compositor draws
+    # around the lock (the `session-lock` glass, the wallpaper under it) is
+    # only there for a real lock. The panel runs first, because it owns the
+    # theme the locker follows.
+    "$BIN" >/tmp/swpp-app.log 2>&1 &
+    for _ in $(seq 1 200); do
+      [ -e "$RUNTIME/swaypplet.pid" ] && break; sleep 0.1
+    done
+    sleep 1.5
+    timeout 120 "$BIN" lock >>/tmp/swpp-app.log 2>&1 &
+    sleep "${SWPP_LOCK_WAIT:-3}"
+    ;;
   keybinds)
     "$BIN" >/tmp/swpp-app.log 2>&1 &
     # The sheet is a surface of the running panel, so it needs the panel up
@@ -462,7 +476,7 @@ mapped=""
 # A layer surface is never in the tree, so this wait cannot see one and runs
 # to its 6 s end. For the jump card that is fatal: its watchdog commits and
 # closes it after 3 s, so every shot missed it.
-case "$MODE" in jump|osd|quiet|report) mapped=layer ;; esac
+case "$MODE" in jump|osd|quiet|report|lock) mapped=layer ;; esac
 for _ in $(seq 1 60); do
   [ -n "$mapped" ] && break
   swaymsg -t get_tree 2>/dev/null | grep -q '"app_id": *"[^"]*swaypplet' && { mapped=1; break; }
