@@ -37,7 +37,7 @@ use std::time::Duration;
 use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
-use super::card::{age_label, populate_card, set_critical_class, wants_keyboard};
+use super::card::{age_label, populate_card, set_critical_class};
 use super::card_surface::CardSurface;
 use super::timers::{Timer, cancel_timer, make_timer, pause_timers, resume_timers};
 use crate::anim;
@@ -94,9 +94,6 @@ pub(super) struct Card {
     pub(super) group: Option<String>,
     /// Every notification the card stands for, oldest first; `id` is last.
     pub(super) members: Vec<u32>,
-    /// The card carries a field that has to be typed into, which is the only
-    /// reason its surface ever accepts keyboard focus.
-    pub(super) wants_keyboard: bool,
     /// When the notification arrived, for the age in the header.
     pub(super) stamp: std::time::SystemTime,
     /// The header's age label, so the minute tick can rewrite it without
@@ -329,7 +326,6 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
             timer,
             group: key,
             members: vec![id],
-            wants_keyboard: wants_keyboard(notif),
             stamp: notif.timestamp,
             age,
             exiting: false,
@@ -376,7 +372,6 @@ fn refill(st: &Rc<RefCell<State>>, id: u32, notif: &Notification) {
         if let Some(card) = s.cards.iter_mut().find(|c| c.id == id && !c.exiting) {
             card.stamp = notif.timestamp;
             card.age = age;
-            card.wants_keyboard = wants_keyboard(notif);
         }
     }
     sync_keyboard_mode(st);
@@ -618,14 +613,16 @@ pub(super) fn reflow(st: &Rc<RefCell<State>>) {
     }
 }
 
-/// Match each surface's keyboard mode to whether its own card can be typed
-/// into. Per card, because the keyboard belongs to the card with the field
-/// and to nothing else on screen.
+/// Every card on screen takes the keyboard when it is clicked, and never
+/// otherwise (`OnDemand`). A card with a reply field needs it to be typed
+/// into; every card needs it to be clicked through to its sender, because
+/// the activation token handed to the sender names the surface that has the
+/// keyboard, and a token naming none only marks the window urgent
+/// (`activate`). A card on its way out gives it up.
 fn sync_keyboard_mode(st: &Rc<RefCell<State>>) {
     let s = st.borrow();
     for card in &s.cards {
-        card.surface
-            .set_wants_keyboard(card.wants_keyboard && !card.exiting);
+        card.surface.set_wants_keyboard(!card.exiting);
     }
 }
 

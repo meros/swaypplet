@@ -196,9 +196,9 @@ impl CardSurface {
         surface.set_input_region(Some(&region));
     }
 
-    /// Whether this card can be typed into. Off by default and for almost
-    /// every card: a surface that appears unbidden has no business holding
-    /// the keyboard, and `OnDemand` only ever takes focus on a click.
+    /// Whether this card takes the keyboard when it is clicked (`OnDemand`),
+    /// or never. A surface that appears unbidden has no business holding the
+    /// keyboard, and `OnDemand` only ever takes it on a click.
     pub fn set_wants_keyboard(&self, wants: bool) {
         self.inner.surface.set_wants_keyboard(wants);
     }

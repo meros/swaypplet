@@ -27,6 +27,7 @@ enum DbusEvent {
 enum SignalEvent {
     Closed(u32, u32),
     ActionInvoked(u32, String),
+    ActivationToken(u32, String),
     Replied(u32, String),
 }
 
@@ -350,6 +351,16 @@ impl NotificationServer {
         action_key: &str,
     ) -> zbus::Result<()>;
 
+    /// An xdg-activation token for the sender of the action about to be
+    /// invoked, so it may raise the window the notification is about
+    /// (Desktop Notifications spec 1.2). Sent just before `ActionInvoked`.
+    #[zbus(signal)]
+    async fn activation_token(
+        emitter: &SignalContext<'_>,
+        id: u32,
+        activation_token: &str,
+    ) -> zbus::Result<()>;
+
     /// Text the user typed into a card offering `inline-reply`.
     #[zbus(signal)]
     async fn notification_replied(
@@ -420,6 +431,9 @@ pub fn start_server(store: Rc<RefCell<NotificationStore>>) {
                                 SignalEvent::ActionInvoked(id, key) => {
                                     NotificationServer::action_invoked(ctxt, id, &key).await
                                 }
+                                SignalEvent::ActivationToken(id, token) => {
+                                    NotificationServer::activation_token(ctxt, id, &token).await
+                                }
                                 SignalEvent::Replied(id, text) => {
                                     NotificationServer::notification_replied(ctxt, id, &text).await
                                 }
@@ -452,6 +466,14 @@ pub fn start_server(store: Rc<RefCell<NotificationStore>>) {
         let tx = signal_tx.clone();
         store.borrow_mut().connect_action(move |id, key| {
             let _ = tx.send(SignalEvent::ActionInvoked(id, key.to_string()));
+        });
+    }
+    {
+        // The same channel as the action, and fired before it, so the
+        // token reaches the bus first.
+        let tx = signal_tx.clone();
+        store.borrow_mut().connect_activation_token(move |id, token| {
+            let _ = tx.send(SignalEvent::ActivationToken(id, token.to_string()));
         });
     }
     {

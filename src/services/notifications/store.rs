@@ -10,6 +10,8 @@ type ActionCb = Rc<dyn Fn(u32, &str)>;
 /// A typed reply to a notification, which is a different thing from an
 /// action: it carries text the user wrote rather than naming a button.
 type ReplyCb = Rc<dyn Fn(u32, &str)>;
+/// An xdg-activation token for the sender of an invoked action.
+type TokenCb = Rc<dyn Fn(u32, &str)>;
 
 /// A Claude session located for stop-notification policy (vision O2):
 /// which task owns it, and whether its workspace is showing on any output.
@@ -53,6 +55,7 @@ pub struct NotificationStore {
     on_close: Vec<CloseCb>,
     on_change: Vec<ChangeCb>,
     on_action: Vec<ActionCb>,
+    on_token: Vec<TokenCb>,
     on_reply: Vec<ReplyCb>,
     task_resolver: Option<TaskResolver>,
 }
@@ -62,6 +65,7 @@ pub struct PendingCallbacks {
     notify: Vec<(NotifyCb, Notification)>,
     close: Vec<(CloseCb, u32, CloseReason)>,
     change: Vec<ChangeCb>,
+    token: Vec<(TokenCb, u32, String)>,
     action: Vec<(ActionCb, u32, String)>,
     reply: Vec<(ReplyCb, u32, String)>,
 }
@@ -72,6 +76,7 @@ impl PendingCallbacks {
             notify: Vec::new(),
             close: Vec::new(),
             change: Vec::new(),
+            token: Vec::new(),
             action: Vec::new(),
             reply: Vec::new(),
         }
@@ -87,6 +92,10 @@ impl PendingCallbacks {
         }
         for cb in self.change {
             cb();
+        }
+        // Before the action it belongs to: see `connect_activation_token`.
+        for (cb, id, token) in self.token {
+            cb(id, &token);
         }
         for (cb, id, key) in self.action {
             cb(id, &key);
@@ -110,6 +119,7 @@ impl NotificationStore {
             on_close: Vec::new(),
             on_change: Vec::new(),
             on_action: Vec::new(),
+            on_token: Vec::new(),
             on_reply: Vec::new(),
             task_resolver: None,
         }
@@ -138,6 +148,12 @@ impl NotificationStore {
 
     pub fn connect_action(&mut self, cb: impl Fn(u32, &str) + 'static) {
         self.on_action.push(Rc::new(cb));
+    }
+
+    /// The activation token that goes with an invoked action (the spec's
+    /// `ActivationToken` signal), handed over before the action itself.
+    pub fn connect_activation_token(&mut self, cb: impl Fn(u32, &str) + 'static) {
+        self.on_token.push(Rc::new(cb));
     }
 
     pub fn connect_reply(&mut self, cb: impl Fn(u32, &str) + 'static) {
@@ -337,8 +353,13 @@ impl NotificationStore {
 
     /// Notify observers (e.g. the D-Bus layer) that an action was invoked.
     /// Does not mutate notification state.
-    pub fn action_invoked(&self, id: u32, key: &str) -> PendingCallbacks {
+    pub fn action_invoked(&self, id: u32, key: &str, token: Option<&str>) -> PendingCallbacks {
         let mut pending = PendingCallbacks::new();
+        if let Some(token) = token {
+            for cb in &self.on_token {
+                pending.token.push((cb.clone(), id, token.to_string()));
+            }
+        }
         for cb in &self.on_action {
             pending.action.push((cb.clone(), id, key.to_string()));
         }
@@ -419,8 +440,8 @@ pub fn store_close_all_of(store: &StoreRef, ids: &[u32], reason: CloseReason) {
     pending.fire();
 }
 
-pub fn store_action_invoked(store: &StoreRef, id: u32, key: &str) {
-    let pending = store.borrow().action_invoked(id, key);
+pub fn store_action_invoked(store: &StoreRef, id: u32, key: &str, token: Option<&str>) {
+    let pending = store.borrow().action_invoked(id, key, token);
     pending.fire();
 }
 
@@ -642,4 +663,31 @@ mod tests {
         assert_eq!(stored.task, None);
         assert!(store.should_popup(&stored));
     }
+
+    #[test]
+    fn an_action_hands_its_activation_token_over_first() {
+        // The spec's ActivationToken signal goes out before ActionInvoked, so
+        // the sender holds the token when it acts on the action.
+        let store: StoreRef = Rc::new(RefCell::new(NotificationStore::new()));
+        let seen = Rc::new(RefCell::new(Vec::<String>::new()));
+        {
+            let seen = seen.clone();
+            store.borrow_mut().connect_action(move |id, key| {
+                seen.borrow_mut().push(format!("action {id} {key}"));
+            });
+        }
+        {
+            let seen = seen.clone();
+            store.borrow_mut().connect_activation_token(move |id, token| {
+                seen.borrow_mut().push(format!("token {id} {token}"));
+            });
+        }
+        store_action_invoked(&store, 7, "default", Some("abc"));
+        store_action_invoked(&store, 8, "snooze", None);
+        assert_eq!(
+            *seen.borrow(),
+            ["token 7 abc", "action 7 default", "action 8 snooze"]
+        );
+    }
+
 }

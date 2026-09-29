@@ -390,6 +390,8 @@ impl Panel {
             let surface = surface.clone();
             Rc::new(move || surface.hide())
         };
+        // A notification clicked through to its sender takes the panel away.
+        notifications.set_on_activate(hide_menu.clone());
 
         // ── Prefix routing from Omnibox ──────────────────────────────────────
         {

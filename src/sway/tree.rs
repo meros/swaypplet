@@ -77,7 +77,8 @@ pub struct Target {
 /// terminal indistinguishable by name from the others. A session that has
 /// ended finds nothing, which falls through to the caller's fallback rather
 /// than to a guess. `parent` walks the process tree (`/proc`), and is the
-/// caller's so this module needs nothing from the services.
+/// caller's so this module needs nothing from the services. `pick` says
+/// whether a name several windows answer to equally still picks one of them.
 ///
 /// The tree query is an IPC round trip, so it happens on a worker thread
 /// (`spawn::spawn_work`) rather than under the pointer. A sway that is not
@@ -87,6 +88,7 @@ pub fn focus_source(
     names: Vec<String>,
     claude_pid: Option<i32>,
     parent: fn(i32) -> Option<i32>,
+    pick: Pick,
     done: impl FnOnce(bool) + 'static,
 ) {
     if names.is_empty() && claude_pid.is_none() {
@@ -101,7 +103,7 @@ pub fn focus_source(
                 .ok()?;
             match claude_pid {
                 Some(pid) => window_of_pid(&tree, pid, parent),
-                None => find_named_window(&tree, &names),
+                None => find_named_window(&tree, &names, pick),
             }
         },
         move |found| match found {
@@ -193,14 +195,34 @@ fn window_of_pid(root: &Node, pid: i32, parent: impl Fn(i32) -> Option<i32>) -> 
     None
 }
 
+/// Which of several equally good windows a search may answer with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pick {
+    /// The best one, ties going to the window the seat is on.
+    Best,
+    /// Only a window no other view matches as well; a tie is no answer.
+    Unique,
+}
+
 /// The view a notification came from, or `None` when nothing in the tree
-/// answers to any of its names.
-fn find_named_window(root: &Node, names: &[String]) -> Option<Target> {
+/// answers to any of its names — or, with [`Pick::Unique`], when more than
+/// one view answers equally well.
+fn find_named_window(root: &Node, names: &[String], pick: Pick) -> Option<Target> {
     let mut best: Option<((u8, usize, bool), Target)> = None;
+    // How many views share the best match, the seat's focus left out: two
+    // windows of one app match alike whichever of them was last focused.
+    let mut tied = 0;
     for_each(root, |node, workspace| {
-        if let Some(rank) = view_rank(node, names)
-            && best.as_ref().is_none_or(|(seen, _)| rank > *seen)
-        {
+        let Some(rank) = view_rank(node, names) else {
+            return;
+        };
+        let evidence = |r: (u8, usize, bool)| (r.0, r.1);
+        match &best {
+            Some((seen, _)) if evidence(rank) == evidence(*seen) => tied += 1,
+            Some((seen, _)) if evidence(rank) < evidence(*seen) => {}
+            _ => tied = 1,
+        }
+        if best.as_ref().is_none_or(|(seen, _)| rank > *seen) {
             best = Some((
                 rank,
                 Target {
@@ -210,6 +232,9 @@ fn find_named_window(root: &Node, names: &[String]) -> Option<Target> {
             ));
         }
     });
+    if pick == Pick::Unique && tied > 1 {
+        return None;
+    }
     best.map(|(_, target)| target)
 }
 
@@ -331,7 +356,27 @@ mod tests {
 
     fn found(names: &[&str]) -> Option<(i64, Option<String>)> {
         let names: Vec<String> = names.iter().map(|s| (*s).to_string()).collect();
-        find_named_window(&tree(), &names).map(|t| (t.con_id, t.workspace))
+        find_named_window(&tree(), &names, Pick::Best).map(|t| (t.con_id, t.workspace))
+    }
+
+    fn found_unique(names: &[&str]) -> Option<i64> {
+        let names: Vec<String> = names.iter().map(|s| (*s).to_string()).collect();
+        find_named_window(&tree(), &names, Pick::Unique).map(|t| t.con_id)
+    }
+
+    #[test]
+    fn a_sender_with_several_windows_names_none_of_them_uniquely() {
+        // Two firefox windows answer equally well: which one the
+        // notification is about is the sender's to say (its default action),
+        // and guessing the focused one did nothing at all when that was the
+        // window already in front.
+        assert_eq!(found_unique(&["firefox"]), None);
+        // One window of the app is that window.
+        assert_eq!(found_unique(&["kitty"]), Some(13));
+        assert_eq!(found_unique(&["slack"]), Some(12));
+        // A weaker match on another view does not make an exact one
+        // ambiguous.
+        assert_eq!(found_unique(&["kitty", "fire"]), Some(13));
     }
 
     #[test]

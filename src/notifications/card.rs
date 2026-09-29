@@ -161,11 +161,6 @@ pub(super) fn set_critical_class(card: &gtk4::Box, notif: &Notification) {
 /// dotted and senders extend them (`device.added`, `device.removed`).
 const COMPACT_CATEGORIES: &[&str] = &["device", "x-swaypplet.osd"];
 
-/// Whether a notification puts a text field on its card.
-pub(super) fn wants_keyboard(notif: &Notification) -> bool {
-    notif.actions.iter().any(|(key, _)| key == INLINE_REPLY_KEY)
-}
-
 /// Whether a notification wants the one-line template.
 ///
 /// Two ways in. A transient toast with nothing to read or press is one by
@@ -619,8 +614,7 @@ fn action_buttons(
         // "snooze" or a "mark read" could never be offered by a sender.
         let resident = notif.resident;
         btn.connect_clicked(move |_| {
-            log::info!("Action invoked: notification {id}, action {key_c}");
-            store::store_action_invoked(&store_c, id, &key_c);
+            super::activate::invoke(&store_c, id, &key_c);
             if !resident {
                 store::store_close(&store_c, id, CloseReason::Dismissed);
             }
@@ -725,67 +719,17 @@ fn click_gesture(
     gesture.set_button(0);
     let id = notif.id;
     let store_c = store.clone();
-    let names = Rc::new(window_names(notif));
-    let claude_pid = notif.claude_pid;
-    let has_default = notif.actions.iter().any(|(key, _)| key == "default");
-    let resident = notif.resident;
+    // The card is rebuilt whenever what it shows changes, so this is the
+    // notification on it.
+    let shown = notif.clone();
     gesture.connect_released(move |g, _, _, _| match g.current_button() {
         gtk4::gdk::BUTTON_MIDDLE | gtk4::gdk::BUTTON_SECONDARY => {
             store::store_close(&store_c, id, CloseReason::Dismissed);
         }
-        gtk4::gdk::BUTTON_PRIMARY => {
-            let store_c = store_c.clone();
-            crate::sway::tree::focus_source(
-                names.to_vec(),
-                claude_pid,
-                crate::services::task_state::parent_pid,
-                move |focused| {
-                    // Nowhere to jump: the sender's own default action is the
-                    // next best answer to "take me to this", and dismissing is
-                    // the answer when it offered none.
-                    if !focused && has_default {
-                        log::info!("Action invoked: notification {id}, action default");
-                        store::store_action_invoked(&store_c, id, "default");
-                        if resident {
-                            return;
-                        }
-                    }
-                    store::store_close(&store_c, id, CloseReason::Dismissed);
-                },
-            );
-        }
+        gtk4::gdk::BUTTON_PRIMARY => super::activate::activate(&shown, &store_c, || {}),
         _ => {}
     });
     gesture
-}
-
-/// What the notification says about itself that a window could be named
-/// after, best evidence first.
-///
-/// The `desktop-entry` hint is the sender naming its own `.desktop` file,
-/// which for a Wayland client is the same string sway reports as `app_id`.
-/// `app_name` is free text but usually the program. A themed icon name is
-/// what is left when a sender sets neither.
-fn window_names(notif: &Notification) -> Vec<String> {
-    let icon = match &notif.icon {
-        Some(ImageSource::Named(name)) => Some(name.clone()),
-        _ => None,
-    };
-    let mut names: Vec<String> = Vec::new();
-    for name in [
-        notif.desktop_entry.clone(),
-        Some(notif.app_name.clone()),
-        icon,
-    ]
-    .into_iter()
-    .flatten()
-    {
-        let name = name.trim().trim_end_matches(".desktop").to_lowercase();
-        if !name.is_empty() && !names.contains(&name) {
-            names.push(name);
-        }
-    }
-    names
 }
 
 #[cfg(test)]
@@ -881,20 +825,5 @@ mod tests {
             category: Some("devicemanager.thing".into()),
             ..toast
         }));
-    }
-
-    #[test]
-    fn the_names_a_card_offers_are_ordered_by_how_much_they_are_worth() {
-        let notif = Notification {
-            app_name: "Fractal".into(),
-            desktop_entry: Some("org.gnome.Fractal.desktop".into()),
-            icon: Some(ImageSource::Named("fractal".into())),
-            ..Default::default()
-        };
-        // The hint first, lowercased and stripped of its suffix; the icon
-        // name is already the entry's tail, so it is not repeated.
-        assert_eq!(window_names(&notif), ["org.gnome.fractal", "fractal"]);
-        // A sender that says nothing about itself gets no lookup at all.
-        assert!(window_names(&Notification::default()).is_empty());
     }
 }

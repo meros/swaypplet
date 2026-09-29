@@ -4,6 +4,7 @@
 //! D-Bus server that receives them are services
 //! (`crate::services::notifications`).
 
+pub mod activate;
 pub mod card;
 mod card_surface;
 pub mod markup;

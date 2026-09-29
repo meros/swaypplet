@@ -9,11 +9,16 @@ use crate::services::notifications::store::{self, NotificationStore};
 use crate::ui;
 use crate::ui::icons;
 
+/// What the surface around the list does once a notification has been
+/// clicked through to its sender: the panel gets out of the way.
+type OnActivate = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
+
 pub struct NotificationsSection {
     section: Rc<ui::Section>,
     list_box: gtk4::Box,
     empty_label: gtk4::Label,
     store: Rc<RefCell<NotificationStore>>,
+    on_activate: OnActivate,
 }
 
 impl NotificationsSection {
@@ -68,6 +73,7 @@ impl NotificationsSection {
             list_box,
             empty_label,
             store: store.clone(),
+            on_activate: Rc::new(RefCell::new(None)),
         };
 
         // Subscribe to changes for live updates
@@ -75,12 +81,14 @@ impl NotificationsSection {
         let empty_label_c = notifications.empty_label.clone();
         let section_c = notifications.section.clone();
         let store_change = store.clone();
+        let on_activate_c = notifications.on_activate.clone();
         store.borrow_mut().connect_change(move || {
             let has_notifications = rebuild_list(
                 &list_box_c,
                 &empty_label_c,
                 &section_c.summary,
                 &store_change,
+                &on_activate_c,
             );
             // Auto-expand when new notifications arrive
             if has_notifications && !section_c.revealer.reveals_child() {
@@ -94,6 +102,12 @@ impl NotificationsSection {
 
     pub fn refresh(&self) {
         self.rebuild();
+    }
+
+    /// Run `f` after a notification in the list is clicked through to where
+    /// it came from (the panel hides itself).
+    pub fn set_on_activate(&self, f: Rc<dyn Fn()>) {
+        *self.on_activate.borrow_mut() = Some(f);
     }
 
     /// Switch into page mode: reveal detail immediately, hide the summary
@@ -112,6 +126,7 @@ impl NotificationsSection {
             &self.empty_label,
             &self.section.summary,
             &self.store,
+            &self.on_activate,
         );
     }
 }
@@ -123,6 +138,7 @@ fn rebuild_list(
     empty_label: &gtk4::Label,
     summary_text: &gtk4::Label,
     store: &Rc<RefCell<NotificationStore>>,
+    on_activate: &OnActivate,
 ) -> bool {
     // Remove all children except the empty label
     while let Some(child) = list_box.last_child() {
@@ -191,11 +207,11 @@ fn rebuild_list(
             head.append(&close);
         }
         list_box.append(&head);
-        list_box.append(&build_entry(newest, store));
+        list_box.append(&build_entry(newest, store, on_activate));
         if count > 1 {
             let more = ui::disclosure(&format!("{} earlier", count - 1));
             for notif in &g.items[1..] {
-                more.body.append(&build_entry(notif, store));
+                more.body.append(&build_entry(notif, store, on_activate));
             }
             list_box.append(&more.root);
         }
@@ -207,8 +223,24 @@ fn rebuild_list(
 fn build_entry(
     notif: &crate::services::notifications::Notification,
     store: &Rc<RefCell<NotificationStore>>,
+    on_activate: &OnActivate,
 ) -> gtk4::Box {
     let r = ui::row("", &notif.summary, "");
+
+    // A click on the entry goes where the notification came from, as a
+    // click on its popup does. Its buttons claim their own clicks, so this
+    // sees only the ones that land on the entry itself.
+    {
+        let click = gtk4::GestureClick::new();
+        click.set_button(gtk4::gdk::BUTTON_PRIMARY);
+        let notif = notif.clone();
+        let store = store.clone();
+        let on_activate = on_activate.clone();
+        click.connect_released(move |_, _, _, _| {
+            go_to_source(&notif, &store, &on_activate);
+        });
+        r.root.add_controller(click);
+    }
 
     // The time sits after the summary, in the row's metadata tone.
     let time_label = ui::text(
@@ -251,22 +283,28 @@ fn build_entry(
     // and only under a pointer. The panel opens from a keybinding and GTK
     // gives its buttons ordinary focus traversal, so putting them here is
     // what makes an action reachable without a pointer at all (P8) — and it
-    // does that without an input grab on an overlay-layer surface.
+    // does that without an input grab on an overlay-layer surface. Each goes
+    // to the sender with an activation token, so it may raise its window.
     if !notif.actions.is_empty() {
         let actions_box = ui::hbox(2);
 
         for (key, label) in &notif.actions {
-            // "default" is what clicking the notification itself means; in a
-            // list of rows there is no such gesture to hang it on, so it gets
-            // a button like any other.
+            // "default" is what clicking the entry means; it keeps a button
+            // as well, because a click is out of reach of the keyboard.
             let btn = ui::button_with(ui::Face::Label(label), ui::Kind::Secondary, ui::Size::Small);
 
             let id = notif.id;
             let key_c = key.clone();
             let store_c = store.clone();
             let resident = notif.resident;
+            let notif_c = notif.clone();
+            let on_activate_c = on_activate.clone();
             btn.connect_clicked(move |_| {
-                store::store_action_invoked(&store_c, id, &key_c);
+                if key_c == "default" {
+                    go_to_source(&notif_c, &store_c, &on_activate_c);
+                    return;
+                }
+                crate::notifications::activate::invoke(&store_c, id, &key_c);
                 if !resident {
                     store::store_close(&store_c, id, CloseReason::Dismissed);
                 }
@@ -294,6 +332,22 @@ fn build_entry(
     r.end.append(&dismiss_btn);
 
     r.root
+}
+
+/// Take the user to where `notif` came from, and get the panel out of the
+/// way. The panel hides at once rather than once the jump is done: the
+/// activation token has been taken by then, and the panel holds the
+/// keyboard exclusively until it is gone.
+fn go_to_source(
+    notif: &crate::services::notifications::Notification,
+    store: &Rc<RefCell<NotificationStore>>,
+    on_activate: &OnActivate,
+) {
+    crate::notifications::activate::activate(notif, store, || {});
+    let hide = on_activate.borrow().clone();
+    if let Some(hide) = hide {
+        hide();
+    }
 }
 
 fn format_relative_time(timestamp: SystemTime) -> String {
