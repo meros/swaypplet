@@ -27,5 +27,6 @@ pub mod network;
 pub mod notifications;
 pub mod power;
 pub mod presence;
+pub mod status;
 pub mod task_state;
 pub mod tray;

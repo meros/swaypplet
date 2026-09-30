@@ -306,7 +306,11 @@ fn scan_with(
             .push(SessionState {
                 pid,
                 desc,
-                activity: first_line(&status).map_or(Activity::Stale, |s| Activity::parse(&s)),
+                activity: crate::services::status::claude::settle(
+                    first_line(&status).map_or(Activity::Stale, |s| Activity::parse(&s)),
+                    dir,
+                    pid,
+                ),
                 progress: first_line(&dir.join(format!("progress-{pid}"))).map(Progress::parse),
                 workspace,
                 status_mtime: fs::metadata(&status).and_then(|m| m.modified()).ok(),
@@ -359,7 +363,7 @@ fn reconcile_acks(
 }
 
 /// PIDs with a pid-<N> description file, sorted for stable render order.
-fn claude_pids(dir: &Path) -> Vec<i32> {
+pub(crate) fn claude_pids(dir: &Path) -> Vec<i32> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -378,7 +382,7 @@ pub(crate) fn first_line(path: &Path) -> Option<String> {
     (!line.is_empty()).then(|| line.to_string())
 }
 
-fn proc_comm(pid: i32) -> Option<String> {
+pub(crate) fn proc_comm(pid: i32) -> Option<String> {
     let comm = fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
     Some(comm.trim_end().to_string())
 }
@@ -424,7 +428,7 @@ pub fn task_of_name(name: &str) -> Option<u8> {
 
 /// The nix wrapper renames the binary to .claude-unwrapped (truncated to
 /// 15 bytes in comm); a bare `claude` covers non-wrapped installs.
-fn is_claude_comm(comm: &str) -> bool {
+pub(crate) fn is_claude_comm(comm: &str) -> bool {
     comm == "claude" || comm.starts_with(".claude-unwrapp")
 }
 
