@@ -23,7 +23,7 @@ pub fn material(inputs: Inputs) -> Material {
             fill_alpha: if high { 0.72 } else { 0.50 },
             absorb: 1.0,
             photochromic: if high { 0.25 } else { 0.35 },
-            edge_light: if high { 0.12 } else { 0.09 },
+            edge_light: if high { 0.12 } else { 0.11 },
             frost: if high { 0.45 } else { 0.33 },
         },
         Mode::Light => Material {
@@ -31,8 +31,8 @@ pub fn material(inputs: Inputs) -> Material {
             fill_alpha: if high { 0.72 } else { 0.50 },
             absorb: if high { 0.20 } else { 0.25 },
             photochromic: if high { -0.50 } else { -0.43 },
-            edge_light: if high { 0.18 } else { 0.14 },
-            frost: if high { 0.45 } else { 0.36 },
+            edge_light: if high { 0.18 } else { 0.17 },
+            frost: if high { 0.45 } else { 0.30 },
         },
     }
 }

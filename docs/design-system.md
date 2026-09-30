@@ -549,8 +549,8 @@ material values, per glass namespace, over IPC, fading both (§2.3):
 | `fill_alpha` | 0.50 (high 0.72) | 0.50 (high 0.72) | the same body in both modes, so light glass lets as much through as dark; the lift below keeps dark text readable over a black terminal |
 | `absorb` | 1.0 | 0.25 (high 0.20) | milky glass must not grey out the light it lets through |
 | `photochromic` | 0.35 (high 0.25), a ceiling | −0.43 (high −0.50), a lift | dark caps a white page behind; light floors a black terminal behind |
-| `edge_light` | 0.09 (high 0.12) | 0.14 (high 0.18), drawn darker | a light rim disappears on a light body |
-| `frost` | 0.33 (high 0.45) | 0.36 (high 0.45) | light glass shows detail behind it a little more clearly |
+| `edge_light` | 0.11 (high 0.12) | 0.17 (high 0.18), drawn darker | a light rim disappears on a light body |
+| `frost` | 0.33 (high 0.45) | 0.30 (high 0.45) | light glass keeps more of the picture behind it: its lift already evens the backdrop out, so it needs less frost than dark glass |
 
 Everything else (refraction, dispersion, bevel, crest, specular, grain) is
 one material in both modes. A negative `photochromic` is the one shader

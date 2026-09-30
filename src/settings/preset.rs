@@ -82,7 +82,7 @@ fn base() -> Material {
         refraction: 1.07,
         dispersion: 0.003,
         samples: 4.0,
-        reflection: 0.73,
+        reflection: 0.85,
         lensing: 0.15,
         frost_radius: 28.0,
         absorb: 1.0,
