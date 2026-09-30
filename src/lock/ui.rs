@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use gtk4::prelude::*;
 
 use crate::anim::animations_enabled;
+use crate::services::status::{Severity, StatusItem};
 use crate::auth_field::{AuthField, Caption, Tone};
 use crate::switch_user;
 use crate::ui;
@@ -194,6 +195,71 @@ struct Surface {
     caption: Caption,
     clock: gtk4::Label,
     date: gtk4::Label,
+    /// The Claude Code line under the date (`set_sessions`).
+    sessions: SessionLine,
+}
+
+/// "1 waiting for you · 2 working" under the date: how many Claude Code
+/// sessions want the owner and how many work, never what they are called.
+/// Anyone at the machine can read the lock screen, and a task label can name
+/// a customer or an issue.
+///
+/// The line keeps its height when there is nothing to say, so the clock does
+/// not move when a session starts or ends: the stamp is centred on the shade.
+#[derive(Clone)]
+struct SessionLine {
+    row: gtk4::Box,
+    dot: gtk4::Label,
+    text: gtk4::Label,
+}
+
+impl SessionLine {
+    fn new() -> Self {
+        let row = ui::hbox(2);
+        row.set_halign(gtk4::Align::Center);
+        row.add_css_class("lock-sessions");
+        // The dot is the one colour on the shade, and only for a session
+        // that cannot go on without the owner.
+        let dot = ui::text("\u{25CF}", ui::Text::Body, ui::Tone::Warning);
+        let text = ui::text("", ui::Text::Body, ui::Tone::Fg);
+        ui::on_shade::adopt(&text);
+        row.append(&dot);
+        row.append(&text);
+        let line = Self { row, dot, text };
+        line.show(None);
+        line
+    }
+
+    fn show(&self, line: Option<&(bool, String)>) {
+        match line {
+            Some((attention, words)) => {
+                self.dot.set_visible(*attention);
+                self.text.set_label(words);
+                self.row.set_opacity(1.0);
+            }
+            None => {
+                // A space, so the empty line still has a line's height.
+                self.text.set_label(" ");
+                self.dot.set_visible(false);
+                self.row.set_opacity(0.0);
+            }
+        }
+    }
+}
+
+/// What the session line says for `items`, or `None` when no session wants
+/// the owner or works. Idle sessions are not counted: they ask for nothing.
+pub fn session_line(items: &[StatusItem]) -> Option<(bool, String)> {
+    let count = |severity| items.iter().filter(|i| i.severity == severity).count();
+    let (waiting, working) = (count(Severity::Attention), count(Severity::Active));
+    let parts: Vec<String> = [
+        (waiting > 0).then(|| format!("{waiting} waiting for you")),
+        (working > 0).then(|| format!("{working} working")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    (!parts.is_empty()).then(|| (waiting > 0, parts.join(" \u{00B7} ")))
 }
 
 #[derive(Clone, Default)]
@@ -222,6 +288,8 @@ pub struct SurfaceSet {
     caps: Rc<Cell<bool>>,
     /// Which of the two colours every surface's commit pixel is drawing.
     pulse: Rc<Cell<u32>>,
+    /// The session line as last set, for a surface built after it.
+    sessions: Rc<RefCell<Option<(bool, String)>>>,
 }
 
 impl SurfaceSet {
@@ -338,6 +406,9 @@ impl SurfaceSet {
         stamp.set_valign(gtk4::Align::Center);
         stamp.append(&clock);
         stamp.append(&date);
+        let sessions = SessionLine::new();
+        sessions.show(self.sessions.borrow().as_ref());
+        stamp.append(&sessions.row);
         let plate = gtk4::Overlay::new();
         plate.add_css_class("lock-stamp");
         plate.set_child(Some(&clock_shade()));
@@ -523,6 +594,7 @@ impl SurfaceSet {
             caption,
             clock,
             date,
+            sessions,
         };
         self.update_surface_clock(&surface);
         surface.caption.set_resting(self.resting_text());
@@ -560,6 +632,15 @@ impl SurfaceSet {
         for s in self.inner.borrow().iter() {
             s.commit_pixel.queue_draw();
         }
+    }
+
+    /// The Claude Code line under the date, on every surface.
+    pub fn set_sessions(&self, items: &[StatusItem]) {
+        let line = session_line(items);
+        for s in self.inner.borrow().iter() {
+            s.sessions.show(line.as_ref());
+        }
+        *self.sessions.borrow_mut() = line;
     }
 
     /// Tick: clock, date, and caps-lock state on every surface.
@@ -971,4 +1052,48 @@ fn caps_lock_state() -> bool {
         .and_then(|seat| seat.keyboard())
         .map(|kb| kb.is_caps_locked())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(id: &str, severity: Severity) -> StatusItem {
+        StatusItem {
+            source: "claude",
+            id: id.into(),
+            severity,
+            title: "[norban] a customer's name".into(),
+            detail: None,
+            since: None,
+        }
+    }
+
+    #[test]
+    fn the_line_counts_and_never_names() {
+        let items = [
+            item("1", Severity::Attention),
+            item("2", Severity::Active),
+            item("3", Severity::Active),
+            item("4", Severity::Info),
+        ];
+        assert_eq!(
+            session_line(&items),
+            Some((true, "1 waiting for you \u{00B7} 2 working".into()))
+        );
+    }
+
+    #[test]
+    fn working_alone_has_no_dot() {
+        assert_eq!(
+            session_line(&[item("1", Severity::Active)]),
+            Some((false, "1 working".into()))
+        );
+    }
+
+    #[test]
+    fn idle_sessions_leave_the_line_empty() {
+        assert_eq!(session_line(&[item("1", Severity::Info)]), None);
+        assert_eq!(session_line(&[]), None);
+    }
 }

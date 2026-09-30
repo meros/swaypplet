@@ -574,9 +574,25 @@ pub fn run() -> ! {
             // warning that fades in behind a card still fading in reads as
             // something having gone wrong.
             surfaces.tick();
+            // The Claude Code line under the date. The directory watch sees
+            // every hook write; the tick sees a session whose process died
+            // without one.
+            let status = crate::services::status::StatusService::start(vec![Box::new(
+                crate::services::status::claude::ClaudeSource::new(),
+            )]);
+            surfaces.set_sessions(&status.items());
+            status.connect_change({
+                let (surfaces, status) = (surfaces.clone(), Rc::downgrade(&status));
+                move || {
+                    if let Some(status) = status.upgrade() {
+                        surfaces.set_sessions(&status.items());
+                    }
+                }
+            });
             let clock_surfaces = surfaces.clone();
             glib::timeout_add_seconds_local(1, move || {
                 clock_surfaces.tick();
+                status.refresh();
                 glib::ControlFlow::Continue
             });
 

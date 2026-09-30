@@ -24,3 +24,9 @@
 .lock-card {
     margin-top: 0;
 }
+
+/* The Claude Code line (lock/ui.rs SessionLine) under the date: apart from
+   it, so it reads as its own fact rather than as the date's second line. */
+.lock-sessions {
+    margin-top: var(--space-2);
+}
