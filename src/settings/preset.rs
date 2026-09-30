@@ -78,7 +78,7 @@ impl Preset {
 fn base() -> Material {
     Material {
         roughness: 0.01,
-        surface: SurfaceKind::Droplet,
+        surface: SurfaceKind::ConvexSquircle,
         refraction: 1.07,
         dispersion: 0.003,
         samples: 4.0,

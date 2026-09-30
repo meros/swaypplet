@@ -1090,7 +1090,7 @@ mod tests {
     fn the_nix_export_does_not_print_integers_as_floats() {
         let nix = preset::plain().as_nix();
         assert!(nix.contains("samples = 4;"), "{nix}");
-        assert!(nix.contains("surface = \"droplet\";"));
+        assert!(nix.contains("surface = \"convex_squircle\";"));
         // The shipped material is grainless now, so the seeded spelling is
         // checked on a preset that carries one.
         let seeded = preset::ALL
