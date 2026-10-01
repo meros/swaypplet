@@ -6,9 +6,8 @@
 //!
 //! Each row reads as the adapter's name ("Ethernet on Lenovo dock",
 //! `services::network::naming`, or the one the person gave it) over the
-//! chipset and the kernel name. Rename turns the title into an entry: Enter
-//! stores the name under the adapter's MAC address, an empty name goes back
-//! to the automatic one, Escape leaves it as it was.
+//! chipset and the kernel name. Rename (`widgets::rename`) stores a name
+//! under the adapter's MAC address.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -88,8 +87,13 @@ impl Adapters {
                 self.switch_row(iface, &name)
             };
             if let Some(mac) = &iface.mac {
-                r.end
-                    .prepend(&self.rename_button(&r, mac, &name, &iface.label));
+                let (ask, mac) = (self.ask.clone(), mac.clone());
+                r.end.prepend(&crate::widgets::rename::button(
+                    &r.title,
+                    &name,
+                    &iface.label,
+                    move |name| ask(AdapterAsk::Rename(mac.clone(), name)),
+                ));
             }
             self.list
                 .append(&ListBoxRow::builder().child(&r.root).build());
@@ -142,56 +146,6 @@ impl Adapters {
         let b = ui::button_with(ui::Face::Label(label), ui::Kind::Flat, ui::Size::Small);
         let (dev, ask) = (device.to_string(), self.ask.clone());
         b.connect_clicked(move |_| ask(AdapterAsk::Ban(dev.clone(), ban)));
-        b
-    }
-
-    /// Rename: the title becomes an entry in its own place until Enter or
-    /// Escape.
-    fn rename_button(&self, r: &ui::Row, mac: &str, name: &str, auto: &str) -> gtk4::Button {
-        let b = ui::button_with(ui::Face::Label("Rename"), ui::Kind::Flat, ui::Size::Small);
-        b.set_tooltip_text(Some(
-            "Name this adapter; leave it empty for the automatic name",
-        ));
-        let entry = gtk4::Entry::new();
-        entry.set_placeholder_text(Some(auto));
-        entry.set_hexpand(true);
-        entry.set_visible(false);
-        ui::entry::adopt(&entry, ui::FieldSize::Normal);
-        let title = r.title.clone();
-        if let Some(parent) = title.parent().and_downcast::<gtk4::Box>() {
-            parent.insert_child_after(&entry, Some(&title));
-        }
-        let editing = |on: bool, title: &gtk4::Label, entry: &gtk4::Entry| {
-            title.set_visible(!on);
-            entry.set_visible(on);
-        };
-        {
-            let (title, entry, name) = (title.clone(), entry.clone(), name.to_string());
-            b.connect_clicked(move |_| {
-                entry.set_text(&name);
-                editing(true, &title, &entry);
-                entry.grab_focus();
-            });
-        }
-        {
-            let (title, ask, mac) = (title.clone(), self.ask.clone(), mac.to_string());
-            entry.connect_activate(move |e| {
-                editing(false, &title, e);
-                ask(AdapterAsk::Rename(mac.clone(), e.text().to_string()));
-            });
-        }
-        let keys = gtk4::EventControllerKey::new();
-        {
-            let entry_c = entry.clone();
-            keys.connect_key_pressed(move |_, key, _, _| {
-                if key == gtk4::gdk::Key::Escape {
-                    editing(false, &title, &entry_c);
-                    return gtk4::glib::Propagation::Stop;
-                }
-                gtk4::glib::Propagation::Proceed
-            });
-        }
-        entry.add_controller(keys);
         b
     }
 }

@@ -359,6 +359,14 @@ impl NetworkSection {
         // Drawn from what NetworkManager knows before the page is ever
         // opened, so the first frame of it is never empty.
         this.refresh();
+        {
+            let weak = Rc::downgrade(&this.0);
+            crate::services::devices::observe(move || {
+                if let Some(i) = weak.upgrade() {
+                    NetworkSection(i).names_changed();
+                }
+            });
+        }
         this
     }
 
@@ -660,10 +668,13 @@ impl NetworkSection {
             }
             // Settings, not NetworkManager: stored on this thread, and the
             // list redrawn from the snapshot it already has.
+            // Settings, not NetworkManager: stored on this thread; the
+            // names redraw through `devices::observe` (`names_changed`).
             interfaces::AdapterAsk::Rename(mac, name) => {
-                network::rename(&mac, &name);
-                let i = &self.0;
-                i.adapters.update(&i.snap.borrow().interfaces);
+                crate::services::devices::rename(
+                    &crate::services::devices::DeviceKey::Net(mac),
+                    &name,
+                );
             }
         }
     }
@@ -697,6 +708,18 @@ impl NetworkSection {
     }
 
     // ── Drawing ────────────────────────────────────────────────────────
+
+    /// A device name may have changed: redraw what shows adapter names
+    /// from the snapshot already held.
+    fn names_changed(&self) {
+        let i = &self.0;
+        let snap = i.snap.borrow().clone();
+        i.syncing.set(true);
+        self.draw_current(&snap);
+        i.syncing.set(false);
+        i.adapters.update(&snap.interfaces);
+        self.draw_summary(&snap);
+    }
 
     fn apply(&self, snap: Snapshot) {
         let i = &self.0;
@@ -980,7 +1003,15 @@ impl NetworkSection {
                     }
                     (signal_icon(*signal), t)
                 }
-                ActiveConnection::Ethernet { .. } => (ICON_ETHERNET, "Wired".to_string()),
+                // The adapter's name, as Wi-Fi shows the network's.
+                ActiveConnection::Ethernet { device } => (
+                    ICON_ETHERNET,
+                    s.interfaces
+                        .iter()
+                        .find(|i| &i.device == device)
+                        .map(|i| display_name(&i.label, i.mac.as_deref()))
+                        .unwrap_or_else(|| "Wired".to_string()),
+                ),
                 ActiveConnection::Disconnected if !s.wifi_enabled => {
                     (ICON_DISCONNECTED, "Off".to_string())
                 }

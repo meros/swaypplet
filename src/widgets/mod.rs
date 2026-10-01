@@ -8,5 +8,6 @@ pub mod media;
 pub mod network;
 pub mod notifications;
 pub mod power;
+pub mod rename;
 pub mod tiles;
 pub mod users;

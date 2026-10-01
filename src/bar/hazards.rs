@@ -104,7 +104,7 @@ pub fn build(sway: &Rc<SwayService>, audio: &Rc<AudioService>) -> gtk4::Box {
         })
     });
     // A rename shows in the tooltip without waiting for the next ban.
-    crate::settings::store::observe(move || apply_wired());
+    crate::services::devices::observe(move || apply_wired());
     network::blocked::start();
 
     let (rec, rec_glyph) = hazard("󰑋");

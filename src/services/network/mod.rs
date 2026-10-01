@@ -8,6 +8,8 @@
 
 use std::collections::HashSet;
 
+use crate::services::devices::DeviceKey;
+
 pub mod blocked;
 pub mod fixture;
 pub mod model;
@@ -404,23 +406,8 @@ pub fn wired_adapters() -> Vec<Wired> {
 /// What the person reads for an adapter: the name they gave it, else
 /// `label`. Reads the live settings, so main thread only.
 pub fn display_name(label: &str, mac: Option<&str>) -> String {
-    mac.and_then(|mac| {
-        crate::settings::store::with(|s| s.adapters.as_ref()?.names.get(mac).cloned())
-    })
-    .unwrap_or_else(|| label.to_string())
-}
-
-/// Store `name` for the adapter with `mac`, or clear it (`name` empty) to
-/// go back to the automatic name. Main thread only.
-pub fn rename(mac: &str, name: &str) {
-    let (mac, name) = (mac.to_ascii_lowercase(), name.trim().to_string());
-    crate::settings::store::edit::<crate::settings::store::Adapters>(|a| {
-        if name.is_empty() {
-            a.names.remove(&mac);
-        } else {
-            a.names.insert(mac, name);
-        }
-    });
+    let key = mac.map(|m| DeviceKey::Net(m.to_string()));
+    crate::services::devices::display_name(key.as_ref(), label)
 }
 
 /// Ban (`true`) or lift the ban on (`false`) a wired adapter. See

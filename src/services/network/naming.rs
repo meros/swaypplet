@@ -28,6 +28,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::services::devices::short_vendor;
+
 /// `NM_DEVICE_TYPE_ETHERNET` and `NM_DEVICE_TYPE_WIFI`.
 const ETHERNET: u32 = 1;
 const WIFI: u32 = 2;
@@ -84,38 +86,6 @@ pub fn chipset(root: &Path, iface: &str) -> Option<String> {
         (Some(v), Some(m)) => Some(format!("{v} {m}")),
         (v, m) => v.or(m).filter(|s| !s.is_empty()),
     }
-}
-
-/// The company's name without its legal form: "Realtek Semiconductor
-/// Corp." is "Realtek", "Intel Corporation" is "Intel".
-pub fn short_vendor(vendor: &str) -> String {
-    const NOISE: [&str; 14] = [
-        "Semiconductor",
-        "Corporation",
-        "Corp.",
-        "Corp",
-        "Co.,",
-        "Co.",
-        "Ltd.",
-        "Ltd",
-        "Inc.",
-        "Inc",
-        "Technology",
-        "Technologies",
-        "Limited",
-        "GmbH",
-    ];
-    let words: Vec<&str> = vendor
-        .split_whitespace()
-        .map(|w| w.trim_end_matches(','))
-        .collect();
-    // Cut at the first noise word, but never down to nothing.
-    let keep = words
-        .iter()
-        .position(|w| NOISE.iter().any(|n| n.trim_end_matches(',') == *w))
-        .filter(|&i| i > 0)
-        .unwrap_or(words.len());
-    words[..keep].join(" ")
 }
 
 /// The part number without the product category after it: "RTL8153
@@ -505,15 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn shortening_drops_legal_forms_and_categories_and_nothing_else() {
-        assert_eq!(short_vendor("Realtek Semiconductor Corp."), "Realtek");
-        assert_eq!(short_vendor("Intel Corporation"), "Intel");
-        assert_eq!(short_vendor("ASIX Electronics Corp."), "ASIX Electronics");
-        assert_eq!(
-            short_vendor("Hon Hai Precision Ind. Co., Ltd."),
-            "Hon Hai Precision Ind."
-        );
-        assert_eq!(short_vendor("Lenovo"), "Lenovo");
+    fn model_shortening_drops_the_category_and_nothing_else() {
         assert_eq!(short_model("RTL8153 Gigabit Ethernet Adapter"), "RTL8153");
         assert_eq!(
             short_model("Ethernet Connection (16) I219-LM"),

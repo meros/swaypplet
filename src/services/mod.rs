@@ -16,6 +16,7 @@ pub mod bluetooth;
 pub mod bluez;
 pub mod capture;
 pub mod clipboard;
+pub mod devices;
 pub mod displays;
 pub mod elephant;
 pub mod gamma;

@@ -33,10 +33,14 @@ groups, `src/settings/`:
 | System | nothing: it shows which nixos-config commit this host runs against origin/main, and runs `nx apply` or `nx` on a press | none |
 | Quality | nothing: the open issues, Auto-fix, and Merge & apply for a ready fix (docs/QUALITY.md) | none; GitHub, through `gh` |
 
-One section has no pane: `adapters`, the names a person gives network
-adapters with Rename in the network page's Adapters list, keyed by
-permanent MAC address. Like the wallpaper it has no system layer and is not
-in `data/settings-defaults.json`.
+One section has no pane: `devices`, the names a person gives devices with
+Rename wherever a device is listed (network adapters, audio outputs and
+inputs, displays, input devices). Keys say what kind of device and follow
+the device, not its port: `net:<permanent MAC>`, `audio:<node.name>`,
+`display:<make|model|serial>`, `input:<sway identifier>`
+(`services/devices.rs`). Bluetooth names are BlueZ's own alias instead.
+Like the wallpaper it has no system layer and is not in
+`data/settings-defaults.json`.
 
 The Displays pane (`displays_pane.rs`) is the one that does not apply
 live: a layout can turn the only screen dark. Its arithmetic is pure and
