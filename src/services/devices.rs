@@ -158,4 +158,97 @@ mod tests {
         assert_eq!(short_vendor("Dell Inc."), "Dell");
         assert_eq!(short_vendor("Lenovo"), "Lenovo");
     }
+
+    /// The automatic name of every audio node, output, input device and
+    /// network adapter on this machine, as each rule set computes it.
+    /// `cargo test --release live_device_names -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_device_names() {
+        use std::process::Command;
+        let json = |cmd: &mut Command| -> serde_json::Value {
+            let out = cmd.output().expect("run");
+            serde_json::from_slice(&out.stdout).unwrap_or_default()
+        };
+
+        println!("── audio (pw-dump) ──");
+        let dump = json(&mut Command::new("pw-dump"));
+        let objects = dump.as_array().cloned().unwrap_or_default();
+        let props = |o: &serde_json::Value| o["info"]["props"].clone();
+        let card = |id: &serde_json::Value| {
+            objects
+                .iter()
+                .find(|o| &o["id"] == id)
+                .and_then(|o| props(o)["device.description"].as_str().map(str::to_string))
+        };
+        for o in &objects {
+            let p = props(o);
+            let class = p["media.class"].as_str().unwrap_or_default();
+            if class != "Audio/Sink" && class != "Audio/Source" {
+                continue;
+            }
+            let description = p["node.description"].as_str().unwrap_or_default();
+            let card_description = card(&p["device.id"]);
+            let n = crate::services::audio::NodeNames {
+                description,
+                nick: p["node.nick"].as_str(),
+                card: card_description.as_deref(),
+                bluetooth: p["device.api"].as_str() == Some("bluez5"),
+            };
+            println!(
+                "{class:12} {:34} <- {description}",
+                crate::services::audio::device_name(&n)
+            );
+        }
+
+        println!("── outputs (swaymsg) ──");
+        let outputs = json(Command::new("swaymsg").args(["-t", "get_outputs", "-r"]));
+        for o in outputs.as_array().cloned().unwrap_or_default() {
+            let f = |k: &str| o[k].as_str().unwrap_or_default().to_string();
+            println!(
+                "{:8} {:30} key {}",
+                f("name"),
+                crate::services::displays::naming::auto_name(&f("name"), &f("make"), &f("model")),
+                crate::services::displays::naming::key(
+                    &f("name"),
+                    &f("make"),
+                    &f("model"),
+                    &f("serial")
+                )
+            );
+        }
+
+        println!("── inputs (swaymsg) ──");
+        let inputs = json(Command::new("swaymsg").args(["-t", "get_inputs", "-r"]));
+        let all = crate::services::input::parse_devices(&inputs);
+        let listed = crate::services::input::listed(&all);
+        for d in &all {
+            let shown = listed
+                .iter()
+                .any(|l| l.identifier == d.identifier && l.kind == d.kind);
+            println!(
+                "{:6} {:9} {:30} <- {}",
+                if shown { "shown" } else { "hidden" },
+                d.kind,
+                crate::services::input::auto_name(d),
+                d.name
+            );
+        }
+
+        println!("── network ──");
+        let root = std::path::Path::new("/");
+        for e in std::fs::read_dir("/sys/class/net").unwrap().flatten() {
+            let iface = e.file_name().to_string_lossy().into_owned();
+            let ty = if e.path().join("wireless").exists() {
+                2
+            } else {
+                1
+            };
+            if let Some(name) = crate::services::network::naming::auto_name(root, &iface, ty) {
+                let chip =
+                    crate::services::network::naming::chipset(root, &iface).unwrap_or_default();
+                println!("{iface:16} {name:28} {chip}");
+            }
+        }
+    }
 }

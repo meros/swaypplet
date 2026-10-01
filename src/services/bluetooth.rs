@@ -91,7 +91,10 @@ pub enum Command {
     /// Clear a failure off its row.
     Dismiss(String),
     /// Set BlueZ's `Alias` for the device; empty gives it back its own name.
-    Rename { mac: String, alias: String },
+    Rename {
+        mac: String,
+        alias: String,
+    },
 }
 
 pub struct BluetoothService {
@@ -331,8 +334,19 @@ fn handle(command: Command, shared: &Shared, snapshot: &Snapshot) {
             tokio::spawn(async move {
                 // BlueZ resets the alias to the device's own name when it is
                 // set to the empty string.
-                let body = (IFACE_DEVICE, "Alias", zbus::zvariant::Value::from(alias.as_str()));
-                let result = call(&shared.conn, &path, "org.freedesktop.DBus.Properties", "Set", &body).await;
+                let body = (
+                    IFACE_DEVICE,
+                    "Alias",
+                    zbus::zvariant::Value::from(alias.as_str()),
+                );
+                let result = call(
+                    &shared.conn,
+                    &path,
+                    "org.freedesktop.DBus.Properties",
+                    "Set",
+                    &body,
+                )
+                .await;
                 if let Err(e) = result {
                     shared.set(&mac, Some(Op::Failed(e)));
                 }

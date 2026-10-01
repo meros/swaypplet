@@ -1349,11 +1349,19 @@ mod tests {
     #[test]
     fn profile_suffixes_are_stripped() {
         assert_eq!(
-            named("Creative Pebble X Analog Stereo", Some("Creative Pebble X"), Some("Creative Pebble X")),
+            named(
+                "Creative Pebble X Analog Stereo",
+                Some("Creative Pebble X"),
+                Some("Creative Pebble X")
+            ),
             "Creative Pebble X"
         );
         assert_eq!(
-            named("ThinkPad USB-C Dock Audio Mono", None, Some("ThinkPad USB-C Dock Audio")),
+            named(
+                "ThinkPad USB-C Dock Audio Mono",
+                None,
+                Some("ThinkPad USB-C Dock Audio")
+            ),
             "ThinkPad USB-C Dock Audio"
         );
         assert_eq!(
@@ -1366,17 +1374,30 @@ mod tests {
 
     #[test]
     fn a_soc_port_takes_its_nick_unless_the_nick_is_a_port_number() {
-        assert_eq!(named(&format!("{SOC} Pro 5"), Some("HDMI 1"), Some(SOC)), "HDMI 1");
+        assert_eq!(
+            named(&format!("{SOC} Pro 5"), Some("HDMI 1"), Some(SOC)),
+            "HDMI 1"
+        );
         assert_eq!(
             named(&format!("{SOC} Pro 31"), Some("Pro 31"), Some(SOC)),
             format!("{SOC} Pro 31")
         );
-        assert_eq!(named(&format!("{SOC} Pro"), Some("Pro"), Some(SOC)), format!("{SOC} Pro"));
+        assert_eq!(
+            named(&format!("{SOC} Pro"), Some("Pro"), Some(SOC)),
+            format!("{SOC} Pro")
+        );
         // A description WirePlumber already made readable wins over the nick.
-        assert_eq!(named("Internal Speakers", Some("Pro 2"), Some(SOC)), "Internal Speakers");
+        assert_eq!(
+            named("Internal Speakers", Some("Pro 2"), Some(SOC)),
+            "Internal Speakers"
+        );
         // A product's own nick is not used over its description.
         assert_eq!(
-            named("Jabra Evolve 65 Mono", Some("Evolve"), Some("Jabra Evolve 65")),
+            named(
+                "Jabra Evolve 65 Mono",
+                Some("Evolve"),
+                Some("Jabra Evolve 65")
+            ),
             "Jabra Evolve 65"
         );
     }

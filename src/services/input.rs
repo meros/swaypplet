@@ -441,9 +441,21 @@ pub fn auto_name(d: &Device) -> String {
         return "Built-in touchpad".into();
     }
     const NOISE: [&str; 10] = [
-        "Ltd", "Ltd.", "Inc", "Inc.", "Corp", "Corp.", "Co.,", "Co.", "Technology", "Technologies",
+        "Ltd",
+        "Ltd.",
+        "Inc",
+        "Inc.",
+        "Corp",
+        "Corp.",
+        "Co.,",
+        "Co.",
+        "Technology",
+        "Technologies",
     ];
-    let words: Vec<&str> = name.split_whitespace().filter(|w| !NOISE.contains(w)).collect();
+    let words: Vec<&str> = name
+        .split_whitespace()
+        .filter(|w| !NOISE.contains(w))
+        .collect();
     // "Creative Creative Pebble X": the vendor, then the product that
     // starts with it again.
     let words = match words.as_slice() {
@@ -451,7 +463,11 @@ pub fn auto_name(d: &Device) -> String {
         _ => words,
     };
     let cleaned = words.join(" ");
-    if cleaned.is_empty() { name.to_string() } else { cleaned }
+    if cleaned.is_empty() {
+        name.to_string()
+    } else {
+        cleaned
+    }
 }
 
 /// An I²C HID touchpad (`SNSL002E:00 2C2F:002E Touchpad`: ACPI id, bus
@@ -467,7 +483,9 @@ fn is_builtin_touchpad(name: &str) -> bool {
     };
     let hex4 = |s: &str| s.len() == 4 && s.chars().all(|c| c.is_ascii_hexdigit());
     acpi.split_once(':').is_some_and(|(id, n)| {
-        id.len() >= 4 && id.chars().all(|c| c.is_ascii_alphanumeric()) && n.chars().all(|c| c.is_ascii_digit())
+        id.len() >= 4
+            && id.chars().all(|c| c.is_ascii_alphanumeric())
+            && n.chars().all(|c| c.is_ascii_digit())
     }) && ids.split_once(':').is_some_and(|(v, p)| hex4(v) && hex4(p))
 }
 
@@ -543,7 +561,10 @@ mod tests {
     #[test]
     fn other_names_lose_legal_forms_and_a_doubled_vendor() {
         assert_eq!(
-            auto_name(&input("Creative Technology Ltd Creative Pebble X", "keyboard")),
+            auto_name(&input(
+                "Creative Technology Ltd Creative Pebble X",
+                "keyboard"
+            )),
             "Creative Pebble X"
         );
         assert_eq!(

@@ -42,7 +42,9 @@ impl Draft {
     /// automatic one. Main thread only.
     pub fn shown_name(&self) -> String {
         crate::services::devices::display_name(
-            Some(&crate::services::devices::DeviceKey::Display(self.key.clone())),
+            Some(&crate::services::devices::DeviceKey::Display(
+                self.key.clone(),
+            )),
             &self.label,
         )
     }

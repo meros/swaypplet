@@ -20,7 +20,9 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use crate::services::audio::{AudioService, AudioState, Card, Command, Device, DeviceKind, Stream, VolumeState};
+use crate::services::audio::{
+    AudioService, AudioState, Card, Command, Device, DeviceKind, Stream, VolumeState,
+};
 use crate::services::devices::{self, DeviceKey};
 use crate::ui;
 use crate::ui::icons;
@@ -192,7 +194,9 @@ impl DevicePicker {
             *self.order.borrow_mut() = ids;
         }
         for d in devices {
-            let Some((_, button, row)) = rows.get(&d.id) else { continue };
+            let Some((_, button, row)) = rows.get(&d.id) else {
+                continue;
+            };
             row.icon.set_label(device_glyph(d.kind));
             row.title.set_label(&shown_name(d));
             let detail = if d.available {
@@ -208,7 +212,11 @@ impl DevicePicker {
             button.set_sensitive(d.available || d.is_default);
             // The server's own description, so the technical name stays
             // findable behind a name the person gave.
-            let action = if d.is_default { "In use" } else { "Use this device" };
+            let action = if d.is_default {
+                "In use"
+            } else {
+                "Use this device"
+            };
             button.set_tooltip_text(Some(&format!("{action} · {}", d.description)));
         }
     }
@@ -543,7 +551,11 @@ impl AudioSection {
             w.sink_row.update(state, false);
             w.section.icon.set_label(volume_icon(state, false));
             let name = default_sink.map_or_else(|| "Output".to_string(), shown_name);
-            let level = if state.muted { "Muted".to_string() } else { pct_text(state.volume) };
+            let level = if state.muted {
+                "Muted".to_string()
+            } else {
+                pct_text(state.volume)
+            };
             w.section.summary.set_label(&format!("{level} · {name}"));
         }
         w.outputs.update(&s.sinks);

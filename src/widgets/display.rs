@@ -437,7 +437,15 @@ mod tests {
     use super::*;
 
     fn out(mode: Option<(i32, i32, i32)>, scale: Option<f64>) -> OutputInfo {
-        OutputInfo { name: "eDP-1".into(), active: mode.is_some(), mode, scale, product: None, label: "Built-in display".into(), key: "builtin|eDP-1".into() }
+        OutputInfo {
+            name: "eDP-1".into(),
+            active: mode.is_some(),
+            mode,
+            scale,
+            product: None,
+            label: "Built-in display".into(),
+            key: "builtin|eDP-1".into(),
+        }
     }
 
     #[test]

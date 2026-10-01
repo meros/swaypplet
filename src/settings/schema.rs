@@ -87,7 +87,8 @@ impl Devices {
                 .into_iter()
                 .map(|(key, name)| (key.trim().to_string(), name.trim().to_string()))
                 .filter(|(key, name)| {
-                    key.split_once(':').is_some_and(|(k, v)| !k.is_empty() && !v.is_empty())
+                    key.split_once(':')
+                        .is_some_and(|(k, v)| !k.is_empty() && !v.is_empty())
                         && !name.is_empty()
                 })
                 .collect(),

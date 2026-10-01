@@ -326,7 +326,12 @@ impl Pane {
             let (q, r) = (Rc::downgrade(p), Rc::downgrade(p));
             let rename = crate::widgets::rename::button(
                 &p.details.title,
-                move || q.upgrade().and_then(|p| selected(&p)).map(|d| d.shown_name()).unwrap_or_default(),
+                move || {
+                    q.upgrade()
+                        .and_then(|p| selected(&p))
+                        .map(|d| d.shown_name())
+                        .unwrap_or_default()
+                },
                 "Automatic name",
                 move |name| {
                     if let Some(d) = r.upgrade().and_then(|p| selected(&p)) {
