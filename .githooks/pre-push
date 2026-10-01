@@ -18,7 +18,9 @@ cd "$(git rev-parse --show-toplevel)" || exit 1
 # (nx waited for an end of output that never came) and nx's own lock.
 nix develop -c sccache --start-server </dev/null >/dev/null 2>&1 9>&- || true
 
-nix develop -c cargo test --release --quiet 2>&1 | tail -3
+# The dev profile: incremental, so an edit recompiles the tests in about
+# 17 s, where a release test build recompiled the whole crate (2.5 min).
+nix develop -c cargo test --quiet 2>&1 | tail -3
 [ "${PIPESTATUS[0]}" -eq 0 ] || { echo "pre-push: tests failed"; exit 1; }
 
 [ -n "${SWPP_SKIP_GATE:-}" ] && { echo "pre-push: frame gate skipped"; exit 0; }

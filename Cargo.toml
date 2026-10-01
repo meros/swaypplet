@@ -48,6 +48,19 @@ protobuf-codegen = "3.7"
 # Line tables are left out: they cost 43 MB for swaypplet's own code.
 [profile.release]
 strip = "debuginfo"
+# The pre-push hook's frame-gate build recompiles in seconds after an edit
+# instead of 2.5 min. The Nix build turns it off (flake.nix): a sandbox
+# has no earlier session to reuse.
+incremental = true
+
+# swaypplet's own code at opt-level 1, its dependencies at the profile's
+# level. LLVM spends about 130 of the crate's 155 s at opt-level 2; level 1
+# builds it in 105 s. Measured 2026-10-01 with dev/frame-bench.sh, three
+# runs each: late frames 3.3-4.3 % (level 1) against 3.3-5.2 % (level 2),
+# p95 work 0.72-0.78 ms against 0.66-0.98 ms. Level 0 (23 s) had a run at
+# 9.1 % late with a 19.6 ms frame, so it stays off.
+[profile.release.package.swaypplet]
+opt-level = 1
 
 [profile.dev]
 opt-level = 0

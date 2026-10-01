@@ -88,7 +88,12 @@
             CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "16";
             CARGO_PROFILE_RELEASE_DEBUG = "0";
             CARGO_PROFILE_RELEASE_LTO = "false";
+            # The dependencies' level; swaypplet's own code is at 1 through
+            # Cargo.toml's package override, which this does not replace.
             CARGO_PROFILE_RELEASE_OPT_LEVEL = "2";
+            # Cargo.toml turns it on for the pre-push hook; a sandboxed build
+            # has nothing to reuse and would only write the cache.
+            CARGO_PROFILE_RELEASE_INCREMENTAL = "false";
             # --build-id: mold writes none by default, and without one
             # systemd-coredump and debuginfod cannot tie a core to its binary.
             RUSTFLAGS = "-C linker=clang -C link-arg=-fuse-ld=mold -C link-arg=-Wl,--build-id";
