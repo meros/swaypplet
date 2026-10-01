@@ -21,6 +21,7 @@ use super::form::{self, dropdown_row, scale_row, section_box, switch_row};
 use super::schema::{AccelProfile, ClickMethod, Input, ScrollMethod};
 use super::store::{self, Keys};
 use super::xkb;
+use crate::services::devices::{self, DeviceKey};
 use crate::services::input::{self as service, Device};
 use crate::ui;
 
@@ -201,6 +202,8 @@ struct State {
     brightness_step: gtk4::Scale,
     boost: gtk4::Switch,
     devices: gtk4::Box,
+    /// The last list sway gave, redrawn when a device is renamed.
+    shown: RefCell<Vec<Device>>,
     reported: RefCell<Input>,
     status: gtk4::Label,
     updating: Cell<bool>,
@@ -408,10 +411,7 @@ impl State {
         while let Some(child) = self.devices.first_child() {
             self.devices.remove(&child);
         }
-        let listed: Vec<&Device> = devices
-            .iter()
-            .filter(|d| matches!(d.kind.as_str(), "keyboard" | "touchpad" | "pointer"))
-            .collect();
+        let listed = service::listed(&devices);
         if listed.is_empty() {
             let none = ui::text(
                 "Sway reports no keyboard, touchpad or mouse.",
@@ -423,12 +423,22 @@ impl State {
         }
         for d in listed {
             let row = form::row();
-            row.set_tooltip_text(Some(&d.identifier));
-            let name = form::row_label(&d.name);
+            // The kernel's name and sway's identifier stay findable here.
+            row.set_tooltip_text(Some(&format!("{} · {}", d.name, d.identifier)));
+            let auto = service::auto_name(d);
+            let key = DeviceKey::Input(d.identifier.clone());
+            let shown = devices::display_name(Some(&key), &auto);
+            let name = form::row_label(&shown);
             name.set_hexpand(true);
             name.set_xalign(0.0);
             name.set_ellipsize(gtk4::pango::EllipsizeMode::End);
             row.append(&name);
+            row.append(&crate::widgets::rename::button(
+                &name,
+                move || shown.clone(),
+                &auto,
+                move |n| devices::rename(&key, &n),
+            ));
             let kind = match d.kind.as_str() {
                 "pointer" => "Mouse",
                 "touchpad" => "Touchpad",
@@ -438,6 +448,7 @@ impl State {
             self.devices.append(&row);
         }
         *self.reported.borrow_mut() = reported(&devices, self.catalogue);
+        *self.shown.borrow_mut() = devices;
         self.sync();
     }
 }
@@ -695,6 +706,7 @@ impl InputPane {
             brightness_step: brightness_step.clone(),
             boost: boost.clone(),
             devices,
+            shown: RefCell::default(),
             reported: RefCell::new(Input::default()),
             status,
             updating: Cell::new(false),
@@ -861,8 +873,17 @@ impl InputPane {
         root.append(&devices_group);
         root.append(&footer);
         state.sync();
+        InputPane::follow_names(&state);
 
         InputPane { root, state }
+    }
+
+    fn follow_names(state: &Rc<State>) {
+        let state = state.clone();
+        devices::observe(move || {
+            let shown = state.shown.borrow().clone();
+            state.take_devices(shown);
+        });
     }
 
     fn read_devices(state: &Rc<State>) {

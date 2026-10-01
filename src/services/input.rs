@@ -379,9 +379,178 @@ pub fn devices(then: impl FnOnce(Vec<Device>) + 'static) {
     );
 }
 
+/// Is this a device a person would call a keyboard, touchpad or mouse, or
+/// one of the pseudo devices the kernel presents as one: the power, sleep
+/// and lid buttons, ACPI's video and HID event sources, a sound card's jack
+/// sensor, BlueZ's media-control input, and the "Consumer Control" and
+/// "System Control" halves a receiver or a speaker exposes for its media
+/// and power keys. Conservative: what is not on this list is shown.
+pub fn is_pseudo(d: &Device) -> bool {
+    const NAMES: [&str; 8] = [
+        "Power Button",
+        "Sleep Button",
+        "Lid Switch",
+        "Video Bus",
+        "Intel HID events",
+        "Intel HID 5 button array",
+        "ThinkPad Extra Buttons",
+        "PC Speaker",
+    ];
+    let name = d.name.trim();
+    d.kind == "switch"
+        || NAMES.contains(&name)
+        || name.ends_with(" Consumer Control")
+        || name.ends_with(" System Control")
+        || (name.ends_with(" Jack") && (name.starts_with("sof-") || name.starts_with("HDA ")))
+        || (name.starts_with("BlueZ ") && name.ends_with("(MCS)"))
+}
+
+/// The devices to list: no pseudo devices, and no "Mouse" half of a
+/// touchpad (an I²C touchpad shows up as `… Touchpad` and `… Mouse`, the
+/// same hardware twice).
+pub fn listed(devices: &[Device]) -> Vec<&Device> {
+    let touchpads: Vec<&str> = devices
+        .iter()
+        .filter(|d| d.kind == "touchpad")
+        .filter_map(|d| d.name.strip_suffix(" Touchpad"))
+        .collect();
+    devices
+        .iter()
+        .filter(|d| matches!(d.kind.as_str(), "keyboard" | "touchpad" | "pointer"))
+        .filter(|d| !is_pseudo(d))
+        .filter(|d| {
+            !(d.kind == "pointer"
+                && d.name
+                    .strip_suffix(" Mouse")
+                    .is_some_and(|base| touchpads.contains(&base)))
+        })
+        .collect()
+}
+
+/// The automatic name: "Built-in keyboard" for the laptop's own (the PS/2
+/// "AT Translated Set 2 keyboard"), "Built-in touchpad" for an I²C or PS/2
+/// touchpad, and otherwise the kernel's name without legal forms or a
+/// vendor said twice ("Creative Technology Ltd Creative Pebble X" is
+/// "Creative Pebble X").
+pub fn auto_name(d: &Device) -> String {
+    let name = d.name.trim();
+    if name == "AT Translated Set 2 keyboard" {
+        return "Built-in keyboard".into();
+    }
+    if d.kind == "touchpad" && is_builtin_touchpad(name) {
+        return "Built-in touchpad".into();
+    }
+    const NOISE: [&str; 10] = [
+        "Ltd", "Ltd.", "Inc", "Inc.", "Corp", "Corp.", "Co.,", "Co.", "Technology", "Technologies",
+    ];
+    let words: Vec<&str> = name.split_whitespace().filter(|w| !NOISE.contains(w)).collect();
+    // "Creative Creative Pebble X": the vendor, then the product that
+    // starts with it again.
+    let words = match words.as_slice() {
+        [a, b, rest @ ..] if a == b => std::iter::once(*a).chain(rest.iter().copied()).collect(),
+        _ => words,
+    };
+    let cleaned = words.join(" ");
+    if cleaned.is_empty() { name.to_string() } else { cleaned }
+}
+
+/// An I²C HID touchpad (`SNSL002E:00 2C2F:002E Touchpad`: ACPI id, bus
+/// instance, vendor:product) or a PS/2 one (`SynPS/2 Synaptics TouchPad`,
+/// `ETPS/2 Elantech Touchpad`): the machine's own.
+fn is_builtin_touchpad(name: &str) -> bool {
+    if name.starts_with("SynPS/2") || name.starts_with("ETPS/2") || name.starts_with("AlpsPS/2") {
+        return true;
+    }
+    let mut words = name.split_whitespace();
+    let (Some(acpi), Some(ids)) = (words.next(), words.next()) else {
+        return false;
+    };
+    let hex4 = |s: &str| s.len() == 4 && s.chars().all(|c| c.is_ascii_hexdigit());
+    acpi.split_once(':').is_some_and(|(id, n)| {
+        id.len() >= 4 && id.chars().all(|c| c.is_ascii_alphanumeric()) && n.chars().all(|c| c.is_ascii_digit())
+    }) && ids.split_once(':').is_some_and(|(v, p)| hex4(v) && hex4(p))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn input(name: &str, kind: &str) -> Device {
+        Device {
+            identifier: format!("0:0:{}", name.replace(' ', "_")),
+            name: name.into(),
+            kind: kind.into(),
+            ..Device::default()
+        }
+    }
+
+    #[test]
+    fn pseudo_devices_are_not_listed() {
+        let all = [
+            input("Power Button", "keyboard"),
+            input("Sleep Button", "keyboard"),
+            input("Lid Switch", "switch"),
+            input("Video Bus", "keyboard"),
+            input("Intel HID events", "keyboard"),
+            input("sof-soundwire Jack", "keyboard"),
+            input("HDA Intel PCH Headphone Jack", "keyboard"),
+            input("BlueZ 5.87 (MCS)", "keyboard"),
+            input("Logitech USB Receiver Consumer Control", "keyboard"),
+            input("Logitech USB Receiver System Control", "keyboard"),
+            input("ThinkPad Extra Buttons", "keyboard"),
+            input("AT Translated Set 2 keyboard", "keyboard"),
+            input("Logitech USB Receiver", "keyboard"),
+            input("Logitech USB Receiver Mouse", "pointer"),
+            input("SNSL002E:00 2C2F:002E Touchpad", "touchpad"),
+            input("SNSL002E:00 2C2F:002E Mouse", "pointer"),
+            input("Wacom quicki2c-hid 056A:53E1 Pen", "tablet_tool"),
+        ];
+        let names: Vec<&str> = listed(&all).iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "AT Translated Set 2 keyboard",
+                "Logitech USB Receiver",
+                "Logitech USB Receiver Mouse",
+                "SNSL002E:00 2C2F:002E Touchpad",
+            ]
+        );
+        // A real device whose name merely mentions a jack stays.
+        assert!(!is_pseudo(&input("Jack's Keyboard", "keyboard")));
+    }
+
+    #[test]
+    fn the_machines_own_keyboard_and_touchpad_are_built_in() {
+        assert_eq!(
+            auto_name(&input("AT Translated Set 2 keyboard", "keyboard")),
+            "Built-in keyboard"
+        );
+        assert_eq!(
+            auto_name(&input("SNSL002E:00 2C2F:002E Touchpad", "touchpad")),
+            "Built-in touchpad"
+        );
+        assert_eq!(
+            auto_name(&input("SynPS/2 Synaptics TouchPad", "touchpad")),
+            "Built-in touchpad"
+        );
+        // A USB touchpad is not.
+        assert_eq!(
+            auto_name(&input("Apple Inc. Magic Trackpad", "touchpad")),
+            "Apple Magic Trackpad"
+        );
+    }
+
+    #[test]
+    fn other_names_lose_legal_forms_and_a_doubled_vendor() {
+        assert_eq!(
+            auto_name(&input("Creative Technology Ltd Creative Pebble X", "keyboard")),
+            "Creative Pebble X"
+        );
+        assert_eq!(
+            auto_name(&input("Logitech USB Receiver Mouse", "pointer")),
+            "Logitech USB Receiver Mouse"
+        );
+    }
 
     fn all() -> Input {
         Input {
