@@ -21,6 +21,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use crate::services::audio::{AudioService, AudioState, Card, Command, Device, DeviceKind, Stream, VolumeState};
+use crate::services::devices::{self, DeviceKey};
 use crate::ui;
 use crate::ui::icons;
 
@@ -133,9 +134,16 @@ impl VolumeRow {
 /// place. Shared by the section and the media popover's output picker.
 pub struct DevicePicker {
     pub container: gtk4::Box,
-    rows: RefCell<HashMap<String, (gtk4::Button, ui::Row)>>,
+    rows: RefCell<HashMap<String, (gtk4::Box, gtk4::Button, ui::Row)>>,
     order: RefCell<Vec<String>>,
     on_select: Rc<dyn Fn(String)>,
+}
+
+/// What the person reads for an output or input: the name they gave it,
+/// else the automatic one.
+pub fn shown_name(d: &Device) -> String {
+    let key = (!d.bluetooth).then(|| DeviceKey::Audio(d.id.clone()));
+    devices::display_name(key.as_ref(), &d.name)
 }
 
 impl DevicePicker {
@@ -157,21 +165,36 @@ impl DevicePicker {
             }
             rows.retain(|id, _| ids.contains(id));
             for d in devices {
-                let (button, row) = rows.entry(d.id.clone()).or_insert_with(|| {
+                let (line, _, _) = rows.entry(d.id.clone()).or_insert_with(|| {
                     let (button, row) = ui::row_button(device_glyph(d.kind), &d.name, &d.detail);
+                    button.set_hexpand(true);
                     let (on_select, id) = (self.on_select.clone(), d.id.clone());
                     button.connect_clicked(move |_| on_select(id.clone()));
-                    (button, row)
+                    let line = ui::hbox(1);
+                    line.append(&button);
+                    // Bluetooth devices are named by BlueZ: renamed on the
+                    // Bluetooth page, which the name here then follows.
+                    if !d.bluetooth {
+                        let key = DeviceKey::Audio(d.id.clone());
+                        let title = row.title.clone();
+                        let shown = move || title.label().to_string();
+                        line.append(&crate::widgets::rename::button(
+                            &button,
+                            shown,
+                            &d.name,
+                            move |name| devices::rename(&key, &name),
+                        ));
+                    }
+                    (line, button, row)
                 });
-                let _ = row;
-                self.container.append(button);
+                self.container.append(line);
             }
             *self.order.borrow_mut() = ids;
         }
         for d in devices {
-            let Some((button, row)) = rows.get(&d.id) else { continue };
+            let Some((_, button, row)) = rows.get(&d.id) else { continue };
             row.icon.set_label(device_glyph(d.kind));
-            row.title.set_label(&d.name);
+            row.title.set_label(&shown_name(d));
             let detail = if d.available {
                 d.detail.clone()
             } else if d.detail.is_empty() {
@@ -183,7 +206,10 @@ impl DevicePicker {
             row.subtitle.set_visible(!detail.is_empty());
             ui::set_selected(button, d.is_default);
             button.set_sensitive(d.available || d.is_default);
-            button.set_tooltip_text(Some(if d.is_default { "In use" } else { "Use this device" }));
+            // The server's own description, so the technical name stays
+            // findable behind a name the person gave.
+            let action = if d.is_default { "In use" } else { "Use this device" };
+            button.set_tooltip_text(Some(&format!("{action} · {}", d.description)));
         }
     }
 }
@@ -434,6 +460,11 @@ impl AudioSection {
             audio.connect_change(move || Self::apply(&w, &updating, &audio_c, &audio_c.snapshot()));
         }
         {
+            // A rename lands in the settings, not in the server's state.
+            let (w, updating, audio_c) = (widgets.clone(), section.updating.clone(), audio.clone());
+            devices::observe(move || Self::apply(&w, &updating, &audio_c, &audio_c.snapshot()));
+        }
+        {
             let (w, audio_c) = (widgets.clone(), audio.clone());
             audio.connect_level(move || {
                 if w.metering.get() {
@@ -511,7 +542,7 @@ impl AudioSection {
         if let Some(state) = &s.sink {
             w.sink_row.update(state, false);
             w.section.icon.set_label(volume_icon(state, false));
-            let name = default_sink.map_or("Output", |d| d.name.as_str());
+            let name = default_sink.map_or_else(|| "Output".to_string(), shown_name);
             let level = if state.muted { "Muted".to_string() } else { pct_text(state.volume) };
             w.section.summary.set_label(&format!("{level} · {name}"));
         }
@@ -680,7 +711,12 @@ pub fn output_picker(audio: &Rc<AudioService>) -> gtk4::Box {
         }
     };
     draw();
-    audio.connect_change(draw);
+    let draw = Rc::new(draw);
+    audio.connect_change({
+        let draw = draw.clone();
+        move || draw()
+    });
+    devices::observe(move || draw());
     root
 }
 

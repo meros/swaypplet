@@ -88,9 +88,10 @@ impl Adapters {
             };
             if let Some(mac) = &iface.mac {
                 let (ask, mac) = (self.ask.clone(), mac.clone());
+                let shown = name.clone();
                 r.end.prepend(&crate::widgets::rename::button(
                     &r.title,
-                    &name,
+                    move || shown.clone(),
                     &iface.label,
                     move |name| ask(AdapterAsk::Rename(mac.clone(), name)),
                 ));

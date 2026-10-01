@@ -108,7 +108,14 @@ pub struct Device {
     /// The server's index, which is what *writing* to it takes. Names are
     /// stable across a reconnect and indices are not, so both are kept.
     pub index: u32,
+    /// The automatic name ([`device_name`]); what the person reads is
+    /// `services::devices::display_name` of it, keyed by `id`.
     pub name: String,
+    /// The server's own description ("Creative Pebble X Analog Stereo"),
+    /// kept for the tooltip so the technical name stays findable.
+    pub description: String,
+    /// On Bluetooth: named by BlueZ, and renamed there, not here.
+    pub bluetooth: bool,
     pub is_default: bool,
     /// How many channels its volume has. A write must carry exactly this
     /// many; see [`from_level`].
@@ -602,12 +609,19 @@ fn read(mainloop: &mut Mainloop, context: &Context) -> Result<AudioState, String
         let op = introspect.get_sink_info_list(move |result| match result {
             ListResult::Item(info) => {
                 let id = info.name.as_deref().unwrap_or_default().to_string();
-                let name = clean_device_name(info.description.as_deref().unwrap_or(&id));
+                let description = info.description.as_deref().unwrap_or(&id).to_string();
                 let port = info.active_port.as_deref();
                 let (form_factor, bus) = (
                     info.proplist.get_str("device.form_factor"),
                     info.proplist.get_str("device.bus"),
                 );
+                let bluetooth = bus.as_deref() == Some("bluetooth");
+                let name = device_name(&NodeNames {
+                    description: &description,
+                    nick: info.proplist.get_str("node.nick").as_deref(),
+                    card: info.proplist.get_str("device.description").as_deref(),
+                    bluetooth,
+                });
                 sinks.borrow_mut().push(Device {
                     is_default: id == default,
                     index: info.index,
@@ -626,6 +640,8 @@ fn read(mainloop: &mut Mainloop, context: &Context) -> Result<AudioState, String
                     card: info.card,
                     available: port.is_none_or(|p| p.available != pulse::def::PortAvailable::No),
                     name,
+                    description,
+                    bluetooth,
                     id,
                     volume: VolumeState {
                         volume: to_level(&info.volume),
@@ -653,12 +669,19 @@ fn read(mainloop: &mut Mainloop, context: &Context) -> Result<AudioState, String
                     return;
                 }
                 let id = info.name.as_deref().unwrap_or_default().to_string();
-                let name = clean_device_name(info.description.as_deref().unwrap_or(&id));
+                let description = info.description.as_deref().unwrap_or(&id).to_string();
                 let port = info.active_port.as_deref();
                 let (form_factor, bus) = (
                     info.proplist.get_str("device.form_factor"),
                     info.proplist.get_str("device.bus"),
                 );
+                let bluetooth = bus.as_deref() == Some("bluetooth");
+                let name = device_name(&NodeNames {
+                    description: &description,
+                    nick: info.proplist.get_str("node.nick").as_deref(),
+                    card: info.proplist.get_str("device.description").as_deref(),
+                    bluetooth,
+                });
                 sources.borrow_mut().push(Device {
                     is_default: id == default,
                     index: info.index,
@@ -677,6 +700,8 @@ fn read(mainloop: &mut Mainloop, context: &Context) -> Result<AudioState, String
                     card: info.card,
                     available: port.is_none_or(|p| p.available != pulse::def::PortAvailable::No),
                     name,
+                    description,
+                    bluetooth,
                     id,
                     volume: VolumeState {
                         volume: to_level(&info.volume),
@@ -1168,6 +1193,95 @@ pub(crate) fn stream_name(proplist: &Proplist, fallback: Option<&str>) -> String
         .unwrap_or_else(|| "Unknown".into())
 }
 
+/// What the server says about a node, for [`device_name`].
+pub struct NodeNames<'a> {
+    /// `description`: "Creative Pebble X Analog Stereo".
+    pub description: &'a str,
+    /// `node.nick`: "HDMI 1", "Creative Pebble X", or the useless "Pro 2".
+    pub nick: Option<&'a str>,
+    /// The card's `device.description`: "Core Ultra 200V Series Processors
+    /// HD Audio", or for Bluetooth the BlueZ alias.
+    pub card: Option<&'a str>,
+    pub bluetooth: bool,
+}
+
+/// The automatic name for an output or input.
+///
+/// - Bluetooth: the card's description, which WirePlumber takes from the
+///   BlueZ alias, so a device renamed in the Bluetooth page reads the same.
+/// - A description that is the SoC's audio controller plus a port number
+///   ("Core Ultra 200V Series Processors HD Audio Pro 5") says nothing; the
+///   node's nick ("HDMI 1") does, unless the nick is the same port number
+///   ("Pro 2"), in which case the description stays.
+/// - Otherwise the description without its profile ("Analog Stereo",
+///   "Digital Stereo (IEC958)", …) and without a known controller prefix.
+pub fn device_name(n: &NodeNames) -> String {
+    if n.bluetooth
+        && let Some(card) = n.card.map(str::trim).filter(|c| !c.is_empty())
+    {
+        return card.to_string();
+    }
+    let description = strip_profile(n.description);
+    let nick = n
+        .nick
+        .map(str::trim)
+        .filter(|nick| !nick.is_empty() && !is_pro_port(nick));
+    let controller = n
+        .card
+        .map(str::trim)
+        .filter(|c| is_controller(c) && description.starts_with(c));
+    if controller.is_some()
+        && let Some(nick) = nick
+    {
+        return nick.to_string();
+    }
+    clean_device_name(description)
+}
+
+/// "Pro", "Pro 2", "Pro 31": ALSA's UCM-less port names, a number and
+/// nothing a person can use.
+fn is_pro_port(nick: &str) -> bool {
+    nick.strip_prefix("Pro")
+        .is_some_and(|rest| rest.trim().chars().all(|c| c.is_ascii_digit()))
+}
+
+/// A card described as its audio controller rather than as a product.
+fn is_controller(card: &str) -> bool {
+    const MARKS: [&str; 6] = [
+        "HD Audio",
+        "High Definition Audio",
+        "Audio Controller",
+        "Smart Sound",
+        "cAVS",
+        "HDMI/DP Audio",
+    ];
+    MARKS.iter().any(|m| card.contains(m))
+}
+
+/// The description without the profile PulseAudio appends to it.
+fn strip_profile(description: &str) -> &str {
+    const PROFILES: [&str; 11] = [
+        " Analog Stereo",
+        " Analog Mono",
+        " Analog Surround 2.1",
+        " Analog Surround 4.0",
+        " Analog Surround 5.1",
+        " Analog Surround 7.1",
+        " Digital Stereo (IEC958)",
+        " Digital Stereo (HDMI)",
+        " Digital Surround 5.1 (IEC958)",
+        " Multichannel",
+        " Mono",
+    ];
+    let d = description.trim();
+    PROFILES
+        .iter()
+        .find_map(|p| d.strip_suffix(p))
+        .filter(|rest| !rest.trim().is_empty())
+        .unwrap_or(d)
+        .trim()
+}
+
 /// Strip the audio controller's model name off a device description.
 ///
 /// Moved here from the old `wpctl` parser unchanged: the names come from
@@ -1220,6 +1334,63 @@ pub fn clean_device_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn named(description: &str, nick: Option<&str>, card: Option<&str>) -> String {
+        device_name(&NodeNames {
+            description,
+            nick,
+            card,
+            bluetooth: false,
+        })
+    }
+
+    const SOC: &str = "Core Ultra 200V Series Processors HD Audio";
+
+    #[test]
+    fn profile_suffixes_are_stripped() {
+        assert_eq!(
+            named("Creative Pebble X Analog Stereo", Some("Creative Pebble X"), Some("Creative Pebble X")),
+            "Creative Pebble X"
+        );
+        assert_eq!(
+            named("ThinkPad USB-C Dock Audio Mono", None, Some("ThinkPad USB-C Dock Audio")),
+            "ThinkPad USB-C Dock Audio"
+        );
+        assert_eq!(
+            named("OBSBOT Tiny 2 Digital Stereo (IEC958)", None, None),
+            "OBSBOT Tiny 2"
+        );
+        // A name that is only a profile stays.
+        assert_eq!(named("Analog Stereo", None, None), "Analog Stereo");
+    }
+
+    #[test]
+    fn a_soc_port_takes_its_nick_unless_the_nick_is_a_port_number() {
+        assert_eq!(named(&format!("{SOC} Pro 5"), Some("HDMI 1"), Some(SOC)), "HDMI 1");
+        assert_eq!(
+            named(&format!("{SOC} Pro 31"), Some("Pro 31"), Some(SOC)),
+            format!("{SOC} Pro 31")
+        );
+        assert_eq!(named(&format!("{SOC} Pro"), Some("Pro"), Some(SOC)), format!("{SOC} Pro"));
+        // A description WirePlumber already made readable wins over the nick.
+        assert_eq!(named("Internal Speakers", Some("Pro 2"), Some(SOC)), "Internal Speakers");
+        // A product's own nick is not used over its description.
+        assert_eq!(
+            named("Jabra Evolve 65 Mono", Some("Evolve"), Some("Jabra Evolve 65")),
+            "Jabra Evolve 65"
+        );
+    }
+
+    #[test]
+    fn bluetooth_reads_the_alias() {
+        let n = NodeNames {
+            description: "WH-1000XM4",
+            nick: Some("WH-1000XM4"),
+            card: Some("Kitchen headphones"),
+            bluetooth: true,
+        };
+        assert_eq!(device_name(&n), "Kitchen headphones");
+    }
 
     #[test]
     fn a_level_survives_the_round_trip_to_the_server_and_back() {

@@ -673,6 +673,8 @@ mod fixtures {
             id: format!("fixture.{i}"),
             index: i,
             name: name.into(),
+            description: name.into(),
+            bluetooth: false,
             is_default: default,
             channels: 2,
             volume: vol(0.64, false),
