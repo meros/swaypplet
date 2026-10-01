@@ -33,8 +33,8 @@ use gtk4::{Button, Label, ListBox, RevealerTransitionType, Spinner, Switch};
 use crate::services::network::model::{self, Failure, Snapshot};
 use crate::services::network::tailscale::{self, Status};
 use crate::services::network::{
-    ActiveConnection, ConnectivityState, ICON_DISCONNECTED, ICON_ETHERNET, NmResult, fixture,
-    signal_icon, snapshot, watch,
+    ActiveConnection, ConnectivityState, ICON_DISCONNECTED, ICON_ETHERNET, NmResult,
+    display_name, fixture, signal_icon, snapshot, watch,
 };
 use crate::spawn::spawn_work;
 use crate::ui;
@@ -772,7 +772,15 @@ impl NetworkSection {
             }
             (ActiveConnection::Ethernet { device }, _) => {
                 set_signal_glyph(&c.row.icon, ICON_ETHERNET, ui::Tone::Fg);
-                c.row.title.set_label(&format!("Wired · {device}"));
+                // The adapter's name, as the Advanced list shows it; the
+                // chipset and kernel name go to the details' Device line.
+                let name = s
+                    .interfaces
+                    .iter()
+                    .find(|i| &i.device == device)
+                    .map(|i| display_name(&i.label, i.mac.as_deref()))
+                    .unwrap_or_else(|| format!("Wired · {device}"));
+                c.row.title.set_label(&name);
                 c.disconnect.set_visible(false);
                 c.spinner.set_visible(false);
             }
@@ -842,6 +850,20 @@ impl NetworkSection {
             }
             if !link.is_empty() {
                 add("Link", &link.join(" · "));
+            }
+            if let ActiveConnection::Ethernet { device } = &s.active {
+                let chipset = s
+                    .interfaces
+                    .iter()
+                    .find(|i| &i.device == device)
+                    .and_then(|i| i.chipset.clone());
+                add(
+                    "Device",
+                    &match chipset {
+                        Some(c) => format!("{c} · {device}"),
+                        None => device.clone(),
+                    },
+                );
             }
             if let Some(v) = &d.hw_address {
                 add("Hardware", v);
