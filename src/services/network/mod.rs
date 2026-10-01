@@ -8,6 +8,7 @@
 
 use std::collections::HashSet;
 
+pub mod blocked;
 pub mod fixture;
 pub mod model;
 mod nm;
@@ -108,6 +109,8 @@ pub struct NetworkInterface {
     pub device: String,
     pub iface_type: String,
     pub enabled: bool,
+    /// Left alone by NetworkManager until unplugged ([`is_banned`]).
+    pub banned: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -312,7 +315,16 @@ pub fn get_network_interfaces() -> Vec<NetworkInterface> {
     nm::devices(&conn)
         .into_iter()
         .filter_map(|device| {
-            if !is_user_facing_interface(&device.interface, device.device_type, device.state) {
+            // A banned adapter is unmanaged, which the filter below drops; it
+            // stays in the list so the person can lift the ban.
+            let banned = device.device_type == nm::DEVICE_TYPE_ETHERNET
+                && device.state <= nm::DEVICE_STATE_UNMANAGED
+                && nm::managed_and_real(&conn, &device.path).is_some_and(|(managed, real)| {
+                    is_banned(&device.interface, device.device_type, managed, real)
+                });
+            if !banned
+                && !is_user_facing_interface(&device.interface, device.device_type, device.state)
+            {
                 return None;
             }
             let iface_type = device_type_name(device.device_type);
@@ -320,9 +332,68 @@ pub fn get_network_interfaces() -> Vec<NetworkInterface> {
                 enabled: device.state > nm::DEVICE_STATE_DISCONNECTED,
                 device: device.interface,
                 iface_type: iface_type.to_string(),
+                banned,
             })
         })
         .collect()
+}
+
+/// A wired adapter NetworkManager has been told to leave alone for now.
+///
+/// A ban is NM's runtime `Managed = false` on a real ethernet device: what
+/// the panel's Block button sets, and what the host's dispatcher sets when
+/// the link drops while the adapter is still plugged in (a flaky dock link
+/// that would otherwise break every call on it). The machine falls back to
+/// Wi-Fi until the adapter is unplugged, which ends the ban with the device.
+///
+/// Read off `Managed`, not off the state: unmanaged is also where a docker
+/// bridge or an external veth sits, and those are not banned, just not NM's.
+/// The type and the name rule them out; `Real` rules out the placeholder
+/// device NM keeps for a profile whose hardware is absent.
+pub fn is_banned(interface: &str, device_type: u32, managed: bool, real: bool) -> bool {
+    real && !managed && device_type == nm::DEVICE_TYPE_ETHERNET && !is_virtual_name(interface)
+}
+
+/// One real, physically named wired adapter, as the bar's hazard reads it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Wired {
+    /// NM's object path: one per plug-in, never reused for a replug.
+    pub path: String,
+    pub interface: String,
+    pub managed: bool,
+}
+
+/// Every real wired adapter with a physical name, managed or not.
+pub fn wired_adapters() -> Vec<Wired> {
+    let Ok(conn) = nm::system() else {
+        return Vec::new();
+    };
+    nm::devices(&conn)
+        .into_iter()
+        .filter(|d| d.device_type == nm::DEVICE_TYPE_ETHERNET && !is_virtual_name(&d.interface))
+        .filter_map(|d| {
+            let (managed, real) = nm::managed_and_real(&conn, &d.path)?;
+            real.then_some(Wired {
+                path: d.path,
+                interface: d.interface,
+                managed,
+            })
+        })
+        .collect()
+}
+
+/// Ban (`true`) or lift the ban on (`false`) a wired adapter. See
+/// [`is_banned`]; the ban lasts until the adapter is unplugged.
+pub fn set_banned(device: &str, banned: bool) -> NmResult {
+    let device = device.to_string();
+    acting(move |conn| {
+        let path = nm::devices(conn)
+            .into_iter()
+            .find(|d| d.interface == device)
+            .map(|d| d.path)
+            .ok_or_else(|| format!("no device named {device}"))?;
+        nm::set_managed(conn, &path, !banned)
+    })
 }
 
 fn is_user_facing_interface(interface: &str, device_type: u32, state: u32) -> bool {
@@ -339,9 +410,13 @@ fn is_user_facing_interface(interface: &str, device_type: u32, state: u32) -> bo
     {
         return false;
     }
-    // Virtual devices, by the names their creators give them. Long enough
-    // that a prefix match is the whole test: nothing a person would name an
-    // adapter starts with any of these.
+    !is_virtual_name(interface)
+}
+
+/// A virtual device, by the name its creator gave it.
+fn is_virtual_name(interface: &str) -> bool {
+    // Long enough that a prefix match is the whole test: nothing a person
+    // would name an adapter starts with any of these.
     const VIRTUAL: [&str; 10] = [
         "veth",      // container pair ends: veth<random hex>
         "docker",    // docker0
@@ -355,7 +430,7 @@ fn is_user_facing_interface(interface: &str, device_type: u32, state: u32) -> bo
         "flannel",
     ];
     if VIRTUAL.iter().any(|prefix| interface.starts_with(prefix)) {
-        return false;
+        return true;
     }
 
     // The short ones need a boundary. A udev rule may name a real adapter
@@ -364,14 +439,11 @@ fn is_user_facing_interface(interface: &str, device_type: u32, state: u32) -> bo
     // match only when what follows is not another letter — a number
     // ("tun0", "wg0"), a separator ("wg-office"), or nothing at all.
     const SHORT: [&str; 3] = ["tun", "tap", "wg"];
-    if SHORT.iter().any(|prefix| {
+    SHORT.iter().any(|prefix| {
         interface
             .strip_prefix(prefix)
             .is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_alphabetic()))
-    }) {
-        return false;
-    }
-    true
+    })
 }
 
 /// `NM_DEVICE_TYPE_*` as the strings the icon table and the filters above
@@ -611,6 +683,24 @@ mod tests {
             ETHERNET,
             nm::DEVICE_STATE_DISCONNECTED
         ));
+    }
+
+    #[test]
+    fn an_unmanaged_real_wired_adapter_is_banned() {
+        assert!(is_banned("enp0s13f0u2u1", ETHERNET, false, true));
+        // Managed is the normal case, not a ban.
+        assert!(!is_banned("enp0s13f0u2u1", ETHERNET, true, true));
+        // NM's placeholder for a profile whose hardware is absent.
+        assert!(!is_banned("enp0s13f0u2u1", ETHERNET, false, false));
+    }
+
+    #[test]
+    fn unmanaged_virtual_and_wireless_devices_are_not_banned() {
+        // Docker's devices sit unmanaged by design; they are not NM's to ban.
+        for iface in ["docker0", "br-1a2b3c", "veth9f2a", "tailscale0"] {
+            assert!(!is_banned(iface, ETHERNET, false, true), "{iface}");
+        }
+        assert!(!is_banned("wlp0s20f3", WIFI, false, true));
     }
 
     #[test]

@@ -101,6 +101,7 @@ fn base() -> Snapshot {
             device: "enp0s31f6".into(),
             iface_type: "ethernet".into(),
             enabled: false,
+            banned: false,
         }],
         activating: None,
         wifi_state: 100,

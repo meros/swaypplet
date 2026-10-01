@@ -38,6 +38,9 @@ pub const IFACE_IP4: &str = "org.freedesktop.NetworkManager.IP4Config";
 /// `super::device_type_name`, where they are turned into strings.
 pub const DEVICE_TYPE_WIFI: u32 = 2;
 
+/// `NM_DEVICE_TYPE_ETHERNET`, the one type a ban applies to.
+pub const DEVICE_TYPE_ETHERNET: u32 = 1;
+
 /// `NM_DEVICE_STATE_UNMANAGED`. Devices not managed by NetworkManager.
 pub const DEVICE_STATE_UNMANAGED: u32 = 10;
 
@@ -175,6 +178,30 @@ pub fn devices(conn: &Connection) -> Vec<DeviceInfo> {
             })
         })
         .collect()
+}
+
+/// Whether NetworkManager manages the device, and whether the device is a
+/// real one (a kernel interface exists) rather than a placeholder NM keeps
+/// for a connection profile. `None` if the device went away mid-read.
+pub fn managed_and_real(conn: &Connection, path: &str) -> Option<(bool, bool)> {
+    let managed = prop(conn, path, IFACE_DEVICE, "Managed")?;
+    // `Real` arrived in NM 1.2; a daemon without it only exports real ones.
+    let real = prop(conn, path, IFACE_DEVICE, "Real").unwrap_or(true);
+    Some((managed, real))
+}
+
+/// Set the device's `Managed` property: the D-Bus spelling of `nmcli device
+/// set <iface> managed yes|no` without `--permanent`. The value lives on
+/// NM's device object, so it ends when the device is unplugged (a replug is
+/// a new object) or NetworkManager restarts. Needs polkit's
+/// `org.freedesktop.NetworkManager.network-control`.
+pub fn set_managed(conn: &Connection, path: &str, managed: bool) -> Result<(), String> {
+    proxy(conn, path, IFACE_DEVICE)?
+        .set_property("Managed", managed)
+        .map_err(|e| match e {
+            zbus::fdo::Error::AccessDenied(m) | zbus::fdo::Error::Failed(m) => m,
+            other => other.to_string(),
+        })
 }
 
 /// The settings of one stored connection, as `(id, type)`.

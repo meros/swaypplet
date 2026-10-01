@@ -275,9 +275,9 @@ impl NetworkSection {
                 }
             }));
             let w = weak.clone();
-            let adapters = interfaces::Adapters::new(Rc::new(move |dev, on| {
+            let adapters = interfaces::Adapters::new(Rc::new(move |ask| {
                 if let Some(i) = w.upgrade() {
-                    NetworkSection(i).toggle_adapter(dev, on);
+                    NetworkSection(i).adapter(ask);
                 }
             }));
             Inner {
@@ -642,17 +642,23 @@ impl NetworkSection {
         });
     }
 
-    fn toggle_adapter(&self, dev: String, on: bool) {
-        self.act(
-            move || {
-                if on {
-                    crate::services::network::device_connect(&dev)
-                } else {
-                    crate::services::network::device_disconnect(&dev)
-                }
-            },
-            |_| {},
-        );
+    fn adapter(&self, ask: interfaces::AdapterAsk) {
+        use crate::services::network;
+        match ask {
+            interfaces::AdapterAsk::Toggle(dev, on) => self.act(
+                move || {
+                    if on {
+                        network::device_connect(&dev)
+                    } else {
+                        network::device_disconnect(&dev)
+                    }
+                },
+                |_| {},
+            ),
+            interfaces::AdapterAsk::Ban(dev, ban) => {
+                self.act(move || network::set_banned(&dev, ban), |_| {})
+            }
+        }
     }
 
     fn tailscale(&self, ask: TailscaleAsk) {

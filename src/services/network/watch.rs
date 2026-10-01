@@ -66,3 +66,53 @@ async fn follow(
         let _ = tx.try_send(());
     }
 }
+
+/// Call `on_change` (through `tx`) when a device is added, removed, or
+/// changes state, and for nothing else: the bar's banned-adapter hazard
+/// (`blocked`), which runs for the life of the process and so cannot take
+/// [`start`]'s every-signal filter (a scan alone is dozens of signals).
+///
+/// A ban flips `Managed`, and NM moves the device into or out of the
+/// unmanaged state when it does, so `StateChanged` covers it without
+/// subscribing to the device's property chatter. Lives as long as the
+/// receiving end of `tx`.
+pub fn devices(tx: async_channel::Sender<()>) {
+    crate::spawn::spawn_tokio_thread("network-devices", async move {
+        if let Err(e) = follow_devices(&tx).await {
+            log::debug!("network: not following NetworkManager's devices: {e}");
+        }
+    });
+}
+
+async fn follow_devices(tx: &async_channel::Sender<()>) -> zbus::Result<()> {
+    let conn = zbus::Connection::system().await?;
+    let rule =
+        |iface: &'static str, member: &'static str| -> zbus::Result<zbus::MatchRule<'static>> {
+            Ok(zbus::MatchRule::builder()
+                .msg_type(zbus::message::Type::Signal)
+                .sender("org.freedesktop.NetworkManager")?
+                .interface(iface)?
+                .member(member)?
+                .build())
+        };
+    let stream = |r| zbus::MessageStream::for_match_rule(r, &conn, Some(16));
+    let mut state = stream(rule(
+        "org.freedesktop.NetworkManager.Device",
+        "StateChanged",
+    )?)
+    .await?;
+    let mut added = stream(rule("org.freedesktop.NetworkManager", "DeviceAdded")?).await?;
+    let mut removed = stream(rule("org.freedesktop.NetworkManager", "DeviceRemoved")?).await?;
+    loop {
+        tokio::select! {
+            Some(_) = state.next() => {}
+            Some(_) = added.next() => {}
+            Some(_) = removed.next() => {}
+            else => return Ok(()),
+        }
+        if tx.is_closed() {
+            return Ok(());
+        }
+        let _ = tx.try_send(());
+    }
+}
