@@ -11,6 +11,7 @@ use std::collections::HashSet;
 pub mod blocked;
 pub mod fixture;
 pub mod model;
+pub mod naming;
 mod nm;
 pub mod snapshot;
 pub mod tailscale;
@@ -111,6 +112,13 @@ pub struct NetworkInterface {
     pub enabled: bool,
     /// Left alone by NetworkManager until unplugged ([`is_banned`]).
     pub banned: bool,
+    /// The automatic name ([`naming::auto_name`]), else the kernel name.
+    /// What the person reads is [`display_name`] of it.
+    pub label: String,
+    /// "Realtek RTL8153", for the subtitle.
+    pub chipset: Option<String>,
+    /// The key a name the person gave it is stored under.
+    pub mac: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -328,8 +336,13 @@ pub fn get_network_interfaces() -> Vec<NetworkInterface> {
                 return None;
             }
             let iface_type = device_type_name(device.device_type);
+            let root = std::path::Path::new("/");
             Some(NetworkInterface {
                 enabled: device.state > nm::DEVICE_STATE_DISCONNECTED,
+                label: naming::auto_name(root, &device.interface, device.device_type)
+                    .unwrap_or_else(|| device.interface.clone()),
+                chipset: naming::chipset(root, &device.interface),
+                mac: nm::permanent_mac(&conn, &device.path, device.device_type),
                 device: device.interface,
                 iface_type: iface_type.to_string(),
                 banned,
@@ -361,6 +374,9 @@ pub struct Wired {
     pub path: String,
     pub interface: String,
     pub managed: bool,
+    /// As [`NetworkInterface::label`] and [`NetworkInterface::mac`].
+    pub label: String,
+    pub mac: Option<String>,
 }
 
 /// Every real wired adapter with a physical name, managed or not.
@@ -373,13 +389,38 @@ pub fn wired_adapters() -> Vec<Wired> {
         .filter(|d| d.device_type == nm::DEVICE_TYPE_ETHERNET && !is_virtual_name(&d.interface))
         .filter_map(|d| {
             let (managed, real) = nm::managed_and_real(&conn, &d.path)?;
-            real.then_some(Wired {
+            real.then(|| Wired {
+                label: naming::auto_name(std::path::Path::new("/"), &d.interface, d.device_type)
+                    .unwrap_or_else(|| d.interface.clone()),
+                mac: nm::permanent_mac(&conn, &d.path, d.device_type),
                 path: d.path,
                 interface: d.interface,
                 managed,
             })
         })
         .collect()
+}
+
+/// What the person reads for an adapter: the name they gave it, else
+/// `label`. Reads the live settings, so main thread only.
+pub fn display_name(label: &str, mac: Option<&str>) -> String {
+    mac.and_then(|mac| {
+        crate::settings::store::with(|s| s.adapters.as_ref()?.names.get(mac).cloned())
+    })
+    .unwrap_or_else(|| label.to_string())
+}
+
+/// Store `name` for the adapter with `mac`, or clear it (`name` empty) to
+/// go back to the automatic name. Main thread only.
+pub fn rename(mac: &str, name: &str) {
+    let (mac, name) = (mac.to_ascii_lowercase(), name.trim().to_string());
+    crate::settings::store::edit::<crate::settings::store::Adapters>(|a| {
+        if name.is_empty() {
+            a.names.remove(&mac);
+        } else {
+            a.names.insert(mac, name);
+        }
+    });
 }
 
 /// Ban (`true`) or lift the ban on (`false`) a wired adapter. See

@@ -33,6 +33,11 @@ groups, `src/settings/`:
 | System | nothing: it shows which nixos-config commit this host runs against origin/main, and runs `nx apply` or `nx` on a press | none |
 | Quality | nothing: the open issues, Auto-fix, and Merge & apply for a ready fix (docs/QUALITY.md) | none; GitHub, through `gh` |
 
+One section has no pane: `adapters`, the names a person gives network
+adapters with Rename in the network page's Adapters list, keyed by
+permanent MAC address. Like the wallpaper it has no system layer and is not
+in `data/settings-defaults.json`.
+
 The Displays pane (`displays_pane.rs`) is the one that does not apply
 live: a layout can turn the only screen dark. Its arithmetic is pure and
 tested (`arrange.rs`): a dragged output lands flush against the nearest

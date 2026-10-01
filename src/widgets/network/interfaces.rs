@@ -3,6 +3,12 @@
 //! button that tells NetworkManager to leave it alone until it is unplugged
 //! (`services::network::is_banned`). A blocked adapter stays listed with
 //! Unblock in the switch's place, since NM no longer brings it up or down.
+//!
+//! Each row reads as the adapter's name ("Ethernet on Lenovo dock",
+//! `services::network::naming`, or the one the person gave it) over the
+//! chipset and the kernel name. Rename turns the title into an entry: Enter
+//! stores the name under the adapter's MAC address, an empty name goes back
+//! to the automatic one, Escape leaves it as it was.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -11,7 +17,7 @@ use gtk4::prelude::*;
 use gtk4::{ListBox, ListBoxRow};
 
 use super::set_signal_glyph;
-use crate::services::network::{NetworkInterface, iface_type_icon};
+use crate::services::network::{NetworkInterface, display_name, iface_type_icon};
 use crate::ui;
 
 /// What a row asks for.
@@ -20,13 +26,26 @@ pub enum AdapterAsk {
     Toggle(String, bool),
     /// Block (`true`) or unblock the adapter.
     Ban(String, bool),
+    /// Store a name for the adapter with this MAC; empty clears it.
+    Rename(String, String),
 }
+
+/// What a row draws, for telling whether the list changed.
+type Shown = (String, String, bool, bool, String, Option<String>);
 
 pub struct Adapters {
     pub list: ListBox,
-    shown: RefCell<Vec<(String, String, bool, bool)>>,
+    shown: RefCell<Vec<Shown>>,
     syncing: Rc<Cell<bool>>,
     ask: Rc<dyn Fn(AdapterAsk)>,
+}
+
+/// "Realtek RTL8153 · enp0s13f0u2u1", or the kernel name alone.
+fn subtitle(lead: Option<&str>, device: &str) -> String {
+    match lead {
+        Some(lead) => format!("{lead} · {device}"),
+        None => device.to_string(),
+    }
 }
 
 impl Adapters {
@@ -40,9 +59,18 @@ impl Adapters {
     }
 
     pub fn update(&self, interfaces: &[NetworkInterface]) {
-        let now: Vec<(String, String, bool, bool)> = interfaces
+        let now: Vec<Shown> = interfaces
             .iter()
-            .map(|i| (i.device.clone(), i.iface_type.clone(), i.enabled, i.banned))
+            .map(|i| {
+                (
+                    i.device.clone(),
+                    i.iface_type.clone(),
+                    i.enabled,
+                    i.banned,
+                    display_name(&i.label, i.mac.as_deref()),
+                    i.chipset.clone(),
+                )
+            })
             .collect();
         if *self.shown.borrow() == now {
             return;
@@ -53,25 +81,24 @@ impl Adapters {
         }
         self.syncing.set(true);
         for iface in interfaces {
-            let kind = match iface.iface_type.as_str() {
-                "ethernet" => "Ethernet",
-                "wireguard" => "WireGuard",
-                "bluetooth" => "Bluetooth",
-                other => other,
-            };
-            let root = if iface.banned {
-                self.banned_row(iface, kind)
+            let name = display_name(&iface.label, iface.mac.as_deref());
+            let r = if iface.banned {
+                self.banned_row(iface, &name)
             } else {
-                self.switch_row(iface, kind)
+                self.switch_row(iface, &name)
             };
+            if let Some(mac) = &iface.mac {
+                r.end
+                    .prepend(&self.rename_button(&r, mac, &name, &iface.label));
+            }
             self.list
-                .append(&ListBoxRow::builder().child(&root).build());
+                .append(&ListBoxRow::builder().child(&r.root).build());
         }
         self.syncing.set(false);
     }
 
-    fn switch_row(&self, iface: &NetworkInterface, kind: &str) -> gtk4::Box {
-        let (r, sw) = ui::switch_row(&iface.device, kind);
+    fn switch_row(&self, iface: &NetworkInterface, name: &str) -> ui::Row {
+        let (r, sw) = ui::switch_row(name, &subtitle(iface.chipset.as_deref(), &iface.device));
         set_signal_glyph(&r.icon, iface_type_icon(&iface.iface_type), ui::Tone::Fg);
         r.icon.set_visible(true);
         ui::set_selected(&r.root, iface.enabled);
@@ -92,14 +119,14 @@ impl Adapters {
             block.set_tooltip_text(Some("Use Wi-Fi instead until this adapter is unplugged"));
             r.end.prepend(&block);
         }
-        r.root
+        r
     }
 
-    fn banned_row(&self, iface: &NetworkInterface, kind: &str) -> gtk4::Box {
+    fn banned_row(&self, iface: &NetworkInterface, name: &str) -> ui::Row {
         let r = ui::row(
             iface_type_icon(&iface.iface_type),
-            &iface.device,
-            &format!("{kind} · blocked until unplugged"),
+            name,
+            &subtitle(Some("Blocked until unplugged"), &iface.device),
         );
         set_signal_glyph(
             &r.icon,
@@ -108,13 +135,63 @@ impl Adapters {
         );
         r.end
             .append(&self.ban_button("Unblock", &iface.device, false));
-        r.root
+        r
     }
 
     fn ban_button(&self, label: &str, device: &str, ban: bool) -> gtk4::Button {
         let b = ui::button_with(ui::Face::Label(label), ui::Kind::Flat, ui::Size::Small);
         let (dev, ask) = (device.to_string(), self.ask.clone());
         b.connect_clicked(move |_| ask(AdapterAsk::Ban(dev.clone(), ban)));
+        b
+    }
+
+    /// Rename: the title becomes an entry in its own place until Enter or
+    /// Escape.
+    fn rename_button(&self, r: &ui::Row, mac: &str, name: &str, auto: &str) -> gtk4::Button {
+        let b = ui::button_with(ui::Face::Label("Rename"), ui::Kind::Flat, ui::Size::Small);
+        b.set_tooltip_text(Some(
+            "Name this adapter; leave it empty for the automatic name",
+        ));
+        let entry = gtk4::Entry::new();
+        entry.set_placeholder_text(Some(auto));
+        entry.set_hexpand(true);
+        entry.set_visible(false);
+        ui::entry::adopt(&entry, ui::FieldSize::Normal);
+        let title = r.title.clone();
+        if let Some(parent) = title.parent().and_downcast::<gtk4::Box>() {
+            parent.insert_child_after(&entry, Some(&title));
+        }
+        let editing = |on: bool, title: &gtk4::Label, entry: &gtk4::Entry| {
+            title.set_visible(!on);
+            entry.set_visible(on);
+        };
+        {
+            let (title, entry, name) = (title.clone(), entry.clone(), name.to_string());
+            b.connect_clicked(move |_| {
+                entry.set_text(&name);
+                editing(true, &title, &entry);
+                entry.grab_focus();
+            });
+        }
+        {
+            let (title, ask, mac) = (title.clone(), self.ask.clone(), mac.to_string());
+            entry.connect_activate(move |e| {
+                editing(false, &title, e);
+                ask(AdapterAsk::Rename(mac.clone(), e.text().to_string()));
+            });
+        }
+        let keys = gtk4::EventControllerKey::new();
+        {
+            let entry_c = entry.clone();
+            keys.connect_key_pressed(move |_, key, _, _| {
+                if key == gtk4::gdk::Key::Escape {
+                    editing(false, &title, &entry_c);
+                    return gtk4::glib::Propagation::Stop;
+                }
+                gtk4::glib::Propagation::Proceed
+            });
+        }
+        entry.add_controller(keys);
         b
     }
 }

@@ -82,15 +82,29 @@ pub fn build(sway: &Rc<SwayService>, audio: &Rc<AudioService>) -> gtk4::Box {
 
     let (wired, wired_glyph) = hazard("󰈂");
     lane.append(&wired);
-    let apply_wired = move || {
-        let banned = network::blocked::BANNED.with(|b| b.with(Vec::clone));
+    let apply_wired = Rc::new(move || {
+        let banned: Vec<String> = network::blocked::BANNED.with(|b| {
+            b.with(|banned| {
+                banned
+                    .iter()
+                    .map(|w| network::display_name(&w.label, w.mac.as_deref()))
+                    .collect()
+            })
+        });
         if let Some(text) = banned_tooltip(&banned) {
             wired_glyph.set_tooltip_text(Some(&text));
         }
         wired.set_reveal_child(!banned.is_empty());
-    };
+    });
     apply_wired();
-    network::blocked::BANNED.with(|b| b.connect_change(apply_wired));
+    network::blocked::BANNED.with(|b| {
+        b.connect_change({
+            let apply = apply_wired.clone();
+            move || apply()
+        })
+    });
+    // A rename shows in the tooltip without waiting for the next ban.
+    crate::settings::store::observe(move || apply_wired());
     network::blocked::start();
 
     let (rec, rec_glyph) = hazard("󰑋");
@@ -158,11 +172,9 @@ fn armed_mode(mode: &str) -> Option<&str> {
 fn banned_tooltip(banned: &[String]) -> Option<String> {
     match banned {
         [] => None,
-        [one] => Some(format!(
-            "Ethernet {one} blocked: on Wi-Fi until it is unplugged"
-        )),
+        [one] => Some(format!("{one} blocked: on Wi-Fi until it is unplugged")),
         many => Some(format!(
-            "Ethernet {} blocked: on Wi-Fi until they are unplugged",
+            "{} blocked: on Wi-Fi until they are unplugged",
             many.join(", ")
         )),
     }
@@ -201,12 +213,12 @@ mod tests {
     fn the_banned_glyph_names_the_adapters() {
         assert_eq!(banned_tooltip(&[]), None);
         assert_eq!(
-            banned_tooltip(&["enp0s13f0u2u1".into()]).as_deref(),
-            Some("Ethernet enp0s13f0u2u1 blocked: on Wi-Fi until it is unplugged")
+            banned_tooltip(&["Ethernet on Lenovo dock".into()]).as_deref(),
+            Some("Ethernet on Lenovo dock blocked: on Wi-Fi until it is unplugged")
         );
         assert!(
-            banned_tooltip(&["enp1".into(), "enp2".into()])
-                .is_some_and(|t| t.contains("enp1, enp2") && t.contains("they are"))
+            banned_tooltip(&["Desk".into(), "Ethernet on USB hub".into()])
+                .is_some_and(|t| t.contains("Desk, Ethernet on USB hub") && t.contains("they are"))
         );
     }
 

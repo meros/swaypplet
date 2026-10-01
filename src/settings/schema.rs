@@ -65,6 +65,31 @@ impl WallpaperMode {
     }
 }
 
+/// Names the user gave network adapters, by permanent MAC address (lower
+/// case, colon separated), so a name follows the adapter across ports and
+/// reboots. No system layer: the names are this person's. A name here
+/// overrides `services::network::naming`'s automatic one; removing it
+/// restores that.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Adapters {
+    #[serde(default)]
+    pub names: std::collections::BTreeMap<String, String>,
+}
+
+impl Adapters {
+    /// Trim the names and drop the empty ones, which mean "automatic".
+    fn sanitized(self) -> Adapters {
+        Adapters {
+            names: self
+                .names
+                .into_iter()
+                .map(|(mac, name)| (mac.to_ascii_lowercase(), name.trim().to_string()))
+                .filter(|(mac, name)| !mac.is_empty() && !name.is_empty())
+                .collect(),
+        }
+    }
+}
+
 /// The wallpaper the user picked. No default: the default is whatever the
 /// sway config says, which `wallpaper::system_default` reads back from the
 /// compositor rather than guessing.
@@ -1329,11 +1354,13 @@ pub struct Settings {
     pub displays: Option<Displays>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<Input>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapters: Option<Adapters>,
 }
 
 impl Settings {
     /// The section names, in the order the file and the pane list them.
-    pub const SECTIONS: [&'static str; 14] = [
+    pub const SECTIONS: [&'static str; 15] = [
         "wallpaper",
         "look",
         "idle",
@@ -1348,10 +1375,12 @@ impl Settings {
         "daylight",
         "displays",
         "input",
+        "adapters",
     ];
 
     /// The sections with a system layer, which is every one but the
-    /// wallpaper: its system default is the sway config's `bg` line.
+    /// wallpaper (its system default is the sway config's `bg` line) and the
+    /// adapter names (a person's own).
     pub const NIX_SECTIONS: [&'static str; 13] = [
         "look",
         "idle",
@@ -1420,6 +1449,10 @@ impl Settings {
             .or_else(|| system().input.clone())
             .unwrap_or_default()
     }
+    /// User layer only, like the wallpaper.
+    pub fn adapters(&self) -> Adapters {
+        self.adapters.clone().unwrap_or_default()
+    }
 
     /// True when nothing is overridden, which is when the file should not
     /// exist.
@@ -1444,6 +1477,7 @@ impl Settings {
             daylight: Some(self.daylight()),
             displays: Some(self.displays()),
             input: Some(self.input()),
+            adapters: self.adapters.clone(),
         }
     }
 
@@ -1474,6 +1508,7 @@ impl Settings {
             daylight: Some(Daylight::default()),
             displays: Some(Displays::default()),
             input: Some(Input::default()),
+            adapters: Some(Adapters::default()),
         }
     }
 
@@ -1489,6 +1524,7 @@ impl Settings {
             daylight: self.daylight.map(Daylight::sanitized),
             displays: self.displays.map(Displays::sanitized),
             input: self.input.map(Input::sanitized),
+            adapters: self.adapters.map(Adapters::sanitized),
             ..self
         }
     }
@@ -1653,6 +1689,7 @@ section!(NightLight, night_light, night_light);
 section!(Daylight, daylight, daylight);
 section!(Displays, displays, displays);
 section!(Input, input, input);
+section!(Adapters, adapters, adapters);
 
 /// Every `section` or `section.field` in `value` that the structs do not
 /// have.
@@ -2067,6 +2104,9 @@ mod tests {
     fn defaults_json() -> String {
         let mut probe = Settings::probe();
         probe.wallpaper = None;
+        // User layer only: Nix never writes it, so the guard has nothing to
+        // check it against.
+        probe.adapters = None;
         let mut json = serde_json::to_string_pretty(&probe).unwrap();
         json.push('\n');
         json

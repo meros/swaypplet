@@ -658,6 +658,13 @@ impl NetworkSection {
             interfaces::AdapterAsk::Ban(dev, ban) => {
                 self.act(move || network::set_banned(&dev, ban), |_| {})
             }
+            // Settings, not NetworkManager: stored on this thread, and the
+            // list redrawn from the snapshot it already has.
+            interfaces::AdapterAsk::Rename(mac, name) => {
+                network::rename(&mac, &name);
+                let i = &self.0;
+                i.adapters.update(&i.snap.borrow().interfaces);
+            }
         }
     }
 

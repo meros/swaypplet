@@ -30,6 +30,7 @@ pub const IFACE_SETTINGS: &str = "org.freedesktop.NetworkManager.Settings";
 pub const IFACE_CONNECTION: &str = "org.freedesktop.NetworkManager.Settings.Connection";
 pub const IFACE_ACTIVE: &str = "org.freedesktop.NetworkManager.Connection.Active";
 pub const IFACE_DEVICE: &str = "org.freedesktop.NetworkManager.Device";
+pub const IFACE_WIRED: &str = "org.freedesktop.NetworkManager.Device.Wired";
 pub const IFACE_WIRELESS: &str = "org.freedesktop.NetworkManager.Device.Wireless";
 pub const IFACE_AP: &str = "org.freedesktop.NetworkManager.AccessPoint";
 pub const IFACE_IP4: &str = "org.freedesktop.NetworkManager.IP4Config";
@@ -188,6 +189,20 @@ pub fn managed_and_real(conn: &Connection, path: &str) -> Option<(bool, bool)> {
     // `Real` arrived in NM 1.2; a daemon without it only exports real ones.
     let real = prop(conn, path, IFACE_DEVICE, "Real").unwrap_or(true);
     Some((managed, real))
+}
+
+/// The address an adapter keeps whatever is done to it: the wired device's
+/// `PermHwAddress`, else the current `HwAddress` (a Wi-Fi card, or a driver
+/// that reports no permanent one). Lower case, `None` when NM has neither.
+pub fn permanent_mac(conn: &Connection, path: &str, device_type: u32) -> Option<String> {
+    let permanent = (device_type == DEVICE_TYPE_ETHERNET)
+        .then(|| prop::<String>(conn, path, IFACE_WIRED, "PermHwAddress"))
+        .flatten()
+        .filter(|m| !m.is_empty());
+    permanent
+        .or_else(|| prop::<String>(conn, path, IFACE_DEVICE, "HwAddress"))
+        .filter(|m| !m.is_empty() && m != "00:00:00:00:00:00")
+        .map(|m| m.to_ascii_lowercase())
 }
 
 /// Set the device's `Managed` property: the D-Bus spelling of `nmcli device

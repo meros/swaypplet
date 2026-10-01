@@ -24,8 +24,8 @@ use super::Wired;
 use crate::service::Observed;
 
 thread_local! {
-    /// Interface names of the banned adapters, in NM's order.
-    pub static BANNED: Observed<Vec<String>> = Observed::new(Vec::new());
+    /// The banned adapters, in NM's order.
+    pub static BANNED: Observed<Vec<Wired>> = Observed::new(Vec::new());
     static STARTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -64,9 +64,9 @@ pub struct Tracker {
 }
 
 impl Tracker {
-    /// The banned interfaces among `adapters`, a full read of NM's wired
+    /// The banned ones among `adapters`, a full read of NM's wired
     /// adapters.
-    pub fn update(&mut self, adapters: &[Wired]) -> Vec<String> {
+    pub fn update(&mut self, adapters: &[Wired]) -> Vec<Wired> {
         if !self.primed {
             self.primed = true;
             self.seen_managed
@@ -84,7 +84,7 @@ impl Tracker {
         adapters
             .iter()
             .filter(|a| !a.managed && self.seen_managed.contains(&a.path))
-            .map(|a| a.interface.clone())
+            .cloned()
             .collect()
     }
 }
@@ -98,13 +98,19 @@ mod tests {
             path: format!("/org/freedesktop/NetworkManager/Devices/{path}"),
             interface: format!("enp{path}"),
             managed,
+            label: "Ethernet on USB hub".into(),
+            mac: None,
         }
+    }
+
+    fn names(banned: Vec<Wired>) -> Vec<String> {
+        banned.into_iter().map(|w| w.interface).collect()
     }
 
     #[test]
     fn a_ban_already_in_place_at_start_shows() {
         let mut t = Tracker::default();
-        assert_eq!(t.update(&[wired("7", false)]), vec!["enp7"]);
+        assert_eq!(names(t.update(&[wired("7", false)])), vec!["enp7"]);
     }
 
     #[test]
@@ -120,7 +126,7 @@ mod tests {
     fn a_managed_adapter_that_loses_management_is_banned() {
         let mut t = Tracker::default();
         assert!(t.update(&[wired("8", true)]).is_empty());
-        assert_eq!(t.update(&[wired("8", false)]), vec!["enp8"]);
+        assert_eq!(names(t.update(&[wired("8", false)])), vec!["enp8"]);
         // Lifting the ban clears it.
         assert!(t.update(&[wired("8", true)]).is_empty());
     }
@@ -129,7 +135,7 @@ mod tests {
     fn a_replug_starts_without_history() {
         let mut t = Tracker::default();
         t.update(&[wired("8", true)]);
-        assert_eq!(t.update(&[wired("8", false)]), vec!["enp8"]);
+        assert_eq!(names(t.update(&[wired("8", false)])), vec!["enp8"]);
         // Unplugged: the ban goes with the device.
         assert!(t.update(&[]).is_empty());
         // Plugged back in under a new path, initializing.
