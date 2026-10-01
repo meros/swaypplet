@@ -61,10 +61,20 @@ pub fn rename(key: &DeviceKey, name: &str) {
     });
 }
 
-/// Run `cb` whenever the settings change, which is when a name may have:
-/// every surface that shows a device redraws its name on this.
+/// Run `cb` when a stored name changes: every surface that shows a device
+/// redraws its names on this. The settings notify on every edit (a slider
+/// drag is dozens), so this passes on only the edits that moved the
+/// `devices` section.
 pub fn observe(cb: impl Fn() + 'static) {
-    crate::settings::store::observe(cb);
+    let names = || crate::settings::store::with(|s| s.devices.clone());
+    let last = std::cell::RefCell::new(names());
+    crate::settings::store::observe(move || {
+        let now = names();
+        if *last.borrow() != now {
+            *last.borrow_mut() = now;
+            cb();
+        }
+    });
 }
 
 /// A company's name without its legal form: "Realtek Semiconductor Corp."

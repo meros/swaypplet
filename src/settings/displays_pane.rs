@@ -24,6 +24,7 @@ use gtk4::prelude::*;
 use super::arrange::{self, Draft, Fit, Rect};
 use super::form::{self, section_box, switch_row};
 use super::keep::{Effect, End, Keep, Why};
+use crate::services::devices;
 use crate::services::displays::{self, HeadPlan, HeadState, Outcome};
 use crate::ui::{self, Kind, Text, Tone};
 
@@ -165,7 +166,11 @@ impl DisplaysPane {
         group.set_hexpand(true);
         group.add_css_class("settings-group");
         let title = ui::overline("", Tone::Muted);
-        group.append(&title);
+        title.set_hexpand(true);
+        // The title and, once the pane exists, Rename beside it (`connect`).
+        let head = ui::hbox(1);
+        head.append(&title);
+        group.append(&head);
         let (enabled_row, enabled) = switch_row(
             "Enabled",
             "Off, the display goes dark and its workspaces move to the others.",
@@ -314,6 +319,31 @@ impl Pane {
     }
 
     fn connect(p: &Rc<Pane>, keep_btn: &gtk4::Button, revert_btn: &gtk4::Button) {
+        {
+            // Rename the selected screen: the name follows the screen, not
+            // the connector (`displays::naming::key`).
+            let selected = |p: &Pane| p.drafts.borrow().get(p.selected.get()).cloned();
+            let (q, r) = (Rc::downgrade(p), Rc::downgrade(p));
+            let rename = crate::widgets::rename::button(
+                &p.details.title,
+                move || q.upgrade().and_then(|p| selected(&p)).map(|d| d.shown_name()).unwrap_or_default(),
+                "Automatic name",
+                move |name| {
+                    if let Some(d) = r.upgrade().and_then(|p| selected(&p)) {
+                        devices::rename(&devices::DeviceKey::Display(d.key), &name);
+                    }
+                },
+            );
+            if let Some(head) = p.details.title.parent().and_downcast::<gtk4::Box>() {
+                head.append(&rename);
+            }
+            let p = p.clone();
+            devices::observe(move || {
+                if !p.drafts.borrow().is_empty() {
+                    p.rebuild();
+                }
+            });
+        }
         {
             let p = p.clone();
             displays::observe(move || {
@@ -735,11 +765,12 @@ impl Pane {
         let mut first_chip: Option<gtk4::ToggleButton> = None;
         for (i, d) in drafts.iter().enumerate() {
             let chip_label = if d.enabled {
-                d.name.clone()
+                d.shown_name()
             } else {
-                format!("{} (off)", d.name)
+                format!("{} (off)", d.shown_name())
             };
             let chip = ui::toggle_chip(&chip_label);
+            chip.set_tooltip_text(Some(&d.name));
             match &first_chip {
                 Some(f) => chip.set_group(Some(f)),
                 None => first_chip = Some(chip.clone()),
@@ -777,11 +808,8 @@ impl Pane {
     /// One output on the canvas: its connector and product, draggable, and
     /// moved by the arrow keys when it has the focus.
     fn tile(self: &Rc<Pane>, i: usize, d: &Draft) -> gtk4::ToggleButton {
-        let text = if d.product.is_empty() {
-            d.name.clone()
-        } else {
-            format!("{}\n{}", d.name, d.product)
-        };
+        // The name over the connector, which stays findable here.
+        let text = format!("{}\n{}", d.shown_name(), d.name);
         let label = gtk4::Label::new(Some(&text));
         label.set_justify(gtk4::Justification::Center);
         label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
@@ -972,9 +1000,9 @@ impl Pane {
         dt.group.set_visible(true);
         self.updating.set(true);
         let title = if d.product.is_empty() {
-            d.name.clone()
+            format!("{} · {}", d.shown_name(), d.name)
         } else {
-            format!("{} · {}", d.name, d.product)
+            format!("{} · {} · {}", d.shown_name(), d.name, d.product)
         };
         dt.title.set_text(&title);
         dt.enabled.set_active(d.enabled);

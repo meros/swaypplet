@@ -11,7 +11,7 @@
 //! drag keeps it that way as it goes (`settle`), so Apply meets a gap or an
 //! overlap only when the outputs came from the compositor like that.
 
-use crate::services::displays::{HeadPlan, HeadState, Mode, ModeChoice};
+use crate::services::displays::{HeadPlan, HeadState, Mode, ModeChoice, naming};
 use crate::settings::store::OutputTransform;
 
 /// One output as the tab edits it.
@@ -20,6 +20,11 @@ pub struct Draft {
     pub name: String,
     /// "Make Model", empty when the output does not say.
     pub product: String,
+    /// The automatic name (`displays::naming::auto_name`).
+    pub label: String,
+    /// What a name the person gave it is stored under
+    /// (`displays::naming::key`).
+    pub key: String,
     pub enabled: bool,
     pub mode: Option<Mode>,
     pub modes: Vec<Mode>,
@@ -33,6 +38,15 @@ pub struct Draft {
 }
 
 impl Draft {
+    /// What the person reads: the name they gave this screen, else the
+    /// automatic one. Main thread only.
+    pub fn shown_name(&self) -> String {
+        crate::services::devices::display_name(
+            Some(&crate::services::devices::DeviceKey::Display(self.key.clone())),
+            &self.label,
+        )
+    }
+
     pub fn from_head(h: &HeadState) -> Draft {
         let product = [h.make.as_str(), h.model.as_str()]
             .iter()
@@ -41,6 +55,8 @@ impl Draft {
             .collect::<Vec<_>>()
             .join(" ");
         Draft {
+            label: naming::auto_name(&h.name, &h.make, &h.model),
+            key: naming::key(&h.name, &h.make, &h.model, &h.serial),
             name: h.name.clone(),
             product,
             enabled: h.enabled,
@@ -596,6 +612,8 @@ mod tests {
         Draft {
             name: name.into(),
             product: String::new(),
+            label: name.into(),
+            key: name.into(),
             enabled: true,
             mode: Some(mode),
             modes: vec![mode],

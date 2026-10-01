@@ -10,6 +10,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{Box, Label};
 
+use crate::services::devices::{self, DeviceKey};
 use crate::services::displays;
 use crate::settings::store::{self, NightLight, NightSchedule};
 use crate::spawn::spawn_work;
@@ -29,6 +30,18 @@ struct OutputInfo {
     scale: Option<f64>,
     /// "Make Model", when sway knows them.
     product: Option<String>,
+    /// The automatic name and the key a given one is stored under
+    /// (`displays::naming`).
+    label: String,
+    key: String,
+}
+
+impl OutputInfo {
+    /// The name the person gave this screen, else the automatic one. Main
+    /// thread only.
+    fn shown_name(&self) -> String {
+        devices::display_name(Some(&DeviceKey::Display(self.key.clone())), &self.label)
+    }
 }
 
 // ── Backend helpers ───────────────────────────────────────────────────────────
@@ -45,6 +58,8 @@ fn get_outputs() -> Vec<OutputInfo> {
     outputs
         .into_iter()
         .map(|o| OutputInfo {
+            label: displays::naming::auto_name(&o.name, &o.make, &o.model),
+            key: displays::naming::key(&o.name, &o.make, &o.model, &o.serial),
             product: Some(format!("{} {}", o.make, o.model))
                 .filter(|p| !p.trim().is_empty() && !p.contains("Unknown")),
             mode: o.current_mode.map(|m| (m.width, m.height, m.refresh)),
@@ -81,11 +96,21 @@ fn trim(v: f64) -> String {
 /// One output, read only: what it is and what it runs at. Turning one on or
 /// off is arranging them, which settings does with the layout in view.
 fn output_row(output: &OutputInfo) -> Box {
-    let title = match &output.product {
-        Some(p) => format!("{} · {p}", output.name),
-        None => output.name.clone(),
-    };
-    ui::row(icons::DISPLAY, &title, &describe(output)).root
+    // The connector and the product go under the name, where they stay
+    // findable.
+    let mut subtitle = vec![output.name.clone()];
+    subtitle.extend(output.product.iter().map(|p| p.trim().to_string()));
+    subtitle.push(describe(output));
+    let name = output.shown_name();
+    let r = ui::row(icons::DISPLAY, &name, &subtitle.join(" · "));
+    let key = DeviceKey::Display(output.key.clone());
+    r.end.append(&crate::widgets::rename::button(
+        &r.title,
+        move || name.clone(),
+        &output.label,
+        move |name| devices::rename(&key, &name),
+    ));
+    r.root
 }
 
 /// Clear `list` and rebuild it from pre-fetched output data.
@@ -340,6 +365,12 @@ impl DisplaySection {
                 refresh_outputs(&output_list, &summary);
             });
         }
+        {
+            // A screen renamed here or in settings.
+            let output_list = display.output_list.clone();
+            let summary = display.section.summary.clone();
+            devices::observe(move || refresh_outputs(&output_list, &summary));
+        }
 
         display.refresh();
         display
@@ -381,7 +412,7 @@ fn refresh_outputs(output_list: &Box, summary_text: &Label) {
             1 => outputs
                 .iter()
                 .find(|o| o.active)
-                .map(|o| o.name.clone())
+                .map(OutputInfo::shown_name)
                 .unwrap_or_default(),
             n => format!("{n} displays"),
         };
@@ -406,7 +437,7 @@ mod tests {
     use super::*;
 
     fn out(mode: Option<(i32, i32, i32)>, scale: Option<f64>) -> OutputInfo {
-        OutputInfo { name: "eDP-1".into(), active: mode.is_some(), mode, scale, product: None }
+        OutputInfo { name: "eDP-1".into(), active: mode.is_some(), mode, scale, product: None, label: "Built-in display".into(), key: "builtin|eDP-1".into() }
     }
 
     #[test]
