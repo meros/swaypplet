@@ -114,6 +114,7 @@ struct DeviceRow {
     row: ui::Row,
     primary: gtk4::Button,
     secondary: gtk4::Button,
+    rename: gtk4::Button,
     action: Rc<RefCell<Option<Command>>>,
     second: Rc<RefCell<Secondary>>,
     /// Forget was pressed once; the row asks before doing it.
@@ -129,6 +130,23 @@ impl DeviceRow {
             ui::Size::Small,
         );
         let secondary = ui::button_with(ui::Face::Label("Forget"), ui::Kind::Flat, ui::Size::Small);
+        // Rename writes BlueZ's alias, which every Bluetooth UI on the
+        // machine (and the audio page's name for it) then shows.
+        let rename = {
+            let (service, mac, title) = (service.clone(), d.mac.clone(), row.title.clone());
+            crate::widgets::rename::button(
+                &row.title,
+                move || title.label().to_string(),
+                "The device's own name",
+                move |alias| {
+                    service.send(Command::Rename {
+                        mac: mac.clone(),
+                        alias,
+                    })
+                },
+            )
+        };
+        row.end.append(&rename);
         row.end.append(&primary);
         row.end.append(&secondary);
         let action: Rc<RefCell<Option<Command>>> = Rc::default();
@@ -165,6 +183,7 @@ impl DeviceRow {
             row,
             primary,
             secondary,
+            rename,
             action,
             second,
             asking,
@@ -173,6 +192,10 @@ impl DeviceRow {
 
     fn update(&self, d: &Device, group: Group, op: Option<&Op>) {
         self.row.title.set_label(&d.name);
+        // The address stays findable behind an alias.
+        self.row.title.set_tooltip_text(Some(&d.mac));
+        // A nearby device is a passing object; a paired one keeps its alias.
+        self.rename.set_visible(d.paired);
         self.row.icon.set_label(device_icon(d.icon_hint.as_deref()));
         ui::set_selected(&self.row.root, group == Group::Connected);
         ui::set_busy(&self.row.root, op.is_some_and(Op::busy));
