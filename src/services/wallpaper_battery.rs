@@ -75,8 +75,10 @@ const SPEED_SPAN: Duration = Duration::from_millis(2500);
 /// The fade to black and back, the whole way.
 const FADE_SPAN: Duration = Duration::from_millis(1500);
 
-/// Between two property writes: thirty over a full slow-down.
-const STEP: Duration = Duration::from_millis(2500 / 30);
+/// Between two property writes: one per refresh of a 60 Hz output. At the
+/// twelve a second this started with, the fade showed as visible steps of
+/// contrast; a write per refresh is what makes each refresh a new value.
+const STEP: Duration = Duration::from_micros(16_667);
 
 /// How long the last fade write gets to reach the screen before the video
 /// track is dropped. A paused player redraws its frame only when asked, and
@@ -705,7 +707,7 @@ mod tests {
         assert_eq!(p.speed.curve, Curve::Out);
         assert!(!p.fade.moves());
         let steps = schedule(&p);
-        assert_eq!(steps.len(), 30);
+        assert_eq!(steps.len(), 150);
         assert!(steps.iter().all(|s| s.fade.is_none()));
         let speeds: Vec<f64> = steps.iter().map(|s| s.speed.unwrap()).collect();
         assert!(speeds.windows(2).all(|w| w[1] < w[0]), "{speeds:?}");
@@ -765,7 +767,7 @@ mod tests {
             vec![Cmd::Pause(true), Cmd::Video(false), Cmd::Blackout]
         );
         let steps = schedule(&p);
-        assert_eq!(steps.len(), 18);
+        assert_eq!(steps.len(), 90);
         assert!(steps.iter().all(|s| s.speed.is_some() && s.fade.is_some()));
         assert_eq!(steps.last().unwrap().fade, Some(DARK));
     }
