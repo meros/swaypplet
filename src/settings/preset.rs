@@ -77,20 +77,22 @@ impl Preset {
 /// is where it is written down.
 fn base() -> Material {
     Material {
-        surface: SurfaceKind::ConvexSquircle,
+        surface: SurfaceKind::Droplet,
         refraction: 1.07,
         dispersion: 0.003,
         samples: 4.0,
-        reflection: 0.85,
+        reflection: 0.4,
         lensing: 0.15,
         frost_radius: 28.0,
         absorb: 1.0,
-        absorb_floor: 0.07,
         photochromic: 0.35,
         specular: 0.0,
         frost: 0.33,
         shine: 4096.0,
         reflect_blur: 0.06,
+        contact_angle: 89.5,
+        tail: 0.5,
+        tail_length: 6.0,
         // Unset, in every preset: the fill is the card's, and a preset that
         // took it over would be changing swaypplet's own colours under the
         // guise of picking a material.
@@ -140,7 +142,6 @@ pub static ALL: [Preset; 5] = [
             dispersion: 0.008,
             lensing: 0.24,
             frost_radius: 4.0,
-            absorb_floor: 0.0,
             specular: 0.28,
             ..rough(0.01)
         },
@@ -159,7 +160,6 @@ pub static ALL: [Preset; 5] = [
             dispersion: 0.004,
             lensing: 0.22,
             frost_radius: 30.0,
-            absorb_floor: 0.14,
             // The lobe is broad at this roughness, so most of the shipped
             // highlight is still a lit top rather than a patch.
             specular: 0.08,
@@ -178,7 +178,6 @@ pub static ALL: [Preset; 5] = [
             dispersion: 0.004,
             lensing: 0.20,
             frost_radius: 26.0,
-            absorb_floor: 0.09,
             specular: 0.07,
             ..rough(0.62)
         },
@@ -194,7 +193,6 @@ pub static ALL: [Preset; 5] = [
             dispersion: 0.012,
             lensing: 0.36,
             frost_radius: 16.0,
-            absorb_floor: 0.14,
             specular: 0.26,
             ..rough(0.16)
         },
@@ -299,7 +297,6 @@ mod tests {
         f("dispersion", a.dispersion, b.dispersion);
         f("lensing", a.lensing, b.lensing);
         f("frost_radius", a.frost_radius, b.frost_radius);
-        f("absorb_floor", a.absorb_floor, b.absorb_floor);
         f("specular", a.specular, b.specular);
         f("clarity", pa.clarity, pb.clarity);
         f("frost_scale", pa.frost_scale, pb.frost_scale);

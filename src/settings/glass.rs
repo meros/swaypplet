@@ -88,7 +88,14 @@ impl SurfaceKind {
 /// Unknown fields are ignored rather than refused, which is what keeps an
 /// override written before a knob was removed loading: `roughness`, `haze`,
 /// `noise`, `energy_comp`, the grain, the thin-film, glow and wave effects
-/// and `edge_light` all lived here once.
+/// `edge_light` and `absorb_floor` all lived here once. The absorption is
+/// constant across the card now: the tint is the body's, for legibility, not
+/// the slab's thickness, so there is no floor for a thin rim to sit on.
+///
+/// `contact_angle`, `tail` and `tail_length` shape the droplet's profile and
+/// do nothing on the squircle: the edge's slope in degrees, and the weight
+/// and relative length of the long, gentle part that runs out to the flat
+/// top. Missing from an older override, they load as the shipped droplet.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Material {
     pub surface: SurfaceKind,
@@ -99,12 +106,17 @@ pub struct Material {
     pub lensing: f64,
     pub frost_radius: f64,
     pub absorb: f64,
-    pub absorb_floor: f64,
     pub photochromic: f64,
     pub specular: f64,
     pub frost: f64,
     pub shine: f64,
     pub reflect_blur: f64,
+    #[serde(default = "shipped_contact_angle")]
+    pub contact_angle: f64,
+    #[serde(default = "shipped_tail")]
+    pub tail: f64,
+    #[serde(default = "shipped_tail_length")]
+    pub tail_length: f64,
     /// The fill the compositor paints under swaypplet's own content, as
     /// `#rrggbb`, or the literal `none` for the card's own colour.
     ///
@@ -136,6 +148,18 @@ fn unset() -> f64 {
 
 fn unset_color() -> String {
     "none".to_string()
+}
+
+fn shipped_contact_angle() -> f64 {
+    89.5
+}
+
+fn shipped_tail() -> f64 {
+    0.5
+}
+
+fn shipped_tail_length() -> f64 {
+    6.0
 }
 
 impl Material {
@@ -348,12 +372,14 @@ impl System {
             ("lensing", m.lensing),
             ("frost_radius", m.frost_radius),
             ("absorb", m.absorb),
-            ("absorb_floor", m.absorb_floor),
             ("photochromic", m.photochromic),
             ("specular", m.specular),
             ("frost", m.frost),
             ("shine", m.shine),
             ("reflect_blur", m.reflect_blur),
+            ("contact_angle", m.contact_angle),
+            ("tail", m.tail),
+            ("tail_length", m.tail_length),
             ("fill_alpha", m.fill_alpha),
             ("bezel", geometry.bezel),
             ("thickness", geometry.thickness),
@@ -587,7 +613,7 @@ impl Material {
     }
 
     /// Every numeric field, in the order the export prints them.
-    pub(super) fn numbers(&self) -> [(&'static str, f64); 14] {
+    pub(super) fn numbers(&self) -> [(&'static str, f64); 16] {
         [
             ("refraction", self.refraction),
             ("dispersion", self.dispersion),
@@ -596,12 +622,14 @@ impl Material {
             ("lensing", self.lensing),
             ("frost_radius", self.frost_radius),
             ("absorb", self.absorb),
-            ("absorb_floor", self.absorb_floor),
             ("photochromic", self.photochromic),
             ("specular", self.specular),
             ("frost", self.frost),
             ("shine", self.shine),
             ("reflect_blur", self.reflect_blur),
+            ("contact_angle", self.contact_angle),
+            ("tail", self.tail),
+            ("tail_length", self.tail_length),
             ("fill_alpha", self.fill_alpha),
         ]
     }
@@ -903,7 +931,7 @@ mod tests {
     fn the_nix_export_does_not_print_integers_as_floats() {
         let nix = preset::plain().as_nix();
         assert!(nix.contains("samples = 4;"), "{nix}");
-        assert!(nix.contains("surface = \"convex_squircle\";"));
+        assert!(nix.contains("surface = \"droplet\";"));
     }
 
     /// The lock card's glass follows the mode like every other card.
@@ -976,6 +1004,7 @@ mod tests {
             "edge_glow",
             "wave_amplitude",
             "edge_light",
+            "absorb_floor",
             "crest_radius",
         ] {
             assert!(

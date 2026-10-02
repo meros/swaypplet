@@ -255,11 +255,13 @@ fn between_materials(
         lensing,
         frost_radius,
         absorb,
-        absorb_floor,
         specular,
         frost,
         shine,
-        reflect_blur
+        reflect_blur,
+        contact_angle,
+        tail,
+        tail_length
     );
     m.photochromic = photochromic(ma.photochromic, mb.photochromic, t);
     let ((ca, aa), (cb, ab)) = (fill(ma), fill(mb));

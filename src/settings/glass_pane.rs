@@ -130,6 +130,41 @@ static MATERIAL: &[Knob] = &[
     },
 ];
 
+/// The droplet's profile, under the surface it shapes. The squircle ignores
+/// all three.
+static PROFILE: &[Knob] = &[
+    Knob {
+        label: "Contact angle",
+        hint: "The droplet edge's slope, in degrees: higher is a steeper, narrower rim.",
+        min: 30.0,
+        max: 89.5,
+        step: 0.5,
+        decimals: 1,
+        get: |t| t.material.contact_angle,
+        set: |t, v| t.material.contact_angle = v,
+    },
+    Knob {
+        label: "Tail",
+        hint: "How much of the droplet's height is in the long, gentle run out to the flat top.",
+        min: 0.0,
+        max: 0.95,
+        step: 0.01,
+        decimals: 2,
+        get: |t| t.material.tail,
+        set: |t, v| t.material.tail = v,
+    },
+    Knob {
+        label: "Tail length",
+        hint: "The gentle run's length, as a multiple of the steep edge's.",
+        min: 1.0,
+        max: 12.0,
+        step: 0.1,
+        decimals: 1,
+        get: |t| t.material.tail_length,
+        set: |t, v| t.material.tail_length = v,
+    },
+];
+
 // ── State ───────────────────────────────────────────────────────────────
 
 struct State {
@@ -436,7 +471,10 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
 /// The named property. A dropdown rather than a slider because sway takes it
 /// as a name, and an unknown one costs the whole `layer_effects` block.
 fn build_kinds(state: &Rc<State>) -> gtk4::Box {
-    let group = section_box("Profile", "The bevel's height profile.");
+    let group = section_box(
+        "Profile",
+        "The bevel's height profile, and the droplet's shape.",
+    );
 
     let surface_labels: Vec<&str> = SurfaceKind::ALL.iter().map(|k| k.label()).collect();
     let surface = form::dropdown(&surface_labels);
@@ -466,6 +504,9 @@ fn build_kinds(state: &Rc<State>) -> gtk4::Box {
         }));
     }
     group.append(&kind_row("Surface", &surface));
+    for knob in PROFILE {
+        group.append(&build_knob(state, knob));
+    }
     group
 }
 
@@ -562,6 +603,9 @@ pub(super) const SEARCH: &[Entry] = &[
     row("Material", "Highlight", "The light on the top of the card", &["specular", "shine", "gloss"]),
     row("Material", "Bevel", "The width and depth of the edge", &["edge", "bezel", "depth", "border"]),
     row("Profile", "Surface", "The bevel's height profile", &["shape", "curve"]),
+    row("Profile", "Contact angle", "How steep the droplet's edge is", &["slope", "rim", "steep", "droplet"]),
+    row("Profile", "Tail", "How much of the droplet runs out gently", &["falloff", "soft", "droplet"]),
+    row("Profile", "Tail length", "How long the droplet's gentle run is", &["falloff", "soft", "droplet"]),
 ];
 
 #[cfg(test)]
@@ -570,7 +614,7 @@ mod tests {
 
     /// Every knob on the tab.
     fn knobs() -> impl Iterator<Item = &'static Knob> {
-        MATERIAL.iter()
+        MATERIAL.iter().chain(PROFILE.iter())
     }
 
     /// What a knob's setter moves, named, so two knobs on one number show.

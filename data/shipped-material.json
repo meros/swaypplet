@@ -1,18 +1,20 @@
 {
-  "surface": "convex_squircle",
+  "surface": "droplet",
   "refraction": 1.07,
   "dispersion": 0.003,
   "samples": 4.0,
-  "reflection": 0.85,
+  "reflection": 0.4,
   "lensing": 0.15,
   "frost_radius": 28.0,
   "absorb": 1.0,
-  "absorb_floor": 0.07,
   "photochromic": 0.35,
   "specular": 0.0,
   "frost": 0.33,
   "shine": 4096.0,
   "reflect_blur": 0.06,
+  "contact_angle": 89.5,
+  "tail": 0.5,
+  "tail_length": 6.0,
   "fill_color": "none",
   "fill_alpha": -1.0
 }
