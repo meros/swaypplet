@@ -5,10 +5,11 @@
 //! §4). The mode owns six values (fill colour and alpha, absorb,
 //! photochromic, edge light, frost) and sets them in `glass::for_mode`; the
 //! tab moves them only relative to the mode, with Clarity and Frost. The
-//! rest is one material in both modes: the profile and grain, refraction,
-//! dispersion, the highlight and the bevel. The esoteric numbers (samples,
-//! energy compensation, the thin-film and wave effects) stay as shipped and
-//! have no slider: `glass.nix` is the bench for those.
+//! rest is one material in both modes: the profile, refraction, dispersion,
+//! the highlight and the bevel. The esoteric numbers (samples, the
+//! highlight's exponent, the reflection blur) stay as shipped and have no
+//! slider: `glass.nix` and tools/glass-bench in the nixos repo are the bench
+//! for those.
 //!
 //! It edits the compositor live rather than on OK. A material is not a value
 //! you can predict from its numbers, so the pane's job is to put the slider
@@ -29,7 +30,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 
 use super::form::{self, kind_row, pretty_path, section_box};
-use super::glass::{self, GrainKind, SurfaceKind, System, Tuning};
+use super::glass::{self, SurfaceKind, System, Tuning};
 use super::preset;
 
 /// How long after the last slider motion the compositor is told.
@@ -56,10 +57,6 @@ struct Knob {
     decimals: usize,
     get: fn(&Tuning) -> f64,
     set: fn(&mut Tuning, f64),
-    /// When this knob has anything to say. `None` is always; the grain's
-    /// knobs go grey with no grain, since a slider that silently does
-    /// nothing is worse than one that says so.
-    live_when: Option<fn(&Tuning) -> bool>,
 }
 
 /// Re-reads one control from the tuning. One per widget, so a preset click
@@ -80,7 +77,6 @@ static MATERIAL: &[Knob] = &[
         decimals: 2,
         get: |t| t.clarity,
         set: |t, v| t.clarity = v,
-        live_when: None,
     },
     Knob {
         label: "Frost",
@@ -91,7 +87,6 @@ static MATERIAL: &[Knob] = &[
         decimals: 2,
         get: |t| t.frost_scale,
         set: |t, v| t.frost_scale = v,
-        live_when: None,
     },
     Knob {
         label: "Refraction",
@@ -102,7 +97,6 @@ static MATERIAL: &[Knob] = &[
         decimals: 2,
         get: |t| t.material.refraction,
         set: |t, v| t.material.refraction = v,
-        live_when: None,
     },
     Knob {
         label: "Dispersion",
@@ -113,7 +107,6 @@ static MATERIAL: &[Knob] = &[
         decimals: 3,
         get: |t| t.material.dispersion,
         set: |t, v| t.material.dispersion = v,
-        live_when: None,
     },
     Knob {
         label: "Highlight",
@@ -124,7 +117,6 @@ static MATERIAL: &[Knob] = &[
         decimals: 2,
         get: |t| t.material.specular,
         set: |t, v| t.material.specular = v,
-        live_when: None,
     },
     Knob {
         label: "Bevel",
@@ -135,33 +127,6 @@ static MATERIAL: &[Knob] = &[
         decimals: 2,
         get: |t| t.bezel_scale,
         set: |t, v| t.bezel_scale = v,
-        live_when: None,
-    },
-];
-
-/// The grain's two numbers, under the grain dropdown they belong to.
-static GRAIN: &[Knob] = &[
-    Knob {
-        label: "Grain size",
-        hint: "Cell, flute or wave pitch in pixels.",
-        min: 4.0,
-        max: 96.0,
-        step: 1.0,
-        decimals: 0,
-        get: |t| t.material.grain_scale,
-        set: |t, v| t.material.grain_scale = v,
-        live_when: Some(|t| t.material.grain != GrainKind::None),
-    },
-    Knob {
-        label: "Grain strength",
-        hint: "Peak lateral displacement in pixels.",
-        min: 0.0,
-        max: 8.0,
-        step: 0.1,
-        decimals: 1,
-        get: |t| t.material.grain_strength,
-        set: |t, v| t.material.grain_strength = v,
-        live_when: Some(|t| t.material.grain != GrainKind::None),
     },
 ];
 
@@ -468,13 +433,10 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
     group
 }
 
-/// The two named properties. Dropdowns rather than sliders because sway takes
-/// them as names, and an unknown one costs the whole `layer_effects` block.
+/// The named property. A dropdown rather than a slider because sway takes it
+/// as a name, and an unknown one costs the whole `layer_effects` block.
 fn build_kinds(state: &Rc<State>) -> gtk4::Box {
-    let group = section_box(
-        "Profile",
-        "The bevel's height profile, and the sub-pixel structure laid over it.",
-    );
+    let group = section_box("Profile", "The bevel's height profile.");
 
     let surface_labels: Vec<&str> = SurfaceKind::ALL.iter().map(|k| k.label()).collect();
     let surface = form::dropdown(&surface_labels);
@@ -504,47 +466,12 @@ fn build_kinds(state: &Rc<State>) -> gtk4::Box {
         }));
     }
     group.append(&kind_row("Surface", &surface));
-
-    let grain_labels: Vec<&str> = GrainKind::ALL.iter().map(|k| k.label()).collect();
-    let grain = form::dropdown(&grain_labels);
-    {
-        let state = state.clone();
-        grain.connect_selected_notify(move |d| {
-            if state.updating.get() {
-                return;
-            }
-            let Some(kind) = GrainKind::ALL.get(d.selected() as usize).copied() else {
-                return;
-            };
-            state.tuning.borrow_mut().material.grain = kind;
-            state.edited();
-        });
-    }
-    {
-        let grain = grain.clone();
-        state.sync.borrow_mut().push(Box::new(move |t| {
-            let index = GrainKind::ALL.iter().position(|k| *k == t.material.grain);
-            grain.set_selected(index.unwrap_or(0) as u32);
-        }));
-    }
-    group.append(&kind_row("Grain", &grain));
-    for knob in GRAIN {
-        group.append(&build_knob(state, knob));
-    }
-
     group
 }
 
 fn build_knob(state: &Rc<State>, knob: &'static Knob) -> gtk4::Box {
     let row = form::row();
     row.set_tooltip_text(Some(knob.hint));
-    if let Some(live_when) = knob.live_when {
-        let row = row.clone();
-        state
-            .sync
-            .borrow_mut()
-            .push(Box::new(move |t| row.set_sensitive(live_when(t))));
-    }
 
     row.append(&form::row_label(knob.label));
 
@@ -635,9 +562,6 @@ pub(super) const SEARCH: &[Entry] = &[
     row("Material", "Highlight", "The light on the top of the card", &["specular", "shine", "gloss"]),
     row("Material", "Bevel", "The width and depth of the edge", &["edge", "bezel", "depth", "border"]),
     row("Profile", "Surface", "The bevel's height profile", &["shape", "curve"]),
-    row("Profile", "Grain", "Structure laid over the bevel", &["texture", "pattern", "noise", "fluted", "ribbed"]),
-    row("Profile", "Grain size", "The grain's pitch", &["texture size"]),
-    row("Profile", "Grain strength", "How far the grain moves the light", &["texture strength"]),
 ];
 
 #[cfg(test)]
@@ -646,7 +570,7 @@ mod tests {
 
     /// Every knob on the tab.
     fn knobs() -> impl Iterator<Item = &'static Knob> {
-        MATERIAL.iter().chain(GRAIN)
+        MATERIAL.iter()
     }
 
     /// What a knob's setter moves, named, so two knobs on one number show.
@@ -662,7 +586,6 @@ mod tests {
         for (name, x, y) in [
             ("bezel_scale", a.bezel_scale, b.bezel_scale),
             ("thickness_ratio", a.thickness_ratio, b.thickness_ratio),
-            ("crest_scale", a.crest_scale, b.crest_scale),
             ("clarity", a.clarity, b.clarity),
             ("frost_scale", a.frost_scale, b.frost_scale),
         ] {
@@ -758,11 +681,9 @@ mod tests {
         let shipped = glass::Geometry {
             bezel: 10.0,
             thickness: 39.0,
-            crest_radius: 14.0,
         };
         let got = t.geometry(shipped);
         assert_eq!(got.bezel, 10.0);
         assert_eq!(got.thickness, 39.0);
-        assert_eq!(got.crest_radius, 14.0);
     }
 }

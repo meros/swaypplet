@@ -19,12 +19,9 @@
 //! ## What is deliberately not editable
 //!
 //! `mask_threshold` is in the system file and is never written back. It is not
-//! a look, it is the contract between a surface's alpha and whether the
-//! compositor treats it as a card at all, and it has a band on either side
-//! that nothing may land in (see `glass.nix`, "The threshold has two lines").
-//! Every card paints the key at 0.50, 0.10 over the seeding line, and a value
-//! past it is a shell with no cards on it. A slider is the wrong instrument
-//! for that.
+//! a look: it decides which of the card's pixels the body tint takes its
+//! colour from, against the 0.50 every card paints the fill key at (see
+//! `glass.nix`). A slider is the wrong instrument for that.
 //!
 //! `liquid_glass enable|disable` is not written either, and neither are
 //! `blur_ignore_transparent` or `corner_radius`. The first belongs to
@@ -52,98 +49,29 @@ const SYSTEM_CONFIG: &str = "/etc/swaypplet/glass.json";
 /// Named rather than numbered, exactly as the config is: sway rejects a name
 /// it does not know and takes the whole `layer_effects` block down with it,
 /// so the set is closed here for the same reason `glass-config.nix` asserts
-/// it is one of four.
+/// it is one of two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SurfaceKind {
-    ConvexCircle,
     ConvexSquircle,
-    Concave,
-    Lip,
     Droplet,
 }
 
 impl SurfaceKind {
-    pub const ALL: [SurfaceKind; 5] = [
-        SurfaceKind::ConvexCircle,
-        SurfaceKind::ConvexSquircle,
-        SurfaceKind::Concave,
-        SurfaceKind::Lip,
-        SurfaceKind::Droplet,
-    ];
+    pub const ALL: [SurfaceKind; 2] = [SurfaceKind::ConvexSquircle, SurfaceKind::Droplet];
 
     /// The spelling sway parses.
     pub fn as_str(self) -> &'static str {
         match self {
-            SurfaceKind::ConvexCircle => "convex_circle",
             SurfaceKind::ConvexSquircle => "convex_squircle",
-            SurfaceKind::Concave => "concave",
-            SurfaceKind::Lip => "lip",
             SurfaceKind::Droplet => "droplet",
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            SurfaceKind::ConvexCircle => "Convex circle",
             SurfaceKind::ConvexSquircle => "Convex squircle",
-            SurfaceKind::Concave => "Concave",
-            SurfaceKind::Lip => "Lip",
             SurfaceKind::Droplet => "Droplet \u{2014} surface tension",
-        }
-    }
-}
-
-/// The surface at a scale you can resolve, rather than one that integrates
-/// into a scattering lobe. See `glass.nix` for what each pattern reads as.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GrainKind {
-    None,
-    Seeded,
-    Hammered,
-    Rippled,
-    Reeded,
-    CrossReed,
-    Prismatic,
-    Cathedral,
-}
-
-impl GrainKind {
-    pub const ALL: [GrainKind; 8] = [
-        GrainKind::None,
-        GrainKind::Seeded,
-        GrainKind::Hammered,
-        GrainKind::Rippled,
-        GrainKind::Reeded,
-        GrainKind::CrossReed,
-        GrainKind::Prismatic,
-        GrainKind::Cathedral,
-    ];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            GrainKind::None => "none",
-            GrainKind::Seeded => "seeded",
-            GrainKind::Hammered => "hammered",
-            GrainKind::Rippled => "rippled",
-            GrainKind::Reeded => "reeded",
-            GrainKind::CrossReed => "cross_reed",
-            GrainKind::Prismatic => "prismatic",
-            GrainKind::Cathedral => "cathedral",
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            GrainKind::None => "None — flat",
-            GrainKind::Seeded => "Seeded — cast, bubbles",
-            GrainKind::Hammered => "Hammered — dimples",
-            GrainKind::Rippled => "Rippled — rolled glass",
-            GrainKind::Reeded => "Reeded — flutes",
-            GrainKind::CrossReed => "Cross-reed — flutes both ways",
-            GrainKind::Prismatic => "Prismatic — cut facets",
-            GrainKind::Cathedral => "Cathedral — hand-rolled",
         }
     }
 }
@@ -151,9 +79,18 @@ impl GrainKind {
 /// Every `liquid_glass_*` value that describes the material rather than the
 /// surface it is drawn on. Field names are the sway spellings, so the writer
 /// below is a formatting loop and not a translation table.
+///
+/// `frost`, `shine` and `reflect_blur` are direct values. They used to be
+/// derived from a `roughness` whenever they were 0; that knob is gone, and 0
+/// now means what it says (no frost, the broadest highlight, a sharp
+/// reflection).
+///
+/// Unknown fields are ignored rather than refused, which is what keeps an
+/// override written before a knob was removed loading: `roughness`, `haze`,
+/// `noise`, `energy_comp`, the grain and the thin-film, glow and wave effects
+/// all lived here once.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Material {
-    pub roughness: f64,
     pub surface: SurfaceKind,
     pub refraction: f64,
     pub dispersion: f64,
@@ -164,28 +101,11 @@ pub struct Material {
     pub absorb: f64,
     pub absorb_floor: f64,
     pub photochromic: f64,
-    pub haze: f64,
     pub specular: f64,
     pub edge_light: f64,
-    pub noise: f64,
     pub frost: f64,
     pub shine: f64,
     pub reflect_blur: f64,
-    pub grain: GrainKind,
-    pub grain_scale: f64,
-    pub grain_strength: f64,
-    /// The pattern's own frame: degrees clockwise, and a stretch along the
-    /// pattern's own x. Neither changes what `grain_strength` means — the
-    /// shader divides the stretched slope by the larger scale — so they are
-    /// shape and not amount.
-    ///
-    /// Defaulted, like the fill pair below, so an override written before the
-    /// grain rebuild loads as the unrotated, unstretched pattern it described.
-    #[serde(default)]
-    pub grain_angle: f64,
-    #[serde(default = "isotropic")]
-    pub grain_aspect: f64,
-    pub energy_comp: f64,
     /// The fill the compositor paints under swaypplet's own content, as
     /// `#rrggbb`, or the literal `none` for the card's own colour.
     ///
@@ -206,15 +126,6 @@ pub struct Material {
     /// a card swaypplet is still painting at 0.50. See `glass.nix`.
     #[serde(default = "unset")]
     pub fill_alpha: f64,
-    /// Artsy reality-bending controls
-    #[serde(default)]
-    pub iridescence: f64,
-    #[serde(default)]
-    pub edge_glow: f64,
-    #[serde(default = "unset_color")]
-    pub edge_glow_color: String,
-    #[serde(default)]
-    pub wave_amplitude: f64,
 }
 
 /// The sentinels. Both are also the `#[serde(default)]`s, so an override
@@ -263,10 +174,6 @@ impl Material {
     }
 }
 
-fn isotropic() -> f64 {
-    1.0
-}
-
 /// The material plus what the pane is allowed to do to a surface's geometry.
 ///
 /// Geometry is not material — `glass.nix` gives each class of surface its own
@@ -292,12 +199,6 @@ pub struct Tuning {
     /// this is the knob for deliberately breaking that, not for setting it.
     #[serde(default)]
     pub thickness_ratio: f64,
-    /// Multiplies each class's shipped crest radius. Deliberately not folded
-    /// into `bezel_scale`: the crest radius is pinned to the card's own corner
-    /// radius, which does not change when the bevel gets wider. 1 is what the
-    /// system config ships.
-    #[serde(default = "unit")]
-    pub crest_scale: f64,
     /// How much of the backdrop shows through, relative to the mode: 0 is
     /// the mode's own body fill, +1 thins it, −1 thickens it
     /// (`tokens::material_at`, which also keeps the text readable). The one
@@ -320,7 +221,6 @@ impl Tuning {
             material: system.material.clone(),
             bezel_scale: 1.0,
             thickness_ratio: 0.0,
-            crest_scale: 1.0,
             clarity: 0.0,
             frost_scale: 1.0,
         }
@@ -334,33 +234,18 @@ impl Tuning {
         } else {
             shipped.thickness * self.bezel_scale
         };
-        // The sentinel survives scaling: negative means the shader derives it
-        // from the bezel, and a scaled negative is still negative but no
-        // longer says so at any particular strength.
-        let crest_radius = if shipped.crest_radius >= 0.0 {
-            shipped.crest_radius * self.crest_scale
-        } else {
-            shipped.crest_radius
-        };
-        Geometry {
-            bezel,
-            thickness,
-            crest_radius,
-        }
+        Geometry { bezel, thickness }
     }
 }
 
 // ── The system's copy ───────────────────────────────────────────────────
 
+/// One class's bevel. A system config written while `crest_radius` was still
+/// in it loads too: the field is ignored, like any other unknown one.
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct Geometry {
     pub bezel: f64,
     pub thickness: f64,
-    /// How wide the crest rounds where the card's edges compete. Negative
-    /// derives it from the bezel, which is what the shader did before the
-    /// field existed, so a system config without it still works.
-    #[serde(default = "unset")]
-    pub crest_radius: f64,
 }
 
 /// `/etc/swaypplet/glass.json`, whole.
@@ -453,11 +338,10 @@ impl System {
         let m = &tuning.material;
         let mut out = String::with_capacity(512);
         // Named rather than looped over a serialised map: the order is stable,
-        // the two enums are spelled by hand anyway, and a field added to
+        // the enum is spelled by hand anyway, and a field added to
         // `Material` should fail to compile here rather than silently stop
         // being sent.
         for (name, value) in [
-            ("roughness", m.roughness),
             ("refraction", m.refraction),
             ("dispersion", m.dispersion),
             ("samples", m.samples),
@@ -467,25 +351,14 @@ impl System {
             ("absorb", m.absorb),
             ("absorb_floor", m.absorb_floor),
             ("photochromic", m.photochromic),
-            ("haze", m.haze),
             ("specular", m.specular),
             ("edge_light", m.edge_light),
-            ("noise", m.noise),
             ("frost", m.frost),
             ("shine", m.shine),
             ("reflect_blur", m.reflect_blur),
-            ("grain_scale", m.grain_scale),
-            ("grain_strength", m.grain_strength),
-            ("grain_angle", m.grain_angle),
-            ("grain_aspect", m.grain_aspect),
-            ("energy_comp", m.energy_comp),
             ("fill_alpha", m.fill_alpha),
-            ("iridescence", m.iridescence),
-            ("edge_glow", m.edge_glow),
-            ("wave_amplitude", m.wave_amplitude),
             ("bezel", geometry.bezel),
             ("thickness", geometry.thickness),
-            ("crest_radius", geometry.crest_radius),
             ("mask_threshold", self.mask_threshold),
         ] {
             let _ = write!(out, "liquid_glass_{name} {value:.6}; ");
@@ -493,11 +366,9 @@ impl System {
         // The ones that are words rather than numbers.
         let _ = write!(
             out,
-            "liquid_glass_surface {}; liquid_glass_grain {}; liquid_glass_fill_color {}; liquid_glass_edge_glow_color {}",
+            "liquid_glass_surface {}; liquid_glass_fill_color {}",
             m.surface.as_str(),
-            m.grain.as_str(),
-            m.fill_color,
-            m.edge_glow_color
+            m.fill_color
         );
         Some(out)
     }
@@ -673,8 +544,8 @@ pub fn apply_greeter(inputs: crate::tokens::Inputs) {
 /// other. What the tuning adds is relative: `clarity` moves the body fill
 /// (`tokens::material_at`), `frost_scale` multiplies the mode's frost.
 /// Everything else in the material (profile, refraction, dispersion,
-/// highlight, grain, geometry) is one material in both modes and passes
-/// through as tuned.
+/// highlight, geometry) is one material in both modes and passes through as
+/// tuned.
 ///
 /// The lock's glass follows the mode like every other namespace.
 pub fn for_mode(mut tuning: Tuning, inputs: crate::tokens::Inputs) -> Tuning {
@@ -714,16 +585,13 @@ impl Material {
             let _ = writeln!(out, "{name} = {};", trim_float(value));
         }
         let _ = writeln!(out, "surface = \"{}\";", self.surface.as_str());
-        let _ = writeln!(out, "grain = \"{}\";", self.grain.as_str());
         let _ = writeln!(out, "fill_color = \"{}\";", self.fill_color);
-        let _ = writeln!(out, "edge_glow_color = \"{}\";", self.edge_glow_color);
         out
     }
 
     /// Every numeric field, in the order the export prints them.
-    pub(super) fn numbers(&self) -> [(&'static str, f64); 26] {
+    pub(super) fn numbers(&self) -> [(&'static str, f64); 15] {
         [
-            ("roughness", self.roughness),
             ("refraction", self.refraction),
             ("dispersion", self.dispersion),
             ("samples", self.samples),
@@ -733,22 +601,12 @@ impl Material {
             ("absorb", self.absorb),
             ("absorb_floor", self.absorb_floor),
             ("photochromic", self.photochromic),
-            ("haze", self.haze),
             ("specular", self.specular),
             ("edge_light", self.edge_light),
-            ("noise", self.noise),
             ("frost", self.frost),
             ("shine", self.shine),
             ("reflect_blur", self.reflect_blur),
-            ("grain_scale", self.grain_scale),
-            ("grain_strength", self.grain_strength),
-            ("grain_angle", self.grain_angle),
-            ("grain_aspect", self.grain_aspect),
-            ("energy_comp", self.energy_comp),
             ("fill_alpha", self.fill_alpha),
-            ("iridescence", self.iridescence),
-            ("edge_glow", self.edge_glow),
-            ("wave_amplitude", self.wave_amplitude),
         ]
     }
 }
@@ -770,7 +628,7 @@ impl Tuning {
                 trim_float(self.frost_scale)
             );
         }
-        if self.bezel_scale == 1.0 && self.thickness_ratio == 0.0 && self.crest_scale == 1.0 {
+        if self.bezel_scale == 1.0 && self.thickness_ratio == 0.0 {
             return out;
         }
         let ratio = if self.thickness_ratio > 0.0 {
@@ -788,10 +646,9 @@ impl Tuning {
             let g = self.geometry(*shipped);
             let _ = writeln!(
                 out,
-                "{class} = {{ bezel = {}; thickness = {}; crest_radius = {}; }};",
+                "{class} = {{ bezel = {}; thickness = {}; }};",
                 trim_float(g.bezel),
-                trim_float(g.thickness),
-                trim_float(g.crest_radius)
+                trim_float(g.thickness)
             );
         }
         out
@@ -845,7 +702,6 @@ mod tests {
                     Geometry {
                         bezel: 10.0,
                         thickness: 39.0,
-                        crest_radius: 14.0,
                     },
                 ),
                 (
@@ -853,7 +709,6 @@ mod tests {
                     Geometry {
                         bezel: 18.0,
                         thickness: 70.0,
-                        crest_radius: 14.0,
                     },
                 ),
             ]),
@@ -873,7 +728,6 @@ mod tests {
             Geometry {
                 bezel: 18.0,
                 thickness: 70.0,
-                crest_radius: 18.0,
             },
         );
         sys.surfaces = Namespace::ALL
@@ -969,38 +823,6 @@ mod tests {
     }
 
     #[test]
-    fn enums_round_trip_through_their_sway_spelling() {
-        let json = serde_json::to_string(&SurfaceKind::ConvexSquircle).unwrap();
-        assert_eq!(json, "\"convex_squircle\"");
-        assert_eq!(
-            serde_json::from_str::<GrainKind>("\"rippled\"").unwrap(),
-            GrainKind::Rippled
-        );
-        // The multi-word one is where serde's rename and `as_str` could
-        // disagree without anything noticing: sway rejects a name it does not
-        // know by discarding the whole layer_effects block, so a surface with
-        // this grain selected would lose its material entirely.
-        assert_eq!(
-            serde_json::to_string(&GrainKind::CrossReed).unwrap(),
-            "\"cross_reed\""
-        );
-    }
-
-    #[test]
-    fn every_grain_spells_itself_the_same_way_both_directions() {
-        for kind in GrainKind::ALL {
-            let json = serde_json::to_string(&kind).unwrap();
-            assert_eq!(
-                json,
-                format!("\"{}\"", kind.as_str()),
-                "serde and as_str disagree about {kind:?}"
-            );
-            assert_eq!(serde_json::from_str::<GrainKind>(&json).unwrap(), kind);
-            assert!(!kind.label().is_empty());
-        }
-    }
-
-    #[test]
     fn scaling_the_bevel_moves_both_numbers_together() {
         // The whole reason this is one knob and not two: it is the slope the
         // light bends on, so a scale that changed only one of them would be
@@ -1009,7 +831,6 @@ mod tests {
         let shipped = Geometry {
             bezel: 10.0,
             thickness: 39.0,
-            crest_radius: 14.0,
         };
         let t = Tuning {
             bezel_scale: 2.0,
@@ -1017,7 +838,6 @@ mod tests {
                 material: preset::plain(),
                 bezel_scale: 1.0,
                 thickness_ratio: 0.0,
-                crest_scale: 1.0,
                 clarity: 0.0,
                 frost_scale: 1.0,
             }
@@ -1033,13 +853,11 @@ mod tests {
         let shipped = Geometry {
             bezel: 10.0,
             thickness: 39.0,
-            crest_radius: 14.0,
         };
         let t = Tuning {
             material: preset::plain(),
             bezel_scale: 1.5,
             thickness_ratio: 2.0,
-            crest_scale: 1.0,
             clarity: 0.0,
             frost_scale: 1.0,
         };
@@ -1062,7 +880,7 @@ mod tests {
         assert!(nix.contains("Geometry, at bezel scale 1.5"), "{nix}");
         // thin ships 10/39, so 1.5x is 15/58.5 and the ratio is untouched.
         assert!(
-            nix.contains("thin = { bezel = 15; thickness = 58.5; crest_radius = 14; };"),
+            nix.contains("thin = { bezel = 15; thickness = 58.5; };"),
             "{nix}"
         );
     }
@@ -1074,10 +892,9 @@ mod tests {
         // not deserialise would be a material that silently reverts one knob
         // per session restart.
         let before = Tuning {
-            material: preset::textured(),
+            material: preset::ALL[preset::ALL.len() - 1].material(),
             bezel_scale: 1.35,
             thickness_ratio: 4.2,
-            crest_scale: 1.0,
             clarity: 0.0,
             frost_scale: 1.0,
         };
@@ -1091,17 +908,6 @@ mod tests {
         let nix = preset::plain().as_nix();
         assert!(nix.contains("samples = 4;"), "{nix}");
         assert!(nix.contains("surface = \"convex_squircle\";"));
-        // The shipped material is grainless now, so the seeded spelling is
-        // checked on a preset that carries one.
-        let seeded = preset::ALL
-            .iter()
-            .map(preset::Preset::material)
-            .find(|m| m.grain == GrainKind::Seeded)
-            .expect("no preset is seeded")
-            .as_nix();
-        assert!(seeded.contains("grain = \"seeded\";"), "{seeded}");
-        let bare = preset::grainless().as_nix();
-        assert!(bare.contains("grain = \"none\";"), "{bare}");
     }
 
     /// The lock card's glass follows the mode like every other card.
@@ -1135,21 +941,50 @@ mod tests {
     #[test]
     fn an_int_valued_field_survives_json_written_by_nix() {
         // `builtins.toJSON` emits `4`, not `4.0`, for an integer.
-        let raw = r#"{"roughness":0.55,"surface":"convex_squircle","refraction":1.5,
+        let raw = r#"{"surface":"convex_squircle","refraction":1.5,
             "dispersion":0.004,"samples":4,"reflection":1.0,"lensing":0.22,
             "frost_radius":22,"absorb":2.0,"absorb_floor":0.14,"photochromic":0.14,
-            "haze":0.05,"specular":0.1,"edge_light":0.08,"noise":0.012,"frost":0,
-            "shine":0,"reflect_blur":0,"grain":"rippled","grain_scale":18,
-            "grain_strength":1,"energy_comp":1.0}"#;
+            "specular":0.1,"edge_light":0.08,"frost":0,"shine":0,"reflect_blur":0}"#;
         let m: Material = serde_json::from_str(raw).unwrap();
         assert_eq!(m.samples, 4.0);
         assert_eq!(m.frost_radius, 22.0);
-        assert_eq!(m.grain, GrainKind::Rippled);
-        // The same JSON is an override written before the grain frame
-        // existed. It has to load as the pattern it described, which is the
-        // unrotated, unstretched one — an aspect defaulting to serde's 0
-        // would divide the pitch by zero.
-        assert_eq!(m.grain_angle, 0.0);
-        assert_eq!(m.grain_aspect, 1.0);
+    }
+
+    /// An override saved before the knobs went still loads, and what it is
+    /// sent as never names one: sway rejects a whole `layer_effects` list
+    /// for one key it does not know.
+    #[test]
+    fn an_override_from_before_the_removed_knobs_loads_and_sends_none_of_them() {
+        let raw = r#"{"material":{"roughness":0.55,"surface":"convex_squircle",
+            "refraction":1.5,"dispersion":0.004,"samples":4,"reflection":1.0,
+            "lensing":0.22,"frost_radius":22,"absorb":2.0,"absorb_floor":0.14,
+            "photochromic":0.14,"haze":0.05,"specular":0.1,"edge_light":0.08,
+            "noise":0.012,"frost":0,"shine":0,"reflect_blur":0,"grain":"rippled",
+            "grain_scale":18,"grain_strength":1,"grain_angle":0,"grain_aspect":1,
+            "energy_comp":1.0,"iridescence":0,"edge_glow":0,"edge_glow_color":"none",
+            "wave_amplitude":0},"bezel_scale":1.0,"crest_scale":1.2}"#;
+        let t: Tuning = serde_json::from_str(raw).unwrap();
+        let mut sys = system();
+        // And a system file that still carries a crest radius.
+        let geometry: Geometry =
+            serde_json::from_str(r#"{"bezel":10,"thickness":39,"crest_radius":14}"#).unwrap();
+        sys.geometries.insert("thin".into(), geometry);
+        let cmd = sys.command(&t);
+        for gone in [
+            "roughness",
+            "haze",
+            "noise",
+            "energy_comp",
+            "grain",
+            "iridescence",
+            "edge_glow",
+            "wave_amplitude",
+            "crest_radius",
+        ] {
+            assert!(
+                !cmd.contains(&format!("liquid_glass_{gone}")),
+                "sends {gone}: {cmd}"
+            );
+        }
     }
 }

@@ -407,8 +407,8 @@ Box `spacing` in Rust takes the same values through `tokens::space(n)`.
 | `--radius-card` | 18 | every floating card: panel, launcher, notifications, polkit, keybinds, switcher, lock |
 | `--radius-pill` | 999 | pills, chips, switches, toggle tiles in the bar |
 
-The glass geometry in `glass.nix` (`crest_radius`) reads these two values:
-thin 14, card 18. The cross-repo guard checks both.
+The `cornerRadius` of each glass surface in `glass-config.nix` reads these
+two values: thin 14, card 18. The cross-repo guard checks both.
 
 ### 3.7 Elevation
 
@@ -552,8 +552,8 @@ material values, per glass namespace, over IPC, fading both (§2.3):
 | `edge_light` | 0.11 (high 0.12) | 0.17 (high 0.18), drawn darker | a light rim disappears on a light body |
 | `frost` | 0.33 (high 0.45) | 0.30 (high 0.45) | light glass keeps more of the picture behind it: its lift already evens the backdrop out, so it needs less frost than dark glass |
 
-Everything else (refraction, dispersion, bevel, crest, specular, grain) is
-one material in both modes. A negative `photochromic` is the one shader
+Everything else (refraction, dispersion, bevel, specular, shine) is one
+material in both modes. A negative `photochromic` is the one shader
 change the light mode needs: a soft floor on luminance,
 `lum' = lum + f·exp(−lum/f)`, the mirror of the ceiling.
 
@@ -570,9 +570,9 @@ with the same meaning in both:
   At +1 both standard modes reach a fill of 0.25.
 - **Frost** multiplies the mode's frost.
 
-The rest of the tab is the one material: the profile and grain,
-refraction, dispersion, the highlight and the bevel. Presets are written
-in the same terms: a smoked preset is a clarity of −0.8, never an absorb.
+The rest of the tab is the one material: the profile, refraction,
+dispersion, the highlight and the bevel. Presets are written in the same
+terms: a smoked preset is a clarity of −0.8, never an absorb.
 
 ## 5. Contrast
 

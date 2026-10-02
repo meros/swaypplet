@@ -219,8 +219,8 @@ fn photochromic(a: f64, b: f64, t: f64) -> f64 {
 
 /// `t` of the way from `a` to `b`: the ends exactly, and between them every
 /// number straight except `photochromic` (see there), the fill through
-/// OKLCH (`tint::blend`) with its sentinels resolved, and what is a word (a
-/// surface or grain kind) at `b`'s from the first frame.
+/// OKLCH (`tint::blend`) with its sentinels resolved, and what is a word (the
+/// surface kind) at `b`'s from the first frame.
 fn between(a: &Tuning, b: &Tuning, t: f64) -> Tuning {
     if t <= 0.0 {
         return a.clone();
@@ -232,7 +232,6 @@ fn between(a: &Tuning, b: &Tuning, t: f64) -> Tuning {
     let mut out = b.clone();
     out.material = between_materials(&a.material, &b.material, t);
     out.bezel_scale = n(a.bezel_scale, b.bezel_scale);
-    out.crest_scale = n(a.crest_scale, b.crest_scale);
     out
 }
 
@@ -249,7 +248,6 @@ fn between_materials(
         ($($f:ident),*) => { $( m.$f = n(ma.$f, mb.$f); )* };
     }
     numbers!(
-        roughness,
         refraction,
         dispersion,
         samples,
@@ -258,21 +256,11 @@ fn between_materials(
         frost_radius,
         absorb,
         absorb_floor,
-        haze,
         specular,
         edge_light,
-        noise,
         frost,
         shine,
-        reflect_blur,
-        grain_scale,
-        grain_strength,
-        grain_angle,
-        grain_aspect,
-        energy_comp,
-        iridescence,
-        edge_glow,
-        wave_amplitude
+        reflect_blur
     );
     m.photochromic = photochromic(ma.photochromic, mb.photochromic, t);
     let ((ca, aa), (cb, ab)) = (fill(ma), fill(mb));
@@ -296,7 +284,6 @@ mod tests {
             material: m,
             bezel_scale: 1.0,
             thickness_ratio: 0.0,
-            crest_scale: 1.0,
             clarity: 0.0,
             frost_scale: 1.0,
         }
