@@ -481,6 +481,34 @@ impl ThemeMode {
     }
 }
 
+/// What the animated wallpaper does while the machine runs on battery
+/// (`services::wallpaper_battery`). A still image is unaffected by all but
+/// `Black`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum OnBattery {
+    /// Nothing changes.
+    #[default]
+    Keep,
+    /// The video slows to a stop and holds its frame.
+    Pause,
+    /// The video fades to black and stops, the background goes black and
+    /// the shell goes dark.
+    Black,
+}
+
+impl OnBattery {
+    pub const ALL: [OnBattery; 3] = [OnBattery::Keep, OnBattery::Pause, OnBattery::Black];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            OnBattery::Keep => "Keep playing",
+            OnBattery::Pause => "Slow to a stop",
+            OnBattery::Black => "Black, dark mode",
+        }
+    }
+}
+
 /// The Look tab's second group. The wallpaper is the first and has its own
 /// section, since it has no system layer in this file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -516,11 +544,11 @@ pub struct Look {
     /// portal serves (`theme::apps`). Off, it leaves them as they are.
     #[serde(default = "yes")]
     pub apps_follow: bool,
-    /// Pause the animated wallpaper while on battery
-    /// (`services::wallpaper_pause`). Here rather than in `wallpaper`,
+    /// What the animated wallpaper does while on battery
+    /// (`services::wallpaper_battery`). Here rather than in `wallpaper`,
     /// which is the pick and drops whole on a reset of that section.
     #[serde(default)]
-    pub pause_wallpaper_on_battery: bool,
+    pub wallpaper_on_battery: OnBattery,
 }
 
 impl Default for Look {
@@ -535,7 +563,7 @@ impl Default for Look {
             tint_colour: 0,
             launch_zoom: false,
             apps_follow: true,
-            pause_wallpaper_on_battery: false,
+            wallpaper_on_battery: OnBattery::default(),
         }
     }
 }
@@ -1971,6 +1999,28 @@ mod tests {
         assert_eq!(s.look().motion, Motion::Off);
         s.set("capture.after", serde_json::json!("copy")).unwrap();
         assert_eq!(s.capture().after, After::Copy);
+    }
+
+    /// The wallpaper's battery choice by its lowercase word; the old switch
+    /// shipped only at its default and is gone, so a file still carrying it
+    /// reads as the default rather than failing.
+    #[test]
+    fn the_battery_choice_is_a_word() {
+        let mut s = Settings::default();
+        assert_eq!(s.look().wallpaper_on_battery, OnBattery::Keep);
+        s.set("look.wallpaper_on_battery", serde_json::json!("black"))
+            .unwrap();
+        assert_eq!(s.look().wallpaper_on_battery, OnBattery::Black);
+        assert_eq!(
+            s.get("look.wallpaper_on_battery"),
+            Some(serde_json::json!("black"))
+        );
+        assert!(
+            s.set("look.wallpaper_on_battery", serde_json::json!("dim"))
+                .is_err()
+        );
+        let old: Look = serde_json::from_str(r#"{"pause_wallpaper_on_battery": false}"#).unwrap();
+        assert_eq!(old.wallpaper_on_battery, OnBattery::Keep);
     }
 
     #[test]

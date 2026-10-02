@@ -20,8 +20,10 @@ use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::prelude::*;
 
 use super::form::{self, dropdown_row, section_box};
-use super::schema::ThemeMode;
-use super::store::{self, Daylight, Look, Motion, NightLight, NightSchedule, Tint, Wallpaper, WallpaperMode};
+use super::schema::{OnBattery, ThemeMode};
+use super::store::{
+    self, Daylight, Look, Motion, NightLight, NightSchedule, Tint, Wallpaper, WallpaperMode,
+};
 use super::wallpaper::{apply, candidates, candidates_dir, system_default};
 use crate::theme::wallpaper::Sample;
 use crate::tokens::{Accent, Contrast, Neutral, Palette, Tint as Reach};
@@ -246,7 +248,7 @@ struct State {
     motion: gtk4::DropDown,
     launch_zoom: gtk4::Switch,
     apps_follow: gtk4::Switch,
-    pause_on_battery: gtk4::Switch,
+    on_battery: gtk4::DropDown,
     tint: gtk4::DropDown,
     /// The row offering the wallpaper's colours, shown while a tint is on
     /// and the wallpaper has been sampled.
@@ -342,8 +344,10 @@ impl State {
         self.motion.set_selected(motion.unwrap_or(0) as u32);
         self.launch_zoom.set_active(settings.look().launch_zoom);
         self.apps_follow.set_active(settings.look().apps_follow);
-        self.pause_on_battery
-            .set_active(settings.look().pause_wallpaper_on_battery);
+        let on_battery = OnBattery::ALL
+            .iter()
+            .position(|o| *o == settings.look().wallpaper_on_battery);
+        self.on_battery.set_selected(on_battery.unwrap_or(0) as u32);
         let tint = Tint::ALL.iter().position(|t| *t == settings.look().tint);
         self.tint.set_selected(tint.unwrap_or(0) as u32);
         let night = settings.night_light();
@@ -530,12 +534,13 @@ impl LookPane {
             &mode_labels,
         );
         group.append(&mode_row);
-        let (pause_row, pause_on_battery) = form::switch_row(
-            "Pause animated wallpaper on battery",
-            "An animated wallpaper holds its frame while the machine runs on battery and plays again on mains. A still image is unaffected.",
-            false,
+        let on_battery_labels: Vec<&str> = OnBattery::ALL.iter().map(|o| o.label()).collect();
+        let (on_battery_row, on_battery) = dropdown_row(
+            "On battery",
+            "What the animated wallpaper does while the machine runs on battery. Slow to a stop eases the video down to a held frame and starts it up again on mains. Black fades it out, turns the background black and the shell dark until mains is back.",
+            &on_battery_labels,
         );
-        group.append(&pause_row);
+        group.append(&on_battery_row);
 
         let appearance = section_box(
             "Appearance",
@@ -683,7 +688,7 @@ impl LookPane {
             motion: motion.clone(),
             launch_zoom: launch_zoom.clone(),
             apps_follow: apps_follow.clone(),
-            pause_on_battery: pause_on_battery.clone(),
+            on_battery: on_battery.clone(),
             tint: tint.clone(),
             colour_row: colour_row.clone(),
             colour_box: colour_box.clone(),
@@ -880,12 +885,14 @@ impl LookPane {
         }
         {
             let state = state.clone();
-            pause_on_battery.connect_active_notify(move |s| {
+            on_battery.connect_selected_notify(move |d| {
                 if state.updating.get() {
                     return;
                 }
-                let on = s.is_active();
-                store::edit::<Look>(|l| l.pause_wallpaper_on_battery = on);
+                let Some(choice) = OnBattery::ALL.get(d.selected() as usize).copied() else {
+                    return;
+                };
+                store::edit::<Look>(|l| l.wallpaper_on_battery = choice);
                 state.sync();
             });
         }
@@ -957,7 +964,7 @@ use super::search::{Entry, row};
 pub(super) const SEARCH: &[Entry] = &[
     row("Wallpaper", "", "The image behind every output", &["wallpaper", "background", "background image", "desktop background", "bg", "picture", "photo"]),
     row("Wallpaper", "Scaling", "How the image meets the screen", &["fill", "fit", "stretch", "crop", "center", "centre", "tile"]),
-    row("Wallpaper", "Pause animated wallpaper on battery", "Hold the video wallpaper's frame on battery", &["battery", "video wallpaper", "live wallpaper", "animated", "animation", "mpvpaper", "power saving", "pause"]).keys(&["look.pause_wallpaper_on_battery"]),
+    row("Wallpaper", "On battery", "Keep the video wallpaper playing, slow it to a stop, or go black and dark", &["battery", "video wallpaper", "live wallpaper", "animated", "animation", "mpvpaper", "power saving", "pause", "black", "black background", "dark mode on battery", "stop"]).keys(&["look.wallpaper_on_battery"]),
     row("Appearance", "Mode", "Dark, light, or by the sun", &["dark", "light", "dark mode", "light mode", "dark theme", "light theme", "theme", "night mode", "auto", "sunset"]).keys(&["look.mode"]),
     row("Appearance", "Accent", "The colour of on, selected and primary", &["accent colour", "accent color", "colour", "color", "highlight colour", "highlight color"]).keys(&["look.accent"]),
     row("Appearance", "Neutral", "The greys of the glass, the text and the lines", &["grey", "gray", "neutral colour", "palette"]).keys(&["look.neutral"]),

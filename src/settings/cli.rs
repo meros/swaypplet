@@ -27,7 +27,8 @@ usage: swaypplet settings                      the settings in force, as JSON
 
 sections and fields (data/settings-defaults.json has every default):
   wallpaper  path, mode (fill|fit|stretch|center|tile)
-  look       motion (full|reduced|off), tint (off|accents|full), pause_wallpaper_on_battery
+  look       motion (full|reduced|off), tint (off|accents|full),
+             wallpaper_on_battery (keep|pause|black)
   idle       dim_after_s, dim_level, lock_after_s, blank_after_s,
              battery_blank_after_s (shorter screen-off on battery, 0 is no override),
              suspend_after_s (0 is never), walk_away_lock, face_unlock

@@ -189,9 +189,10 @@ pub fn run() {
         // same sun the automatic mode follows.
         crate::services::gamma::follow_settings();
 
-        // The animated wallpaper pauses on battery when the Look tab says
-        // so; this process owns the battery reading already.
-        crate::services::wallpaper_pause::follow();
+        // The animated wallpaper slows to a stop or goes black on battery when
+        // the Look tab says so; this process owns the battery reading and the
+        // theme it darkens.
+        crate::services::wallpaper_battery::follow();
 
         // Display profiles: kanshi's job, matched against the outputs the
         // compositor reports and applied in one step (`services::displays`).
