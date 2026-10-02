@@ -140,6 +140,9 @@ pub(crate) struct BatteryState {
     /// UPower's smoothed estimates, seconds; `None` when it has none yet.
     pub(crate) upower_to_empty_s: Option<u64>,
     pub(crate) upower_to_full_s: Option<u64>,
+    /// Whether a charger is connected: any supply that is not a battery
+    /// reports online. `None` when the machine lists no such supply.
+    pub(crate) on_mains: Option<bool>,
 }
 
 /// The power profile and who owns it.
@@ -212,6 +215,18 @@ impl Profile {
 }
 
 impl BatteryState {
+    /// Running on the battery: no charger connected. The charge state alone
+    /// cannot say this: a ThinkPad at its charge threshold reports "Not
+    /// charging" and, around it, "Discharging" for a moment while plugged in
+    /// (seen 2026-10-02 at 99 %, UPower state flipping with OnBattery false).
+    /// The charge state is the fallback only where no charger is listed.
+    pub(crate) fn on_battery(&self) -> bool {
+        match self.on_mains {
+            Some(mains) => !mains,
+            None => self.state == ChargeState::Discharging,
+        }
+    }
+
     /// A made-up battery for the render harness's fixtures.
     pub(crate) fn fixture(
         capacity: u8,
@@ -233,6 +248,7 @@ impl BatteryState {
             charge_end: Some(80),
             upower_to_empty_s: to_empty_s,
             upower_to_full_s: to_full_s,
+            on_mains: None,
         }
     }
 }
@@ -301,7 +317,26 @@ pub(crate) fn read_battery(bat_path: &str) -> Option<BatteryState> {
         charge_end: pct("charge_control_end_threshold"),
         upower_to_empty_s: None,
         upower_to_full_s: None,
+        on_mains: mains_online(),
     })
+}
+
+/// Whether any supply that is not a battery reports online=1 (the AC
+/// adapter, a USB-C source); `None` when the machine lists none.
+fn mains_online() -> Option<bool> {
+    let entries = std::fs::read_dir("/sys/class/power_supply").ok()?;
+    let mut seen = false;
+    for e in entries.flatten() {
+        let read = |f: &str| std::fs::read_to_string(e.path().join(f)).unwrap_or_default();
+        if read("type").trim() == "Battery" {
+            continue;
+        }
+        seen = true;
+        if read("online").trim() == "1" {
+            return Some(true);
+        }
+    }
+    seen.then_some(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -545,6 +580,22 @@ pub(crate) fn set_profile(profile: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// A charger that is connected wins over a battery that says
+    /// "Discharging" for a moment at its charge threshold; with no charger
+    /// listed, the charge state decides.
+    #[test]
+    fn on_battery_follows_the_charger_not_the_charge_state() {
+        let mut b = charged(ChargeState::Discharging, 99, 69.0, 70.0);
+        b.on_mains = Some(true);
+        assert!(!b.on_battery());
+        b.on_mains = Some(false);
+        assert!(b.on_battery());
+        b.on_mains = None;
+        assert!(b.on_battery());
+        b.state = ChargeState::Idle;
+        assert!(!b.on_battery());
+    }
+
     use super::*;
 
     fn bat(power_w: Option<f64>) -> BatteryState {
@@ -561,6 +612,7 @@ mod tests {
             charge_end: None,
             upower_to_empty_s: None,
             upower_to_full_s: None,
+            on_mains: None,
         }
     }
 
@@ -578,6 +630,7 @@ mod tests {
             charge_end: None,
             upower_to_empty_s: None,
             upower_to_full_s: None,
+            on_mains: None,
         }
     }
 

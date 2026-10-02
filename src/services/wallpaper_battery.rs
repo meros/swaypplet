@@ -70,7 +70,6 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use crate::services::battery;
-use crate::services::power::ChargeState;
 use crate::services::wallpaper_curtain::{self, Curtain};
 use crate::settings::store::{OnBattery, Wallpaper};
 
@@ -128,11 +127,11 @@ enum Target {
     Black,
 }
 
-/// The setting, on battery; playing otherwise. Plugged in at a charge
-/// threshold (`Idle`), full, or a state the firmware does not name is not
-/// "on battery".
-fn wanted(setting: OnBattery, state: Option<ChargeState>) -> Target {
-    if state != Some(ChargeState::Discharging) {
+/// The setting, on battery; playing otherwise. "On battery" is no charger
+/// connected (`BatteryState::on_battery`), not the battery's charge state,
+/// which flips at a charge threshold while plugged in.
+fn wanted(setting: OnBattery, on_battery: Option<bool>) -> Target {
+    if on_battery != Some(true) {
         return Target::Play;
     }
     match setting {
@@ -888,7 +887,7 @@ pub fn follow(app: &gtk4::Application) {
             crate::settings::store::with(|s| (s.look().wallpaper_on_battery, s.wallpaper.clone()));
         let target = SCRIPTED
             .with(Cell::get)
-            .unwrap_or_else(|| wanted(setting, battery::current().map(|b| b.state)));
+            .unwrap_or_else(|| wanted(setting, battery::current().map(|b| b.on_battery())));
         Want { target, restore }
     };
     let tick: Rc<RefCell<Option<glib::SourceId>>> = Rc::default();
@@ -981,22 +980,15 @@ mod tests {
     ];
 
     #[test]
-    fn only_a_discharging_battery_changes_anything() {
-        let on = Some(ChargeState::Discharging);
+    fn only_running_on_the_battery_changes_anything() {
+        let on = Some(true);
         assert_eq!(wanted(OnBattery::Keep, on), Target::Play);
         assert_eq!(wanted(OnBattery::Pause, on), Target::Pause);
         assert_eq!(wanted(OnBattery::Black, on), Target::Black);
-        for plugged in [
-            ChargeState::Charging,
-            ChargeState::Full,
-            ChargeState::Idle,
-            ChargeState::Unknown,
-        ] {
-            for setting in OnBattery::ALL {
-                assert_eq!(wanted(setting, Some(plugged)), Target::Play, "{plugged:?}");
-            }
+        for setting in OnBattery::ALL {
+            assert_eq!(wanted(setting, Some(false)), Target::Play);
+            assert_eq!(wanted(setting, None), Target::Play);
         }
-        assert_eq!(wanted(OnBattery::Black, None), Target::Play);
     }
 
     #[test]
