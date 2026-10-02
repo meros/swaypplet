@@ -64,7 +64,7 @@ pub use expander::{Disclosure, Section, disclosure, section};
 pub use face::{FacePill, FaceState, face_pill, set_face_enter, set_face_state};
 pub use field::{FieldSize, FieldState, dropdown, entry, field, set_field_state, text_area};
 pub use layout::{hbox, pad, pill_group, separator, toolbar, vbox};
-pub use media::{choice_grid, lifted, pick_thumb, placeholder, swatch, thumb};
+pub use media::{choice_grid, lifted, pick_thumb, placeholder, swatch, thumb, thumb_mark};
 pub use menu::{menu, menu_item};
 pub use motion::{clear_shake, highlight, page_stack, revealer, set_breathing, shake};
 pub use popover::popover;

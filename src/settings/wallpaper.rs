@@ -21,7 +21,9 @@
 //! that still starts the video (the `wallpaper-video` user unit, mpvpaper,
 //! which plays the file named in its environment file) over it; picking any
 //! other stops it, so the still shows. The still stays sway's `bg` either
-//! way: it is what the lock screen and the greeter fall back to.
+//! way: it is what the lock screen and the greeter fall back to. The same
+//! file carries `look.video_speed` for the unit's start; a change of speed
+//! reaches a playing video over IPC instead (`services::wallpaper_battery`).
 
 use std::path::{Path, PathBuf};
 
@@ -79,17 +81,20 @@ pub fn apply(w: &Wallpaper) {
         crate::sway::ipc::run_command(&cmd);
     }
     let still = w.path.clone();
-    crate::spawn::spawn_work(move || follow_video(&still), |()| ());
+    let speed = video_speed();
+    crate::spawn::spawn_work(move || follow_video(&still, speed), |()| ());
 }
 
 /// [`apply`] for a process with no main loop (`swaypplet settings`): one
-/// connection, one command, and sway's answer.
-pub fn apply_blocking(w: &Wallpaper) -> Result<(), String> {
+/// connection, one command, and sway's answer. `speed` is
+/// `look.video_speed`, which a thread off the panel's main one cannot read
+/// from the live settings.
+pub fn apply_blocking(w: &Wallpaper, speed: f64) -> Result<(), String> {
     let cmd = command(w).ok_or("path not sendable")?;
     let outcomes = crate::sway::ipc::connect()
         .and_then(|mut c| c.run_command(&cmd))
         .map_err(|e| format!("sway ipc: {e}"))?;
-    follow_video(&w.path);
+    follow_video(&w.path, speed);
     outcomes
         .into_iter()
         .find_map(Result::err)
@@ -111,38 +116,99 @@ pub(crate) fn video_for(still: &Path) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// The unit's environment file: `VIDEO=<path>`, the one thing it plays.
+/// The unit's environment file: `VIDEO=<path>`, the one thing it plays,
+/// and `SPEED=<multiple>`, how fast (mpv's `speed`).
 fn video_env() -> PathBuf {
     glib::user_runtime_dir()
         .join("swaypplet")
         .join("wallpaper-video.env")
 }
 
+/// `look.video_speed` from the live settings: the panel's main thread only.
+fn video_speed() -> f64 {
+    store::with(|s| s.look().video_speed)
+}
+
+/// The environment file's text for `video` played at `speed`.
+fn env_text(video: &Path, speed: f64) -> String {
+    format!("VIDEO={}\nSPEED={speed}\n", video.display())
+}
+
+/// The video an environment file's text names.
+fn env_video(text: &str) -> Option<&str> {
+    text.lines().find_map(|l| l.strip_prefix("VIDEO="))
+}
+
+/// What following `video` at `speed` does to a unit whose environment file
+/// reads `old`: the text to write, if it changed, and the `systemctl` verb.
+/// Only another video restarts the unit. A speed alone does not: the player
+/// takes a new one over IPC (`services::wallpaper_battery`), and the file
+/// is for its next start.
+fn env_change(old: Option<&str>, video: &Path, speed: f64) -> (Option<String>, &'static str) {
+    let text = env_text(video, speed);
+    let same_video = old
+        .and_then(env_video)
+        .is_some_and(|v| Path::new(v) == video);
+    let write = (old != Some(text.as_str())).then_some(text);
+    // `start` is a no-op on a running unit; a new file needs a restart.
+    (write, if same_video { "start" } else { "restart" })
+}
+
+/// `text` with its speed line made `speed`, the video left as it is.
+fn with_speed(text: &str, speed: f64) -> String {
+    let mut out: String = text
+        .lines()
+        .filter(|l| !l.starts_with("SPEED="))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    out.push_str(&format!("SPEED={speed}\n"));
+    out
+}
+
+fn write_env(env: &Path, text: &str) -> std::io::Result<()> {
+    env.parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::write(env, text))
+}
+
 /// Start the video `still` stands for, or stop the one playing. A video
 /// already playing the same file is left alone, so replaying a pick (panel
 /// start, `settings apply` on reload, the battery service putting the
-/// wallpaper back) does not restart it. Blocking: two small file operations
-/// and a `systemctl` call.
-fn follow_video(still: &Path) {
+/// wallpaper back) does not restart it; nor does a new `speed`, which only
+/// waits in the file for the next start. Blocking: two small file
+/// operations and a `systemctl` call.
+fn follow_video(still: &Path, speed: f64) {
     let Some(video) = video_for(still) else {
         systemctl("stop");
         return;
     };
-    let line = format!("VIDEO={}\n", video.display());
     let env = video_env();
-    let same = std::fs::read_to_string(&env).is_ok_and(|s| s == line);
-    if !same {
-        let written = env
-            .parent()
-            .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| std::fs::write(&env, &line));
-        if let Err(e) = written {
-            log::warn!("wallpaper: {}: {e}", env.display());
-            return;
-        }
+    let old = std::fs::read_to_string(&env).ok();
+    let (write, verb) = env_change(old.as_deref(), &video, speed);
+    if let Some(text) = write
+        && let Err(e) = write_env(&env, &text)
+    {
+        log::warn!("wallpaper: {}: {e}", env.display());
+        return;
     }
-    // `start` is a no-op on a running unit; a new file needs a restart.
-    systemctl(if same { "start" } else { "restart" });
+    systemctl(verb);
+}
+
+/// Put a new `look.video_speed` in the environment file, for the unit's
+/// next start; the playing video takes it over IPC. Nothing when no video
+/// was ever picked (no file), and never a restart. Blocking: a small file
+/// read and write.
+pub(crate) fn sync_video_speed(speed: f64) {
+    let env = video_env();
+    let Ok(old) = std::fs::read_to_string(&env) else {
+        return;
+    };
+    let text = with_speed(&old, speed);
+    if text != old
+        && let Err(e) = write_env(&env, &text)
+    {
+        log::warn!("wallpaper: {}: {e}", env.display());
+    }
 }
 
 fn systemctl(verb: &str) {
@@ -164,10 +230,11 @@ pub fn apply_saved() {
     } else {
         // No pick: sway's config line stands, and only the video it may
         // stand for is this process's to start.
+        let speed = video_speed();
         crate::spawn::spawn_work(
-            || {
+            move || {
                 if let Some(w) = system_default() {
-                    follow_video(&w.path);
+                    follow_video(&w.path, speed);
                 }
             },
             |()| (),
@@ -346,5 +413,44 @@ seat \"*\" {
         assert_eq!(video_for(&still), Some(dir.join("beach.mp4")));
         assert_eq!(video_for(&other), None);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The file names the video and its speed; only another video restarts
+    /// the unit, and a file already right is not written again.
+    #[test]
+    fn the_environment_file_carries_the_speed_and_a_speed_alone_restarts_nothing() {
+        let beach = Path::new("/w/beach.mp4");
+        assert_eq!(env_text(beach, 0.5), "VIDEO=/w/beach.mp4\nSPEED=0.5\n");
+        assert_eq!(env_text(beach, 1.0), "VIDEO=/w/beach.mp4\nSPEED=1\n");
+        // Nothing yet: written, and started afresh.
+        let (write, verb) = env_change(None, beach, 1.0);
+        assert_eq!(write.as_deref(), Some("VIDEO=/w/beach.mp4\nSPEED=1\n"));
+        assert_eq!(verb, "restart");
+        // The same file: left alone, and a running unit with it.
+        let (write, verb) = env_change(Some("VIDEO=/w/beach.mp4\nSPEED=1\n"), beach, 1.0);
+        assert_eq!((write, verb), (None, "start"));
+        // Another speed: written, but no restart.
+        let (write, verb) = env_change(Some("VIDEO=/w/beach.mp4\nSPEED=1\n"), beach, 2.0);
+        assert_eq!(write.as_deref(), Some("VIDEO=/w/beach.mp4\nSPEED=2\n"));
+        assert_eq!(verb, "start");
+        // A file from before the speed, with the same video: no restart.
+        let (write, verb) = env_change(Some("VIDEO=/w/beach.mp4\n"), beach, 1.0);
+        assert!(write.is_some());
+        assert_eq!(verb, "start");
+        // Another video: a restart.
+        let (_, verb) = env_change(Some("VIDEO=/w/waves.mp4\nSPEED=1\n"), beach, 1.0);
+        assert_eq!(verb, "restart");
+    }
+
+    #[test]
+    fn a_new_speed_keeps_the_video_line() {
+        assert_eq!(
+            with_speed("VIDEO=/w/beach.mp4\nSPEED=1\n", 0.75),
+            "VIDEO=/w/beach.mp4\nSPEED=0.75\n"
+        );
+        assert_eq!(
+            with_speed("VIDEO=/w/beach.mp4\n", 2.0),
+            "VIDEO=/w/beach.mp4\nSPEED=2\n"
+        );
     }
 }

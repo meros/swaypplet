@@ -59,6 +59,14 @@
 //! up; the worker sends the curtain what to do. A missing socket is the
 //! normal state of a session without the animated wallpaper and is logged
 //! at debug only; `black` then still turns the background black.
+//!
+//! The same worker gives the player `look.video_speed`, the Look pane's
+//! multiplier, on a machine with a battery or without one: a new speed
+//! becomes the player's base (so a pause or black comes back to it), and is
+//! set on the player at once when it is meant to be playing. Held slowed,
+//! paused or black, only the base moves. The unit's environment file gets it
+//! too, for the player's next start (`settings::wallpaper`), which a new
+//! speed alone never forces.
 
 use std::cell::{Cell, RefCell};
 use std::io::{self, BufRead, BufReader, Write};
@@ -476,6 +484,8 @@ enum Msg {
     Want(Want),
     /// The curtain asked for under this number is opaque on screen.
     Covered(u64),
+    /// `look.video_speed`, at startup and whenever it changes.
+    Speed(f64),
 }
 
 /// Out of the worker, to the curtain on the GTK thread; the number is the
@@ -509,7 +519,7 @@ fn remember_black(black: bool) {
     }
 }
 
-fn restore(pick: Option<&Wallpaper>) {
+fn restore(pick: Option<&Wallpaper>, speed: f64) {
     let wallpaper = pick
         .cloned()
         .or_else(crate::settings::wallpaper::system_default);
@@ -517,7 +527,7 @@ fn restore(pick: Option<&Wallpaper>) {
         log::warn!("wallpaper-battery: no wallpaper to put back");
         return;
     };
-    match crate::settings::wallpaper::apply_blocking(&w) {
+    match crate::settings::wallpaper::apply_blocking(&w, speed) {
         Ok(()) => remember_black(false),
         Err(e) => log::warn!("wallpaper-battery: {e}"),
     }
@@ -572,9 +582,65 @@ struct Worker {
     /// matched only while waiting: the curtain can land before the speed
     /// under it does, while the worker is waiting on the speed's clock.
     covered: Cell<u64>,
+    /// The target last taken up: playing until a battery says otherwise,
+    /// and always on a machine without one.
+    target: Target,
+    /// `look.video_speed` as last told.
+    speed: Cell<f64>,
+    /// A speed told that the player has not been given yet: one that came
+    /// in midway through a transition waits for its end.
+    speed_due: Cell<bool>,
 }
 
 impl Worker {
+    fn new(rx: Receiver<Msg>, curtain: Box<dyn Fn(ToCurtain) + Send>) -> Worker {
+        Worker {
+            rx,
+            curtain,
+            bg_black: black_marker().exists(),
+            up: false,
+            seq: 0,
+            covered: Cell::new(0),
+            target: Target::Play,
+            speed: Cell::new(1.0),
+            speed_due: Cell::new(false),
+        }
+    }
+
+    /// Take in a message between transitions; a want is kept for the next.
+    fn note(&self, msg: Msg, pending: &mut Option<Want>) {
+        match msg {
+            Msg::Want(want) => *pending = Some(want),
+            Msg::Covered(n) => self.covered.set(self.covered.get().max(n)),
+            Msg::Speed(speed) => self.note_speed(speed),
+        }
+    }
+
+    fn note_speed(&self, speed: f64) {
+        self.speed.set(speed);
+        self.speed_due.set(true);
+    }
+
+    /// Give the player the speed told, if it has not had it: in its
+    /// environment file for its next start, and over the socket now.
+    fn give_speed(&self, path: &Path) {
+        if !self.speed_due.replace(false) {
+            return;
+        }
+        let speed = self.speed.get();
+        crate::settings::wallpaper::sync_video_speed(speed);
+        let mut ipc = match Ipc::connect(path) {
+            Ok(ipc) => ipc,
+            Err(e) => {
+                log::debug!("wallpaper-battery: no player for speed {speed}: {e}");
+                return;
+            }
+        };
+        if let Err(e) = retune(&mut ipc, speed, self.target) {
+            log::debug!("wallpaper-battery: speed {speed}: {e}");
+        }
+    }
+
     fn tell(&mut self, cmd: wallpaper_curtain::Cmd) -> u64 {
         use wallpaper_curtain::Cmd as C;
         self.seq += 1;
@@ -602,6 +668,9 @@ impl Worker {
                         return Wake::Covered;
                     }
                 }
+                // Given once the transition is over: a speed is no reason
+                // to turn one around.
+                Ok(Msg::Speed(speed)) => self.note_speed(speed),
                 Err(RecvTimeoutError::Timeout) => return Wake::Due,
                 Err(RecvTimeoutError::Disconnected) => return Wake::Gone,
             }
@@ -653,7 +722,7 @@ impl Worker {
         log::debug!("wallpaper-battery: {cmd:?}");
         match cmd {
             Cmd::Restore => {
-                restore(want.restore.as_ref());
+                restore(want.restore.as_ref(), self.speed.get());
                 self.bg_black = false;
             }
             Cmd::Blackout => self.bg_black = blackout(),
@@ -715,7 +784,7 @@ impl Worker {
                     }
                 } else {
                     if self.bg_black {
-                        restore(want.restore.as_ref());
+                        restore(want.restore.as_ref(), self.speed.get());
                         self.bg_black = false;
                     }
                     self.tell(C::Out);
@@ -777,42 +846,46 @@ impl Worker {
 }
 
 /// The worker: wanted states in, transitions out, one at a time and the
-/// newest first.
+/// newest first; and a new speed given between them.
 fn worker(path: PathBuf, rx: Receiver<Msg>, curtain: Box<dyn Fn(ToCurtain) + Send>) {
-    let mut w = Worker {
-        rx,
-        curtain,
-        bg_black: black_marker().exists(),
-        up: false,
-        seq: 0,
-        covered: Cell::new(0),
-    };
-    let mut want = loop {
-        match w.rx.recv() {
-            Ok(Msg::Want(want)) => break want,
-            Ok(Msg::Covered(_)) => {}
-            Err(_) => return,
-        }
-    };
+    let mut w = Worker::new(rx, curtain);
+    let mut pending: Option<Want> = None;
     loop {
         while let Ok(msg) = w.rx.try_recv() {
-            match msg {
-                Msg::Want(newer) => want = newer,
-                Msg::Covered(n) => w.covered.set(w.covered.get().max(n)),
+            w.note(msg, &mut pending);
+        }
+        if let Some(mut want) = pending.take() {
+            w.target = want.target;
+            if let Some(next) = w.settle(&path, &mut want) {
+                pending = Some(next);
+                continue;
             }
         }
-        if let Some(next) = w.settle(&path, &mut want) {
-            want = next;
-            continue;
+        w.give_speed(&path);
+        match w.rx.recv() {
+            Ok(msg) => w.note(msg, &mut pending),
+            Err(_) => return,
         }
-        want = loop {
-            match w.rx.recv() {
-                Ok(Msg::Want(next)) => break next,
-                Ok(Msg::Covered(n)) => w.covered.set(w.covered.get().max(n)),
-                Err(_) => return,
-            }
-        };
     }
+}
+
+/// A new base speed for the player: marked on it, so a pause or black comes
+/// back to it, and played at once if it is meant to be playing.
+fn retune(ipc: &mut Ipc, speed: f64, target: Target) -> io::Result<()> {
+    let player = read(ipc)?;
+    ipc.set(BASE_KEY, json!(speed))?;
+    if plays_at_base(target) && (player.speed - speed).abs() > EPS {
+        log::info!("wallpaper-battery: speed {:.2} to {speed:.2}", player.speed);
+        ipc.set("speed", json!(speed))?;
+    }
+    Ok(())
+}
+
+/// Whether a player wanted at `target` plays at its base speed, so a new
+/// base is its speed now. Slowed to a stop or black, it is held at what
+/// this service set, and the new base waits for the way back.
+fn plays_at_base(target: Target) -> bool {
+    target == Target::Play
 }
 
 thread_local! {
@@ -846,13 +919,12 @@ fn script() -> Option<Vec<(Target, f64)>> {
     steps
 }
 
-/// Start following, from the panel process. Does nothing on a machine
-/// without a battery, where nothing here can ever be wanted.
+/// Start following, from the panel process. On a machine without a
+/// battery, where no target but playing can ever be wanted, only the speed
+/// is followed.
 pub fn follow(app: &gtk4::Application) {
     let script = script();
-    if !battery::start() && script.is_none() {
-        return;
-    }
+    let on_battery_matters = battery::start() || script.is_some();
     let path = glib::user_runtime_dir().join("mpvpaper.sock");
     let (tx, rx) = mpsc::channel::<Msg>();
     let (to_gtk, from_worker) = async_channel::unbounded::<ToCurtain>();
@@ -864,6 +936,10 @@ pub fn follow(app: &gtk4::Application) {
         .spawn(move || worker(path, rx, tell));
     if let Err(e) = spawned {
         log::warn!("wallpaper-battery: failed to spawn thread: {e}");
+        return;
+    }
+    follow_speed(tx.clone());
+    if !on_battery_matters {
         return;
     }
 
@@ -944,6 +1020,20 @@ pub fn follow(app: &gtk4::Application) {
         battery::observe(move || apply());
     }
     crate::settings::store::observe(move || apply());
+}
+
+/// Tell the worker `look.video_speed` now and whenever it changes.
+fn follow_speed(tx: mpsc::Sender<Msg>) {
+    let last: Rc<Cell<Option<f64>>> = Rc::default();
+    let send = move || {
+        let speed = crate::settings::store::with(|s| s.look().video_speed);
+        if last.get() != Some(speed) {
+            last.set(Some(speed));
+            let _ = tx.send(Msg::Speed(speed));
+        }
+    };
+    send();
+    crate::settings::store::observe(send);
 }
 
 #[cfg(test)]
@@ -1209,17 +1299,63 @@ mod tests {
         assert!(schedule(&p.speed).is_empty());
     }
 
+    fn idle_worker() -> (mpsc::Sender<Msg>, Worker) {
+        let (tx, rx) = mpsc::channel::<Msg>();
+        let w = Worker {
+            bg_black: false,
+            ..Worker::new(rx, Box::new(|_| {}))
+        };
+        (tx, w)
+    }
+
+    /// A new speed is the player's at once only while it plays; held
+    /// slowed or black, it is the base the way back comes to.
+    #[test]
+    fn a_new_speed_plays_at_once_only_while_playing() {
+        assert!(plays_at_base(Target::Play));
+        assert!(!plays_at_base(Target::Pause));
+        assert!(!plays_at_base(Target::Black));
+        // And the way back from either goes to the base marked on the
+        // player, which is where the new speed went.
+        let p = plan(&paused_here(2.0), false, false, Target::Play);
+        assert_eq!(p.speed.to, 2.0);
+        let p = plan(&black_here(0.25), true, false, Target::Play);
+        assert_eq!(p.speed.to, 0.25);
+    }
+
+    /// A speed that comes in midway through a transition does not turn it
+    /// around; it waits, and is given once.
+    #[test]
+    fn a_speed_midway_waits_for_the_transition_to_end() {
+        let (tx, w) = idle_worker();
+        let mut want = Want {
+            target: Target::Pause,
+            restore: None,
+        };
+        tx.send(Msg::Speed(1.5)).unwrap();
+        assert!(matches!(
+            w.wait(&mut want, Instant::now() + POLL, None),
+            Wake::Due
+        ));
+        assert!(w.speed_due.get());
+        assert_eq!(w.speed.get(), 1.5);
+        // Between transitions it is a note like any other, the want kept.
+        let mut pending = None;
+        w.note(Msg::Speed(0.5), &mut pending);
+        w.note(
+            Msg::Want(Want {
+                target: Target::Play,
+                restore: None,
+            }),
+            &mut pending,
+        );
+        assert_eq!(w.speed.get(), 0.5);
+        assert!(pending.is_some_and(|p| p.target == Target::Play));
+    }
+
     #[test]
     fn a_curtain_up_before_the_speed_is_down_is_not_waited_for_again() {
-        let (tx, rx) = mpsc::channel::<Msg>();
-        let mut w = Worker {
-            rx,
-            curtain: Box::new(|_| {}),
-            bg_black: false,
-            up: false,
-            seq: 0,
-            covered: Cell::new(0),
-        };
+        let (tx, mut w) = idle_worker();
         let n = w.tell(wallpaper_curtain::Cmd::In);
         let mut want = Want {
             target: Target::Black,
@@ -1242,9 +1378,9 @@ mod tests {
     /// Drive a real player through a script of targets, without a curtain
     /// (one that is up at once), for a check of the worker alone:
     /// `WALLPAPER_SOCK=<mpv socket> WALLPAPER_SCRIPT="pause:4,play:1.2"`
-    /// (each target held for that many seconds), with `SWAYSOCK` set for the
-    /// background. The curtain itself needs the panel:
-    /// `SWAYPPLET_WALLPAPER_SCRIPT`.
+    /// (each target held for that many seconds; `speed=1.5:1` tells a new
+    /// `look.video_speed`), with `SWAYSOCK` set for the background. The
+    /// curtain itself needs the panel: `SWAYPPLET_WALLPAPER_SCRIPT`.
     #[test]
     #[ignore]
     fn drive_a_real_player() {
@@ -1260,6 +1396,12 @@ mod tests {
         let start = Instant::now();
         for item in script.split(',') {
             let (name, secs) = item.split_once(':').expect("target:seconds");
+            if let Some(speed) = name.strip_prefix("speed=") {
+                eprintln!("t={:.2}s -> speed {speed}", start.elapsed().as_secs_f64());
+                tx.send(Msg::Speed(speed.parse().unwrap())).unwrap();
+                std::thread::sleep(Duration::from_secs_f64(secs.parse().unwrap()));
+                continue;
+            }
             let target = match name {
                 "play" => Target::Play,
                 "pause" => Target::Pause,

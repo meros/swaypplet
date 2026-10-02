@@ -511,7 +511,7 @@ impl OnBattery {
 
 /// The Look tab's second group. The wallpaper is the first and has its own
 /// section, since it has no system layer in this file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Look {
     /// The theme inputs (docs/design-system.md §2).
     #[serde(default)]
@@ -549,6 +549,42 @@ pub struct Look {
     /// which is the pick and drops whole on a reset of that section.
     #[serde(default)]
     pub wallpaper_on_battery: OnBattery,
+    /// How fast the animated wallpaper plays, as a multiple of the video's
+    /// own speed: mpv's `speed`. The unit starts at it (`SPEED=` in its
+    /// environment file, `settings::wallpaper`) and a change reaches a
+    /// playing video over IPC (`services::wallpaper_battery`).
+    #[serde(default = "Look::default_video_speed")]
+    pub video_speed: f64,
+}
+
+impl Look {
+    /// The speeds the Look pane offers.
+    pub const VIDEO_SPEEDS: [f64; 6] = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
+    /// What a hand-edited speed is clamped to: slower than a tenth reads as
+    /// a still, faster than four as a glitch.
+    pub const VIDEO_SPEED_RANGE: (f64, f64) = (0.1, 4.0);
+
+    fn default_video_speed() -> f64 {
+        1.0
+    }
+
+    /// A speed mpv can take and a person would mean; anything that is not
+    /// a number is the video's own speed.
+    pub fn sanitize_video_speed(speed: f64) -> f64 {
+        let (min, max) = Self::VIDEO_SPEED_RANGE;
+        if speed.is_finite() {
+            speed.clamp(min, max)
+        } else {
+            Self::default_video_speed()
+        }
+    }
+
+    fn sanitized(self) -> Look {
+        Look {
+            video_speed: Self::sanitize_video_speed(self.video_speed),
+            ..self
+        }
+    }
 }
 
 impl Default for Look {
@@ -564,6 +600,7 @@ impl Default for Look {
             launch_zoom: false,
             apps_follow: true,
             wallpaper_on_battery: OnBattery::default(),
+            video_speed: Look::default_video_speed(),
         }
     }
 }
@@ -1587,6 +1624,7 @@ impl Settings {
     pub(super) fn sanitized(self) -> Settings {
         Settings {
             idle: self.idle.map(Idle::sanitized),
+            look: self.look.map(Look::sanitized),
             pins: self.pins.map(Pins::sanitized),
             keys: self.keys.map(Keys::sanitized),
             alerts: self.alerts.map(Alerts::sanitized),
@@ -2021,6 +2059,30 @@ mod tests {
         );
         let old: Look = serde_json::from_str(r#"{"pause_wallpaper_on_battery": false}"#).unwrap();
         assert_eq!(old.wallpaper_on_battery, OnBattery::Keep);
+    }
+
+    /// The video speed: 1 when the file has none, clamped to what mpv and a
+    /// person can use when a hand edit put it out of range.
+    #[test]
+    fn the_video_speed_is_sanitized() {
+        let old: Look = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.video_speed, 1.0);
+        assert_eq!(Look::sanitize_video_speed(0.5), 0.5);
+        assert_eq!(Look::sanitize_video_speed(0.0), 0.1);
+        assert_eq!(Look::sanitize_video_speed(-2.0), 0.1);
+        assert_eq!(Look::sanitize_video_speed(10.0), 4.0);
+        assert_eq!(Look::sanitize_video_speed(f64::NAN), 1.0);
+        assert_eq!(Look::sanitize_video_speed(f64::INFINITY), 1.0);
+        for speed in Look::VIDEO_SPEEDS {
+            assert_eq!(
+                Look::sanitize_video_speed(speed),
+                speed,
+                "a rung is in range"
+            );
+        }
+        let mut s = Settings::default();
+        s.set("look.video_speed", serde_json::json!(9)).unwrap();
+        assert_eq!(s.look().video_speed, 4.0);
     }
 
     #[test]

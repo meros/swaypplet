@@ -28,7 +28,8 @@ usage: swaypplet settings                      the settings in force, as JSON
 sections and fields (data/settings-defaults.json has every default):
   wallpaper  path, mode (fill|fit|stretch|center|tile)
   look       motion (full|reduced|off), tint (off|accents|full),
-             wallpaper_on_battery (keep|pause|black)
+             wallpaper_on_battery (keep|pause|black),
+             video_speed (the animated wallpaper's speed, 0.1–4, 1 is its own)
   idle       dim_after_s, dim_level, lock_after_s, blank_after_s,
              battery_blank_after_s (shorter screen-off on battery, 0 is no override),
              suspend_after_s (0 is never), walk_away_lock, face_unlock
@@ -91,10 +92,16 @@ fn execute(words: &[&str]) -> Result<String, String> {
             settings.save();
             // The one section with a reader that does not follow the file:
             // the compositor.
+            let speed = settings.look().video_speed;
             if key.starts_with("wallpaper.")
                 && let Some(w) = &settings.wallpaper
             {
-                wallpaper::apply_blocking(w)?;
+                wallpaper::apply_blocking(w, speed)?;
+            }
+            // The panel gives a playing video the new speed; the unit's
+            // file is kept for its next start even with no panel running.
+            if *key == "look.video_speed" {
+                wallpaper::sync_video_speed(speed);
             }
             Ok(String::new())
         }
@@ -104,7 +111,7 @@ fn execute(words: &[&str]) -> Result<String, String> {
             settings.save();
             if matches!(words.get(1), None | Some(&"wallpaper")) {
                 match wallpaper::system_default() {
-                    Some(w) => wallpaper::apply_blocking(&w)?,
+                    Some(w) => wallpaper::apply_blocking(&w, settings.look().video_speed)?,
                     None => log::warn!("wallpaper: no system default to reset to"),
                 }
             }
@@ -116,11 +123,14 @@ fn execute(words: &[&str]) -> Result<String, String> {
                 Settings::NIX_SECTIONS.join(", ")
             )
         }),
-        ["apply"] => match Settings::load().wallpaper {
-            Some(w) => wallpaper::apply_blocking(&w),
-            None => Ok(()),
+        ["apply"] => {
+            let settings = Settings::load();
+            match &settings.wallpaper {
+                Some(w) => wallpaper::apply_blocking(w, settings.look().video_speed),
+                None => Ok(()),
+            }
+            .map(|()| String::new())
         }
-        .map(|()| String::new()),
         ["help"] | ["--help"] | ["-h"] => Ok(USAGE.to_string()),
         _ => Err(USAGE.to_string()),
     }

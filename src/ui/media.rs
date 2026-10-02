@@ -1,7 +1,8 @@
-//! Pictures: the thumbnail frame, the picked thumbnail, the choice grid,
-//! the swatch, the placeholder and the lifted picture.
+//! Pictures: the thumbnail frame, the picked thumbnail and its mark, the
+//! choice grid, the swatch, the placeholder and the lifted picture.
 //!
 //! `ui::thumb()`, `ui::thumb::adopt(&picture)`, `ui::pick_thumb(child)`,
+//! `ui::thumb_mark(glyph, label)`,
 //! `ui::choice_grid::adopt(&flowbox)`, `ui::swatch(child)`,
 //! `ui::placeholder::adopt(&w)`, `ui::lifted::adopt(&w)`.
 
@@ -34,6 +35,21 @@ pub fn pick_thumb(child: &impl IsA<gtk4::Widget>) -> gtk4::Button {
     b.add_css_class("ui-pick-thumb");
     b.set_child(Some(child));
     b
+}
+
+/// What a picked picture stands for (a video), as a glyph in its corner:
+/// the one thing drawn over a [`pick_thumb`], small enough to leave the
+/// picture whole. `label` is its tooltip and what a screen reader says.
+/// Put it on an overlay over the picture; it is never the selection cue.
+pub fn thumb_mark(glyph: &str, label: &str) -> gtk4::Label {
+    let l = gtk4::Label::new(Some(glyph));
+    super::glyph::adopt(&l, super::Text::Caption, super::Tone::Fg);
+    l.add_css_class("ui-thumb-mark");
+    l.set_halign(Align::End);
+    l.set_valign(Align::End);
+    l.set_tooltip_text(Some(label));
+    l.update_property(&[gtk4::accessible::Property::Label(label)]);
+    l
 }
 
 pub mod choice_grid {

@@ -12,6 +12,7 @@
 //! animation by `anim::duration` and scaled into the motion tokens.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -24,7 +25,7 @@ use super::schema::{OnBattery, ThemeMode};
 use super::store::{
     self, Daylight, Look, Motion, NightLight, NightSchedule, Tint, Wallpaper, WallpaperMode,
 };
-use super::wallpaper::{apply, candidates, candidates_dir, system_default};
+use super::wallpaper::{apply, candidates, candidates_dir, system_default, video_for};
 use crate::theme::wallpaper::Sample;
 use crate::tokens::{Accent, Contrast, Neutral, Palette, Tint as Reach};
 
@@ -229,15 +230,78 @@ fn wallpaper_swatch(palette: Palette, rank: usize) -> (gtk4::ToggleButton, gtk4:
     (button, dot)
 }
 
+// ── The animated wallpaper ──────────────────────────────────────────────
+
+/// The On battery choices the wallpaper on screen gives a meaning to: all
+/// three for a video, and for a still only the two that do something to it
+/// or nothing at all. A still has nothing to slow down.
+fn on_battery_choices(video: bool) -> &'static [OnBattery] {
+    const STILL: [OnBattery; 2] = [OnBattery::Keep, OnBattery::Black];
+    if video { &OnBattery::ALL } else { &STILL }
+}
+
+/// "Keep playing" says nothing over a still; there, it is no change.
+fn on_battery_label(choice: OnBattery, video: bool) -> &'static str {
+    match (choice, video) {
+        (OnBattery::Keep, false) => "No change",
+        _ => choice.label(),
+    }
+}
+
+fn on_battery_hint(video: bool) -> &'static str {
+    if video {
+        "What the animated wallpaper does while the machine runs on battery. Slow to a stop eases the video down to a held frame and starts it up again on mains. Black fades it out, turns the background black and the shell dark until mains is back."
+    } else {
+        "What the wallpaper does while the machine runs on battery. Black turns the background black and the shell dark until mains is back."
+    }
+}
+
+/// Where the saved choice sits among [`on_battery_choices`]. A slow to a
+/// stop saved while a still shows reads as no change, which is what the
+/// battery service makes of it with no video playing; the file keeps it for
+/// the next video.
+fn on_battery_index(saved: OnBattery, video: bool) -> u32 {
+    on_battery_choices(video)
+        .iter()
+        .position(|o| *o == saved)
+        .unwrap_or(0) as u32
+}
+
+/// A rung of `Look::VIDEO_SPEEDS` as the dropdown shows it: `0.25×`, `1×`.
+fn speed_label(speed: f64) -> String {
+    format!("{speed}×")
+}
+
+/// The rung nearest `speed`: a hand-set speed off the ladder shows as the
+/// closest one, and stays as it is until a rung is picked.
+fn speed_index(speed: f64) -> usize {
+    Look::VIDEO_SPEEDS
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| (*a - speed).abs().total_cmp(&(*b - speed).abs()))
+        .map_or(0, |(i, _)| i)
+}
+
 // ── The tab ─────────────────────────────────────────────────────────────
 
 /// A swatch and the dot it draws, to repaint when the tokens move.
 type Swatch = (gtk4::ToggleButton, gtk4::DrawingArea);
 
+/// One thumbnail in the grid: the image it picks, the button, and the
+/// mark that says the image stands for a video.
+struct ThumbEntry {
+    path: PathBuf,
+    button: gtk4::Button,
+    mark: gtk4::Label,
+}
+
 struct State {
     grid: gtk4::FlowBox,
     /// One thumbnail per path the grid shows, in grid order.
-    thumbs: RefCell<Vec<(PathBuf, gtk4::Button)>>,
+    thumbs: RefCell<Vec<ThumbEntry>>,
+    /// Which of the grid's images stand for a video (`video_for`), as the
+    /// last scan off the main thread found them.
+    videos: RefCell<HashMap<PathBuf, bool>>,
     mode: gtk4::DropDown,
     theme_mode: gtk4::DropDown,
     /// One swatch per accent, and the dot it draws, to repaint when the mode
@@ -249,6 +313,15 @@ struct State {
     launch_zoom: gtk4::Switch,
     apps_follow: gtk4::Switch,
     on_battery: gtk4::DropDown,
+    on_battery_row: gtk4::Box,
+    /// Whether the On battery dropdown holds the choices for a video
+    /// (`Some(true)`) or a still; `None` before the first sync.
+    on_battery_video: Cell<Option<bool>>,
+    /// This machine has a battery; the On battery row is hidden until the
+    /// worker that looks says so.
+    has_battery: Cell<bool>,
+    speed: gtk4::DropDown,
+    speed_row: gtk4::Box,
     tint: gtk4::DropDown,
     /// The row offering the wallpaper's colours, shown while a tint is on
     /// and the wallpaper has been sampled.
@@ -344,10 +417,7 @@ impl State {
         self.motion.set_selected(motion.unwrap_or(0) as u32);
         self.launch_zoom.set_active(settings.look().launch_zoom);
         self.apps_follow.set_active(settings.look().apps_follow);
-        let on_battery = OnBattery::ALL
-            .iter()
-            .position(|o| *o == settings.look().wallpaper_on_battery);
-        self.on_battery.set_selected(on_battery.unwrap_or(0) as u32);
+        self.sync_video_rows();
         let tint = Tint::ALL.iter().position(|t| *t == settings.look().tint);
         self.tint.set_selected(tint.unwrap_or(0) as u32);
         let night = settings.night_light();
@@ -359,9 +429,9 @@ impl State {
         // screen now and `theme::observe` paints the rest when it lands.
         self.strip.queue_draw();
         self.sync_colours();
-        for (path, button) in self.thumbs.borrow().iter() {
-            let selected = shown.as_ref().is_some_and(|w| w.path == *path);
-            crate::ui::set_selected(button, selected);
+        for thumb in self.thumbs.borrow().iter() {
+            let selected = shown.as_ref().is_some_and(|w| w.path == thumb.path);
+            crate::ui::set_selected(&thumb.button, selected);
         }
         if let Some(w) = &shown {
             let index = WallpaperMode::ALL.iter().position(|m| *m == w.mode);
@@ -373,6 +443,41 @@ impl State {
             "System default: the sway config's wallpaper, auto mode in aqua on gruvbox, full motion, day and night by the sun at the system's location, night light at 3500 K",
         );
         self.updating.set(false);
+    }
+
+    /// The wallpaper on screen stands for a video, as far as the last scan
+    /// knows.
+    fn shows_video(&self) -> bool {
+        self.shown()
+            .is_some_and(|w| self.videos.borrow().get(&w.path).copied().unwrap_or(false))
+    }
+
+    /// The rows that depend on what the wallpaper is: the speed only for a
+    /// video, On battery only on a machine with a battery and with only the
+    /// choices that mean something for the wallpaper on screen. Called
+    /// from [`Self::sync`], when a scan lands and when the settings move.
+    fn sync_video_rows(&self) {
+        let was = self.updating.replace(true);
+        let video = self.shows_video();
+        let look = store::with(|s| s.look());
+        self.speed_row.set_visible(video);
+        self.speed
+            .set_selected(speed_index(look.video_speed) as u32);
+        self.on_battery_row.set_visible(self.has_battery.get());
+        if self.on_battery_video.get() != Some(video) {
+            let labels: Vec<&str> = on_battery_choices(video)
+                .iter()
+                .map(|o| on_battery_label(*o, video))
+                .collect();
+            self.on_battery
+                .set_model(Some(&gtk4::StringList::new(&labels)));
+            self.on_battery_row
+                .set_tooltip_text(Some(on_battery_hint(video)));
+            self.on_battery_video.set(Some(video));
+        }
+        self.on_battery
+            .set_selected(on_battery_index(look.wallpaper_on_battery, video));
+        self.updating.set(was);
     }
 
     /// Bring the wallpaper's colours in line with the last sample and the
@@ -444,15 +549,55 @@ impl State {
             .thumbs
             .borrow()
             .iter()
-            .map(|(p, _)| p.clone())
+            .map(|t| t.path.clone())
             .collect();
-        for path in wanted {
-            if known.contains(&path) {
+        for path in &wanted {
+            if known.contains(path) {
                 continue;
             }
-            self.add_thumb(path);
+            self.add_thumb(path.clone());
         }
         self.sync();
+
+        // Which of them stand for a video: a few file lookups each, so off
+        // the main thread, and on every rescan so a video put beside a
+        // still since is found.
+        let state = self.clone();
+        crate::spawn::spawn_work(
+            move || {
+                wanted
+                    .into_iter()
+                    .map(|p| {
+                        let video = video_for(&p).is_some();
+                        (p, video)
+                    })
+                    .collect::<Vec<_>>()
+            },
+            move |found| {
+                *state.videos.borrow_mut() = found.into_iter().collect();
+                state.sync_marks();
+                state.sync_video_rows();
+            },
+        );
+    }
+
+    /// Show the video mark on each thumbnail whose image stands for one.
+    fn sync_marks(&self) {
+        let videos = self.videos.borrow();
+        for thumb in self.thumbs.borrow().iter() {
+            let video = videos.get(&thumb.path).copied().unwrap_or(false);
+            thumb.mark.set_visible(video);
+            let name = thumb
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            thumb.button.set_tooltip_text(Some(&if video {
+                format!("{name} — video wallpaper")
+            } else {
+                name
+            }));
+        }
     }
 
     fn add_thumb(self: &Rc<Self>, path: PathBuf) {
@@ -463,7 +608,12 @@ impl State {
             .hexpand(true)
             .halign(gtk4::Align::Fill)
             .build();
-        let button = crate::ui::pick_thumb(&picture);
+        let face = gtk4::Overlay::new();
+        face.set_child(Some(&picture));
+        let mark = crate::ui::thumb_mark(crate::ui::icons::MEDIA_PLAY, "Video wallpaper");
+        mark.set_visible(false);
+        face.add_overlay(&mark);
+        let button = crate::ui::pick_thumb(&face);
         button.set_tooltip_text(
             path.file_name()
                 .map(|n| n.to_string_lossy().to_string())
@@ -480,7 +630,11 @@ impl State {
             });
         }
         self.grid.append(&button);
-        self.thumbs.borrow_mut().push((path.clone(), button));
+        self.thumbs.borrow_mut().push(ThumbEntry {
+            path: path.clone(),
+            button,
+            mark,
+        });
 
         // Decoded at thumbnail size on a worker: a 4K JPEG is 33 MB as a
         // texture and a hundred milliseconds to decode, and there are
@@ -534,12 +688,19 @@ impl LookPane {
             &mode_labels,
         );
         group.append(&mode_row);
-        let on_battery_labels: Vec<&str> = OnBattery::ALL.iter().map(|o| o.label()).collect();
-        let (on_battery_row, on_battery) = dropdown_row(
-            "On battery",
-            "What the animated wallpaper does while the machine runs on battery. Slow to a stop eases the video down to a held frame and starts it up again on mains. Black fades it out, turns the background black and the shell dark until mains is back.",
-            &on_battery_labels,
+        let speed_labels: Vec<String> =
+            Look::VIDEO_SPEEDS.iter().map(|s| speed_label(*s)).collect();
+        let speed_labels: Vec<&str> = speed_labels.iter().map(String::as_str).collect();
+        let (speed_row, speed) = dropdown_row(
+            "Video speed",
+            "How fast the animated wallpaper plays, as a multiple of the video's own speed. Changes the playing video at once.",
+            &speed_labels,
         );
+        speed_row.set_visible(false);
+        group.append(&speed_row);
+        // Filled for the wallpaper on screen by `sync_video_rows`.
+        let (on_battery_row, on_battery) = dropdown_row("On battery", on_battery_hint(true), &[]);
+        on_battery_row.set_visible(false);
         group.append(&on_battery_row);
 
         let appearance = section_box(
@@ -680,6 +841,7 @@ impl LookPane {
         let state = Rc::new(State {
             grid: grid.clone(),
             thumbs: RefCell::new(Vec::new()),
+            videos: RefCell::new(HashMap::new()),
             mode: mode.clone(),
             theme_mode: theme_mode.clone(),
             accents,
@@ -689,6 +851,11 @@ impl LookPane {
             launch_zoom: launch_zoom.clone(),
             apps_follow: apps_follow.clone(),
             on_battery: on_battery.clone(),
+            on_battery_row: on_battery_row.clone(),
+            on_battery_video: Cell::new(None),
+            has_battery: Cell::new(false),
+            speed: speed.clone(),
+            speed_row: speed_row.clone(),
             tint: tint.clone(),
             colour_row: colour_row.clone(),
             colour_box: colour_box.clone(),
@@ -889,11 +1056,40 @@ impl LookPane {
                 if state.updating.get() {
                     return;
                 }
-                let Some(choice) = OnBattery::ALL.get(d.selected() as usize).copied() else {
+                let video = state.on_battery_video.get().unwrap_or(true);
+                let Some(choice) = on_battery_choices(video)
+                    .get(d.selected() as usize)
+                    .copied()
+                else {
                     return;
                 };
                 store::edit::<Look>(|l| l.wallpaper_on_battery = choice);
                 state.sync();
+            });
+        }
+        {
+            let state = state.clone();
+            speed.connect_selected_notify(move |d| {
+                if state.updating.get() {
+                    return;
+                }
+                let Some(speed) = Look::VIDEO_SPEEDS.get(d.selected() as usize).copied() else {
+                    return;
+                };
+                // The panel's battery service gives the playing video the
+                // new speed (`services::wallpaper_battery`).
+                store::edit::<Look>(|l| l.video_speed = speed);
+                state.sync();
+            });
+        }
+        {
+            // A pick or a speed changed elsewhere (the CLI, a keybind)
+            // reaches the rows that depend on it while the pane is open.
+            let weak = Rc::downgrade(&state);
+            store::observe(move || {
+                if let Some(state) = weak.upgrade() {
+                    state.sync_video_rows();
+                }
             });
         }
         {
@@ -931,13 +1127,21 @@ impl LookPane {
         root.append(&footer);
 
         // Ask the compositor what the config shipped, then build the grid
-        // once the answer is in so the system image gets a thumbnail too.
+        // once the answer is in so the system image gets a thumbnail too;
+        // and whether there is a battery for On battery to be about.
         {
             let state = state.clone();
-            crate::spawn::spawn_work(system_default, move |system| {
-                *state.system.borrow_mut() = system;
-                state.rescan();
-            });
+            crate::spawn::spawn_work(
+                || {
+                    let battery = crate::services::power::find_battery_path().is_some();
+                    (system_default(), battery)
+                },
+                move |(system, battery)| {
+                    *state.system.borrow_mut() = system;
+                    state.has_battery.set(battery);
+                    state.rescan();
+                },
+            );
         }
 
         LookPane { root, state }
@@ -964,6 +1168,7 @@ use super::search::{Entry, row};
 pub(super) const SEARCH: &[Entry] = &[
     row("Wallpaper", "", "The image behind every output", &["wallpaper", "background", "background image", "desktop background", "bg", "picture", "photo"]),
     row("Wallpaper", "Scaling", "How the image meets the screen", &["fill", "fit", "stretch", "crop", "center", "centre", "tile"]),
+    row("Wallpaper", "Video speed", "How fast the video wallpaper plays", &["video speed", "playback speed", "slow motion", "faster", "slower", "video wallpaper", "live wallpaper", "animated", "mpvpaper", "speed"]).keys(&["look.video_speed"]),
     row("Wallpaper", "On battery", "Keep the video wallpaper playing, slow it to a stop, or go black and dark", &["battery", "video wallpaper", "live wallpaper", "animated", "animation", "mpvpaper", "power saving", "pause", "black", "black background", "dark mode on battery", "stop"]).keys(&["look.wallpaper_on_battery"]),
     row("Appearance", "Mode", "Dark, light, or by the sun", &["dark", "light", "dark mode", "light mode", "dark theme", "light theme", "theme", "night mode", "auto", "sunset"]).keys(&["look.mode"]),
     row("Appearance", "Accent", "The colour of on, selected and primary", &["accent colour", "accent color", "colour", "color", "highlight colour", "highlight color"]).keys(&["look.accent"]),
@@ -984,3 +1189,43 @@ pub(super) const SEARCH: &[Entry] = &[
     row("Night light", "Night warmth", "How warm the night gets, in kelvin", &["colour temperature", "color temperature", "temperature", "kelvin", "warmth", "warm"]).keys(&["night_light.night_k"]),
     row("Appearance", "Apps follow the shell's appearance", "Apps switch dark and light with the shell", &["dark mode apps", "light mode apps", "gtk theme", "color scheme", "portal", "libadwaita", "prefer dark"]).keys(&["look.apps_follow"]),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A still offers only what does something to it: no change, or black;
+    /// a video all three.
+    #[test]
+    fn on_battery_offers_what_the_wallpaper_gives_a_meaning_to() {
+        assert_eq!(on_battery_choices(true), &OnBattery::ALL);
+        assert_eq!(
+            on_battery_choices(false),
+            &[OnBattery::Keep, OnBattery::Black]
+        );
+        assert_eq!(on_battery_label(OnBattery::Keep, true), "Keep playing");
+        assert_eq!(on_battery_label(OnBattery::Keep, false), "No change");
+        assert_eq!(
+            on_battery_label(OnBattery::Black, false),
+            OnBattery::Black.label()
+        );
+        // Slow to a stop saved, a still shown: it reads as no change.
+        assert_eq!(on_battery_index(OnBattery::Pause, false), 0);
+        assert_eq!(on_battery_index(OnBattery::Black, false), 1);
+        assert_eq!(on_battery_index(OnBattery::Pause, true), 1);
+        assert_eq!(on_battery_index(OnBattery::Black, true), 2);
+        assert!(!on_battery_hint(false).contains("Slow to a stop"));
+    }
+
+    #[test]
+    fn the_speed_ladder_reads_as_multiples_and_finds_the_nearest_rung() {
+        let labels: Vec<String> = Look::VIDEO_SPEEDS.iter().map(|s| speed_label(*s)).collect();
+        assert_eq!(labels, ["0.25×", "0.5×", "0.75×", "1×", "1.5×", "2×"]);
+        assert_eq!(speed_index(1.0), 3);
+        assert_eq!(speed_index(0.25), 0);
+        assert_eq!(speed_index(0.1), 0);
+        assert_eq!(speed_index(4.0), 5);
+        assert_eq!(speed_index(1.2), 3);
+        assert_eq!(speed_index(1.3), 4);
+    }
+}

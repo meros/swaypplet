@@ -1,10 +1,10 @@
 /* ══════════════════════════════════════════════════════════════════════
    Media (src/ui/media.rs).
 
-   Pictures: the thumbnail frame, the picked thumbnail, the choice grid,
-   the swatch, the ring, the placeholder and the lifted picture.
+   Pictures: the thumbnail frame, the picked thumbnail and its mark, the
+   choice grid, the swatch, the ring, the placeholder and the lifted picture.
 
-   owns: ui-thumb ui-pick-thumb ui-choice-grid ui-swatch ui-placeholder ui-lifted
+   owns: ui-thumb ui-pick-thumb ui-thumb-mark ui-choice-grid ui-swatch ui-placeholder ui-lifted
    ══════════════════════════════════════════════════════════════════════ */
 
 /* An image in a rounded frame: album art, with a fill while it loads or
@@ -17,7 +17,8 @@
 /* ── Picked thumbnail ──
    A picture you choose. The frame is the whole selection cue: no tick, no
    overlay, because the picture is the thing being chosen and anything drawn
-   over it hides part of that. */
+   over it hides part of that. The one exception is the mark below, which
+   says what kind of picture it is, in a corner. */
 
 button.ui-pick-thumb {
     padding: 0;
@@ -46,6 +47,19 @@ button.ui-pick-thumb.selected {
 button.ui-pick-thumb:focus-visible {
     outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
+}
+
+/* ── Thumbnail mark ──
+   What a picked picture stands for (a video), a glyph in its corner. Not a
+   selection cue: the frame stays the only one. A solid ground, so the
+   glyph holds its contrast on any image. */
+
+.ui-thumb-mark {
+    margin: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-pill);
+    background-color: var(--surface-raised);
+    color: var(--fg);
 }
 
 /* ── Choice grid ──
