@@ -1,7 +1,7 @@
 //! The glass material following the theme's colour fade (docs/design-system.md
 //! §4), and the one thread every material push goes through.
 //!
-//! A mode switch moves six material values (`tokens::material`). Sent in one
+//! A mode switch moves five material values (`tokens::material`). Sent in one
 //! command, the glass jumps while the stylesheet beside it fades over `page`;
 //! so [`send`] walks from what the compositor has to the new material over
 //! the same duration and curve as `theme::fade`, [`STEP`] apart, with the
@@ -257,7 +257,6 @@ fn between_materials(
         absorb,
         absorb_floor,
         specular,
-        edge_light,
         frost,
         shine,
         reflect_blur
@@ -348,7 +347,6 @@ mod tests {
                 fill_alpha,
                 absorb: m.absorb,
                 photochromic: m.photochromic,
-                edge_light: m.edge_light,
                 frost: m.frost,
             };
             crate::tokens::Oklch::from(crate::tokens::material::glass_body(behind, &model)).0
@@ -362,7 +360,6 @@ mod tests {
             let mut t = tuning(&tm.fill_color.css(), tm.fill_alpha, tm.frost);
             t.material.absorb = tm.absorb;
             t.material.photochromic = tm.photochromic;
-            t.material.edge_light = tm.edge_light;
             t
         };
         // The shipped dark material, sentinels and all, and the light one.

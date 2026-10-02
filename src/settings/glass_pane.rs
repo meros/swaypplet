@@ -2,8 +2,8 @@
 //! against the card it is drawn on.
 //!
 //! Every control here means the same in dark and light (docs/design-system.md
-//! §4). The mode owns six values (fill colour and alpha, absorb,
-//! photochromic, edge light, frost) and sets them in `glass::for_mode`; the
+//! §4). The mode owns five values (fill colour and alpha, absorb,
+//! photochromic, frost) and sets them in `glass::for_mode`; the
 //! tab moves them only relative to the mode, with Clarity and Frost. The
 //! rest is one material in both modes: the profile, refraction, dispersion,
 //! the highlight and the bevel. The esoteric numbers (samples, the
@@ -639,13 +639,7 @@ mod tests {
         for knob in knobs() {
             let mut t = base.clone();
             (knob.set)(&mut t, (knob.get)(&base) + knob.step);
-            for owned in [
-                "absorb",
-                "photochromic",
-                "edge_light",
-                "frost",
-                "fill_alpha",
-            ] {
+            for owned in ["absorb", "photochromic", "frost", "fill_alpha"] {
                 assert!(
                     !moved(&base, &t).contains(&owned),
                     "{} sets {owned}",

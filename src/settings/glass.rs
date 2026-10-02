@@ -87,8 +87,8 @@ impl SurfaceKind {
 ///
 /// Unknown fields are ignored rather than refused, which is what keeps an
 /// override written before a knob was removed loading: `roughness`, `haze`,
-/// `noise`, `energy_comp`, the grain and the thin-film, glow and wave effects
-/// all lived here once.
+/// `noise`, `energy_comp`, the grain, the thin-film, glow and wave effects
+/// and `edge_light` all lived here once.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Material {
     pub surface: SurfaceKind,
@@ -102,7 +102,6 @@ pub struct Material {
     pub absorb_floor: f64,
     pub photochromic: f64,
     pub specular: f64,
-    pub edge_light: f64,
     pub frost: f64,
     pub shine: f64,
     pub reflect_blur: f64,
@@ -202,7 +201,7 @@ pub struct Tuning {
     /// How much of the backdrop shows through, relative to the mode: 0 is
     /// the mode's own body fill, +1 thins it, −1 thickens it
     /// (`tokens::material_at`, which also keeps the text readable). The one
-    /// move on the six values the mode owns, and the same move in both.
+    /// move on the five values the mode owns, and the same move in both.
     #[serde(default)]
     pub clarity: f64,
     /// Multiplies the mode's frost. 1 is what the mode ships.
@@ -352,7 +351,6 @@ impl System {
             ("absorb_floor", m.absorb_floor),
             ("photochromic", m.photochromic),
             ("specular", m.specular),
-            ("edge_light", m.edge_light),
             ("frost", m.frost),
             ("shine", m.shine),
             ("reflect_blur", m.reflect_blur),
@@ -538,8 +536,8 @@ pub fn apply_greeter(inputs: crate::tokens::Inputs) {
 
 /// The material as the theme's mode tunes it (docs/design-system.md §4).
 ///
-/// The mode owns six values (fill colour and alpha, absorb, photochromic,
-/// edge light, frost) and always sets them, dark at standard contrast
+/// The mode owns five values (fill colour and alpha, absorb, photochromic,
+/// frost) and always sets them, dark at standard contrast
 /// included, so a tuning made in one mode means the same thing in the
 /// other. What the tuning adds is relative: `clarity` moves the body fill
 /// (`tokens::material_at`), `frost_scale` multiplies the mode's frost.
@@ -553,7 +551,7 @@ pub fn for_mode(mut tuning: Tuning, inputs: crate::tokens::Inputs) -> Tuning {
     tuning
 }
 
-/// `tuning`'s material with the six values `inputs`' mode owns.
+/// `tuning`'s material with the five values `inputs`' mode owns.
 fn mode_material(tuning: &Tuning, inputs: crate::tokens::Inputs) -> Material {
     let m = crate::tokens::material_at(inputs, tuning.clarity);
     Material {
@@ -561,7 +559,6 @@ fn mode_material(tuning: &Tuning, inputs: crate::tokens::Inputs) -> Material {
         fill_alpha: m.fill_alpha,
         absorb: m.absorb,
         photochromic: m.photochromic,
-        edge_light: m.edge_light,
         frost: m.frost * tuning.frost_scale.max(0.0),
         ..tuning.material.clone()
     }
@@ -590,7 +587,7 @@ impl Material {
     }
 
     /// Every numeric field, in the order the export prints them.
-    pub(super) fn numbers(&self) -> [(&'static str, f64); 15] {
+    pub(super) fn numbers(&self) -> [(&'static str, f64); 14] {
         [
             ("refraction", self.refraction),
             ("dispersion", self.dispersion),
@@ -602,7 +599,6 @@ impl Material {
             ("absorb_floor", self.absorb_floor),
             ("photochromic", self.photochromic),
             ("specular", self.specular),
-            ("edge_light", self.edge_light),
             ("frost", self.frost),
             ("shine", self.shine),
             ("reflect_blur", self.reflect_blur),
@@ -944,7 +940,7 @@ mod tests {
         let raw = r#"{"surface":"convex_squircle","refraction":1.5,
             "dispersion":0.004,"samples":4,"reflection":1.0,"lensing":0.22,
             "frost_radius":22,"absorb":2.0,"absorb_floor":0.14,"photochromic":0.14,
-            "specular":0.1,"edge_light":0.08,"frost":0,"shine":0,"reflect_blur":0}"#;
+            "specular":0.1,"frost":0,"shine":0,"reflect_blur":0}"#;
         let m: Material = serde_json::from_str(raw).unwrap();
         assert_eq!(m.samples, 4.0);
         assert_eq!(m.frost_radius, 22.0);
@@ -979,6 +975,7 @@ mod tests {
             "iridescence",
             "edge_glow",
             "wave_amplitude",
+            "edge_light",
             "crest_radius",
         ] {
             assert!(

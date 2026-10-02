@@ -10,7 +10,6 @@ pub struct Material {
     pub absorb: f64,
     /// > 0 a ceiling on luminance, < 0 a lift (a floor).
     pub photochromic: f64,
-    pub edge_light: f64,
     pub frost: f64,
 }
 
@@ -23,7 +22,6 @@ pub fn material(inputs: Inputs) -> Material {
             fill_alpha: if high { 0.72 } else { 0.50 },
             absorb: 1.0,
             photochromic: if high { 0.25 } else { 0.35 },
-            edge_light: if high { 0.12 } else { 0.11 },
             frost: if high { 0.45 } else { 0.33 },
         },
         Mode::Light => Material {
@@ -31,7 +29,6 @@ pub fn material(inputs: Inputs) -> Material {
             fill_alpha: if high { 0.72 } else { 0.44 },
             absorb: if high { 0.20 } else { 0.25 },
             photochromic: if high { -0.50 } else { -0.48 },
-            edge_light: if high { 0.18 } else { 0.17 },
             frost: if high { 0.45 } else { 0.30 },
         },
     }
@@ -42,7 +39,7 @@ pub fn material(inputs: Inputs) -> Material {
 const CLARITY_REACH: f64 = 0.5;
 
 /// The mode's material with the Glass tab's clarity applied (§4): the one
-/// move a person may make on the six values the mode owns, and the same
+/// move a person may make on the five values the mode owns, and the same
 /// move in both modes.
 ///
 /// Positive clarity thins the body fill so more of the backdrop shows. A

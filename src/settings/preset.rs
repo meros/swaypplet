@@ -39,7 +39,7 @@ pub struct Preset {
     build: fn() -> Material,
     /// The body, as the moves a tuning may make on the mode's own values
     /// (`Tuning::clarity`, `Tuning::frost_scale`). A preset cannot set the
-    /// fill, absorb, photochromic, edge light or frost itself: the mode owns
+    /// fill, absorb, photochromic or frost itself: the mode owns
     /// those, so a smoked preset is a dense clarity rather than an absorb.
     pub clarity: f64,
     pub frost_scale: f64,
@@ -88,7 +88,6 @@ fn base() -> Material {
         absorb_floor: 0.07,
         photochromic: 0.35,
         specular: 0.0,
-        edge_light: 0.09,
         frost: 0.33,
         shine: 4096.0,
         reflect_blur: 0.06,
@@ -247,7 +246,7 @@ mod tests {
         }
     }
 
-    /// No preset carries a value of its own for the six the mode owns: they
+    /// No preset carries a value of its own for the five the mode owns: they
     /// would be overwritten in `glass::for_mode` anyway, and a preset that
     /// looked like it set them would lie about what the button does.
     #[test]
@@ -256,8 +255,8 @@ mod tests {
         for p in &ALL {
             let m = p.material();
             assert_eq!(
-                (m.absorb, m.photochromic, m.edge_light, m.frost),
-                (b.absorb, b.photochromic, b.edge_light, b.frost),
+                (m.absorb, m.photochromic, m.frost),
+                (b.absorb, b.photochromic, b.frost),
                 "{}",
                 p.name
             );

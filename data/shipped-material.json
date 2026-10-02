@@ -10,7 +10,6 @@
   "absorb_floor": 0.07,
   "photochromic": 0.35,
   "specular": 0.0,
-  "edge_light": 0.09,
   "frost": 0.33,
   "shine": 4096.0,
   "reflect_blur": 0.06,

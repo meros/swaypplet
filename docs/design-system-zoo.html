@@ -39,9 +39,7 @@
     --glass-fill-base: var(--neutral-3);
     --glass-fill-alpha: 0.5;
     --glass-filter: blur(22px) saturate(1.6) brightness(0.62) contrast(0.85);
-    --glass-edge:
-      inset 0 0 0 1px rgb(255 255 255 / 0.08),
-      inset 0 1px 0 rgb(255 255 255 / 0.07);
+    --glass-edge: inset 0 1px 0 rgb(255 255 255 / 0.07);
     --glass-shadow: 0 0 0 0 transparent;
     --muted-mix: 68%;
     --faint-mix: 46%;
@@ -2302,20 +2300,18 @@
           fill: 0.5,
           absorb: 1.0,
           photo: 0.35,
-          edge: 0.09,
           frost: 0.33,
         },
-        high: { fill: 0.72, absorb: 1.0, photo: 0.25, edge: 0.12, frost: 0.45 },
+        high: { fill: 0.72, absorb: 1.0, photo: 0.25, frost: 0.45 },
       },
       light: {
         standard: {
           fill: 0.55,
           absorb: 0.25,
           photo: -0.3,
-          edge: 0.14,
           frost: 0.45,
         },
-        high: { fill: 0.75, absorb: 0.2, photo: -0.4, edge: 0.18, frost: 0.55 },
+        high: { fill: 0.75, absorb: 0.2, photo: -0.4, frost: 0.55 },
       },
     };
     const STATUS = {
@@ -2413,8 +2409,8 @@
           : `blur(${high ? 26 : 22}px) saturate(1.45) brightness(${high ? 1.18 : 1.1}) contrast(${high ? 0.6 : 0.7})`;
       v["--glass-edge"] =
         mode === "dark"
-          ? `inset 0 0 0 1px rgb(255 255 255 / ${mat.edge.toFixed(2)}), inset 0 1px 0 rgb(255 255 255 / 0.07)`
-          : `inset 0 0 0 1px rgb(0 0 0 / ${(mat.edge * 0.6).toFixed(2)}), inset 0 1px 0 rgb(255 255 255 / 0.6)`;
+          ? "inset 0 1px 0 rgb(255 255 255 / 0.07)"
+          : "inset 0 1px 0 rgb(255 255 255 / 0.6)";
       v["--glass-shadow"] =
         mode === "dark"
           ? "0 0 0 0 transparent"
@@ -2568,12 +2564,6 @@
           "Dark: a ceiling, so a white page behind cannot wash the text out. Light: a lift, a floor on luminance, so a black terminal behind cannot swallow dark text.",
         ],
         [
-          "edge_light",
-          d.edge,
-          l.edge,
-          "The rim. Light glass needs more of it, drawn as a darker line, because a light edge on a light body disappears.",
-        ],
-        [
           "frost",
           d.frost,
           l.frost,
@@ -2623,8 +2613,8 @@
           false,
         ],
         [
-          "Rim, specular",
-          `Edge light ${mat.edge}, Fresnel reflection.`,
+          "Specular",
+          "Fresnel reflection.",
           "mode",
           true,
         ],
