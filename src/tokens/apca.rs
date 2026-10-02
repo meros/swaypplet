@@ -52,6 +52,7 @@ mod tests {
             let s = scales(inputs);
             let lv = levels(inputs.mode, inputs.contrast);
             let m = material(inputs);
+            let t = crate::tokens::material::targets(inputs.mode, inputs.contrast);
             let fg = s.neutral[11];
             for behind in BEHIND {
                 let ground = glass_body(behind, &m);
@@ -61,10 +62,10 @@ mod tests {
                     (true, Contrast::High) => 5.0,
                 };
                 for (name, color, alpha, need) in [
-                    ("fg", fg, 1.0, 75.0 - slack),
-                    ("fg-muted", fg, lv.muted, 60.0 - slack),
-                    ("fg-faint", fg, lv.faint, 45.0 - slack),
-                    ("accent", s.accent[10], 1.0, 60.0 - slack),
+                    ("fg", fg, 1.0, t.fg - slack),
+                    ("fg-muted", fg, lv.muted, t.muted - slack),
+                    ("fg-faint", fg, lv.faint, t.faint - slack),
+                    ("accent", s.accent[10], 1.0, t.accent - slack),
                 ] {
                     let lc = apca(color.over(alpha, ground), ground).abs();
                     if lc < need {
@@ -127,12 +128,13 @@ mod tests {
             .filter(|i| i.accent == Accent::Aqua)
         {
             let m = material(inputs);
+            let need = crate::tokens::material::targets(inputs.mode, inputs.contrast).categorical;
             let ink = scales(inputs).neutral[0];
             for behind in [Rgb(0.5, 0.5, 0.5), Rgb::BLACK] {
                 let ground = glass_body(behind, &m);
                 for (i, (text, fill)) in categorical(inputs).iter().enumerate() {
                     let lc = apca(*text, ground).abs();
-                    if lc < 45.0 {
+                    if lc < need {
                         failures.push(format!(
                             "{inputs:?} cat-{} over {}: Lc {lc:.0}",
                             i + 1,

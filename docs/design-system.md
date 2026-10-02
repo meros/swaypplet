@@ -546,9 +546,9 @@ material values, per glass namespace, over IPC, fading both (§2.3):
 | Value | dark | light | Why |
 |---|---|---|---|
 | `fill_color` | `--neutral-3` | `--neutral-2` | smoked body against milky body; follows the neutral input |
-| `fill_alpha` | 0.50 (high 0.72) | 0.50 (high 0.72) | the same body in both modes, so light glass lets as much through as dark; the lift below keeps dark text readable over a black terminal |
+| `fill_alpha` | 0.50 (high 0.72) | 0.30 (high 0.72) | a thinner light body, so the wallpaper is not washed flat; the lift below keeps dark text readable over a black terminal |
 | `absorb` | 1.0 | 0.25 (high 0.20) | milky glass must not grey out the light it lets through |
-| `photochromic` | 0.35 (high 0.25), a ceiling | −0.43 (high −0.50), a lift | dark caps a white page behind; light floors a black terminal behind |
+| `photochromic` | 0.35 (high 0.25), a ceiling | −0.30 (high −0.50), a lift | dark caps a white page behind; light floors a black terminal behind, and compresses the whole backdrop toward white, so it is kept weak |
 | `frost` | 0.33 (high 0.45) | 0.30 (high 0.45) | light glass keeps more of the picture behind it: its lift already evens the backdrop out, so it needs less frost than dark glass |
 
 Everything else (refraction, dispersion, bevel, specular, shine) is one
@@ -590,6 +590,16 @@ reaches Lc 62 there, 71 at high contrast):
 | `--accent` (15 px bold) | 60 |
 | `--on-accent` on `--accent-bg` | 60 |
 | `--on-status` on each status fill | 60 |
+
+Light glass at standard contrast is held to less: `--fg` 60, `--fg-muted`
+52, `--fg-faint` 41, `--accent` 46, a categorical colour 36. Dark text
+reaches Lc 75 only where the glass brightens whatever is behind it, black
+included, and brightening a dark backdrop that far erases it: at the full
+targets light glass could show under half the backdrop dark glass shows.
+The light material was chosen for the backdrop instead (2026-10-02, the
+nixos glass-bench zoo), and these are what it reaches. High contrast keeps
+the full targets in both modes. `tokens::material::targets` holds the
+table.
 
 `src/tokens/apca.rs` tests all of them for all 72 untinted input
 combinations (2 modes, 6 accents, 3 neutrals, 2 contrasts), and each of

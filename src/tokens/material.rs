@@ -26,9 +26,14 @@ pub fn material(inputs: Inputs) -> Material {
         },
         Mode::Light => Material {
             fill_color: s.neutral[1],
-            fill_alpha: if high { 0.72 } else { 0.44 },
+            // 0.30 and -0.30, from 0.44 and -0.48 on 2026-10-02, chosen by
+            // eye in the nixos glass-bench zoo (variant 05): the lift
+            // compresses the whole backdrop toward white, and with the fill
+            // it washed the wallpaper flat where dark glass lets it through.
+            // It costs contrast; see `targets`.
+            fill_alpha: if high { 0.72 } else { 0.30 },
             absorb: if high { 0.20 } else { 0.25 },
-            photochromic: if high { -0.50 } else { -0.48 },
+            photochromic: if high { -0.50 } else { -0.30 },
             frost: if high { 0.45 } else { 0.30 },
         },
     }
@@ -85,14 +90,57 @@ pub fn material_at(inputs: Inputs, clarity: f64) -> Material {
 /// desktop, a black terminal.
 const BEHIND: [Rgb; 3] = [Rgb::WHITE, Rgb(0.5, 0.5, 0.5), Rgb::BLACK];
 
-/// Whether every text token meets its §5 target on `m` over every backdrop
-/// in [`BEHIND`]: body text Lc 75, muted 60, faint 45, the accent's text 60.
-/// A white page, which dark glass cannot fully overcome, is held to 15 less
-/// (5 less at high contrast). `tokens::apca`'s tests hold the shipped
-/// material to the same rule.
+/// The §5 contrast targets, in APCA Lc, for text over the glass.
+#[derive(Clone, Copy, Debug)]
+pub struct Targets {
+    pub fg: f64,
+    pub muted: f64,
+    pub faint: f64,
+    pub accent: f64,
+    /// A categorical colour's dot, rail or short label. Read only by the
+    /// contrast tests: no runtime path picks a categorical colour.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub categorical: f64,
+}
+
+/// Body text Lc 75, muted 60, faint 45, the accent's text 60, categorical
+/// 45 - except light glass at standard contrast.
+///
+/// Light glass reaches dark text's contrast only by brightening whatever is
+/// behind it, black included, and brightening a dark backdrop that far
+/// erases it: at Lc 75 the most backdrop light glass could show was under
+/// half what dark glass shows (glass-bench search, 2026-10-02). The light
+/// standard material was chosen for the backdrop instead, and these are
+/// what it reaches over every input: a deliberate trade, not drift. High
+/// contrast keeps the full targets, and is the setting for anyone who
+/// needs them.
+pub fn targets(mode: Mode, contrast: Contrast) -> Targets {
+    match (mode, contrast) {
+        (Mode::Light, Contrast::Standard) => Targets {
+            fg: 60.0,
+            muted: 52.0,
+            faint: 41.0,
+            accent: 46.0,
+            categorical: 36.0,
+        },
+        _ => Targets {
+            fg: 75.0,
+            muted: 60.0,
+            faint: 45.0,
+            accent: 60.0,
+            categorical: 45.0,
+        },
+    }
+}
+
+/// Whether every text token meets its [`targets`] on `m` over every backdrop
+/// in [`BEHIND`]. A white page, which dark glass cannot fully overcome, is
+/// held to 15 less (5 less at high contrast). `tokens::apca`'s tests hold
+/// the shipped material to the same rule.
 pub fn readable(inputs: Inputs, m: &Material) -> bool {
     let s = scales(inputs);
     let lv = levels(inputs.mode, inputs.contrast);
+    let t = targets(inputs.mode, inputs.contrast);
     let fg = s.neutral[11];
     BEHIND.iter().all(|behind| {
         let ground = glass_body(*behind, m);
@@ -102,10 +150,10 @@ pub fn readable(inputs: Inputs, m: &Material) -> bool {
             (true, Contrast::High) => 5.0,
         };
         [
-            (fg, 1.0, 75.0),
-            (fg, lv.muted, 60.0),
-            (fg, lv.faint, 45.0),
-            (s.accent[10], 1.0, 60.0),
+            (fg, 1.0, t.fg),
+            (fg, lv.muted, t.muted),
+            (fg, lv.faint, t.faint),
+            (s.accent[10], 1.0, t.accent),
         ]
         .iter()
         .all(|(color, alpha, need)| apca(color.over(*alpha, ground), ground).abs() >= need - slack)
@@ -203,12 +251,13 @@ mod tests {
                 "{c:?}: light {l:.3}, dark {d:.3}"
             );
         }
-        // Vivid colours: never more than dark glass shows, where the old
-        // gain clipped them to neon.
+        // Vivid colours: about what dark glass shows, where the old gain
+        // clipped them to neon. 1.25 since the lighter light material of
+        // 2026-10-02, which lets gruvbox's dark red through at 1.21.
         for c in [0xff0000, 0xff00aa, 0x0000ff, 0xcc241d] {
             let c = Rgb::hex(c);
             let (l, d) = (chroma(glass_body(c, &light)), chroma(glass_body(c, &dark)));
-            assert!(l <= d, "{c:?}: light {l:.3}, dark {d:.3}");
+            assert!(l <= d * 1.25, "{c:?}: light {l:.3}, dark {d:.3}");
         }
     }
 
