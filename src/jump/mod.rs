@@ -18,7 +18,7 @@
 //! The surface here is a transparent layer over the output. It holds the
 //! keyboard (the release edge only reaches whoever does), catches the
 //! pointer so a click cannot land on a window that is only a picture, and
-//! draws two things: a ring round the middle workspace and its caption.
+//! draws one thing: the caption under the middle workspace.
 //!
 //! The parts that can go wrong live in [`gesture`] and [`row`], with no GTK
 //! in them. This file translates GTK events into [`gesture::Ev`], and
@@ -96,12 +96,12 @@ type PinFn = Box<dyn Fn(String) -> bool>;
 pub struct Jump {
     surface: Surface,
     stage: gtk4::Fixed,
-    /// The ring round the middle workspace.
-    ring: gtk4::Box,
     caption: gtk4::Box,
     chord: gtk4::Label,
     label: gtk4::Label,
     detail: gtk4::Label,
+    /// Shown while the middle workspace is pinned.
+    pinned: gtk4::Label,
     pin: RefCell<Option<PinFn>>,
     state: RefCell<State>,
 }
@@ -111,8 +111,8 @@ impl Jump {
         let surface = Surface::builder(app, Namespace::Jump)
             // The whole output: the row is drawn across all of it, and the
             // pointer must not reach the windows in it. Over the bar too:
-            // the row's geometry is the output's, and the ring is placed in
-            // output coordinates.
+            // the row's geometry is the output's, and the caption is placed
+            // in output coordinates.
             .fill()
             .over_exclusive_zones()
             // Exclusive: this surface has to see the modifier come up, and
@@ -130,11 +130,6 @@ impl Jump {
         let stage = gtk4::Fixed::new();
         // The whole root, so the stage is the output.
         stage.set_vexpand(true);
-        // Outside the workspace, so it frames the windows and covers none.
-        // It fades in as the row opens: the workspaces take the animation's
-        // time to get there.
-        let ring = crate::ui::ring();
-        ring.set_can_target(false);
         // The key that reaches this place without this surface: the part of
         // the caption worth learning.
         let chord = crate::ui::key("");
@@ -144,30 +139,36 @@ impl Jump {
         let detail = crate::ui::text("", crate::ui::Text::Label, crate::ui::Tone::Fg);
         crate::ui::on_wallpaper::adopt(&detail);
         detail.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        // The bar's pin glyph (bar/workspaces.rs), so a pin reads the same in
+        // both places.
+        let pinned = gtk4::Label::new(Some("\u{f0403}"));
+        crate::ui::glyph::adopt(&pinned, crate::ui::Text::Label, crate::ui::Tone::Fg);
+        crate::ui::on_wallpaper::adopt(&pinned);
+        pinned.set_visible(false);
         // Centred under the middle workspace: the outer box is as wide as
-        // the workspace (`place_ring`), the line itself only as wide as it is.
+        // the workspace (`place_caption`), the line itself only as wide as it is.
         let line = crate::ui::hbox(3);
         line.set_halign(gtk4::Align::Center);
         line.add_css_class("jump-caption");
         line.append(&chord);
         line.append(&label);
         line.append(&detail);
+        line.append(&pinned);
         let caption = crate::ui::hbox(0);
         caption.append(&line);
         line.set_hexpand(true);
         caption.set_can_target(false);
-        stage.put(&ring, 0.0, 0.0);
         stage.put(&caption, 0.0, 0.0);
         surface.root().append(&stage);
 
         let this = Rc::new(Jump {
             surface,
             stage,
-            ring,
             caption,
             chord,
             label,
             detail,
+            pinned,
             pin: RefCell::new(None),
             state: RefCell::new(State {
                 gesture: Gesture::new(),
@@ -394,7 +395,7 @@ impl Jump {
     fn apply(self: &Rc<Self>, action: Action) {
         match action {
             Action::Map => {
-                self.place_ring();
+                self.place_caption();
                 self.surface.window().set_visible(true);
                 set_mode(MODE);
                 if let Some(pins) = pin::handle() {
@@ -482,31 +483,21 @@ impl Jump {
         }
     }
 
-    /// The ring round the middle workspace, and the caption under it, in the
-    /// surface's coordinates.
-    fn place_ring(&self) {
+    /// The caption under the middle workspace, in the surface's coordinates.
+    fn place_caption(&self) {
         let (r, (ox, oy)) = {
             let st = self.state.borrow();
             (st.row, st.origin_xy)
         };
         let Some(r) = r else {
-            self.ring.set_visible(false);
             self.caption.set_visible(false);
             return;
         };
         let (x, y, w, h) = r.middle();
         let (x, y) = (x - ox, y - oy);
-        // The ring sits just outside the workspace, so it frames the windows
-        // and covers none of them. Its radius is the card's, concentric with
-        // the workspace's corners this far inside it.
-        const OUT: f64 = crate::tokens::space(3) as f64;
-        self.ring
-            .set_size_request((w + 2.0 * OUT) as i32, (h + 2.0 * OUT) as i32);
-        self.stage.move_(&self.ring, x - OUT, y - OUT);
         self.caption.set_size_request(w as i32, -1);
         self.stage
             .move_(&self.caption, x, y + h + f64::from(crate::tokens::space(4)));
-        self.ring.set_visible(true);
         self.caption.set_visible(true);
     }
 
@@ -518,7 +509,7 @@ impl Jump {
         self.label.set_label(rows::caption_label(row));
         self.detail.set_label(&row.detail);
         let pinned = st.names.get(i).is_some_and(|n| pin::is_pinned(n));
-        crate::ui::set_pinned(&self.ring, pinned);
+        self.pinned.set_visible(pinned);
     }
 
     fn arm_watchdog(self: &Rc<Self>) {

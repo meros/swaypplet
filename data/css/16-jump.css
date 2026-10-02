@@ -1,8 +1,8 @@
 /* ── Jump (src/jump/) ──
    Super+Tab: sway draws the workspaces themselves in a row (row.rs). This
-   surface is transparent over the output and draws only the ring round the
-   middle workspace (the ring component) and the caption under it. Colour,
-   type and shape come from the components; this file places them. ── */
+   surface is transparent over the output and draws only the caption under
+   the middle workspace. Colour, type and shape come from the components;
+   this file places them. ── */
 .jump-surface {
     background: none;
 }

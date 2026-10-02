@@ -1,14 +1,12 @@
 //! Pictures: the thumbnail frame, the picked thumbnail, the choice grid,
-//! the swatch, the ring, the placeholder and the lifted picture.
+//! the swatch, the placeholder and the lifted picture.
 //!
 //! `ui::thumb()`, `ui::thumb::adopt(&picture)`, `ui::pick_thumb(child)`,
-//! `ui::choice_grid::adopt(&flowbox)`, `ui::swatch(child)`, `ui::ring()`,
-//! `ui::placeholder::adopt(&w)`, `ui::lifted::adopt(&w)`; `ui::set_pinned`.
+//! `ui::choice_grid::adopt(&flowbox)`, `ui::swatch(child)`,
+//! `ui::placeholder::adopt(&w)`, `ui::lifted::adopt(&w)`.
 
 use gtk4::prelude::*;
-use gtk4::{Align, Orientation};
-
-use super::class::toggle;
+use gtk4::Align;
 
 /// A rounded frame for an image, filled while it has none.
 pub fn thumb() -> gtk4::Box {
@@ -53,18 +51,6 @@ pub fn swatch(child: &impl IsA<gtk4::Widget>) -> gtk4::ToggleButton {
     b.add_css_class("ui-swatch");
     b.set_child(Some(child));
     b
-}
-
-/// An accent ring round something the shell frames but does not draw.
-pub fn ring() -> gtk4::Box {
-    let b = gtk4::Box::new(Orientation::Horizontal, 0);
-    b.add_css_class("ui-ring");
-    b
-}
-
-/// A ring round something pinned: a second, quieter band.
-pub fn set_pinned(ring: &impl IsA<gtk4::Widget>, pinned: bool) {
-    toggle(ring, "pinned", pinned);
 }
 
 pub mod placeholder {

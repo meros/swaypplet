@@ -4,7 +4,7 @@
    Pictures: the thumbnail frame, the picked thumbnail, the choice grid,
    the swatch, the ring, the placeholder and the lifted picture.
 
-   owns: ui-thumb ui-pick-thumb ui-choice-grid ui-swatch ui-ring ui-placeholder ui-lifted
+   owns: ui-thumb ui-pick-thumb ui-choice-grid ui-swatch ui-placeholder ui-lifted
    ══════════════════════════════════════════════════════════════════════ */
 
 /* An image in a rounded frame: album art, with a fill while it loads or
@@ -97,35 +97,6 @@ button.ui-swatch:checked {
 button.ui-swatch:focus-visible {
     outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
-}
-
-/* ── Ring ──
-   An accent ring round something the compositor draws, which the shell can
-   frame but not fill: the selected workspace in the Super+Tab row. A second,
-   quieter band says it is pinned. Fades in with the row. */
-
-.ui-ring {
-    border-radius: var(--radius-card);
-    box-shadow:
-        0 0 0 2px var(--accent-bg),
-        0 0 24px var(--accent-tint);
-    animation: ui-ring-in var(--motion-enter);
-}
-
-.ui-ring.pinned {
-    box-shadow:
-        0 0 0 2px var(--accent-bg),
-        0 0 0 5px var(--accent-tint),
-        0 0 24px var(--accent-tint);
-}
-
-@keyframes ui-ring-in {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
 }
 
 /* ── Placeholder ──
