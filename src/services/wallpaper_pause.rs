@@ -16,9 +16,11 @@
 //! Resuming is only ever undoing this service's own pause. A player paused
 //! by anything else stays paused, and a fresh player (a new socket inode)
 //! was never paused here, so going back to AC leaves it alone. The one
-//! case this cannot see is a panel restart mid-pause: the new process did
-//! not pause that player and so will not resume it, until mpvpaper restarts
-//! or the next unplug and replug.
+//! exception is this process's first contact: a panel that restarted
+//! mid-pause cannot tell its predecessor's pause from anyone else's, so the
+//! first command always states the wanted state outright. Nothing else
+//! pauses this player on purpose; mpvpaper's own `-p` pauses it again
+//! within two seconds if it is hidden.
 //!
 //! The socket writes run on a worker thread: the GTK thread only sends it
 //! the wanted state. A missing socket is the normal state of a session
@@ -82,8 +84,11 @@ fn send(path: &Path, pause: bool) -> std::io::Result<()> {
 fn worker(path: PathBuf, rx: mpsc::Receiver<bool>) {
     let mut player: Option<(u64, u64)> = None;
     let mut held = false;
+    // Until the first command lands, say the wanted state outright (see the
+    // module comment).
+    let mut first = true;
     for want in rx {
-        if !want && !held {
+        if !first && !want && !held {
             continue;
         }
         let Some(id) = socket_id(&path) else {
@@ -93,7 +98,11 @@ fn worker(path: PathBuf, rx: mpsc::Receiver<bool>) {
         };
         let fresh = player != Some(id);
         player = Some(id);
-        let (command, after) = decide(want, held, fresh);
+        let (command, after) = if first {
+            (Some(want), want)
+        } else {
+            decide(want, held, fresh)
+        };
         let Some(pause) = command else {
             held = after;
             continue;
@@ -107,6 +116,7 @@ fn worker(path: PathBuf, rx: mpsc::Receiver<bool>) {
                 };
                 log::info!("wallpaper-pause: {what}");
                 held = after;
+                first = false;
             }
             Err(e) => {
                 log::debug!("wallpaper-pause: {}: {e}", path.display());
