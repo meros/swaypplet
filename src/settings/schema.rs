@@ -516,6 +516,11 @@ pub struct Look {
     /// portal serves (`theme::apps`). Off, it leaves them as they are.
     #[serde(default = "yes")]
     pub apps_follow: bool,
+    /// Pause the animated wallpaper while on battery
+    /// (`services::wallpaper_pause`). Here rather than in `wallpaper`,
+    /// which is the pick and drops whole on a reset of that section.
+    #[serde(default)]
+    pub pause_wallpaper_on_battery: bool,
 }
 
 impl Default for Look {
@@ -530,6 +535,7 @@ impl Default for Look {
             tint_colour: 0,
             launch_zoom: false,
             apps_follow: true,
+            pause_wallpaper_on_battery: false,
         }
     }
 }

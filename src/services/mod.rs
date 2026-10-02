@@ -31,3 +31,4 @@ pub mod presence;
 pub mod status;
 pub mod task_state;
 pub mod tray;
+pub mod wallpaper_pause;
