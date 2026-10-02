@@ -477,6 +477,32 @@ enum Msg {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ToCurtain(wallpaper_curtain::Cmd, u64);
 
+/// Where a black background this service set is remembered across panel
+/// restarts. In the runtime directory, so a new login starts without it, as
+/// it starts with swaybg showing the wallpaper.
+fn black_marker() -> PathBuf {
+    glib::user_runtime_dir()
+        .join("swaypplet")
+        .join("wallpaper-black")
+}
+
+fn remember_black(black: bool) {
+    let path = black_marker();
+    let result = if black {
+        path.parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(&path, b""))
+    } else {
+        match std::fs::remove_file(&path) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            other => other,
+        }
+    };
+    if let Err(e) = result {
+        log::warn!("wallpaper-battery: {}: {e}", path.display());
+    }
+}
+
 fn restore(pick: Option<&Wallpaper>) {
     let wallpaper = pick
         .cloned()
@@ -485,14 +511,18 @@ fn restore(pick: Option<&Wallpaper>) {
         log::warn!("wallpaper-battery: no wallpaper to put back");
         return;
     };
-    if let Err(e) = crate::settings::wallpaper::apply_blocking(&w) {
-        log::warn!("wallpaper-battery: {e}");
+    match crate::settings::wallpaper::apply_blocking(&w) {
+        Ok(()) => remember_black(false),
+        Err(e) => log::warn!("wallpaper-battery: {e}"),
     }
 }
 
 fn blackout() -> bool {
     match crate::sway::ipc::run_command_blocking("output * bg #000000 solid_color") {
-        Ok(()) => true,
+        Ok(()) => {
+            remember_black(true);
+            true
+        }
         Err(e) => {
             log::warn!("wallpaper-battery: {e}");
             false
@@ -522,10 +552,11 @@ enum Go {
 struct Worker {
     rx: Receiver<Msg>,
     curtain: Box<dyn Fn(ToCurtain) + Send>,
-    /// Sway's background is the compositor's, not the player's: whether it
-    /// is black is remembered here. A panel restarted while it was black
-    /// finds the player's video track off, and puts the wallpaper back on
-    /// that instead.
+    /// Sway's background is the compositor's, not the player's, and sway
+    /// cannot be asked what it shows: whether this service made it black is
+    /// kept here and in [`black_marker`]. The file is what a panel restarted
+    /// while black (an `nx` switch restarts it) starts from; without it the
+    /// new process never put the wallpaper back.
     bg_black: bool,
     /// The curtain was last told to come up (in or cover), not to go.
     up: bool,
@@ -745,7 +776,7 @@ fn worker(path: PathBuf, rx: Receiver<Msg>, curtain: Box<dyn Fn(ToCurtain) + Sen
     let mut w = Worker {
         rx,
         curtain,
-        bg_black: false,
+        bg_black: black_marker().exists(),
         up: false,
         seq: 0,
         covered: Cell::new(0),
