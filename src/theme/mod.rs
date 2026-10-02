@@ -209,6 +209,16 @@ mod sway;
 pub mod wallpaper;
 
 pub use inputs::{inputs, own_mode, theme_file};
+
+/// Force dark mode over the Look setting while `on`, or let go of it; the
+/// shell fades to it the way it fades to a mode chosen in the pane
+/// ([`changed`]). The owner process only: the panel's wallpaper-on-battery
+/// service.
+pub fn set_battery_dark(on: bool) {
+    if inputs::set_battery_dark(on) {
+        changed();
+    }
+}
 pub use paint::{Paint, paint};
 
 /// The inputs the stylesheet on screen was generated from: the Look

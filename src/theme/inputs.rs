@@ -37,6 +37,27 @@ thread_local! {
     /// What this process last read from [`theme_file`], when it is not the
     /// owner: `shown` answers from it.
     static FOLLOWED: Cell<Option<Inputs>> = const { Cell::new(None) };
+    /// Dark forced over the Look mode while the wallpaper's battery choice
+    /// is black ([`set_battery_dark`]).
+    static BATTERY_DARK: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Force dark mode over the Look setting, or stop forcing it: the
+/// wallpaper's `black` on battery (`services::wallpaper_battery`). Layered
+/// over the setting rather than written to it, so plugging in brings back
+/// what the person chose. Whether it moved: the caller resolves again only
+/// then.
+///
+/// Letting go counts as a choice made just now, so Auto shows the sun's
+/// mode at once rather than holding the forced dark until nobody is looking.
+pub fn set_battery_dark(on: bool) -> bool {
+    if BATTERY_DARK.with(|b| b.replace(on)) == on {
+        return false;
+    }
+    if !on {
+        SETTING.with(|c| c.set(None));
+    }
+    true
 }
 
 /// Make this process the one that resolves the theme (the panel in a
@@ -229,12 +250,15 @@ fn resolve() -> Inputs {
     // Whether the mode setting moved since the last resolution: then the
     // person just chose it, and Auto shows the sun's answer at once.
     let chosen_now = SETTING.with(|c| c.replace(Some(look.mode))) != Some(look.mode);
-    let mode = forced().unwrap_or_else(|| match look.mode {
-        // A choice made in the pane applies at once: the person made it.
-        ThemeMode::Dark => Mode::Dark,
-        ThemeMode::Light => Mode::Light,
-        ThemeMode::Auto => auto_mode(sun_mode(), chosen_now),
-    });
+    let battery_dark = BATTERY_DARK.with(Cell::get).then_some(Mode::Dark);
+    let mode = forced()
+        .or(battery_dark)
+        .unwrap_or_else(|| match look.mode {
+            // A choice made in the pane applies at once: the person made it.
+            ThemeMode::Dark => Mode::Dark,
+            ThemeMode::Light => Mode::Light,
+            ThemeMode::Auto => auto_mode(sun_mode(), chosen_now),
+        });
     // One read of the one-line cache for both of the wallpaper's inputs.
     let (sample, backdrop) = match super::wallpaper::read() {
         Some((sample, backdrop)) => (sample, Some(backdrop)),
@@ -268,6 +292,19 @@ mod tests {
         // Choosing Auto again clears the wait and applies.
         assert_eq!(auto_mode(Mode::Light, true), Mode::Light);
         assert!(PENDING.with(|p| p.borrow().is_none()));
+    }
+
+    /// The battery's forced dark wins over Light, and letting go of it
+    /// brings Auto's sun answer back at once.
+    #[test]
+    fn battery_dark_layers_over_the_setting_and_lets_go_at_once() {
+        STARTED.with(|s| s.set(true));
+        assert!(set_battery_dark(true));
+        assert!(!set_battery_dark(true), "no change, no resolve");
+        assert!(BATTERY_DARK.with(Cell::get));
+        assert!(set_battery_dark(false));
+        // The next resolution reads as a fresh choice of the setting.
+        assert_eq!(SETTING.with(Cell::get), None);
     }
 
     /// What the owner writes is what a follower reads, tint and backdrop
