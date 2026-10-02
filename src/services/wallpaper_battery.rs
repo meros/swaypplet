@@ -14,7 +14,8 @@
 //!   floor, slowly at first.
 //! - **black**: a black curtain fades in over the video
 //!   (`services::wallpaper_curtain`, a layer surface eased on GTK's frame
-//!   clock) while the speed falls under it over [`FADE_SPAN`]. Once the
+//!   clock) over [`FADE_SPAN`], with the video playing on at its own
+//!   speed under it: only `pause` slows down and speeds up. Once the
 //!   curtain is up the player is paused, its video track dropped with
 //!   mpv told to draw black without one (so mpvpaper's own buffer, which the
 //!   lock screen shows, is black too), sway's background set to solid black,
@@ -24,8 +25,8 @@
 //!   mode rather than a write to it). Back on mains the order reverses: the
 //!   curtain goes up opaque over the black, the wallpaper pick goes back,
 //!   the video track comes back and the player resumes under it; once mpv
-//!   shows a frame again the curtain fades away, the mode is let go in the
-//!   same moment, and the speed climbs back.
+//!   shows a frame again the curtain fades away over the video playing at
+//!   its base speed, and the mode is let go in the same moment.
 //!
 //! The fade is not the player's own (contrast and saturation over IPC, as it
 //! once was) because mpv applies those only when it renders a video frame:
@@ -255,9 +256,13 @@ impl Plan {
 /// From the player as it is, sway's background (black or not) and the
 /// curtain (up or not, as last told) to `target`.
 fn plan(p: &Player, bg_black: bool, curtain: bool, target: Target) -> Plan {
+    // Only "pause" slows the video to a stop and back. Going black, it plays
+    // on at its own speed under the curtain and stops once covered; coming
+    // back, it plays at its base speed as the curtain lifts.
     let speed_to = match target {
         Target::Play => p.base,
-        Target::Pause | Target::Black => FLOOR,
+        Target::Pause => FLOOR,
+        Target::Black => p.speed,
     };
     let mut before = Vec::new();
     let mut after = Vec::new();
@@ -308,9 +313,11 @@ fn plan(p: &Player, bg_black: bool, curtain: bool, target: Target) -> Plan {
     } else {
         Curve::Out
     };
-    // Going black, the speed falls under the curtain: nothing shows after.
-    let full = if target == Target::Black {
-        FADE_SPAN
+    // Back from black, the base speed is set at once, before the curtain
+    // lifts; easing it there would be the slow start this mode leaves out.
+    let from_black = target == Target::Play && (!p.video || bg_black);
+    let full = if from_black {
+        Duration::ZERO
     } else {
         SPEED_SPAN
     };
@@ -1065,16 +1072,15 @@ mod tests {
     }
 
     #[test]
-    fn black_is_the_curtain_over_the_slowing_video_then_a_stop_under_it() {
+    fn black_is_the_curtain_over_the_playing_video_then_a_stop_under_it() {
         let p = plan(&playing(0.5), false, false, Target::Black);
         assert_eq!(p.before, vec![Cmd::FadeIn]);
-        assert_eq!(p.speed.span, FADE_SPAN);
+        // The video plays on at its speed while the curtain comes down.
+        assert!(!p.speed.moves());
+        assert!(schedule(&p.speed).is_empty());
         // Everything after waits for the curtain; the background only once
         // mpv draws black, and the curtain lifts off black.
         assert_eq!(p.after, DOWN.to_vec());
-        let steps = schedule(&p.speed);
-        assert_eq!(steps.len(), 90);
-        assert_eq!(steps.last().unwrap().speed, FLOOR);
     }
 
     #[test]
@@ -1092,7 +1098,10 @@ mod tests {
             ]
         );
         assert!(p.after.is_empty());
-        assert_eq!(p.speed.curve, Curve::In);
+        // Back at its base speed at once, not a slow start: that is the
+        // pause mode's.
+        assert_eq!(p.speed.to, 0.5);
+        assert!(p.speed.span.is_zero());
         // A panel that restarted while black does not know the background
         // is black; the video track being off says so.
         let p = plan(&black_here(0.5), false, false, Target::Play);
@@ -1174,7 +1183,7 @@ mod tests {
         // video on. The background is already black.
         let p = plan(&playing(0.5), true, false, Target::Black);
         assert_eq!(p.before, vec![Cmd::FadeIn]);
-        assert!(p.speed.moves());
+        assert!(!p.speed.moves());
         assert_eq!(
             p.after,
             vec![
