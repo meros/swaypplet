@@ -326,6 +326,10 @@ pub fn watch(on_material: impl Fn(crate::tokens::Inputs) + 'static) {
     locked::on_change(changed);
     crate::settings::store::observe(changed);
     follow_the_sun(changed);
+    // The stylesheet was loaded before the settings were (`app::run`), so
+    // it shows the defaults until the first event: catch up now, so the
+    // first answer the apps get (`publish_to_apps`) is the settings'.
+    changed();
 }
 
 /// A sender of the glass material, as [`watch`] takes it.

@@ -115,7 +115,8 @@ pub fn gtk_theme(current: &str, mode: Mode) -> Option<&'static str> {
 const INTERFACE: &str = "org.gnome.desktop.interface";
 const A11Y: &str = "org.gnome.desktop.a11y.interface";
 
-/// Every key but `gtk-theme`, as GVariant text.
+/// Every key but `gtk-theme`, as GVariant text. `reduced-motion` is a
+/// boolean here; [`as_stored`] gives it the type the installed schema has.
 fn keys(a: Appearance) -> [(&'static str, &'static str, String); 5] {
     let quoted = |s: &str| format!("'{s}'");
     [
@@ -125,6 +126,87 @@ fn keys(a: Appearance) -> [(&'static str, &'static str, String); 5] {
         (A11Y, "high-contrast", a.high_contrast.to_string()),
         (A11Y, "reduced-motion", (!a.animations).to_string()),
     ]
+}
+
+/// `value` in the type of `now`, the key's current value. GNOME 48 made
+/// `reduced-motion` an enum (`'no-preference'`, `'reduce'`) where it had
+/// been a boolean; a boolean written to the enum is refused, so every
+/// publish found the key different and failed to set it.
+fn as_stored(key: &str, value: String, now: &str) -> String {
+    if key == "reduced-motion" && now.starts_with('\'') {
+        let reduce = value == "true";
+        return if reduce {
+            "'reduce'"
+        } else {
+            "'no-preference'"
+        }
+        .into();
+    }
+    value
+}
+
+/// What [`write_appearance`] needs from where the keys live: read a key as GVariant
+/// text (`None` when the store does not have it), write one, put one back
+/// to its default, and wait until every write has reached the database.
+trait Keys {
+    fn read(&self, schema: &str, key: &str) -> Option<String>;
+    fn write(&self, schema: &str, key: &str, value: &str);
+    fn reset(&self, schema: &str, key: &str);
+    fn sync(&self);
+}
+
+/// Write what differs from `a`, and nothing else; then read every written
+/// key back, and write again what did not land.
+///
+/// A write can be acknowledged and still not land. dconf-service loads the
+/// database once and diffs each change against that copy, so after a second
+/// dconf-service has written the same file (a nested session's, under
+/// `dbus-run-session`; dev/render.sh runs a whole panel that way) the
+/// session's service still believes what it last wrote, and drops a write of
+/// that value as a no-op: apps stayed on the other service's dark mode while
+/// the shell went light. A reset is a change against any copy, so a reset
+/// and the write again commit both.
+fn write_appearance(store: &impl Keys, a: Appearance) {
+    let mut wanted = Vec::new();
+    for (schema, key, value) in keys(a) {
+        // The dconf store reads an unset key as nothing, which differs from
+        // every value, so it writes: correct, since unset is the schema
+        // default and not what the shell shows.
+        if let Some(now) = store.read(schema, key) {
+            let value = as_stored(key, value, &now);
+            if now != value {
+                wanted.push((schema, key, value));
+            }
+        }
+    }
+    if let Some(now) = store.read(INTERFACE, "gtk-theme") {
+        let now = now.trim_matches('\'');
+        if let Some(next) = gtk_theme(now, a.mode)
+            && next != now
+        {
+            wanted.push((INTERFACE, "gtk-theme", format!("'{next}'")));
+        }
+    }
+    if wanted.is_empty() {
+        return;
+    }
+    for (schema, key, value) in &wanted {
+        store.write(schema, key, value);
+    }
+    store.sync();
+    let mut nudged = false;
+    for (schema, key, value) in &wanted {
+        if store.read(schema, key).as_deref() != Some(value.as_str()) {
+            log::info!("theme: apps: {schema} {key} did not take {value}; writing it again");
+            store.reset(schema, key);
+            store.sync();
+            store.write(schema, key, value);
+            nudged = true;
+        }
+    }
+    if nudged {
+        store.sync();
+    }
 }
 
 /// Where the keys are written: GSettings when the schemas are installed,
@@ -174,12 +256,30 @@ impl Store {
         format!("/{}/{key}", schema.replace('.', "/"))
     }
 
-    /// The key's value as GVariant text, or `None` when this store does not
-    /// have it (a schema older than the key).
+    fn settings(&self, schema: &str) -> Option<&gio::Settings> {
+        match self {
+            Store::Gio(settings) => settings
+                .iter()
+                .find(|(id, _)| *id == schema)
+                .map(|(_, s)| s),
+            _ => None,
+        }
+    }
+
+    fn dconf(args: &[&str]) -> Result<(), String> {
+        std::process::Command::new("dconf")
+            .args(args)
+            .status()
+            .map_err(|e| e.to_string())
+            .and_then(|s| s.success().then_some(()).ok_or(s.to_string()))
+    }
+}
+
+impl Keys for Store {
     fn read(&self, schema: &str, key: &str) -> Option<String> {
         match self {
-            Store::Gio(settings) => {
-                let (_, s) = settings.iter().find(|(id, _)| *id == schema)?;
+            Store::Gio(_) => {
+                let s = self.settings(schema)?;
                 if !s.settings_schema()?.has_key(key) {
                     return None;
                 }
@@ -198,19 +298,15 @@ impl Store {
 
     fn write(&self, schema: &str, key: &str, value: &str) {
         let result = match self {
-            Store::Gio(settings) => {
-                let Some((_, s)) = settings.iter().find(|(id, _)| *id == schema) else {
+            Store::Gio(_) => {
+                let Some(s) = self.settings(schema) else {
                     return;
                 };
                 glib::Variant::parse(None, value)
                     .map_err(|e| e.to_string())
                     .and_then(|v| s.set_value(key, &v).map_err(|e| e.to_string()))
             }
-            Store::Dconf => std::process::Command::new("dconf")
-                .args(["write", &Self::dconf_path(schema, key), value])
-                .status()
-                .map_err(|e| e.to_string())
-                .and_then(|s| s.success().then_some(()).ok_or(s.to_string())),
+            Store::Dconf => Self::dconf(&["write", &Self::dconf_path(schema, key), value]),
             Store::Nowhere => Ok(()),
         };
         match result {
@@ -219,30 +315,26 @@ impl Store {
         }
     }
 
-    /// Write what differs from `a`, and nothing else.
-    fn publish(&self, a: Appearance) {
-        let mut wrote = false;
-        for (schema, key, value) in keys(a) {
-            // The dconf store reads an unset key as nothing, which differs
-            // from every value, so it writes: correct, since unset is the
-            // schema default and not what the shell shows.
-            if let Some(now) = self.read(schema, key)
-                && now != value
-            {
-                self.write(schema, key, &value);
-                wrote = true;
+    fn reset(&self, schema: &str, key: &str) {
+        match self {
+            Store::Gio(_) => {
+                if let Some(s) = self.settings(schema) {
+                    s.reset(key);
+                }
             }
-        }
-        if let Some(now) = self.read(INTERFACE, "gtk-theme") {
-            let now = now.trim_matches('\'');
-            if let Some(next) = gtk_theme(now, a.mode)
-                && next != now
-            {
-                self.write(INTERFACE, "gtk-theme", &format!("'{next}'"));
-                wrote = true;
+            Store::Dconf => {
+                if let Err(e) = Self::dconf(&["reset", &Self::dconf_path(schema, key)]) {
+                    log::warn!("theme: apps: cannot reset {schema} {key}: {e}");
+                }
             }
+            Store::Nowhere => {}
         }
-        if wrote && matches!(self, Store::Gio(_)) {
+    }
+
+    /// GSettings writes asynchronously; this waits for them. A `dconf write`
+    /// has landed when the command returns.
+    fn sync(&self) {
+        if matches!(self, Store::Gio(_)) {
             gio::Settings::sync();
         }
     }
@@ -253,8 +345,47 @@ thread_local! {
     static QUEUE: RefCell<Option<mpsc::Sender<Appearance>>> = const { RefCell::new(None) };
 }
 
+/// Whether a process on the bus at `address` speaks for the session's apps.
+/// Not when the user's bus exists (`bus`, `$XDG_RUNTIME_DIR/bus`) and this
+/// process is on another one: that is a nested panel under
+/// `dbus-run-session` (dev/render.sh, dev/frame-bench.sh), whose dconf-service
+/// still writes the session's database, so every harness run used to set the
+/// apps to the harness's mode, and leave the session's dconf-service with a
+/// stale copy that dropped the panel's next write ([`write_appearance`]).
+/// `SWAYPPLET_APPS=on` or `off` overrides.
+fn speaks_for_apps(
+    setting: Option<&str>,
+    address: Option<&str>,
+    bus: &str,
+    bus_exists: bool,
+) -> bool {
+    match setting {
+        Some("off") => return false,
+        Some("on") => return true,
+        _ => {}
+    }
+    let ours = format!("unix:path={bus}");
+    match address {
+        Some(address) if bus_exists => address
+            .split(';')
+            .any(|a| a.split(',').next() == Some(ours.as_str())),
+        _ => true,
+    }
+}
+
 /// Start publishing from this process. The panel calls this, once.
 pub(super) fn start() {
+    let bus = glib::user_runtime_dir().join("bus");
+    let speaks = speaks_for_apps(
+        std::env::var("SWAYPPLET_APPS").ok().as_deref(),
+        std::env::var("DBUS_SESSION_BUS_ADDRESS").ok().as_deref(),
+        &bus.to_string_lossy(),
+        bus.exists(),
+    );
+    if !speaks {
+        log::info!("theme: on a private D-Bus, not the session's; apps are left alone");
+        return;
+    }
     let (tx, rx) = mpsc::channel::<Appearance>();
     let spawned = std::thread::Builder::new()
         .name("theme-apps".into())
@@ -265,7 +396,7 @@ pub(super) fn start() {
                 while let Ok(newer) = rx.try_recv() {
                     a = newer;
                 }
-                store.publish(a);
+                write_appearance(&store, a);
             }
         });
     match spawned {
@@ -376,6 +507,133 @@ mod tests {
         for name in ["blue", "green", "orange", "purple"] {
             assert_eq!(tinted(hue_of(name)), name);
         }
+    }
+
+    /// The session's dconf-service as it behaves after another one wrote
+    /// the database: `file` is what readers see, `cache` what the service
+    /// believes, and a write equal to the cache is dropped.
+    #[derive(Default)]
+    struct StaleService {
+        file: std::cell::RefCell<std::collections::HashMap<String, String>>,
+        cache: std::cell::RefCell<std::collections::HashMap<String, Option<String>>>,
+        writes: std::cell::Cell<usize>,
+    }
+
+    impl StaleService {
+        fn set(&self, key: &str, value: Option<&str>) {
+            let mut cache = self.cache.borrow_mut();
+            if cache.get(key).cloned().flatten().as_deref() == value {
+                return;
+            }
+            cache.insert(key.into(), value.map(Into::into));
+            let mut file = self.file.borrow_mut();
+            for (k, v) in cache.iter() {
+                match v {
+                    Some(v) => file.insert(k.clone(), v.clone()),
+                    None => file.remove(k),
+                };
+            }
+        }
+    }
+
+    impl Keys for StaleService {
+        fn read(&self, _: &str, key: &str) -> Option<String> {
+            let defaults = [
+                ("color-scheme", "'default'"),
+                ("accent-color", "'blue'"),
+                ("enable-animations", "true"),
+                ("high-contrast", "false"),
+                ("reduced-motion", "'no-preference'"),
+                ("gtk-theme", "'Adwaita'"),
+            ];
+            let default = defaults
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| v.to_string());
+            self.file.borrow().get(key).cloned().or(default)
+        }
+        fn write(&self, _: &str, key: &str, value: &str) {
+            self.writes.set(self.writes.get() + 1);
+            self.set(key, Some(value));
+        }
+        fn reset(&self, _: &str, key: &str) {
+            self.set(key, None);
+        }
+        fn sync(&self) {}
+    }
+
+    /// The live failure of 2026-10-02: the panel last wrote light, a nested
+    /// panel's dconf-service wrote dark behind the session's, and the
+    /// panel's write of light again was dropped, so apps stayed dark under
+    /// a light shell.
+    #[test]
+    fn a_write_the_stale_service_drops_is_written_again() {
+        let light = appearance(Inputs {
+            mode: Mode::Light,
+            ..Inputs::default()
+        });
+        let service = StaleService::default();
+        service
+            .file
+            .borrow_mut()
+            .insert("gtk-theme".into(), "'adw-gtk3'".into());
+        write_appearance(&service, light);
+        assert_eq!(service.read("", "color-scheme").unwrap(), "'prefer-light'");
+        // Another dconf-service writes the file; this one's copy goes stale.
+        service
+            .file
+            .borrow_mut()
+            .insert("color-scheme".into(), "'prefer-dark'".into());
+        service
+            .file
+            .borrow_mut()
+            .insert("gtk-theme".into(), "'adw-gtk3-dark'".into());
+        write_appearance(&service, light);
+        assert_eq!(service.read("", "color-scheme").unwrap(), "'prefer-light'");
+        assert_eq!(service.read("", "gtk-theme").unwrap(), "'adw-gtk3'");
+    }
+
+    /// Nothing differs, nothing is written: no change signal in any app.
+    #[test]
+    fn a_publish_that_changes_nothing_writes_nothing() {
+        let service = StaleService::default();
+        let dark = appearance(Inputs::default());
+        write_appearance(&service, dark);
+        let writes = service.writes.get();
+        assert!(writes > 0);
+        write_appearance(&service, dark);
+        assert_eq!(service.writes.get(), writes);
+    }
+
+    /// GNOME 48's `reduced-motion` is an enum; older schemas have a boolean.
+    #[test]
+    fn reduced_motion_takes_the_schemas_type() {
+        assert_eq!(
+            as_stored("reduced-motion", "true".into(), "'no-preference'"),
+            "'reduce'"
+        );
+        assert_eq!(
+            as_stored("reduced-motion", "false".into(), "'reduce'"),
+            "'no-preference'"
+        );
+        assert_eq!(as_stored("reduced-motion", "true".into(), "false"), "true");
+        assert_eq!(as_stored("high-contrast", "true".into(), "false"), "true");
+    }
+
+    /// A panel on the session's bus publishes; one on a private bus beside
+    /// it (a harness under `dbus-run-session`) does not.
+    #[test]
+    fn only_the_sessions_bus_speaks_for_apps() {
+        let bus = "/run/user/1000/bus";
+        let session = Some("unix:path=/run/user/1000/bus");
+        let private = Some("unix:path=/tmp/dbus-XYZ,guid=abc");
+        assert!(speaks_for_apps(None, session, bus, true));
+        assert!(!speaks_for_apps(None, private, bus, true));
+        // No user bus at all (a non-systemd session): the bus there is it.
+        assert!(speaks_for_apps(None, private, bus, false));
+        assert!(speaks_for_apps(None, None, bus, true));
+        assert!(speaks_for_apps(Some("on"), private, bus, true));
+        assert!(!speaks_for_apps(Some("off"), session, bus, true));
     }
 
     #[test]
