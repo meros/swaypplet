@@ -192,7 +192,7 @@ pub fn run() {
         // The animated wallpaper slows to a stop or goes black on battery when
         // the Look tab says so; this process owns the battery reading and the
         // theme it darkens.
-        crate::services::wallpaper_battery::follow();
+        crate::services::wallpaper_battery::follow(app);
 
         // Display profiles: kanshi's job, matched against the outputs the
         // compositor reports and applied in one step (`services::displays`).

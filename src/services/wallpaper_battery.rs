@@ -4,30 +4,40 @@
 //!
 //! The wallpaper video is mpvpaper's, a systemd user service this process
 //! does not own. The NixOS side starts it with mpv's JSON IPC on
-//! `$XDG_RUNTIME_DIR/mpvpaper.sock`, and this service moves four of its
-//! properties:
+//! `$XDG_RUNTIME_DIR/mpvpaper.sock`, and this service moves its `speed`,
+//! `pause` and video track over it:
 //!
 //! - **pause**: `speed` eases from the player's own speed (its base, read
 //!   from it, never assumed) down to mpv's floor of 0.01 over
 //!   [`SPEED_SPAN`], fast at first and settling, and only then is `pause`
 //!   set. Back on mains, `pause` goes first and the speed climbs from the
 //!   floor, slowly at first.
-//! - **black**: the picture fades to black over [`FADE_SPAN`] while the
-//!   speed falls with it (see [`FADE`] for how); then the player is paused, `vid` is set to `no` (mpv
-//!   stops decoding; mpvpaper keeps the black frame it last drew), and only
-//!   then is sway's background set to solid black, under a video that is
-//!   already black, so nothing flashes. The shell goes dark in the same
-//!   moment the fade starts, through the theme's own cross-fade
-//!   (`theme::set_battery_dark`, an override over the Look mode rather than a
-//!   write to it). Back on mains the order reverses: the wallpaper pick goes
-//!   back under the still-black video, the mode is let go, the video track
-//!   comes back, and the picture and the speed climb back.
+//! - **black**: a black curtain fades in over the video
+//!   (`services::wallpaper_curtain`, a layer surface eased on GTK's frame
+//!   clock) while the speed falls under it over [`FADE_SPAN`]. Once the
+//!   curtain is up the player is paused, its video track dropped with
+//!   mpv told to draw black without one (so mpvpaper's own buffer, which the
+//!   lock screen shows, is black too), sway's background set to solid black,
+//!   and the curtain lifted off a picture that is black under it. The shell
+//!   goes dark in the same moment the curtain starts, through the theme's
+//!   own cross-fade (`theme::set_battery_dark`, an override over the Look
+//!   mode rather than a write to it). Back on mains the order reverses: the
+//!   curtain goes up opaque over the black, the wallpaper pick goes back,
+//!   the video track comes back and the player resumes under it; once mpv
+//!   shows a frame again the curtain fades away, the mode is let go in the
+//!   same moment, and the speed climbs back.
+//!
+//! The fade is not the player's own (contrast and saturation over IPC, as it
+//! once was) because mpv applies those only when it renders a video frame:
+//! 15 a second at the wallpaper's half speed, fewer while it slows, so the
+//! fade stepped with the video.
 //!
 //! Every transition starts from what the player says it is at now, read
-//! over the socket, so a transition cut off by the opposite one turns
-//! around where it is rather than from its end, and a player that restarted
-//! (it comes up playing, at its own speed) is taken from where it is to the
-//! state wanted.
+//! over the socket, and from what this service last told the curtain, so a
+//! transition cut off by the opposite one turns around where it is rather
+//! than from its end (the curtain from its current opacity, for its share
+//! of the span), and a player that restarted (it comes up playing, at its
+//! own speed) is taken from where it is to the state wanted.
 //!
 //! What this service did to a player is kept on the player, in mpv's
 //! `user-data`: its base speed, and whether the pause on it is this
@@ -35,7 +45,7 @@
 //! and a restarted panel finds both. Resuming is only ever undoing this
 //! service's own pause: a player paused by anything else (mpvpaper's own
 //! `-p` while the screen is off, a person over IPC) stays paused, though its
-//! speed and fade still go back, since nothing else moves those.
+//! speed still goes back, since nothing else moves it.
 //!
 //! Three things re-assert the state: a battery change (`services::battery`,
 //! UPower), a settings change, and a 30-second tick while the wallpaper is
@@ -44,11 +54,12 @@
 //! mains free of the wake-up.
 //!
 //! The socket runs on a worker thread, one connection per transition: the
-//! GTK thread only sends it the wanted state. A missing socket is the
+//! GTK thread sends it the wanted state and tells it when the curtain is
+//! up; the worker sends the curtain what to do. A missing socket is the
 //! normal state of a session without the animated wallpaper and is logged
 //! at debug only; `black` then still turns the background black.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -60,6 +71,7 @@ use serde_json::{Value, json};
 
 use crate::services::battery;
 use crate::services::power::ChargeState;
+use crate::services::wallpaper_curtain::{self, Curtain};
 use crate::settings::store::{OnBattery, Wallpaper};
 
 /// How often the state is re-asserted while the wallpaper is not meant to
@@ -72,31 +84,34 @@ const FLOOR: f64 = 0.01;
 /// Slowing to a stop, and starting up again, from the base speed.
 const SPEED_SPAN: Duration = Duration::from_millis(2500);
 
-/// The fade to black and back, the whole way.
+/// The curtain's fade to black and back, the whole way; the speed falls
+/// under it over the same span.
 const FADE_SPAN: Duration = Duration::from_millis(1500);
 
-/// Between two property writes: one per refresh of a 60 Hz output. At the
-/// twelve a second this started with, the fade showed as visible steps of
-/// contrast; a write per refresh is what makes each refresh a new value.
+/// Between two speed writes: one per refresh of a 60 Hz output.
 const STEP: Duration = Duration::from_micros(16_667);
 
-/// How long the last fade write gets to reach the screen before the video
-/// track is dropped. A paused player redraws its frame only when asked, and
-/// with no track there is no frame to redraw: dropped at once, the picture
-/// kept is the one before last (measured: grey up to 3 of 255, not black).
+/// How long a picture mpv changed gets to reach the screen: mpvpaper
+/// redraws, commits, and the compositor presents. Measured in a nested
+/// sway: black about 80 ms after the video track goes.
 const SETTLE: Duration = Duration::from_millis(150);
 
-/// The fade's level at black.
-const DARK: f64 = -100.0;
+/// The same for a frame of video that just came back, which the curtain
+/// starts uncovering slowly anyway.
+const SHOWN: Duration = Duration::from_millis(50);
 
-/// The mpv properties the fade moves, together, from 0 to [`DARK`].
-///
-/// Not `brightness`: that adds an offset, so the picture clips to black
-/// from the shadows up and is gone two thirds of the way down (measured on
-/// the beach loop: mean grey 147 at 0, 26 at -45, black by -65). Contrast scales luma and saturation scales chroma, so both at
-/// the same level multiply the picture: grey 147, 111, 74, 37, 0 at 0, -25,
-/// -50, -75, -100, an even fade the whole way.
-const FADE: [&str; 2] = ["contrast", "saturation"];
+/// The longest wait for mpv to show a frame, or stop showing one, before
+/// carrying on regardless. A video track coming back takes about 0.9 s on
+/// the 4K loop (seek, decoder, first frame), measured in a nested sway.
+const FRAME_WAIT: Duration = Duration::from_secs(3);
+
+/// Between two looks at whether mpv shows a frame.
+const POLL: Duration = Duration::from_millis(10);
+
+/// The longest wait for the curtain to say it is opaque. The curtain lands
+/// on its own 250 ms after its span even with no frame clock ticking; this
+/// is for a GTK thread that never answers at all.
+const COVER_WAIT: Duration = Duration::from_secs(10);
 
 /// Below this, two values are the same one.
 const EPS: f64 = 1e-3;
@@ -133,7 +148,6 @@ struct Player {
     /// The speed it plays at when left alone.
     base: f64,
     speed: f64,
-    fade: f64,
     paused: bool,
     /// The pause on it is this service's.
     held: bool,
@@ -148,10 +162,27 @@ enum Cmd {
     Restore,
     /// Sway's background to solid black.
     Blackout,
-    /// Select the video track again, or none.
+    /// Select the video track again; or none, with mpv drawing black.
     Video(bool),
     /// Pause, or undo this service's pause.
     Pause(bool),
+    /// Wait until mpv shows a frame of video (`true`), or has stopped
+    /// showing one and drawn black (`false`).
+    Frame(bool),
+    /// Start the curtain's fade in.
+    FadeIn,
+    /// Wait until the curtain is up.
+    Covered,
+    /// The curtain opaque at once, over a picture that is black, and wait
+    /// until it is on screen.
+    Cover,
+    /// Start the curtain's fade away, and let the shell's mode go. Sent on
+    /// every transition to a target that is not black, whether a curtain is
+    /// up or not: the mode was set dark by the GTK thread when black was
+    /// wanted, and this is the one moment it goes back.
+    FadeOut,
+    /// Take the curtain away at once: the picture under it is black.
+    Lift,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,8 +191,6 @@ enum Curve {
     Out,
     /// Slow at first, gathering: starting up.
     In,
-    /// Both ends gentle: a fade.
-    InOut,
 }
 
 fn ease(curve: Curve, t: f64) -> f64 {
@@ -169,11 +198,10 @@ fn ease(curve: Curve, t: f64) -> f64 {
     match curve {
         Curve::Out => 1.0 - (1.0 - t).powi(3),
         Curve::In => t.powi(3),
-        Curve::InOut => t * t * (3.0 - 2.0 * t),
     }
 }
 
-/// One property eased from where it is to where it is going.
+/// The speed eased from where it is to where it is going.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Leg {
     from: f64,
@@ -208,112 +236,116 @@ impl Leg {
     }
 }
 
-/// A transition: the discrete steps before, the eased part, the steps
+/// A transition: the discrete steps before, the eased speed, the steps
 /// after.
 #[derive(Debug, Clone, PartialEq)]
 struct Plan {
     before: Vec<Cmd>,
     speed: Leg,
-    fade: Leg,
     after: Vec<Cmd>,
 }
 
 impl Plan {
+    /// Nothing to do but say so: a [`Cmd::FadeOut`] alone is that.
     fn is_empty(&self) -> bool {
-        self.before.is_empty() && self.after.is_empty() && !self.speed.moves() && !self.fade.moves()
+        let idle = |cmds: &[Cmd]| cmds.iter().all(|c| *c == Cmd::FadeOut);
+        idle(&self.before) && idle(&self.after) && !self.speed.moves()
     }
 }
 
-/// From the player as it is (and sway's background, black or not) to
-/// `target`.
-fn plan(p: &Player, bg_black: bool, target: Target) -> Plan {
-    let black = target == Target::Black;
-    let (speed_to, fade_to) = match target {
-        Target::Play => (p.base, 0.0),
-        Target::Pause => (FLOOR, 0.0),
-        Target::Black => (FLOOR, DARK),
+/// From the player as it is, sway's background (black or not) and the
+/// curtain (up or not, as last told) to `target`.
+fn plan(p: &Player, bg_black: bool, curtain: bool, target: Target) -> Plan {
+    let speed_to = match target {
+        Target::Play => p.base,
+        Target::Pause | Target::Black => FLOOR,
     };
     let mut before = Vec::new();
-    if !black && (bg_black || !p.video) {
-        // Under the still-black video, before anything of it shows.
-        before.push(Cmd::Restore);
-    }
-    if !black && !p.video {
-        before.push(Cmd::Video(true));
-    }
-    if target == Target::Play && p.paused && p.held {
-        before.push(Cmd::Pause(false));
+    let mut after = Vec::new();
+    if target == Target::Black {
+        if p.video {
+            before.push(Cmd::FadeIn);
+            after.push(Cmd::Covered);
+        }
+        if !p.paused {
+            after.push(Cmd::Pause(true));
+        }
+        if p.video {
+            after.push(Cmd::Video(false));
+            after.push(Cmd::Frame(false));
+        }
+        if !bg_black {
+            after.push(Cmd::Blackout);
+        }
+        if p.video || curtain {
+            after.push(Cmd::Lift);
+        }
+    } else {
+        // No video means mpv draws black: the curtain goes up over it at
+        // once, and everything comes back under it.
+        let hidden = !p.video;
+        if hidden {
+            before.push(Cmd::Cover);
+        }
+        if bg_black || hidden {
+            before.push(Cmd::Restore);
+        }
+        if hidden {
+            before.push(Cmd::Video(true));
+        }
+        if target == Target::Play && p.paused && p.held {
+            before.push(Cmd::Pause(false));
+        }
+        if hidden {
+            before.push(Cmd::Frame(true));
+        }
+        before.push(Cmd::FadeOut);
+        if target == Target::Pause && !p.paused {
+            after.push(Cmd::Pause(true));
+        }
     }
     let curve = if speed_to > p.speed {
         Curve::In
     } else {
         Curve::Out
     };
-    // Going black, the speed falls with the fade: nothing shows after it.
-    let full = if black { FADE_SPAN } else { SPEED_SPAN };
+    // Going black, the speed falls under the curtain: nothing shows after.
+    let full = if target == Target::Black {
+        FADE_SPAN
+    } else {
+        SPEED_SPAN
+    };
     let speed = Leg::new(p.speed, speed_to, full, p.base - FLOOR, curve);
-    let fade = Leg::new(p.fade, fade_to, FADE_SPAN, -DARK, Curve::InOut);
-    let mut after = Vec::new();
-    if target != Target::Play && !p.paused {
-        after.push(Cmd::Pause(true));
-    }
-    if black {
-        if p.video {
-            after.push(Cmd::Video(false));
-        }
-        if !bg_black {
-            after.push(Cmd::Blackout);
-        }
-    }
     Plan {
         before,
         speed,
-        fade,
         after,
     }
 }
 
-/// One write of the eased part: when, and the values that moved.
+/// One speed write: when, and the value.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Step {
     at: Duration,
-    speed: Option<f64>,
-    fade: Option<f64>,
+    speed: f64,
 }
 
-/// The eased part as writes about [`STEP`] apart, evenly over the longest
-/// leg, each leg's exact end value last and nothing written for a leg once
-/// it is there.
-fn schedule(plan: &Plan) -> Vec<Step> {
-    let legs = [plan.speed, plan.fade].map(|l| l.moves().then_some(l));
-    let end = legs.iter().flatten().map(|l| l.span).max();
-    let Some(end) = end else {
+/// The eased speed as writes about [`STEP`] apart, its exact end value
+/// last.
+fn schedule(leg: &Leg) -> Vec<Step> {
+    if !leg.moves() {
         return Vec::new();
-    };
-    let mut last = [None::<f64>; 2];
-    let mut steps = Vec::new();
-    let n = ((end.as_secs_f64() / STEP.as_secs_f64()).round() as u32).max(1);
-    for i in 1..=n {
-        let at = end.mul_f64(f64::from(i) / f64::from(n));
-        let mut values = [None; 2];
-        for (k, leg) in legs.iter().enumerate() {
-            let Some(leg) = leg else { continue };
-            if last[k] == Some(leg.to) {
-                continue;
-            }
-            let v = leg.at(at);
-            last[k] = Some(v);
-            values[k] = Some(v);
-        }
-        if values.iter().any(Option::is_some) {
-            steps.push(Step {
-                at,
-                speed: values[0],
-                fade: values[1],
-            });
-        }
     }
-    steps
+    let n = ((leg.span.as_secs_f64() / STEP.as_secs_f64()).round() as u32).max(1);
+    (1..=n)
+        .map(|i| {
+            let at = leg.span.mul_f64(f64::from(i) / f64::from(n));
+            Step {
+                at,
+                speed: leg.at(at),
+            }
+        })
+        .collect()
 }
 
 // ── The socket ──────────────────────────────────────────────────────────
@@ -377,6 +409,15 @@ impl Ipc {
         }
         Ok(())
     }
+
+    /// Whether mpv shows a frame of video: `video-frame-info` is there
+    /// exactly while one is displayed, and turns up the moment a returning
+    /// track's first frame does (measured: within a refresh of it reaching
+    /// the screen), where `vo-configured` and `video-out-params` outlive the
+    /// track.
+    fn shows_frame(&mut self) -> io::Result<bool> {
+        Ok(self.get("video-frame-info")?.is_some_and(|v| !v.is_null()))
+    }
 }
 
 /// The player as it is, its base speed marked on it if it was not yet.
@@ -397,7 +438,6 @@ fn read(ipc: &mut Ipc) -> io::Result<Player> {
             1.0
         }
     };
-    let fade = number(ipc.get(FADE[0])?).unwrap_or(0.0);
     let paused = ipc.get("pause")?.and_then(|v| v.as_bool()).unwrap_or(false);
     let held = ipc
         .get(HELD_KEY)?
@@ -407,7 +447,6 @@ fn read(ipc: &mut Ipc) -> io::Result<Player> {
     Ok(Player {
         base,
         speed,
-        fade,
         paused,
         held,
         video,
@@ -424,6 +463,19 @@ struct Want {
     target: Target,
     restore: Option<Wallpaper>,
 }
+
+/// Into the worker.
+#[derive(Debug)]
+enum Msg {
+    Want(Want),
+    /// The curtain asked for under this number is opaque on screen.
+    Covered(u64),
+}
+
+/// Out of the worker, to the curtain on the GTK thread; the number is the
+/// one to answer [`Msg::Covered`] with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ToCurtain(wallpaper_curtain::Cmd, u64);
 
 fn restore(pick: Option<&Wallpaper>) {
     let wallpaper = pick
@@ -448,168 +500,384 @@ fn blackout() -> bool {
     }
 }
 
-fn run(cmd: Cmd, ipc: &mut Ipc, want: &Want, bg_black: &mut bool) -> io::Result<()> {
-    match cmd {
-        Cmd::Restore => {
-            restore(want.restore.as_ref());
-            *bg_black = false;
-        }
-        Cmd::Blackout => *bg_black = blackout(),
-        Cmd::Video(on) => ipc.set("vid", json!(if on { "auto" } else { "no" }))?,
-        Cmd::Pause(on) => {
-            ipc.set("pause", json!(on))?;
-            ipc.set(HELD_KEY, json!(on))?;
-        }
-    }
-    Ok(())
+/// How a wait ended.
+enum Wake {
+    /// Its time came.
+    Due,
+    /// The curtain it waited on is up.
+    Covered,
+    /// Another target is wanted: turn around to it.
+    Turn(Want),
+    /// The GTK side is gone.
+    Gone,
 }
 
-/// Take the player to `want`. Returns a newer want for another target if
-/// one came in midway, for the caller to turn around to.
-fn settle(path: &Path, want: &mut Want, bg_black: &mut bool, rx: &Receiver<Want>) -> Option<Want> {
-    let mut ipc = match Ipc::connect(path) {
-        Ok(ipc) => ipc,
-        Err(e) => {
-            log::debug!("wallpaper-battery: no player at {}: {e}", path.display());
-            // No video: the background alone.
-            match (want.target == Target::Black, *bg_black) {
-                (true, false) => *bg_black = blackout(),
-                (false, true) => {
-                    restore(want.restore.as_ref());
-                    *bg_black = false;
-                }
-                _ => {}
-            }
-            return None;
-        }
-    };
-    match transition(&mut ipc, want, bg_black, rx) {
-        Ok(next) => next,
-        Err(e) => {
-            log::debug!("wallpaper-battery: {}: {e}", path.display());
-            None
-        }
-    }
+/// Whether a step lets the transition carry on.
+enum Go {
+    On,
+    Turn(Want),
+    Stop,
 }
 
-fn transition(
-    ipc: &mut Ipc,
-    want: &mut Want,
-    bg_black: &mut bool,
-    rx: &Receiver<Want>,
-) -> io::Result<Option<Want>> {
-    let player = read(ipc)?;
-    let plan = plan(&player, *bg_black, want.target);
-    if plan.is_empty() {
-        return Ok(None);
+struct Worker {
+    rx: Receiver<Msg>,
+    curtain: Box<dyn Fn(ToCurtain) + Send>,
+    /// Sway's background is the compositor's, not the player's: whether it
+    /// is black is remembered here. A panel restarted while it was black
+    /// finds the player's video track off, and puts the wallpaper back on
+    /// that instead.
+    bg_black: bool,
+    /// The curtain was last told to come up (in or cover), not to go.
+    up: bool,
+    /// The number of the last curtain asked for.
+    seq: u64,
+    /// The number of the last curtain that said it is up. Kept rather than
+    /// matched only while waiting: the curtain can land before the speed
+    /// under it does, while the worker is waiting on the speed's clock.
+    covered: Cell<u64>,
+}
+
+impl Worker {
+    fn tell(&mut self, cmd: wallpaper_curtain::Cmd) -> u64 {
+        use wallpaper_curtain::Cmd as C;
+        self.seq += 1;
+        self.up = matches!(cmd, C::In | C::Cover);
+        (self.curtain)(ToCurtain(cmd, self.seq));
+        self.seq
     }
-    log::info!(
-        "wallpaper-battery: to {:?} from speed {:.2}, fade {:.0}{}",
-        want.target,
-        player.speed,
-        player.fade,
-        if player.paused { ", paused" } else { "" },
-    );
-    for cmd in &plan.before {
-        run(*cmd, ipc, want, bg_black)?;
-    }
-    let start = Instant::now();
-    for step in schedule(&plan) {
-        let due = start + step.at;
+
+    /// Wait until `until`, or until the curtain numbered `covered` is up,
+    /// or until another target is wanted. The same target again (a tick, a
+    /// settings change beside it) carries on, with the newest wallpaper to
+    /// put back.
+    fn wait(&self, want: &mut Want, until: Instant, covered: Option<u64>) -> Wake {
         loop {
             let now = Instant::now();
-            if now >= due {
+            if now >= until {
+                return Wake::Due;
+            }
+            match self.rx.recv_timeout(until - now) {
+                Ok(Msg::Want(next)) if next.target == want.target => want.restore = next.restore,
+                Ok(Msg::Want(next)) => return Wake::Turn(next),
+                Ok(Msg::Covered(n)) => {
+                    self.covered.set(self.covered.get().max(n));
+                    if covered.is_some_and(|c| c <= n) {
+                        return Wake::Covered;
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => return Wake::Due,
+                Err(RecvTimeoutError::Disconnected) => return Wake::Gone,
+            }
+        }
+    }
+
+    /// Wait for the curtain numbered `n`; a curtain that never answers is
+    /// given up on after [`COVER_WAIT`].
+    fn await_cover(&self, want: &mut Want, n: u64) -> Go {
+        if self.covered.get() >= n {
+            return Go::On;
+        }
+        match self.wait(want, Instant::now() + COVER_WAIT, Some(n)) {
+            Wake::Covered => Go::On,
+            Wake::Due => {
+                log::warn!("wallpaper-battery: the curtain did not answer; carrying on");
+                Go::On
+            }
+            Wake::Turn(next) => Go::Turn(next),
+            Wake::Gone => Go::Stop,
+        }
+    }
+
+    /// Wait until mpv shows a frame (`shown`) or does not, then for it to
+    /// reach the screen.
+    fn await_frame(&self, ipc: &mut Ipc, want: &mut Want, shown: bool) -> io::Result<Go> {
+        let give_up = Instant::now() + FRAME_WAIT;
+        while ipc.shows_frame()? != shown {
+            if Instant::now() >= give_up {
+                log::debug!("wallpaper-battery: no change of frame in {FRAME_WAIT:?}; carrying on");
                 break;
             }
-            match rx.recv_timeout(due - now) {
-                // The same target again (a tick, a settings change beside
-                // it): carry on, with the newest wallpaper to put back.
-                Ok(next) if next.target == want.target => want.restore = next.restore,
-                Ok(next) => return Ok(Some(next)),
-                Err(RecvTimeoutError::Timeout) => break,
-                Err(RecvTimeoutError::Disconnected) => return Ok(None),
+            match self.wait(want, Instant::now() + POLL, None) {
+                Wake::Due | Wake::Covered => {}
+                Wake::Turn(next) => return Ok(Go::Turn(next)),
+                Wake::Gone => return Ok(Go::Stop),
             }
         }
-        if let Some(speed) = step.speed {
-            ipc.set("speed", json!(speed))?;
+        let land = if shown { SHOWN } else { SETTLE };
+        Ok(match self.wait(want, Instant::now() + land, None) {
+            Wake::Due | Wake::Covered => Go::On,
+            Wake::Turn(next) => Go::Turn(next),
+            Wake::Gone => Go::Stop,
+        })
+    }
+
+    fn run(&mut self, cmd: Cmd, ipc: &mut Ipc, want: &mut Want) -> io::Result<Go> {
+        use wallpaper_curtain::Cmd as C;
+        log::debug!("wallpaper-battery: {cmd:?}");
+        match cmd {
+            Cmd::Restore => {
+                restore(want.restore.as_ref());
+                self.bg_black = false;
+            }
+            Cmd::Blackout => self.bg_black = blackout(),
+            Cmd::Video(true) => {
+                ipc.set("vid", json!("auto"))?;
+                ipc.set("force-window", json!("no"))?;
+            }
+            Cmd::Video(false) => {
+                // With no track and no window forced, mpv draws nothing and
+                // mpvpaper keeps the last frame it drew: the video, which
+                // the lock screen would then show (measured: grey 147 of
+                // 255 after `vid` went). A forced window draws its
+                // background instead, black, within about 80 ms.
+                ipc.set("background-color", json!("#000000"))?;
+                ipc.set("force-window", json!("yes"))?;
+                ipc.set("vid", json!("no"))?;
+            }
+            Cmd::Pause(on) => {
+                ipc.set("pause", json!(on))?;
+                ipc.set(HELD_KEY, json!(on))?;
+            }
+            Cmd::Frame(shown) => return self.await_frame(ipc, want, shown),
+            Cmd::FadeIn => {
+                self.tell(C::In);
+            }
+            Cmd::Covered => {
+                let n = self.seq;
+                return Ok(self.await_cover(want, n));
+            }
+            Cmd::Cover => {
+                let n = self.tell(C::Cover);
+                return Ok(self.await_cover(want, n));
+            }
+            Cmd::FadeOut => {
+                self.tell(C::Out);
+            }
+            Cmd::Lift => {
+                self.tell(C::Lift);
+            }
         }
-        if let Some(fade) = step.fade {
-            for property in FADE {
-                ipc.set(property, json!(fade))?;
+        Ok(Go::On)
+    }
+
+    /// Take the player to `want`. Returns a newer want for another target if
+    /// one came in midway, for the caller to turn around to.
+    fn settle(&mut self, path: &Path, want: &mut Want) -> Option<Want> {
+        use wallpaper_curtain::Cmd as C;
+        let mut ipc = match Ipc::connect(path) {
+            Ok(ipc) => ipc,
+            Err(e) => {
+                log::debug!("wallpaper-battery: no player at {}: {e}", path.display());
+                // No video: the background alone, and no curtain left up.
+                if want.target == Target::Black {
+                    if !self.bg_black {
+                        self.bg_black = blackout();
+                    }
+                    if self.up {
+                        self.tell(C::Lift);
+                    }
+                } else {
+                    if self.bg_black {
+                        restore(want.restore.as_ref());
+                        self.bg_black = false;
+                    }
+                    self.tell(C::Out);
+                }
+                return None;
+            }
+        };
+        match self.transition(&mut ipc, want) {
+            Ok(next) => next,
+            Err(e) => {
+                log::debug!("wallpaper-battery: {}: {e}", path.display());
+                None
             }
         }
     }
-    if plan.fade.moves() && plan.after.contains(&Cmd::Video(false)) {
-        std::thread::sleep(SETTLE);
+
+    fn transition(&mut self, ipc: &mut Ipc, want: &mut Want) -> io::Result<Option<Want>> {
+        macro_rules! step {
+            ($go:expr) => {
+                match $go {
+                    Go::On => {}
+                    Go::Turn(next) => return Ok(Some(next)),
+                    Go::Stop => return Ok(None),
+                }
+            };
+        }
+        let player = read(ipc)?;
+        let plan = plan(&player, self.bg_black, self.up, want.target);
+        if plan.is_empty() {
+            for cmd in plan.before.iter().chain(&plan.after) {
+                step!(self.run(*cmd, ipc, want)?);
+            }
+            return Ok(None);
+        }
+        log::info!(
+            "wallpaper-battery: to {:?} from speed {:.2}{}{}",
+            want.target,
+            player.speed,
+            if player.paused { ", paused" } else { "" },
+            if player.video { "" } else { ", no video" },
+        );
+        for cmd in &plan.before {
+            step!(self.run(*cmd, ipc, want)?);
+        }
+        let start = Instant::now();
+        for s in schedule(&plan.speed) {
+            match self.wait(want, start + s.at, None) {
+                Wake::Due | Wake::Covered => {}
+                Wake::Turn(next) => return Ok(Some(next)),
+                Wake::Gone => return Ok(None),
+            }
+            ipc.set("speed", json!(s.speed))?;
+        }
+        for cmd in &plan.after {
+            step!(self.run(*cmd, ipc, want)?);
+        }
+        Ok(None)
     }
-    for cmd in &plan.after {
-        run(*cmd, ipc, want, bg_black)?;
-    }
-    Ok(None)
 }
 
 /// The worker: wanted states in, transitions out, one at a time and the
 /// newest first.
-fn worker(path: PathBuf, rx: Receiver<Want>) {
-    // Sway's background is the compositor's, not the player's: whether it
-    // is black is remembered here. A panel restarted while it was black
-    // finds the player's video track off, and puts the wallpaper back on
-    // that instead.
-    let mut bg_black = false;
-    let Ok(mut want) = rx.recv() else { return };
-    loop {
-        while let Ok(newer) = rx.try_recv() {
-            want = newer;
+fn worker(path: PathBuf, rx: Receiver<Msg>, curtain: Box<dyn Fn(ToCurtain) + Send>) {
+    let mut w = Worker {
+        rx,
+        curtain,
+        bg_black: false,
+        up: false,
+        seq: 0,
+        covered: Cell::new(0),
+    };
+    let mut want = loop {
+        match w.rx.recv() {
+            Ok(Msg::Want(want)) => break want,
+            Ok(Msg::Covered(_)) => {}
+            Err(_) => return,
         }
-        if let Some(next) = settle(&path, &mut want, &mut bg_black, &rx) {
+    };
+    loop {
+        while let Ok(msg) = w.rx.try_recv() {
+            match msg {
+                Msg::Want(newer) => want = newer,
+                Msg::Covered(n) => w.covered.set(w.covered.get().max(n)),
+            }
+        }
+        if let Some(next) = w.settle(&path, &mut want) {
             want = next;
             continue;
         }
-        match rx.recv() {
-            Ok(next) => want = next,
-            Err(_) => return,
-        }
+        want = loop {
+            match w.rx.recv() {
+                Ok(Msg::Want(next)) => break next,
+                Ok(Msg::Covered(n)) => w.covered.set(w.covered.get().max(n)),
+                Err(_) => return,
+            }
+        };
     }
+}
+
+thread_local! {
+    /// The target `SWAYPPLET_WALLPAPER_SCRIPT` has put in place of the
+    /// battery's, while it runs.
+    static SCRIPTED: Cell<Option<Target>> = const { Cell::new(None) };
+}
+
+/// `SWAYPPLET_WALLPAPER_SCRIPT="black:6,play:6"`: a test hook for the
+/// nested-sway check, which has no battery to unplug. Each target in turn
+/// stands in for the battery's for that many seconds, through the same path
+/// a real unplug takes; the last one stays.
+fn script() -> Option<Vec<(Target, f64)>> {
+    let raw = std::env::var("SWAYPPLET_WALLPAPER_SCRIPT").ok()?;
+    let steps: Option<Vec<_>> = raw
+        .split(',')
+        .map(|item| {
+            let (name, secs) = item.trim().split_once(':')?;
+            let target = match name {
+                "play" => Target::Play,
+                "pause" => Target::Pause,
+                "black" => Target::Black,
+                _ => return None,
+            };
+            Some((target, secs.parse::<f64>().ok()?))
+        })
+        .collect();
+    if steps.is_none() {
+        log::warn!("wallpaper-battery: SWAYPPLET_WALLPAPER_SCRIPT={raw:?} is not target:seconds,…");
+    }
+    steps
 }
 
 /// Start following, from the panel process. Does nothing on a machine
 /// without a battery, where nothing here can ever be wanted.
-pub fn follow() {
-    if !battery::start() {
+pub fn follow(app: &gtk4::Application) {
+    let script = script();
+    if !battery::start() && script.is_none() {
         return;
     }
     let path = glib::user_runtime_dir().join("mpvpaper.sock");
-    let (tx, rx) = mpsc::channel::<Want>();
+    let (tx, rx) = mpsc::channel::<Msg>();
+    let (to_gtk, from_worker) = async_channel::unbounded::<ToCurtain>();
+    let tell: Box<dyn Fn(ToCurtain) + Send> = Box::new(move |c| {
+        let _ = to_gtk.send_blocking(c);
+    });
     let spawned = std::thread::Builder::new()
         .name("wallpaper-battery".into())
-        .spawn(move || worker(path, rx));
+        .spawn(move || worker(path, rx, tell));
     if let Err(e) = spawned {
         log::warn!("wallpaper-battery: failed to spawn thread: {e}");
         return;
     }
 
+    let curtain = Curtain::new(app, FADE_SPAN.as_secs_f64() * 1000.0);
+    // Black is wanted, as the GTK thread last saw it: a curtain told to go
+    // by a transition this one has overtaken must not lighten the shell.
+    let black_wanted = Rc::new(Cell::new(false));
+    {
+        let tx = tx.clone();
+        let black_wanted = black_wanted.clone();
+        glib::spawn_future_local(async move {
+            while let Ok(ToCurtain(cmd, n)) = from_worker.recv().await {
+                if cmd == wallpaper_curtain::Cmd::Out && !black_wanted.get() {
+                    // The picture comes back as the curtain starts going:
+                    // the mode goes with it.
+                    crate::theme::set_battery_dark(false);
+                }
+                let tx = tx.clone();
+                curtain.apply(cmd, move || {
+                    let _ = tx.send(Msg::Covered(n));
+                });
+            }
+        });
+    }
+
     let want_now = || {
         let (setting, restore) =
             crate::settings::store::with(|s| (s.look().wallpaper_on_battery, s.wallpaper.clone()));
-        Want {
-            target: wanted(setting, battery::current().map(|b| b.state)),
-            restore,
-        }
+        let target = SCRIPTED
+            .with(Cell::get)
+            .unwrap_or_else(|| wanted(setting, battery::current().map(|b| b.state)));
+        Want { target, restore }
     };
     let tick: Rc<RefCell<Option<glib::SourceId>>> = Rc::default();
     let apply = Rc::new(move || {
         let want = want_now();
         let still = want.target != Target::Play;
-        // The shell darkens as the fade starts, through the theme's own
-        // cross-fade.
-        crate::theme::set_battery_dark(want.target == Target::Black);
-        let _ = tx.send(want);
+        let black = want.target == Target::Black;
+        black_wanted.set(black);
+        // The shell darkens as the curtain starts, through the theme's own
+        // cross-fade. It lightens when the worker lets the curtain go.
+        if black {
+            crate::theme::set_battery_dark(true);
+        }
+        let _ = tx.send(Msg::Want(want));
         let mut t = tick.borrow_mut();
         match (still, t.is_some()) {
             (true, false) => {
                 let tx = tx.clone();
                 *t = Some(glib::timeout_add_seconds_local(TICK_S, move || {
-                    let _ = tx.send(want_now());
+                    let _ = tx.send(Msg::Want(want_now()));
                     glib::ControlFlow::Continue
                 }));
             }
@@ -621,6 +889,18 @@ pub fn follow() {
             _ => {}
         }
     });
+    if let Some(steps) = script {
+        let mut at = Duration::ZERO;
+        for (target, secs) in steps {
+            let apply = apply.clone();
+            glib::timeout_add_local_once(at, move || {
+                log::info!("wallpaper-battery: script: {target:?}");
+                SCRIPTED.with(|s| s.set(Some(target)));
+                apply();
+            });
+            at += Duration::from_secs_f64(secs);
+        }
+    }
     apply();
     {
         let apply = apply.clone();
@@ -637,7 +917,6 @@ mod tests {
         Player {
             base,
             speed: base,
-            fade: 0.0,
             paused: false,
             held: false,
             video: true,
@@ -655,11 +934,20 @@ mod tests {
 
     fn black_here(base: f64) -> Player {
         Player {
-            fade: DARK,
             video: false,
             ..paused_here(base)
         }
     }
+
+    /// What going black does after the speed, from a playing player.
+    const DOWN: [Cmd; 6] = [
+        Cmd::Covered,
+        Cmd::Pause(true),
+        Cmd::Video(false),
+        Cmd::Frame(false),
+        Cmd::Blackout,
+        Cmd::Lift,
+    ];
 
     #[test]
     fn only_a_discharging_battery_changes_anything() {
@@ -682,7 +970,7 @@ mod tests {
 
     #[test]
     fn the_curves_run_end_to_end_the_right_way() {
-        for curve in [Curve::Out, Curve::In, Curve::InOut] {
+        for curve in [Curve::Out, Curve::In] {
             assert_eq!(ease(curve, 0.0), 0.0);
             assert_eq!(ease(curve, 1.0), 1.0);
             let mut last = 0.0;
@@ -695,39 +983,37 @@ mod tests {
         // Slowing: most of the drop early. Starting: most of the rise late.
         assert!(ease(Curve::Out, 0.5) > 0.8);
         assert!(ease(Curve::In, 0.5) < 0.2);
-        assert!((ease(Curve::InOut, 0.5) - 0.5).abs() < 1e-9);
     }
 
     #[test]
-    fn slowing_down_is_thirty_writes_from_the_base_to_the_floor_then_a_pause() {
-        let p = plan(&playing(0.5), false, Target::Pause);
-        assert!(p.before.is_empty());
+    fn slowing_down_is_a_write_per_refresh_from_the_base_to_the_floor_then_a_pause() {
+        let p = plan(&playing(0.5), false, false, Target::Pause);
+        // No curtain to take away, but the mode is let go all the same.
+        assert_eq!(p.before, vec![Cmd::FadeOut]);
         assert_eq!(p.after, vec![Cmd::Pause(true)]);
         assert_eq!(p.speed.span, SPEED_SPAN);
         assert_eq!(p.speed.curve, Curve::Out);
-        assert!(!p.fade.moves());
-        let steps = schedule(&p);
+        let steps = schedule(&p.speed);
         assert_eq!(steps.len(), 150);
-        assert!(steps.iter().all(|s| s.fade.is_none()));
-        let speeds: Vec<f64> = steps.iter().map(|s| s.speed.unwrap()).collect();
+        let speeds: Vec<f64> = steps.iter().map(|s| s.speed).collect();
         assert!(speeds.windows(2).all(|w| w[1] < w[0]), "{speeds:?}");
         assert_eq!(*speeds.last().unwrap(), FLOOR);
         assert_eq!(steps.last().unwrap().at, SPEED_SPAN);
         // The base is the player's, whatever it is.
-        let p = plan(&playing(1.25), false, Target::Pause);
+        let p = plan(&playing(1.25), false, false, Target::Pause);
         assert_eq!(p.speed.from, 1.25);
     }
 
     #[test]
     fn starting_up_undoes_our_pause_first_then_climbs_slowly() {
-        let p = plan(&paused_here(0.5), false, Target::Play);
-        assert_eq!(p.before, vec![Cmd::Pause(false)]);
+        let p = plan(&paused_here(0.5), false, false, Target::Play);
+        assert_eq!(p.before, vec![Cmd::Pause(false), Cmd::FadeOut]);
         assert!(p.after.is_empty());
         assert_eq!((p.speed.from, p.speed.to), (FLOOR, 0.5));
         assert_eq!(p.speed.curve, Curve::In);
         assert_eq!(p.speed.span, SPEED_SPAN);
-        let steps = schedule(&p);
-        let first = steps[0].speed.unwrap();
+        let steps = schedule(&p.speed);
+        let first = steps[0].speed;
         assert!(first - FLOOR < 0.001, "starts slow: {first}");
     }
 
@@ -737,8 +1023,8 @@ mod tests {
             held: false,
             ..paused_here(0.5)
         };
-        let p = plan(&theirs, false, Target::Play);
-        assert!(p.before.is_empty(), "never resumed: {:?}", p.before);
+        let p = plan(&theirs, false, false, Target::Play);
+        assert_eq!(p.before, vec![Cmd::FadeOut], "never resumed");
         // Its speed is still ours to give back.
         assert!(p.speed.moves());
         // Already paused by someone else, going to Pause: no pause to send,
@@ -749,58 +1035,76 @@ mod tests {
                 ..playing(0.5)
             },
             false,
+            false,
             Target::Pause,
         );
         assert!(p.after.is_empty());
     }
 
     #[test]
-    fn black_fades_and_slows_together_then_stops_and_blacks_the_background() {
-        let p = plan(&playing(0.5), false, Target::Black);
-        assert!(p.before.is_empty());
-        assert_eq!((p.fade.from, p.fade.to), (0.0, DARK));
-        assert_eq!(p.fade.span, FADE_SPAN);
+    fn black_is_the_curtain_over_the_slowing_video_then_a_stop_under_it() {
+        let p = plan(&playing(0.5), false, false, Target::Black);
+        assert_eq!(p.before, vec![Cmd::FadeIn]);
         assert_eq!(p.speed.span, FADE_SPAN);
-        // The background only after the video is black and stopped.
-        assert_eq!(
-            p.after,
-            vec![Cmd::Pause(true), Cmd::Video(false), Cmd::Blackout]
-        );
-        let steps = schedule(&p);
+        // Everything after waits for the curtain; the background only once
+        // mpv draws black, and the curtain lifts off black.
+        assert_eq!(p.after, DOWN.to_vec());
+        let steps = schedule(&p.speed);
         assert_eq!(steps.len(), 90);
-        assert!(steps.iter().all(|s| s.speed.is_some() && s.fade.is_some()));
-        assert_eq!(steps.last().unwrap().fade, Some(DARK));
+        assert_eq!(steps.last().unwrap().speed, FLOOR);
     }
 
     #[test]
-    fn back_from_black_the_wallpaper_goes_back_first() {
-        let p = plan(&black_here(0.5), true, Target::Play);
+    fn back_from_black_the_picture_returns_under_the_curtain_first() {
+        let p = plan(&black_here(0.5), true, false, Target::Play);
         assert_eq!(
             p.before,
-            vec![Cmd::Restore, Cmd::Video(true), Cmd::Pause(false)]
+            vec![
+                Cmd::Cover,
+                Cmd::Restore,
+                Cmd::Video(true),
+                Cmd::Pause(false),
+                Cmd::Frame(true),
+                Cmd::FadeOut,
+            ]
         );
         assert!(p.after.is_empty());
-        assert_eq!((p.fade.from, p.fade.to), (DARK, 0.0));
         assert_eq!(p.speed.curve, Curve::In);
         // A panel that restarted while black does not know the background
         // is black; the video track being off says so.
-        let p = plan(&black_here(0.5), false, Target::Play);
-        assert_eq!(p.before[0], Cmd::Restore);
+        let p = plan(&black_here(0.5), false, false, Target::Play);
+        assert_eq!(&p.before[..2], &[Cmd::Cover, Cmd::Restore]);
     }
 
     #[test]
     fn between_pause_and_black_on_battery() {
-        // Paused, then black is picked: only the fade moves.
-        let p = plan(&paused_here(0.5), false, Target::Black);
-        assert!(p.before.is_empty());
+        // Paused, then black is picked: only the curtain moves.
+        let p = plan(&paused_here(0.5), false, false, Target::Black);
+        assert_eq!(p.before, vec![Cmd::FadeIn]);
         assert!(!p.speed.moves());
-        assert!(p.fade.moves());
-        assert_eq!(p.after, vec![Cmd::Video(false), Cmd::Blackout]);
+        assert_eq!(
+            p.after,
+            vec![
+                Cmd::Covered,
+                Cmd::Video(false),
+                Cmd::Frame(false),
+                Cmd::Blackout,
+                Cmd::Lift,
+            ]
+        );
         // Black, then pause is picked: the picture comes back, still held.
-        let p = plan(&black_here(0.5), true, Target::Pause);
-        assert_eq!(p.before, vec![Cmd::Restore, Cmd::Video(true)]);
+        let p = plan(&black_here(0.5), true, false, Target::Pause);
+        assert_eq!(
+            p.before,
+            vec![
+                Cmd::Cover,
+                Cmd::Restore,
+                Cmd::Video(true),
+                Cmd::Frame(true),
+                Cmd::FadeOut,
+            ]
+        );
         assert!(!p.speed.moves());
-        assert_eq!(p.fade.to, 0.0);
         assert!(p.after.is_empty());
     }
 
@@ -812,67 +1116,115 @@ mod tests {
             speed: 0.2,
             ..playing(0.5)
         };
-        let p = plan(&midway, false, Target::Play);
-        assert!(p.before.is_empty() && p.after.is_empty());
+        let p = plan(&midway, false, false, Target::Play);
+        assert_eq!(p.before, vec![Cmd::FadeOut]);
+        assert!(p.after.is_empty());
         assert_eq!((p.speed.from, p.speed.to), (0.2, 0.5));
         let share = 0.3 / (0.5 - FLOOR);
         let span = SPEED_SPAN.as_secs_f64() * share;
         assert!((p.speed.span.as_secs_f64() - span).abs() < 1e-6);
-        assert_eq!(schedule(&p)[0].speed.map(|s| s > 0.2), Some(true));
-        // Fading in from black, cut off by unplugging again: back down from
-        // where the fade got to, and nothing to restore twice.
-        let fading_in = Player {
+        assert!(schedule(&p.speed)[0].speed > 0.2);
+        // Going black, cut off by mains with the curtain half up: the
+        // curtain goes back from where it is (the curtain's own business),
+        // nothing to restore, nothing to cover.
+        let p = plan(&midway, false, true, Target::Play);
+        assert_eq!(p.before, vec![Cmd::FadeOut]);
+        // Coming back from black, cut off by unplugging again with the
+        // video back and the curtain going: it comes up again from where it
+        // got to, and nothing is restored twice.
+        let coming_back = Player {
             speed: 0.1,
-            fade: -40.0,
-            paused: false,
-            held: false,
-            video: true,
-            base: 0.5,
+            ..playing(0.5)
         };
-        let p = plan(&fading_in, false, Target::Black);
-        assert!(p.before.is_empty());
-        assert_eq!(p.fade.from, -40.0);
-        let span = 0.6 * FADE_SPAN.as_secs_f64();
-        assert!((p.fade.span.as_secs_f64() - span).abs() < 1e-6);
-        assert_eq!(
-            p.after,
-            vec![Cmd::Pause(true), Cmd::Video(false), Cmd::Blackout]
-        );
+        let p = plan(&coming_back, false, false, Target::Black);
+        assert_eq!(p.before, vec![Cmd::FadeIn]);
+        assert_eq!(p.after, DOWN.to_vec());
+        // Cut off after the video went but before the curtain lifted: it
+        // still lifts.
+        let p = plan(&black_here(0.5), true, true, Target::Black);
+        assert_eq!(p.after, vec![Cmd::Lift]);
     }
 
     #[test]
     fn a_restarted_player_is_taken_from_where_it_comes_up() {
-        // mpvpaper restarted while black: it plays at its own speed, full
-        // fade. The background is already black.
-        let p = plan(&playing(0.5), true, Target::Black);
-        assert!(p.before.is_empty());
-        assert!(p.speed.moves() && p.fade.moves());
-        assert_eq!(p.after, vec![Cmd::Pause(true), Cmd::Video(false)]);
+        // mpvpaper restarted while black: it plays at its own speed, its
+        // video on. The background is already black.
+        let p = plan(&playing(0.5), true, false, Target::Black);
+        assert_eq!(p.before, vec![Cmd::FadeIn]);
+        assert!(p.speed.moves());
+        assert_eq!(
+            p.after,
+            vec![
+                Cmd::Covered,
+                Cmd::Pause(true),
+                Cmd::Video(false),
+                Cmd::Frame(false),
+                Cmd::Lift,
+            ]
+        );
         // Restarted while a pause was wanted: slowed again from its speed.
-        let p = plan(&playing(0.75), false, Target::Pause);
+        let p = plan(&playing(0.75), false, false, Target::Pause);
         assert_eq!(p.speed.from, 0.75);
         assert_eq!(p.after, vec![Cmd::Pause(true)]);
     }
 
     #[test]
     fn settled_is_nothing_to_do() {
-        assert!(plan(&playing(0.5), false, Target::Play).is_empty());
-        assert!(plan(&paused_here(0.5), false, Target::Pause).is_empty());
-        assert!(plan(&black_here(0.5), true, Target::Black).is_empty());
-        assert!(schedule(&plan(&playing(0.5), false, Target::Play)).is_empty());
+        assert!(plan(&playing(0.5), false, false, Target::Play).is_empty());
+        assert!(plan(&paused_here(0.5), false, false, Target::Pause).is_empty());
+        assert!(plan(&black_here(0.5), true, false, Target::Black).is_empty());
+        let p = plan(&playing(0.5), false, false, Target::Play);
+        assert!(schedule(&p.speed).is_empty());
     }
 
-    /// Drive a real player through a script of targets, for the nested-sway
-    /// check: `WALLPAPER_SOCK=<mpv socket> WALLPAPER_SCRIPT="pause:4,play:1.2"`
+    #[test]
+    fn a_curtain_up_before_the_speed_is_down_is_not_waited_for_again() {
+        let (tx, rx) = mpsc::channel::<Msg>();
+        let mut w = Worker {
+            rx,
+            curtain: Box::new(|_| {}),
+            bg_black: false,
+            up: false,
+            seq: 0,
+            covered: Cell::new(0),
+        };
+        let n = w.tell(wallpaper_curtain::Cmd::In);
+        let mut want = Want {
+            target: Target::Black,
+            restore: None,
+        };
+        // The curtain lands while the worker waits on the speed's clock.
+        tx.send(Msg::Covered(n)).unwrap();
+        assert!(matches!(
+            w.wait(&mut want, Instant::now() + POLL, None),
+            Wake::Due
+        ));
+        let started = Instant::now();
+        assert!(matches!(w.await_cover(&mut want, n), Go::On));
+        assert!(started.elapsed() < Duration::from_millis(100));
+        // A newer curtain is not taken for up by an older answer.
+        let newer = w.tell(wallpaper_curtain::Cmd::Cover);
+        assert!(w.covered.get() < newer);
+    }
+
+    /// Drive a real player through a script of targets, without a curtain
+    /// (one that is up at once), for a check of the worker alone:
+    /// `WALLPAPER_SOCK=<mpv socket> WALLPAPER_SCRIPT="pause:4,play:1.2"`
     /// (each target held for that many seconds), with `SWAYSOCK` set for the
-    /// background.
+    /// background. The curtain itself needs the panel:
+    /// `SWAYPPLET_WALLPAPER_SCRIPT`.
     #[test]
     #[ignore]
     fn drive_a_real_player() {
         let path = PathBuf::from(std::env::var("WALLPAPER_SOCK").expect("WALLPAPER_SOCK"));
         let script = std::env::var("WALLPAPER_SCRIPT").expect("WALLPAPER_SCRIPT");
-        let (tx, rx) = mpsc::channel::<Want>();
-        let worker = std::thread::spawn(move || worker(path, rx));
+        let (tx, rx) = mpsc::channel::<Msg>();
+        let ack: mpsc::Sender<Msg> = tx.clone();
+        let curtain: Box<dyn Fn(ToCurtain) + Send> = Box::new(move |ToCurtain(cmd, n)| {
+            eprintln!("curtain: {cmd:?}");
+            let _ = ack.send(Msg::Covered(n));
+        });
+        let worker = std::thread::spawn(move || worker(path, rx, curtain));
         let start = Instant::now();
         for item in script.split(',') {
             let (name, secs) = item.split_once(':').expect("target:seconds");
@@ -883,14 +1235,15 @@ mod tests {
                 other => panic!("no target {other}"),
             };
             eprintln!("t={:.2}s -> {target:?}", start.elapsed().as_secs_f64());
-            tx.send(Want {
+            tx.send(Msg::Want(Want {
                 target,
                 restore: None,
-            })
+            }))
             .unwrap();
             std::thread::sleep(Duration::from_secs_f64(secs.parse().unwrap()));
         }
-        drop(tx);
-        worker.join().unwrap();
+        // The curtain's sender keeps the channel open: the worker is left
+        // to the end of the process rather than joined.
+        drop(worker);
     }
 }

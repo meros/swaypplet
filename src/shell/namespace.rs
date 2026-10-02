@@ -53,10 +53,15 @@ pub enum Namespace {
     /// A namespace no surface uses, for asking sway what `layer_effects`
     /// options it parses (`anim::motion_support`).
     MotionProbe,
+    /// The black sheet over the animated wallpaper, one per output, that
+    /// fades it to black on battery (`services::wallpaper_curtain`).
+    /// Deliberately without glass: it is plain black, and a `layer_effects`
+    /// block on it would frost the desktop it is fading out.
+    WallpaperCurtain,
 }
 
 impl Namespace {
-    pub const ALL: [Namespace; 17] = [
+    pub const ALL: [Namespace; 18] = [
         Namespace::Panel,
         Namespace::Bar,
         Namespace::Launcher,
@@ -74,6 +79,7 @@ impl Namespace {
         Namespace::LockWarm,
         Namespace::SessionLock,
         Namespace::MotionProbe,
+        Namespace::WallpaperCurtain,
     ];
 
     /// The string the compositor sees.
@@ -96,6 +102,7 @@ impl Namespace {
             Namespace::LockWarm => "swaypplet-lock-warm",
             Namespace::SessionLock => "session-lock",
             Namespace::MotionProbe => "swaypplet-motion-probe",
+            Namespace::WallpaperCurtain => "swaypplet-curtain",
         }
     }
 
@@ -133,7 +140,8 @@ impl Namespace {
             | Namespace::Screenshot
             | Namespace::Greeter
             | Namespace::LockWarm
-            | Namespace::MotionProbe => None,
+            | Namespace::MotionProbe
+            | Namespace::WallpaperCurtain => None,
         }
     }
 }
