@@ -15,6 +15,13 @@
 //! after the config has run. One thing it cannot follow is a `swaymsg
 //! reload`, which re-runs the config's line; the next panel start puts the
 //! pick back.
+//!
+//! A still can stand for a video: a file beside it with the same name and a
+//! video extension (`beach-waves-4k.jpg` and `beach-waves-4k.mp4`). Picking
+//! that still starts the video (the `wallpaper-video` user unit, mpvpaper,
+//! which plays the file named in its environment file) over it; picking any
+//! other stops it, so the still shows. The still stays sway's `bg` either
+//! way: it is what the lock screen and the greeter fall back to.
 
 use std::path::{Path, PathBuf};
 
@@ -71,6 +78,8 @@ pub fn apply(w: &Wallpaper) {
     if let Some(cmd) = command(w) {
         crate::sway::ipc::run_command(&cmd);
     }
+    let still = w.path.clone();
+    crate::spawn::spawn_work(move || follow_video(&still), |()| ());
 }
 
 /// [`apply`] for a process with no main loop (`swaypplet settings`): one
@@ -80,10 +89,71 @@ pub fn apply_blocking(w: &Wallpaper) -> Result<(), String> {
     let outcomes = crate::sway::ipc::connect()
         .and_then(|mut c| c.run_command(&cmd))
         .map_err(|e| format!("sway ipc: {e}"))?;
+    follow_video(&w.path);
     outcomes
         .into_iter()
         .find_map(Result::err)
         .map_or(Ok(()), |e| Err(format!("sway: {e}")))
+}
+
+// ── The video a still stands for ────────────────────────────────────────
+
+/// The user unit that plays the wallpaper video (nixos
+/// `users/modules/wallpaper-video.nix`).
+const VIDEO_UNIT: &str = "wallpaper-video.service";
+
+/// The video `still` stands for: a file beside it with the same name and a
+/// video extension.
+pub(crate) fn video_for(still: &Path) -> Option<PathBuf> {
+    ["mp4", "webm", "mkv"]
+        .iter()
+        .map(|ext| still.with_extension(ext))
+        .find(|p| p.is_file())
+}
+
+/// The unit's environment file: `VIDEO=<path>`, the one thing it plays.
+fn video_env() -> PathBuf {
+    glib::user_runtime_dir()
+        .join("swaypplet")
+        .join("wallpaper-video.env")
+}
+
+/// Start the video `still` stands for, or stop the one playing. A video
+/// already playing the same file is left alone, so replaying a pick (panel
+/// start, `settings apply` on reload, the battery service putting the
+/// wallpaper back) does not restart it. Blocking: two small file operations
+/// and a `systemctl` call.
+fn follow_video(still: &Path) {
+    let Some(video) = video_for(still) else {
+        systemctl("stop");
+        return;
+    };
+    let line = format!("VIDEO={}\n", video.display());
+    let env = video_env();
+    let same = std::fs::read_to_string(&env).is_ok_and(|s| s == line);
+    if !same {
+        let written = env
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(&env, &line));
+        if let Err(e) = written {
+            log::warn!("wallpaper: {}: {e}", env.display());
+            return;
+        }
+    }
+    // `start` is a no-op on a running unit; a new file needs a restart.
+    systemctl(if same { "start" } else { "restart" });
+}
+
+fn systemctl(verb: &str) {
+    match std::process::Command::new("systemctl")
+        .args(["--user", "--no-block", verb, VIDEO_UNIT])
+        .status()
+    {
+        Ok(s) if s.success() => {}
+        Ok(s) => log::warn!("wallpaper: systemctl {verb} {VIDEO_UNIT}: {s}"),
+        Err(e) => log::warn!("wallpaper: systemctl {verb} {VIDEO_UNIT}: {e}"),
+    }
 }
 
 /// Replay the saved pick at panel startup.
@@ -91,6 +161,17 @@ pub fn apply_saved() {
     if let Some(w) = store::current().wallpaper {
         log::info!("wallpaper: replaying {}", w.path.display());
         apply(&w);
+    } else {
+        // No pick: sway's config line stands, and only the video it may
+        // stand for is this process's to start.
+        crate::spawn::spawn_work(
+            || {
+                if let Some(w) = system_default() {
+                    follow_video(&w.path);
+                }
+            },
+            |()| (),
+        );
     }
 }
 
@@ -245,8 +326,25 @@ seat \"*\" {
     #[test]
     fn only_images_are_candidates() {
         assert!(is_image(Path::new("/x/a.JPG")));
+        assert!(!is_image(Path::new("/x/a.mp4")));
         assert!(is_image(Path::new("/x/a.png")));
         assert!(!is_image(Path::new("/x/a.txt")));
         assert!(!is_image(Path::new("/x/noext")));
+    }
+
+    /// A still with a same-named video beside it stands for the video; one
+    /// without, or with only a differently named video, does not.
+    #[test]
+    fn a_still_stands_for_the_video_named_like_it() {
+        let dir = std::env::temp_dir().join(format!("swpp-video-for-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let still = dir.join("beach.jpg");
+        let other = dir.join("fields.jpg");
+        for f in [&still, &other, &dir.join("beach.mp4"), &dir.join("waves.mp4")] {
+            std::fs::write(f, b"").unwrap();
+        }
+        assert_eq!(video_for(&still), Some(dir.join("beach.mp4")));
+        assert_eq!(video_for(&other), None);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
