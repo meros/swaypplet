@@ -131,6 +131,12 @@ pub struct Idle {
     /// Power the outputs off after this much idle time *while locked*.
     #[serde(default = "Idle::default_blank_after")]
     pub blank_after_s: u32,
+    /// A shorter screen-off while running on battery. It can only shorten:
+    /// the effective tier is the smaller of this and the one in force
+    /// (night window included), see [`Idle::blank_after_on`]. Zero is no
+    /// battery override, not "never".
+    #[serde(default = "Idle::default_battery_blank_after")]
+    pub battery_blank_after_s: u32,
     /// Suspend after this much idle time, on battery only.
     #[serde(default = "Idle::default_suspend_after")]
     pub suspend_after_s: u32,
@@ -190,6 +196,9 @@ impl Idle {
     }
     fn default_blank_after() -> u32 {
         15 * 60
+    }
+    fn default_battery_blank_after() -> u32 {
+        300
     }
     fn default_suspend_after() -> u32 {
         1200
@@ -280,6 +289,26 @@ impl Idle {
             ..*self
         }
     }
+
+    /// The screen-off tier in seconds for a resolved struct, given the power
+    /// source; zero is "never", as for `blank_after_s`.
+    ///
+    /// On battery the battery tier wins only when it is the shorter of the
+    /// two, and a zero on either side drops out rather than winning the
+    /// comparison: a "never" blank on battery still goes off after the
+    /// battery tier, since a lit lock screen draining the battery is what
+    /// the setting exists to stop, and a zero battery tier is the user
+    /// turning the override off. On AC nothing changes.
+    pub fn blank_after_on(&self, on_battery: bool) -> u32 {
+        let battery = self.battery_blank_after_s;
+        if !on_battery || battery == 0 {
+            return self.blank_after_s;
+        }
+        match self.blank_after_s {
+            0 => battery,
+            tier => tier.min(battery),
+        }
+    }
 }
 
 impl Default for Idle {
@@ -289,6 +318,7 @@ impl Default for Idle {
             dim_level: Self::default_dim_level(),
             lock_after_s: Self::default_lock_after(),
             blank_after_s: Self::default_blank_after(),
+            battery_blank_after_s: Self::default_battery_blank_after(),
             suspend_after_s: Self::default_suspend_after(),
             walk_away_lock: true,
             face_unlock: true,
@@ -2059,6 +2089,33 @@ mod tests {
         assert_eq!(night.suspend_after_s, cfg.suspend_after_s);
         // The window's own fields survive, so resolving again is a no-op.
         assert_eq!(night.resolve(22 * 60), night);
+    }
+
+    #[test]
+    fn the_battery_tier_only_ever_shortens_the_screen_off() {
+        let cfg = |blank, battery| Idle {
+            blank_after_s: blank,
+            battery_blank_after_s: battery,
+            ..Idle::default()
+        };
+        // On AC the battery tier is inert, whatever it says.
+        assert_eq!(cfg(900, 300).blank_after_on(false), 900);
+        assert_eq!(cfg(0, 300).blank_after_on(false), 0);
+        // On battery the shorter wins, in either direction.
+        assert_eq!(cfg(900, 300).blank_after_on(true), 300);
+        assert_eq!(cfg(120, 300).blank_after_on(true), 120);
+        // "Never" on AC is not "never" on battery, and a zero battery tier
+        // is no override rather than a "never" that beats everything.
+        assert_eq!(cfg(0, 300).blank_after_on(true), 300);
+        assert_eq!(cfg(900, 0).blank_after_on(true), 900);
+        assert_eq!(cfg(0, 0).blank_after_on(true), 0);
+        // It applies to the resolved struct, so the night tier competes too.
+        let night = Idle {
+            night: true,
+            night_blank_after_s: 120,
+            ..cfg(900, 300)
+        };
+        assert_eq!(night.resolve(23 * 60).blank_after_on(true), 120);
     }
 
     #[test]

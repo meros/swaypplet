@@ -40,7 +40,7 @@ struct Timer {
     set: fn(&mut Idle, u32),
 }
 
-const TIMERS: [Timer; 4] = [
+const TIMERS: [Timer; 5] = [
     Timer {
         label: "Dim after",
         hint: "Fade the backlight after this much idle time. Any input restores it.",
@@ -61,6 +61,13 @@ const TIMERS: [Timer; 4] = [
         ladder: BLANK_LADDER,
         get: |i| i.blank_after_s,
         set: |i, v| i.blank_after_s = v,
+    },
+    Timer {
+        label: "Screen off on battery",
+        hint: "Counted while locked, on battery only. It can only shorten the screen-off tier, the night one included, never lengthen it; Never leaves that tier in charge.",
+        ladder: BLANK_LADDER,
+        get: |i| i.battery_blank_after_s,
+        set: |i, v| i.battery_blank_after_s = v,
     },
     Timer {
         label: "Suspend after",
@@ -103,11 +110,12 @@ const NIGHT_TIMERS: [Timer; 3] = [
 /// rather than that there is one.
 fn describe(idle: &Idle) -> String {
     let mut text = format!(
-        "System default: dim {} at {}%, lock {}, screen off {} into the lock, suspend {} on battery",
+        "System default: dim {} at {}%, lock {}, screen off {} into the lock ({} on battery), suspend {} on battery",
         form::duration_label(idle.dim_after_s).to_lowercase(),
         idle.dim_level,
         form::duration_label(idle.lock_after_s).to_lowercase(),
         form::duration_label(idle.blank_after_s).to_lowercase(),
+        form::duration_label(idle.blank_after_on(true)).to_lowercase(),
         form::duration_label(idle.suspend_after_s).to_lowercase(),
     );
     if idle.night {
@@ -531,6 +539,7 @@ pub(super) const SEARCH: &[Entry] = &[
     row("Idle timers", "Dim after", "Dim the backlight when idle", &["dim", "screen dim", "idle", "backlight", "inactivity"]).keys(&["idle.dim_after_s"]),
     row("Idle timers", "Lock after", "Lock the session when idle", &["auto lock", "autolock", "screen lock", "lock screen", "timeout", "idle", "screensaver"]).keys(&["idle.lock_after_s"]),
     row("Idle timers", "Screen off after", "Turn the screens off while locked", &["screen timeout", "display off", "monitor off", "screen off", "blank", "dpms", "timeout", "screensaver"]).keys(&["idle.blank_after_s"]),
+    row("Idle timers", "Screen off on battery", "A shorter screen-off while locked on battery", &["battery", "screen timeout", "display off", "screen off", "blank", "dpms", "power saving", "unplugged"]).keys(&["idle.battery_blank_after_s"]),
     row("Idle timers", "Suspend after", "Sleep on battery when idle", &["sleep", "suspend", "hibernate", "battery", "standby"]).keys(&["idle.suspend_after_s"]),
     row("Idle timers", "Dim to", "How far the dim tier turns the backlight down", &["dim level", "brightness", "backlight"]).keys(&["idle.dim_level"]),
     row("Night window", "Use a night window", "Shorter timers for the night", &["night", "schedule", "bedtime"]).keys(&["idle.night"]),
@@ -613,6 +622,10 @@ mod tests {
             ("dim_after_s", t.dim_after_s != base.dim_after_s),
             ("lock_after_s", t.lock_after_s != base.lock_after_s),
             ("blank_after_s", t.blank_after_s != base.blank_after_s),
+            (
+                "battery_blank_after_s",
+                t.battery_blank_after_s != base.battery_blank_after_s,
+            ),
             ("suspend_after_s", t.suspend_after_s != base.suspend_after_s),
             ("dim_level", t.dim_level != base.dim_level),
             ("walk_away_lock", t.walk_away_lock != base.walk_away_lock),
@@ -657,6 +670,7 @@ mod tests {
         assert_eq!(
             seen,
             [
+                "battery_blank_after_s",
                 "blank_after_s",
                 "dim_after_s",
                 "lock_after_s",

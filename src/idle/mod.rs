@@ -17,6 +17,7 @@
 //!   300 s  lock the session (the screen stays LIT; locking does not blank)
 //!    15 m  power outputs off after this much idle time *while locked*;
 //!          any input disarms it and re-powers
+//!     5 m  the same, on battery, when shorter (`Idle::blank_after_on`)
 //!  1200 s  suspend, only on battery
 //!
 //! The pane is another process, so an edit reaches here as a file: an
@@ -170,9 +171,24 @@ fn next_minute() -> Instant {
 /// that is the machine powering down rather than an idle policy. `None` is
 /// the setting's "never": the lock screen stays lit until something else
 /// turns it off.
-fn blank_deadline(cfg: &Idle) -> Option<Instant> {
-    (cfg.blank_after_s > 0)
-        .then(|| Instant::now() + Duration::from_secs(u64::from(cfg.blank_after_s)))
+///
+/// On battery the tier is the shorter of the two settings
+/// (`Idle::blank_after_on`). The power source is read by the caller at arm
+/// time and again on the minute check, so unplugging while locked shortens a
+/// countdown already running.
+fn blank_deadline(cfg: &Idle, on_battery: bool) -> Option<Instant> {
+    let secs = cfg.blank_after_on(on_battery);
+    (secs > 0).then(|| Instant::now() + Duration::from_secs(u64::from(secs)))
+}
+
+/// The blank tier as the log lines say it: `300s (on battery)`, `900s`, or
+/// the setting's never.
+fn blank_label(cfg: &Idle, on_battery: bool) -> String {
+    match cfg.blank_after_on(on_battery) {
+        0 => "never (setting)".to_string(),
+        secs if on_battery && secs != cfg.blank_after_s => format!("{secs}s (on battery)"),
+        secs => format!("{secs}s"),
+    }
 }
 
 pub fn run() -> ! {
@@ -217,6 +233,10 @@ pub fn run() -> ! {
     // When the locked, idle session's outputs should go off. Some(_) only
     // while locked AND idle; any input clears it. See `blank_deadline`.
     let mut blank_at: Option<Instant> = None;
+    // The power source as last read, for the blank tier. Read again at every
+    // arm and on the minute check rather than watched: a minute's lag on an
+    // unplug costs at most a minute of lit lock screen.
+    let mut battery = on_battery();
     // Why the current locker was started ("idle" | "manual" | "sleep" |
     // "switch"); decides whether LockerUp blanks the outputs.
     let mut lock_reason: &'static str = "manual";
@@ -293,7 +313,8 @@ pub fn run() -> ! {
                 // to turn it off again, and the lock screen would sit lit
                 // until someone touched a key.
                 if locker_confirmed {
-                    blank_at = blank_deadline(&cfg);
+                    battery = on_battery();
+                    blank_at = blank_deadline(&cfg, battery);
                 }
                 outputs.power("presence.back", Power::On);
             } else if !cfg.walk_away_lock {
@@ -336,6 +357,15 @@ pub fn run() -> ! {
             }
             let minute = store::local_minute_of_day();
             let fresh = saved.resolve(minute);
+            let was_battery = std::mem::replace(&mut battery, on_battery());
+            if battery != was_battery {
+                log::info!(
+                    "idle: {} — screen off {}",
+                    if battery { "on battery" } else { "on AC" },
+                    blank_label(&fresh, battery)
+                );
+            }
+            let tier_changed = fresh != cfg || battery != was_battery;
             if fresh != cfg {
                 log::info!(
                     "idle: {} — dim {}s to {}%, lock {}s, blank {}s, suspend {}s (0 is never)",
@@ -356,15 +386,17 @@ pub fn run() -> ! {
                 if timeouts.send(wayland::Timeouts::from(&cfg)).is_err() {
                     log::error!("idle: wayland thread gone; timers not re-armed");
                 }
-                // A blank already counting down was armed against the old
-                // tier. Shorten it to the new one, never extend it: the
-                // window's job is to put the screen out sooner, and a locked
-                // screen that stays lit past the new deadline because the
-                // window opened one second too late is the bug this avoids.
-                // `None` from the new tier is "never", which disarms.
-                if let Some(at) = blank_at {
-                    blank_at = blank_deadline(&cfg).map(|fresh_at| at.min(fresh_at));
-                }
+            }
+            // A blank already counting down was armed against the old tier,
+            // or the old power source. Shorten it to the new one, never
+            // extend it: the window's job, and the battery tier's, is to put
+            // the screen out sooner, and a locked screen that stays lit past
+            // the new deadline because the window opened one second too late
+            // is the bug this avoids. Plugging in therefore leaves a shorter
+            // countdown alone. `None` from the new tier is "never", which
+            // disarms.
+            if tier_changed && let Some(at) = blank_at {
+                blank_at = blank_deadline(&cfg, battery).map(|fresh_at| at.min(fresh_at));
             }
         }
 
@@ -397,7 +429,10 @@ pub fn run() -> ! {
             // must still be on the seat, since a switch-away lock leaves our
             // idle timers running on a VT we no longer own.
             if locker_confirmed && session_active {
-                log::info!("lock.blank: {}s idle while locked", cfg.blank_after_s);
+                log::info!(
+                    "lock.blank: {} idle while locked",
+                    blank_label(&cfg, battery)
+                );
                 outputs.power("lock.blank", Power::Off);
             } else {
                 log::info!("lock.blank: skipped (session inactive or locker gone)");
@@ -462,9 +497,12 @@ pub fn run() -> ! {
             // This no longer blanks anything by itself.
             Ev::Idled(Timeout::LockIdle) => {
                 if locker_confirmed {
-                    blank_at = blank_deadline(&cfg);
+                    battery = on_battery();
+                    blank_at = blank_deadline(&cfg, battery);
                     match blank_at {
-                        Some(_) => log::info!("lock.blank: armed for {}s", cfg.blank_after_s),
+                        Some(_) => {
+                            log::info!("lock.blank: armed for {}", blank_label(&cfg, battery))
+                        }
                         None => log::info!("lock.blank: never (setting)"),
                     }
                 }
@@ -574,13 +612,11 @@ pub fn run() -> ! {
                     // where face unlock reports what it is doing, and a panel
                     // that goes dark a second after locking made that
                     // invisible. Blanking waits for real idle time.
-                    blank_at = blank_deadline(&cfg);
+                    battery = on_battery();
+                    blank_at = blank_deadline(&cfg, battery);
                     log::info!(
                         "lock: locker up ({lock_reason}) — screen stays lit, blank in {}",
-                        match blank_at {
-                            Some(_) => format!("{}s", cfg.blank_after_s),
-                            None => "never (setting)".to_string(),
-                        }
+                        blank_label(&cfg, battery)
                     );
                 }
                 // Record the lock in logind so a service restart can recover
@@ -693,6 +729,24 @@ pub(super) fn run_cmd_timed(scope: &str, cmd: &str, args: &[&str], waited: Durat
         Ok(st) => log::warn!("{scope}: {cmd} exited {st} after {took}ms (queued {queued}ms)"),
         Err(e) => log::warn!("{scope}: {cmd} failed to spawn: {e}"),
     }
+}
+
+/// True when the machine has a battery and nothing is charging it: a
+/// `Battery` supply exists and no supply reports online=1.
+///
+/// Deliberately not `!on_ac()`, which reads a machine with no supply at all
+/// (a desktop) as off AC. The battery screen-off tier must not reach a
+/// machine that has no battery.
+fn on_battery() -> bool {
+    let Ok(entries) = std::fs::read_dir("/sys/class/power_supply") else {
+        return false;
+    };
+    let read = |e: &std::fs::DirEntry, file: &str| {
+        std::fs::read_to_string(e.path().join(file)).unwrap_or_default()
+    };
+    let entries: Vec<_> = entries.flatten().collect();
+    entries.iter().any(|e| read(e, "type").trim() == "Battery")
+        && !entries.iter().any(|e| read(e, "online").trim() == "1")
 }
 
 /// True when any power supply reports online=1 (AC adapter present).
