@@ -211,6 +211,25 @@ pub(crate) fn sync_video_speed(speed: f64) {
     }
 }
 
+/// Freeze the video's unit (systemd's cgroup freezer), or thaw it. mpvpaper
+/// polls on a 10 ms timer whether mpv plays or not, about 200 wake-ups a
+/// second paused; frozen, it runs not at all, and its last frame stays on
+/// screen. Blocking: `systemctl` returns once the unit is frozen or thawed
+/// (13 ms measured). A unit that is not running cannot be frozen, which is
+/// the normal state of a session without the video: logged at debug only.
+pub(crate) fn freeze_video(frozen: bool) {
+    let verb = if frozen { "freeze" } else { "thaw" };
+    match std::process::Command::new("systemctl")
+        .args(["--user", verb, VIDEO_UNIT])
+        .stderr(std::process::Stdio::null())
+        .status()
+    {
+        Ok(s) if s.success() => {}
+        Ok(s) => log::debug!("wallpaper: systemctl {verb} {VIDEO_UNIT}: {s}"),
+        Err(e) => log::warn!("wallpaper: systemctl {verb} {VIDEO_UNIT}: {e}"),
+    }
+}
+
 fn systemctl(verb: &str) {
     match std::process::Command::new("systemctl")
         .args(["--user", "--no-block", verb, VIDEO_UNIT])

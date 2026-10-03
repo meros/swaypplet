@@ -54,6 +54,14 @@
 //! it) or that something else resumed. Polling only then keeps a machine on
 //! mains free of the wake-up.
 //!
+//! Paused or black and settled, the player's unit is frozen (systemd's
+//! cgroup freezer, `settings::wallpaper::freeze_video`): mpvpaper polls on a
+//! 10 ms timer whether mpv plays or not, about 200 wake-ups a second and
+//! 0.7 % of a core paused (meros-laptop, 2026-10-03), and none frozen. Its
+//! last frame, the paused video or black, stays on screen and behind the
+//! lock card. Every connection to the socket thaws it first, so the tick
+//! thaws, finds nothing to do, and freezes it again.
+//!
 //! The socket runs on a worker thread, one connection per transition: the
 //! GTK thread sends it the wanted state and tells it when the curtain is
 //! up; the worker sends the curtain what to do. A missing socket is the
@@ -590,6 +598,9 @@ struct Worker {
     /// A speed told that the player has not been given yet: one that came
     /// in midway through a transition waits for its end.
     speed_due: Cell<bool>,
+    /// The player's unit may be frozen: thaw it before the socket. True at
+    /// start, for a panel restarted while it was.
+    frozen: Cell<bool>,
 }
 
 impl Worker {
@@ -604,6 +615,25 @@ impl Worker {
             target: Target::Play,
             speed: Cell::new(1.0),
             speed_due: Cell::new(false),
+            frozen: Cell::new(true),
+        }
+    }
+
+    /// The player's socket, its unit thawed first: a frozen mpv accepts the
+    /// connection in the kernel and never answers it.
+    fn connect(&self, path: &Path) -> io::Result<Ipc> {
+        if self.frozen.replace(false) {
+            crate::settings::wallpaper::freeze_video(false);
+        }
+        Ipc::connect(path)
+    }
+
+    /// Paused or black and settled, freeze the player's unit: mpvpaper polls
+    /// whether mpv plays or not. Thawed again before the next connection.
+    fn hold(&self) {
+        if self.target != Target::Play && !self.frozen.replace(true) {
+            log::debug!("wallpaper-battery: freezing the player");
+            crate::settings::wallpaper::freeze_video(true);
         }
     }
 
@@ -629,7 +659,7 @@ impl Worker {
         }
         let speed = self.speed.get();
         crate::settings::wallpaper::sync_video_speed(speed);
-        let mut ipc = match Ipc::connect(path) {
+        let mut ipc = match self.connect(path) {
             Ok(ipc) => ipc,
             Err(e) => {
                 log::debug!("wallpaper-battery: no player for speed {speed}: {e}");
@@ -770,7 +800,7 @@ impl Worker {
     /// one came in midway, for the caller to turn around to.
     fn settle(&mut self, path: &Path, want: &mut Want) -> Option<Want> {
         use wallpaper_curtain::Cmd as C;
-        let mut ipc = match Ipc::connect(path) {
+        let mut ipc = match self.connect(path) {
             Ok(ipc) => ipc,
             Err(e) => {
                 log::debug!("wallpaper-battery: no player at {}: {e}", path.display());
@@ -862,6 +892,7 @@ fn worker(path: PathBuf, rx: Receiver<Msg>, curtain: Box<dyn Fn(ToCurtain) + Sen
             }
         }
         w.give_speed(&path);
+        w.hold();
         match w.rx.recv() {
             Ok(msg) => w.note(msg, &mut pending),
             Err(_) => return,
