@@ -1,6 +1,7 @@
 //! The glass material per mode (docs/design-system.md §4), and what its
 //! body shows over a backdrop.
 
+use super::color::{Oklch, oklch_linear};
 use super::{Contrast, Inputs, Mode, Rgb, apca, levels, scales};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -8,7 +9,9 @@ pub struct Material {
     pub fill_color: Rgb,
     pub fill_alpha: f64,
     pub absorb: f64,
-    /// > 0 a ceiling on luminance, < 0 a lift (a floor).
+    /// The shader's OKLab tone (`photochromic_tone`): > 0 dark, the brights
+    /// fold down and white lands at OKLab L `p / (1 + p)`; < 0 light, the
+    /// darks fold up and black lands at `-p / (1 - p)`; 0 off.
     pub photochromic: f64,
     pub frost: f64,
 }
@@ -17,24 +20,31 @@ pub fn material(inputs: Inputs) -> Material {
     let s = scales(inputs);
     let high = inputs.contrast == Contrast::High;
     match inputs.mode {
+        // Standard contrast in both modes is clear glass with the tone alone
+        // (2026-10-05, from a grey or white veil over a luminance ceiling or
+        // lift): dark a little darker, light a little lighter, every colour
+        // keeping its hue. The veils washed a colour toward one grey or one
+        // pastel, and the light lift oversaturated what it lifted. Chosen by
+        // eye in an OKLab model of the shader over the wallpapers and the
+        // bench backdrops. High contrast keeps its dense veil.
         Mode::Dark => Material {
             fill_color: s.neutral[2],
-            fill_alpha: if high { 0.72 } else { 0.50 },
-            absorb: 1.0,
-            photochromic: if high { 0.25 } else { 0.35 },
+            fill_alpha: if high { 0.72 } else { 0.0 },
+            absorb: if high { 1.0 } else { 0.0 },
+            // 0.89 lands a white page at OKLab L 0.47, about what the old
+            // veil and ceiling reached, and leaves the darks alone.
+            photochromic: if high { 0.25 } else { 0.89 },
             frost: if high { 0.45 } else { 0.33 },
         },
         Mode::Light => Material {
-            fill_color: s.neutral[1],
-            // 0.30 and -0.30, from 0.44 and -0.48 on 2026-10-02, chosen by
-            // eye in the nixos glass-bench zoo (variant 05): the lift
-            // compresses the whole backdrop toward white, and with the fill
-            // it washed the wallpaper flat where dark glass lets it through.
-            // It costs contrast; see `targets`.
-            fill_alpha: if high { 0.72 } else { 0.30 },
-            absorb: if high { 0.20 } else { 0.25 },
-            photochromic: if high { -0.50 } else { -0.30 },
-            frost: if high { 0.45 } else { 0.30 },
+            fill_color: Rgb::WHITE,
+            fill_alpha: if high { 0.72 } else { 0.0 },
+            absorb: if high { 0.20 } else { 0.0 },
+            // -2 lands black at OKLab L 0.67 and leaves the brights alone.
+            // -1.27 (L 0.56) left a black backdrop a muddy mid grey, the one
+            // lightness where mid-tone colours on the glass vanish.
+            photochromic: if high { -3.0 } else { -2.0 },
+            frost: if high { 0.45 } else { 0.33 },
         },
     }
 }
@@ -61,21 +71,38 @@ pub fn material_at(inputs: Inputs, clarity: f64) -> Material {
         return base;
     }
     let target = (base.fill_alpha * (1.0 - CLARITY_REACH * c)).clamp(0.0, 0.95);
-    // The strongest the compensation may go: a lift past 0.70 turns a black
-    // terminal behind into grey paper, a ceiling under 0.15 flattens every
-    // highlight behind to one grey.
+    // With no body fill to thin (light standard ships alpha 0), clarity acts
+    // on the lift instead: +1 takes it toward none of the mode's own, −1
+    // past it, the same reach CLARITY_REACH gives the fill. The readable()
+    // walk below still has the last word, and over a black backdrop it
+    // usually keeps some of the thinning from happening.
+    // The tone's strength is 1/p dark and -p light (glass_fade.rs fades it
+    // the same way), so clear divides it and dense multiplies it.
+    let (fill_target, photo_start) = if base.fill_alpha > 0.0 {
+        (target, base.photochromic)
+    } else {
+        let k = 1.0 - CLARITY_REACH * c;
+        let p = match inputs.mode {
+            Mode::Dark => base.photochromic / k,
+            Mode::Light => base.photochromic * k,
+        };
+        (base.fill_alpha, p)
+    };
+    // The strongest the compensation may go: a light fold past -4 lands a
+    // black terminal behind at grey paper (L 0.8), a dark one under 0.15
+    // flattens every highlight behind to one dark grey (L 0.13).
     let (strongest, step) = match inputs.mode {
-        Mode::Light => (-0.70, -0.01),
+        Mode::Light => (-4.0, -0.05),
         Mode::Dark => (0.15, -0.01),
     };
-    let steps_alpha = ((base.fill_alpha - target).abs() / 0.01).round() as usize;
-    let steps_photo = ((strongest - base.photochromic) / step).round().max(0.0) as usize;
+    let steps_alpha = ((base.fill_alpha - fill_target).abs() / 0.01).round() as usize;
+    let steps_photo = ((strongest - photo_start) / step).round().max(0.0) as usize;
     for i in 0..=steps_alpha {
-        let fill_alpha = target + (base.fill_alpha - target).signum() * 0.01 * i as f64;
+        let fill_alpha = fill_target + (base.fill_alpha - fill_target).signum() * 0.01 * i as f64;
         for j in 0..=steps_photo {
             let m = Material {
                 fill_alpha,
-                photochromic: base.photochromic + step * j as f64,
+                photochromic: photo_start + step * j as f64,
                 ..base
             };
             if readable(inputs, &m) {
@@ -104,24 +131,40 @@ pub struct Targets {
 }
 
 /// Body text Lc 75, muted 60, faint 45, the accent's text 60, categorical
-/// 45 - except light glass at standard contrast.
+/// 45 - except at standard contrast, where both modes are clear glass and
+/// the tone alone holds the text up.
 ///
-/// Light glass reaches dark text's contrast only by brightening whatever is
-/// behind it, black included, and brightening a dark backdrop that far
-/// erases it: at Lc 75 the most backdrop light glass could show was under
-/// half what dark glass shows (glass-bench search, 2026-10-02). The light
-/// standard material was chosen for the backdrop instead, and these are
-/// what it reaches over every input: a deliberate trade, not drift. High
-/// contrast keeps the full targets, and is the setting for anyone who
-/// needs them.
+/// Light glass reaches dark text's contrast only by lifting whatever is
+/// behind it, black included, and lifting black far enough for Lc 75 erases
+/// the backdrop. Measured on the shipped light material (2026-10-05, black
+/// landing at OKLab L 0.67): Lc 42.9 fg, 37.1 muted, 28.8 faint, 28.8
+/// accent and 18 categorical over black, 60.6 fg over mid grey, and more
+/// over every lighter backdrop. These targets are that reach with a small
+/// cushion: a trade for a light material that shows the wallpaper, made for
+/// the look and not for the text.
+///
+/// Dark glass leaves the darks as they are, so faint text over a black
+/// terminal has no lift under it: Lc 44.3 on the untinted neutral and down
+/// to 43.x on the warmest tints, against 45. It holds the full targets
+/// everywhere else.
+///
+/// High contrast keeps the full targets behind its own dense veil, and is
+/// the setting for anyone who needs them.
 pub fn targets(mode: Mode, contrast: Contrast) -> Targets {
     match (mode, contrast) {
         (Mode::Light, Contrast::Standard) => Targets {
-            fg: 60.0,
-            muted: 52.0,
-            faint: 41.0,
-            accent: 46.0,
-            categorical: 36.0,
+            fg: 40.0,
+            muted: 35.0,
+            faint: 27.0,
+            accent: 27.0,
+            categorical: 16.0,
+        },
+        (Mode::Dark, Contrast::Standard) => Targets {
+            fg: 75.0,
+            muted: 60.0,
+            faint: 43.0,
+            accent: 60.0,
+            categorical: 45.0,
         },
         _ => Targets {
             fg: 75.0,
@@ -162,44 +205,58 @@ pub fn readable(inputs: Inputs, m: &Material) -> bool {
 
 /// What the glass body shows over `backdrop`, following
 /// `liquid_glass.frag` on the flat interior of a card: absorption along the
-/// full path, the photochromic ceiling or lift, then the body fill. The
-/// shader draws it; this model is what [`readable`] and the contrast tests
-/// measure through.
-/// The most light glass's lift may multiply a colour by (the shader's
-/// `LIFT_GAIN_MAX`): at 4 a colour behind light glass keeps about the chroma
-/// dark glass leaves it, so the two modes feel alike.
-const LIFT_GAIN_MAX: f64 = 4.0;
-
+/// full path, the photochromic tone, then the body fill. The shader draws
+/// it; this model is what [`readable`] and the contrast tests measure
+/// through.
 pub fn glass_body(backdrop: Rgb, m: &Material) -> Rgb {
     let k = (-m.absorb).exp();
     let mut t = backdrop.to_linear().map(|x| x * k);
-    let lum = 0.2126 * t[0] + 0.7152 * t[1] + 0.0722 * t[2];
-    if m.photochromic > 0.0 && lum > 0.0005 {
-        let p = m.photochromic;
-        let s = p * (1.0 - (-lum / p).exp()) / lum;
-        t = t.map(|x| x * s);
-    } else if m.photochromic < 0.0 {
-        // As the shader does (nixos patches/scenefx-photochromic-lift.patch):
-        // the floor reaches the colour as a gain of at most LIFT_GAIN_MAX,
-        // never past 1.0 on a channel, and the rest as white. The luminance
-        // lands on the floor either way. An uncapped gain of lifted/lum
-        // turned a dark red diff line behind light glass into neon.
-        let f = -m.photochromic;
-        let lifted = lum + f * (-lum / f).exp();
-        let mut gain = if lum > 0.0005 {
-            (lifted / lum).min(LIFT_GAIN_MAX)
-        } else {
-            0.0
-        };
-        let top = t[0].max(t[1]).max(t[2]);
-        if top > lum + 1e-6 {
-            gain = gain.min((1.0 - lifted).max(0.0) / (top - lum));
-        }
-        t = t.map(|x| x * gain + lifted - lum * gain);
+    if m.photochromic != 0.0 {
+        t = photochromic_tone(t, m.photochromic);
     }
     let fill = m.fill_color.to_linear();
     let a = m.fill_alpha.clamp(0.0, 1.0);
     Rgb::from_linear([0, 1, 2].map(|i| t[i] * (1.0 - a) + fill[i] * a))
+}
+
+/// The shader's `CHROMA_CAP` and `GAMUT_KNEE` (nixos
+/// patches/scenefx-liquid-glass.patch).
+const CHROMA_CAP: f64 = 0.13;
+const GAMUT_KNEE: f64 = 0.8;
+
+/// The shader's `photochromic_tone`, in linear sRGB: lightness along the
+/// mode's curve, hue kept, chroma softly capped and then compressed into
+/// the gamut at the new lightness.
+fn photochromic_tone(t: [f64; 3], p: f64) -> [f64; 3] {
+    let Oklch(l, c, h) = Oklch::from(Rgb::from_linear(t));
+    let l = l.max(0.0);
+    let l = if p > 0.0 {
+        l / (1.0 + l / p)
+    } else {
+        let x = (1.0 - l).max(0.0);
+        1.0 - x / (1.0 - p * x)
+    };
+    let mut c = CHROMA_CAP * (c / CHROMA_CAP).tanh();
+    let inside = |c: f64| {
+        oklch_linear(Oklch(l, c, h))
+            .iter()
+            .all(|v| (0.0..=1.0).contains(v))
+    };
+    let (mut lo, mut hi) = (0.0, 0.4);
+    for _ in 0..8 {
+        let mid = 0.5 * (lo + hi);
+        if inside(mid) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let knee = GAMUT_KNEE * lo;
+    if c > knee {
+        let room = (lo - knee).max(1e-5);
+        c = knee + room * ((c - knee) / room).tanh();
+    }
+    oklch_linear(Oklch(l, c, h)).map(|v| v.clamp(0.0, 1.0))
 }
 
 #[cfg(test)]
@@ -216,48 +273,40 @@ mod tests {
             .filter(|i| i.tint.hue().is_none_or(|h| (h as u32).is_multiple_of(30)))
     }
 
-    /// OKLCH chroma, for comparing how much colour survives the glass.
-    fn chroma(c: Rgb) -> f64 {
-        let [r, g, b] = c.to_linear();
-        let cbrt = |x: f64| x.max(0.0).cbrt();
-        let l = cbrt(0.412_221_470_8 * r + 0.536_332_536_3 * g + 0.051_445_992_9 * b);
-        let m = cbrt(0.211_903_498_2 * r + 0.680_699_545_1 * g + 0.107_396_956_6 * b);
-        let s = cbrt(0.088_302_461_9 * r + 0.281_718_837_6 * g + 0.629_978_700_5 * b);
-        let a = 1.977_998_495_1 * l - 2.428_592_205 * m + 0.450_593_709_9 * s;
-        let bb = 0.025_904_037_1 * l + 0.782_771_766_2 * m - 0.808_675_766 * s;
-        a.hypot(bb)
-    }
-
-    /// Light glass shows a colour behind it about as strongly as dark glass
-    /// does, and never brighter than its gamut: no neon from a terminal's
-    /// dark red diff line or a pure red. Measured on the body (before the
-    /// client's content), in OKLCH chroma, with the uncapped lift at 0.085
-    /// over the diff line against dark glass's 0.031.
+    /// The tone moves lightness and nothing else a person would call the
+    /// colour: in both modes, no colour behind the glass leaves with more
+    /// chroma than it came in with (no neon), its hue holds, and dark glass
+    /// never lightens nor light glass darkens. Before 2026-10-05 the light
+    /// lift multiplied a dark red diff line by up to 20, and a cap was what
+    /// kept it from going neon; here nothing multiplies chroma at all.
     #[test]
-    fn light_and_dark_glass_carry_a_colour_alike() {
-        let light = material(Inputs {
-            mode: Mode::Light,
-            ..Inputs::default()
-        });
-        let dark = material(Inputs::default());
-        assert!(light.photochromic < 0.0 && dark.photochromic > 0.0);
-        // Dark colours (a diff line's ground, a dim photo): within a
-        // factor of 1.6 of dark glass either way.
-        for c in [0x5f0000, 0x003f00, 0x3c1414, 0x458588, 0x00003f, 0xf4a6c0, 0x8ec8f0] {
-            let c = Rgb::hex(c);
-            let (l, d) = (chroma(glass_body(c, &light)), chroma(glass_body(c, &dark)));
-            assert!(
-                l <= d * 1.6 && l >= d / 1.6,
-                "{c:?}: light {l:.3}, dark {d:.3}"
-            );
-        }
-        // Vivid colours: about what dark glass shows, where the old gain
-        // clipped them to neon. 1.25 since the lighter light material of
-        // 2026-10-02, which lets gruvbox's dark red through at 1.21.
-        for c in [0xff0000, 0xff00aa, 0x0000ff, 0xcc241d] {
-            let c = Rgb::hex(c);
-            let (l, d) = (chroma(glass_body(c, &light)), chroma(glass_body(c, &dark)));
-            assert!(l <= d * 1.25, "{c:?}: light {l:.3}, dark {d:.3}");
+    fn the_tone_keeps_a_colour() {
+        for mode in Mode::ALL {
+            let m = material(Inputs {
+                mode,
+                ..Inputs::default()
+            });
+            for c in [
+                0x5f0000, 0x003f00, 0x3c1414, 0x458588, 0x00003f, 0xf4a6c0, 0x8ec8f0, 0xff0000,
+                0xff00aa, 0x0000ff, 0x00e5ff, 0xffd400, 0xcc241d, 0x808080,
+            ] {
+                let c = Rgb::hex(c);
+                let (i, o) = (Oklch::from(c), Oklch::from(glass_body(c, &m)));
+                assert!(
+                    o.1 <= i.1 + 1e-6,
+                    "{mode:?} {c:?}: chroma {:.3} -> {:.3}",
+                    i.1,
+                    o.1
+                );
+                if o.1 > 0.02 {
+                    let dh = ((o.2 - i.2 + 540.0) % 360.0 - 180.0).abs();
+                    assert!(dh < 3.0, "{mode:?} {c:?}: hue moved {dh:.1} degrees");
+                }
+                match mode {
+                    Mode::Dark => assert!(o.0 <= i.0 + 1e-6, "{c:?}: {:.3} -> {:.3}", i.0, o.0),
+                    Mode::Light => assert!(o.0 >= i.0 - 1e-6, "{c:?}: {:.3} -> {:.3}", i.0, o.0),
+                }
+            }
         }
     }
 
@@ -300,21 +349,52 @@ mod tests {
         }
     }
 
-    /// And it does something: full clarity thins the body in every mode.
+    /// And it does something: where the mode has a body fill, full clarity
+    /// thins it; where it has none (standard contrast), the tone is the knob
+    /// and dense clarity strengthens it. `readable()` may hold the clear end
+    /// in place, so the clear assertion is on the effect, not the knob: clear
+    /// never moves the mode's hardest backdrop further than dense does.
     #[test]
     fn clarity_lets_more_through() {
         for inputs in sample() {
             let base = material(inputs);
             let clear = material_at(inputs, 1.0);
             let dense = material_at(inputs, -1.0);
-            assert!(
-                clear.fill_alpha < base.fill_alpha - 0.05,
-                "{inputs:?}: {} -> {}",
-                base.fill_alpha,
-                clear.fill_alpha
-            );
-            assert!(dense.fill_alpha > base.fill_alpha, "{inputs:?}");
             assert_eq!(material_at(inputs, 0.0), base);
+            if base.fill_alpha > 0.0 {
+                assert!(
+                    clear.fill_alpha < base.fill_alpha - 0.05,
+                    "{inputs:?}: {} -> {}",
+                    base.fill_alpha,
+                    clear.fill_alpha
+                );
+                assert!(dense.fill_alpha > base.fill_alpha, "{inputs:?}");
+            } else {
+                // Stronger is a smaller p dark and a more negative one light.
+                assert!(
+                    dense.photochromic < base.photochromic,
+                    "{inputs:?}: dense tone {:.2} vs base {:.2}",
+                    dense.photochromic,
+                    base.photochromic
+                );
+                let lum = |c: Rgb| {
+                    let [r, g, b] = c.to_linear();
+                    0.2126 * r + 0.7152 * g + 0.0722 * b
+                };
+                // The mode's hardest backdrop: black under light glass, white
+                // under dark. Clear moves it less than dense does.
+                let behind = match inputs.mode {
+                    Mode::Light => Rgb::BLACK,
+                    Mode::Dark => Rgb::WHITE,
+                };
+                let moved = |m: &Material| (lum(glass_body(behind, m)) - lum(behind)).abs();
+                assert!(
+                    moved(&clear) <= moved(&dense),
+                    "{inputs:?}: clear moves the ground {:.3}, dense {:.3}",
+                    moved(&clear),
+                    moved(&dense)
+                );
+            }
         }
     }
 }

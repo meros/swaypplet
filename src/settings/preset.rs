@@ -83,9 +83,9 @@ fn base() -> Material {
         samples: 4.0,
         reflection: 0.4,
         lensing: 0.15,
-        frost_radius: 28.0,
-        absorb: 1.0,
-        photochromic: 0.35,
+        frost_radius: 12.0,
+        absorb: 0.0,
+        photochromic: 0.89,
         specular: 0.0,
         frost: 0.33,
         shine: 4096.0,
@@ -93,11 +93,12 @@ fn base() -> Material {
         contact_angle: 89.5,
         tail: 0.5,
         tail_length: 6.0,
-        // Unset, in every preset: the fill is the card's, and a preset that
-        // took it over would be changing swaypplet's own colours under the
-        // guise of picking a material.
+        // The same in every preset: a preset that set its own fill would be
+        // changing swaypplet's colours under the guise of picking a
+        // material. Clear (`fill_alpha` 0), as glass.nix ships it since
+        // 2026-10-05; the mode replaces it in `glass::for_mode` either way.
         fill_color: "none".to_string(),
-        fill_alpha: -1.0,
+        fill_alpha: 0.0,
     }
 }
 
@@ -260,7 +261,7 @@ mod tests {
             );
             assert_eq!(
                 (m.fill_color.as_str(), m.fill_alpha),
-                ("none", -1.0),
+                (b.fill_color.as_str(), b.fill_alpha),
                 "{}",
                 p.name
             );
