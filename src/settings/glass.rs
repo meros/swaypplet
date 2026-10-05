@@ -94,8 +94,11 @@ impl SurfaceKind {
 ///
 /// `contact_angle`, `tail` and `tail_length` shape the droplet's profile and
 /// do nothing on the squircle: the edge's slope in degrees, and the weight
-/// and relative length of the long, gentle part that runs out to the flat
-/// top. Missing from an older override, they load as the shipped droplet.
+/// and length of the long, gentle part that runs out to the flat top. The
+/// length is a multiple of the slab's thickness since 2026-10-05 (it was a
+/// multiple of the steep edge's, 1 to 12), so it can outrun a thin bar and
+/// round it into a dome. Missing from an older override, they load as the
+/// shipped droplet, and an old-style length loads as the shipped one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Material {
     pub surface: SurfaceKind,
@@ -159,8 +162,12 @@ fn shipped_tail() -> f64 {
 }
 
 fn shipped_tail_length() -> f64 {
-    6.0
+    0.1
 }
+
+/// The longest tail the length's new meaning allows; anything past it in a
+/// saved override is the old meaning (1 to 12 steep edges).
+const TAIL_LENGTH_MAX: f64 = 1.5;
 
 impl Material {
     /// The fill colour as the compositor wants it, or `None` when the card
@@ -446,7 +453,18 @@ pub fn load_override() -> Option<Tuning> {
     let path = override_path();
     let raw = std::fs::read(&path).ok()?;
     match serde_json::from_slice::<Tuning>(&raw) {
-        Ok(tuning) => Some(tuning),
+        Ok(mut tuning) => {
+            if tuning.material.tail_length > TAIL_LENGTH_MAX {
+                log::info!(
+                    "glass: tail_length {} in {} is the old relative length; using {}",
+                    tuning.material.tail_length,
+                    path.display(),
+                    shipped_tail_length()
+                );
+                tuning.material.tail_length = shipped_tail_length();
+            }
+            Some(tuning)
+        }
         Err(e) => {
             log::warn!(
                 "glass: ignoring unreadable override at {}: {e}",

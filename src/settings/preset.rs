@@ -78,7 +78,7 @@ impl Preset {
 fn base() -> Material {
     Material {
         surface: SurfaceKind::Droplet,
-        refraction: 1.07,
+        refraction: 1.35,
         dispersion: 0.003,
         samples: 4.0,
         reflection: 0.4,
@@ -92,7 +92,7 @@ fn base() -> Material {
         reflect_blur: 0.06,
         contact_angle: 89.5,
         tail: 0.5,
-        tail_length: 6.0,
+        tail_length: 0.1,
         // The same in every preset: a preset that set its own fill would be
         // changing swaypplet's colours under the guise of picking a
         // material. Clear (`fill_alpha` 0), as glass.nix ships it since
