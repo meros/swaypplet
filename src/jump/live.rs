@@ -254,6 +254,17 @@ fn run(
                     STALL,
                     s.waiting_on(now)
                 );
+                // Sway answers a frame only on new damage, and has been seen
+                // to stop answering one for a window that went on drawing.
+                // A new session gets the window's current frame at once, so
+                // a window that was only idle shows what it already showed
+                // and one that was stuck catches up. Once per stall: a
+                // frame resets `stalled`, and a window that never answers
+                // again is not reopened in a loop.
+                if s.capture.is_some() {
+                    s.release();
+                    s.retry_at = now;
+                }
             }
             if s.capture.is_none() {
                 if now < s.retry_at && !toplevels_changed {
