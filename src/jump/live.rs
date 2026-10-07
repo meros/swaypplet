@@ -155,6 +155,14 @@ const RESTART_MIN: Duration = Duration::from_millis(100);
 const RESTART_MAX: Duration = Duration::from_secs(5);
 /// How long a window goes without a frame before the journal hears of it.
 const STALL: Duration = Duration::from_secs(10);
+
+/// How long a new session may take to send its first frame. Sway answers a
+/// new session at once, so a longer wait means the window was not asked to
+/// draw (seen on a hidden workspace: 10 s of nothing, and the window drew
+/// again the moment the session was reopened). The session is reopened
+/// instead of waited on, up to [`FIRST_FRAME_TRIES`] times in a row.
+const FIRST_FRAME: Duration = Duration::from_millis(1500);
+const FIRST_FRAME_TRIES: u32 = 6;
 /// How soon a frame that found every output buffer on screen tries again:
 /// GTK lets one go after its next render, well within a refresh.
 const SLOT_RETRY: Duration = Duration::from_millis(4);
@@ -266,6 +274,20 @@ fn run(
                     s.retry_at = now;
                 }
             }
+            if s.capture.is_some()
+                && !s.got_frame
+                && s.reopens < FIRST_FRAME_TRIES
+                && now.saturating_duration_since(s.opened) > FIRST_FRAME
+            {
+                s.reopens += 1;
+                log::info!(
+                    "jump: capture {}: no first frame in {FIRST_FRAME:?}; reopen {}",
+                    s.want.id,
+                    s.reopens
+                );
+                s.release();
+                s.retry_at = now;
+            }
             if s.capture.is_none() {
                 if now < s.retry_at && !toplevels_changed {
                     wake = wake.min(s.retry_at);
@@ -295,6 +317,7 @@ fn run(
                     (index, s.generation),
                 );
                 s.capture = Some((source, session));
+                s.opened = now;
                 log::info!("jump: capture {}: session open", s.want.id);
                 continue;
             }
@@ -623,6 +646,12 @@ struct Session {
     frame: Option<ExtImageCopyCaptureFrameV1>,
     /// Set when the frame in flight turned `ready`; the loop sends it.
     ready: bool,
+    /// When the session was opened, for the first-frame deadline.
+    opened: Instant,
+    /// A frame came since the session opened.
+    got_frame: bool,
+    /// Sessions reopened in a row for want of a first frame.
+    reopens: u32,
     /// When the last frame was asked for, for the frame cap.
     last: Instant,
     /// When the last frame arrived, for the stall line in the journal.
@@ -648,6 +677,9 @@ impl Session {
             buffer: None,
             frame: None,
             ready: false,
+            opened: now,
+            got_frame: false,
+            reopens: 0,
             last: now - Duration::from_secs(1),
             last_frame: now,
             stalled: false,
@@ -700,6 +732,7 @@ impl Session {
         self.pending_dmabuf.clear();
         self.no_buffer = None;
         self.ready = false;
+        self.got_frame = false;
         self.generation = self.generation.wrapping_add(1);
     }
 
@@ -879,6 +912,8 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, (usize, u32)> for State {
                     );
                 }
                 s.last_frame = now;
+                s.got_frame = true;
+                s.reopens = 0;
                 s.backoff = RESTART_MIN;
             }
             Event::Failed { reason } => {
