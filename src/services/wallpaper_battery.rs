@@ -24,9 +24,14 @@
 //!   own cross-fade (`theme::set_battery_dark`, an override over the Look
 //!   mode rather than a write to it). Back on mains the order reverses: the
 //!   curtain goes up opaque over the black, the wallpaper pick goes back,
-//!   the video track comes back and the player resumes under it; once mpv
-//!   shows a frame again the curtain fades away over the video playing at
-//!   its base speed, and the mode is let go in the same moment.
+//!   the video track comes back with the player still paused, and once mpv
+//!   shows a frame again the player resumes and the curtain fades away over
+//!   the video playing at its base speed, the mode let go in the same moment.
+//!   The player resumes only after that first frame because of mpvpaper's
+//!   `-p`: it pauses a playing mpv that sends no frame for 2 s, and resumes
+//!   it only on a frame callback, which a paused mpv never causes. A track
+//!   that took 15 s to come back after a resume (meros-laptop, 2026-10-07)
+//!   left the wallpaper paused on its first frame for good.
 //!
 //! The fade is not the player's own (contrast and saturation over IPC, as it
 //! once was) because mpv applies those only when it renders a video frame:
@@ -118,8 +123,11 @@ const SHOWN: Duration = Duration::from_millis(50);
 
 /// The longest wait for mpv to show a frame, or stop showing one, before
 /// carrying on regardless. A video track coming back takes about 0.9 s on
-/// the 4K loop (seek, decoder, first frame), measured in a nested sway.
-const FRAME_WAIT: Duration = Duration::from_secs(3);
+/// the 4K loop (seek, decoder, first frame), measured in a nested sway, and
+/// took 15 s once just after a resume from suspend (VA-API, meros-laptop,
+/// 2026-10-07). The player is resumed only after this wait: resumed with no
+/// frame yet, mpvpaper's `-p` pauses it for good.
+const FRAME_WAIT: Duration = Duration::from_secs(20);
 
 /// Between two looks at whether mpv shows a frame.
 const POLL: Duration = Duration::from_millis(10);
@@ -312,12 +320,11 @@ fn plan(p: &Player, bg_black: bool, curtain: bool, target: Target) -> Plan {
         }
         if hidden {
             before.push(Cmd::Video(true));
+            // Still paused: see [`FRAME_WAIT`].
+            before.push(Cmd::Frame(true));
         }
         if target == Target::Play && p.paused && p.held {
             before.push(Cmd::Pause(false));
-        }
-        if hidden {
-            before.push(Cmd::Frame(true));
         }
         before.push(Cmd::FadeOut);
         if target == Target::Pause && !p.paused {
@@ -1213,8 +1220,8 @@ mod tests {
                 Cmd::Cover,
                 Cmd::Restore,
                 Cmd::Video(true),
-                Cmd::Pause(false),
                 Cmd::Frame(true),
+                Cmd::Pause(false),
                 Cmd::FadeOut,
             ]
         );
