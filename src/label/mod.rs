@@ -67,7 +67,7 @@ const EDIT_IDLE_MS: u64 = 20_000;
 /// The strip the pointer rests in: wide enough to find, thin enough that a
 /// window's top edge underneath it stays reachable.
 const EDGE_WIDTH: i32 = 480;
-const EDGE_HEIGHT: i32 = 6;
+const EDGE_HEIGHT: i32 = 8;
 const PLACEHOLDER: &str = "Name this workspace";
 
 // ── The saved state ─────────────────────────────────────────────────────
@@ -392,26 +392,25 @@ impl EdgeZone {
             .connector()
             .map(|c| c.to_string())
             .unwrap_or_default();
+        // As small as its content: a layer surface with no default size is
+        // 200 by 200, which would catch the pointer over a stretch of every
+        // window's title bar. A default of 1 by 1 is gtk4-layer-shell's
+        // documented way to shrink to the content, which is the strip.
         let surface = Surface::builder(app, Namespace::LabelEdge)
             .monitor(Some(monitor))
-            // Spans the output, like the camera cue: a width asked for on an
-            // unanchored axis came back from sway as 200 px, so the strip
-            // takes its width from the compositor and the input region cuts
-            // it down to the middle.
-            .anchor(&[Edge::Top, Edge::Left, Edge::Right])
-            .height(EDGE_HEIGHT)
+            .anchor(&[Edge::Top])
+            .width(1)
+            .height(1)
+            .resizable(false)
             .no_card()
             .build();
-        surface.root().set_size_request(1, EDGE_HEIGHT);
-        // The region lives on the GdkSurface, which exists from map, and is
-        // set again whenever the output's width changes.
-        surface.window().connect_map(|window| {
-            let Some(gdk_surface) = window.surface() else {
-                return;
-            };
-            gdk_surface.connect_layout(|s, width, height| middle_only(s, width, height));
-            middle_only(&gdk_surface, window.width(), window.height());
-        });
+        // Painted, if barely: a surface with nothing to draw never got its
+        // second size request, and stayed at gtk4-layer-shell's initial
+        // 200 by 200. A component's hairline at 1% does it.
+        let strip = ui::separator(gtk4::Orientation::Horizontal);
+        strip.set_opacity(0.01);
+        strip.set_size_request(EDGE_WIDTH, EDGE_HEIGHT);
+        surface.root().append(&strip);
 
         // Rest here for DWELL_MS and the pill comes; passing through does not.
         let dwell: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
@@ -419,6 +418,7 @@ impl EdgeZone {
         {
             let dwell = dwell.clone();
             motion.connect_enter(move |_, _, _| {
+                log::debug!("label: pointer in the strip");
                 let owner = owner.clone();
                 let connector = connector.clone();
                 let slot = dwell.clone();
@@ -443,17 +443,6 @@ impl EdgeZone {
 
         EdgeZone { surface }
     }
-}
-
-/// Let only the middle [`EDGE_WIDTH`] of the strip catch the pointer, so the
-/// rest of the top edge stays clickable.
-fn middle_only(surface: &gdk::Surface, width: i32, height: i32) {
-    if width <= 0 {
-        return;
-    }
-    let x = ((width - EDGE_WIDTH) / 2).max(0);
-    let rect = gdk::cairo::RectangleInt::new(x, 0, EDGE_WIDTH.min(width), height.max(EDGE_HEIGHT));
-    surface.set_input_region(Some(&gdk::cairo::Region::create_rectangle(&rect)));
 }
 
 // ── The service ─────────────────────────────────────────────────────────
@@ -608,6 +597,7 @@ impl Labels {
     /// Show `output`'s pill, then let it go after `ms` unless something holds
     /// it. Replaces a countdown already running.
     fn peek(&self, output: &str, controls: bool, ms: u64) {
+        log::debug!("label: peek {output} (workspace {:?})", self.workspace_on(output));
         if self.workspace_on(output).is_none() {
             return;
         }
