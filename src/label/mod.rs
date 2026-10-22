@@ -394,12 +394,24 @@ impl EdgeZone {
             .unwrap_or_default();
         let surface = Surface::builder(app, Namespace::LabelEdge)
             .monitor(Some(monitor))
-            .anchor(&[Edge::Top])
-            .width(EDGE_WIDTH)
+            // Spans the output, like the camera cue: a width asked for on an
+            // unanchored axis came back from sway as 200 px, so the strip
+            // takes its width from the compositor and the input region cuts
+            // it down to the middle.
+            .anchor(&[Edge::Top, Edge::Left, Edge::Right])
             .height(EDGE_HEIGHT)
             .no_card()
             .build();
-        surface.root().set_size_request(EDGE_WIDTH, EDGE_HEIGHT);
+        surface.root().set_size_request(1, EDGE_HEIGHT);
+        // The region lives on the GdkSurface, which exists from map, and is
+        // set again whenever the output's width changes.
+        surface.window().connect_map(|window| {
+            let Some(gdk_surface) = window.surface() else {
+                return;
+            };
+            gdk_surface.connect_layout(|s, width, height| middle_only(s, width, height));
+            middle_only(&gdk_surface, window.width(), window.height());
+        });
 
         // Rest here for DWELL_MS and the pill comes; passing through does not.
         let dwell: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
@@ -431,6 +443,17 @@ impl EdgeZone {
 
         EdgeZone { surface }
     }
+}
+
+/// Let only the middle [`EDGE_WIDTH`] of the strip catch the pointer, so the
+/// rest of the top edge stays clickable.
+fn middle_only(surface: &gdk::Surface, width: i32, height: i32) {
+    if width <= 0 {
+        return;
+    }
+    let x = ((width - EDGE_WIDTH) / 2).max(0);
+    let rect = gdk::cairo::RectangleInt::new(x, 0, EDGE_WIDTH.min(width), height.max(EDGE_HEIGHT));
+    surface.set_input_region(Some(&gdk::cairo::Region::create_rectangle(&rect)));
 }
 
 // ── The service ─────────────────────────────────────────────────────────
