@@ -61,13 +61,13 @@ const LEAVE_MS: u64 = 1200;
 /// pointer never reaches it.
 const PEEK_MS: u64 = 3000;
 /// How long the pointer rests in the strip before the pill comes.
-const DWELL_MS: u64 = 250;
+const DWELL_MS: u64 = 120;
 /// An edit with no typing for this long saves and closes (module docs).
 const EDIT_IDLE_MS: u64 = 20_000;
 /// The strip the pointer rests in: wide enough to find, thin enough that a
 /// window's top edge underneath it stays reachable.
-const EDGE_WIDTH: i32 = 360;
-const EDGE_HEIGHT: i32 = 4;
+const EDGE_WIDTH: i32 = 480;
+const EDGE_HEIGHT: i32 = 6;
 const PLACEHOLDER: &str = "Name this workspace";
 
 // ── The saved state ─────────────────────────────────────────────────────
@@ -666,6 +666,12 @@ impl Labels {
         self.inner
             .edges
             .for_each(|edge| edge.surface.window().set_visible(!fullscreen));
+
+        // A pill showing for the workspace you left goes at once; it is not
+        // given a countdown for one that has no name.
+        for output in &switched {
+            self.inner.peeking.borrow_mut().remove(output);
+        }
 
         if self.inner.data.borrow().mode == Mode::Auto && !fullscreen {
             for output in switched {
