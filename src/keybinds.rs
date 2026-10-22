@@ -337,6 +337,7 @@ fn describe(command: &str) -> (Section, String, Option<&'static str>) {
 
         // ── Apps ──
         ["chrome-profile-launcher", ..] => (Section::Apps, "Chrome profiles".into(), None),
+        ["swaypplet-label", ..] => (Section::Workspaces, "Name workspace".into(), None),
         ["swaypplet-launcher", ..] => (Section::Apps, "Launcher".into(), None),
         ["swaypplet-toggle", ..] => (Section::Apps, "Control centre".into(), None),
         ["alacritty", ..] | ["foot", ..] | ["kitty", ..] => {

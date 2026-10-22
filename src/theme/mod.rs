@@ -165,6 +165,7 @@ pub const RULES: &[(&str, &str)] = &[
         include_str!("../../data/css/15-settings.css"),
     ),
     ("16-jump.css", include_str!("../../data/css/16-jump.css")),
+    ("17-label.css", include_str!("../../data/css/17-label.css")),
 ];
 
 /// Every rule file joined, as GTK parses them.

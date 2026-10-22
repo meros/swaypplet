@@ -153,6 +153,13 @@
               SCRIPT
               chmod +x $out/bin/swaypplet-jump
 
+              # Label — name the workspace you are on (src/label/)
+              cat > $out/bin/swaypplet-label <<SCRIPT
+              #!/bin/sh
+              exec $out/bin/swaypplet label "\$@"
+              SCRIPT
+              chmod +x $out/bin/swaypplet-label
+
               # Pin — keep the focused workspace in sight, live (src/jump/pin.rs)
               cat > $out/bin/swaypplet-pin <<SCRIPT
               #!/bin/sh

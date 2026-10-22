@@ -37,6 +37,11 @@ pub enum Namespace {
     FaceCue,
     /// The held-Super keybinding sheet, one per output.
     Keybinds,
+    /// The workspace label pill, one per output (`label/`).
+    Label,
+    /// The thin strip at the top middle of an output that summons the label
+    /// pill. Invisible, so without glass.
+    LabelEdge,
     /// The Super+Tab stage.
     Jump,
     /// The frozen screen the region selector draws on. Deliberately without
@@ -61,7 +66,7 @@ pub enum Namespace {
 }
 
 impl Namespace {
-    pub const ALL: [Namespace; 18] = [
+    pub const ALL: [Namespace; 20] = [
         Namespace::Panel,
         Namespace::Bar,
         Namespace::Launcher,
@@ -73,6 +78,8 @@ impl Namespace {
         Namespace::Report,
         Namespace::FaceCue,
         Namespace::Keybinds,
+        Namespace::Label,
+        Namespace::LabelEdge,
         Namespace::Jump,
         Namespace::Screenshot,
         Namespace::Greeter,
@@ -96,6 +103,8 @@ impl Namespace {
             Namespace::Report => "swaypplet-report",
             Namespace::FaceCue => "swaypplet-face-cue",
             Namespace::Keybinds => "swaypplet-keybinds",
+            Namespace::Label => "swaypplet-label",
+            Namespace::LabelEdge => "swaypplet-label-edge",
             Namespace::Jump => "swaypplet-jump",
             Namespace::Screenshot => "swaypplet-screenshot",
             Namespace::Greeter => "swaypplet-greeter",
@@ -126,7 +135,7 @@ impl Namespace {
     /// the session's.
     pub const fn glass(self) -> Option<&'static str> {
         match self {
-            Namespace::Bar | Namespace::Osd | Namespace::FaceCue => Some("thin"),
+            Namespace::Bar | Namespace::Osd | Namespace::FaceCue | Namespace::Label => Some("thin"),
             Namespace::Panel
             | Namespace::Launcher
             | Namespace::Notification
@@ -137,6 +146,7 @@ impl Namespace {
             | Namespace::Keybinds => Some("panel"),
             Namespace::SessionLock => Some("lock"),
             Namespace::Jump
+            | Namespace::LabelEdge
             | Namespace::Screenshot
             | Namespace::Greeter
             | Namespace::LockWarm

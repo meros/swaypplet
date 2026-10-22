@@ -18,6 +18,7 @@ mod handoff;
 mod idle;
 mod jump;
 mod keybinds;
+mod label;
 mod launcher;
 mod lock;
 mod notifications;

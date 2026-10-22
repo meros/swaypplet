@@ -56,6 +56,7 @@ struct AppState {
     keybinds: Option<Rc<Keybinds>>,
     jump: Option<Rc<Jump>>,
     pins: Option<crate::jump::pin::Pins>,
+    labels: Option<crate::label::Labels>,
     /// Keep-alive only: the bar follows monitor hotplug by itself and has
     /// no external control surface.
     _bar: Option<Rc<BarManager>>,
@@ -143,6 +144,7 @@ pub fn run() {
         keybinds: None,
         jump: None,
         pins: None,
+        labels: None,
         _bar: None,
     }));
 
@@ -421,6 +423,10 @@ pub fn run() {
                     }));
             }
             let bar = BarManager::new(app, sway.clone(), audio.clone(), toggle);
+            // Workspace names: a pill that follows the workspace on each
+            // output (src/label/). Needs the sway model, so it lives with
+            // the bar.
+            st.labels = Some(crate::label::Labels::new(app, sway.clone()));
             // OSD interjection (BAR_VISION increment 5): volume and brightness
             // render in the bar's decision slot rather than as the
             // center-screen card.
@@ -520,6 +526,14 @@ pub fn run() {
                     Some("pin") => jump.pin(),
                     _ => jump.step(),
                 }
+            }
+        } else if args.len() > 1 && args[1] == "label" {
+            // Like `jump`, a request to the running panel: a cold session has
+            // no pill yet and the first press is dropped.
+            let st = state_clone.borrow();
+            if let Some(ref labels) = st.labels {
+                let rest: Vec<&str> = args[2..].iter().map(String::as_str).collect();
+                labels.command(&rest);
             }
         } else if args.len() > 1 && args[1] == "pin" {
             let st = state_clone.borrow();

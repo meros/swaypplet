@@ -1,0 +1,13 @@
+/* ── Workspace label (src/label/) ──
+   A thin card holding a name, and under the pointer its mode and a remove
+   button. Colour, type and shape come from the components; this places them. */
+.label-wrapper {
+    /* The transparent apron around the card; it must stay alpha 0 so the
+       compositor's glass clips to the card. */
+    padding: var(--space-6);
+}
+
+.label-pill {
+    padding: var(--space-3) var(--space-5);
+    min-width: 240px;
+}
