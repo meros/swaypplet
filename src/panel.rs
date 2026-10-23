@@ -527,7 +527,9 @@ impl Panel {
         } else {
             self.launcher.reset();
             self.deck_stack.set_visible_child_name("launcher");
-            self.surface.show();
+            // Pinned where it opens, so an output coming or going (an extra
+            // screen for a cast) cannot move it (`Surface::show_on_focused_output`).
+            self.surface.show_on_focused_output();
             self.launcher.focus_entry();
             // Harness hook: the nested session in dev/render.sh has no
             // keyboard, so `SWAYPPLET_PANEL_QUERY` types an omnibox prefix

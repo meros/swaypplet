@@ -141,6 +141,19 @@ pub fn monitor_by_connector(name: &str) -> Option<gdk::Monitor> {
     monitors().find(|m| m.connector().is_some_and(|c| c == name))
 }
 
+/// The monitor of the output sway has focused, or `None` when sway cannot
+/// say or GDK does not have it. One IPC round trip.
+pub fn focused_monitor() -> Option<gdk::Monitor> {
+    crate::sway::ipc::focused_output().and_then(|name| monitor_by_connector(&name))
+}
+
+/// Every connected monitor's connector name ("eDP-1", "HEADLESS-3").
+pub fn connectors() -> Vec<String> {
+    monitors()
+        .filter_map(|m| m.connector().map(|c| c.to_string()))
+        .collect()
+}
+
 fn monitors() -> impl Iterator<Item = gdk::Monitor> {
     // `ListModel::into_iter` borrows the model, so the list has to outlive
     // the iterator: collect it here rather than chaining off a temporary.

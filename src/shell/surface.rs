@@ -171,6 +171,24 @@ impl Surface {
         }
     }
 
+    /// [`Self::show`] on the output that has sway's focus, pinned there.
+    ///
+    /// For a surface built without a monitor (the Helm, settings), which the
+    /// compositor would place by itself. Left unpinned, gtk4-layer-shell
+    /// remaps it on every change to the monitor list (1.3.0,
+    /// `monitors_changed` in gtk4-layer-shell.c), and sway places the new
+    /// surface on the focused output again; while such a surface holds the
+    /// keyboard, sway gives a new output's workspace the focus, so making an
+    /// extra screen for a cast moved the open Helm onto the TV. Pinned, it
+    /// stays where it opened: gtk4-layer-shell leaves a surface with a
+    /// monitor alone, and only unpins it when that monitor goes away.
+    /// Without an answer from sway it is left to the compositor, as before.
+    pub fn show_on_focused_output(&self) {
+        let monitor = layer::focused_monitor();
+        self.inner.window.set_monitor(monitor.as_ref());
+        self.show();
+    }
+
     /// Map, and fade in when there is a card to fade.
     pub fn show(&self) {
         match &self.inner.reveal {

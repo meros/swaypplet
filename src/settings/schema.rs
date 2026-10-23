@@ -818,6 +818,13 @@ pub struct Alerts {
     /// Cards shown at full size before older ones collapse behind them.
     #[serde(default = "Alerts::default_stack")]
     pub stack: u8,
+    /// Let popups appear on an extra screen (a virtual output made for a
+    /// TV or a VNC viewer, `services::cast`). Off, a popup that would go
+    /// there goes to one of your own screens instead
+    /// (`notifications::stack::popup_output`); a TV in the room would show
+    /// everyone what arrives.
+    #[serde(default)]
+    pub on_extra_screens: bool,
     /// Arm Do Not Disturb between `quiet_from_h` and `quiet_to_h`, and
     /// disarm it after. A manual toggle inside the window is left alone.
     #[serde(default)]
@@ -887,6 +894,7 @@ impl Default for Alerts {
             linger: Linger::Normal,
             corner: Corner::TopRight,
             stack: 3,
+            on_extra_screens: false,
             quiet: false,
             quiet_from_h: 22,
             quiet_to_h: 7,

@@ -426,7 +426,23 @@ pub fn run() {
                         Some(crate::services::notifications::store::TaskRef { task, visible })
                     }));
             }
-            let bar = BarManager::new(app, sway.clone(), audio.clone(), toggle);
+            // The extra-screen hazard's click: the Helm on its Displays
+            // page, where the running cast's Stop is.
+            let open_displays: Rc<dyn Fn()> = {
+                let s = state_clone.clone();
+                Rc::new(move || {
+                    if let Some(ref panel) = s.borrow().panel {
+                        panel.open_page(":disp");
+                    }
+                })
+            };
+            let bar = BarManager::new(
+                app,
+                sway.clone(),
+                audio.clone(),
+                toggle,
+                Some(open_displays),
+            );
             // Workspace names: a pill that follows the workspace on each
             // output (src/label/). Needs the sway model, so it lives with
             // the bar.

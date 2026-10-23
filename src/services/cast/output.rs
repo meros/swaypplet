@@ -83,6 +83,22 @@ fn placed(conn: &mut Connection) -> Result<Vec<Placed>, String> {
         .collect())
 }
 
+/// The output of the focused workspace.
+fn focused(conn: &mut Connection) -> Option<String> {
+    conn.get_workspaces()
+        .ok()?
+        .into_iter()
+        .find(|w| w.focused)
+        .map(|w| w.output)
+}
+
+/// Where focus goes back to after `create_output`: the output that had it,
+/// when sway moved it onto the new output `made`. `None` leaves it.
+pub fn refocus(before: Option<&str>, after: Option<&str>, made: &str) -> Option<String> {
+    let before = before.filter(|b| *b != made)?;
+    (after == Some(made)).then(|| before.to_string())
+}
+
 fn run(conn: &mut Connection, cmd: &str) -> Result<(), String> {
     conn.run_command(cmd)
         .map_err(|e| e.to_string())
@@ -100,11 +116,22 @@ pub fn create() -> Result<String, String> {
     let mut conn = crate::sway::ipc::connect().map_err(|e| format!("sway ipc: {e}"))?;
     let before = placed(&mut conn)?;
     let names: Vec<String> = before.iter().map(|o| o.name.clone()).collect();
+    let focused_before = focused(&mut conn);
     run(&mut conn, "create_output")?;
     let after: Vec<String> = placed(&mut conn)?.into_iter().map(|o| o.name).collect();
     let name =
         appeared(&names, &after).ok_or_else(|| "sway made no new headless output".to_string())?;
     record(&name);
+    // While a layer surface holds the keyboard (the Helm, settings: where
+    // Start is pressed), sway's seat has no window focused, and sway hands
+    // the new output's workspace the focus. The next Helm would then open
+    // on the TV. Give the focus back.
+    let after = focused(&mut conn);
+    if let Some(back) = refocus(focused_before.as_deref(), after.as_deref(), &name)
+        && let Err(e) = run(&mut conn, &format!("focus output {back}"))
+    {
+        log::warn!("cast: {e}");
+    }
     if let Err(e) = run(
         &mut conn,
         &configure_command(&name, MODE, right_of(&before)),
@@ -253,6 +280,36 @@ mod tests {
         // goes beside them, not on top.
         assert_eq!(right_of(&[out("HEADLESS-1", 0, 0, 1280, 800)]), (1280, 0));
         assert_eq!(right_of(&[]), (0, 0));
+    }
+
+    /// Against a nested sway with the Helm open (a layer surface holding
+    /// the keyboard, which is when sway moves focus to a new output): the
+    /// focused output is the same after `create` as before.
+    ///   SWAYSOCK=<nested socket> cargo test -- --ignored create_leaves_the_focus
+    #[test]
+    #[ignore = "needs a nested sway with the Helm open"]
+    fn create_leaves_the_focus() {
+        let mut conn = crate::sway::ipc::connect().unwrap();
+        let before = focused(&mut conn);
+        let name = create().expect("create");
+        let after = focused(&mut conn);
+        remove(&name).expect("remove");
+        assert_eq!(after, before, "focus moved to {name}");
+    }
+
+    #[test]
+    fn focus_goes_back_only_when_sway_moved_it_to_the_new_output() {
+        // The Helm was open: sway focused the new output's workspace.
+        assert_eq!(
+            refocus(Some("eDP-1"), Some("HEADLESS-3"), "HEADLESS-3"),
+            Some("eDP-1".into())
+        );
+        // Nothing open: the focus stayed, and nothing is sent.
+        assert_eq!(refocus(Some("eDP-1"), Some("eDP-1"), "HEADLESS-3"), None);
+        // The person moved it elsewhere meanwhile: theirs.
+        assert_eq!(refocus(Some("eDP-1"), Some("DP-3"), "HEADLESS-3"), None);
+        // No focus to go back to.
+        assert_eq!(refocus(None, Some("HEADLESS-3"), "HEADLESS-3"), None);
     }
 
     #[test]

@@ -29,6 +29,17 @@
 //!   which is what the glyph says. Stand-down: the adapter is unplugged or
 //!   the ban lifted in the panel. NM's device signals drive it.
 //!
+//! - **Extra screen**: a virtual output is on and something is sent to it
+//!   (`services::cast`): a TV cast or a VNC viewer. Your desktop is
+//!   reaching a screen you may not be looking at, so the lane says so,
+//!   and the tooltip says where. `cast::observe` drives it; it stands down
+//!   when the session ends, by Stop or by itself (the TV went away, the
+//!   encoder died), and a restarted panel starts with none. A click opens
+//!   the Helm's Displays page, where Stop is: the one hazard with an
+//!   action, because ending it is the one thing a person does about it.
+//!   The cast lives in the panel process, so the standalone bar never
+//!   shows it.
+//!
 //! Camera and screencast were meant to ship beside the microphone and
 //! cannot yet. Neither has a signal a third party can read: v4l2 has no
 //! in-use broadcast, and `org.freedesktop.portal.Camera` reports only
@@ -46,6 +57,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use crate::services::audio::AudioService;
+use crate::services::cast::{self, backend::Target};
 use crate::services::inhibit::{self, Inhibitor};
 use crate::services::network;
 use crate::sway::ipc::SwayService;
@@ -53,8 +65,13 @@ use crate::ui;
 
 // ── Widget ──────────────────────────────────────────────────────────────
 
-/// The hazard lane for one bar window.
-pub fn build(sway: &Rc<SwayService>, audio: &Rc<AudioService>) -> gtk4::Box {
+/// The hazard lane for one bar window. `open_displays` is the extra-screen
+/// glyph's click.
+pub fn build(
+    sway: &Rc<SwayService>,
+    audio: &Rc<AudioService>,
+    open_displays: Option<Rc<dyn Fn()>>,
+) -> gtk4::Box {
     let lane = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .build();
@@ -125,6 +142,25 @@ pub fn build(sway: &Rc<SwayService>, audio: &Rc<AudioService>) -> gtk4::Box {
         rec.set_reveal_child(r.with(|v| *v));
     });
 
+    let (extra, extra_glyph) = hazard(ui::icons::TV);
+    lane.append(&extra);
+    let clickable = open_displays.is_some();
+    if let Some(open) = open_displays {
+        let click = gtk4::GestureClick::new();
+        click.connect_released(move |_, _, _, _| open());
+        extra_glyph.add_controller(click);
+        extra_glyph.set_cursor_from_name(Some("pointer"));
+    }
+    let apply_extra = move || match extra_screen_tooltip(&cast::view(), clickable) {
+        Some(text) => {
+            extra_glyph.set_tooltip_text(Some(&text));
+            extra.set_reveal_child(true);
+        }
+        None => extra.set_reveal_child(false),
+    };
+    apply_extra();
+    cast::observe(apply_extra);
+
     let apply_mic = {
         let (mic, glyph, audio) = (mic.clone(), mic_glyph, audio.clone());
         move || {
@@ -166,6 +202,22 @@ pub fn build(sway: &Rc<SwayService>, audio: &Rc<AudioService>) -> gtk4::Box {
 /// would only flash beside it.
 fn armed_mode(mode: &str) -> Option<&str> {
     (!mode.is_empty() && mode != "default" && !mode.starts_with("swaypplet-")).then_some(mode)
+}
+
+/// What the extra-screen glyph says, or `None` when no extra screen is on
+/// (none, or one still starting).
+fn extra_screen_tooltip(view: &cast::View, clickable: bool) -> Option<String> {
+    let s = view.session.as_ref()?;
+    let what = match &s.target {
+        Target::Device(d) => format!("Extra screen on {}", d.name),
+        Target::Viewer => "Extra screen for a VNC viewer".to_string(),
+    };
+    let how = if clickable {
+        "\nClick to see it in Displays, where Stop is"
+    } else {
+        ""
+    };
+    Some(format!("{what}\n{} · {}{how}", s.output, s.location))
 }
 
 /// What the banned-adapter glyph says, or `None` when nothing is banned.
@@ -220,6 +272,59 @@ mod tests {
             banned_tooltip(&["Desk".into(), "Ethernet on USB hub".into()])
                 .is_some_and(|t| t.contains("Desk, Ethernet on USB hub") && t.contains("they are"))
         );
+    }
+
+    fn session(target: Target) -> cast::View {
+        cast::View {
+            session: Some(cast::SessionView {
+                output: "HEADLESS-3".into(),
+                target,
+                backend: "Cast",
+                location: "Vardagsrummet TV, under a second behind".into(),
+            }),
+            ..cast::View::default()
+        }
+    }
+
+    #[test]
+    fn the_extra_screen_glyph_says_what_runs_and_only_while_it_does() {
+        let tv = cast::discovery::Device {
+            id: "daf6".into(),
+            name: "Vardagsrummet TV".into(),
+            model: Some("Chromecast".into()),
+            address: "192.168.1.107".into(),
+            port: 8009,
+            video: true,
+            group: false,
+        };
+        let text = extra_screen_tooltip(&session(Target::Device(tv)), true).unwrap();
+        assert!(
+            text.starts_with("Extra screen on Vardagsrummet TV\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("HEADLESS-3") && text.contains("Stop"),
+            "{text}"
+        );
+        let vnc = extra_screen_tooltip(&session(Target::Viewer), false).unwrap();
+        assert!(vnc.starts_with("Extra screen for a VNC viewer"), "{vnc}");
+        assert!(
+            !vnc.contains("Click"),
+            "the standalone bar promises no click"
+        );
+        // Nothing on; one starting (busy, no session yet); one that ended,
+        // by Stop or by itself (the view drops its session either way).
+        assert_eq!(extra_screen_tooltip(&cast::View::default(), true), None);
+        let starting = cast::View {
+            busy: true,
+            ..cast::View::default()
+        };
+        assert_eq!(extra_screen_tooltip(&starting, true), None);
+        let ended = cast::View {
+            problem: Some("The TV stopped answering.".into()),
+            ..cast::View::default()
+        };
+        assert_eq!(extra_screen_tooltip(&ended, true), None);
     }
 
     #[test]

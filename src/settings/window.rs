@@ -110,7 +110,9 @@ impl SettingsWindow {
     /// card is in, as the Helm's sections do.
     pub fn open(&self, what: Open) {
         if !self.is_shown() {
-            self.surface.show();
+            // Pinned, as the Helm is: its Displays pane starts casts, and a
+            // new output must not move it (`Surface::show_on_focused_output`).
+            self.surface.show_on_focused_output();
             let section = self.section.clone();
             glib::timeout_add_local_once(
                 std::time::Duration::from_millis(

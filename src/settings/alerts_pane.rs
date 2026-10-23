@@ -51,6 +51,7 @@ struct State {
     linger: gtk4::DropDown,
     corner: gtk4::DropDown,
     stack: gtk4::Scale,
+    extra: gtk4::Switch,
     quiet: gtk4::Switch,
     quiet_from: gtk4::DropDown,
     quiet_to: gtk4::DropDown,
@@ -94,6 +95,7 @@ impl State {
         self.corner
             .set_selected(pos(Corner::ALL.iter().position(|c| *c == alerts.corner)));
         self.stack.set_value(f64::from(alerts.stack));
+        self.extra.set_active(alerts.on_extra_screens);
         self.quiet.set_active(alerts.quiet);
         self.quiet_from
             .set_selected(u32::from(alerts.quiet_from_h.min(23)));
@@ -161,6 +163,12 @@ impl AlertsPane {
             |v| format!("{v:.0}"),
         );
         popups.append(&row_stack);
+        let (row_extra, extra) = switch_row(
+            "On extra screens",
+            "Pop up on a screen made for a TV or a VNC viewer too. Off, they pop up on one of your own screens, so a TV in the room does not show them.",
+            alerts.on_extra_screens,
+        );
+        popups.append(&row_extra);
 
         let quiet_group = section_box(
             "Quiet hours",
@@ -271,6 +279,7 @@ impl AlertsPane {
             linger: linger.clone(),
             corner: corner.clone(),
             stack: stack.clone(),
+            extra: extra.clone(),
             quiet: quiet.clone(),
             quiet_from: quiet_from.clone(),
             quiet_to: quiet_to.clone(),
@@ -332,7 +341,8 @@ impl AlertsPane {
         }
         {
             type Field = fn(&mut Alerts, bool);
-            let rows: [(&gtk4::Switch, Field); 5] = [
+            let rows: [(&gtk4::Switch, Field); 6] = [
+                (&extra, |a, on| a.on_extra_screens = on),
                 (&context, |a, on| a.context_quiet = on),
                 (&sharing, |a, on| a.quiet_when_sharing = on),
                 (&mirrored, |a, on| a.quiet_when_mirrored = on),
@@ -421,6 +431,7 @@ pub(super) const SEARCH: &[Entry] = &[
     row("Notifications", "Linger", "How long a notification stays", &["notification timeout", "duration", "popup", "toast", "dismiss"]).keys(&["alerts.linger"]),
     row("Notifications", "Corner", "Where notifications appear", &["position", "notification position", "top right", "placement"]).keys(&["alerts.corner"]),
     row("Notifications", "Stack", "Cards shown before older ones fold", &["notifications", "count", "collapse"]).keys(&["alerts.stack"]),
+    row("Notifications", "On extra screens", "Notifications on a TV or a VNC screen", &["cast", "tv", "chromecast", "extra screen", "vnc", "second screen", "privacy"]).keys(&["alerts.on_extra_screens"]),
     row("Quiet hours", "Quiet hours", "Do Not Disturb on a schedule", &["do not disturb", "dnd", "silence", "mute notifications", "focus"]).keys(&["alerts.quiet"]),
     row("Quiet hours", "From", "When quiet hours start", &["start", "begin"]).keys(&["alerts.quiet_from_h"]),
     row("Quiet hours", "Until", "When quiet hours end", &["end", "stop"]).keys(&["alerts.quiet_to_h"]),

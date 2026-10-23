@@ -71,6 +71,10 @@ pub struct BarManager {
     /// `panel.toggle()`; the standalone bar passes the cross-process
     /// SIGUSR1 fallback (see `start::toggle_panel_fallback`).
     toggle_panel: Rc<dyn Fn()>,
+    /// What a click on the extra-screen hazard does: the Helm's Displays
+    /// page, where Stop is. `None` in the standalone bar, which has no
+    /// panel and no cast of its own to show.
+    open_displays: Option<Rc<dyn Fn()>>,
 }
 
 impl BarManager {
@@ -79,6 +83,7 @@ impl BarManager {
         sway: Rc<SwayService>,
         audio: Rc<crate::services::audio::AudioService>,
         toggle_panel: Rc<dyn Fn()>,
+        open_displays: Option<Rc<dyn Fn()>>,
     ) -> Rc<Self> {
         let tasks = TaskStateService::start(&sway);
         let manager = Rc::new(Self {
@@ -91,6 +96,7 @@ impl BarManager {
             mpris: crate::services::mpris::MprisService::start(),
             tray: crate::services::tray::TrayService::start(),
             toggle_panel,
+            open_displays,
         });
 
         // One bar per output, following hotplug. Weak: the manager owns
@@ -127,6 +133,7 @@ fn build_bar_window(bar: &BarManager, monitor: &gdk::Monitor) -> (Surface, decis
         mpris,
         tray,
         toggle_panel,
+        open_displays,
         ..
     } = bar;
     let toggle_panel = toggle_panel.clone();
@@ -198,7 +205,7 @@ fn build_bar_window(bar: &BarManager, monitor: &gdk::Monitor) -> (Surface, decis
     // The tray follows the Bar tab's switch itself: it also hides while no
     // item is registered, which `follow_setting` would override.
     right.append(&tray::build(tray));
-    right.append(&hazards::build(sway, audio));
+    right.append(&hazards::build(sway, audio, open_displays.clone()));
     // Battery + board + clock fuse into one segmented track (waybar's
     // group/right-track); a batteryless machine skips the segment so the
     // board keeps the rounded left end.
@@ -313,6 +320,7 @@ pub fn run() {
             sway,
             crate::services::audio::AudioService::start(),
             Rc::new(start::toggle_panel_fallback),
+            None,
         ));
     });
 
