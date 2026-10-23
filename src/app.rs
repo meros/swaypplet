@@ -112,6 +112,12 @@ fn defer_to_service() -> bool {
     if panel_listening() {
         return false;
     }
+    // A test run (SWAYPPLET_DRY_SESSION, dev/render.sh) must not start the
+    // person's own panel unit through their user manager.
+    if std::env::var_os("SWAYPPLET_DRY_SESSION").is_some() {
+        log::warn!("no panel owns {APP_ID}; not starting {PANEL_UNIT} (dry run)");
+        return true;
+    }
     log::warn!("no panel owns {APP_ID}; starting {PANEL_UNIT} rather than becoming one");
     // --no-block: nothing here waits on the unit, and the caller may be a
     // watcher loop that must get its thread back.

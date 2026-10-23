@@ -179,8 +179,19 @@ fi
 rm -f "$RUNTIME/swaypplet.pid"
 # Never the real thing: the app below runs as this user, and a restart, shut
 # down or log out typed or clicked in it would act on this machine
-# (widgets/power.rs, Session::run, logs instead).
+# (widgets/power.rs, Session::run, logs instead). The same switch keeps it
+# off the user manager: `systemctl --user` reaches the real one whatever
+# display this is nested in, and picking or replaying a wallpaper stopped
+# the desktop's own video (settings/wallpaper.rs, app.rs).
 export SWAYPPLET_DRY_SESSION=1
+# Every headless output is a screen of the person's own here. Without this
+# shell::extra takes each one for an extra screen (a virtual output for a
+# TV), and nothing per output is drawn on it: no bar, no OSD, no keybind
+# sheet. SWAYPPLET_SCREENS names the outputs that are not.
+if [ -z "${SWAYPPLET_SCREENS:-}" ]; then
+  SWAYPPLET_SCREENS="$(seq -s, -f 'HEADLESS-%g' 1 "$OUTPUTS")"
+  export SWAYPPLET_SCREENS
+fi
 # The keyboard-focus line SWPP_KEYS waits for, on top of whatever else was
 # asked for.
 export RUST_LOG="${RUST_LOG:-warn},swaypplet::focus=debug"

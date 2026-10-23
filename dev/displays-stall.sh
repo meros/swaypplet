@@ -25,6 +25,8 @@ for _ in $(seq 1 80); do swaymsg -t get_version >/dev/null 2>&1 && break; sleep 
 for _ in $(seq 1 40); do WD="$(grep -oE "wayland display '[^']+'" "$LOG" | head -1 | sed "s/.*'\(.*\)'/\1/")"; [ -n "$WD" ] && break; sleep 0.1; done
 [ -n "${WD:-}" ] || { echo "no wayland display"; exit 2; }
 export WAYLAND_DISPLAY="$WD" SWAYPPLET_DRY_SESSION=1 RUST_LOG=warn SWAYPPLET_PREVIEW_DISPLAYS_CYCLE=1
+# The headless output is a screen of one's own, not an extra screen.
+export SWAYPPLET_SCREENS="${SWAYPPLET_SCREENS:-HEADLESS-1}"
 rm -f "$RUNTIME/swaypplet.pid"
 "$BIN" --preview settings.displays >"$APP" 2>&1 &
 APPPID=$!

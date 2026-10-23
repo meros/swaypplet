@@ -178,6 +178,10 @@ fn write_env(env: &Path, text: &str) -> std::io::Result<()> {
 /// waits in the file for the next start. Blocking: two small file
 /// operations and a `systemctl` call.
 fn follow_video(still: &Path, speed: f64) {
+    if dry_session() {
+        log::info!("wallpaper: video for {} (dry run)", still.display());
+        return;
+    }
     let Some(video) = video_for(still) else {
         systemctl("stop");
         return;
@@ -219,6 +223,9 @@ pub(crate) fn sync_video_speed(speed: f64) {
 /// the normal state of a session without the video: logged at debug only.
 pub(crate) fn freeze_video(frozen: bool) {
     let verb = if frozen { "freeze" } else { "thaw" };
+    if dry_session() {
+        return;
+    }
     match std::process::Command::new("systemctl")
         .args(["--user", verb, VIDEO_UNIT])
         .stderr(std::process::Stdio::null())
@@ -230,7 +237,22 @@ pub(crate) fn freeze_video(frozen: bool) {
     }
 }
 
+/// A test run (`dev/render.sh` and the other harnesses set
+/// `SWAYPPLET_DRY_SESSION`): the binary runs as the real user, and
+/// `systemctl --user` reaches the real user manager whatever display it is
+/// nested in, so a harness run that picked or replayed a wallpaper stopped,
+/// started or froze the video playing on the person's own desktop, and its
+/// environment file lives in their runtime directory. None of that happens
+/// in a test run.
+fn dry_session() -> bool {
+    std::env::var_os("SWAYPPLET_DRY_SESSION").is_some()
+}
+
 fn systemctl(verb: &str) {
+    if dry_session() {
+        log::info!("wallpaper: systemctl {verb} {VIDEO_UNIT} (dry run)");
+        return;
+    }
     match std::process::Command::new("systemctl")
         .args(["--user", "--no-block", verb, VIDEO_UNIT])
         .status()
