@@ -148,28 +148,20 @@ pub struct Idle {
     /// the fingerprint remain; nothing here can make unlocking easier.
     #[serde(default = "yes")]
     pub face_unlock: bool,
-    /// Use the three night timers below at night. Night is the Day and
-    /// night section's (`Daylight`): when the automatic mode is dark, by the
-    /// sun or by its fixed times, so there is one night on the machine. Off,
-    /// the timers above hold all day.
+    /// Run the night window below. Off, the timers above hold all day and
+    /// every `night_*` field is inert.
     #[serde(default)]
     pub night: bool,
-    /// Retired: the night window's own clock times, from before it followed
-    /// `Daylight`. Read and ignored, and kept in the struct so a
-    /// `theme/settings.nix` that still sets them stays valid (the nixos
-    /// repo's cross-repo guard checks its keys against
-    /// `data/settings-defaults.json`). A file whose window was on and that
-    /// has no `daylight` section has its times moved there once
-    /// ([`migrate`]).
+    /// When the window opens, local time. The window is half-open,
+    /// `[from, to)`, and wraps past midnight when the end is at or before
+    /// the start.
     #[serde(default = "Idle::default_night_from_h")]
     pub night_from_h: u8,
-    /// Retired, as `night_from_h`.
     #[serde(default)]
     pub night_from_m: u8,
-    /// Retired, as `night_from_h`.
+    /// When the window closes.
     #[serde(default = "Idle::default_night_to_h")]
     pub night_to_h: u8,
-    /// Retired, as `night_from_h`.
     #[serde(default)]
     pub night_to_m: u8,
     /// What `dim_after_s` becomes inside the window.
@@ -181,6 +173,15 @@ pub struct Idle {
     /// What `blank_after_s` becomes inside the window.
     #[serde(default = "Idle::default_night_blank_after")]
     pub night_blank_after_s: u32,
+}
+
+/// Minutes since local midnight, 0–1439. Noon on a clock the platform
+/// cannot read, which is outside the shipped window and so is the tier set
+/// a user is least surprised by.
+pub fn local_minute_of_day() -> u16 {
+    glib::DateTime::now_local()
+        .map(|t| (t.hour() as u16) * 60 + t.minute() as u16)
+        .unwrap_or(12 * 60)
 }
 
 impl Idle {
@@ -239,20 +240,46 @@ impl Idle {
         }
     }
 
-    /// The timers in force: this set by day, and with the three night tiers
-    /// substituted when `night` (it is night by `Daylight`) and the night
-    /// timers are on.
+    /// The window's bounds as minutes since midnight.
+    fn night_bounds(&self) -> (u16, u16) {
+        (
+            u16::from(self.night_from_h) * 60 + u16::from(self.night_from_m),
+            u16::from(self.night_to_h) * 60 + u16::from(self.night_to_m),
+        )
+    }
+
+    /// Whether `minute_of_day` (0–1439, local) is inside the night window.
+    /// False whenever the window is off, so no caller has to check both.
+    ///
+    /// Half-open, `[from, to)`, wrapping past midnight when `to <= from`.
+    /// `from == to` is the whole day, which follows `in_quiet_hours`: a
+    /// switch that is on and does nothing is worse than one that does what
+    /// it says.
+    pub fn in_night(&self, minute_of_day: u16) -> bool {
+        if !self.night {
+            return false;
+        }
+        let (from, to) = self.night_bounds();
+        if from < to {
+            (from..to).contains(&minute_of_day)
+        } else {
+            minute_of_day >= from || minute_of_day < to
+        }
+    }
+
+    /// The timers in force at `minute_of_day`: this set outside the window,
+    /// and this set with the three night tiers substituted inside it.
     ///
     /// Returning an `Idle` rather than three numbers is what keeps the
-    /// night timers out of every consumer — `wayland::Timeouts::from`, the
+    /// night window out of every consumer — `wayland::Timeouts::from`, the
     /// blank deadline and the log line all take the resolved struct and
-    /// never learn that night exists. Suspend is deliberately not
+    /// never learn that a window exists. Suspend is deliberately not
     /// substituted: it is battery-only, and a shorter night suspend would
     /// stop an overnight job on a machine the user left running on purpose.
     ///
     /// Idempotent, so a resolved struct may be resolved again.
-    pub fn resolve(&self, night: bool) -> Idle {
-        if !(self.night && night) {
+    pub fn resolve(&self, minute_of_day: u16) -> Idle {
+        if !self.in_night(minute_of_day) {
             return *self;
         }
         Idle {
@@ -1435,60 +1462,7 @@ pub struct ExtraScreens {
 /// already in the new place wins. An `alerts` section left empty is
 /// removed, or it would hold every alert setting at its default over the
 /// system's.
-///
-/// `idle.night_from_*` and `idle.night_to_*` stopped being read when the
-/// night timers came to follow `Daylight`: one night for the mode, the
-/// night light and the idle timers. A layer whose night timers were on and
-/// that has no `daylight` section gets its window as Day and night's fixed
-/// times, so its night stays where it was, and visibly so (Appearance › Day
-/// and night). With a `daylight` section already there, that wins and the
-/// window is logged as dropped. The old keys stay valid (see
-/// `Idle::night_from_h`).
 pub fn migrate(value: &mut Value) {
-    migrate_extra_screens(value);
-    migrate_idle_night(value);
-}
-
-fn migrate_idle_night(value: &mut Value) {
-    let Some(idle) = value.get("idle").and_then(Value::as_object) else {
-        return;
-    };
-    let keys = ["night_from_h", "night_from_m", "night_to_h", "night_to_m"];
-    if !idle.get("night").and_then(Value::as_bool).unwrap_or(false)
-        || !keys.iter().any(|k| idle.contains_key(*k))
-    {
-        return;
-    }
-    let get = |key: &str, default: u64| idle.get(key).and_then(Value::as_u64).unwrap_or(default);
-    let (from_h, from_m) = (get("night_from_h", 21), get("night_from_m", 0));
-    let (to_h, to_m) = (get("night_to_h", 7), get("night_to_m", 0));
-    let Some(root) = value.as_object_mut() else {
-        return;
-    };
-    if root.contains_key("daylight") {
-        log::info!(
-            "settings: the night timers now follow Day and night; the old window \
-             {from_h:02}:{from_m:02}–{to_h:02}:{to_m:02} is no longer read"
-        );
-        return;
-    }
-    log::info!(
-        "settings: the night timers now follow Day and night; the old window \
-         {from_h:02}:{from_m:02}–{to_h:02}:{to_m:02} becomes its fixed times"
-    );
-    root.insert(
-        "daylight".to_string(),
-        serde_json::json!({
-            "fixed_times": true,
-            "night_from_h": from_h,
-            "night_from_m": from_m,
-            "day_from_h": to_h,
-            "day_from_m": to_m,
-        }),
-    );
-}
-
-fn migrate_extra_screens(value: &mut Value) {
     let Some(old) = value
         .get_mut("alerts")
         .and_then(Value::as_object_mut)
@@ -2227,34 +2201,50 @@ mod tests {
         assert_eq!(nix_literal(&serde_json::json!("a\"b")), "\"a\\\"b\"");
     }
 
-    /// A window whose night timers were on moves to Day and night once,
-    /// as its fixed times; a `daylight` already there wins; a window that
-    /// was off moves nothing.
+    /// 21:30–07:00, the shape the window is for: it wraps midnight, it is
+    /// half-open at both ends, and the minute is part of the bound.
     #[test]
-    fn the_old_night_window_becomes_day_and_nights_fixed_times() {
-        use serde_json::json;
-        let mut v = json!({"idle": {"night": true, "night_from_h": 22, "night_from_m": 30, "night_to_h": 6}});
-        migrate(&mut v);
-        let s: Settings = serde_json::from_value(v.clone()).unwrap();
-        let d = s.daylight();
-        assert!(d.fixed_times);
-        assert_eq!(
-            (d.night_from_h, d.night_from_m, d.day_from_h, d.day_from_m),
-            (22, 30, 6, 0)
-        );
-        assert!(s.idle().night);
-        // Once: a second load finds the daylight section and leaves it.
-        let before = v.clone();
-        migrate(&mut v);
-        assert_eq!(v, before);
+    fn the_night_window_wraps_past_midnight_and_is_half_open() {
+        let at = |h: u16, m: u16| h * 60 + m;
+        let night = Idle {
+            night: true,
+            night_from_h: 21,
+            night_from_m: 30,
+            night_to_h: 7,
+            night_to_m: 0,
+            ..Idle::default()
+        };
+        assert!(night.in_night(at(21, 30)) && night.in_night(at(23, 59)));
+        assert!(night.in_night(at(0, 0)) && night.in_night(at(6, 59)));
+        assert!(!night.in_night(at(21, 29)) && !night.in_night(at(7, 0)));
+        assert!(!night.in_night(at(12, 0)));
 
-        let mut v = json!({"idle": {"night": true, "night_from_h": 22}, "daylight": {"fixed_times": false}});
-        migrate(&mut v);
-        assert_eq!(v["daylight"], json!({"fixed_times": false}));
+        // A window inside one day, and the whole-day case.
+        let day = Idle {
+            night_from_h: 9,
+            night_from_m: 0,
+            night_to_h: 17,
+            night_to_m: 15,
+            ..night
+        };
+        assert!(day.in_night(at(9, 0)) && day.in_night(at(17, 14)));
+        assert!(!day.in_night(at(17, 15)) && !day.in_night(at(2, 0)));
+        let whole = Idle {
+            night_from_h: 5,
+            night_from_m: 0,
+            night_to_h: 5,
+            night_to_m: 0,
+            ..night
+        };
+        assert!(whole.in_night(at(4, 59)) && whole.in_night(at(5, 0)));
 
-        let mut v = json!({"idle": {"night": false, "night_from_h": 22}});
-        migrate(&mut v);
-        assert!(v.get("daylight").is_none());
+        // The switch is the gate: the same bounds with `night` off are never
+        // inside, so no caller has to test both.
+        let off = Idle {
+            night: false,
+            ..night
+        };
+        assert!(!off.in_night(at(22, 0)));
     }
 
     #[test]
@@ -2274,21 +2264,9 @@ mod tests {
             suspend_after_s: 1200,
             ..Idle::default()
         };
-        assert_eq!(cfg.resolve(false), cfg);
-        // Night with the night timers off is the day's set.
-        assert_eq!(
-            Idle {
-                night: false,
-                ..cfg
-            }
-            .resolve(true),
-            Idle {
-                night: false,
-                ..cfg
-            }
-        );
+        assert_eq!(cfg.resolve(12 * 60), cfg);
 
-        let night = cfg.resolve(true);
+        let night = cfg.resolve(22 * 60);
         assert_eq!(
             (night.dim_after_s, night.lock_after_s, night.blank_after_s),
             (60, 300, 120)
@@ -2297,7 +2275,7 @@ mod tests {
         // a machine left running must not be cut short by the window.
         assert_eq!(night.suspend_after_s, cfg.suspend_after_s);
         // The window's own fields survive, so resolving again is a no-op.
-        assert_eq!(night.resolve(true), night);
+        assert_eq!(night.resolve(22 * 60), night);
     }
 
     #[test]
@@ -2324,7 +2302,7 @@ mod tests {
             night_blank_after_s: 120,
             ..cfg(900, 300)
         };
-        assert_eq!(night.resolve(true).blank_after_on(true), 120);
+        assert_eq!(night.resolve(23 * 60).blank_after_on(true), 120);
     }
 
     #[test]

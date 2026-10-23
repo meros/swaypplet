@@ -9,21 +9,19 @@
 //! between a few sensible rungs, and a rail from 0 to an hour puts most of
 //! its length on values nobody wants.
 //!
-//! The night timers are the same three dropdowns a second time, over the
-//! same ladders. Night is Appearance's Day and night (`theme::sun`), when
-//! the automatic mode is dark, so the machine has one night; this group has
-//! no clock times of its own. It is one group rather than a per-timer "and
-//! at night" column because it is one decision: either the night has its own
-//! timers or it does not, and the switch says which. The rows below the
-//! switch go insensitive when it is off, so the values stay visible and stay
-//! saved.
+//! The night window is the same three dropdowns a second time, over the same
+//! ladders, plus the two clock times that bound it. It is one group rather
+//! than a per-timer "and at night" column because the window is one decision:
+//! either the evening has its own timers or it does not, and the switch says
+//! which. The rows below the switch go insensitive when it is off, so the
+//! values stay visible and stay saved.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use super::form::{self, Durations, dropdown_row, scale_row, section_box, switch_row};
+use super::form::{self, Durations, dropdown_row, scale_row, section_box, switch_row, time_row};
 use super::store::{self, Elevate, Idle};
 
 /// The rungs each dropdown offers. The saved value is added if it is not
@@ -87,21 +85,21 @@ const TIMERS: [Timer; 5] = [
 const NIGHT_TIMERS: [Timer; 3] = [
     Timer {
         label: "Dim after",
-        hint: "How long idle before the screen dims, at night.",
+        hint: "The dim tier inside the window.",
         ladder: DIM_LADDER,
         get: |i| i.night_dim_after_s,
         set: |i, v| i.night_dim_after_s = v,
     },
     Timer {
         label: "Lock after",
-        hint: "How long idle before the session locks, at night. If you have already been idle longer than this when night begins, it locks at once.",
+        hint: "The lock tier inside the window. Crossing into the window when you have already been idle longer than this locks at once.",
         ladder: LOCK_LADDER,
         get: |i| i.night_lock_after_s,
         set: |i, v| i.night_lock_after_s = v,
     },
     Timer {
         label: "Screen off after",
-        hint: "How long the lock screen stays lit at night before the screens go off. A countdown already running is shortened to this, never extended.",
+        hint: "The screen-off tier inside the window, counted while locked. A countdown already running is shortened to this, never extended.",
         ladder: BLANK_LADDER,
         get: |i| i.night_blank_after_s,
         set: |i, v| i.night_blank_after_s = v,
@@ -122,7 +120,11 @@ fn describe(idle: &Idle) -> String {
     );
     if idle.night {
         text.push_str(&format!(
-            "; at night dim {}, lock {}, screen off {}",
+            "; {:02}:{:02}–{:02}:{:02} dim {}, lock {}, screen off {}",
+            idle.night_from_h,
+            idle.night_from_m,
+            idle.night_to_h,
+            idle.night_to_m,
             form::duration_label(idle.night_dim_after_s).to_lowercase(),
             form::duration_label(idle.night_lock_after_s).to_lowercase(),
             form::duration_label(idle.night_blank_after_s).to_lowercase(),
@@ -131,39 +133,12 @@ fn describe(idle: &Idle) -> String {
     text
 }
 
-/// When night is, as the night timers will see it: tonight's switch times
-/// by Day and night, or why there is none. True when it is a warning.
-fn night_when(d: &super::store::Daylight) -> (String, bool) {
-    if !d.fixed_times && d.place().is_none() {
-        return (
-            "No place set in Appearance › Day and night, so night never starts and these timers are not used".into(),
-            true,
-        );
-    }
-    let switches = crate::theme::sun::switches_today(d);
-    let dark = switches
-        .iter()
-        .find(|(_, m)| *m == crate::tokens::Mode::Dark)
-        .map(|(m, _)| *m);
-    let light = switches
-        .iter()
-        .find(|(_, m)| *m == crate::tokens::Mode::Light)
-        .map(|(m, _)| *m);
-    let clock = |m: u16| format!("{:02}:{:02}", m / 60, m % 60);
-    match (dark, light) {
-        (Some(dark), Some(light)) => (
-            format!(
-                "Night is from {} to {} today, as Appearance › Day and night sets it",
-                clock(dark),
-                clock(light)
-            ),
-            false,
-        ),
-        _ => (
-            "No sunset or sunrise here today: night follows Appearance › Day and night".into(),
-            false,
-        ),
-    }
+/// One clock bound of the night window: its two dropdowns and the minute
+/// rungs the second was built from.
+struct Clock {
+    hour: gtk4::DropDown,
+    minute: gtk4::DropDown,
+    rungs: Vec<u8>,
 }
 
 /// The short line under a row whose name does not say enough
@@ -190,8 +165,8 @@ struct State {
     night: gtk4::Switch,
     /// Everything the switch governs, so one `set_sensitive` covers it.
     night_body: gtk4::Box,
-    /// When night is tonight, by Day and night, or why it never comes.
-    night_when: gtk4::Label,
+    opens: Clock,
+    closes: Clock,
     dim_level: gtk4::Scale,
     walk_away: gtk4::Switch,
     face: gtk4::Switch,
@@ -279,16 +254,16 @@ impl State {
         }
         self.night.set_active(idle.night);
         self.night_body.set_sensitive(idle.night);
-        let (when, warn) = night_when(&settings.daylight());
-        self.night_when.set_text(&when);
-        crate::ui::set_tone(
-            &self.night_when,
-            if warn && idle.night {
-                crate::ui::Tone::Warning
-            } else {
-                crate::ui::Tone::Muted
-            },
-        );
+        for (clock, (hour, minute)) in [&self.opens, &self.closes].into_iter().zip([
+            (idle.night_from_h, idle.night_from_m),
+            (idle.night_to_h, idle.night_to_m),
+        ]) {
+            clock.hour.set_selected(u32::from(hour.min(23)));
+            match clock.rungs.iter().position(|m| *m == minute) {
+                Some(i) => clock.minute.set_selected(i as u32),
+                None => log::warn!("idle settings: night window minute {minute} is not a rung"),
+            }
+        }
         self.dim_level.set_value(f64::from(idle.dim_level));
         self.walk_away.set_active(idle.walk_away_lock);
         self.face.set_active(idle.face_unlock);
@@ -347,20 +322,30 @@ impl IdlePane {
         // hiding them: what the window would do stays readable, and stays in
         // the file, while it is not doing it.
         let night_group = section_box(
-            "At night",
-            "Shorter timers for the night. Night is when Appearance › Day and night turns the mode dark. Suspend has no night timer.",
+            "Night window",
+            "A second set of timers for a time range, for the hours when a lit, unlocked screen should not sit there. Outside the range the timers above hold. Suspend is not in the window.",
         );
         let (night_row, night) = switch_row(
-            "Night timers",
-            "Off, the timers above hold day and night and the rows below are not used.",
+            "Use a night window",
+            "Off, the timers above hold all day and the rows below are inert.",
             idle.night,
         );
         night_group.append(&night_row);
-        let night_when = form::status_label();
-        night_when.set_xalign(0.0);
-        night_group.append(&night_when);
 
         let night_body = crate::ui::vbox(1);
+        let (opens_row, opens_h, opens_m, opens_rungs) = time_row(
+            "Window opens",
+            "Local time. A window whose end is at or before its start crosses midnight, so 21:00 to 07:00 is the evening and the night.",
+            idle.night_from_m,
+        );
+        night_body.append(&opens_row);
+        let (closes_row, closes_h, closes_m, closes_rungs) = time_row(
+            "Window closes",
+            "Local time, exclusive: at this minute the daytime timers are back.",
+            idle.night_to_m,
+        );
+        night_body.append(&closes_row);
+
         let mut night_dropdowns = Vec::new();
         for timer in &NIGHT_TIMERS {
             let durations = Durations::new(timer.ladder, (timer.get)(&idle));
@@ -428,7 +413,16 @@ impl IdlePane {
             night_dropdowns,
             night: night.clone(),
             night_body,
-            night_when,
+            opens: Clock {
+                hour: opens_h.clone(),
+                minute: opens_m.clone(),
+                rungs: opens_rungs,
+            },
+            closes: Clock {
+                hour: closes_h.clone(),
+                minute: closes_m.clone(),
+                rungs: closes_rungs,
+            },
             dim_level: dim_level.clone(),
             walk_away: walk_away.clone(),
             face: face.clone(),
@@ -470,6 +464,39 @@ impl IdlePane {
             night.connect_active_notify(move |s| {
                 let on = s.is_active();
                 state.edit(|idle| idle.night = on);
+            });
+        }
+        // The four clock dropdowns, each writing one field. The hour is its
+        // own index; the minute goes through the rungs its dropdown was built
+        // from, which may carry a hand-typed value.
+        for (hour, set) in [
+            (
+                &opens_h,
+                (|i: &mut Idle, v: u8| i.night_from_h = v) as fn(&mut Idle, u8),
+            ),
+            (&closes_h, |i: &mut Idle, v: u8| i.night_to_h = v),
+        ] {
+            let state = state.clone();
+            hour.connect_selected_notify(move |d| {
+                let h = d.selected().min(23) as u8;
+                state.edit(|idle| set(idle, h));
+            });
+        }
+        for (which, set) in [
+            (
+                true,
+                (|i: &mut Idle, v: u8| i.night_from_m = v) as fn(&mut Idle, u8),
+            ),
+            (false, |i: &mut Idle, v: u8| i.night_to_m = v),
+        ] {
+            let state = state.clone();
+            let minute = if which { &opens_m } else { &closes_m };
+            minute.connect_selected_notify(move |d| {
+                let clock = if which { &state.opens } else { &state.closes };
+                let Some(m) = clock.rungs.get(d.selected() as usize).copied() else {
+                    return;
+                };
+                state.edit(|idle| set(idle, m));
             });
         }
         {
@@ -540,10 +567,12 @@ pub(super) const SEARCH: &[Entry] = &[
     row("Idle timers", "Screen off on battery", "A shorter screen-off while locked on battery", &["battery", "screen timeout", "display off", "screen off", "blank", "dpms", "power saving", "unplugged"]).keys(&["idle.battery_blank_after_s"]),
     row("Idle timers", "Suspend after", "Sleep on battery when idle", &["sleep", "suspend", "hibernate", "battery", "standby"]).keys(&["idle.suspend_after_s"]),
     row("Idle timers", "Dim to", "How far the dim tier turns the backlight down", &["dim level", "brightness", "backlight"]).keys(&["idle.dim_level"]),
-    row("At night", "Night timers", "Shorter timers for the night", &["night window", "schedule", "bedtime"]).keys(&["idle.night"]),
-    row("At night", "Dim after", "The dim timer at night", &["night dim", "dim", "backlight"]).keys(&["idle.night_dim_after_s"]),
-    row("At night", "Lock after", "The lock timer at night", &["night lock", "auto lock", "timeout"]).keys(&["idle.night_lock_after_s"]),
-    row("At night", "Screen off after", "The screen-off timer at night", &["screen timeout", "display off", "timeout"]).keys(&["idle.night_blank_after_s"]),
+    row("Night window", "Use a night window", "Shorter timers for the night", &["night", "schedule", "bedtime"]).keys(&["idle.night"]),
+    row("Night window", "Window opens", "When the night timers start", &["night", "start", "evening", "bedtime"]).keys(&["idle.night_from_h", "idle.night_from_m"]),
+    row("Night window", "Window closes", "When the day timers come back", &["night", "end", "morning"]).keys(&["idle.night_to_h", "idle.night_to_m"]),
+    row("Night window", "Dim after", "The dim tier at night", &["night", "dim", "backlight"]).keys(&["idle.night_dim_after_s"]),
+    row("Night window", "Lock after", "The lock tier at night", &["night", "auto lock", "timeout"]).keys(&["idle.night_lock_after_s"]),
+    row("Night window", "Screen off after", "The screen-off tier at night", &["night", "screen timeout", "display off", "timeout"]).keys(&["idle.night_blank_after_s"]),
     row("Lock", "Lock when I walk away", "The presence sensor locks when you leave", &["walk away", "presence", "proximity", "away", "leave", "sensor"]).keys(&["idle.walk_away_lock"]),
     row("Lock", "Face unlock", "The camera unlocks the lock screen", &["face", "camera", "howdy", "face id", "biometric", "ir camera", "unlock", "fingerprint"]).keys(&["idle.face_unlock"]),
     row("Administrator access", "Face for administrator access", "The camera for sudo and pkexec", &["sudo", "pkexec", "polkit", "admin", "root", "elevate", "face", "camera"]).keys(&["elevate.face"]),

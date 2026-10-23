@@ -23,7 +23,7 @@ groups, `src/settings/`:
 | **Settings** | | |
 | Appearance | `output * bg` on the compositor; whether the theme takes its colours from it; how much the shell animates; when day and night are; the night light and its warmth | `wallpaper`, `look`, `daylight`, `night_light` |
 | Glass | the liquid-glass material | `~/.config/swaypplet/glass.json` |
-| Idle & Lock | the idle manager's timers; the night timers; walk-away lock; face unlock; what sudo and pkexec may ask for | `idle`, `elevate` |
+| Idle & Lock | the idle manager's timers; the night window; walk-away lock; face unlock; what sudo and pkexec may ask for | `idle`, `elevate` |
 | Bar | clock format, segments, OSD placement; pins and previews: size, frame rate, corner | `bar`, `pins` |
 | Input | keyboard layouts, layout switch, Caps Lock, key repeat; touchpad and mouse; key steps, volume boost; the connected devices | `input`, `keys` |
 | Alerts | popup linger, corner and depth; quiet hours; quiet by context; what a screenshot becomes | `alerts`, `capture` |
@@ -314,25 +314,15 @@ and Bar tabs is `nix <section>` into the clipboard.
   and creates them again (`idle/wayland.rs`). Zero on a timer is "never":
   no notification is created. The blank duration and the dim level are read
   at fire time and need no re-arm.
-- **The night timers** are a second, shorter set of the dim, lock and
-  screen-off tiers for the night (`Idle::resolve`), and night is Day and
-  night's: when the automatic mode is dark (`theme::sun::night_now`, the
-  mode's band and hysteresis), so the machine has one night for the mode,
-  the night light and the idle timers. The idle process reads the
-  `daylight` section from the same files and resolves night once a minute,
-  so an edit in the pane and night beginning arrive by one path and re-arm
-  by one comparison. With the sun deciding and no place picked, it is day
-  for the timers (the pane says so). Suspend has no night timer: it is
+- **The night window** is a second, shorter set of the dim, lock and
+  screen-off tiers for a time range (`Idle::resolve`). The same once-a-second
+  check resolves it against the local clock, so an edit in the pane and the
+  window opening arrive by one path and re-arm by one comparison; a boundary
+  is at most `SETTINGS_POLL` late. Suspend is not in the window: it is
   battery-only, and cutting an overnight job short is worse than a late
-  suspend. Night beginning while already idle past its shorter lock tier
-  locks at once, which is `ext-idle-notify` being correct — the seat has
+  suspend. Crossing INTO the window while already idle past its shorter lock
+  tier locks at once, which is `ext-idle-notify` being correct — the seat has
   been idle longer than the timeout being armed.
-  The window's own clock times (`idle.night_from_h`, `_m`, `night_to_h`,
-  `_m`) are retired: still accepted, so a `theme/settings.nix` that sets
-  them stays valid, and never read. A file whose night timers were on and
-  that has no `daylight` section gets the old window as Day and night's
-  fixed times, once, on load (`schema::migrate`, logged); with a `daylight`
-  section the old window is logged as dropped.
 
 ## Adding a setting
 
@@ -434,5 +424,5 @@ The Launcher pane's "Pages and settings" switch turns the rows off.
   layer somewhere else, as `SWAYPPLET_GLASS_CONFIG` does for glass.
 - `journalctl -t swaypplet-idle -f` shows the re-arm as
   `idle: settings changed — …` followed by `idle: watching N timeouts …`.
-  Night beginning or ending logs the same line with `night began` or
-  `day began` in place of `settings changed`.
+  A night-window boundary logs the same line with `night window open` or
+  `night window closed` in place of `settings changed`.
