@@ -221,6 +221,7 @@ impl DisplaysPane {
         body.append(&group);
         body.append(&footer);
         body.append(&profiles);
+        body.append(&crate::widgets::display::extra_screen_group());
         root.append(&ask);
         root.append(&unavailable);
         root.append(&body);

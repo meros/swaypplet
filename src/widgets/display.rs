@@ -348,7 +348,7 @@ fn fill_extra_screen(list: &Box) {
 
 /// "Extra screen": a virtual output sent to a TV or a viewer. The network
 /// is searched when the group comes on screen, not when the panel opens.
-fn extra_screen_group() -> Box {
+pub fn extra_screen_group() -> Box {
     let group = ui::group(1);
     let head = ui::heading("Extra screen");
     head.set_halign(gtk4::Align::Start);
