@@ -83,6 +83,20 @@ list.ui-list > row:focus > .ui-row {
     background-image: linear-gradient(var(--state-hover), var(--state-hover));
 }
 
+/* The keyboard's row, ringed (§3.3 focus): on a chosen row the hover
+   tint above is lost in the selected fill, and the settings sidebar is
+   walked with the arrows. */
+list.ui-list > row:focus-visible > .ui-row {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+/* GTK's own ring on the row node, square and outside the row's radius,
+   would draw a second one around it. */
+list.ui-list > row:focus-visible {
+    outline: none;
+}
+
 /* A list that holds a choice (`ui::list` given a selection mode, as the
    settings sidebar is): the chosen row keeps the selected fill and its
    icon the accent, while the pointer and the keyboard light the others. */

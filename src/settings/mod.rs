@@ -519,6 +519,33 @@ impl SettingsSection {
             });
             self.search.add_controller(keys);
         }
+        // Tab leaves a list for the pane, Shift+Tab goes back to the
+        // search: the arrows walk the rows. Left to GTK, Tab stepped to the
+        // next row and, the row being the selection, to the next pane, so
+        // the pane's controls were reached only past every pane in turn.
+        for list in [&self.nav, &self.results] {
+            let keys = gtk4::EventControllerKey::new();
+            keys.set_propagation_phase(gtk4::PropagationPhase::Capture);
+            let weak = std::rc::Rc::downgrade(self);
+            keys.connect_key_pressed(move |_, key, _, _| {
+                use gtk4::gdk::Key;
+                let Some(this) = weak.upgrade() else {
+                    return glib::Propagation::Proceed;
+                };
+                match key {
+                    Key::Tab => {
+                        this.focus_pane();
+                        glib::Propagation::Stop
+                    }
+                    Key::ISO_Left_Tab => {
+                        this.search.grab_focus();
+                        glib::Propagation::Stop
+                    }
+                    _ => glib::Propagation::Proceed,
+                }
+            });
+            list.add_controller(keys);
+        }
         {
             let weak = std::rc::Rc::downgrade(self);
             self.results.connect_row_activated(move |_, row| {
@@ -611,6 +638,13 @@ impl SettingsSection {
     /// Type `query` into the search, for the render harness.
     pub fn search_text(&self, query: &str) {
         self.search.set_text(query);
+    }
+
+    /// Put the keyboard on the first control of the pane on screen.
+    fn focus_pane(&self) {
+        if let Some(page) = self.stack.visible_child() {
+            page.child_focus(gtk4::DirectionType::TabForward);
+        }
     }
 
     /// Put the keyboard in the search field.
@@ -895,6 +929,14 @@ fn reveal_when_laid_out(row: &gtk4::Widget) {
         if laid_out {
             scroll_to(row);
             crate::ui::highlight(row);
+            // The keyboard follows the eye: Space or an arrow then works
+            // the row that was asked for, not the search field.
+            row.child_focus(gtk4::DirectionType::TabForward);
+            // Moved by code, so GTK would not ring it; it was asked for
+            // from the keyboard (Enter on a hit), so show where it is.
+            if let Some(window) = row.root().and_downcast::<gtk4::Window>() {
+                window.set_focus_visible(true);
+            }
         }
         glib::ControlFlow::Break
     });
