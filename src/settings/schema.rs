@@ -2247,6 +2247,28 @@ mod tests {
         assert!(!off.in_night(at(22, 0)));
     }
 
+    /// The night window is the Idle pane's own: Day and night's times
+    /// (`daylight`) do not move it, and loading a file with both moves
+    /// nothing between them.
+    #[test]
+    fn the_idle_night_window_ignores_daylight() {
+        let file = r#"{
+            "idle": {"night": true, "night_from_h": 21, "night_from_m": 30, "night_to_h": 6, "night_to_m": 0},
+            "daylight": {"fixed_times": true, "night_from_h": 19, "night_from_m": 0, "day_from_h": 8, "day_from_m": 0}
+        }"#;
+        let mut v: Value = serde_json::from_str(file).unwrap();
+        let before = v.clone();
+        migrate(&mut v);
+        assert_eq!(v, before);
+        let s: Settings = serde_json::from_value(v).unwrap();
+        let idle = s.idle();
+        let at = |h: u16, m: u16| h * 60 + m;
+        // Daylight's night starts at 19:00; the window still at 21:30.
+        assert!(!idle.in_night(at(19, 0)) && !idle.in_night(at(21, 29)));
+        assert!(idle.in_night(at(21, 30)) && idle.in_night(at(5, 59)));
+        assert!(!idle.in_night(at(6, 0)) && !idle.in_night(at(7, 30)));
+    }
+
     #[test]
     fn resolve_swaps_three_tiers_inside_the_window_and_none_outside() {
         let cfg = Idle {

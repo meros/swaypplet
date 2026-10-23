@@ -85,21 +85,21 @@ const TIMERS: [Timer; 5] = [
 const NIGHT_TIMERS: [Timer; 3] = [
     Timer {
         label: "Dim after",
-        hint: "The dim tier inside the window.",
+        hint: "How long idle before the screen dims, in the night window.",
         ladder: DIM_LADDER,
         get: |i| i.night_dim_after_s,
         set: |i, v| i.night_dim_after_s = v,
     },
     Timer {
         label: "Lock after",
-        hint: "The lock tier inside the window. Crossing into the window when you have already been idle longer than this locks at once.",
+        hint: "How long idle before the session locks, in the night window. If you have already been idle longer than this when the window opens, it locks at once.",
         ladder: LOCK_LADDER,
         get: |i| i.night_lock_after_s,
         set: |i, v| i.night_lock_after_s = v,
     },
     Timer {
         label: "Screen off after",
-        hint: "The screen-off tier inside the window, counted while locked. A countdown already running is shortened to this, never extended.",
+        hint: "How long the lock screen stays lit in the night window before the screens go off. A countdown already running is shortened to this, never extended.",
         ladder: BLANK_LADDER,
         get: |i| i.night_blank_after_s,
         set: |i, v| i.night_blank_after_s = v,
@@ -323,27 +323,29 @@ impl IdlePane {
         // the file, while it is not doing it.
         let night_group = section_box(
             "Night window",
-            "A second set of timers for a time range, for the hours when a lit, unlocked screen should not sit there. Outside the range the timers above hold. Suspend is not in the window.",
+            "Shorter timers for the hours you choose here, such as the night. Outside them the timers above hold. Suspend has no night timer.",
         );
         let (night_row, night) = switch_row(
             "Use a night window",
-            "Off, the timers above hold all day and the rows below are inert.",
+            "Off, the timers above hold all day and the rows below are not used.",
             idle.night,
         );
         night_group.append(&night_row);
 
         let night_body = crate::ui::vbox(1);
         let (opens_row, opens_h, opens_m, opens_rungs) = time_row(
-            "Window opens",
-            "Local time. A window whose end is at or before its start crosses midnight, so 21:00 to 07:00 is the evening and the night.",
+            "From",
+            "When the night timers start, local time. An end at or before the start runs past midnight, so 21:00 to 07:00 is the evening and the night.",
             idle.night_from_m,
         );
+        form::dependent(&[&opens_row]);
         night_body.append(&opens_row);
         let (closes_row, closes_h, closes_m, closes_rungs) = time_row(
-            "Window closes",
-            "Local time, exclusive: at this minute the daytime timers are back.",
+            "Until",
+            "When the day timers are back, local time.",
             idle.night_to_m,
         );
+        form::dependent(&[&closes_row]);
         night_body.append(&closes_row);
 
         let mut night_dropdowns = Vec::new();
@@ -567,12 +569,12 @@ pub(super) const SEARCH: &[Entry] = &[
     row("Idle timers", "Screen off on battery", "A shorter screen-off while locked on battery", &["battery", "screen timeout", "display off", "screen off", "blank", "dpms", "power saving", "unplugged"]).keys(&["idle.battery_blank_after_s"]),
     row("Idle timers", "Suspend after", "Sleep on battery when idle", &["sleep", "suspend", "hibernate", "battery", "standby"]).keys(&["idle.suspend_after_s"]),
     row("Idle timers", "Dim to", "How far the dim tier turns the backlight down", &["dim level", "brightness", "backlight"]).keys(&["idle.dim_level"]),
-    row("Night window", "Use a night window", "Shorter timers for the night", &["night", "schedule", "bedtime"]).keys(&["idle.night"]),
-    row("Night window", "Window opens", "When the night timers start", &["night", "start", "evening", "bedtime"]).keys(&["idle.night_from_h", "idle.night_from_m"]),
-    row("Night window", "Window closes", "When the day timers come back", &["night", "end", "morning"]).keys(&["idle.night_to_h", "idle.night_to_m"]),
-    row("Night window", "Dim after", "The dim tier at night", &["night", "dim", "backlight"]).keys(&["idle.night_dim_after_s"]),
-    row("Night window", "Lock after", "The lock tier at night", &["night", "auto lock", "timeout"]).keys(&["idle.night_lock_after_s"]),
-    row("Night window", "Screen off after", "The screen-off tier at night", &["night", "screen timeout", "display off", "timeout"]).keys(&["idle.night_blank_after_s"]),
+    row("Night window", "Use a night window", "Shorter timers for the night", &["night window", "night timers", "schedule", "bedtime"]).keys(&["idle.night"]),
+    row("Night window", "From", "When the night timers start", &["night start", "start", "evening", "bedtime"]).keys(&["idle.night_from_h", "idle.night_from_m"]),
+    row("Night window", "Until", "When the day timers come back", &["night end", "end", "morning"]).keys(&["idle.night_to_h", "idle.night_to_m"]),
+    row("Night window", "Dim after", "The dim timer at night", &["night dim", "dim", "backlight"]).keys(&["idle.night_dim_after_s"]),
+    row("Night window", "Lock after", "The lock timer at night", &["night lock", "auto lock", "timeout"]).keys(&["idle.night_lock_after_s"]),
+    row("Night window", "Screen off after", "The screen-off timer at night", &["screen timeout", "display off", "timeout"]).keys(&["idle.night_blank_after_s"]),
     row("Lock", "Lock when I walk away", "The presence sensor locks when you leave", &["walk away", "presence", "proximity", "away", "leave", "sensor"]).keys(&["idle.walk_away_lock"]),
     row("Lock", "Face unlock", "The camera unlocks the lock screen", &["face", "camera", "howdy", "face id", "biometric", "ir camera", "unlock", "fingerprint"]).keys(&["idle.face_unlock"]),
     row("Administrator access", "Face for administrator access", "The camera for sudo and pkexec", &["sudo", "pkexec", "polkit", "admin", "root", "elevate", "face", "camera"]).keys(&["elevate.face"]),
