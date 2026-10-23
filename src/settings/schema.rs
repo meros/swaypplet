@@ -818,13 +818,6 @@ pub struct Alerts {
     /// Cards shown at full size before older ones collapse behind them.
     #[serde(default = "Alerts::default_stack")]
     pub stack: u8,
-    /// Let popups appear on an extra screen (a virtual output made for a
-    /// TV or a VNC viewer, `services::cast`). Off, a popup that would go
-    /// there goes to one of your own screens instead
-    /// (`notifications::stack::popup_output`); a TV in the room would show
-    /// everyone what arrives.
-    #[serde(default)]
-    pub on_extra_screens: bool,
     /// Arm Do Not Disturb between `quiet_from_h` and `quiet_to_h`, and
     /// disarm it after. A manual toggle inside the window is left alone.
     #[serde(default)]
@@ -894,7 +887,6 @@ impl Default for Alerts {
             linger: Linger::Normal,
             corner: Corner::TopRight,
             stack: 3,
-            on_extra_screens: false,
             quiet: false,
             quiet_from_h: 22,
             quiet_to_h: 7,
@@ -1437,6 +1429,63 @@ impl Input {
     }
 }
 
+/// What of the shell shows on an extra screen: a virtual output made for a
+/// TV or a VNC viewer (`services::cast`). Off, the surface is not built
+/// there (one per output) or goes to one of the person's own screens
+/// (placed on the focused output); `shell::extra` holds the rules. All off
+/// by default: an extra screen is often a TV other people see.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ExtraScreens {
+    /// The bar (and its peek, which lives in it).
+    #[serde(default)]
+    pub bar: bool,
+    /// The workspace-name pill and its hover strip (`label`).
+    #[serde(default)]
+    pub workspace_names: bool,
+    /// The volume and brightness card.
+    #[serde(default)]
+    pub osd: bool,
+    /// The key binding sheet.
+    #[serde(default)]
+    pub key_sheet: bool,
+    /// Pins: a pin follows the focused output, or a screen instead.
+    #[serde(default)]
+    pub pins: bool,
+    /// Notification popups. Was `alerts.on_extra_screens` (see [`migrate`]).
+    #[serde(default)]
+    pub notifications: bool,
+}
+
+/// Bring a settings file written by an older build up to date, before its
+/// keys are checked. `alerts.on_extra_screens` became
+/// `extra_screens.notifications` when every surface got a switch; a value
+/// already in the new place wins. An `alerts` section left empty is
+/// removed, or it would hold every alert setting at its default over the
+/// system's.
+pub fn migrate(value: &mut Value) {
+    let Some(old) = value
+        .get_mut("alerts")
+        .and_then(Value::as_object_mut)
+        .and_then(|a| a.remove("on_extra_screens"))
+    else {
+        return;
+    };
+    if value["alerts"].as_object().is_some_and(|a| a.is_empty())
+        && let Some(root) = value.as_object_mut()
+    {
+        root.remove("alerts");
+    }
+    let Some(root) = value.as_object_mut() else {
+        return;
+    };
+    let extra = root
+        .entry("extra_screens")
+        .or_insert_with(|| Value::Object(Default::default()));
+    if let Some(extra) = extra.as_object_mut() {
+        extra.entry("notifications").or_insert(old);
+    }
+}
+
 // ── The file ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -1468,6 +1517,8 @@ pub struct Settings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub displays: Option<Displays>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_screens: Option<ExtraScreens>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<Input>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub devices: Option<Devices>,
@@ -1475,7 +1526,7 @@ pub struct Settings {
 
 impl Settings {
     /// The section names, in the order the file and the pane list them.
-    pub const SECTIONS: [&'static str; 15] = [
+    pub const SECTIONS: [&'static str; 16] = [
         "wallpaper",
         "look",
         "idle",
@@ -1489,6 +1540,7 @@ impl Settings {
         "night_light",
         "daylight",
         "displays",
+        "extra_screens",
         "input",
         "devices",
     ];
@@ -1496,7 +1548,7 @@ impl Settings {
     /// The sections with a system layer, which is every one but the
     /// wallpaper (its system default is the sway config's `bg` line) and the
     /// device names (a person's own).
-    pub const NIX_SECTIONS: [&'static str; 13] = [
+    pub const NIX_SECTIONS: [&'static str; 14] = [
         "look",
         "idle",
         "bar",
@@ -1509,6 +1561,7 @@ impl Settings {
         "night_light",
         "daylight",
         "displays",
+        "extra_screens",
         "input",
     ];
 
@@ -1531,6 +1584,11 @@ impl Settings {
     }
     pub fn alerts(&self) -> Alerts {
         self.alerts.or(system().alerts).unwrap_or_default()
+    }
+    pub fn extra_screens(&self) -> ExtraScreens {
+        self.extra_screens
+            .or(system().extra_screens)
+            .unwrap_or_default()
     }
     pub fn capture(&self) -> Capture {
         self.capture
@@ -1591,6 +1649,7 @@ impl Settings {
             night_light: Some(self.night_light()),
             daylight: Some(self.daylight()),
             displays: Some(self.displays()),
+            extra_screens: Some(self.extra_screens()),
             input: Some(self.input()),
             devices: self.devices.clone(),
         }
@@ -1622,6 +1681,7 @@ impl Settings {
             night_light: Some(NightLight::default()),
             daylight: Some(Daylight::default()),
             displays: Some(Displays::default()),
+            extra_screens: Some(ExtraScreens::default()),
             input: Some(Input::default()),
             devices: Some(Devices::default()),
         }
@@ -1804,6 +1864,7 @@ section!(Launcher, launcher, launcher);
 section!(NightLight, night_light, night_light);
 section!(Daylight, daylight, daylight);
 section!(Displays, displays, displays);
+section!(ExtraScreens, extra_screens, extra_screens);
 section!(Input, input, input);
 section!(Devices, devices, devices);
 
@@ -2313,6 +2374,46 @@ mod tests {
         let mut json = serde_json::to_string_pretty(&probe).unwrap();
         json.push('\n');
         json
+    }
+
+    #[test]
+    fn the_old_notification_switch_moves_to_extra_screens() {
+        use serde_json::json;
+        // Switched on in the Alerts tab by the build before.
+        let mut v = json!({"alerts": {"stack": 4, "on_extra_screens": true}});
+        migrate(&mut v);
+        assert_eq!(
+            v,
+            json!({"alerts": {"stack": 4}, "extra_screens": {"notifications": true}})
+        );
+        assert!(unknown_keys(&v).is_empty());
+        let s: Settings = serde_json::from_value(v).unwrap();
+        assert!(s.extra_screens().notifications);
+        assert_eq!(s.alerts().stack, 4);
+        // A value already in the new place wins; an emptied alerts goes.
+        let mut v = json!({
+            "alerts": {"on_extra_screens": true},
+            "extra_screens": {"notifications": false, "bar": true}
+        });
+        migrate(&mut v);
+        assert_eq!(
+            v,
+            json!({"extra_screens": {"notifications": false, "bar": true}})
+        );
+        // Nothing to move: untouched.
+        let mut v = json!({"alerts": {"stack": 2}});
+        migrate(&mut v);
+        assert_eq!(v, json!({"alerts": {"stack": 2}}));
+    }
+
+    #[test]
+    fn nothing_shows_on_an_extra_screen_by_default() {
+        let d = Settings::default().extra_screens();
+        assert_eq!(d, ExtraScreens::default());
+        assert!(!(d.bar || d.workspace_names || d.osd || d.key_sheet || d.pins || d.notifications));
+        // A file that names one switch leaves the others off.
+        let s: Settings = serde_json::from_str(r#"{"extra_screens": {"pins": true}}"#).unwrap();
+        assert!(s.extra_screens().pins && !s.extra_screens().bar);
     }
 
     #[test]

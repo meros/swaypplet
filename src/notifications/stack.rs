@@ -41,7 +41,7 @@ use super::card::{age_label, populate_card, set_critical_class};
 use super::card_surface::CardSurface;
 use super::timers::{Timer, cancel_timer, make_timer, pause_timers, resume_timers};
 use crate::anim;
-use crate::services::displays::naming::{is_builtin, is_virtual};
+use crate::services::displays::naming::is_virtual;
 use crate::services::notifications::group;
 use crate::services::notifications::store::{self, NotificationStore};
 use crate::services::notifications::{CloseReason, Notification};
@@ -72,42 +72,6 @@ const PEEK_SCALE_STEP: f64 = 0.05;
 /// than moving the ones on screen.
 pub(super) fn alerts() -> Alerts {
     crate::settings::store::with(|s| s.alerts())
-}
-
-/// Which output a new popup goes on.
-///
-/// The focused output, as always, unless that is an extra screen (a virtual
-/// output for a TV or a VNC viewer, `displays::naming::is_virtual`) and
-/// `on_extra` (the Alerts setting) is off. Then it is one of the screens:
-/// the one the last popup went on (`last`), else the built-in panel, else
-/// the first. The notification itself is never held back, only placed, so
-/// it reaches the history as every other one does.
-///
-/// A session of nothing but virtual outputs (the nested harness) has no
-/// screen to prefer and keeps the focused one. Without an answer from sway
-/// (`focused` is `None`) the compositor places the card, as before, unless
-/// an extra screen exists and must be avoided: then a screen is named.
-pub(super) fn popup_output(
-    focused: Option<&str>,
-    connected: &[String],
-    on_extra: bool,
-    last: Option<&str>,
-) -> Option<String> {
-    let screens: Vec<&str> = connected
-        .iter()
-        .map(String::as_str)
-        .filter(|c| !is_virtual(c))
-        .collect();
-    let avoid = !on_extra && !screens.is_empty() && connected.iter().any(|c| is_virtual(c));
-    match focused {
-        Some(f) if !(avoid && is_virtual(f)) => return Some(f.to_string()),
-        None if !avoid => return None,
-        _ => {}
-    }
-    last.filter(|l| screens.contains(l))
-        .or_else(|| screens.iter().copied().find(|s| is_builtin(s)))
-        .or_else(|| screens.first().copied())
-        .map(str::to_string)
 }
 
 /// One column per corner. Anchors are protocol state on the surface, so a
@@ -162,7 +126,7 @@ pub(super) struct State {
     /// round trip per notification.
     pub(super) sway: Option<Rc<SwayService>>,
     /// The screen (not an extra screen) the last popup went on: where a
-    /// popup goes while the focus is on an extra screen ([`popup_output`]).
+    /// popup goes while the focus is on an extra screen (`shell::extra::place`).
     pub(super) last_screen: Option<String>,
 }
 
@@ -277,10 +241,11 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     // down. Ask sway, pin the surface, and keep the name for `reflow`.
     let sway = st.borrow().sway.clone();
     let focused = crate::sway::ipc::focused_output_from(sway.as_deref());
-    let output = popup_output(
+    // Not on an extra screen unless switched on (`shell::extra`).
+    let output = crate::shell::extra::place(
         focused.as_deref(),
         &crate::shell::layer::connectors(),
-        alerts().on_extra_screens,
+        crate::shell::extra::Kind::Notifications.allowed(),
         st.borrow().last_screen.as_deref(),
     );
     if let Some(o) = output.as_deref().filter(|o| !is_virtual(o)) {
@@ -701,79 +666,6 @@ pub(super) fn dismiss_all(st: &Rc<RefCell<State>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn outs(names: &[&str]) -> Vec<String> {
-        names.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn by_default_a_popup_never_lands_on_an_extra_screen() {
-        let desk = outs(&["eDP-1", "DP-3", "HEADLESS-2"]);
-        // Focus on the TV's screen: the last screen a popup used.
-        assert_eq!(
-            popup_output(Some("HEADLESS-2"), &desk, false, Some("DP-3")).as_deref(),
-            Some("DP-3")
-        );
-        // No popup yet, or that screen is gone: the built-in panel.
-        assert_eq!(
-            popup_output(Some("HEADLESS-2"), &desk, false, None).as_deref(),
-            Some("eDP-1")
-        );
-        assert_eq!(
-            popup_output(Some("HEADLESS-2"), &desk, false, Some("HDMI-A-1")).as_deref(),
-            Some("eDP-1")
-        );
-        // No built-in panel: the first screen.
-        let no_laptop = outs(&["HEADLESS-2", "DP-3"]);
-        assert_eq!(
-            popup_output(Some("HEADLESS-2"), &no_laptop, false, None).as_deref(),
-            Some("DP-3")
-        );
-        // Sway did not answer: a screen is named rather than left to the
-        // compositor, which would use the focused output.
-        assert_eq!(
-            popup_output(None, &desk, false, None).as_deref(),
-            Some("eDP-1")
-        );
-    }
-
-    #[test]
-    fn the_switch_lets_popups_onto_extra_screens() {
-        let desk = outs(&["eDP-1", "DP-3", "HEADLESS-2"]);
-        assert_eq!(
-            popup_output(Some("HEADLESS-2"), &desk, true, Some("DP-3")).as_deref(),
-            Some("HEADLESS-2")
-        );
-        assert_eq!(
-            popup_output(None, &desk, true, None),
-            None,
-            "the compositor's, as before"
-        );
-    }
-
-    #[test]
-    fn real_screens_are_unaffected_either_way() {
-        let desk = outs(&["eDP-1", "DP-3", "HEADLESS-2"]);
-        for on in [false, true] {
-            assert_eq!(
-                popup_output(Some("DP-3"), &desk, on, Some("eDP-1")).as_deref(),
-                Some("DP-3")
-            );
-            assert_eq!(
-                popup_output(Some("eDP-1"), &desk, on, None).as_deref(),
-                Some("eDP-1")
-            );
-        }
-        // Without an extra screen nothing changes, sway silent included.
-        let plain = outs(&["eDP-1", "DP-3"]);
-        assert_eq!(popup_output(None, &plain, false, None), None);
-        // The nested harness: only virtual outputs, the focused one stays.
-        let nested = outs(&["HEADLESS-1", "HEADLESS-2"]);
-        assert_eq!(
-            popup_output(Some("HEADLESS-2"), &nested, false, None).as_deref(),
-            Some("HEADLESS-2")
-        );
-    }
 
     /// The bug this replaced: one rank counter for every card meant a card
     /// arriving on the second screen took rank 0 and pushed the first

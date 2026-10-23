@@ -582,6 +582,8 @@ impl Keybinds {
         // others.
         let app = app.clone();
         let weak = Rc::downgrade(&this);
+        // Not on an extra screen unless switched on (`shell::extra`).
+        crate::shell::extra::follow(&this.cards, crate::shell::extra::Kind::KeySheet);
         this.cards.watch(move |monitor| {
             let card = build_card(&app, monitor);
             if let Some(this) = weak.upgrade() {

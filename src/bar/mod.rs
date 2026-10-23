@@ -101,6 +101,9 @@ impl BarManager {
 
         // One bar per output, following hotplug. Weak: the manager owns
         // the set, and the set's build must not own the manager.
+        // None on an extra screen unless switched on (`shell::extra`); the
+        // extra-screen hazard lives on the bars of the person's own screens.
+        crate::shell::extra::follow(&manager.windows, crate::shell::extra::Kind::Bar);
         let weak = Rc::downgrade(&manager);
         manager.windows.watch(move |monitor| {
             let manager = weak.upgrade().expect("the bar manager outlives its bars");

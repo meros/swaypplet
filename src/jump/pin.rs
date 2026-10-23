@@ -228,6 +228,12 @@ struct Inner {
     /// The Pins & previews setting the surfaces were built for. See
     /// [`Pins::follow_setting`].
     setting: store::Pins,
+    /// Whether pins may stand on an extra screen (`shell::extra`), as the
+    /// surfaces were last placed for.
+    on_extra: bool,
+    /// The screen (not an extra screen) a pin last went on: where pins go
+    /// while the focus is on an extra screen.
+    last_screen: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -260,7 +266,14 @@ impl Pins {
     fn follow_setting(&self) {
         let now = store::with(|s| s.pins());
         let was = std::mem::replace(&mut self.inner.borrow_mut().setting, now);
+        let extra = crate::shell::extra::Kind::Pins.allowed();
+        let extra_was = std::mem::replace(&mut self.inner.borrow_mut().on_extra, extra);
         if was == now {
+            // The extra-screen switch moves pins off a TV, or lets them
+            // follow the focus onto it.
+            if extra_was != extra {
+                self.refresh();
+            }
             return;
         }
         if was.size != now.size || was.corner != now.corner {
@@ -357,7 +370,8 @@ impl Pins {
             },
             move |found| {
                 let Some((name, output)) = found else { return };
-                this.toggle_on(name, Some(output));
+                let output = this.placed(Some(output));
+                this.toggle_on(name, output);
             },
         );
     }
@@ -366,10 +380,26 @@ impl Pins {
     /// it is pinned afterwards.
     pub fn toggle(&self, workspace: String) -> bool {
         let sway = self.inner.borrow().sway.clone();
-        self.toggle_on(
-            workspace,
-            crate::sway::ipc::focused_output_from(sway.as_deref()),
-        )
+        let output = self.placed(crate::sway::ipc::focused_output_from(sway.as_deref()));
+        self.toggle_on(workspace, output)
+    }
+
+    /// Where a pin for the focused output `focused` goes: there, unless it
+    /// is an extra screen pins may not stand on (`shell::extra::place`).
+    fn placed(&self, focused: Option<String>) -> Option<String> {
+        let output = crate::shell::extra::place(
+            focused.as_deref(),
+            &layer::connectors(),
+            crate::shell::extra::Kind::Pins.allowed(),
+            self.inner.borrow().last_screen.as_deref(),
+        );
+        if let Some(o) = output
+            .as_deref()
+            .filter(|o| !crate::services::displays::naming::is_virtual(o))
+        {
+            self.inner.borrow_mut().last_screen = Some(o.to_string());
+        }
+        output
     }
 
     fn toggle_on(&self, workspace: String, output: Option<String>) -> bool {
@@ -435,6 +465,7 @@ impl Pins {
         let Some(id) = region.window.id.clone() else {
             return;
         };
+        let output = self.placed(output);
         let key = format!("window:{id}");
         if self.is_pinned(&key) {
             self.unpin(&key);
@@ -554,7 +585,10 @@ impl Pins {
     /// Move every pin to `output`, the one with focus: rebuild its surface
     /// there, and let the next update draw its picture on it.
     fn follow(&self, output: Option<&str>) {
-        let Some(output) = output else { return };
+        let output = self.placed(output.map(str::to_string));
+        let Some(output) = output.as_deref() else {
+            return;
+        };
         let moving: Vec<usize> = self
             .inner
             .borrow()

@@ -403,6 +403,8 @@ impl Osd {
         // gets what the others show.
         let app = app.clone();
         let current = osd.current.clone();
+        // Not on an extra screen unless switched on (`shell::extra`).
+        crate::shell::extra::follow(&osd.cards, crate::shell::extra::Kind::Osd);
         osd.cards.watch(move |monitor| {
             let card = Card::new(&app, monitor);
             if let Some(display) = &*current.borrow() {

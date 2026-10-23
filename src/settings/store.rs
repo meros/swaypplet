@@ -69,13 +69,14 @@ fn read(path: &std::path::Path, layer: Layer) -> Settings {
     let Ok(raw) = std::fs::read(path) else {
         return Settings::default();
     };
-    let value: Value = match serde_json::from_slice(&raw) {
+    let mut value: Value = match serde_json::from_slice(&raw) {
         Ok(v) => v,
         Err(e) => {
             log::warn!("settings: ignoring unreadable {}: {e}", path.display());
             return Settings::default();
         }
     };
+    super::schema::migrate(&mut value);
     for key in unknown_keys(&value) {
         match layer {
             Layer::System => log::error!(

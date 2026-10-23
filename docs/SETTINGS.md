@@ -26,9 +26,9 @@ groups, `src/settings/`:
 | Idle & Lock | the idle manager's timers; the night window; walk-away lock; face unlock; what sudo and pkexec may ask for | `idle`, `elevate` |
 | Bar | clock format, segments, OSD placement; pins and previews: size, frame rate, corner | `bar`, `pins` |
 | Input | keyboard layouts, layout switch, Caps Lock, key repeat; touchpad and mouse; key steps, volume boost; the connected devices | `input`, `keys` |
-| Alerts | popup linger, corner, depth and extra screens; quiet hours; quiet by context; what a screenshot becomes | `alerts`, `capture` |
+| Alerts | popup linger, corner and depth; quiet hours; quiet by context; what a screenshot becomes | `alerts`, `capture` |
 | Launcher | which kinds of result a search lists; ranking by use, and forgetting it | `launcher` |
-| Displays | where the outputs stand, and each one's mode, scale, rotation and adaptive sync; the profiles | `displays` (the profiles) |
+| Displays | where the outputs stand, and each one's mode, scale, rotation and adaptive sync; the profiles; the extra screen and what shows on it | `displays` (the profiles), `extra_screens` |
 | **This machine** | | |
 | System | nothing: it shows which nixos-config commit this host runs against origin/main, and runs `nx apply` or `nx` on a press | none |
 | Quality | nothing: the open issues, Auto-fix, and Merge & apply for a ready fix (docs/QUALITY.md) | none; GitHub, through `gh` |
@@ -215,12 +215,26 @@ and Bar tabs is `nix <section>` into the clipboard.
   it. The Look pane's group shows the day's resulting switch times
   (`theme::sun::switches_today`). The panel's Night Light tile and the display
   section's warmth slider edit this section too.
+- **Extra screens** (`extra_screens`: `bar`, `workspace_names`, `osd`,
+  `key_sheet`, `pins`, `notifications`, all default off) say what of the
+  shell shows on an extra screen, a virtual output made for a TV or a VNC
+  viewer (`services::cast`); the Displays pane's "On extra screens" group.
+  The rules are `shell::extra`'s. A surface built per output (the bar, the
+  workspace names, the OSD card, the key sheet) is not built on an extra
+  screen while its switch is off; `PerMonitor` reconciles on every
+  settings change and every monitor change, so a switch flipped while an
+  extra screen runs adds or drops it at once. A surface placed on the
+  focused output (pins, notification popups) goes, while its switch is off
+  and the focus is on an extra screen, to the screen it last used, else the
+  built-in panel, else the first screen; nothing is held back. A session of
+  only virtual outputs has no extra screen. `alerts.on_extra_screens`, the
+  first of these switches, is moved here when a file is read
+  (`schema::migrate`). In the nested harness every output is headless;
+  `SWAYPPLET_SCREENS=HEADLESS-1,HEADLESS-2` counts those as screens, so a
+  further one is an extra screen.
 - **Alerts**: a popup reads linger, corner and depth as it is created and
-  keeps them (`notifications/stack.rs`). `on_extra_screens` (default off)
-  is read per popup too: off, a popup whose focused output is an extra
-  screen (a virtual output for a TV or a VNC viewer, `services::cast`) goes
-  to the screen the last popup used, else the built-in panel, else the
-  first screen; the notification itself is never held back; quiet hours is a 30 s tick plus an
+  keeps them (`notifications/stack.rs`), and whether it may land on an
+  extra screen from `extra_screens.notifications` (below); quiet hours is a 30 s tick plus an
   observer (`services/notifications/quiet.rs`), edge-triggered so a manual DND
   toggle inside the window stands. Quiet by context (`context_quiet`, the
   master switch, over `quiet_when_sharing`, `quiet_when_mirrored`,

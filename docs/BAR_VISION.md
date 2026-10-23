@@ -95,6 +95,7 @@ One popover chassis. Board bay click opens the task popover: full description, r
 | battery warn | % Reveals, amber | amber static | >30 % or charging |
 | urgent workspace | one nudge on its button | red static | workspace focused |
 | hazard: caffeine / mode / failed units | glyph Reveals | amber static | inhibit released / default mode event / count 0 |
+| no bar on an extra screen (default; `extra_screens.bar`) | the bar is not built there | n/a | switch on, or the extra screen goes |
 | hazard: extra screen (cast or VNC) | glyph Reveals; tooltip names where, click opens the Helm's Displays page | amber static | the session ends (Stop, TV gone, encoder dead, panel restart) |
 | stale (OFF-flag) | none (quiet by design) | amber hollow | valid status write |
 | OSD | interjection | n/a | 1.5 s decay (self) |

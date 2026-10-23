@@ -504,6 +504,11 @@ impl Labels {
                     }
                 }
             });
+            // Not on an extra screen unless switched on (`shell::extra`).
+            crate::shell::extra::follow(
+                &labels.inner.pills,
+                crate::shell::extra::Kind::WorkspaceNames,
+            );
             labels
                 .inner
                 .pills
@@ -512,6 +517,10 @@ impl Labels {
         {
             let app = app.clone();
             let weak = Rc::downgrade(&labels.inner);
+            crate::shell::extra::follow(
+                &labels.inner.edges,
+                crate::shell::extra::Kind::WorkspaceNames,
+            );
             labels
                 .inner
                 .edges

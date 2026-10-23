@@ -56,7 +56,6 @@
     "linger": "normal",
     "corner": "top_right",
     "stack": 3,
-    "on_extra_screens": false,
     "quiet": false,
     "quiet_from_h": 22,
     "quiet_to_h": 7,
@@ -109,6 +108,14 @@
   },
   "displays": {
     "profiles": []
+  },
+  "extra_screens": {
+    "bar": false,
+    "workspace_names": false,
+    "osd": false,
+    "key_sheet": false,
+    "pins": false,
+    "notifications": false
   },
   "input": {
     "layouts": null,

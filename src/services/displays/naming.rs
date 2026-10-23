@@ -20,7 +20,23 @@ pub fn is_builtin(connector: &str) -> bool {
 /// every one of them HEADLESS-N, counting up, and does not reuse a number
 /// within a session.
 pub fn is_virtual(connector: &str) -> bool {
-    connector.starts_with("HEADLESS-")
+    connector.starts_with("HEADLESS-") && !harness_screen(connector)
+}
+
+/// Harness hook: `SWAYPPLET_SCREENS=HEADLESS-1,HEADLESS-2` makes those
+/// headless outputs count as screens. A nested session's outputs are all
+/// headless, so without it nothing there is an extra screen, and what an
+/// extra screen gets (`shell::extra`) cannot be seen.
+fn harness_screen(connector: &str) -> bool {
+    static SCREENS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    SCREENS
+        .get_or_init(|| {
+            std::env::var("SWAYPPLET_SCREENS")
+                .map(|v| v.split(',').map(|s| s.trim().to_string()).collect())
+                .unwrap_or_default()
+        })
+        .iter()
+        .any(|s| s == connector)
 }
 
 /// "Built-in display" for a laptop panel; otherwise the make, without its

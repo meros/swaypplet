@@ -11,6 +11,7 @@
 //! - [`layer`]: the layer-shell window underneath all of them. Only this
 //!   module creates one (design lint `layer-window`).
 
+pub mod extra;
 pub mod fit;
 pub mod layer;
 mod namespace;

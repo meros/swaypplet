@@ -26,7 +26,57 @@ use super::form::{self, section_box, switch_row};
 use super::keep::{Effect, End, Keep, Why};
 use crate::services::devices;
 use crate::services::displays::{self, HeadPlan, HeadState, Outcome};
+use crate::settings::store::ExtraScreens;
 use crate::ui::{self, Kind, Text, Tone};
+
+type ExtraGet = fn(&ExtraScreens) -> bool;
+
+/// One switch of the "On extra screens" group (`shell::extra`).
+struct ExtraRow {
+    label: &'static str,
+    hint: &'static str,
+    get: ExtraGet,
+    set: fn(&mut ExtraScreens, bool),
+}
+
+const EXTRA_ROWS: &[ExtraRow] = &[
+    ExtraRow {
+        label: "Bar",
+        hint: "The bar along the bottom, with the workspaces and the clock.",
+        get: |s| s.bar,
+        set: |s, on| s.bar = on,
+    },
+    ExtraRow {
+        label: "Workspace names",
+        hint: "The pill that names the workspace.",
+        get: |s| s.workspace_names,
+        set: |s, on| s.workspace_names = on,
+    },
+    ExtraRow {
+        label: "Volume and brightness",
+        hint: "The card the volume and brightness keys show.",
+        get: |s| s.osd,
+        set: |s, on| s.osd = on,
+    },
+    ExtraRow {
+        label: "Key sheet",
+        hint: "The key bindings, shown while Super is held.",
+        get: |s| s.key_sheet,
+        set: |s, on| s.key_sheet = on,
+    },
+    ExtraRow {
+        label: "Pins",
+        hint: "Pinned workspaces follow the focus onto it. Off, they stay on one of your own screens.",
+        get: |s| s.pins,
+        set: |s, on| s.pins = on,
+    },
+    ExtraRow {
+        label: "Notifications",
+        hint: "Popups land on it while it has the focus. Off, they go to one of your own screens; the notification centre keeps every one either way.",
+        get: |s| s.notifications,
+        set: |s, on| s.notifications = on,
+    },
+];
 
 /// How close, in canvas pixels, an edge has to come to another to snap.
 const SNAP: usize = 4;
@@ -223,11 +273,41 @@ impl DisplaysPane {
         );
         extra_screen.append(&crate::widgets::display::extra_screen_list());
 
+        // ── On extra screens ─────────────────────────────────────────────
+        let on_extra = section_box(
+            "On extra screens",
+            "What of the shell also shows on an extra screen. Off, it stays on your own screens: an extra screen is often a TV other people see.",
+        );
+        let now = crate::settings::store::current().extra_screens();
+        let switches: Vec<(gtk4::Switch, ExtraGet)> = EXTRA_ROWS
+            .iter()
+            .map(|r| {
+                let (row, switch) = switch_row(r.label, r.hint, (r.get)(&now));
+                on_extra.append(&row);
+                let set = r.set;
+                switch.connect_active_notify(move |s| {
+                    let on = s.is_active();
+                    crate::settings::store::edit::<ExtraScreens>(|e| set(e, on));
+                });
+                (switch, r.get)
+            })
+            .collect();
+        // The file, the CLI or Reset changed it: the switches follow.
+        crate::settings::store::observe(move || {
+            let now = crate::settings::store::current().extra_screens();
+            for (switch, get) in &switches {
+                if switch.is_active() != get(&now) {
+                    switch.set_active(get(&now));
+                }
+            }
+        });
+
         body.append(&arrangement);
         body.append(&group);
         body.append(&footer);
         body.append(&profiles);
         body.append(&extra_screen);
+        body.append(&on_extra);
         root.append(&ask);
         root.append(&unavailable);
         root.append(&body);
@@ -1140,4 +1220,11 @@ pub(super) const SEARCH: &[Entry] = &[
     row("Display", "Rotation", "Turn the picture for a portrait display", &["rotate", "orientation", "portrait", "landscape", "transform", "flip"]),
     row("Display", "Adaptive sync", "The refresh follows the frames", &["vrr", "freesync", "gsync", "variable refresh"]),
     row("Profiles", "", "Layouts applied when displays connect", &["profile", "kanshi", "docking", "dock", "external monitor"]),
+    row("Extra screen", "", "A screen for a TV or a VNC viewer", &["cast", "chromecast", "tv", "vnc", "extra screen", "second screen", "virtual screen"]),
+    row("On extra screens", "Bar", "The bar on a TV or VNC screen", &["cast", "tv", "extra screen", "bar", "taskbar"]).keys(&["extra_screens.bar"]),
+    row("On extra screens", "Workspace names", "Workspace names on a TV or VNC screen", &["cast", "tv", "extra screen", "label", "workspace name"]).keys(&["extra_screens.workspace_names"]),
+    row("On extra screens", "Volume and brightness", "The volume card on a TV or VNC screen", &["cast", "tv", "extra screen", "osd", "volume", "brightness"]).keys(&["extra_screens.osd"]),
+    row("On extra screens", "Key sheet", "The key sheet on a TV or VNC screen", &["cast", "tv", "extra screen", "keybinds", "shortcuts"]).keys(&["extra_screens.key_sheet"]),
+    row("On extra screens", "Pins", "Pins on a TV or VNC screen", &["cast", "tv", "extra screen", "pin", "pinned workspace"]).keys(&["extra_screens.pins"]),
+    row("On extra screens", "Notifications", "Notifications on a TV or VNC screen", &["cast", "tv", "chromecast", "extra screen", "notification", "popup", "privacy"]).keys(&["extra_screens.notifications"]),
 ];
