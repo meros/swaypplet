@@ -482,10 +482,16 @@ impl SettingsSection {
         {
             // Enter takes the first hit; Down walks into the hits.
             let weak = std::rc::Rc::downgrade(self);
-            self.search.connect_activate(move |_| {
-                if let Some(this) = weak.upgrade()
-                    && let Some(row) = this.results.row_at_index(0)
-                {
+            self.search.connect_activate(move |entry| {
+                let Some(this) = weak.upgrade() else {
+                    return;
+                };
+                // The entry says `search-changed` a moment after the last
+                // key, so an Enter typed straight after the query found the
+                // hits of the query before it, or none. Search for what is
+                // in the field now, then take the first hit.
+                this.search_for(entry.text().trim());
+                if let Some(row) = this.results.row_at_index(0) {
                     this.open_hit(&row);
                 }
             });
