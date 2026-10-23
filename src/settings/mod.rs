@@ -672,6 +672,11 @@ impl SettingsSection {
         self.displays.demo_apply();
     }
 
+    /// Every Displays dropdown choice in turn, for the stall script.
+    pub fn demo_displays_cycle(&self) {
+        self.displays.demo_cycle();
+    }
+
     /// The Input pane's layout picker, open on `query`, for the render
     /// harness.
     pub fn demo_layout_pick(&self, query: &str) {

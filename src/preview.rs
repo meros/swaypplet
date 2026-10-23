@@ -487,6 +487,14 @@ pub fn run(component: &str) {
                         });
                     }
                 }
+                if c == "settings.displays"
+                    && std::env::var_os("SWAYPPLET_PREVIEW_DISPLAYS_CYCLE").is_some()
+                {
+                    let s: &'static crate::settings::SettingsSection = s;
+                    glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
+                        s.demo_displays_cycle();
+                    });
+                }
                 host.append(s.widget());
             }
             // The component sheet: every component in every state, one page

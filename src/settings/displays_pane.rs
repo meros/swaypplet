@@ -307,6 +307,38 @@ impl DisplaysPane {
         p.send();
     }
 
+    /// For `dev/displays-stall.sh`: pick every choice of the selected
+    /// output's Scale, Resolution, Refresh rate and Rotation dropdowns, 250 ms
+    /// apart, then log `displays-cycle: done`. A stalled main loop never
+    /// gets there.
+    pub fn demo_cycle(&self) {
+        let p = self.pane.clone();
+        p.read_service();
+        let d = &p.details;
+        let mut steps: Vec<(gtk4::DropDown, u32)> = Vec::new();
+        for dd in [&d.scale, &d.resolution, &d.refresh, &d.rotation] {
+            let n = dd.model().map_or(0, |m| m.n_items());
+            let from = dd.selected();
+            for i in (0..n).chain(from..from.saturating_add(1)) {
+                steps.push((dd.clone(), i));
+            }
+        }
+        log::warn!("displays-cycle: {} steps", steps.len());
+        fn go(mut steps: std::vec::IntoIter<(gtk4::DropDown, u32)>) {
+            match steps.next() {
+                Some((dd, i)) => {
+                    dd.set_selected(i);
+                    log::warn!("displays-cycle: step to {i}");
+                    glib::timeout_add_local_once(std::time::Duration::from_millis(250), || {
+                        go(steps)
+                    });
+                }
+                None => log::warn!("displays-cycle: done"),
+            }
+        }
+        go(steps.into_iter());
+    }
+
     /// The panel opened: read the outputs when the tab is next on screen.
     pub fn refresh(&self) {
         if self.pane.root.is_mapped() {
@@ -1069,10 +1101,26 @@ impl Pane {
     }
 }
 
+/// Whether the dropdown already shows exactly these rows.
+fn same_rows(d: &gtk4::DropDown, labels: &[String]) -> bool {
+    d.model().and_downcast::<gtk4::StringList>().is_some_and(|m| {
+        m.n_items() as usize == labels.len()
+            && labels
+                .iter()
+                .enumerate()
+                .all(|(i, l)| m.string(i as u32).as_deref() == Some(l.as_str()))
+    })
+}
+
 /// Replace a dropdown's rows and pick one.
 fn set_choices(d: &gtk4::DropDown, labels: &[String], selected: Option<usize>) {
-    let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-    d.set_model(Some(&gtk4::StringList::new(&refs)));
+    // A model swapped from inside the dropdown's own `notify::selected`
+    // (the pick of a row in its popup) sends GTK into a busy loop. Rows that
+    // did not change stay as they are.
+    if !same_rows(d, labels) {
+        let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+        d.set_model(Some(&gtk4::StringList::new(&refs)));
+    }
     d.set_selected(selected.map_or(gtk4::INVALID_LIST_POSITION, |i| i as u32));
 }
 
