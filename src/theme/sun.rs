@@ -62,6 +62,26 @@ pub fn daylight_at(
     ))
 }
 
+/// Whether it is night for `d` at the place it names, now: the automatic
+/// mode's dark, with its band ([`BAND`]), so the idle manager's night
+/// timers start and end with the dark mode. `was` is the last answer, which
+/// holds inside the band. `None` where the sun decides and no place is
+/// picked yet.
+pub fn night_now(d: &Daylight, was: bool) -> Option<bool> {
+    let unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+    night_at(d, unix, local_minute_now(), was)
+}
+
+/// [`night_now`] at a given moment, as [`daylight_at`] takes it.
+pub fn night_at(d: &Daylight, unix: f64, minute_of_day: f64, was: bool) -> Option<bool> {
+    let elevation = daylight_at(d, d.place(), unix, minute_of_day)?;
+    let now = if was { Mode::Dark } else { Mode::Light };
+    Some(mode(elevation, now) == Mode::Dark)
+}
+
 /// Minutes since local midnight, with the seconds as a fraction. Noon on a
 /// clock the platform cannot read.
 fn local_minute_now() -> f64 {
@@ -285,5 +305,33 @@ mod tests {
         assert_eq!(dawn, dawn_same);
         let dawn_early = crossing(-30, 0, false);
         assert!(((dawn - dawn_early) / 60.0 - 30.0).abs() <= 1.0);
+    }
+
+    /// The night timers' night is the fixed times' dark: from the night's
+    /// start to the day's, held inside the band.
+    #[test]
+    fn night_is_the_dark_mode_of_the_fixed_times() {
+        let d = Daylight {
+            fixed_times: true,
+            day_from_h: 7,
+            day_from_m: 0,
+            night_from_h: 21,
+            night_from_m: 0,
+            ..Daylight::default()
+        };
+        let at = |h: f64, was| night_at(&d, 0.0, h * 60.0, was);
+        assert_eq!(at(12.0, false), Some(false));
+        assert_eq!(at(21.0, false), Some(true));
+        assert_eq!(at(2.0, true), Some(true));
+        assert_eq!(at(7.0, true), Some(false));
+        // By the sun with no place: unknown, which the idle manager reads
+        // as day.
+        let sun = Daylight {
+            fixed_times: false,
+            latitude: None,
+            longitude: None,
+            ..Daylight::default()
+        };
+        assert_eq!(night_at(&sun, 0.0, 0.0, true), None);
     }
 }

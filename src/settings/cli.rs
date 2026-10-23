@@ -32,7 +32,9 @@ sections and fields (data/settings-defaults.json has every default):
              video_speed (the animated wallpaper's speed, 0.1–4, 1 is its own)
   idle       dim_after_s, dim_level, lock_after_s, blank_after_s,
              battery_blank_after_s (shorter screen-off on battery, 0 is no override),
-             suspend_after_s (0 is never), walk_away_lock, face_unlock
+             suspend_after_s (0 is never), walk_away_lock, face_unlock,
+             night (the night timers, at night by daylight), night_dim_after_s,
+             night_lock_after_s, night_blank_after_s
   bar        clock_24h, clock_date, osd_in_bar, board, media, tray, battery, presence,
              backup, look_mode
   daylight   fixed_times, day_from_h, day_from_m, night_from_h, night_from_m,

@@ -128,7 +128,7 @@ impl Group {
 pub fn build() -> gtk4::Box {
     let section = section_box(
         "Day and night",
-        "When the automatic mode turns light and dark, and when the night light warms. By the sun unless you set otherwise.",
+        "When the automatic mode turns light and dark, when the night light warms, and when the night timers in Idle & Lock start. By the sun unless you set otherwise.",
     );
 
     let (fixed_row, fixed) = switch_row(

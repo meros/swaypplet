@@ -26,15 +26,16 @@
 //! thread new timeouts to re-arm with. Zero on any tier is "never". The loop
 //! sleeps until the next event or its nearest deadline; nothing ticks.
 //!
-//! The night window (Idle & Lock tab, `Idle::resolve`) is a second, shorter
-//! set of dim / lock / screen-off tiers for a time range, typically the
-//! evening. The same once-a-second check resolves it, so the window opening
-//! and an edit in the pane arrive by one path and re-arm by one comparison.
-//! Suspend is not part of the window: it is battery-only, and cutting an
-//! overnight job short is worse than a late suspend. Crossing INTO the
-//! window while already idle past its shorter lock tier locks at once, which
-//! is `ext-idle-notify` behaving correctly — the seat has been idle longer
-//! than the timeout being armed.
+//! The night timers (Idle & Lock tab, `Idle::resolve`) are a second,
+//! shorter set of dim / lock / screen-off tiers for the night, and night is
+//! the Day and night settings' (`theme::sun::night_now`): when the automatic
+//! mode is dark, by the sun or by fixed times. The same once-a-minute check
+//! resolves it, so night beginning and an edit in the pane arrive by one
+//! path and re-arm by one comparison. Suspend has no night timer: it is
+//! battery-only, and cutting an overnight job short is worse than a late
+//! suspend. Night beginning while already idle past its shorter lock tier
+//! locks at once, which is `ext-idle-notify` behaving correctly — the seat
+//! has been idle longer than the timeout being armed.
 //!
 //! Locking and blanking are deliberately unrelated. They used to be welded
 //! together in three places, so any lock put the panel out within a second
@@ -147,8 +148,8 @@ pub enum Ev {
 /// trip.
 const SLEEP_RELEASE_MAX: Duration = Duration::from_secs(4);
 
-/// The instant the next minute of the day starts, when the night window may
-/// open or close. The settings file itself arrives as an event.
+/// The instant the next minute of the day starts, when night may begin or
+/// end. The settings file itself arrives as an event.
 fn next_minute() -> Instant {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -200,10 +201,13 @@ pub fn run() -> ! {
     let outputs = Outputs::start();
     // The timers, from the settings file, and the handle to re-arm them.
     // `saved` is the file; `cfg` is what is in force this minute, which is a
-    // different set inside the night window (`Idle::resolve`). Everything
-    // below reads `cfg` and never learns that a window exists.
-    let mut saved = Settings::load().idle();
-    let mut cfg = saved.resolve(store::local_minute_of_day());
+    // different set at night (`Idle::resolve`). Night is Day and night's
+    // (`theme::sun::night_now`): when the automatic mode is dark. Everything
+    // below reads `cfg` and never learns that night exists.
+    let mut loaded = Settings::load();
+    let mut saved = loaded.idle();
+    let mut night = crate::theme::sun::night_now(&loaded.daylight(), false).unwrap_or(false);
+    let mut cfg = saved.resolve(night);
     let mut settings_changed = false;
     let mut next_settings_check = next_minute();
     {
@@ -342,9 +346,9 @@ pub fn run() -> ! {
         }
 
         // The settings file (an event) and the clock (each minute boundary).
-        // An edit is reloaded whole, and the night window is resolved on
-        // every check, so one comparison covers both causes: an edit in the
-        // pane, and the window opening or closing. The blank duration and
+        // An edit is reloaded whole, and night is resolved on every check,
+        // so one comparison covers both causes: an edit in the pane, and
+        // night beginning or ending. The blank duration and
         // the dim level are read from `cfg` at fire time, so they need no
         // re-arm at all.
         if settings_changed || Instant::now() >= next_settings_check {
@@ -353,10 +357,13 @@ pub fn run() -> ! {
             }
             let reloaded = std::mem::take(&mut settings_changed);
             if reloaded {
-                saved = Settings::load().idle();
+                loaded = Settings::load();
+                saved = loaded.idle();
             }
-            let minute = store::local_minute_of_day();
-            let fresh = saved.resolve(minute);
+            // No place picked while the sun decides: day, so the night
+            // timers never start on a guess (the pane says so).
+            night = crate::theme::sun::night_now(&loaded.daylight(), night).unwrap_or(false);
+            let fresh = saved.resolve(night);
             let was_battery = std::mem::replace(&mut battery, on_battery());
             if battery != was_battery {
                 log::info!(
@@ -371,10 +378,10 @@ pub fn run() -> ! {
                     "idle: {} — dim {}s to {}%, lock {}s, blank {}s, suspend {}s (0 is never)",
                     if reloaded {
                         "settings changed"
-                    } else if saved.in_night(minute) {
-                        "night window open"
+                    } else if night {
+                        "night began"
                     } else {
-                        "night window closed"
+                        "day began"
                     },
                     fresh.dim_after_s,
                     fresh.dim_level,
