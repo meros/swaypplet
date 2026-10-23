@@ -346,19 +346,25 @@ fn fill_extra_screen(list: &Box) {
     }
 }
 
-/// "Extra screen": a virtual output sent to a TV or a viewer. The network
-/// is searched when the group comes on screen, not when the panel opens.
-pub fn extra_screen_group() -> Box {
+/// The rows of "Extra screen", for the Helm and for the Displays pane. The
+/// network is searched when the rows come on screen, not when the panel opens.
+pub fn extra_screen_list() -> Box {
+    let list = ui::vbox(1);
+    fill_extra_screen(&list);
+    list.connect_map(|_| cast::search_if_stale());
+    let rows = list.clone();
+    cast::observe(move || fill_extra_screen(&rows));
+    list
+}
+
+/// "Extra screen": a virtual output sent to a TV or a viewer.
+fn extra_screen_group() -> Box {
     let group = ui::group(1);
     let head = ui::heading("Extra screen");
     head.set_halign(gtk4::Align::Start);
     head.add_css_class("display-group-head");
     group.append(&head);
-    let list = ui::vbox(1);
-    group.append(&list);
-    fill_extra_screen(&list);
-    group.connect_map(|_| cast::search_if_stale());
-    cast::observe(move || fill_extra_screen(&list));
+    group.append(&extra_screen_list());
     group
 }
 

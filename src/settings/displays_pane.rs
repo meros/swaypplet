@@ -217,11 +217,17 @@ impl DisplaysPane {
         profiles.append(&profile_list);
         profiles.append(&crate::widgets::display::save_row("Save as profile"));
 
+        let extra_screen = section_box(
+            "Extra screen",
+            "A virtual screen beside these, for a TV or a VNC viewer.",
+        );
+        extra_screen.append(&crate::widgets::display::extra_screen_list());
+
         body.append(&arrangement);
         body.append(&group);
         body.append(&footer);
         body.append(&profiles);
-        body.append(&crate::widgets::display::extra_screen_group());
+        body.append(&extra_screen);
         root.append(&ask);
         root.append(&unavailable);
         root.append(&body);

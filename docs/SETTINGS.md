@@ -54,7 +54,10 @@ before is sent back, and it is sent back at once when the page goes away
 from here reverts too. A hand layout is no profile; "Save as profile"
 stores the layout on screen. The Helm's displays page applies a profile
 that fits and lists what is connected; ordering, deleting and saving
-profiles, and turning outputs on and off, are this pane's.
+profiles, and turning outputs on and off, are this pane's. Both pages carry
+the same "Extra screen" rows (`widgets::display::extra_screen_list`): a virtual
+output sent to a TV or a VNC viewer, with Start and Stop. A control that the
+Helm gets for the Displays page goes in this pane too.
 
 The System pane (`system_pane.rs`) has no settings. It reads
 what `nx status` prints, directly: the `configurationRevision` in each
