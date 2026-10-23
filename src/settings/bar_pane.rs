@@ -50,19 +50,19 @@ const SEGMENTS: [Segment; 7] = [
     },
     Segment {
         label: "Battery",
-        hint: "The battery segment of the instrument track. Nothing to hide on a machine without one.",
+        hint: "The battery level. A machine without a battery shows nothing here anyway.",
         get: |b| b.battery,
         set: |b, v| b.battery = v,
     },
     Segment {
         label: "Presence",
-        hint: "The presence sensor's mark. Nothing to hide on a machine without the sensor.",
+        hint: "Whether the presence sensor sees you. A machine without the sensor shows nothing here anyway.",
         get: |b| b.presence,
         set: |b, v| b.presence = v,
     },
     Segment {
         label: "Backup",
-        hint: "One glyph for the nightly backup: quiet when both jobs are fresh, amber when one failed or is two nights old.",
+        hint: "One mark for the nightly backup: quiet when it ran, amber when it failed or is two nights old.",
         get: |b| b.backup,
         set: |b, v| b.backup = v,
     },
@@ -74,7 +74,7 @@ const SEGMENTS: [Segment; 7] = [
     },
     Segment {
         label: "Task board",
-        hint: "The four-bay instrument in the right track, one bay per task 1–4.",
+        hint: "Four small bays at the right, one for each of tasks 1 to 4.",
         get: |b| b.board,
         set: |b, v| b.board = v,
     },
@@ -117,6 +117,19 @@ fn describe(bar: &Bar, pins: &Pins) -> String {
         pins.fps,
         pins.corner.label().to_lowercase(),
     )
+}
+
+/// The short line under a segment whose name does not say enough
+/// (`form::subtitle`).
+fn subtitle_for(label: &str) -> Option<&'static str> {
+    Some(match label {
+        "Media mark" => "What is playing",
+        "Presence" => "Whether the sensor sees you",
+        "Backup" => "Whether last night's backup ran",
+        "Light or dark" => "Switch the mode from the bar",
+        "Task board" => "Tasks 1 to 4",
+        _ => return None,
+    })
 }
 
 struct State {
@@ -192,7 +205,7 @@ impl BarPane {
 
         let clock = section_box(
             "Clock",
-            "The rightmost segment of the bar. Clicking it still flips to the ISO date.",
+            "At the right end of the bar. A click on it shows the full date.",
         );
         let (row_24h, clock_24h) =
             switch_row("24-hour clock", "14:05 rather than 2:05 PM.", bar.clock_24h);
@@ -206,11 +219,14 @@ impl BarPane {
 
         let segments_group = section_box(
             "Segments",
-            "The right cluster, one switch per segment. Hidden, not stopped: the service behind each still runs.",
+            "What the bar shows at its right end. A hidden one keeps working; it is only not shown.",
         );
         let mut segments = Vec::new();
         for segment in &SEGMENTS {
             let (row, switch) = switch_row(segment.label, segment.hint, (segment.get)(&bar));
+            if let Some(line) = subtitle_for(segment.label) {
+                form::subtitle(&row, line);
+            }
             segments_group.append(&row);
             segments.push(switch);
         }
@@ -222,9 +238,10 @@ impl BarPane {
         let osd_labels: Vec<&str> = OSD_PLACES.iter().map(|(l, _)| *l).collect();
         let (row_osd, osd) = dropdown_row(
             "Shown as",
-            "The centre card can be read through and works over fullscreen; the bar's decision slot costs a glance to the bottom edge and is skipped over a fullscreen view.",
+            "The centre card shows over a full-screen window. In the bar it is out of the way, but you look down for it, and it is not shown over a full-screen window.",
             &osd_labels,
         );
+        form::subtitle(&row_osd, "Where a volume or brightness key shows");
         osd_group.append(&row_osd);
 
         let pins_group = section_box(
@@ -240,7 +257,7 @@ impl BarPane {
         pins_group.append(&row_size);
         let (row_fps, pin_fps) = dropdown_row(
             "Frame rate",
-            "Frames a second per window, for pins and the peek alike, so the two share one capture. Every frame is a full-size readback in the compositor: 60 costs twice what 30 does.",
+            "How often pins and the peek redraw. Smoother costs more: 60 a second is twice the work of 30.",
             &FRAME_RATE_LABELS,
         );
         pins_group.append(&row_fps);

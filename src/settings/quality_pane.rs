@@ -457,7 +457,7 @@ impl QualityPane {
         let refresh = form::action_button("Refresh", "Ask GitHub now.");
         let file = form::action_button(
             "Report a problem",
-            "Close the panel and start a report, as the key binding does.",
+            "Close settings and start a report, as the key binding does.",
         );
         let (footer, status) = form::footer(&[&refresh, &file]);
 

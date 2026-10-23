@@ -90,7 +90,7 @@ static MATERIAL: &[Knob] = &[
     },
     Knob {
         label: "Refraction",
-        hint: "Index of the slab. 1.5 is soda-lime glass; 1.0 bends nothing.",
+        hint: "How much the glass bends what is behind it. 1.5 is window glass; 1.0 bends nothing.",
         min: 1.0,
         max: 2.0,
         step: 0.01,
@@ -100,7 +100,7 @@ static MATERIAL: &[Knob] = &[
     },
     Knob {
         label: "Dispersion",
-        hint: "Channel split through the bevel. Small on purpose: text sits on these surfaces.",
+        hint: "Colour fringes along the edge. Kept small: text sits on this glass.",
         min: 0.0,
         max: 0.05,
         step: 0.001,
@@ -353,7 +353,7 @@ impl GlassPane {
 
         let material = section_box(
             "Material",
-            "The same in dark and light. Clarity and Frost move the mode's own body; the rest is the glass itself.",
+            "The same in dark and light. Clarity and Frost adjust each mode's own glass; the rest is shared by both.",
         );
         for knob in MATERIAL {
             material.append(&build_knob(&state, knob));
@@ -419,7 +419,7 @@ fn unconfigured_note() -> gtk4::Box {
 fn build_presets(state: &Rc<State>) -> gtk4::Box {
     let group = section_box(
         "Presets",
-        "The shipped material, and other coherent glass. Each one means the same in dark and light.",
+        "The system's glass and other ready-made ones. Each looks right in dark and light.",
     );
 
     // A grid of three columns rather than a FlowBox, because a FlowBox is a
@@ -442,7 +442,7 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
 
     let system_btn = form::preset_button("System");
     system_btn.set_tooltip_text(Some(
-        "The material users/modules/theme/glass.nix ships. Also what Reset returns to.",
+        "The glass the system ships. Also what Reset returns to.",
     ));
     {
         let state = state.clone();
@@ -471,10 +471,7 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
 /// The named property. A dropdown rather than a slider because sway takes it
 /// as a name, and an unknown one costs the whole `layer_effects` block.
 fn build_kinds(state: &Rc<State>) -> gtk4::Box {
-    let group = section_box(
-        "Profile",
-        "The bevel's height profile, and the droplet's shape.",
-    );
+    let group = section_box("Profile", "The shape of the glass at its edge.");
 
     let surface_labels: Vec<&str> = SurfaceKind::ALL.iter().map(|k| k.label()).collect();
     let surface = form::dropdown(&surface_labels);
@@ -514,7 +511,7 @@ fn build_knob(state: &Rc<State>, knob: &'static Knob) -> gtk4::Box {
     let row = form::row();
     row.set_tooltip_text(Some(knob.hint));
 
-    row.append(&form::row_label(knob.label));
+    row.append(&form::rail_label(knob.label));
 
     let scale = form::scale(knob.min, knob.max, knob.step);
     let value = form::value_label();
@@ -554,6 +551,21 @@ fn build_knob(state: &Rc<State>, knob: &'static Knob) -> gtk4::Box {
 
     row.append(&scale);
     row.append(&value);
+    let line = match knob.label {
+        "Clarity" => "How much shows through",
+        "Frost" => "How blurred what is behind is",
+        "Refraction" => "How much it bends what is behind",
+        "Dispersion" => "Colour fringes at the edge",
+        "Highlight" => "Light along the top edge",
+        "Bevel" => "How wide the edge is",
+        "Contact angle" => "How steep the edge is",
+        "Tail" => "How soft the edge is",
+        "Tail length" => "How far the soft edge runs",
+        _ => "",
+    };
+    if !line.is_empty() {
+        form::subtitle(&row, line);
+    }
     row
 }
 

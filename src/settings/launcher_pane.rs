@@ -49,7 +49,7 @@ static SOURCES: &[Switch] = &[
     },
     Switch {
         label: "Pages and settings",
-        hint: "The panel's pages and these settings tabs, by name.",
+        hint: "The Helm's pages and these settings, by name.",
         get: |l| l.settings,
         set: |l, v| l.settings = v,
     },
@@ -73,7 +73,7 @@ static SOURCES: &[Switch] = &[
     },
     Switch {
         label: "Files",
-        hint: "Files by name. The index is elephant's, and a large home makes the list slower to fill.",
+        hint: "Files by name. A large home folder makes the list slower to fill.",
         get: |l| l.files,
         set: |l, v| l.files = v,
     },
@@ -150,6 +150,14 @@ impl LauncherPane {
         let mut switches = Vec::new();
         for s in SOURCES {
             let (row, w) = switch_row(s.label, s.hint, (s.get)(&l));
+            if let Some(line) = match s.label {
+                "Commands" => Some("Type > to run a command"),
+                "Pages and settings" => Some("Helm pages and these settings"),
+                "App actions" => Some("Such as a new private window"),
+                _ => None,
+            } {
+                form::subtitle(&row, line);
+            }
             results.append(&row);
             switches.push((w, s));
         }
@@ -163,6 +171,7 @@ impl LauncherPane {
             "Off, results come in the order the search gives them.",
             l.frecency,
         );
+        form::subtitle(&row_frecency, "What you open often comes first");
         learning.append(&row_frecency);
         let forget = form::action_button(
             "Forget history",
@@ -255,7 +264,7 @@ pub(super) const SEARCH: &[Entry] = &[
     row("Results", "Open windows", "Windows already open in a search", &["windows", "switch", "go to"]).keys(&["launcher.windows"]),
     row("Results", "Calculator", "Arithmetic as you type it", &["calc", "math", "maths", "qalc"]).keys(&["launcher.calculator"]),
     row("Results", "Commands", "> runs a line in your shell", &["shell", "run", "terminal", "command"]).keys(&["launcher.commands"]),
-    row("Results", "Pages and settings", "The panel's pages and settings in a search", &["settings search", "pages"]).keys(&["launcher.settings"]),
+    row("Results", "Pages and settings", "The Helm's pages and settings in a search", &["settings search", "pages"]).keys(&["launcher.settings"]),
     row("Results", "Clipboard", "Clipboard history in a search", &["clipboard history", "paste", "copied"]).keys(&["launcher.clipboard"]),
     row("Results", "App actions", "What apps publish, such as a private window", &["actions", "menus", "desktop actions"]).keys(&["launcher.menus"]),
     row("Results", "Web search", "Search the web for what you typed", &["google", "duckduckgo", "browser"]).keys(&["launcher.web_search"]),

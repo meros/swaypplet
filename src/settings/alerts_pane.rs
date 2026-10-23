@@ -152,6 +152,7 @@ impl AlertsPane {
             "How long a card with no timeout of its own stays. Longer text stays longer; critical cards stay until dismissed.",
             &linger_labels,
         );
+        form::subtitle(&row_linger, "How long a popup stays");
         popups.append(&row_linger);
         let corner_labels: Vec<&str> = Corner::ALL.iter().map(|c| c.label()).collect();
         let (row_corner, corner) =
@@ -163,6 +164,7 @@ impl AlertsPane {
             (1.0, 5.0, 1.0),
             |v| format!("{v:.0}"),
         );
+        form::subtitle(&row_stack, "Popups shown at full size");
         popups.append(&row_stack);
 
         let quiet_group = section_box(
@@ -189,37 +191,39 @@ impl AlertsPane {
 
         let context_group = section_box(
             "Quiet by context",
-            "Popups wait while one of these holds, and one card counts them when it ends. Critical ones still show. The DND tile names the reason; one click there lets popups through until the context ends.",
+            "Popups wait while one of these is true, and one card counts them when it ends. Urgent ones still show. The Do Not Disturb tile in the Helm says why; a click there lets popups through until it ends.",
         );
         let (row_context, context) = switch_row(
             "Hold popups",
             "On, the triggers below hold popups by themselves.",
             alerts.context_quiet,
         );
+        form::subtitle(&row_context, "While any of the below is true");
         context_group.append(&row_context);
         let (row_sharing, sharing) = switch_row(
             "Screen shared",
-            "A screen-cast stream exists in PipeWire: a browser or call app sharing through the portal. The volume and brightness card waits too, since it would be in the stream.",
+            "A browser or a call app is sharing your screen. The volume and brightness card waits too, since it would be seen.",
             alerts.quiet_when_sharing,
         );
         context_group.append(&row_sharing);
         let (row_mirrored, mirrored) = switch_row(
             "Display mirrored",
-            "Two outputs overlap in the layout, or wl-mirror is open.",
+            "Two screens show the same picture, as on a projector.",
             alerts.quiet_when_mirrored,
         );
         context_group.append(&row_mirrored);
         let (row_fullscreen, fullscreen) = switch_row(
             "Full screen",
-            "A window is fullscreen on the screen you are using.",
+            "A window fills the screen you are using.",
             alerts.quiet_when_fullscreen,
         );
         context_group.append(&row_fullscreen);
         let (row_calls, calls) = switch_row(
             "In a call",
-            "The camera is on, or a call app or a browser records the microphone. A guess from names, so off by default.",
+            "The camera is on, or a call app or a browser is using the microphone. A guess from app names, so off by default.",
             alerts.quiet_in_calls,
         );
+        form::subtitle(&row_calls, "A guess from app names");
         context_group.append(&row_calls);
         form::dependent(&[&row_sharing, &row_mirrored, &row_fullscreen, &row_calls]);
 

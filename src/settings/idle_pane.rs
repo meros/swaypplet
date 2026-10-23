@@ -52,28 +52,28 @@ const TIMERS: [Timer; 5] = [
     },
     Timer {
         label: "Lock after",
-        hint: "Lock the session after this much idle time. Suppressed while the presence sensor sees you; No Lock stops it outright.",
+        hint: "Lock after this long without input. Held off while the presence sensor sees you; No Lock stops it.",
         ladder: LOCK_LADDER,
         get: |i| i.lock_after_s,
         set: |i, v| i.lock_after_s = v,
     },
     Timer {
         label: "Screen off after",
-        hint: "Counted while locked. Locking leaves the screen lit; the outputs go off only after this much idle time on the lock screen.",
+        hint: "Locking leaves the screen lit; the screens go off after this long on the lock screen.",
         ladder: BLANK_LADDER,
         get: |i| i.blank_after_s,
         set: |i, v| i.blank_after_s = v,
     },
     Timer {
         label: "Screen off on battery",
-        hint: "Counted while locked, on battery only. It can only shorten the screen-off tier, the night one included, never lengthen it; Never leaves that tier in charge.",
+        hint: "On battery only, counted on the lock screen. It can only make the screens go off sooner, never later. Never leaves Screen off after in charge.",
         ladder: BLANK_LADDER,
         get: |i| i.battery_blank_after_s,
         set: |i, v| i.battery_blank_after_s = v,
     },
     Timer {
         label: "Suspend after",
-        hint: "On battery only. Never on AC, never with No Sleep armed, never from a session that is not on the seat.",
+        hint: "On battery only: never while plugged in, never with No Sleep on, never for a session that is not in front of the screen.",
         ladder: SUSPEND_LADDER,
         get: |i| i.suspend_after_s,
         set: |i, v| i.suspend_after_s = v,
@@ -166,6 +166,21 @@ fn night_when(d: &super::store::Daylight) -> (String, bool) {
     }
 }
 
+/// The short line under a row whose name does not say enough
+/// (`form::subtitle`).
+fn subtitle_for(label: &str) -> Option<&'static str> {
+    Some(match label {
+        "Screen off after" => "Counted while the lock screen is up",
+        "Screen off on battery" => "A shorter wait on battery",
+        "Suspend after" => "On battery only",
+        "Face for administrator access" => "The camera can answer admin prompts",
+        "Card for terminal sudo" => "A password card for sudo, too",
+        "Pill under the lens" => "Says what the camera sees",
+        "Typing ends the face check" => "A key press stops the camera",
+        _ => return None,
+    })
+}
+
 struct State {
     /// One per [`TIMERS`] entry, in order, with the rungs its dropdown was
     /// built from.
@@ -197,13 +212,13 @@ struct Toggle {
 const ELEVATE: [Toggle; 4] = [
     Toggle {
         label: "Face for administrator access",
-        hint: "Ask the camera when sudo or pkexec asks for you. Off, the reader and the password remain; nothing here can make it easier than the password.",
+        hint: "Let the camera answer when administrator rights are asked for. Off, the fingerprint and the password remain; nothing here makes it easier than the password.",
         get: |e| e.face,
         set: |e, v| e.face = v,
     },
     Toggle {
         label: "Card for terminal sudo",
-        hint: "Draw the same card pkexec gets when sudo asks in a terminal: type the password there or in the terminal, whichever is nearer. Off, the terminal keeps the prompt to itself and the camera is not asked for it.",
+        hint: "When sudo asks in a terminal, show the same card apps get: type the password there or in the terminal. Off, the terminal keeps the prompt and the camera is not used for it.",
         get: |e| e.terminal_card,
         set: |e, v| e.terminal_card = v,
     },
@@ -301,7 +316,7 @@ impl IdlePane {
 
         let group = section_box(
             "Idle timers",
-            "Counted from the last input. A video player's idle inhibitor and No Lock hold these off. The lid, the Lock key and suspend are not timers and are not here.",
+            "Counted from the last time you touched the keyboard or the mouse. A playing video and No Lock hold them off. Closing the lid and the Lock key are not timers and are not set here.",
         );
 
         let idle = store::current().idle();
@@ -311,16 +326,20 @@ impl IdlePane {
             let labels = durations.labels();
             let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
             let (row, dropdown) = dropdown_row(timer.label, timer.hint, &labels);
+            if let Some(line) = subtitle_for(timer.label) {
+                form::subtitle(&row, line);
+            }
             group.append(&row);
             dropdowns.push((dropdown, durations));
         }
 
         let (dim_row, dim_level) = scale_row(
             "Dim to",
-            "The backlight level the dim tier fades to.",
+            "The brightness the screen fades to when it dims.",
             (5.0, 80.0, 5.0),
             |v| format!("{v:.0}%"),
         );
+        form::subtitle(&dim_row, "How dark the screen dims");
         group.append(&dim_row);
 
         // The night window. The switch is the first row and the rest hangs
@@ -360,13 +379,14 @@ impl IdlePane {
         );
         let (walk_row, walk_away) = switch_row(
             "Lock when I walk away",
-            "The presence sensor's absence edge locks the session. Off, walking away is no different from sitting still.",
+            "Lock as soon as the presence sensor sees you leave. Off, walking away is no different from sitting still.",
             idle.walk_away_lock,
         );
+        form::subtitle(&walk_row, "Uses the presence sensor");
         lock.append(&walk_row);
         let (face_row, face) = switch_row(
             "Face unlock",
-            "Try the camera while the lock screen is up. Read when the lock starts.",
+            "Try the camera while the lock screen is up. Takes effect from the next lock.",
             idle.face_unlock,
         );
         lock.append(&face_row);
@@ -376,12 +396,15 @@ impl IdlePane {
         // camera may be asked; every switch removes a way in or a surface.
         let admin = section_box(
             "Administrator access",
-            "What sudo and pkexec may ask for besides the password, and where. The password itself is always there.",
+            "What a request for administrator rights (sudo, or an app asking) may use besides the password. The password always works.",
         );
         let elevate_now = store::current().elevate();
         let mut elevate = Vec::new();
         for toggle in &ELEVATE {
             let (row, switch) = switch_row(toggle.label, toggle.hint, (toggle.get)(&elevate_now));
+            if let Some(line) = subtitle_for(toggle.label) {
+                form::subtitle(&row, line);
+            }
             admin.append(&row);
             elevate.push(switch);
         }

@@ -98,6 +98,14 @@ than asking first. Glass keeps its own Undo, over its whole tuning history.
 The footer's status line says "System default: …" (what the default is) or
 "Custom — saved to …" on every pane.
 
+A group says what it is for in a visible line under its name. A row keeps
+its long hint in a tooltip and, where its name does not say enough, a few
+plain words under the name (`form::subtitle`: "Screen off on battery", "A
+shorter wait on battery"). Rows with a rail keep one gutter for the name and
+its subtitle (`form::rail_label`), so every rail starts at one x. The words
+are for anyone: no tool names (libinput, PipeWire), "the Helm" for the
+Helm, and percentages written as 100%.
+
 A row that means something only while a switch above it is on (the quiet
 hours' From and Until, the quiet-by-context triggers, the night timers, the
 night warmth) is indented one step under the switch and insensitive as a

@@ -3,8 +3,8 @@
    a sidebar of panes beside the chosen pane, and one group per run of rows.
    Dense on purpose: the glass pane alone is twenty knobs, and a settings list
    that scrolls twice as far as it needs to is a list nobody reads to the
-   bottom of. Hints live in tooltips per row; only the group carries a
-   visible one. The rows are components (src/ui/, through
+   bottom of. A group carries a visible hint; a row its long hint in a
+   tooltip, and a few words under its name where the name is not enough. The rows are components (src/ui/, through
    src/settings/ui.rs); this file places them. ── */
 .settings-card {
     padding: 0;
@@ -68,6 +68,19 @@
 
 .settings-row-label {
     min-width: 104px;
+}
+
+/* A row with a rail: its name (and the subtitle under it) in one gutter,
+   wide enough for a short subtitle, so every rail starts at one x
+   (form::rail_label). */
+.settings-rail-label {
+    min-width: 160px;
+}
+
+/* A row with a subtitle under its name (form::subtitle): two lines stand
+   on the dense height with a little air above and below. */
+.settings-row.settings-row-two-line {
+    padding: var(--space-1) 0;
 }
 
 /* A control at the row's far end (form::Placement::Trailing): never

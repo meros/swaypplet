@@ -3,8 +3,10 @@
 //! footer. Built only from the components (`crate::ui`), which carry the
 //! colour, type and shape; `data/css/15-settings.css` only places things.
 //!
-//! Hints live in tooltips per row; only a group carries a visible one. The
-//! pane is dense on purpose (see `data/css/15-settings.css`).
+//! Each group carries a visible hint; a row carries its long hint in a
+//! tooltip, and a short visible line under its name where the name does
+//! not say enough ([`subtitle`]). The pane is dense on purpose (see
+//! `data/css/15-settings.css`).
 
 use std::path::Path;
 
@@ -22,6 +24,20 @@ use crate::ui::{self, Kind, Text, Tone};
 /// whatever width it is finally given, so at the pane's full column it fills
 /// the line as before.
 pub const HINT_CHARS: i32 = 64;
+
+/// A subtitle's width beside a rail, in characters: what fits the rail
+/// rows' gutter (`.settings-rail-label`).
+const RAIL_GUTTER_CHARS: i32 = 22;
+
+/// The label of a row with a rail (a scale), in the rails' gutter: one
+/// width for every rail row of every pane, so the rails start at one x
+/// with or without a subtitle under the name.
+pub fn rail_label(label: &str) -> gtk4::Label {
+    let name = row_label(label);
+    name.add_css_class("settings-rail-label");
+    name.set_xalign(0.0);
+    name
+}
 
 /// A tab's column of groups.
 pub fn pane() -> gtk4::Box {
@@ -58,6 +74,39 @@ pub fn row_label(label: &str) -> gtk4::Label {
     let name = ui::text(label, Text::Body, Tone::Fg);
     name.add_css_class("settings-row-label");
     name
+}
+
+/// A short line under a row's name, for a row whose name does not say
+/// enough by itself ("Screen off on battery": shorter, on battery only).
+/// A few words, plain; the row's tooltip keeps the long hint. The name and
+/// the line stand in one column at the row's start, so the control keeps
+/// its place at the far end.
+pub fn subtitle(row: &gtk4::Box, text: &str) {
+    let Some(name) = row.first_child() else {
+        return;
+    };
+    if !name.has_css_class("settings-row-label") {
+        return;
+    }
+    let column = ui::vbox(0);
+    column.set_valign(gtk4::Align::Center);
+    column.set_hexpand(name.hexpands());
+    row.add_css_class("settings-row-two-line");
+    row.insert_child_after(&column, Some(&name));
+    row.remove(&name);
+    column.append(&name);
+    let line = ui::text(text, Text::Caption, Tone::Muted);
+    line.set_xalign(0.0);
+    line.set_wrap(true);
+    line.set_max_width_chars(HINT_CHARS);
+    // Beside a rail the column is the rail's fixed gutter: the line wraps
+    // inside it, so every rail of the pane still starts at one x.
+    if name.has_css_class("settings-rail-label") {
+        name.remove_css_class("settings-rail-label");
+        column.add_css_class("settings-rail-label");
+        line.set_max_width_chars(RAIL_GUTTER_CHARS);
+    }
+    column.append(&line);
 }
 
 /// The value beside a rail: fixed width, tabular, so the number does not
@@ -190,7 +239,7 @@ pub fn scale_row(
     let (min, max, step) = range;
     let row = row();
     row.set_tooltip_text(Some(hint));
-    row.append(&row_label(label));
+    row.append(&rail_label(label));
 
     let scale = scale(min, max, step);
     let value = value_label();

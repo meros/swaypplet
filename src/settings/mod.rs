@@ -941,10 +941,22 @@ fn find_row_in(
         None if anywhere => page.clone(),
         None => return None,
     };
+    // The row is the label's nearest `settings-row` (a row with a
+    // subtitle holds its label one box down, `form::subtitle`), else its
+    // parent (a list row on Displays).
     descendants(&scope)
         .into_iter()
         .find(|w| w.has_css_class("settings-row-label") && text_is(w, title))
-        .and_then(|label| label.parent())
+        .and_then(|label| {
+            let mut up = label.parent();
+            while let Some(w) = up {
+                if w.has_css_class("settings-row") {
+                    return Some(w);
+                }
+                up = w.parent();
+            }
+            label.parent()
+        })
 }
 
 /// Scroll `row` into the middle of the settings sheet's scroller and light

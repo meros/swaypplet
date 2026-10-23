@@ -308,7 +308,7 @@ impl State {
         }
         if codes.is_empty() {
             let none = ui::text(
-                "The sway config's layouts. Add one to take over the list.",
+                "The system's layouts. Add one to choose your own.",
                 ui::Text::Caption,
                 ui::Tone::Faint,
             );
@@ -414,7 +414,7 @@ impl State {
         let listed = service::listed(&devices);
         if listed.is_empty() {
             let none = ui::text(
-                "Sway reports no keyboard, touchpad or mouse.",
+                "No keyboard, touchpad or mouse is connected.",
                 ui::Text::Caption,
                 ui::Tone::Faint,
             );
@@ -469,15 +469,12 @@ impl InputPane {
         // ── Keyboard ──
         let keyboard = section_box(
             "Keyboard",
-            "Every keyboard. A row you leave alone stays as the sway config sets it.",
+            "Every keyboard. A row you leave alone stays as the system sets it.",
         );
         let layouts = ui::vbox(1);
         keyboard.append(&layouts);
 
-        let add = form::action_button(
-            "Add layout",
-            "Search the xkb layouts and variants by name or code.",
-        );
+        let add = form::action_button("Add layout", "Search the keyboard layouts by name or code.");
         let add_row = form::row();
         add_row.set_halign(gtk4::Align::Start);
         add_row.append(&add);
@@ -530,9 +527,7 @@ impl InputPane {
             .collect();
         let caps = Choices::new(caps_pairs, input.caps.as_deref());
         let row_caps = form::kind_row("Caps Lock", &caps.dropdown);
-        row_caps.set_tooltip_text(Some(
-            "What the Caps Lock key does. Shares one xkb_options line with the layout switch.",
-        ));
+        row_caps.set_tooltip_text(Some("What the Caps Lock key does."));
         keyboard.append(&row_caps);
 
         let (row_delay, delay) = scale_row(
@@ -579,7 +574,7 @@ impl InputPane {
         touchpad.append(&row_dwt);
         let (row_tps, tp_speed) = scale_row(
             "Speed",
-            "libinput's pointer speed, from −1 to 1.",
+            "How fast the pointer moves; 0 is the usual speed.",
             (-1.0, 1.0, 0.05),
             |v| format!("{v:+.2}"),
         );
@@ -607,7 +602,7 @@ impl InputPane {
         let mouse = section_box("Mouse", "Every mouse and trackball, the touchpads apart.");
         let (row_ms, m_speed) = scale_row(
             "Speed",
-            "libinput's pointer speed, from −1 to 1.",
+            "How fast the pointer moves; 0 is the usual speed.",
             (-1.0, 1.0, 0.05),
             |v| format!("{v:+.2}"),
         );
@@ -645,8 +640,8 @@ impl InputPane {
         );
         keys_group.append(&row_bri);
         let (row_boost, boost) = switch_row(
-            "Volume past 100 %",
-            "Let the keys and the panel's rail go to the 150 % the sound server allows.",
+            "Volume past 100%",
+            "Let the keys and the Helm's volume slider go up to 150%.",
             keys.volume_boost,
         );
         keys_group.append(&row_boost);
@@ -660,7 +655,7 @@ impl InputPane {
         devices_group.append(&devices);
 
         let reset = form::ResetButtons::new(
-            "Drop the input and keys sections from the settings file. Sway reads its config again to put its own input values back.",
+            "Put the system's keyboard, touchpad and mouse settings and key steps back.",
         );
         let (footer, status) = form::footer(&[&reset.button, &reset.undo]);
         let copy = form::copy_nix_button(
@@ -933,7 +928,7 @@ pub(super) const SEARCH: &[Entry] = &[
     row("Mouse", "Natural scrolling", "The wheel scrolls the content's way", &["reverse scroll", "invert wheel", "mouse scroll", "scroll direction"]).keys(&["input.mouse_natural_scroll"]),
     row("Keys", "Volume step", "Percent per volume key press", &["volume", "increment", "sound"]).keys(&["keys.volume_step"]),
     row("Keys", "Brightness step", "Percent per brightness key press", &["brightness", "backlight", "increment"]).keys(&["keys.brightness_step"]),
-    row("Keys", "Volume past 100 %", "Let the volume go to 150 %", &["boost", "overamplification", "loud", "louder", "amplify"]).keys(&["keys.volume_boost"]),
+    row("Keys", "Volume past 100%", "Let the volume go to 150%", &["boost", "overamplification", "loud", "louder", "amplify"]).keys(&["keys.volume_boost"]),
     row("Devices", "", "The keyboards, touchpads and mice connected now", &["devices", "connected", "input devices"]),
 ];
 

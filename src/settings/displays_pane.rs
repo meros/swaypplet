@@ -242,9 +242,10 @@ impl DisplaysPane {
             form::dropdown_row("Rotation", "As the display stands on the desk.", &names);
         let (sync_row, sync) = switch_row(
             "Adaptive sync",
-            "Let the refresh follow the frames (FreeSync, VRR). Off when games or video stutter or flicker.",
+            "Let the screen redraw when a new frame is ready. Turn it off if games or video stutter or flicker.",
             false,
         );
+        form::subtitle(&sync_row, "FreeSync, VRR");
         for row in [
             &enabled_row,
             &res_row,

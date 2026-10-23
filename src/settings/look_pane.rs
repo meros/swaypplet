@@ -749,7 +749,7 @@ impl LookPane {
 
         let appearance = section_box(
             "Appearance",
-            "Four of the design system's inputs; the fifth, the tint, is below. Every surface follows within a second.",
+            "The shell's colours and its dark or light. Everything follows within a second.",
         );
         let mode_labels: Vec<&str> = ThemeMode::ALL.iter().map(|m| m.label()).collect();
         let (theme_mode_row, theme_mode) = dropdown_row(
@@ -782,6 +782,7 @@ impl LookPane {
             "The greys the glass, the text and the lines are drawn from.",
             &neutral_labels,
         );
+        form::subtitle(&neutral_row, "The greys of glass, text and lines");
         appearance.append(&neutral_row);
         let contrast_labels: Vec<&str> = Contrast::ALL.iter().map(|c| contrast_label(*c)).collect();
         let (contrast_row, contrast) = dropdown_row(
@@ -795,14 +796,14 @@ impl LookPane {
             "Apps switch between dark and light with the shell, and take the nearest GNOME accent, high contrast and reduced motion from it. Off leaves the apps' own settings alone.",
             true,
         );
+        form::subtitle(&apps_row, "Apps go dark and light too");
         appearance.append(&apps_row);
 
         let theme = section_box(
             "Theme colour",
-            "Take the shell's colours from the wallpaper. Each colour keeps its \
-             lightness and only its hue moves, so the contrast the shell is \
-             built on holds whatever the image is. Below: the neutral and \
-             accent scales the shell is drawn from.",
+            "Take the shell's colours from the wallpaper. Only the hue moves, so \
+             text stays as easy to read whatever the image is. Below: the \
+             greys and the accent shades the shell is drawn from.",
         );
         let tint_labels: Vec<&str> = Tint::ALL.iter().map(|t| t.label()).collect();
         let (tint_row, tint) = dropdown_row(
@@ -813,6 +814,7 @@ impl LookPane {
              stays red either way.",
             &tint_labels,
         );
+        form::subtitle(&tint_row, "Colours from the wallpaper");
         theme.append(&tint_row);
         let colour_box = crate::ui::hbox(2);
         colour_box.set_halign(gtk4::Align::Start);
@@ -840,14 +842,15 @@ impl LookPane {
         look.append(&motion_row);
         let (zoom_row, launch_zoom) = form::switch_row(
             "Launch zoom",
-            "An app you start from the launcher grows out of its row. Needs the swayfx handoff patch.",
+            "An app you start from the launcher grows out of its row.",
             false,
         );
+        form::subtitle(&zoom_row, "Apps grow out of the launcher");
         look.append(&zoom_row);
 
         let night_box = section_box(
             "Night light",
-            "Warms every screen at night, by the same day and night the automatic mode follows. The panel's display section has the same warmth.",
+            "Warms every screen at night, by the same day and night the automatic mode follows. The Helm's Displays page has the same switch.",
         );
         let (night_row, night) = dropdown_row(
             "Night light",
