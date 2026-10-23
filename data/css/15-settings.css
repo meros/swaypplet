@@ -118,6 +118,14 @@
     min-height: 220px;
 }
 
+/* The profile and extra-screen lists: rows shared with the Helm, here in
+   the pane's columns, their text at the label edge and their buttons at the
+   controls' edge (widgets::display drops the glyph for the pane). */
+.settings-list .ui-row {
+    padding-left: 0;
+    padding-right: 0;
+}
+
 .displays-chips {
     padding-top: var(--space-2);
 }

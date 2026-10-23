@@ -54,10 +54,15 @@ before is sent back, and it is sent back at once when the page goes away
 from here reverts too. A hand layout is no profile; "Save as profile"
 stores the layout on screen. The Helm's displays page applies a profile
 that fits and lists what is connected; ordering, deleting and saving
-profiles, and turning outputs on and off, are this pane's. Both pages carry
-the same "Extra screen" rows (`widgets::display::extra_screen_list`): a virtual
-output sent to a TV or a VNC viewer, with Start and Stop. A control that the
-Helm gets for the Displays page goes in this pane too.
+profiles, and turning outputs on and off, are this pane's; deleting one asks
+first (`ui::arm`). Both pages carry the same extra-screen rows
+(`widgets::display::extra_screen_list`): a virtual output sent to a TV or a
+VNC viewer, with Start and Stop. In the pane they head one "Extra screens"
+group, above the six switches for what shows on it ("Bar on extra screens"
+and the rest), and both lists drop their glyphs so they read in the pane's
+label and control columns. A control that the Helm gets for the Displays
+page goes in this pane too. Displays' Reset puts the system's profiles back
+and turns the six switches off; it asks first, since saved profiles go.
 
 The System pane (`system_pane.rs`) has no settings. It reads
 what `nx status` prints, directly: the `configurationRevision` in each
@@ -229,7 +234,7 @@ and Bar tabs is `nix <section>` into the clipboard.
 - **Extra screens** (`extra_screens`: `bar`, `workspace_names`, `osd`,
   `key_sheet`, `pins`, `notifications`, all default off) say what of the
   shell shows on an extra screen, a virtual output made for a TV or a VNC
-  viewer (`services::cast`); the Displays pane's "On extra screens" group.
+  viewer (`services::cast`); the Displays pane's "Extra screens" group.
   The rules are `shell::extra`'s. A surface built per output (the bar, the
   workspace names, the OSD card, the key sheet) is not built on an extra
   screen while its switch is off; `PerMonitor` reconciles on every

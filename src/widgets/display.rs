@@ -127,7 +127,7 @@ fn populate_output_list_with_data(list: &Box, outputs: &[OutputInfo]) {
 // ── Profiles ──────────────────────────────────────────────────────────────────
 
 /// One profile: what it is to the displays now, and what can be done to it.
-fn profile_row(name: &str, current: bool, fits: bool, first: bool) -> Box {
+fn profile_row(name: &str, current: bool, fits: bool, first: bool, icon: bool) -> Box {
     let state = if current {
         "On screen"
     } else if fits {
@@ -135,7 +135,7 @@ fn profile_row(name: &str, current: bool, fits: bool, first: bool) -> Box {
     } else {
         "For other displays"
     };
-    let r = ui::row(icons::DISPLAY_PROFILE, name, state);
+    let r = ui::row(if icon { icons::DISPLAY_PROFILE } else { "" }, name, state);
     if fits && !current {
         let apply = ui::button_with(
             ui::Face::Label("Apply"),
@@ -217,14 +217,17 @@ fn populate_picks(group: &Box, list: &Box) {
 /// Fill `list` with the profiles, one row each with Apply, raise and
 /// delete; the Displays settings tab shows the same list. False when the
 /// compositor offers no output management, where profiles do nothing.
-pub fn fill_profiles(list: &Box) -> bool {
+///
+/// `icon`: the glyph at each row's start. The settings pane's rows have
+/// none, so they read in its label column.
+pub fn fill_profiles(list: &Box, icon: bool) -> bool {
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
     let view = displays::view();
     if view.profiles.is_empty() {
         let empty = ui::row(
-            icons::DISPLAY_PROFILE,
+            if icon { icons::DISPLAY_PROFILE } else { "" },
             "No profiles",
             "Save this layout to restore it when these displays connect",
         );
@@ -232,7 +235,7 @@ pub fn fill_profiles(list: &Box) -> bool {
     }
     for (i, (name, fits)) in view.profiles.iter().enumerate() {
         let current = view.current.as_deref() == Some(name.as_str());
-        list.append(&profile_row(name, current, *fits, i == 0));
+        list.append(&profile_row(name, current, *fits, i == 0, icon));
     }
     view.available
 }
@@ -279,7 +282,8 @@ fn cast_button(label: &str, busy: bool, on_click: impl Fn() + 'static) -> gtk4::
 /// targets, each with Start where a backend reaches it (`cast::backend`).
 /// A cast takes seconds to start (the first segments, the TV's player), so
 /// a row says it is on its way.
-fn fill_extra_screen(list: &Box) {
+fn fill_extra_screen(list: &Box, icon: bool) {
+    let glyph = |g: &'static str| if icon { g } else { "" };
     while let Some(child) = list.first_child() {
         list.remove(&child);
     }
@@ -290,7 +294,7 @@ fn fill_extra_screen(list: &Box) {
             Target::Viewer => "Extra screen for a VNC viewer".to_string(),
         };
         let r = ui::row(
-            icons::TV,
+            glyph(icons::TV),
             &title,
             &format!("{} · {} on {}", s.output, s.backend, s.location),
         );
@@ -298,14 +302,14 @@ fn fill_extra_screen(list: &Box) {
         list.append(&r.root);
     } else if v.busy {
         let r = ui::row(
-            icons::TV,
+            glyph(icons::TV),
             "Starting the extra screen…",
             "A TV shows it once the first seconds are encoded",
         );
         list.append(&r.root);
     } else {
         let r = ui::row(
-            icons::DISPLAY,
+            glyph(icons::DISPLAY),
             "VNC viewer",
             "A screen beside these, for a VNC viewer",
         );
@@ -322,7 +326,7 @@ fn fill_extra_screen(list: &Box) {
             } else {
                 "No address to cast to"
             });
-            let r = ui::row(icons::TV, &d.name, &subtitle.join(" · "));
+            let r = ui::row(glyph(icons::TV), &d.name, &subtitle.join(" · "));
             if reached {
                 r.end.append(&cast_button("Start", v.busy, move || {
                     cast::begin(target.clone())
@@ -332,14 +336,14 @@ fn fill_extra_screen(list: &Box) {
         }
         if v.searching {
             let r = ui::row(
-                icons::TV,
+                glyph(icons::TV),
                 "Looking for TVs…",
                 "Cast devices on this network",
             );
             list.append(&r.root);
         } else if v.devices.is_empty() {
             let r = ui::row(
-                icons::TV,
+                glyph(icons::TV),
                 "No TV found",
                 "Cast devices with a screen show here",
             );
@@ -357,12 +361,12 @@ fn fill_extra_screen(list: &Box) {
 
 /// The rows of "Extra screen", for the Helm and for the Displays pane. The
 /// network is searched when the rows come on screen, not when the panel opens.
-pub fn extra_screen_list() -> Box {
+pub fn extra_screen_list(icon: bool) -> Box {
     let list = ui::vbox(1);
-    fill_extra_screen(&list);
+    fill_extra_screen(&list, icon);
     list.connect_map(|_| cast::search_if_stale());
     let rows = list.clone();
-    cast::observe(move || fill_extra_screen(&rows));
+    cast::observe(move || fill_extra_screen(&rows, icon));
     list
 }
 
@@ -373,7 +377,7 @@ fn extra_screen_group() -> Box {
     head.set_halign(gtk4::Align::Start);
     head.add_css_class("display-group-head");
     group.append(&head);
-    group.append(&extra_screen_list());
+    group.append(&extra_screen_list(true));
     group
 }
 

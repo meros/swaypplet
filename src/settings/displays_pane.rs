@@ -41,37 +41,37 @@ struct ExtraRow {
 
 const EXTRA_ROWS: &[ExtraRow] = &[
     ExtraRow {
-        label: "Bar",
+        label: "Bar on extra screens",
         hint: "The bar along the bottom, with the workspaces and the clock.",
         get: |s| s.bar,
         set: |s, on| s.bar = on,
     },
     ExtraRow {
-        label: "Workspace names",
+        label: "Workspace names on extra screens",
         hint: "The pill that names the workspace.",
         get: |s| s.workspace_names,
         set: |s, on| s.workspace_names = on,
     },
     ExtraRow {
-        label: "Volume and brightness",
+        label: "Volume card on extra screens",
         hint: "The card the volume and brightness keys show.",
         get: |s| s.osd,
         set: |s, on| s.osd = on,
     },
     ExtraRow {
-        label: "Key sheet",
+        label: "Key sheet on extra screens",
         hint: "The key bindings, shown while Super is held.",
         get: |s| s.key_sheet,
         set: |s, on| s.key_sheet = on,
     },
     ExtraRow {
-        label: "Pins",
+        label: "Pins on extra screens",
         hint: "Pinned workspaces follow the focus onto it. Off, they stay on one of your own screens.",
         get: |s| s.pins,
         set: |s, on| s.pins = on,
     },
     ExtraRow {
-        label: "Notifications",
+        label: "Notifications on extra screens",
         hint: "Popups land on it while it has the focus. Off, they go to one of your own screens; the notification centre keeps every one either way.",
         get: |s| s.notifications,
         set: |s, on| s.notifications = on,
@@ -270,20 +270,18 @@ impl DisplaysPane {
             "A profile is applied when its displays connect; the most specific wins. Save stores the layout on screen, not unapplied changes.",
         );
         let profile_list = ui::vbox(1);
+        profile_list.add_css_class("settings-list");
         profiles.append(&profile_list);
         profiles.append(&crate::widgets::display::save_row("Save as profile"));
 
-        let extra_screen = section_box(
-            "Extra screen",
-            "A virtual screen beside these, for a TV or a VNC viewer.",
-        );
-        extra_screen.append(&crate::widgets::display::extra_screen_list());
-
-        // ── On extra screens ─────────────────────────────────────────────
+        // ── Extra screens: start one, then what of the shell shows on it ──
         let on_extra = section_box(
-            "On extra screens",
-            "What of the shell also shows on an extra screen. Off, it stays on your own screens: an extra screen is often a TV other people see.",
+            "Extra screens",
+            "A screen beside yours, for a TV or a VNC viewer. Others may see it, so nothing of the shell shows on it unless you switch it on below.",
         );
+        let extra_list = crate::widgets::display::extra_screen_list(false);
+        extra_list.add_css_class("settings-list");
+        on_extra.append(&extra_list);
         let now = crate::settings::store::current().extra_screens();
         let switches: Vec<(gtk4::Switch, ExtraGet)> = EXTRA_ROWS
             .iter()
@@ -312,7 +310,6 @@ impl DisplaysPane {
         body.append(&group);
         body.append(&footer);
         body.append(&profiles);
-        body.append(&extra_screen);
         body.append(&on_extra);
         // ── Reset, as on every pane ──────────────────────────────────────
         let reset = form::ResetButtons::new(
@@ -715,7 +712,7 @@ impl Pane {
         self.unavailable.set_visible(!view.available);
         self.body.set_visible(view.available);
         self.profiles.set_visible(view.available);
-        crate::widgets::display::fill_profiles(&self.profile_list);
+        crate::widgets::display::fill_profiles(&self.profile_list, false);
         // Left to right, then top to bottom, the ones switched off last: the
         // order the chips read in. The compositor lists them newest first.
         let mut heads = view.heads;
@@ -994,7 +991,13 @@ impl Pane {
     /// moved by the arrow keys when it has the focus.
     fn tile(self: &Rc<Pane>, i: usize, d: &Draft) -> gtk4::ToggleButton {
         // The name over the connector, which stays findable here.
-        let text = format!("{}\n{}", d.shown_name(), d.name);
+        // The name over the connector, or the connector once when the
+        // display has no name of its own (a nested or virtual output).
+        let text = if d.shown_name() == d.name {
+            d.name.clone()
+        } else {
+            format!("{}\n{}", d.shown_name(), d.name)
+        };
         let label = gtk4::Label::new(Some(&text));
         label.set_justify(gtk4::Justification::Center);
         label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
@@ -1184,11 +1187,13 @@ impl Pane {
         let dt = &self.details;
         dt.group.set_visible(true);
         self.updating.set(true);
-        let title = if d.product.is_empty() {
-            format!("{} · {}", d.shown_name(), d.name)
-        } else {
-            format!("{} · {} · {}", d.shown_name(), d.name, d.product)
-        };
+        let mut parts = vec![d.shown_name()];
+        for part in [d.name.clone(), d.product.clone()] {
+            if !part.is_empty() && !parts.contains(&part) {
+                parts.push(part);
+            }
+        }
+        let title = parts.join(" · ");
         dt.title.set_text(&title);
         dt.enabled.set_active(d.enabled);
 
@@ -1281,11 +1286,11 @@ pub(super) const SEARCH: &[Entry] = &[
     row("Display", "Rotation", "Turn the picture for a portrait display", &["rotate", "orientation", "portrait", "landscape", "transform", "flip"]),
     row("Display", "Adaptive sync", "The refresh follows the frames", &["vrr", "freesync", "gsync", "variable refresh"]),
     row("Profiles", "", "Layouts applied when displays connect", &["profile", "kanshi", "docking", "dock", "external monitor"]),
-    row("Extra screen", "", "A screen for a TV or a VNC viewer", &["cast", "chromecast", "tv", "vnc", "extra screen", "second screen", "virtual screen"]),
-    row("On extra screens", "Bar", "The bar on a TV or VNC screen", &["cast", "tv", "extra screen", "bar", "taskbar"]).keys(&["extra_screens.bar"]),
-    row("On extra screens", "Workspace names", "Workspace names on a TV or VNC screen", &["cast", "tv", "extra screen", "label", "workspace name"]).keys(&["extra_screens.workspace_names"]),
-    row("On extra screens", "Volume and brightness", "The volume card on a TV or VNC screen", &["cast", "tv", "extra screen", "osd", "volume", "brightness"]).keys(&["extra_screens.osd"]),
-    row("On extra screens", "Key sheet", "The key sheet on a TV or VNC screen", &["cast", "tv", "extra screen", "keybinds", "shortcuts"]).keys(&["extra_screens.key_sheet"]),
-    row("On extra screens", "Pins", "Pins on a TV or VNC screen", &["cast", "tv", "extra screen", "pin", "pinned workspace"]).keys(&["extra_screens.pins"]),
-    row("On extra screens", "Notifications", "Notifications on a TV or VNC screen", &["cast", "tv", "chromecast", "extra screen", "notification", "popup", "privacy"]).keys(&["extra_screens.notifications"]),
+    row("Extra screens", "", "A screen for a TV or a VNC viewer", &["cast", "chromecast", "tv", "vnc", "extra screen", "second screen", "virtual screen"]),
+    row("Extra screens", "Bar on extra screens", "The bar on a TV or VNC screen", &["cast", "tv", "taskbar"]).keys(&["extra_screens.bar"]),
+    row("Extra screens", "Workspace names on extra screens", "Workspace names on a TV or VNC screen", &["cast", "tv", "label", "workspace name"]).keys(&["extra_screens.workspace_names"]),
+    row("Extra screens", "Volume card on extra screens", "The volume card on a TV or VNC screen", &["cast", "tv", "osd", "brightness"]).keys(&["extra_screens.osd"]),
+    row("Extra screens", "Key sheet on extra screens", "The key sheet on a TV or VNC screen", &["cast", "tv", "keybinds", "shortcuts"]).keys(&["extra_screens.key_sheet"]),
+    row("Extra screens", "Pins on extra screens", "Pins on a TV or VNC screen", &["cast", "tv", "pinned workspace"]).keys(&["extra_screens.pins"]),
+    row("Extra screens", "Notifications on extra screens", "Notifications on a TV or VNC screen", &["cast", "tv", "chromecast", "vnc", "privacy"]).keys(&["extra_screens.notifications"]),
 ];
