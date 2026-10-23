@@ -102,7 +102,7 @@ pub const LIVE_TIMING: Timing = Timing {
 };
 /// From sending DashCast the page to the page saying it plays: loading the
 /// page in DashCast's iframe, the first fragments, the decoder.
-pub const PLAYING_WITHIN: Duration = Duration::from_secs(10);
+pub const PLAYING_WITHIN: Duration = Duration::from_secs(30);
 
 static CAST: Cast = Cast {
     live: LivePage {

@@ -211,6 +211,7 @@ fn answer(stream: TcpStream, peer: SocketAddr, site: &Site, token: &str) {
     let Some(name) = requested(path, token) else {
         return reply(&mut out, "404 Not Found", "", b"");
     };
+    log::info!("cast: {} asked for {method} {name}", peer.ip());
     let dir = match (site, method, name) {
         (Site::Live(hub), "POST", "report") => {
             if length > MAX_REPORT {
