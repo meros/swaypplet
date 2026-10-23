@@ -225,6 +225,9 @@ pub struct SettingsSection {
     /// The sidebar row of each pane, by stack name.
     rows: Vec<(&'static str, gtk4::ListBoxRow)>,
     stack: gtk4::Stack,
+    /// The pane's scroller, one for every pane: back to the top when the
+    /// pane changes.
+    pane_scroller: gtk4::ScrolledWindow,
     title: gtk4::Label,
     /// What a Helm page among the search hits opens: the Helm, on it.
     on_page: OnPage,
@@ -321,6 +324,7 @@ impl SettingsSection {
             .vexpand(true)
             .child(&stack)
             .build();
+        keep_gutter(&scroller, &stack);
         let content = crate::ui::vbox(3);
         content.set_hexpand(true);
         content.append(&title);
@@ -344,6 +348,7 @@ impl SettingsSection {
             results_scroller,
             rows,
             stack,
+            pane_scroller: scroller,
             title,
             on_page: OnPage::default(),
             marks: std::cell::RefCell::default(),
@@ -464,6 +469,13 @@ impl SettingsSection {
                     return;
                 };
                 if let Some((name, _)) = this.rows.iter().find(|(_, r)| r == row) {
+                    // A pane opens at its top. The scroller is shared, so
+                    // the next pane opened where the last was left, its
+                    // first group out of view. A search hit scrolls to
+                    // its row after this, once the row is laid out.
+                    if this.stack.visible_child_name().as_deref() != Some(*name) {
+                        this.pane_scroller.vadjustment().set_value(0.0);
+                    }
                     this.stack.set_visible_child_name(name);
                     if let Some(pane) = PANES.iter().find(|p| p.name == *name) {
                         this.title.set_label(pane.title);
@@ -838,6 +850,27 @@ fn sidebar_scroller(list: &gtk4::ListBox) -> gtk4::ScrolledWindow {
         .vexpand(true)
         .child(list)
         .build()
+}
+
+/// Keep the scrollbar's width beside a pane that does not scroll, so the
+/// right edge of every pane is at one x. The scrollbar is classic, not
+/// overlay (`theme::load_css`), so it takes its width from the pane only
+/// when there is something to scroll, and a short pane's controls stood
+/// further right than a long one's.
+fn keep_gutter(scroller: &gtk4::ScrolledWindow, content: &gtk4::Stack) {
+    let bar = scroller.vscrollbar();
+    let content = content.clone();
+    scroller.vadjustment().connect_changed(move |adj| {
+        let scrolls = adj.upper() > adj.page_size() + 0.5;
+        let gutter = if scrolls {
+            0
+        } else {
+            bar.measure(gtk4::Orientation::Horizontal, -1).1
+        };
+        if content.margin_end() != gutter {
+            content.set_margin_end(gutter);
+        }
+    });
 }
 
 /// The first row of `list` the keyboard can land on.
