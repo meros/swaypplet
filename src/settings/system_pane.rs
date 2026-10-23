@@ -261,24 +261,8 @@ impl SystemPane {
         {
             // `nx` commits and pushes, so it asks twice.
             let p = pane.clone();
-            let armed = Rc::new(Cell::new(false));
-            update.connect_clicked(move |b| {
-                if armed.replace(false) {
-                    ui::set_armed(b, false);
-                    b.set_label("Update");
-                    p.start(Action::Update);
-                    return;
-                }
-                armed.set(true);
-                ui::set_armed(b, true);
-                b.set_label("Commit, build, push?");
-                let (armed, b) = (armed.clone(), b.clone());
-                glib::timeout_add_local_once(Duration::from_secs(4), move || {
-                    if armed.replace(false) {
-                        ui::set_armed(&b, false);
-                        b.set_label("Update");
-                    }
-                });
+            ui::arm(&update, "Commit, build, push?", move |_| {
+                p.start(Action::Update)
             });
         }
         {

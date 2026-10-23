@@ -168,7 +168,8 @@ fn profile_row(name: &str, current: bool, fits: bool, first: bool) -> Box {
         ui::Size::Small,
     );
     let n = name.to_string();
-    delete.connect_clicked(move |_| displays::delete(&n));
+    // A saved layout cannot be put back: the first press asks.
+    ui::arm(&delete, "Delete?", move |_| displays::delete(&n));
     r.end.append(&delete);
     r.root
 }

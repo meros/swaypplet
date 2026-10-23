@@ -317,7 +317,8 @@ impl DisplaysPane {
         // ── Reset, as on every pane ──────────────────────────────────────
         let reset = form::ResetButtons::new(
             "Put the system's display profiles back, and show nothing of the shell on extra screens. Your saved profiles go.",
-        );
+        )
+        .asking("Delete saved profiles?");
         let (reset_footer, reset_status) = form::footer(&[&reset.button, &reset.undo]);
         let copy = form::copy_nix_button(
             &reset_status,

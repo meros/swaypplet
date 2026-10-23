@@ -49,9 +49,6 @@ const LIMIT: u32 = 30;
 /// The systemd unit a deploy runs in.
 const DEPLOY_UNIT: &str = "swaypplet-deploy";
 
-/// How long an armed button waits for its second press.
-const ARMED: Duration = Duration::from_secs(6);
-
 /// A thumbnail's size, in logical pixels.
 const THUMB_W: i32 = 240;
 const THUMB_H: i32 = 150;
@@ -775,7 +772,7 @@ fn build_detail(state: &Rc<State>, entry: &Rc<Entry>, fix: &Fix, job: Option<&Jo
             entry.log.replace(Some(log));
             let stop = ui::button("Stop", ui::Kind::Secondary);
             stop.set_tooltip_text(Some("Stop the agent and throw its work away"));
-            stop.connect_clicked(move |b| {
+            ui::arm(&stop, "Stop and discard?", move |b| {
                 b.set_sensitive(false);
                 stop_job(n);
             });
@@ -810,7 +807,7 @@ fn build_detail(state: &Rc<State>, entry: &Rc<Entry>, fix: &Fix, job: Option<&Jo
                 close.set_tooltip_text(Some("Close the PR without merging, and delete its branch"));
                 {
                     let state = state.clone();
-                    arm(&close, "Close the PR?", move |b| {
+                    ui::arm(&close, "Close the PR?", move |b| {
                         b.set_sensitive(false);
                         let state = state.clone();
                         crate::spawn::spawn_work(
@@ -832,7 +829,7 @@ fn build_detail(state: &Rc<State>, entry: &Rc<Entry>, fix: &Fix, job: Option<&Jo
                 apply.set_sensitive(!state.deploying.get());
                 {
                     let state = state.clone();
-                    arm(&apply, "Merge and deploy?", move |_| apply_fix(&state, pr));
+                    ui::arm(&apply, "Merge and deploy?", move |_| apply_fix(&state, pr));
                 }
                 actions.append(&apply);
             }
@@ -907,39 +904,11 @@ fn autofix_button(state: &Rc<State>, entry: &Rc<Entry>, label: &str) -> gtk4::Bu
         tick(&state);
     };
     if stranger {
-        arm(&button, &prompt, go);
+        ui::arm(&button, &prompt, go);
     } else {
         button.connect_clicked(go);
     }
     button
-}
-
-/// A button that asks on its first press (its label becomes `question`,
-/// armed) and acts on a second within [`ARMED`].
-fn arm(button: &gtk4::Button, question: &str, act: impl Fn(&gtk4::Button) + 'static) {
-    let armed = Rc::new(Cell::new(false));
-    let question = question.to_string();
-    let label = button.label().map(|l| l.to_string()).unwrap_or_default();
-    button.connect_clicked(move |b| {
-        if !armed.replace(true) {
-            b.set_label(&question);
-            ui::set_armed(b, true);
-            let b = b.clone();
-            let armed = armed.clone();
-            let label = label.clone();
-            glib::timeout_add_local_once(ARMED, move || {
-                if armed.replace(false) {
-                    b.set_label(&label);
-                    ui::set_armed(&b, false);
-                }
-            });
-            return;
-        }
-        armed.set(false);
-        ui::set_armed(b, false);
-        b.set_label(&label);
-        act(b);
-    });
 }
 
 fn thumb_frame(label: &str) -> (gtk4::Box, gtk4::Picture) {

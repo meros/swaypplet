@@ -54,7 +54,7 @@ pub use bar::{
     set_bay_state, set_category, set_danger, set_quiet, set_receded, set_ribbon, set_selection,
 };
 pub use button::{
-    Face, Kind, Size, button, button_with, set_armed, set_button_kind, toggle_button,
+    Face, Kind, Size, arm, button, button_with, set_armed, set_button_kind, toggle_button,
 };
 pub use card::{Card, CardTint, group, set_card_tint, set_success, well};
 pub use chip::{

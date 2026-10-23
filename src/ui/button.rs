@@ -122,6 +122,63 @@ pub fn set_button_kind(b: &(impl IsA<gtk4::Button> + IsA<gtk4::Widget>), kind: K
     swap(b, Kind::ALL.iter().filter_map(|k| k.class()), kind.class());
 }
 
+/// How long an armed button waits for its second press.
+pub const ARMED: std::time::Duration = std::time::Duration::from_secs(6);
+
+/// A button that asks before it acts: its first press arms it (its face
+/// becomes `question`, pulsing), and a second press within [`ARMED`] runs
+/// `act`; otherwise it disarms and shows its own face again. For an action
+/// that throws something away (a profile, a learned history, an agent's
+/// work), where the first press is the question.
+pub fn arm(button: &gtk4::Button, question: &str, act: impl Fn(&gtk4::Button) + 'static) {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+    let armed = Rc::new(Cell::new(false));
+    // The face it had: its label, or for a glyph its child. GTK reuses a
+    // label child for the question, so a label is kept as text.
+    #[derive(Default)]
+    enum Was {
+        #[default]
+        Nothing,
+        Label(String),
+        Child(gtk4::Widget),
+    }
+    let face: Rc<RefCell<Was>> = Rc::default();
+    let question = question.to_string();
+    let disarm = {
+        let face = face.clone();
+        move |b: &gtk4::Button| {
+            set_armed(b, false);
+            match std::mem::take(&mut *face.borrow_mut()) {
+                Was::Label(text) => b.set_label(&text),
+                Was::Child(child) => b.set_child(Some(&child)),
+                Was::Nothing => {}
+            }
+        }
+    };
+    button.connect_clicked(move |b| {
+        if !armed.replace(true) {
+            *face.borrow_mut() = match (b.label(), b.child()) {
+                (Some(text), _) => Was::Label(text.to_string()),
+                (None, Some(child)) => Was::Child(child),
+                (None, None) => Was::Nothing,
+            };
+            b.set_label(&question);
+            set_armed(b, true);
+            let (b, armed, disarm) = (b.clone(), armed.clone(), disarm.clone());
+            glib::timeout_add_local_once(ARMED, move || {
+                if armed.replace(false) {
+                    disarm(&b);
+                }
+            });
+            return;
+        }
+        armed.set(false);
+        disarm(b);
+        act(b);
+    });
+}
+
 /// Arm a destructive button for its confirming second press, or disarm it.
 pub fn set_armed(b: &(impl IsA<gtk4::Button> + IsA<gtk4::Widget>), armed: bool) {
     toggle(b, "armed", armed);

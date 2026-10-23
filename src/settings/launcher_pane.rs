@@ -205,14 +205,15 @@ impl LauncherPane {
                 state.edit(|l| l.frecency = on);
             });
         }
-        forget.connect_clicked(|b| {
-            crate::launcher::frecency::forget();
-            b.set_sensitive(false);
-            let b = b.clone();
-            glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
-                b.set_sensitive(true);
+        {
+            // Asks first: what was learned cannot be put back.
+            let status = state.status.clone();
+            crate::ui::arm(&forget, "Forget all of it?", move |_| {
+                crate::launcher::frecency::forget();
+                status.set_text("History forgotten: results start from scratch.");
+                form::mark_source(&status, false);
             });
-        });
+        }
         {
             let state = state.clone();
             let undone = state.clone();

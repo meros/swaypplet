@@ -282,6 +282,9 @@ pub struct ResetButtons {
     /// The file before the reset and right after it, while the undo stands.
     pending:
         std::rc::Rc<std::cell::RefCell<Option<(super::store::Settings, super::store::Settings)>>>,
+    /// Ask first ([`crate::ui::arm`]): for a reset that throws away
+    /// something made here, the undo aside.
+    ask: Option<&'static str>,
 }
 
 impl ResetButtons {
@@ -296,14 +299,21 @@ impl ResetButtons {
             button,
             undo,
             pending: Default::default(),
+            ask: None,
         }
+    }
+
+    /// The reset asks `question` on its first press (`ui::arm`).
+    pub fn asking(mut self, question: &'static str) -> ResetButtons {
+        self.ask = Some(question);
+        self
     }
 
     /// What a press of Reset does, and what follows an undo.
     pub fn connect(&self, reset: impl Fn() + 'static, after_undo: impl Fn() + 'static) {
         {
             let (pending, undo) = (self.pending.clone(), self.undo.clone());
-            self.button.connect_clicked(move |_| {
+            let press = move |_: &gtk4::Button| {
                 pending.borrow_mut().take();
                 let before = super::store::current();
                 reset();
@@ -312,7 +322,13 @@ impl ResetButtons {
                     *pending.borrow_mut() = Some((before, after));
                     undo.set_visible(true);
                 }
-            });
+            };
+            match self.ask {
+                Some(question) => crate::ui::arm(&self.button, question, press),
+                None => {
+                    self.button.connect_clicked(press);
+                }
+            }
         }
         {
             let (pending, undo) = (self.pending.clone(), self.undo.clone());
