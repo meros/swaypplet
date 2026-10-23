@@ -3,31 +3,47 @@
 //!
 //! # Built
 //!
-//! - [`MediaReceiver`]: a Cast device with a screen. The output is encoded
-//!   to HLS (`hls`), served over HTTP from this machine (`http`), and the
-//!   device's Default Media Receiver (app `CC1AD845`, on every Cast device,
-//!   no registration) is told to play it as a live stream (`channel`). It
-//!   runs seconds behind: an HLS player stays about three segments behind
-//!   the newest (`hls` says why HLS). Good for a slideshow, a video, a
-//!   dashboard; not for following a pointer.
-//! - [`Vnc`]: wayvnc on the output, view only, on localhost. Any VNC viewer
-//!   shows the screen (through an SSH or tailscale hop from another
-//!   machine).
+//! A Cast device with a screen gets [`Cast`], which tries two ways in turn:
+//!
+//! 1. [`LivePage`], under a second behind. The output becomes one endless
+//!    fragmented MP4 (`live`), served with a page that plays it through
+//!    Media Source Extensions (`player.html`, `http`). DashCast, a public
+//!    receiver app that shows a web page (no registration), is launched and
+//!    sent the page's URL (`channel::Channel::show_page`). Measured on the
+//!    owner's TV with a prototype of this page: 0.42 s median, glass to
+//!    glass, against a synthetic source.
+//! 2. [`MediaReceiver`], a few seconds behind, when the first does not
+//!    play. The output is encoded to HLS (`hls`), served over HTTP, and the
+//!    Default Media Receiver (on every Cast device) is told to play it.
+//!
+//! The fallback happens when DashCast does not launch (`LAUNCH_ERROR`, or
+//! no answer in [`LIVE_TIMING`]'s reply time), when it closes, or when the
+//! page has not said "playing" within [`PLAYING_WITHIN`]. The DashCast
+//! session is stopped before the Default Media Receiver is launched. A TV
+//! that cannot be reached, or that goes away while the page loads, is an
+//! error, not a fallback: the second way would fail the same.
+//!
+//! DashCast is sent `force: false`: the page loads in DashCast's iframe,
+//! which the owner's TV did with the prototype. `force: true` navigates
+//! the receiver itself to the page, for a TV whose DashCast cannot frame
+//! it; [`LivePage::force`] is the switch.
+//!
+//! [`Vnc`] is for a VNC viewer: wayvnc on the output, view only, on
+//! localhost.
 //!
 //! # Not built
 //!
-//! **Cast mirroring** (the receiver Chrome's "Cast screen" uses) is the
-//! low-lag path, a fraction of a second. Its sender side is Cast Streaming:
-//! an OFFER/ANSWER exchange on the Cast channel, then AES-encrypted RTP over
-//! UDP with RTCP feedback (Open Screen's `cast/streaming`), with no Rust
-//! implementation to build on. Chrome is such a sender; pointing
-//! xdg-desktop-portal-wlr at the extra screen and choosing "Cast screen" in
-//! Chrome is the way to that lag without writing one.
+//! **Cast mirroring** (the receiver Chrome's "Cast screen" uses). Its
+//! sender side is Cast Streaming: an OFFER/ANSWER exchange on the Cast
+//! channel, then AES-encrypted RTP over UDP with RTCP feedback (Open
+//! Screen's `cast/streaming`), with no Rust implementation to build on. The
+//! live page gets most of its latency advantage without it.
 //!
 //! # What a stream leaves behind
 //!
 //! Nothing, when stopped: the TV's app is stopped, the encoder ends, the
-//! port closes, the segments are deleted, and `mod.rs` removes the output.
+//! port closes, the segments (or the live stream's log) are deleted, and
+//! `mod.rs` removes the output.
 //! When the panel dies instead, every child process gets SIGTERM
 //! (`children`), and the next panel stops the TV session it finds in the
 //! runtime directory ([`sweep`]) and removes the output (`output::sweep`).
@@ -39,9 +55,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::channel::{self, Channel, Timing};
+use super::channel::{self, Channel, Launched, Timing};
 use super::discovery::Device;
-use super::{children, hls, http};
+use super::{children, hls, http, live};
 
 /// Where a stream goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,13 +94,31 @@ pub trait Stream: Send {
     fn stop(&mut self);
 }
 
-static MEDIA_RECEIVER: MediaReceiver = MediaReceiver {
-    port: http::PORT,
-    timing: Timing::STANDARD,
+/// DashCast answers a LAUNCH at once on a TV that has it; one that says
+/// nothing for this long is treated as not having it.
+pub const LIVE_TIMING: Timing = Timing {
+    reply: Duration::from_secs(10),
+    ..Timing::STANDARD
+};
+/// From sending DashCast the page to the page saying it plays: loading the
+/// page in DashCast's iframe, the first fragments, the decoder.
+pub const PLAYING_WITHIN: Duration = Duration::from_secs(10);
+
+static CAST: Cast = Cast {
+    live: LivePage {
+        port: http::PORT,
+        timing: LIVE_TIMING,
+        playing_within: PLAYING_WITHIN,
+        force: false,
+    },
+    hls: MediaReceiver {
+        port: http::PORT,
+        timing: Timing::STANDARD,
+    },
 };
 
 /// Every backend built, in the order they are preferred.
-static BACKENDS: &[&dyn Backend] = &[&MEDIA_RECEIVER, &Vnc];
+static BACKENDS: &[&dyn Backend] = &[&CAST, &Vnc];
 
 /// The backend that sends to `target`, when one is built.
 pub fn for_target(target: &Target) -> Option<&'static dyn Backend> {
@@ -160,47 +194,226 @@ impl Backend for MediaReceiver {
         let token = token()?;
         // Dropping what was started undoes it, so `?` from here on is a
         // clean failure: the encoder ends, the port closes.
-        let server = http::serve(dir, token.clone(), self.port, Some(ip))?;
+        let server = http::serve(http::Site::Files(dir), token.clone(), self.port, Some(ip))?;
         let url = format!("http://{here}:{}/{token}/{}", server.port, hls::PLAYLIST);
 
         let mut ch = Channel::open(tv, self.timing)?;
-        let app = ch.launch()?;
+        let app = ch.launch(channel::DEFAULT_MEDIA_RECEIVER, None)?;
         if let Err(e) = ch.load(&app, &url, "Extra screen") {
             ch.stop(&app);
             return Err(e);
         }
-        record(tv, &app.session_id);
         log::info!("cast: {} plays {url}", device.name);
+        cast_stream(
+            format!("{}, a few seconds behind", device.name),
+            Box::new(encoder),
+            server,
+            ch,
+            app,
+            tv,
+        )
+    }
+}
 
-        let stop = Arc::new(AtomicBool::new(false));
-        let ended = Arc::new(Mutex::new(None));
-        let follow = {
-            let (stop, ended) = (stop.clone(), ended.clone());
-            std::thread::Builder::new()
-                .name("swaypplet-cast".into())
-                .spawn(move || {
-                    if let Err(end) = ch.follow(&app, &|| stop.load(Ordering::Relaxed)) {
-                        log::info!("cast: ended: {end:?}");
-                        *ended.lock().unwrap_or_else(|e| e.into_inner()) = Some(end.words());
+/// What feeds a cast: the HLS segmenter or the live MP4.
+trait Encoding: Send {
+    fn running(&mut self) -> bool;
+    fn log_tail(&self) -> String;
+    fn stop(&mut self);
+}
+
+impl Encoding for hls::Encoder {
+    fn running(&mut self) -> bool {
+        hls::Encoder::running(self)
+    }
+    fn log_tail(&self) -> String {
+        hls::Encoder::log_tail(self)
+    }
+    fn stop(&mut self) {
+        hls::Encoder::stop(self)
+    }
+}
+
+impl Encoding for live::Encoder {
+    fn running(&mut self) -> bool {
+        live::Encoder::running(self)
+    }
+    fn log_tail(&self) -> String {
+        live::Encoder::log_tail(self)
+    }
+    fn stop(&mut self) {
+        live::Encoder::stop(self)
+    }
+}
+
+/// The running half of a cast, once the TV plays: the session recorded for
+/// [`sweep`], and a thread that follows the TV until it ends or is stopped.
+fn cast_stream(
+    what: String,
+    encoder: Box<dyn Encoding>,
+    server: http::Server,
+    mut ch: Channel,
+    app: Launched,
+    tv: SocketAddr,
+) -> Result<Box<dyn Stream>, String> {
+    record(tv, &app.session_id);
+    let stop = Arc::new(AtomicBool::new(false));
+    let ended = Arc::new(Mutex::new(None));
+    let follow = {
+        let (stop, ended) = (stop.clone(), ended.clone());
+        std::thread::Builder::new()
+            .name("swaypplet-cast".into())
+            .spawn(move || {
+                if let Err(end) = ch.follow(&app, &|| stop.load(Ordering::Relaxed)) {
+                    log::info!("cast: ended: {end:?}");
+                    *ended.lock().unwrap_or_else(|e| e.into_inner()) = Some(end.words());
+                }
+                forget();
+            })
+            .map_err(|e| format!("cast thread: {e}"))?
+    };
+    Ok(Box::new(CastStream {
+        what,
+        encoder: Some(encoder),
+        server: Some(server),
+        follow: Some(follow),
+        stop,
+        ended,
+    }))
+}
+
+// ── Cast: the live page in DashCast ──────────────────────────────────────
+
+/// A Cast device, shown a page that plays the live MP4 (module comment).
+pub struct LivePage {
+    pub port: u16,
+    pub timing: Timing,
+    pub playing_within: Duration,
+    /// Navigate DashCast to the page instead of framing it.
+    pub force: bool,
+}
+
+/// Why the live page did not start.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Failure {
+    /// This way did not work; the HLS one may.
+    Fallback(String),
+    /// The TV cannot be reached; nothing will work.
+    Fatal(String),
+}
+
+impl LivePage {
+    pub fn try_start(&self, output: &str, device: &Device) -> Result<Box<dyn Stream>, Failure> {
+        use Failure::{Fallback, Fatal};
+        let ip: IpAddr = device
+            .address
+            .parse()
+            .map_err(|_| Fatal(format!("{}: not an address", device.address)))?;
+        let tv = SocketAddr::new(ip, device.port);
+        let here = address_toward(ip).map_err(Fatal)?;
+        let log = runtime_dir().join(format!("cast-live-{}.log", std::process::id()));
+        let encoder =
+            live::Encoder::start(output, log, Duration::from_secs(8)).map_err(Fallback)?;
+        let token = token().map_err(Fatal)?;
+        // As in MediaReceiver: dropping what was started undoes it.
+        let server = http::serve(
+            http::Site::Live(encoder.hub.clone()),
+            token.clone(),
+            self.port,
+            Some(ip),
+        )
+        .map_err(Fatal)?;
+        let url = format!("http://{here}:{}/{token}/player.html", server.port);
+
+        let mut ch = Channel::open(tv, self.timing).map_err(Fatal)?;
+        let app = ch
+            .launch(channel::DASHCAST, Some(channel::DASHCAST_READY))
+            .map_err(Fallback)?;
+        let shown = ch.show_page(&app, &url, self.force).map_err(Fallback);
+        let playing = shown.and_then(|()| self.wait_playing(&mut ch, &app, &encoder.hub));
+        if let Err(e) = playing {
+            ch.stop(&app);
+            return Err(e);
+        }
+        log::info!("cast: {} plays {url}", device.name);
+        cast_stream(
+            format!("{}, under a second behind", device.name),
+            Box::new(encoder),
+            server,
+            ch,
+            app,
+            tv,
+        )
+        .map_err(Fatal)
+    }
+
+    /// Wait for the page to say it plays, keeping the channel alive.
+    fn wait_playing(
+        &self,
+        ch: &mut Channel,
+        app: &Launched,
+        hub: &live::Hub,
+    ) -> Result<(), Failure> {
+        let until = std::time::Instant::now() + self.playing_within;
+        while !hub.playing() {
+            if std::time::Instant::now() >= until {
+                return Err(Failure::Fallback(format!(
+                    "the page did not play within {} s",
+                    self.playing_within.as_secs()
+                )));
+            }
+            match ch.recv() {
+                Ok(Some(m)) => {
+                    if let Some(end) = channel::ends(&m, app) {
+                        return Err(Failure::Fallback(format!(
+                            "DashCast ended: {}",
+                            end.words()
+                        )));
                     }
-                    forget();
-                })
-                .map_err(|e| format!("cast thread: {e}"))?
+                }
+                Ok(None) => {}
+                Err(e) => return Err(Failure::Fatal(e.words())),
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A Cast device: the live page, else HLS (module comment).
+pub struct Cast {
+    pub live: LivePage,
+    pub hls: MediaReceiver,
+}
+
+impl Backend for Cast {
+    fn name(&self) -> &'static str {
+        "Cast"
+    }
+
+    fn reaches(&self, target: &Target) -> bool {
+        self.hls.reaches(target)
+    }
+
+    fn start(&self, output: &str, target: &Target) -> Result<Box<dyn Stream>, String> {
+        let Target::Device(device) = target else {
+            return Err("not a Cast device".into());
         };
-        Ok(Box::new(CastStream {
-            what: format!("{}, a few seconds behind", device.name),
-            encoder: Some(encoder),
-            server: Some(server),
-            follow: Some(follow),
-            stop,
-            ended,
-        }))
+        match self.live.try_start(output, device) {
+            Ok(s) => Ok(s),
+            Err(Failure::Fatal(e)) => Err(e),
+            Err(Failure::Fallback(why)) => {
+                log::info!("cast: no live page on {} ({why}); HLS instead", device.name);
+                self.hls
+                    .start(output, target)
+                    .map_err(|e| format!("{e} (the low-lag way failed first: {why})"))
+            }
+        }
     }
 }
 
 struct CastStream {
     what: String,
-    encoder: Option<hls::Encoder>,
+    encoder: Option<Box<dyn Encoding>>,
     server: Option<http::Server>,
     follow: Option<std::thread::JoinHandle<()>>,
     stop: Arc<AtomicBool>,
@@ -213,7 +426,7 @@ impl Stream for CastStream {
     }
 
     fn running(&mut self) -> bool {
-        self.encoder.as_mut().is_some_and(hls::Encoder::running)
+        self.encoder.as_mut().is_some_and(|e| e.running())
             && self.server.as_ref().is_some_and(http::Server::running)
             && self.follow.as_ref().is_some_and(|t| !t.is_finished())
     }
@@ -269,10 +482,11 @@ fn parse_record(text: &str) -> Option<(SocketAddr, String)> {
     Some((addr, session))
 }
 
-/// Whether `name` is a segment directory another process left: a panel
-/// that died mid-cast. Ours is `cast-hls-<our pid>`.
+/// Whether `name` is something another process left: a panel that died
+/// mid-cast. Ours are `cast-hls-<our pid>` and `cast-live-<our pid>.log`.
 fn stale_segments(name: &str, ours: u32) -> bool {
     name.strip_prefix("cast-hls-")
+        .or_else(|| name.strip_prefix("cast-live-")?.strip_suffix(".log"))
         .and_then(|pid| pid.parse::<u32>().ok())
         .is_some_and(|pid| pid != ours)
 }
@@ -283,7 +497,8 @@ pub fn sweep() {
     if let Ok(entries) = std::fs::read_dir(runtime_dir()) {
         for e in entries.flatten() {
             if stale_segments(&e.file_name().to_string_lossy(), std::process::id()) {
-                let _ = std::fs::remove_dir_all(e.path());
+                let path = e.path();
+                let _ = std::fs::remove_dir_all(&path).or_else(|_| std::fs::remove_file(&path));
             }
         }
     }
@@ -536,6 +751,222 @@ mod tests {
         assert!(!stale_segments("cast-hls-42", 42));
         assert!(!stale_segments("cast-output", 42));
         assert!(!stale_segments("cast-hls-x", 42));
+        assert!(stale_segments("cast-live-41.log", 42));
+        assert!(!stale_segments("cast-live-42.log", 42));
+    }
+
+    fn sh(cmd: &str) -> String {
+        let out = Command::new("sh").args(["-c", cmd]).output().expect("sh");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    fn quick_cast(playing_within: Duration) -> Cast {
+        Cast {
+            live: LivePage {
+                port: 0,
+                timing: Timing {
+                    reply: Duration::from_secs(5),
+                    ..Timing::STANDARD
+                },
+                playing_within,
+                force: false,
+            },
+            hls: MediaReceiver {
+                port: 0,
+                timing: Timing::STANDARD,
+            },
+        }
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("swaypplet-cast-test-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        d.join(name)
+    }
+
+    /// The live page against a nested headless sway and a fake TV that acts
+    /// as the page would: it fetches the page, says it plays, and reads the
+    /// live stream (curl), twice, the second time as a reconnect. ffprobe
+    /// reads both: H.264 1080p from a keyframe. Stop leaves nothing.
+    ///   SWAYSOCK=<nested socket> WAYLAND_DISPLAY=<nested display> \
+    ///     cargo test -- --ignored live_page_round_trip
+    #[test]
+    #[ignore = "needs a sway (nested), wf-recorder, ffmpeg, ffprobe and curl on PATH"]
+    fn live_page_round_trip() {
+        let (name, _) = nested();
+        let (first, again) = (scratch("first.mp4"), scratch("again.mp4"));
+        let page = Arc::new(Mutex::new(String::new()));
+        let seen = page.clone();
+        let (f, a) = (first.clone(), again.clone());
+        let tv = Fake::start(After::Play, move |url| {
+            let base = url.trim_end_matches("player.html").to_string();
+            *seen.lock().unwrap() = sh(&format!("curl -s {url}"));
+            sh(&format!(
+                "curl -s -X POST --data '{{\"event\":\"playing\"}}' {base}report"
+            ));
+            let (f, a) = (f.clone(), a.clone());
+            std::thread::spawn(move || {
+                sh(&format!(
+                    "curl -s --max-time 2 -o {} {base}live.mp4",
+                    f.display()
+                ));
+                sh(&format!(
+                    "curl -s --max-time 2 -o {} {base}live.mp4",
+                    a.display()
+                ));
+            });
+        });
+        let cast = quick_cast(PLAYING_WITHIN);
+        let target = Target::Device(device("127.0.0.1", tv.addr.port(), true));
+        let started = std::time::Instant::now();
+        let mut stream = cast.start(&name, &target).expect("cast");
+        eprintln!("live page playing after {:?}", started.elapsed());
+        assert!(
+            stream.describe().contains("under a second"),
+            "{}",
+            stream.describe()
+        );
+        assert!(
+            page.lock().unwrap().contains("MediaSource"),
+            "the page was served"
+        );
+        std::thread::sleep(Duration::from_millis(4500));
+        assert!(stream.running(), "{:?}", stream.why_ended());
+        for file in [&first, &again] {
+            let probe = sh(&format!(
+                "ffprobe -v error -show_entries stream=codec_name,profile,level,width,height,pix_fmt -of compact {}",
+                file.display()
+            ));
+            assert!(probe.contains("codec_name=h264"), "{probe}");
+            assert!(probe.contains("width=1920|height=1080"), "{probe}");
+            assert!(
+                probe.contains("pix_fmt=yuv420p") && probe.contains("level=41"),
+                "{probe}"
+            );
+            let frames = sh(&format!(
+                "ffprobe -v error -select_streams v -show_entries frame=pict_type -of csv=p=0 {}",
+                file.display()
+            ));
+            assert_eq!(frames.lines().next(), Some("I"), "starts on a keyframe");
+            assert!(
+                frames.lines().count() > 30,
+                "about 2 s of frames: {}",
+                frames.lines().count()
+            );
+        }
+        let log = runtime_dir().join(format!("cast-live-{}.log", std::process::id()));
+        assert!(record_path().exists() && log.exists());
+        stream.stop();
+        assert!(!stream.running());
+        assert!(
+            !record_path().exists() && !log.exists(),
+            "nothing left in the runtime dir"
+        );
+        let kinds = tv.finish();
+        let has = |ns: &str, k: &str| kinds.iter().any(|(n, t)| n == ns && t == k);
+        assert!(
+            has(NS_RECEIVER, "LAUNCH") && has(NS_RECEIVER, "STOP"),
+            "{kinds:?}"
+        );
+        assert!(!has(NS_MEDIA, "LOAD"), "no fallback: {kinds:?}");
+        output::remove(&name).expect("remove");
+        let _ = std::fs::remove_dir_all(first.parent().unwrap());
+    }
+
+    /// A TV without DashCast gets the HLS stream instead.
+    #[test]
+    #[ignore = "needs a sway (nested), wf-recorder and ffmpeg on PATH"]
+    fn falls_back_to_hls_when_dashcast_is_refused() {
+        let (name, _) = nested();
+        let urls = Arc::new(Mutex::new(Vec::new()));
+        let got = urls.clone();
+        let tv = Fake::start_for(After::RefuseDashCast, 2, move |u| {
+            got.lock().unwrap().push(u.to_string())
+        });
+        let target = Target::Device(device("127.0.0.1", tv.addr.port(), true));
+        let mut stream = quick_cast(PLAYING_WITHIN)
+            .start(&name, &target)
+            .expect("cast");
+        assert!(
+            stream.describe().contains("a few seconds"),
+            "{}",
+            stream.describe()
+        );
+        stream.stop();
+        let kinds = tv.finish();
+        let urls = urls.lock().unwrap().clone();
+        assert_eq!(urls.len(), 1, "{urls:?}");
+        assert!(urls[0].ends_with("/stream.m3u8"), "{urls:?}");
+        assert!(
+            kinds.iter().any(|(n, t)| n == NS_MEDIA && t == "LOAD"),
+            "{kinds:?}"
+        );
+        output::remove(&name).expect("remove");
+    }
+
+    /// A page that never plays: DashCast is stopped, then HLS.
+    #[test]
+    #[ignore = "needs a sway (nested), wf-recorder and ffmpeg on PATH"]
+    fn falls_back_to_hls_when_the_page_never_plays() {
+        let (name, _) = nested();
+        let tv = Fake::start_for(After::Play, 2, |_| {});
+        let target = Target::Device(device("127.0.0.1", tv.addr.port(), true));
+        let started = std::time::Instant::now();
+        let mut stream = quick_cast(Duration::from_secs(3))
+            .start(&name, &target)
+            .expect("cast");
+        assert!(started.elapsed() >= Duration::from_secs(3));
+        assert!(
+            stream.describe().contains("a few seconds"),
+            "{}",
+            stream.describe()
+        );
+        stream.stop();
+        let kinds: Vec<String> = tv.finish().into_iter().map(|(_, t)| t).collect();
+        let at = |k: &str| kinds.iter().position(|t| t == k).unwrap_or(usize::MAX);
+        assert!(
+            at("STOP") < at("LOAD"),
+            "DashCast stopped before HLS: {kinds:?}"
+        );
+        output::remove(&name).expect("remove");
+    }
+
+    /// The live stream and its page for a real browser on this machine:
+    /// prints the page's URL, then waits until the page has said it plays
+    /// and sent three stats reports (with ?debug=1), at most 120 s.
+    ///   SWAYSOCK=… WAYLAND_DISPLAY=… cargo test -- --ignored live_page_for_a_browser --nocapture
+    #[test]
+    #[ignore = "needs a sway (nested), the encoders, and a browser driven by hand"]
+    fn live_page_for_a_browser() {
+        let name = output::create().expect("create");
+        let log = scratch("browser.log");
+        let enc = live::Encoder::start(&name, log, Duration::from_secs(8)).expect("encoder");
+        let hub = enc.hub.clone();
+        let server = http::serve(
+            http::Site::Live(hub.clone()),
+            "tok".into(),
+            0,
+            Some([127, 0, 0, 1].into()),
+        )
+        .unwrap();
+        let url = format!("http://127.0.0.1:{}/tok/player.html?debug=1", server.port);
+        std::fs::write(scratch("url"), &url).unwrap();
+        eprintln!("PAGE {url}");
+        let until = std::time::Instant::now() + Duration::from_secs(120);
+        while !(hub.playing() && hub.stats_reports() >= 3) && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        assert!(hub.playing(), "the page never said it plays");
+        assert!(
+            hub.stats_reports() >= 3,
+            "{} stats reports",
+            hub.stats_reports()
+        );
+        eprintln!("STATS {}", hub.last_stats().unwrap_or_default());
+        drop(server);
+        drop(enc);
+        output::remove(&name).expect("remove");
+        let _ = std::fs::remove_dir_all(scratch("url").parent().unwrap());
     }
 
     /// What the next panel does after one was killed mid-cast (run it after
@@ -554,7 +985,10 @@ mod tests {
         let stale = std::fs::read_dir(runtime_dir())
             .unwrap()
             .flatten()
-            .any(|e| e.file_name().to_string_lossy().starts_with("cast-hls-"));
+            .any(|e| {
+                let n = e.file_name().to_string_lossy().into_owned();
+                n.starts_with("cast-hls-") || n.starts_with("cast-live-")
+            });
         assert!(!stale, "segments removed");
         let outputs = crate::sway::ipc::connect().unwrap().get_outputs().unwrap();
         assert!(outputs.iter().all(|o| o.name != name), "{name} removed");

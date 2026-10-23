@@ -1,0 +1,237 @@
+<!doctype html>
+<!--
+  The extra screen, played on a TV (services::cast::live).
+
+  Served by swaypplet's cast server at /<token>/player.html; every URL here
+  is relative to that. The stream (live.mp4) is one HTTP response that does
+  not end: an init segment, then a fragment every 100 ms from a keyframe
+  on. It is fed to Media Source Extensions as it arrives, and a controller
+  keeps the picture near the newest frame.
+
+  ?debug=1 shows the numbers on screen and posts them to `report` every
+  two seconds, which swaypplet logs at info level. Without it the page
+  reports only that it is playing (the backend waits for that) and errors.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Extra screen</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  video { position: absolute; inset: 0; width: 100vw; height: 100vh; background: #000; }
+  #hud {
+    display: none; position: absolute; left: 24px; bottom: 24px; margin: 0;
+    padding: 12px 16px; background: rgba(0, 0, 0, .75); color: #7cfc9a;
+    font: 22px/1.3 monospace;
+  }
+</style>
+<video id="video" muted autoplay playsinline></video>
+<pre id="hud"></pre>
+<script>
+'use strict';
+
+// The codec string of the stream, filled in by the server from its
+// init segment.
+const CODEC = '{{CODEC}}' || 'avc1.640029';
+
+// ── The live edge ────────────────────────────────────────────────────
+// How often the controller looks at the buffer.
+const CONTROL_MS = 100;
+// Further behind the newest frame than this: jump.
+const JUMP_BEHIND_S = 0.8;
+// Where a jump lands: this far before the newest frame.
+const JUMP_TO_S = 0.1;
+// Further behind than this (but not enough to jump): play faster.
+const CATCH_UP_BEHIND_S = 0.35;
+const CATCH_UP_RATE = 1.15;
+// Keep this much played video in the buffer, and trim once there is more
+// than TRIM_AFTER_S of it.
+const KEEP_PLAYED_S = 3;
+const TRIM_AFTER_S = 6;
+// After the stream ends or fails, connect again after this long.
+const RECONNECT_MS = 500;
+// How often the debug view reports.
+const REPORT_MS = 2000;
+
+const video = document.getElementById('video');
+const hud = document.getElementById('hud');
+const debug = new URLSearchParams(location.search).get('debug') === '1';
+
+function report(what) {
+  fetch('report', {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify(what),
+    keepalive: true,
+  }).catch(() => {});
+}
+
+// ── Playing: the first frame on screen ───────────────────────────────
+let playingSaid = false;
+let frames = 0;
+let latencies = [];  // [wall ms, latency ms], the last five seconds
+let clockOffset = 0, t0 = null;
+
+function onFrame(now, meta) {
+  frames++;
+  if (!playingSaid) {
+    playingSaid = true;
+    report({ event: 'playing', codec: CODEC });
+  }
+  if (debug && t0 !== null) {
+    const shown = performance.timeOrigin + (meta.expectedDisplayTime || now);
+    latencies.push([Date.now(), shown + clockOffset - (t0 + meta.mediaTime * 1000)]);
+  }
+  video.requestVideoFrameCallback(onFrame);
+}
+
+if ('requestVideoFrameCallback' in video) {
+  video.requestVideoFrameCallback(onFrame);
+} else {
+  video.addEventListener('timeupdate', () => {
+    if (!playingSaid && video.currentTime > 0) {
+      playingSaid = true;
+      report({ event: 'playing', codec: CODEC, rvfc: false });
+    }
+  });
+}
+
+// ── The stream into Media Source ─────────────────────────────────────
+const queue = [];
+let buffer = null;
+
+function pump() {
+  if (!buffer || buffer.updating || !queue.length) return;
+  try {
+    buffer.appendBuffer(queue.shift());
+  } catch (e) {
+    // Full: drop what has been played and try again on the next pump.
+    if (e.name === 'QuotaExceededError') trim(true);
+    else report({ event: 'error', where: 'append', message: e.message });
+  }
+}
+
+function trim(force) {
+  const b = video.buffered;
+  if (!buffer || buffer.updating || !b.length) return;
+  const played = video.currentTime - b.start(0);
+  if (force || played > TRIM_AFTER_S) {
+    try { buffer.remove(b.start(0), Math.max(b.start(0), video.currentTime - KEEP_PLAYED_S)); } catch (e) {}
+  }
+}
+
+async function readStream() {
+  for (;;) {
+    try {
+      const response = await fetch('live.mp4', { cache: 'no-store' });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const reader = response.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        queue.push(value);
+        pump();
+      }
+      report({ event: 'stream-ended' });
+    } catch (e) {
+      report({ event: 'error', where: 'stream', message: e.message });
+    }
+    await new Promise((r) => setTimeout(r, RECONNECT_MS));
+  }
+}
+
+let started = false;
+
+function control() {
+  const b = video.buffered;
+  if (!b.length) return;
+  const end = b.end(b.length - 1);
+  if (!started) {
+    // A stream joined late starts at its own media time, not zero.
+    video.currentTime = Math.max(b.start(b.length - 1), end - JUMP_TO_S);
+    video.play().catch((e) => report({ event: 'error', where: 'play', message: e.message }));
+    started = true;
+    return;
+  }
+  const behind = end - video.currentTime;
+  if (behind > JUMP_BEHIND_S) {
+    video.currentTime = end - JUMP_TO_S;
+    video.playbackRate = 1;
+  } else if (behind > CATCH_UP_BEHIND_S) {
+    video.playbackRate = CATCH_UP_RATE;
+  } else {
+    video.playbackRate = 1;
+  }
+  trim(false);
+}
+
+// ── Debug: numbers on screen and in the log ──────────────────────────
+async function text(path) {
+  return (await fetch(path + '?n=' + Math.random(), { cache: 'no-store' })).text();
+}
+
+// This machine's clock against swaypplet's, from the quickest of nine
+// round trips.
+async function calibrate() {
+  const samples = [];
+  for (let i = 0; i < 9; i++) {
+    const before = Date.now(), server = +(await text('clock')), after = Date.now();
+    samples.push([after - before, server - (before + after) / 2]);
+  }
+  samples.sort((a, b) => a[0] - b[0]);
+  clockOffset = samples[0][1];
+}
+
+function stats() {
+  const now = Date.now();
+  latencies = latencies.filter((l) => now - l[0] < 5000);
+  const sorted = latencies.map((l) => l[1]).sort((a, b) => a - b);
+  const at = (q) => sorted.length ? Math.round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))]) : null;
+  const b = video.buffered;
+  const quality = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : {};
+  return {
+    event: 'stats',
+    latency_ms: { min: at(0), median: at(0.5), max: at(0.999) },
+    ahead_ms: b.length ? Math.round((b.end(b.length - 1) - video.currentTime) * 1000) : null,
+    rate: video.playbackRate,
+    frames,
+    dropped: quality.droppedVideoFrames,
+    total: quality.totalVideoFrames,
+  };
+}
+
+async function startDebug() {
+  hud.style.display = 'block';
+  await calibrate();
+  const poll = setInterval(async () => {
+    const v = await text('t0');
+    if (v) { t0 = +v; clearInterval(poll); }
+  }, 1000);
+  setInterval(() => {
+    const s = stats();
+    hud.textContent =
+      'latency ms  min ' + s.latency_ms.min + '  median ' + s.latency_ms.median + '  max ' + s.latency_ms.max +
+      '\nahead ' + s.ahead_ms + ' ms  rate ' + s.rate + '  dropped ' + s.dropped + '/' + s.total;
+  }, 250);
+  setInterval(() => report(stats()), REPORT_MS);
+}
+
+async function main() {
+  if (!window.MediaSource || !MediaSource.isTypeSupported('video/mp4; codecs="' + CODEC + '"')) {
+    report({ event: 'error', where: 'start', message: 'MediaSource cannot play ' + CODEC });
+    return;
+  }
+  const source = new MediaSource();
+  video.src = URL.createObjectURL(source);
+  await new Promise((r) => source.addEventListener('sourceopen', r, { once: true }));
+  buffer = source.addSourceBuffer('video/mp4; codecs="' + CODEC + '"');
+  // Fragments carry their own times; a reconnect continues where the
+  // stream is, not where this buffer ended.
+  buffer.mode = 'segments';
+  buffer.addEventListener('updateend', pump);
+  setInterval(control, CONTROL_MS);
+  readStream();
+  if (debug) startDebug().catch((e) => report({ event: 'error', where: 'debug', message: e.message }));
+}
+
+main().catch((e) => report({ event: 'error', where: 'start', message: e.message }));
+</script>

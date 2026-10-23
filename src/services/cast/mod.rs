@@ -18,8 +18,10 @@ pub mod backend;
 pub mod channel;
 mod children;
 pub mod discovery;
+pub mod fmp4;
 pub mod hls;
 pub mod http;
+pub mod live;
 pub mod output;
 
 use std::cell::RefCell;

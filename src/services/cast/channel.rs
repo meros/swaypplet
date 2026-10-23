@@ -42,6 +42,18 @@ pub const NS_RECEIVER: &str = "urn:x-cast:com.google.cast.receiver";
 pub const NS_MEDIA: &str = "urn:x-cast:com.google.cast.media";
 /// The Default Media Receiver: on every Cast device, no registration.
 pub const DEFAULT_MEDIA_RECEIVER: &str = "CC1AD845";
+/// DashCast: a public receiver that shows a web page in an iframe (or, with
+/// `force`, navigates to it). The id is pychromecast's `APP_DASHCAST`, which
+/// catt launches; it is madmod's fork of the receiver
+/// (madmod.github.io/dashcast/receiver.html).
+pub const DASHCAST: &str = "84912283";
+/// The namespace madmod's receiver listens on. stestagg's original listens
+/// on `urn:x-cast:es.offd.dashcast` under another id; the app's own status
+/// names its namespaces, and [`Channel::show_page`] prefers what it says.
+pub const NS_DASHCAST: &str = "urn:x-cast:com.madmod.dashcast";
+/// DashCast's status text once it takes URLs; before it, it drops them
+/// (catt waits for it too).
+pub const DASHCAST_READY: &str = "Application ready";
 const SENDER: &str = "sender-0";
 const RECEIVER: &str = "receiver-0";
 /// A frame larger than this is not a Cast message: the device's own limit
@@ -296,6 +308,8 @@ impl Ended {
 pub struct Launched {
     pub session_id: String,
     pub transport_id: String,
+    /// The namespaces the app says it listens on.
+    pub namespaces: Vec<String>,
 }
 
 fn is_timeout(e: &std::io::Error) -> bool {
@@ -407,20 +421,22 @@ impl Channel {
         ))
     }
 
-    /// Launch the Default Media Receiver and connect to it.
-    pub fn launch(&mut self) -> Result<Launched, String> {
+    /// Launch app `app_id` and connect to it. With `ready`, wait until the
+    /// app's status text says so as well (DashCast drops what it is sent
+    /// before it is ready).
+    pub fn launch(&mut self, app_id: &str, ready: Option<&str>) -> Result<Launched, String> {
         let id = self.request_id();
         self.send(
             RECEIVER,
             NS_RECEIVER,
-            json!({"type": "LAUNCH", "appId": DEFAULT_MEDIA_RECEIVER, "requestId": id}),
+            json!({"type": "LAUNCH", "appId": app_id, "requestId": id}),
         )?;
         let launched = self.wait_for("LAUNCH", |m| {
             let v = m.json();
             match v["type"].as_str() {
-                Some("RECEIVER_STATUS") => our_app(&v).map(Ok),
+                Some("RECEIVER_STATUS") => our_app(&v, app_id, ready).map(Ok),
                 Some("LAUNCH_ERROR") => Some(Err(format!(
-                    "the TV would not start the media player: {}",
+                    "the TV would not start app {app_id}: {}",
                     v["reason"].as_str().unwrap_or("no reason")
                 ))),
                 _ => None,
@@ -455,6 +471,19 @@ impl Channel {
                 _ => None,
             }
         })
+    }
+
+    /// Have DashCast show `url`. `force` navigates the receiver to it
+    /// instead of loading it in an iframe. DashCast does not answer; the
+    /// page says itself when it plays.
+    pub fn show_page(&mut self, app: &Launched, url: &str, force: bool) -> Result<(), String> {
+        let ns = app
+            .namespaces
+            .iter()
+            .find(|n| n.contains("dashcast"))
+            .map_or(NS_DASHCAST, String::as_str)
+            .to_string();
+        self.send(&app.transport_id, &ns, show_request(url, force))
     }
 
     /// Follow the session until it ends or `stop` says to stop. `Ok` when
@@ -502,18 +531,33 @@ pub fn stop_remote(addr: SocketAddr, session_id: &str, timing: Timing) -> Result
     ch.send(RECEIVER, NS_CONNECTION, json!({"type": "CLOSE"}))
 }
 
-/// Our app's entry in a `RECEIVER_STATUS`, once it has a transport.
-fn our_app(status: &Value) -> Option<Launched> {
-    status["status"]["applications"]
+/// App `app_id`'s entry in a `RECEIVER_STATUS`, once it has a transport
+/// (and, with `ready`, that status text).
+fn our_app(status: &Value, app_id: &str, ready: Option<&str>) -> Option<Launched> {
+    let a = status["status"]["applications"]
         .as_array()?
         .iter()
-        .find(|a| a["appId"] == DEFAULT_MEDIA_RECEIVER)
-        .and_then(|a| {
-            Some(Launched {
-                session_id: a["sessionId"].as_str()?.to_string(),
-                transport_id: a["transportId"].as_str()?.to_string(),
+        .find(|a| a["appId"] == app_id)?;
+    if ready.is_some_and(|r| a["statusText"] != r) {
+        return None;
+    }
+    Some(Launched {
+        session_id: a["sessionId"].as_str()?.to_string(),
+        transport_id: a["transportId"].as_str()?.to_string(),
+        namespaces: a["namespaces"]
+            .as_array()
+            .map(|n| {
+                n.iter()
+                    .filter_map(|n| n["name"].as_str().map(str::to_string))
+                    .collect()
             })
-        })
+            .unwrap_or_default(),
+    })
+}
+
+/// DashCast's message: the page, not reloaded on a timer.
+pub fn show_request(url: &str, force: bool) -> Value {
+    json!({"url": url, "force": force, "reload": false, "reload_time": 0})
 }
 
 /// Whether `m` ends the session `app`.
@@ -574,6 +618,10 @@ pub mod fake {
         Silent,
         /// Another sender takes the TV.
         TakenOver,
+        /// Refuses to launch any app.
+        Refuse,
+        /// Refuses DashCast only, and plays media: a TV without DashCast.
+        RefuseDashCast,
     }
 
     pub struct Fake {
@@ -584,9 +632,19 @@ pub mod fake {
     }
 
     impl Fake {
-        /// Start it; `on_load` gets the URL of every LOAD, as the TV would
-        /// fetch it.
+        /// Start it; `on_load` gets the URL of every LOAD, and of every page
+        /// DashCast is sent, as the TV would fetch it.
         pub fn start(after: After, on_load: impl Fn(&str) + Send + 'static) -> Fake {
+            Fake::start_for(after, 1, on_load)
+        }
+
+        /// [`Fake::start`] for `connections` connections, one after the
+        /// other: a sender that falls back opens a second one.
+        pub fn start_for(
+            after: After,
+            connections: usize,
+            on_load: impl Fn(&str) + Send + 'static,
+        ) -> Fake {
             let ck = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
             let key = rustls::pki_types::PrivateKeyDer::Pkcs8(
                 rustls::pki_types::PrivatePkcs8KeyDer::from(ck.key_pair.serialize_der()),
@@ -603,14 +661,17 @@ pub mod fake {
             let addr = listener.local_addr().unwrap();
             let heard = Arc::new(Mutex::new(Vec::new()));
             let log = heard.clone();
+            let config = Arc::new(config);
             let thread = std::thread::spawn(move || {
-                let Ok((tcp, _)) = listener.accept() else {
-                    return;
-                };
-                tcp.set_read_timeout(Some(Duration::from_secs(30))).ok();
-                let conn = rustls::ServerConnection::new(Arc::new(config)).unwrap();
-                let mut tls = StreamOwned::new(conn, tcp);
-                serve(&mut tls, after, &log, &on_load);
+                for _ in 0..connections {
+                    let Ok((tcp, _)) = listener.accept() else {
+                        return;
+                    };
+                    tcp.set_read_timeout(Some(Duration::from_secs(30))).ok();
+                    let conn = rustls::ServerConnection::new(config.clone()).unwrap();
+                    let mut tls = StreamOwned::new(conn, tcp);
+                    serve(&mut tls, after, &log, &on_load);
+                }
             });
             Fake {
                 addr,
@@ -659,10 +720,12 @@ pub mod fake {
         log: &Mutex<Vec<CastMessage>>,
         on_load: &dyn Fn(&str),
     ) {
-        let app = json!([{
-            "appId": DEFAULT_MEDIA_RECEIVER, "sessionId": "session-7",
-            "transportId": "web-7", "displayName": "Default Media Receiver",
-        }]);
+        let app = |id: &str, text: &str| {
+            json!([{
+                "appId": id, "sessionId": "session-7", "transportId": "web-7",
+                "statusText": text, "namespaces": [{"name": NS_MEDIA}, {"name": NS_DASHCAST}],
+            }])
+        };
         let mut buf = Vec::new();
         let mut loaded = false;
         loop {
@@ -673,21 +736,44 @@ pub mod fake {
                     (NS_HEARTBEAT, "PING") if !(loaded && after == After::Silent) => {
                         say(tls, &m.destination, NS_HEARTBEAT, json!({"type": "PONG"}))
                     }
-                    (NS_RECEIVER, "LAUNCH") => {
-                        // First "launching" without the app, as devices do.
-                        say(tls, RECEIVER, NS_RECEIVER, status(json!([])))
-                            && say(tls, RECEIVER, NS_RECEIVER, status(app.clone()))
-                    }
-                    (NS_MEDIA, "LOAD") => {
-                        on_load(v["media"]["contentId"].as_str().unwrap_or_default());
-                        loaded = true;
-                        let ok = say(
+                    (NS_RECEIVER, "LAUNCH")
+                        if after == After::Refuse
+                            || (after == After::RefuseDashCast && v["appId"] == DASHCAST) =>
+                    {
+                        say(
                             tls,
-                            "web-7",
-                            NS_MEDIA,
-                            json!({"type": "MEDIA_STATUS", "requestId": v["requestId"],
-                                   "status": [{"playerState": "BUFFERING"}]}),
-                        );
+                            RECEIVER,
+                            NS_RECEIVER,
+                            json!({"type": "LAUNCH_ERROR", "requestId": v["requestId"], "reason": "NOT_FOUND"}),
+                        )
+                    }
+                    (NS_RECEIVER, "LAUNCH") => {
+                        // First "launching" without the app, as devices do;
+                        // DashCast then says it is starting before it is
+                        // ready.
+                        let id = v["appId"].as_str().unwrap_or_default();
+                        say(tls, RECEIVER, NS_RECEIVER, status(json!([])))
+                            && (id != DASHCAST
+                                || say(
+                                    tls,
+                                    RECEIVER,
+                                    NS_RECEIVER,
+                                    status(app(id, "Application is starting")),
+                                ))
+                            && say(tls, RECEIVER, NS_RECEIVER, status(app(id, DASHCAST_READY)))
+                    }
+                    (NS_MEDIA | NS_DASHCAST, kind) if kind == "LOAD" || v["url"].is_string() => {
+                        let url = v["media"]["contentId"].as_str().or(v["url"].as_str());
+                        on_load(url.unwrap_or_default());
+                        loaded = true;
+                        let ok = m.namespace != NS_MEDIA
+                            || say(
+                                tls,
+                                "web-7",
+                                NS_MEDIA,
+                                json!({"type": "MEDIA_STATUS", "requestId": v["requestId"],
+                                       "status": [{"playerState": "BUFFERING"}]}),
+                            );
                         match after {
                             After::Vanish => return,
                             After::TakenOver => say(
@@ -788,7 +874,7 @@ mod tests {
             got.lock().unwrap().push(u.to_string())
         });
         let mut ch = Channel::open(tv.addr, quick()).unwrap();
-        let app = ch.launch().unwrap();
+        let app = ch.launch(DEFAULT_MEDIA_RECEIVER, None).unwrap();
         assert_eq!(app.transport_id, "web-7");
         ch.load(&app, "http://127.0.0.1:1/t/stream.m3u8", "Extra screen")
             .unwrap();
@@ -818,7 +904,7 @@ mod tests {
     fn ended_by(after: After) -> Ended {
         let tv = Fake::start(after, |_| {});
         let mut ch = Channel::open(tv.addr, quick()).unwrap();
-        let app = ch.launch().unwrap();
+        let app = ch.launch(DEFAULT_MEDIA_RECEIVER, None).unwrap();
         ch.load(&app, "http://127.0.0.1:1/x", "x").unwrap();
         let end = ch.follow(&app, &|| false).unwrap_err();
         drop(ch);
@@ -851,5 +937,65 @@ mod tests {
             .local_addr()
             .unwrap();
         assert!(Channel::open(port, quick()).is_err());
+    }
+
+    #[test]
+    fn dashcast_is_launched_once_ready_and_sent_the_page() {
+        let urls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let got = urls.clone();
+        let tv = Fake::start(After::Play, move |u| {
+            got.lock().unwrap().push(u.to_string())
+        });
+        let mut ch = Channel::open(tv.addr, quick()).unwrap();
+        let app = ch.launch(DASHCAST, Some(DASHCAST_READY)).unwrap();
+        assert!(
+            app.namespaces.iter().any(|n| n == NS_DASHCAST),
+            "{:?}",
+            app.namespaces
+        );
+        ch.show_page(&app, "http://127.0.0.1:1/t/player.html", false)
+            .unwrap();
+        let started = Instant::now();
+        assert_eq!(
+            ch.follow(&app, &|| started.elapsed() > Duration::from_millis(300)),
+            Ok(())
+        );
+        let heard = tv.heard.clone();
+        tv.join();
+        let heard = heard.lock().unwrap();
+        let page = heard
+            .iter()
+            .find(|m| m.namespace == NS_DASHCAST)
+            .expect("the page was sent");
+        assert_eq!(page.destination, "web-7", "to the app, not the platform");
+        assert_eq!(
+            page.json(),
+            show_request("http://127.0.0.1:1/t/player.html", false)
+        );
+        assert_eq!(page.json()["force"], false);
+        assert_eq!(*urls.lock().unwrap(), ["http://127.0.0.1:1/t/player.html"]);
+        let launch = heard.iter().find(|m| m.kind() == "LAUNCH").unwrap();
+        assert_eq!(launch.json()["appId"], DASHCAST);
+    }
+
+    #[test]
+    fn a_tv_without_dashcast_says_so_at_launch() {
+        let tv = Fake::start(After::Refuse, |_| {});
+        let mut ch = Channel::open(tv.addr, quick()).unwrap();
+        let err = ch.launch(DASHCAST, Some(DASHCAST_READY)).unwrap_err();
+        assert!(err.contains("NOT_FOUND"), "{err}");
+        drop(ch);
+        tv.join();
+    }
+
+    #[test]
+    fn a_status_counts_only_for_the_app_asked_for_and_once_ready() {
+        let status = json!({"status": {"applications": [{
+            "appId": DASHCAST, "sessionId": "s", "transportId": "t",
+            "statusText": "Application is starting", "namespaces": [{"name": NS_DASHCAST}],
+        }]}});
+        assert!(our_app(&status, DASHCAST, Some(DASHCAST_READY)).is_none());
+        assert!(our_app(&status, DASHCAST, None).is_some());
+        assert!(our_app(&status, DEFAULT_MEDIA_RECEIVER, None).is_none());
     }
 }
