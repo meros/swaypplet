@@ -15,6 +15,14 @@ pub fn is_builtin(connector: &str) -> bool {
         .any(|p| connector.starts_with(p))
 }
 
+/// An output sway made with `create_output`: no screen of its own, only
+/// pixels for a capture to send somewhere (`services::cast`). sway names
+/// every one of them HEADLESS-N, counting up, and does not reuse a number
+/// within a session.
+pub fn is_virtual(connector: &str) -> bool {
+    connector.starts_with("HEADLESS-")
+}
+
 /// "Built-in display" for a laptop panel; otherwise the make, without its
 /// legal form, and the model ("Samsung Display ATNA40HQ02-0", "NON
 /// 28H2U"). The connector when the screen says nothing.
@@ -68,6 +76,15 @@ mod tests {
             auto_name("eDP-1", "Samsung Display Corp.", "ATNA40HQ02-0 "),
             "Built-in display"
         );
+    }
+
+    #[test]
+    fn only_a_headless_output_is_virtual() {
+        assert!(is_virtual("HEADLESS-1"));
+        assert!(is_virtual("HEADLESS-12"));
+        assert!(!is_virtual("eDP-1"));
+        assert!(!is_virtual("HDMI-A-1"));
+        assert!(!is_virtual("headless"));
     }
 
     #[test]

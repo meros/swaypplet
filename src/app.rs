@@ -200,6 +200,10 @@ pub fn run() {
         // compositor reports and applied in one step (`services::displays`).
         crate::services::displays::start(store_startup.clone());
 
+        // An extra screen for a TV (`services::cast`); this removes one the
+        // panel before this one left behind.
+        crate::services::cast::start();
+
         // Keyboard, touchpad and mouse: the saved `input` section on sway,
         // again after a hotplug or a reload (`services::input`).
         crate::services::input::follow();

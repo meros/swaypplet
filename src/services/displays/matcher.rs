@@ -160,6 +160,21 @@ pub fn choose(
         .max_by_key(|(i, _)| (profile_specificity(&profiles[*i]), std::cmp::Reverse(*i)))
 }
 
+/// The heads the profiles are matched against: the screens. A virtual
+/// output (`naming::is_virtual`) beside a real one is an extra screen made
+/// for a cast, and counting it would break kanshi's rule that every
+/// connected output is claimed: the desk profile would stop matching the
+/// moment a cast starts, and come back with a modeset when it ends. A
+/// session with only virtual outputs (the nested harness, `dev/render.sh`)
+/// keeps them, or there would be nothing to match.
+pub fn screens(heads: Vec<HeadState>) -> Vec<HeadState> {
+    let virtual_ = |h: &HeadState| super::naming::is_virtual(&h.name);
+    if heads.iter().all(virtual_) {
+        return heads;
+    }
+    heads.into_iter().filter(|h| !virtual_(h)).collect()
+}
+
 /// A scale for an output no profile names, from its pixel density: about
 /// 110 pixels to the logical inch, the density a desktop's type is drawn
 /// for, in quarter steps between 1 and 3. `None` when the output does not

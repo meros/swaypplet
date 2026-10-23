@@ -10,6 +10,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{Box, Label};
 
+use crate::services::cast::{self, backend::Target};
 use crate::services::devices::{self, DeviceKey};
 use crate::services::displays;
 use crate::settings::store::{self, NightLight, NightSchedule};
@@ -262,6 +263,105 @@ pub fn save_row(label: &str) -> Box {
     save
 }
 
+// ── Extra screen ──────────────────────────────────────────────────────────────
+
+/// A small button that starts or stops the extra screen; it waits while
+/// one is starting or stopping.
+fn cast_button(label: &str, busy: bool, on_click: impl Fn() + 'static) -> gtk4::Button {
+    let b = ui::button_with(ui::Face::Label(label), ui::Kind::Secondary, ui::Size::Small);
+    b.set_sensitive(!busy);
+    b.connect_clicked(move |_| on_click());
+    b
+}
+
+/// The rows under "Extra screen": the one that is on, with Stop; else the
+/// targets, each with Start where a backend reaches it. A TV with no
+/// backend that reaches it is listed and says so (`cast::backend`).
+fn fill_extra_screen(list: &Box) {
+    while let Some(child) = list.first_child() {
+        list.remove(&child);
+    }
+    let v = cast::view();
+    if let Some(s) = &v.session {
+        let title = match &s.target {
+            Target::Device(d) => format!("Extra screen on {}", d.name),
+            Target::Viewer => "Extra screen for a VNC viewer".to_string(),
+        };
+        let r = ui::row(
+            icons::TV,
+            &title,
+            &format!("{} · {} on {}", s.output, s.backend, s.location),
+        );
+        r.end.append(&cast_button("Stop", v.busy, cast::end));
+        list.append(&r.root);
+    } else {
+        let r = ui::row(
+            icons::DISPLAY,
+            "VNC viewer",
+            "A screen beside these, for a VNC viewer",
+        );
+        r.end.append(&cast_button("Start", v.busy, || {
+            cast::begin(Target::Viewer)
+        }));
+        list.append(&r.root);
+        for d in &v.devices {
+            let target = Target::Device(d.clone());
+            let reached = cast::backend::for_target(&target).is_some();
+            let mut subtitle: Vec<&str> = d.model.iter().map(String::as_str).collect();
+            subtitle.push(if reached {
+                &d.address
+            } else {
+                "Casting to it is not built yet"
+            });
+            let r = ui::row(icons::TV, &d.name, &subtitle.join(" · "));
+            if reached {
+                r.end.append(&cast_button("Start", v.busy, move || {
+                    cast::begin(target.clone())
+                }));
+            }
+            list.append(&r.root);
+        }
+        if v.searching {
+            let r = ui::row(
+                icons::TV,
+                "Looking for TVs…",
+                "Cast devices on this network",
+            );
+            list.append(&r.root);
+        } else if v.devices.is_empty() {
+            let r = ui::row(
+                icons::TV,
+                "No TV found",
+                "Cast devices with a screen show here",
+            );
+            r.end.append(&cast_button("Search", false, cast::search));
+            list.append(&r.root);
+        }
+    }
+    if let Some(problem) = &v.problem {
+        let l = ui::text(problem, ui::Text::Caption, ui::Tone::Danger);
+        l.set_halign(gtk4::Align::Start);
+        l.set_wrap(true);
+        list.append(&l);
+    }
+}
+
+/// "Extra screen": a virtual output sent to a TV or a viewer. The network
+/// is searched when the group comes on screen, not when the panel opens.
+fn extra_screen_group() -> Box {
+    let group = ui::group(1);
+    let head = ui::heading("Extra screen");
+    head.set_halign(gtk4::Align::Start);
+    head.add_css_class("display-group-head");
+    group.append(&head);
+    let list = ui::vbox(1);
+    group.append(&list);
+    fill_extra_screen(&list);
+    group.connect_map(|_| cast::search_if_stale());
+    cast::observe(move || fill_extra_screen(&list));
+    group
+}
+
 // ── DisplaySection ────────────────────────────────────────────────────────────
 
 /// What "Arrange displays…" runs, once the Helm has said.
@@ -346,6 +446,7 @@ impl DisplaySection {
         detail_box.append(&on_row.root);
         detail_box.append(&profiles);
         detail_box.append(&outputs);
+        detail_box.append(&extra_screen_group());
         detail_box.append(&arrange.root);
         section.body.append(&detail_box);
 
@@ -363,6 +464,20 @@ impl DisplaySection {
             displays::observe(move || {
                 populate_picks(&profiles, &profile_list);
                 refresh_outputs(&output_list, &summary);
+            });
+        }
+        {
+            // The profiles do not see an extra screen come and go
+            // (`displays::matcher::screens`); the list of outputs does.
+            let output_list = display.output_list.clone();
+            let summary = display.section.summary.clone();
+            let last = RefCell::new(cast::view().session.map(|s| s.output));
+            cast::observe(move || {
+                let now = cast::view().session.map(|s| s.output);
+                if *last.borrow() != now {
+                    *last.borrow_mut() = now;
+                    refresh_outputs(&output_list, &summary);
+                }
             });
         }
         {

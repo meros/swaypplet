@@ -152,6 +152,7 @@ cargo test --release
 | `swaypplet polkit-agent` | the polkit authentication agent |
 | `swaypplet settings get\|set …` | read and change settings from a script or a key binding |
 | `swaypplet report [region\|window\|screen]` | a screenshot and a description, filed as a public issue ([docs/QUALITY.md](docs/QUALITY.md)) |
+| `swaypplet cast list` | the Cast devices on the network (TVs, Nest Hubs, speakers), from avahi |
 | `swaypplet crash-report` | what systemd runs when the service fails: a de-duplicated crash issue |
 
 ## Development

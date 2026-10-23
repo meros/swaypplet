@@ -308,6 +308,9 @@ impl Engine {
     fn event(&self, event: wayland::Event) {
         match event {
             wayland::Event::Heads { serial, heads } => {
+                // An extra screen for a cast is neither matched nor shown;
+                // a configuration leaves it as it is (`wayland::send`).
+                let heads = matcher::screens(heads);
                 self.serial.set(serial);
                 let mut ids: Vec<String> = heads.iter().map(HeadState::identity).collect();
                 ids.sort();
@@ -647,5 +650,41 @@ mod tests {
             heads: vec![other],
         });
         assert!(rec.sent.borrow().is_empty() && said.borrow().is_empty());
+    }
+
+    #[test]
+    fn an_extra_screen_for_a_cast_leaves_the_profile_alone() {
+        let (e, rec, _) = engine(vec![profile("big", 2.0)]);
+        e.event(heads(1, 1.0));
+        let id = rec.sent.borrow()[0].0;
+        e.event(wayland::Event::Outcome {
+            id,
+            outcome: wayland::Outcome::Succeeded,
+        });
+        let mut screen = head("DP-1", "X", "Y");
+        screen.scale = 2.0;
+        let mut cast = head("HEADLESS-2", "", "");
+        cast.position = (1920, 0);
+        // The cast's output comes and goes: the profile stays on screen and
+        // nothing is sent, so no modeset blanks the real one.
+        e.event(wayland::Event::Heads {
+            serial: 2,
+            heads: vec![screen.clone(), cast],
+        });
+        e.event(wayland::Event::Heads {
+            serial: 3,
+            heads: vec![screen],
+        });
+        assert_eq!(rec.sent.borrow().len(), 1);
+        assert_eq!(e.current.borrow().as_deref(), Some("big"));
+        assert!(e.heads.borrow().iter().all(|h| h.name == "DP-1"));
+    }
+
+    #[test]
+    fn a_session_of_only_virtual_outputs_keeps_them() {
+        let only = vec![head("HEADLESS-1", "", ""), head("HEADLESS-2", "", "")];
+        assert_eq!(matcher::screens(only.clone()), only);
+        let mixed = vec![head("eDP-1", "", ""), head("HEADLESS-2", "", "")];
+        assert_eq!(matcher::screens(mixed).len(), 1);
     }
 }

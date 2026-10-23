@@ -15,6 +15,7 @@ pub mod battery;
 pub mod bluetooth;
 pub mod bluez;
 pub mod capture;
+pub mod cast;
 pub mod clipboard;
 pub mod devices;
 pub mod displays;

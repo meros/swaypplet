@@ -85,6 +85,9 @@ fn main() {
         // What systemd's OnFailure= runs when the panel dies: collect, sign,
         // de-duplicate, file (src/quality/crash.rs). No GTK.
         Some("crash-report") => quality::crash::run(args),
+        // The Cast devices on the network, from avahi (services::cast). No
+        // GTK.
+        Some("cast") => services::cast::cli(args),
         // Dev-only: render one component (or the whole panel) in a plain window
         // for visual validation. See src/preview.rs and dev/render.sh.
         Some("--preview") => preview::run(args.next().as_deref().unwrap_or("panel")),
