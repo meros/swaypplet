@@ -83,7 +83,7 @@
     padding: var(--space-1) 0;
 }
 
-/* A control at the row's far end (form::Placement::Trailing): never
+/* A control at the row's far end (form::kind_row): never
    narrower than this, so a column of dropdowns lines up on both edges and
    the eye lands on the same x for every value. */
 .settings-control {

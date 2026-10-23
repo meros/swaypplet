@@ -471,7 +471,7 @@ impl State {
         form::set_source(
             &self.status,
             overridden,
-            "System default: the sway config's wallpaper, auto mode in aqua on gruvbox, full motion, day and night by the sun at the system's location, night light at 3500 K",
+            "System default: the system's wallpaper, automatic mode in aqua on warm greys, full motion, day and night by the sun, night light at 3500 K",
         );
         self.updating.set(false);
     }

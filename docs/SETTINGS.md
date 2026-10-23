@@ -413,15 +413,13 @@ The Launcher pane's "Pages and settings" switch turns the rows off.
   --mode panel --res 1440x900` opens settings on a pane, as Enter on a
   pane's prefix does; `SWAYPPLET_SETTINGS_QUERY=dark` also types into its
   search, for the hits.
-- `dev/render.sh --mode preview:settings.idle` renders one pane
-  (`wallpaper`, `idle`, `bar`, `input`, `alerts`, `launcher`, `displays`,
-  `glass`, `quality`; the last with `SWAYPPLET_QUALITY_FIXTURE=<dir>`). `settings.input` sends the saved `input` section to the nested
-  compositor and lists its devices.
-  (`wallpaper`, `idle`, `bar`, `alerts`, `launcher`, `displays`, `glass`,
-  `system`). `SWAYPPLET_SYSTEM_FIXTURE=behind|staged|in-sync|applying`
-  gives the System pane a canned state, and its buttons play a canned log
-  instead of running nx.
-  (`wallpaper`, `idle`, `bar`, `alerts`, `launcher`, `displays`, `glass`).
+- `dev/render.sh --mode preview:settings.idle` renders one pane (`look`,
+  `glass`, `idle`, `bar`, `input`, `alerts`, `launcher`, `displays`,
+  `system`, `quality`). `settings.input` sends the saved `input` section to
+  the nested compositor and lists its devices;
+  `SWAYPPLET_SYSTEM_FIXTURE=behind|staged|in-sync|applying` gives the System
+  pane a canned state, and its buttons play a canned log instead of running
+  nx; `SWAYPPLET_QUALITY_FIXTURE=<dir>` gives Quality its issues.
 - `SWPP_SETTLE=4 SWAYPPLET_PANEL_QUERY=dark dev/render.sh --mode launcher`
   shows the search results; `SWAYPPLET_PANEL_ACTIVATE=1` also presses
   Enter, for the row lit on its pane (a larger number is the delay in

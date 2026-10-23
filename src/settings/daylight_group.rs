@@ -172,8 +172,16 @@ pub fn build() -> gtk4::Box {
         (-max, max, 5.0),
         offset_label,
     );
-    let today = form::value_label();
+    // The offsets read as words ("30 min earlier"), not a number in place.
+    for row in [&rise_row, &set_row] {
+        if let Some(value) = row.last_child().and_downcast::<gtk4::Label>() {
+            crate::ui::set_mono(&value, false);
+            value.set_width_chars(13);
+        }
+    }
+    let today = form::words_label();
     today.set_wrap(true);
+    today.set_max_width_chars(form::HINT_CHARS);
     today.set_xalign(1.0);
     let today_row = kind_row("Today", &today);
     today_row.set_tooltip_text(Some(

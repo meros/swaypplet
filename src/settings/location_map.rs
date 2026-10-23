@@ -89,7 +89,7 @@ impl LocationMap {
         area.set_tooltip_text(Some(
             "Click where you are. Within a degree or two is plenty.",
         ));
-        let caption = super::form::value_label();
+        let caption = super::form::words_label();
         caption.set_xalign(0.0);
 
         let map = Rc::new(LocationMap {

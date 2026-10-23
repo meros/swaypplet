@@ -447,7 +447,7 @@ impl ThemeMode {
 
     pub fn label(self) -> &'static str {
         match self {
-            ThemeMode::Auto => "Auto — light by day, dark by night",
+            ThemeMode::Auto => "Auto — by day and night",
             ThemeMode::Dark => "Dark",
             ThemeMode::Light => "Light",
         }

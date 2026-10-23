@@ -739,7 +739,7 @@ down in its file.
 2. **A row reads label, then value.** In a column of settings the control
    sits at the row's far end at its natural width, never narrower than
    `.settings-control`, so a column of controls lines up on both edges
-   (`settings::form::Placement`). A rail and a text field fill the row: the
+   (`settings::form::kind_row`). A rail and a text field fill the row: the
    one needs the length, the other is read where it is typed. Every row
    stands on `--row-height-dense`.
 3. **A column is read across in one glance.** Settings' card stops at 980

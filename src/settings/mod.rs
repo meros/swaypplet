@@ -602,14 +602,18 @@ impl SettingsSection {
                 .iter()
                 .find(|p| p.title == pane)
                 .map_or("", |p| p.glyph);
-            let r = crate::ui::row(
-                glyph,
-                if rest.is_empty() { pane } else { rest },
-                hit.subtitle,
-            );
+            // The setting's name first and its place second (design-system
+            // §6.2 rule 5): "Night warmth" over "Appearance › Night light",
+            // which a 220 px sidebar shows whole where the path cut it.
+            let (place, name) = match hit.path.rsplit_once(" › ") {
+                Some((place, name)) if !rest.is_empty() => (place, name),
+                _ => ("Settings", pane),
+            };
+            let r = crate::ui::row(glyph, name, place);
             crate::ui::glyph::adopt(&r.icon, crate::ui::Text::TitleSm, crate::ui::Tone::Muted);
             r.title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-            r.title.set_tooltip_text(Some(&hit.path));
+            r.root
+                .set_tooltip_text(Some(&format!("{}\n{}", hit.path, hit.subtitle)));
             let row = gtk4::ListBoxRow::new();
             row.set_child(Some(&r.root));
             self.results.append(&row);

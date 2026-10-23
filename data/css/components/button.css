@@ -121,6 +121,15 @@ button.ui-btn.flat:checked {
     color: var(--on-accent);
 }
 
+/* ── Chosen ──
+   One of a set of buttons that each put a whole state in place (the Glass
+   presets): the one the state now is wears the accent, as a toggle that is
+   down does (`ui::set_selected`). */
+button.ui-btn.selected {
+    background-color: var(--accent-bg);
+    color: var(--on-accent);
+}
+
 /* ── Armed ──
    A destructive button after its first press, waiting for the second: the
    danger fill, breathing, so the one thing on screen that will act on the

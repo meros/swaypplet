@@ -5,7 +5,7 @@
 //! room full of people, so by default nothing of the shell's goes there: no
 //! bar, no workspace names, no volume card, no key sheet, no pins, no
 //! notifications. Each has a switch in the `extra_screens` settings section
-//! (the Displays pane's "On extra screens" group), off by default.
+//! (the Displays pane's "Extra screens" group), off by default.
 //!
 //! Two kinds of surface, two rules:
 //!

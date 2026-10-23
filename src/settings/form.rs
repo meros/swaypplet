@@ -120,6 +120,16 @@ pub fn value_label() -> gtk4::Label {
     value
 }
 
+/// The words beside a control (an offset, a place, today's times): the
+/// value label's place and tone, in the text face. Mono is for numbers
+/// that change in place; a sentence in it reads as code.
+pub fn words_label() -> gtk4::Label {
+    let value = ui::text("", Text::Caption, Tone::Muted);
+    ui::set_numeric(&value, true);
+    value.set_xalign(1.0);
+    value
+}
+
 /// A rail for a dense column of them.
 pub fn scale(min: f64, max: f64, step: f64) -> gtk4::Scale {
     let scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, min, max, step);

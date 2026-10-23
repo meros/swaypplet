@@ -31,7 +31,7 @@ use crate::ui::{self, Kind, Text, Tone};
 
 type ExtraGet = fn(&ExtraScreens) -> bool;
 
-/// One switch of the "On extra screens" group (`shell::extra`).
+/// One switch of the "Extra screens" group (`shell::extra`).
 struct ExtraRow {
     label: &'static str,
     hint: &'static str,

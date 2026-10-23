@@ -349,7 +349,6 @@ impl GlassPane {
         }
 
         root.append(&build_presets(&state));
-        root.append(&build_kinds(&state));
 
         let material = section_box(
             "Material",
@@ -359,6 +358,9 @@ impl GlassPane {
             material.append(&build_knob(&state, knob));
         }
         root.append(&material);
+        // The edge's shape after the material: the sliders people move
+        // first come first.
+        root.append(&build_kinds(&state));
 
         root.append(&build_footer(&state, &status, &undo_btn));
 
@@ -441,6 +443,13 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
     };
 
     let system_btn = form::preset_button("System");
+    {
+        // The preset the glass is now, marked; none after a slider moved.
+        let (system_btn, tuning) = (system_btn.clone(), Tuning::system(&state.system));
+        state.sync.borrow_mut().push(Box::new(move |t| {
+            crate::ui::set_selected(&system_btn, *t == tuning);
+        }));
+    }
     system_btn.set_tooltip_text(Some(
         "The glass the system ships. Also what Reset returns to.",
     ));
@@ -456,6 +465,12 @@ fn build_presets(state: &Rc<State>) -> gtk4::Box {
     for p in &preset::ALL {
         let btn = form::preset_button(p.name);
         btn.set_tooltip_text(Some(p.hint));
+        {
+            let (btn, tuning) = (btn.clone(), p.tuning());
+            state.sync.borrow_mut().push(Box::new(move |t| {
+                crate::ui::set_selected(&btn, *t == tuning);
+            }));
+        }
         let state = state.clone();
         // A preset is a whole tuning, geometry and clarity included: keeping
         // a bevel scale from whatever was being tried before would make the
