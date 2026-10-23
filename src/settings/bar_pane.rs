@@ -252,11 +252,10 @@ impl BarPane {
         );
         pins_group.append(&row_corner);
 
-        let reset = form::action_button(
-            "Reset to system",
+        let reset = form::ResetButtons::new(
             "Put the system's choices back and drop the bar and pins sections from the settings file.",
         );
-        let (footer, status) = form::footer(&[&reset]);
+        let (footer, status) = form::footer(&[&reset.button, &reset.undo]);
         let copy = form::copy_nix_button(
             &status,
             "The bar and pins sections as theme/settings.nix holds them, for promoting a keeper into the Nix side by hand.",
@@ -269,7 +268,7 @@ impl BarPane {
                 ))
             },
         );
-        if let Some(row) = reset.parent().and_downcast::<gtk4::Box>() {
+        if let Some(row) = reset.button.parent().and_downcast::<gtk4::Box>() {
             row.append(&copy);
         }
 
@@ -340,14 +339,15 @@ impl BarPane {
         }
         {
             let state = state.clone();
-            reset.connect_clicked(move |_| {
-                if state.updating.get() {
-                    return;
-                }
-                store::reset::<Bar>();
-                store::reset::<Pins>();
-                state.sync();
-            });
+            let undone = state.clone();
+            reset.connect(
+                move || {
+                    store::reset::<Bar>();
+                    store::reset::<Pins>();
+                    state.sync();
+                },
+                move || undone.sync(),
+            );
         }
 
         root.append(&clock);

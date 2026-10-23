@@ -286,12 +286,12 @@ impl State {
     fn set_status(&self, modified: bool) {
         if modified {
             self.status.set_text(&format!(
-                "Overridden — saved to {}",
+                "Custom — saved to {}",
                 pretty_path(&glass::override_path())
             ));
         } else {
             self.status
-                .set_text("System default, as the sway config ships it");
+                .set_text("System default: the glass the system ships");
         }
         form::mark_source(&self.status, !modified);
     }

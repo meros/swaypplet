@@ -659,11 +659,10 @@ impl InputPane {
         let devices = ui::vbox(1);
         devices_group.append(&devices);
 
-        let reset = form::action_button(
-            "Reset to system",
+        let reset = form::ResetButtons::new(
             "Drop the input and keys sections from the settings file. Sway reads its config again to put its own input values back.",
         );
-        let (footer, status) = form::footer(&[&reset]);
+        let (footer, status) = form::footer(&[&reset.button, &reset.undo]);
         let copy = form::copy_nix_button(
             &status,
             "The input and keys sections as theme/settings.nix holds them.",
@@ -676,7 +675,7 @@ impl InputPane {
                 ))
             },
         );
-        if let Some(row) = reset.parent().and_downcast::<gtk4::Box>() {
+        if let Some(row) = reset.button.parent().and_downcast::<gtk4::Box>() {
             row.append(&copy);
         }
 
@@ -851,19 +850,21 @@ impl InputPane {
         }
         {
             let state = state.clone();
-            reset.connect_clicked(move |_| {
-                if state.updating.get() {
-                    return;
-                }
-                store::reset::<Input>();
-                store::reset::<Keys>();
-                state.sync();
-                // The reload the reset causes changes what the devices say.
-                let state = state.clone();
-                glib::timeout_add_local_once(std::time::Duration::from_secs(1), move || {
-                    InputPane::read_devices(&state);
-                });
-            });
+            let undone = state.clone();
+            reset.connect(
+                move || {
+                    store::reset::<Input>();
+                    store::reset::<Keys>();
+                    state.sync();
+                    // The reload the reset causes changes what the devices
+                    // say.
+                    let state = state.clone();
+                    glib::timeout_add_local_once(std::time::Duration::from_secs(1), move || {
+                        InputPane::read_devices(&state);
+                    });
+                },
+                move || undone.sync(),
+            );
         }
 
         root.append(&keyboard);

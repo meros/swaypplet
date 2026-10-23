@@ -84,8 +84,19 @@ the system layer is logged as an error and ignored; one in the user file is
 a warning.
 
 Every settings pane applies live and saves afterwards (800 ms after the last
-edit). Every settings pane has one Reset, which puts the system default back
-and removes the section from the user file.
+edit). Every settings pane, Displays included, has one Reset at the head of
+its footer, which puts the system default back and removes its sections from
+the user file, and then an "Undo reset" beside it that puts back exactly the
+sections the reset changed (`form::ResetButtons`). The undo stands until
+anything in the settings changes again; a reset offers its way back rather
+than asking first. Glass keeps its own Undo, over its whole tuning history.
+The footer's status line says "System default: …" (what the default is) or
+"Custom — saved to …" on every pane.
+
+A row that means something only while a switch above it is on (the quiet
+hours' From and Until, the quiet-by-context triggers, the night timers, the
+night warmth) is indented one step under the switch and insensitive as a
+whole while the switch is off (`form::dependent`, `form::set_live`).
 
 A row the user file changes from the system's has its name in the accent,
 with a tooltip saying so; a right-click on it writes the system's value back

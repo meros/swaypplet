@@ -314,9 +314,49 @@ impl DisplaysPane {
         body.append(&profiles);
         body.append(&extra_screen);
         body.append(&on_extra);
+        // ── Reset, as on every pane ──────────────────────────────────────
+        let reset = form::ResetButtons::new(
+            "Put the system's display profiles back, and show nothing of the shell on extra screens. Your saved profiles go.",
+        );
+        let (reset_footer, reset_status) = form::footer(&[&reset.button, &reset.undo]);
+        let copy = form::copy_nix_button(
+            &reset_status,
+            "The profiles and the extra-screen choices as theme/settings.nix holds them.",
+            || {
+                let s = crate::settings::store::current();
+                Some(format!(
+                    "{}{}",
+                    s.section_as_nix("displays")?,
+                    s.section_as_nix("extra_screens")?
+                ))
+            },
+        );
+        if let Some(row) = reset.button.parent().and_downcast::<gtk4::Box>() {
+            row.append(&copy);
+        }
+        let show_source = move || {
+            let s = crate::settings::store::current();
+            form::set_source(
+                &reset_status,
+                s.displays.is_some() || s.extra_screens.is_some(),
+                "System default: the system's display profiles, and nothing of the shell on extra screens",
+            );
+        };
+        show_source();
+        crate::settings::store::observe(show_source);
+        reset.connect(
+            || {
+                crate::settings::store::reset::<crate::settings::store::Displays>();
+                crate::settings::store::reset::<ExtraScreens>();
+            },
+            // The profiles and the switches follow the store by themselves.
+            || {},
+        );
+
         root.append(&ask);
         root.append(&unavailable);
         root.append(&body);
+        root.append(&reset_footer);
 
         let pane = Rc::new(Pane {
             root,

@@ -128,6 +128,23 @@ pub fn switch_row(label: &str, hint: &str, active: bool) -> (gtk4::Box, gtk4::Sw
     (row, switch)
 }
 
+/// Rows that only mean something while a switch above them is on: indented
+/// one step under it, and insensitive as a whole (the label with the
+/// control) while it is off, so a row that cannot change says so the same
+/// way on every pane. The values stay on screen and in the file.
+pub fn dependent(rows: &[&gtk4::Box]) {
+    for row in rows {
+        row.add_css_class("settings-dependent");
+    }
+}
+
+/// Set the rows [`dependent`] marked as live or not.
+pub fn set_live(rows: &[&gtk4::Box], on: bool) {
+    for row in rows {
+        row.set_sensitive(on);
+    }
+}
+
 /// A dropdown over `choices`, the pane's height.
 pub fn dropdown(choices: &[&str]) -> gtk4::DropDown {
     ui::dropdown(choices)
@@ -251,6 +268,115 @@ pub fn copy_nix_button(
     )
 }
 
+/// "Reset to system", and the "Undo reset" that stands beside it after a
+/// reset until anything in the settings changes again. Every settings pane
+/// has the pair at the head of its footer. [`ResetButtons::connect`] says
+/// what the reset does; the undo puts back exactly the sections it changed,
+/// then runs `after_undo` for what the store does not reach by itself (the
+/// wallpaper on screen, the controls). A reset offers its way back rather
+/// than asking first: the question would be asked every time and read
+/// never; the undo is there for when it was a mistake.
+pub struct ResetButtons {
+    pub button: gtk4::Button,
+    pub undo: gtk4::Button,
+    /// The file before the reset and right after it, while the undo stands.
+    pending:
+        std::rc::Rc<std::cell::RefCell<Option<(super::store::Settings, super::store::Settings)>>>,
+}
+
+impl ResetButtons {
+    pub fn new(hint: &str) -> ResetButtons {
+        let button = action_button("Reset to system", hint);
+        let undo = action_button(
+            "Undo reset",
+            "Put back what the reset took away. Gone once anything changes again.",
+        );
+        undo.set_visible(false);
+        ResetButtons {
+            button,
+            undo,
+            pending: Default::default(),
+        }
+    }
+
+    /// What a press of Reset does, and what follows an undo.
+    pub fn connect(&self, reset: impl Fn() + 'static, after_undo: impl Fn() + 'static) {
+        {
+            let (pending, undo) = (self.pending.clone(), self.undo.clone());
+            self.button.connect_clicked(move |_| {
+                pending.borrow_mut().take();
+                let before = super::store::current();
+                reset();
+                let after = super::store::current();
+                if before != after {
+                    *pending.borrow_mut() = Some((before, after));
+                    undo.set_visible(true);
+                }
+            });
+        }
+        {
+            let (pending, undo) = (self.pending.clone(), self.undo.clone());
+            super::store::observe(move || {
+                let stale = pending
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|(_, after)| *after != super::store::current());
+                if stale {
+                    pending.borrow_mut().take();
+                    undo.set_visible(false);
+                }
+            });
+        }
+        let pending = self.pending.clone();
+        self.undo.connect_clicked(move |b| {
+            b.set_visible(false);
+            let Some((before, after)) = pending.borrow_mut().take() else {
+                return;
+            };
+            super::store::update(|s| *s = undo_sections(s, &before, &after));
+            after_undo();
+        });
+    }
+}
+
+/// `now` with every section that differs between `before` and `after` put
+/// back as `before` had it: what a reset changed, and nothing else.
+pub fn undo_sections(
+    now: &super::store::Settings,
+    before: &super::store::Settings,
+    after: &super::store::Settings,
+) -> super::store::Settings {
+    let (Ok(mut now_v), Ok(before_v), Ok(after_v)) = (
+        serde_json::to_value(now),
+        serde_json::to_value(before),
+        serde_json::to_value(after),
+    ) else {
+        return now.clone();
+    };
+    let (Some(now_o), Some(before_o), Some(after_o)) = (
+        now_v.as_object_mut(),
+        before_v.as_object(),
+        after_v.as_object(),
+    ) else {
+        return now.clone();
+    };
+    let keys: std::collections::BTreeSet<&String> = before_o.keys().chain(after_o.keys()).collect();
+    for key in keys {
+        if before_o.get(key) == after_o.get(key) {
+            continue;
+        }
+        match before_o.get(key) {
+            Some(v) => {
+                now_o.insert(key.clone(), v.clone());
+            }
+            None => {
+                now_o.remove(key);
+            }
+        }
+    }
+    serde_json::from_value(now_v).unwrap_or_else(|_| now.clone())
+}
+
 pub fn action_button(label: &str, hint: &str) -> gtk4::Button {
     let button = ui::button(label, Kind::Secondary);
     button.set_tooltip_text(Some(hint));
@@ -356,6 +482,10 @@ pub fn time_row(
     let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
     let minutes = dropdown(&labels);
 
+    // The two dropdowns share the control column's width, so a clock row
+    // lines up on both edges with the dropdowns above and below it.
+    hour.set_hexpand(true);
+    minutes.set_hexpand(true);
     let clock = crate::ui::hbox(2);
     clock.append(&hour);
     clock.append(&crate::ui::text(
@@ -373,6 +503,31 @@ pub fn time_row(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_undone_reset_puts_back_only_what_it_changed() {
+        use crate::settings::store::Settings;
+        let mut before = Settings::default();
+        before
+            .set("bar.clock_24h", serde_json::json!(false))
+            .unwrap();
+        before
+            .set("idle.lock_after_s", serde_json::json!(600))
+            .unwrap();
+        // The Bar pane's reset dropped its section.
+        let mut after = before.clone();
+        after.bar = None;
+        // Something else moved since: it stays as it is now.
+        let mut now = after.clone();
+        now.set("idle.lock_after_s", serde_json::json!(900))
+            .unwrap();
+        let undone = undo_sections(&now, &before, &after);
+        assert_eq!(undone.get("bar.clock_24h"), Some(serde_json::json!(false)));
+        assert_eq!(
+            undone.get("idle.lock_after_s"),
+            Some(serde_json::json!(900))
+        );
+    }
 
     #[test]
     fn durations_keep_the_ladder_and_admit_the_current_value() {

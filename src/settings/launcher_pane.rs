@@ -170,17 +170,16 @@ impl LauncherPane {
         );
         learning.append(&form::kind_row("History", &forget));
 
-        let reset = form::action_button(
-            "Reset to system",
+        let reset = form::ResetButtons::new(
             "Put the system's choices back and drop the launcher section from the settings file.",
         );
-        let (footer, status) = form::footer(&[&reset]);
+        let (footer, status) = form::footer(&[&reset.button, &reset.undo]);
         let copy = form::copy_nix_button(
             &status,
             "The launcher section as theme/settings.nix holds it.",
             || store::current().section_as_nix("launcher"),
         );
-        if let Some(row) = reset.parent().and_downcast::<gtk4::Box>() {
+        if let Some(row) = reset.button.parent().and_downcast::<gtk4::Box>() {
             row.append(&copy);
         }
 
@@ -216,13 +215,14 @@ impl LauncherPane {
         });
         {
             let state = state.clone();
-            reset.connect_clicked(move |_| {
-                if state.updating.get() {
-                    return;
-                }
-                store::reset::<Launcher>();
-                state.sync();
-            });
+            let undone = state.clone();
+            reset.connect(
+                move || {
+                    store::reset::<Launcher>();
+                    state.sync();
+                },
+                move || undone.sync(),
+            );
         }
 
         root.append(&results);

@@ -332,6 +332,7 @@ struct State {
     colours: RefCell<(Vec<u16>, Vec<Swatch>)>,
     night: gtk4::DropDown,
     night_k: gtk4::Scale,
+    night_k_row: gtk4::Box,
     /// The token scales, for the strip to repaint.
     strip: gtk4::DrawingArea,
     status: gtk4::Label,
@@ -423,7 +424,7 @@ impl State {
         let night = settings.night_light();
         self.night.set_selected(night_choice(night) as u32);
         self.night_k.set_value(f64::from(night.night_k));
-        self.night_k.set_sensitive(night.enabled);
+        form::set_live(&[&self.night_k_row], night.enabled);
         // The stylesheet follows on `theme::watch`'s next tick, and a new
         // wallpaper's hue after the panel samples it; this paints what is on
         // screen now and `theme::observe` paints the rest when it lands.
@@ -822,6 +823,7 @@ impl LookPane {
             |k| format!("{k:.0} K"),
         );
         night_box.append(&night_k_row);
+        form::dependent(&[&night_k_row]);
 
         let browse = form::action_button(
             "Browse…",
@@ -832,11 +834,29 @@ impl LookPane {
                     .unwrap_or_else(|| "~/Pictures/wallpapers".into())
             ),
         );
-        let reset = form::action_button(
-            "Reset to system",
-            "Put the sway config's wallpaper back, and the system's theme colour, motion, day and night, and night light.",
+        // Beside the grid it adds to, not in the footer five groups away.
+        let browse_row = form::kind_row("Other picture", &browse);
+        group.insert_child_after(&browse_row, Some(&grid));
+        let reset = form::ResetButtons::new(
+            "Put the system's wallpaper back, and the system's colours, motion, day and night, and night light.",
         );
-        let (footer, status) = form::footer(&[&browse, &reset]);
+        let (footer, status) = form::footer(&[&reset.button, &reset.undo]);
+        let copy = form::copy_nix_button(
+            &status,
+            "The look, day and night, and night light sections as theme/settings.nix holds them.",
+            || {
+                let s = store::current();
+                Some(format!(
+                    "{}{}{}",
+                    s.section_as_nix("look")?,
+                    s.section_as_nix("daylight")?,
+                    s.section_as_nix("night_light")?
+                ))
+            },
+        );
+        if let Some(row) = reset.button.parent().and_downcast::<gtk4::Box>() {
+            row.append(&copy);
+        }
 
         let state = Rc::new(State {
             grid: grid.clone(),
@@ -862,6 +882,7 @@ impl LookPane {
             colours: RefCell::new((Vec::new(), Vec::new())),
             night: night.clone(),
             night_k: night_k.clone(),
+            night_k_row: night_k_row.clone(),
             strip: strip.clone(),
             status: status.clone(),
             system: RefCell::new(None),
@@ -925,7 +946,17 @@ impl LookPane {
 
         {
             let state = state.clone();
-            reset.connect_clicked(move |_| state.reset());
+            let undone = state.clone();
+            reset.connect(
+                move || state.reset(),
+                move || {
+                    // The store has the wallpaper back; the screen has not.
+                    if let Some(w) = undone.shown() {
+                        apply(&w);
+                    }
+                    undone.sync();
+                },
+            );
         }
         {
             let state = state.clone();
@@ -1167,6 +1198,7 @@ use super::search::{Entry, row};
 #[rustfmt::skip]
 pub(super) const SEARCH: &[Entry] = &[
     row("Wallpaper", "", "The image behind every output", &["wallpaper", "background", "background image", "desktop background", "bg", "picture", "photo"]),
+    row("Wallpaper", "Other picture", "Pick any image as the wallpaper", &["browse", "choose image", "custom wallpaper", "file", "my picture"]),
     row("Wallpaper", "Scaling", "How the image meets the screen", &["fill", "fit", "stretch", "crop", "center", "centre", "tile"]),
     row("Wallpaper", "Video speed", "How fast the video wallpaper plays", &["video speed", "playback speed", "slow motion", "faster", "slower", "video wallpaper", "live wallpaper", "animated", "mpvpaper", "speed"]).keys(&["look.video_speed"]),
     row("Wallpaper", "On battery", "Keep the video wallpaper playing, slow it to a stop, or go black and dark", &["battery", "video wallpaper", "live wallpaper", "animated", "animation", "mpvpaper", "power saving", "pause", "black", "black background", "dark mode on battery", "stop"]).keys(&["look.wallpaper_on_battery"]),

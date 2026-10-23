@@ -348,6 +348,7 @@ impl IdlePane {
             let labels = durations.labels();
             let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
             let (row, dropdown) = dropdown_row(timer.label, timer.hint, &labels);
+            form::dependent(&[&row]);
             night_body.append(&row);
             night_dropdowns.push((dropdown, durations));
         }
@@ -385,18 +386,17 @@ impl IdlePane {
             elevate.push(switch);
         }
 
-        let reset = form::action_button(
-            "Reset to system",
+        let reset = form::ResetButtons::new(
             "Put the system's timers and access switches back and drop both sections from the settings file.",
         );
-        let (footer, status) = form::footer(&[&reset]);
+        let (footer, status) = form::footer(&[&reset.button, &reset.undo]);
         let copy = form::copy_nix_button(
             &status,
             "The timers as the `idle` attrset of theme/settings.nix, for promoting a keeper into the Nix side by hand.",
             || store::current().section_as_nix("idle"),
         );
         // Beside Reset, in the row `footer` built.
-        if let Some(row) = reset.parent().and_downcast::<gtk4::Box>() {
+        if let Some(row) = reset.button.parent().and_downcast::<gtk4::Box>() {
             row.append(&copy);
         }
 
@@ -472,14 +472,15 @@ impl IdlePane {
         }
         {
             let state = state.clone();
-            reset.connect_clicked(move |_| {
-                if state.updating.get() {
-                    return;
-                }
-                store::reset::<Idle>();
-                store::reset::<Elevate>();
-                state.sync();
-            });
+            let undone = state.clone();
+            reset.connect(
+                move || {
+                    store::reset::<Idle>();
+                    store::reset::<Elevate>();
+                    state.sync();
+                },
+                move || undone.sync(),
+            );
         }
 
         root.append(&group);

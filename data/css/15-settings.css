@@ -98,8 +98,16 @@
     min-height: var(--row-height-dense);
     padding: var(--space-1) var(--space-3);
 }
+/* The footer stands at the rows' left edge, not the groups': its buttons
+   and its status line start where a row's label does. */
 .settings-footer {
-    padding-top: var(--space-2);
+    padding: var(--space-2) var(--space-4) 0;
+}
+
+/* A row that means something only while the switch above it is on
+   (form::dependent): one step in, under it. */
+.settings-row.settings-dependent {
+    margin-left: var(--space-4);
 }
 
 /* ── Displays (src/settings/displays_pane.rs) ──

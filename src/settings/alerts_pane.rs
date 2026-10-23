@@ -54,6 +54,10 @@ struct State {
     quiet: gtk4::Switch,
     quiet_from: gtk4::DropDown,
     quiet_to: gtk4::DropDown,
+    /// From and Until, live while quiet hours are on.
+    quiet_rows: [gtk4::Box; 2],
+    /// The four triggers, live while Hold popups is on.
+    context_rows: [gtk4::Box; 4],
     context: gtk4::Switch,
     sharing: gtk4::Switch,
     mirrored: gtk4::Switch,
@@ -99,8 +103,8 @@ impl State {
             .set_selected(u32::from(alerts.quiet_from_h.min(23)));
         self.quiet_to
             .set_selected(u32::from(alerts.quiet_to_h.min(23)));
-        self.quiet_from.set_sensitive(alerts.quiet);
-        self.quiet_to.set_sensitive(alerts.quiet);
+        form::set_live(&self.quiet_rows.each_ref(), alerts.quiet);
+        form::set_live(&self.context_rows.each_ref(), alerts.context_quiet);
         self.context.set_active(alerts.context_quiet);
         for (switch, on) in [
             (&self.sharing, alerts.quiet_when_sharing),
@@ -109,7 +113,6 @@ impl State {
             (&self.calls, alerts.quiet_in_calls),
         ] {
             switch.set_active(on);
-            switch.set_sensitive(alerts.context_quiet);
         }
         if self.folder.text() != capture.folder {
             self.folder.set_text(&capture.folder);
@@ -182,6 +185,7 @@ impl AlertsPane {
             &hours,
         );
         quiet_group.append(&row_to);
+        form::dependent(&[&row_from, &row_to]);
 
         let context_group = section_box(
             "Quiet by context",
@@ -217,6 +221,7 @@ impl AlertsPane {
             alerts.quiet_in_calls,
         );
         context_group.append(&row_calls);
+        form::dependent(&[&row_sharing, &row_mirrored, &row_fullscreen, &row_calls]);
 
         let capture_group = section_box(
             "Capture",
@@ -246,11 +251,10 @@ impl AlertsPane {
         );
         capture_group.append(&row_annotate);
 
-        let reset = form::action_button(
-            "Reset to system",
+        let reset = form::ResetButtons::new(
             "Put the system's choices back and drop the alerts and capture sections from the settings file.",
         );
-        let (footer, status) = form::footer(&[&reset]);
+        let (footer, status) = form::footer(&[&reset.button, &reset.undo]);
         let copy = form::copy_nix_button(
             &status,
             "The alerts and capture sections as theme/settings.nix holds them.",
@@ -263,7 +267,7 @@ impl AlertsPane {
                 ))
             },
         );
-        if let Some(row) = reset.parent().and_downcast::<gtk4::Box>() {
+        if let Some(row) = reset.button.parent().and_downcast::<gtk4::Box>() {
             row.append(&copy);
         }
 
@@ -274,6 +278,13 @@ impl AlertsPane {
             quiet: quiet.clone(),
             quiet_from: quiet_from.clone(),
             quiet_to: quiet_to.clone(),
+            quiet_rows: [row_from.clone(), row_to.clone()],
+            context_rows: [
+                row_sharing.clone(),
+                row_mirrored.clone(),
+                row_fullscreen.clone(),
+                row_calls.clone(),
+            ],
             context: context.clone(),
             sharing: sharing.clone(),
             mirrored: mirrored.clone(),
@@ -381,14 +392,15 @@ impl AlertsPane {
         }
         {
             let state = state.clone();
-            reset.connect_clicked(move |_| {
-                if state.updating.get() {
-                    return;
-                }
-                store::reset::<Alerts>();
-                store::reset::<Capture>();
-                state.sync();
-            });
+            let undone = state.clone();
+            reset.connect(
+                move || {
+                    store::reset::<Alerts>();
+                    store::reset::<Capture>();
+                    state.sync();
+                },
+                move || undone.sync(),
+            );
         }
 
         root.append(&popups);
