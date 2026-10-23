@@ -545,6 +545,11 @@ impl Pane {
                 }
                 let on = s.is_active();
                 let i = q.selected.get();
+                // The switch put back after a refusal notifies once the
+                // handler has returned, outside `updating`: it is no edit.
+                if q.drafts.borrow().get(i).is_some_and(|d| d.enabled == on) {
+                    return;
+                }
                 let refused = {
                     let mut drafts = q.drafts.borrow_mut();
                     let others_on = drafts.iter().enumerate().any(|(j, d)| j != i && d.enabled);
