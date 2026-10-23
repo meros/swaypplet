@@ -209,6 +209,7 @@ fn answer(stream: TcpStream, peer: SocketAddr, site: &Site, token: &str) {
         return reply(&mut out, "204 No Content", "", b"");
     }
     let Some(name) = requested(path, token) else {
+        log::info!("cast: {} asked for a path that is not ours: {method}", peer.ip());
         return reply(&mut out, "404 Not Found", "", b"");
     };
     log::info!("cast: {} asked for {method} {name}", peer.ip());

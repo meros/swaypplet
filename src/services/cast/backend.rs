@@ -23,10 +23,13 @@
 //! that cannot be reached, or that goes away while the page loads, is an
 //! error, not a fallback: the second way would fail the same.
 //!
-//! DashCast is sent `force: false`: the page loads in DashCast's iframe,
-//! which the owner's TV did with the prototype. `force: true` navigates
-//! the receiver itself to the page, for a TV whose DashCast cannot frame
-//! it; [`LivePage::force`] is the switch.
+//! DashCast is sent `force: true`, as `catt cast_site` does: DashCast
+//! navigates the receiver itself to the page. With `force: false` DashCast
+//! (an https page) loads ours (plain http) in an iframe, which the browser
+//! blocks as mixed content: the TV sat on "loading http..." and never asked
+//! for the page (2026-10-23, Vardagsrummet TV). The prototype that worked
+//! was cast by `catt`, so it had used `force: true` all along.
+//! [`LivePage::force`] is the switch.
 //!
 //! [`Vnc`] is for a VNC viewer: wayvnc on the output, view only, on
 //! localhost.
@@ -109,7 +112,7 @@ static CAST: Cast = Cast {
         port: http::PORT,
         timing: LIVE_TIMING,
         playing_within: PLAYING_WITHIN,
-        force: false,
+        force: true,
     },
     hls: MediaReceiver {
         port: http::PORT,
