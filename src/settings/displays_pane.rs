@@ -114,9 +114,12 @@ struct Details {
 }
 
 struct Pane {
-    /// Apply and Undo, with their status line; shown only while there is
-    /// something to apply.
+    /// Apply and Undo, with their status line: shown while there is
+    /// something to apply, and while the status line has something to say.
     footer: gtk4::Box,
+    /// Apply and Undo alone: hidden when there is nothing to apply, so a
+    /// result ("Layout kept.") stands without two greyed buttons over it.
+    footer_buttons: gtk4::Widget,
     root: gtk4::Box,
     /// Everything that edits; insensitive while a layout is on trial.
     body: gtk4::Box,
@@ -257,6 +260,9 @@ impl DisplaysPane {
         let apply = ui::button("Apply", Kind::Primary);
         let undo = form::action_button("Undo changes", "Back to the layout on screen.");
         let (footer, status) = form::footer(&[&apply, &undo]);
+        let footer_buttons = footer
+            .first_child()
+            .expect("form::footer puts the buttons first");
 
         // ── Profiles ─────────────────────────────────────────────────────
         let profiles = section_box(
@@ -316,6 +322,7 @@ impl DisplaysPane {
             root,
             body,
             footer: footer.clone(),
+            footer_buttons,
             unavailable,
             area,
             fixed,
@@ -732,8 +739,14 @@ impl Pane {
             .set_sensitive(idle && self.dirty.get() && problem.is_none());
         self.undo.set_sensitive(idle && self.dirty.get());
         // Nothing to apply: no row of disabled buttons floating under the
-        // group. It comes back with the first change.
-        self.footer.set_visible(self.dirty.get() || !idle);
+        // group. It comes back with the first change. The status line
+        // stays while it says something: the end of a trial (kept,
+        // refused, put back) is said after the draft is reset, and it was
+        // once written into a footer this had just hidden.
+        let buttons = self.dirty.get() || !idle;
+        self.footer_buttons.set_visible(buttons);
+        self.footer
+            .set_visible(buttons || !self.status.text().is_empty());
         if idle && self.dirty.get() {
             match problem {
                 Some(p) => self.say(&p.say(), true),
@@ -744,6 +757,8 @@ impl Pane {
 
     fn say(&self, text: &str, bad: bool) {
         self.status.set_text(text);
+        self.footer
+            .set_visible(self.footer_buttons.is_visible() || !text.is_empty());
         ui::set_tone(&self.status, if bad { Tone::Danger } else { Tone::Muted });
     }
 
