@@ -424,6 +424,7 @@ impl EdgeZone {
                 let slot = dwell.clone();
                 let id = glib::timeout_add_local_once(Duration::from_millis(DWELL_MS), move || {
                     slot.borrow_mut().take();
+                    log::debug!("label: dwell over");
                     if let Some(owner) = owner.upgrade() {
                         Labels { inner: owner }.peek(&connector, true, PEEK_MS);
                     }
@@ -434,11 +435,14 @@ impl EdgeZone {
             });
         }
         motion.connect_leave(move |_| {
+            log::debug!("label: pointer left the strip");
             if let Some(id) = dwell.borrow_mut().take() {
                 crate::spawn::remove_source(id);
             }
         });
-        surface.root().add_controller(motion);
+        // On the window, not the root: the controller then sees the pointer
+        // wherever it is on the surface, with or without a child under it.
+        surface.window().add_controller(motion);
         surface.show();
 
         EdgeZone { surface }
