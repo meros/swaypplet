@@ -4,16 +4,22 @@
 //!
 //! One at a time. Starting makes the output and starts the backend on it,
 //! on a worker; the output is removed again when the backend cannot start.
-//! Stopping ends the stream and removes the output, and its workspaces move
-//! to the screens. A stream that ends by itself (wayvnc exited) is noticed
-//! within [`WATCH`] and stopped the same way, with the reason in the view.
+//! Stopping ends the stream and removes the output, on a worker (a cast
+//! tells the TV first), and its workspaces move to the screens. A stream
+//! that ends by itself (the TV went away, the encoder died, wayvnc exited)
+//! is noticed within [`WATCH`] and stopped the same way, with the reason in
+//! the view.
 //!
 //! What runs at rest: nothing without a session; with one, a check of the
-//! child process every [`WATCH`]. The device list is one avahi browse, when
-//! the Displays page is shown ([`search_if_stale`]).
+//! stream every [`WATCH`]. The device list is one avahi browse, when the
+//! Displays page is shown ([`search_if_stale`]).
 
 pub mod backend;
+pub mod channel;
+mod children;
 pub mod discovery;
+pub mod hls;
+pub mod http;
 pub mod output;
 
 use std::cell::RefCell;
@@ -84,10 +90,17 @@ fn edit(f: impl FnOnce(&mut View)) {
     VIEW.with(|o| o.set_if_changed(v));
 }
 
-/// Call once, in the panel process: removes an extra screen the panel
-/// before this one left (`output::sweep`).
+/// Call once, in the panel process: stops the TV session and removes the
+/// extra screen the panel before this one left (`backend::sweep`,
+/// `output::sweep`). Its child processes died with it (`children`).
 pub fn start() {
-    spawn_work(output::sweep, |()| {});
+    spawn_work(
+        || {
+            backend::sweep();
+            output::sweep();
+        },
+        |()| {},
+    );
 }
 
 /// Search the network for Cast devices, unless the list is fresh or a
@@ -132,7 +145,7 @@ pub fn begin(target: Target) {
         return;
     }
     let Some(backend) = backend::for_target(&target) else {
-        edit(|v| v.problem = Some("Nothing built here can send to that device yet.".into()));
+        edit(|v| v.problem = Some("Nothing here can send to that device.".into()));
         return;
     };
     edit(|v| {
@@ -191,18 +204,21 @@ pub fn end() {
 }
 
 fn end_with(problem: Option<String>) {
-    let Some(mut session) = SESSION.with(|s| s.borrow_mut().take()) else {
+    let Some(session) = SESSION.with(|s| s.borrow_mut().take()) else {
         return;
     };
     crate::spawn::remove_source(session.watch);
-    session.stream.stop();
+    let mut stream = session.stream;
     let name = session.view.output.clone();
     edit(|v| {
         v.busy = true;
         v.problem = problem;
     });
     spawn_work(
-        move || output::remove(&name),
+        move || {
+            stream.stop();
+            output::remove(&name)
+        },
         |result| {
             edit(|v| {
                 v.busy = false;
@@ -251,16 +267,18 @@ pub fn cli(mut args: impl Iterator<Item = String>) {
 }
 
 fn watch_stream() -> glib::ControlFlow {
-    let ended = SESSION.with(|s| {
-        s.borrow_mut()
-            .as_mut()
-            .map(|s| !s.stream.running())
-            .unwrap_or(true)
+    let ended = SESSION.with(|s| match s.borrow_mut().as_mut() {
+        Some(s) => (!s.stream.running()).then(|| {
+            s.stream
+                .why_ended()
+                .unwrap_or_else(|| "The stream ended by itself.".into())
+        }),
+        None => Some(String::new()),
     });
-    if ended {
+    if let Some(why) = ended {
         // `end_with` removes this source; it is still running, so break
         // instead and let the removal find it gone.
-        glib::idle_add_local_once(|| end_with(Some("The stream ended by itself.".into())));
+        glib::idle_add_local_once(move || end_with((!why.is_empty()).then_some(why)));
         return glib::ControlFlow::Break;
     }
     glib::ControlFlow::Continue

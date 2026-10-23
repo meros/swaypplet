@@ -275,8 +275,9 @@ fn cast_button(label: &str, busy: bool, on_click: impl Fn() + 'static) -> gtk4::
 }
 
 /// The rows under "Extra screen": the one that is on, with Stop; else the
-/// targets, each with Start where a backend reaches it. A TV with no
-/// backend that reaches it is listed and says so (`cast::backend`).
+/// targets, each with Start where a backend reaches it (`cast::backend`).
+/// A cast takes seconds to start (the first segments, the TV's player), so
+/// a row says it is on its way.
 fn fill_extra_screen(list: &Box) {
     while let Some(child) = list.first_child() {
         list.remove(&child);
@@ -293,6 +294,13 @@ fn fill_extra_screen(list: &Box) {
             &format!("{} · {} on {}", s.output, s.backend, s.location),
         );
         r.end.append(&cast_button("Stop", v.busy, cast::end));
+        list.append(&r.root);
+    } else if v.busy {
+        let r = ui::row(
+            icons::TV,
+            "Starting the extra screen…",
+            "A TV shows it once the first seconds are encoded",
+        );
         list.append(&r.root);
     } else {
         let r = ui::row(
@@ -311,7 +319,7 @@ fn fill_extra_screen(list: &Box) {
             subtitle.push(if reached {
                 &d.address
             } else {
-                "Casting to it is not built yet"
+                "No address to cast to"
             });
             let r = ui::row(icons::TV, &d.name, &subtitle.join(" · "));
             if reached {

@@ -39,6 +39,9 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 gbm = { version = "0.18", default-features = false }
 khronos-egl = { version = "6", features = ["static", "1_5"] }
 glow = "0.18"
+# The Cast channel to a TV (services::cast::channel). ring, not the default
+# aws-lc-rs, which needs cmake and nasm to build.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 
 [build-dependencies]
 protobuf-codegen = "3.7"
@@ -71,4 +74,8 @@ incremental = true
 # Optimize dependencies slightly so GTK event dispatch remains fast without slowing crate compilation
 [profile.dev.package."*"]
 opt-level = 1
+
+[dev-dependencies]
+# A certificate for the fake Cast receiver the channel is tested against.
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
 
