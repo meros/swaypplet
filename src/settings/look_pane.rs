@@ -31,6 +31,9 @@ use crate::tokens::{Accent, Contrast, Neutral, Palette, Tint as Reach};
 
 /// Thumbnail size, in logical pixels. 16:9, four to a row in the card.
 const THUMB_W: i32 = 132;
+/// Thumbnails shown until "Show all": one row, the picked one among them,
+/// so Mode, Accent and Night light are on screen when the pane opens.
+const THUMBS_SHOWN: usize = 4;
 const THUMB_H: i32 = 74;
 
 // ── Thumbnails ──────────────────────────────────────────────────────────
@@ -331,11 +334,16 @@ struct State {
     /// The hues the swatches were built for, and each swatch with its dot.
     colours: RefCell<(Vec<u16>, Vec<Swatch>)>,
     night: gtk4::DropDown,
+    /// Night light at night with no place to know when night is.
+    night_warning: gtk4::Label,
     night_k: gtk4::Scale,
     night_k_row: gtk4::Box,
     /// The token scales, for the strip to repaint.
     strip: gtk4::DrawingArea,
     status: gtk4::Label,
+    /// Every thumbnail, or the first row of them.
+    show_all: Cell<bool>,
+    show_all_button: gtk4::Button,
     /// Read once from the compositor; `None` until it answers, and still
     /// `None` if the config sets no wallpaper.
     system: RefCell<Option<Wallpaper>>,
@@ -425,15 +433,37 @@ impl State {
         self.night.set_selected(night_choice(night) as u32);
         self.night_k.set_value(f64::from(night.night_k));
         form::set_live(&[&self.night_k_row], night.enabled);
+        self.sync_night_warning();
         // The stylesheet follows on `theme::watch`'s next tick, and a new
         // wallpaper's hue after the panel samples it; this paints what is on
         // screen now and `theme::observe` paints the rest when it lands.
         self.strip.queue_draw();
         self.sync_colours();
-        for thumb in self.thumbs.borrow().iter() {
-            let selected = shown.as_ref().is_some_and(|w| w.path == thumb.path);
+        let thumbs = self.thumbs.borrow();
+        let picked = thumbs
+            .iter()
+            .position(|t| shown.as_ref().is_some_and(|w| w.path == t.path));
+        for (i, thumb) in thumbs.iter().enumerate() {
+            let selected = picked == Some(i);
             crate::ui::set_selected(&thumb.button, selected);
+            // The first row, the picked one in its last place when it is
+            // further down, or all of them.
+            let shown_here = self.show_all.get()
+                || selected
+                || i + 1 < THUMBS_SHOWN
+                || (i + 1 == THUMBS_SHOWN && picked.is_none_or(|p| p < THUMBS_SHOWN));
+            if let Some(child) = thumb.button.parent() {
+                child.set_visible(shown_here);
+            }
         }
+        self.show_all_button
+            .set_visible(thumbs.len() > THUMBS_SHOWN);
+        self.show_all_button.set_label(&if self.show_all.get() {
+            "Show fewer".to_string()
+        } else {
+            format!("Show all {}", thumbs.len())
+        });
+        drop(thumbs);
         if let Some(w) = &shown {
             let index = WallpaperMode::ALL.iter().position(|m| *m == w.mode);
             self.mode.set_selected(index.unwrap_or(0) as u32);
@@ -444,6 +474,19 @@ impl State {
             "System default: the sway config's wallpaper, auto mode in aqua on gruvbox, full motion, day and night by the sun at the system's location, night light at 3500 K",
         );
         self.updating.set(false);
+    }
+
+    /// The night light set to "At night" while nothing says when night is:
+    /// by the sun, with no place picked. Day and night is edited in its own
+    /// group, so this follows the store, not only this pane's edits.
+    fn sync_night_warning(&self) {
+        let (night, daylight) = store::with(|s| (s.night_light(), s.daylight()));
+        self.night_warning.set_visible(
+            night.enabled
+                && night.schedule == NightSchedule::Sun
+                && !daylight.fixed_times
+                && daylight.place().is_none(),
+        );
     }
 
     /// The wallpaper on screen stands for a video, as far as the last scan
@@ -673,7 +716,7 @@ impl LookPane {
             // Three or four thumbnails per row: the pictures shrink to the
             // column (the pixbuf is decoded at 2x for HiDPI, so its natural
             // width would otherwise wrap the third onto a line of its own).
-            .min_children_per_line(3)
+            .min_children_per_line(4)
             .max_children_per_line(4)
             .row_spacing(crate::tokens::space(2) as u32)
             .column_spacing(crate::tokens::space(2) as u32)
@@ -812,6 +855,14 @@ impl LookPane {
             &NIGHT_CHOICES,
         );
         night_box.append(&night_row);
+        let night_warning = form::status_label();
+        night_warning.set_text(
+            "No place is set in Day and night below, so night never comes and the night light stays off. Pick your place on the map, or use fixed times.",
+        );
+        night_warning.set_xalign(0.0);
+        crate::ui::set_tone(&night_warning, crate::ui::Tone::Warning);
+        night_warning.set_visible(false);
+        night_box.append(&night_warning);
         let (night_k_row, night_k) = form::scale_row(
             "Night warmth",
             "The night's colour temperature. Lower is warmer; 6500 K is no change.",
@@ -835,7 +886,14 @@ impl LookPane {
             ),
         );
         // Beside the grid it adds to, not in the footer five groups away.
-        let browse_row = form::kind_row("Other picture", &browse);
+        let show_all_button = form::action_button(
+            "Show all",
+            "Every picture in the folder, not only the first row.",
+        );
+        let more = crate::ui::hbox(2);
+        more.append(&show_all_button);
+        more.append(&browse);
+        let browse_row = form::kind_row("More pictures", &more);
         group.insert_child_after(&browse_row, Some(&grid));
         let reset = form::ResetButtons::new(
             "Put the system's wallpaper back, and the system's colours, motion, day and night, and night light.",
@@ -881,10 +939,13 @@ impl LookPane {
             colour_box: colour_box.clone(),
             colours: RefCell::new((Vec::new(), Vec::new())),
             night: night.clone(),
+            night_warning,
             night_k: night_k.clone(),
             night_k_row: night_k_row.clone(),
             strip: strip.clone(),
             status: status.clone(),
+            show_all: Cell::new(false),
+            show_all_button: show_all_button.clone(),
             system: RefCell::new(None),
             updating: Cell::new(false),
         });
@@ -901,6 +962,13 @@ impl LookPane {
             });
         }
 
+        {
+            let state = state.clone();
+            show_all_button.connect_clicked(move |_| {
+                state.show_all.set(!state.show_all.get());
+                state.sync();
+            });
+        }
         {
             let state = state.clone();
             browse.connect_clicked(move |button| {
@@ -1120,6 +1188,7 @@ impl LookPane {
             store::observe(move || {
                 if let Some(state) = weak.upgrade() {
                     state.sync_video_rows();
+                    state.sync_night_warning();
                 }
             });
         }
@@ -1149,12 +1218,15 @@ impl LookPane {
             });
         }
 
+        // What is changed most first: the picture, the mode and accent, the
+        // night light; then the finer colour, the motion, and the day and
+        // night everything at night follows.
         root.append(&group);
         root.append(&appearance);
+        root.append(&night_box);
         root.append(&theme);
         root.append(&look);
         root.append(&super::daylight_group::build());
-        root.append(&night_box);
         root.append(&footer);
 
         // Ask the compositor what the config shipped, then build the grid
@@ -1198,7 +1270,7 @@ use super::search::{Entry, row};
 #[rustfmt::skip]
 pub(super) const SEARCH: &[Entry] = &[
     row("Wallpaper", "", "The image behind every output", &["wallpaper", "background", "background image", "desktop background", "bg", "picture", "photo"]),
-    row("Wallpaper", "Other picture", "Pick any image as the wallpaper", &["browse", "choose image", "custom wallpaper", "file", "my picture"]),
+    row("Wallpaper", "More pictures", "Every picture in the folder, or any image", &["browse", "choose image", "custom wallpaper", "file", "my picture", "show all"]),
     row("Wallpaper", "Scaling", "How the image meets the screen", &["fill", "fit", "stretch", "crop", "center", "centre", "tile"]),
     row("Wallpaper", "Video speed", "How fast the video wallpaper plays", &["video speed", "playback speed", "slow motion", "faster", "slower", "video wallpaper", "live wallpaper", "animated", "mpvpaper", "speed"]).keys(&["look.video_speed"]),
     row("Wallpaper", "On battery", "Keep the video wallpaper playing, slow it to a stop, or go black and dark", &["battery", "video wallpaper", "live wallpaper", "animated", "animation", "mpvpaper", "power saving", "pause", "black", "black background", "dark mode on battery", "stop"]).keys(&["look.wallpaper_on_battery"]),

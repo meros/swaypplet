@@ -108,6 +108,24 @@ pub fn kind_row(label: &str, control: &impl IsA<gtk4::Widget>) -> gtk4::Box {
         name.set_hexpand(true);
         control.set_halign(gtk4::Align::End);
         control.add_css_class("settings-control");
+        // A box of small things (the accent swatches, two buttons) is
+        // narrower than the control column, and a box packs from its start:
+        // its contents ended short of the column's right edge. Its first
+        // child takes the slack and stands at the end of it, so the row
+        // ends where every dropdown's does. A box whose children already
+        // share the width (a clock) is left alone.
+        if let Some(group) = control.downcast_ref::<gtk4::Box>() {
+            let mut child = group.first_child();
+            let mut fills = false;
+            while let Some(c) = child {
+                fills |= c.hexpands();
+                child = c.next_sibling();
+            }
+            if !fills && let Some(first) = group.first_child() {
+                first.set_hexpand(true);
+                first.set_halign(gtk4::Align::End);
+            }
+        }
     }
     row.append(control);
     row
