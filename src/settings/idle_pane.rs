@@ -510,8 +510,9 @@ use super::search::{Entry, row};
 /// to the tab gets a line here; the test there fails until it does.
 #[rustfmt::skip]
 pub(super) const SEARCH: &[Entry] = &[
+    row("Idle timers", "", "Timers from the last input; closing the lid is not one of them", &["lid", "laptop lid", "close lid"]),
     row("Idle timers", "Dim after", "Dim the backlight when idle", &["dim", "screen dim", "idle", "backlight", "inactivity"]).keys(&["idle.dim_after_s"]),
-    row("Idle timers", "Lock after", "Lock the session when idle", &["auto lock", "autolock", "screen lock", "lock screen", "timeout", "idle", "screensaver"]).keys(&["idle.lock_after_s"]),
+    row("Idle timers", "Lock after", "Lock the session when idle", &["auto lock", "autolock", "screen lock", "lock screen", "timeout", "idle", "screensaver", "screen saver"]).keys(&["idle.lock_after_s"]),
     row("Idle timers", "Screen off after", "Turn the screens off while locked", &["screen timeout", "display off", "monitor off", "screen off", "blank", "dpms", "timeout", "screensaver"]).keys(&["idle.blank_after_s"]),
     row("Idle timers", "Screen off on battery", "A shorter screen-off while locked on battery", &["battery", "screen timeout", "display off", "screen off", "blank", "dpms", "power saving", "unplugged"]).keys(&["idle.battery_blank_after_s"]),
     row("Idle timers", "Suspend after", "Sleep on battery when idle", &["sleep", "suspend", "hibernate", "battery", "standby"]).keys(&["idle.suspend_after_s"]),
@@ -521,7 +522,7 @@ pub(super) const SEARCH: &[Entry] = &[
     row("At night", "Lock after", "The lock timer at night", &["night lock", "auto lock", "timeout"]).keys(&["idle.night_lock_after_s"]),
     row("At night", "Screen off after", "The screen-off timer at night", &["screen timeout", "display off", "timeout"]).keys(&["idle.night_blank_after_s"]),
     row("Lock", "Lock when I walk away", "The presence sensor locks when you leave", &["walk away", "presence", "proximity", "away", "leave", "sensor"]).keys(&["idle.walk_away_lock"]),
-    row("Lock", "Face unlock", "The camera unlocks the lock screen", &["face", "camera", "howdy", "face id", "biometric", "ir camera", "unlock"]).keys(&["idle.face_unlock"]),
+    row("Lock", "Face unlock", "The camera unlocks the lock screen", &["face", "camera", "howdy", "face id", "biometric", "ir camera", "unlock", "fingerprint"]).keys(&["idle.face_unlock"]),
     row("Administrator access", "Face for administrator access", "The camera for sudo and pkexec", &["sudo", "pkexec", "polkit", "admin", "root", "elevate", "face", "camera"]).keys(&["elevate.face"]),
     row("Administrator access", "Card for terminal sudo", "A password card for sudo in a terminal", &["sudo", "terminal", "polkit", "password", "prompt"]).keys(&["elevate.terminal_card"]),
     row("Administrator access", "Pill under the lens", "Says what the camera sees", &["camera", "face", "caption", "status"]).keys(&["elevate.cue"]),

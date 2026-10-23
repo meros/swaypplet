@@ -377,8 +377,10 @@ use super::search::{Entry, row};
 /// to the tab gets a line here; the test there fails until it does.
 #[rustfmt::skip]
 pub(super) const SEARCH: &[Entry] = &[
-    row("Clock", "24-hour clock", "14:05 rather than 2:05 PM", &["24h", "12h", "am pm", "time format", "military time", "clock format"]).keys(&["bar.clock_24h"]),
+    row("Clock", "", "The clock in the bar, in the system's time zone", &["clock", "time zone", "timezone"]),
+    row("Clock", "24-hour clock", "14:05 rather than 2:05 PM", &["24h", "12h", "am pm", "time format", "military time", "clock format", "clock"]).keys(&["bar.clock_24h"]),
     row("Clock", "Show the date", "Weekday and date beside the time", &["date", "day", "weekday", "calendar"]).keys(&["bar.clock_date"]),
+    row("Segments", "", "What the bar shows at its right end", &["bar", "status bar", "taskbar", "panel"]),
     row("Segments", "Media mark", "What is playing, on the bar", &["music", "now playing", "player", "mpris", "song"]).keys(&["bar.media"]),
     row("Segments", "Tray", "Status icons from applications", &["system tray", "systray", "status icons", "appindicator", "tray icons"]).keys(&["bar.tray"]),
     row("Segments", "Battery", "The battery segment of the bar", &["power", "charge", "percentage"]).keys(&["bar.battery"]),

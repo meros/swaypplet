@@ -430,7 +430,7 @@ use super::search::{Entry, row};
 /// to the tab gets a line here; the test there fails until it does.
 #[rustfmt::skip]
 pub(super) const SEARCH: &[Entry] = &[
-    row("Notifications", "Linger", "How long a notification stays", &["notification timeout", "duration", "popup", "toast", "dismiss"]).keys(&["alerts.linger"]),
+    row("Notifications", "Linger", "How long a notification stays", &["notifications", "notification", "notification timeout", "duration", "popup", "toast", "dismiss"]).keys(&["alerts.linger"]),
     row("Notifications", "Corner", "Where notifications appear", &["position", "notification position", "top right", "placement"]).keys(&["alerts.corner"]),
     row("Notifications", "Stack", "Cards shown before older ones fold", &["notifications", "count", "collapse"]).keys(&["alerts.stack"]),
     row("Quiet hours", "Quiet hours", "Do Not Disturb on a schedule", &["do not disturb", "dnd", "silence", "mute notifications", "focus"]).keys(&["alerts.quiet"]),

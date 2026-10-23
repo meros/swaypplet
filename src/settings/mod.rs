@@ -583,7 +583,7 @@ impl SettingsSection {
         }
         let hits = search::find(query);
         if hits.is_empty() {
-            let none = crate::ui::row("", "No setting matches", "Try another word");
+            let none = crate::ui::row("", "No setting matches", search::no_match_hint(query));
             let row = gtk4::ListBoxRow::new();
             row.set_selectable(false);
             row.set_activatable(false);

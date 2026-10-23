@@ -1278,11 +1278,11 @@ use super::search::{Entry, row};
 /// to the tab gets a line here; the test there fails until it does.
 #[rustfmt::skip]
 pub(super) const SEARCH: &[Entry] = &[
-    row("Arrangement", "", "Where the displays stand", &["arrange", "arrangement", "position", "layout", "multi monitor", "monitors", "displays", "screens"]),
+    row("Arrangement", "", "Where the displays stand", &["arrange", "arrangement", "position", "layout", "multi monitor", "monitor", "monitors", "displays", "screens", "second monitor", "external monitor", "external screen"]),
     row("Display", "Enabled", "Turn a display on or off", &["disable", "turn off", "monitor", "display"]),
     row("Display", "Resolution", "The display's mode", &["mode", "pixels", "4k", "1080p", "1440p"]),
     row("Display", "Refresh rate", "How often the display redraws", &["hz", "refresh", "fps", "60hz", "144hz"]),
-    row("Display", "Scale", "How large everything is drawn", &["scaling", "hidpi", "dpi", "zoom", "text size", "size", "fractional scaling"]),
+    row("Display", "Scale", "How large everything is drawn", &["scaling", "hidpi", "dpi", "zoom", "text size", "size", "fractional scaling", "font size", "font", "bigger text", "smaller text"]),
     row("Display", "Rotation", "Turn the picture for a portrait display", &["rotate", "orientation", "portrait", "landscape", "transform", "flip"]),
     row("Display", "Adaptive sync", "The refresh follows the frames", &["vrr", "freesync", "gsync", "variable refresh"]),
     row("Profiles", "", "Layouts applied when displays connect", &["profile", "kanshi", "docking", "dock", "external monitor"]),

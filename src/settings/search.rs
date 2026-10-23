@@ -330,6 +330,20 @@ impl Prepared {
     }
 }
 
+/// What the search says when `query` finds nothing: a pointer for the
+/// words that name no one row, or the plain "try another word".
+pub fn no_match_hint(query: &str) -> &'static str {
+    let q = words(query).join(" ");
+    if ["reset", "default", "defaults", "system default", "factory"]
+        .iter()
+        .any(|w| q.starts_with(w))
+    {
+        "Every pane has Reset to system at its foot"
+    } else {
+        "Try another word"
+    }
+}
+
 /// The entries `query` finds, best first. Nothing under two characters, so a
 /// single letter does not list half the settings.
 pub fn find(query: &str) -> Vec<Hit> {
@@ -529,9 +543,41 @@ mod tests {
             ("headphones", "Panel › Audio output"),
             ("pair", "Panel › Bluetooth"),
             ("accent colour", "Appearance › Accent"),
+            // Words people type that named nothing before.
+            ("font", "Displays › Display › Scale"),
+            ("font size", "Displays › Display › Scale"),
+            ("fingerprint", "Idle & Lock › Lock › Face unlock"),
+            ("time zone", "Bar › Clock"),
+            ("scroll direction", "Input › Touchpad › Natural scrolling"),
+            ("screen saver", "Idle & Lock › Idle timers › Lock after"),
+            ("lid", "Idle & Lock › Idle timers"),
+            ("second monitor", "Displays › Arrangement"),
+            ("nightlight", "Appearance › Night light › Night light"),
+            // Rankings that went to the wrong pane.
+            ("notifications", "Alerts › Notifications › Linger"),
+            ("night", "Appearance › Night light › Night light"),
+            ("clock", "Bar › Clock"),
+            ("monitor", "Displays › Arrangement"),
+            ("bar", "Bar › Segments"),
         ] {
             assert_eq!(top(query), path, "{query:?}");
         }
+    }
+
+    /// "reset" and "default" name no row: every pane has one. The empty
+    /// search says where it is instead of "try another word".
+    #[test]
+    fn reset_finds_no_row_but_says_where_it_is() {
+        assert!(find("reset").is_empty() && find("default").is_empty());
+        assert_eq!(
+            no_match_hint("Reset"),
+            "Every pane has Reset to system at its foot"
+        );
+        assert_eq!(
+            no_match_hint("default"),
+            "Every pane has Reset to system at its foot"
+        );
+        assert_eq!(no_match_hint("zzzq"), "Try another word");
     }
 
     #[test]
