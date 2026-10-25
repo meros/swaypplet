@@ -100,6 +100,8 @@ struct Drag {
 struct Details {
     group: gtk4::Box,
     title: gtk4::Label,
+    /// Hidden for the extra screen: Stop under "Extra screens" ends it.
+    enabled_row: gtk4::Box,
     enabled: gtk4::Switch,
     resolution: gtk4::DropDown,
     refresh: gtk4::DropDown,
@@ -268,7 +270,7 @@ impl DisplaysPane {
         // ── Profiles ─────────────────────────────────────────────────────
         let profiles = section_box(
             "Profiles",
-            "A profile is applied when its displays connect; the most specific wins. Save stores the layout on screen, not unapplied changes.",
+            "A profile is applied when its displays connect; the most specific wins. Save stores the layout on screen, not unapplied changes, and the extra screen's too when one is on: the next one starts there.",
         );
         let profile_list = ui::vbox(1);
         profile_list.add_css_class("settings-list");
@@ -371,6 +373,7 @@ impl DisplaysPane {
             details: Details {
                 group,
                 title,
+                enabled_row: enabled_row.clone(),
                 enabled,
                 resolution,
                 refresh,
@@ -591,7 +594,11 @@ impl Pane {
                 }
                 let refused = {
                     let mut drafts = q.drafts.borrow_mut();
-                    let others_on = drafts.iter().enumerate().any(|(j, d)| j != i && d.enabled);
+                    // The extra screen does not count: it is not in front of you.
+                    let others_on = drafts
+                        .iter()
+                        .enumerate()
+                        .any(|(j, d)| j != i && d.enabled && !d.extra);
                     if !on && !others_on {
                         true
                     } else {
@@ -1234,7 +1241,9 @@ impl Pane {
                 .position(|(t, _)| *t == d.transform)
                 .unwrap_or(0) as u32,
         );
-        dt.sync_row.set_visible(d.adaptive_sync.is_some());
+        dt.enabled_row.set_visible(!d.extra);
+        dt.sync_row
+            .set_visible(!d.extra && d.adaptive_sync.is_some());
         dt.sync.set_active(d.adaptive_sync.unwrap_or(false));
         for w in [&dt.resolution, &dt.refresh, &dt.scale, &dt.rotation] {
             w.set_sensitive(d.enabled);

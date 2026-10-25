@@ -1248,6 +1248,22 @@ pub enum OutputTransform {
     Flipped270,
 }
 
+impl OutputTransform {
+    /// The word `output … transform` takes, the same as the serde name.
+    pub fn sway(self) -> &'static str {
+        match self {
+            OutputTransform::Normal => "normal",
+            OutputTransform::R90 => "90",
+            OutputTransform::R180 => "180",
+            OutputTransform::R270 => "270",
+            OutputTransform::Flipped => "flipped",
+            OutputTransform::Flipped90 => "flipped-90",
+            OutputTransform::Flipped180 => "flipped-180",
+            OutputTransform::Flipped270 => "flipped-270",
+        }
+    }
+}
+
 /// One output of a display profile. A field left out keeps what the output
 /// has, so a profile can say only where a screen goes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1270,12 +1286,35 @@ pub struct DisplayOutput {
     pub adaptive_sync: Option<bool>,
 }
 
+/// How the extra screen (`services::cast::output`) stands while a profile
+/// is on screen. It has no `match`: there is one extra screen at a time,
+/// and sway gives it a new name each time. A field left out keeps what the
+/// extra screen gets by default: 1920×1080 at 60 Hz, scale 1, to the right
+/// of the screens.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ExtraScreenLayout {
+    /// Width, height and refresh in mHz: `[1920, 1080, 60000]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<[u32; 3]>,
+    /// The top-left corner in the layout, logical pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[i32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform: Option<OutputTransform>,
+}
+
 /// A named layout for one set of connected outputs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DisplayProfile {
     pub name: String,
     #[serde(default)]
     pub outputs: Vec<DisplayOutput>,
+    /// The extra screen's layout under this profile. Matching ignores it:
+    /// a cast that starts or stops never changes which profile fits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_screen: Option<ExtraScreenLayout>,
 }
 
 /// Display profiles, kanshi's job in the panel (`services::displays`): the
@@ -1298,11 +1337,14 @@ impl Displays {
                 .into_iter()
                 .filter(|p| !p.name.trim().is_empty() && !p.outputs.is_empty())
                 .map(|mut p| {
+                    let fix =
+                        |s: Option<f64>| s.filter(|s| s.is_finite()).map(|s| s.clamp(0.25, 8.0));
                     for o in &mut p.outputs {
-                        o.scale = o
-                            .scale
-                            .filter(|s| s.is_finite())
-                            .map(|s| s.clamp(0.25, 8.0));
+                        o.scale = fix(o.scale);
+                    }
+                    if let Some(e) = &mut p.extra_screen {
+                        e.scale = fix(e.scale);
+                        e.mode = e.mode.filter(|[w, h, _]| *w > 0 && *h > 0);
                     }
                     p
                 })

@@ -661,7 +661,7 @@ mod tests {
     }
 
     fn nested() -> (String, SocketAddr) {
-        let name = output::create().expect("create");
+        let name = output::create(&Default::default()).expect("create");
         (name, "127.0.0.1:0".parse().unwrap())
     }
 
@@ -941,7 +941,7 @@ mod tests {
     #[test]
     #[ignore = "needs a sway (nested), the encoders, and a browser driven by hand"]
     fn live_page_for_a_browser() {
-        let name = output::create().expect("create");
+        let name = output::create(&Default::default()).expect("create");
         let log = scratch("browser.log");
         let enc = live::Encoder::start(&name, log, Duration::from_secs(8)).expect("encoder");
         let hub = enc.hub.clone();
@@ -1008,7 +1008,7 @@ mod tests {
     fn extra_screen_round_trip() {
         use std::io::{Read, Write};
         let before = crate::sway::ipc::connect().unwrap().get_outputs().unwrap();
-        let name = output::create().expect("create");
+        let name = output::create(&Default::default()).expect("create");
         let after = crate::sway::ipc::connect().unwrap().get_outputs().unwrap();
         let made = after.iter().find(|o| o.name == name).expect("listed");
         let right = before

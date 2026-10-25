@@ -11,7 +11,9 @@
 //! more than a connector, which says more than `*`. Order breaks a tie, so
 //! kanshi's "first match wins" still holds between equals.
 
-use crate::settings::store::{DisplayOutput, DisplayProfile, OutputMatch, OutputTransform};
+use crate::settings::store::{
+    DisplayOutput, DisplayProfile, ExtraScreenLayout, OutputMatch, OutputTransform,
+};
 
 /// A mode as the compositor lists it: width, height, refresh in mHz.
 pub type Mode = (u32, u32, u32);
@@ -167,12 +169,55 @@ pub fn choose(
 /// moment a cast starts, and come back with a modeset when it ends. A
 /// session with only virtual outputs (the nested harness, `dev/render.sh`)
 /// keeps them, or there would be nothing to match.
-pub fn screens(heads: Vec<HeadState>) -> Vec<HeadState> {
+///
+/// The second list is the extra screens left out, for the Displays tab and
+/// a profile's `extra_screen`.
+pub fn split(heads: Vec<HeadState>) -> (Vec<HeadState>, Vec<HeadState>) {
     let virtual_ = |h: &HeadState| super::naming::is_virtual(&h.name);
     if heads.iter().all(virtual_) {
-        return heads;
+        return (heads, Vec::new());
     }
-    heads.into_iter().filter(|h| !virtual_(h)).collect()
+    heads.into_iter().partition(|h| !virtual_(h))
+}
+
+/// The sizes an extra screen offers. A headless output lists no modes of
+/// its own and takes any custom one; these are the sizes a TV or a viewer
+/// is likely to want, at 60 Hz.
+pub const EXTRA_MODES: [Mode; 4] = [
+    (3840, 2160, 60000),
+    (2560, 1440, 60000),
+    (1920, 1080, 60000),
+    (1280, 720, 60000),
+];
+
+/// An extra screen as the Displays tab shows it: the sizes it offers.
+pub fn offer_modes(mut head: HeadState) -> HeadState {
+    if head.modes.is_empty() {
+        head.modes = EXTRA_MODES.to_vec();
+    }
+    head
+}
+
+/// What applying `layout` does to the extra screen `head`. A mode goes as a
+/// custom one: a headless output lists none.
+pub fn extra_plan(layout: &ExtraScreenLayout) -> HeadPlan {
+    HeadPlan::Enable {
+        mode: layout.mode.map(|[w, h, r]| ModeChoice::Custom((w, h, r))),
+        position: layout.position.map(|[x, y]| (x, y)),
+        scale: layout.scale,
+        transform: layout.transform,
+        adaptive_sync: None,
+    }
+}
+
+/// The extra screen `head` as it stands now, to keep in a profile.
+pub fn capture_extra(head: &HeadState) -> ExtraScreenLayout {
+    ExtraScreenLayout {
+        mode: head.mode.map(|(w, h, r)| [w, h, r]),
+        position: Some([head.position.0, head.position.1]),
+        scale: Some(head.scale),
+        transform: Some(head.transform),
+    }
 }
 
 /// A scale for an output no profile names, from its pixel density: about
@@ -362,6 +407,7 @@ pub fn capture(name: &str, heads: &[HeadState]) -> DisplayProfile {
     DisplayProfile {
         name: name.to_string(),
         outputs,
+        extra_screen: None,
     }
 }
 
@@ -413,6 +459,7 @@ pub(crate) mod tests {
         DisplayProfile {
             name: name.into(),
             outputs,
+            extra_screen: None,
         }
     }
 

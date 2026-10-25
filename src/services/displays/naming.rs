@@ -39,12 +39,16 @@ fn harness_screen(connector: &str) -> bool {
         .any(|s| s == connector)
 }
 
-/// "Built-in display" for a laptop panel; otherwise the make, without its
-/// legal form, and the model ("Samsung Display ATNA40HQ02-0", "NON
-/// 28H2U"). The connector when the screen says nothing.
+/// "Built-in display" for a laptop panel, "Extra screen" for a virtual
+/// output; otherwise the make, without its legal form, and the model
+/// ("Samsung Display ATNA40HQ02-0", "NON 28H2U"). The connector when the
+/// screen says nothing.
 pub fn auto_name(connector: &str, make: &str, model: &str) -> String {
     if is_builtin(connector) {
         return "Built-in display".into();
+    }
+    if is_virtual(connector) {
+        return "Extra screen".into();
     }
     let make = known(make).map(short_vendor);
     let model = known(model).map(str::to_string);
@@ -59,10 +63,14 @@ pub fn auto_name(connector: &str, make: &str, model: &str) -> String {
 /// What a stored name follows: make, model and serial, so a monitor keeps
 /// its name on any port. Monitors without a serial (sway's "Unknown", or a
 /// run of zeros) share it by make and model; a built-in panel is the one on
-/// its connector.
+/// its connector; the extra screen is one, whatever HEADLESS-N sway gives
+/// it this time.
 pub fn key(connector: &str, make: &str, model: &str, serial: &str) -> String {
     if is_builtin(connector) {
         return format!("builtin|{connector}");
+    }
+    if is_virtual(connector) {
+        return "extra-screen".into();
     }
     let field = |s: &str| known(s).unwrap_or_default().to_string();
     match known(serial).filter(|s| !s.chars().all(|c| c == '0')) {
@@ -101,6 +109,18 @@ mod tests {
         assert!(!is_virtual("eDP-1"));
         assert!(!is_virtual("HDMI-A-1"));
         assert!(!is_virtual("headless"));
+    }
+
+    #[test]
+    fn the_extra_screen_has_one_name_whatever_sway_calls_it() {
+        assert_eq!(
+            auto_name("HEADLESS-3", "headless", "headless"),
+            "Extra screen"
+        );
+        assert_eq!(
+            key("HEADLESS-3", "headless", "headless", ""),
+            key("HEADLESS-7", "headless", "headless", "")
+        );
     }
 
     #[test]

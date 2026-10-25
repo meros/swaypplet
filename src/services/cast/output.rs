@@ -10,7 +10,11 @@
 //! desktop reaches it. `output NAME unplug` removes it, and its workspaces
 //! move to the screens that are left.
 //!
-//! Display profiles do not see it (`displays::matcher::screens`).
+//! A display profile can say where it goes and how it is drawn
+//! (`DisplayProfile::extra_screen`, saved from the Displays tab): the
+//! profile on screen gives `create` its layout, and what it leaves out is
+//! the default above. Profiles are never matched against it
+//! (`displays::matcher::split`).
 //!
 //! The name made is written to the runtime directory with the sway socket
 //! it was made on. A panel that restarts while a cast runs has lost the
@@ -25,6 +29,7 @@ use std::path::PathBuf;
 use swayipc::Connection;
 
 use crate::services::displays::naming::is_virtual;
+use crate::settings::store::{ExtraScreenLayout, OutputTransform};
 
 /// Width, height and refresh in Hz: 1080p, the size every Cast screen and
 /// every TV takes. A stream backend sends at its own rate (wayvnc: 30 fps);
@@ -61,9 +66,22 @@ pub fn right_of(outputs: &[Placed]) -> (i32, i32) {
         .map_or((0, 0), |o| (o.x + o.width, o.y))
 }
 
-/// The command that gives `name` its mode and place.
-pub fn configure_command(name: &str, (w, h, hz): (u32, u32, u32), (x, y): (i32, i32)) -> String {
-    format!("output {name} mode --custom {w}x{h}@{hz}Hz position {x} {y}")
+/// The command that gives `name` its mode, place, scale and rotation:
+/// `layout`'s where it says, else [`MODE`] right of `outputs`.
+pub fn configure_command(name: &str, layout: &ExtraScreenLayout, outputs: &[Placed]) -> String {
+    let (w, h, hz) = match layout.mode {
+        Some([w, h, mhz]) if mhz > 0 => (w, h, format!("{}", f64::from(mhz) / 1000.0)),
+        Some([w, h, _]) => (w, h, MODE.2.to_string()),
+        None => (MODE.0, MODE.1, MODE.2.to_string()),
+    };
+    let (x, y) = layout
+        .position
+        .map_or_else(|| right_of(outputs), |[x, y]| (x, y));
+    let scale = layout.scale.unwrap_or(1.0);
+    let transform = layout.transform.unwrap_or(OutputTransform::Normal).sway();
+    format!(
+        "output {name} mode --custom {w}x{h}@{hz}Hz position {x} {y} scale {scale} transform {transform}"
+    )
 }
 
 fn placed(conn: &mut Connection) -> Result<Vec<Placed>, String> {
@@ -111,8 +129,8 @@ fn run(conn: &mut Connection, cmd: &str) -> Result<(), String> {
         .map_err(|e| format!("sway ipc: `{cmd}`: {e}"))
 }
 
-/// Make the extra screen and place it. Its name.
-pub fn create() -> Result<String, String> {
+/// Make the extra screen and place it, as `layout` says. Its name.
+pub fn create(layout: &ExtraScreenLayout) -> Result<String, String> {
     let mut conn = crate::sway::ipc::connect().map_err(|e| format!("sway ipc: {e}"))?;
     let before = placed(&mut conn)?;
     let names: Vec<String> = before.iter().map(|o| o.name.clone()).collect();
@@ -132,10 +150,7 @@ pub fn create() -> Result<String, String> {
     {
         log::warn!("cast: {e}");
     }
-    if let Err(e) = run(
-        &mut conn,
-        &configure_command(&name, MODE, right_of(&before)),
-    ) {
+    if let Err(e) = run(&mut conn, &configure_command(&name, layout, &before)) {
         // The output is there either way; at sway's own size and place it
         // still works, so this is worth a line in the log, not a failure.
         log::warn!("cast: {e}");
@@ -291,7 +306,7 @@ mod tests {
     fn create_leaves_the_focus() {
         let mut conn = crate::sway::ipc::connect().unwrap();
         let before = focused(&mut conn);
-        let name = create().expect("create");
+        let name = create(&ExtraScreenLayout::default()).expect("create");
         let after = focused(&mut conn);
         remove(&name).expect("remove");
         assert_eq!(after, before, "focus moved to {name}");
@@ -314,9 +329,37 @@ mod tests {
 
     #[test]
     fn the_command_sets_a_custom_mode_and_a_place() {
+        let desk = [
+            out("DP-3", 0, 0, 2560, 1440),
+            out("eDP-1", 2560, 149, 1440, 900),
+        ];
         assert_eq!(
-            configure_command("HEADLESS-3", MODE, (4000, 149)),
-            "output HEADLESS-3 mode --custom 1920x1080@60Hz position 4000 149"
+            configure_command("HEADLESS-3", &ExtraScreenLayout::default(), &desk),
+            "output HEADLESS-3 mode --custom 1920x1080@60Hz position 4000 149 scale 1 transform normal"
+        );
+    }
+
+    #[test]
+    fn a_profiles_layout_wins_where_it_says_something() {
+        let desk = [out("eDP-1", 0, 0, 1440, 900)];
+        let layout = ExtraScreenLayout {
+            mode: Some([1280, 720, 59940]),
+            position: Some([-1280, 0]),
+            scale: Some(1.5),
+            transform: Some(OutputTransform::R90),
+        };
+        assert_eq!(
+            configure_command("HEADLESS-3", &layout, &desk),
+            "output HEADLESS-3 mode --custom 1280x720@59.94Hz position -1280 0 scale 1.5 transform 90"
+        );
+        // Only a scale: the default size, right of the screens.
+        let scaled = ExtraScreenLayout {
+            scale: Some(2.0),
+            ..ExtraScreenLayout::default()
+        };
+        assert_eq!(
+            configure_command("HEADLESS-3", &scaled, &desk),
+            "output HEADLESS-3 mode --custom 1920x1080@60Hz position 1440 0 scale 2 transform normal"
         );
     }
 

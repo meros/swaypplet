@@ -200,7 +200,9 @@ and Bar tabs is `nix <section>` into the clipboard.
   and `outputs`, each output a `match` of `name`, `make`, `model`,
   `serial` as globs, and optionally `enabled`, `mode` `[w, h, mHz]`,
   `position` `[x, y]`, `scale`, `transform` in sway's spelling, and
-  `adaptive_sync`) are read in this process by `services::displays`, which
+  `adaptive_sync`; and optionally `extra_screen`, the extra screen's
+  `mode`, `position`, `scale` and `transform` under that profile, with no
+  `match`) are read in this process by `services::displays`, which
   replaces kanshi over `zwlr_output_manager_v1`. A profile matches when its
   outputs claim every connected output, each a different one; the most
   specific match wins (an exact serial over make and model over a
@@ -210,7 +212,13 @@ and Bar tabs is `nix <section>` into the clipboard.
   configuration is tested before it is applied; one the compositor refuses
   leaves the outputs as they were and posts a notification. An output no
   profile names and the compositor left at scale 1 gets a scale from its
-  density (about 110 px per logical inch, in quarter steps). The section is
+  density (about 110 px per logical inch, in quarter steps). The extra
+  screen is never matched, so a cast that starts or stops leaves the
+  profile alone; the Displays tab arranges it like a screen (no Enabled,
+  no adaptive sync), "Save as profile" keeps its layout when one is on
+  (and keeps the profile's old one when none is), the layout goes with the
+  profile when it is shown, and a new cast makes its extra screen there
+  (`displays::extra_layout`). The section is
   replaced whole by the user's copy, so the first "Save current layout"
   copies the Nix profiles into the user file, and later Nix edits do not
   reach that account until Reset. From the command line,

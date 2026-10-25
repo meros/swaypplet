@@ -19,7 +19,7 @@
 //!
 //! A session where every output is virtual (the nested harness,
 //! `dev/render.sh`) has no screen to prefer, and treats its outputs as
-//! screens; the same rule `displays::matcher::screens` uses for profiles.
+//! screens; the same rule `displays::matcher::split` uses for profiles.
 
 use crate::services::displays::naming::{is_builtin, is_virtual};
 use crate::settings::store::{self, ExtraScreens};

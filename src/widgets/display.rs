@@ -487,7 +487,7 @@ impl DisplaySection {
         }
         {
             // The profiles do not see an extra screen come and go
-            // (`displays::matcher::screens`); the list of outputs does.
+            // (`displays::matcher::split`); the list of outputs does.
             let output_list = display.output_list.clone();
             let summary = display.section.summary.clone();
             let last = RefCell::new(cast::view().session.map(|s| s.output));

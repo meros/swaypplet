@@ -35,6 +35,9 @@ pub struct Draft {
     pub adaptive_sync: Option<bool>,
     /// The scale its pixel density asks for (`displays::dpi_scale`).
     pub suggested: Option<f64>,
+    /// The extra screen made for a cast (`displays::naming::is_virtual`):
+    /// arranged like a screen, but never switched off here.
+    pub extra: bool,
 }
 
 impl Draft {
@@ -69,6 +72,7 @@ impl Draft {
             transform: h.transform,
             adaptive_sync: h.adaptive_sync,
             suggested: crate::services::displays::dpi_scale(h),
+            extra: naming::is_virtual(&h.name),
         }
     }
 
@@ -386,7 +390,8 @@ impl Problem {
 
 pub fn check(drafts: &[Draft]) -> Result<(), Problem> {
     let on: Vec<&Draft> = drafts.iter().filter(|d| d.enabled).collect();
-    if on.is_empty() {
+    // Only the extra screen on leaves nothing in front of you.
+    if on.iter().all(|d| d.extra) {
         return Err(Problem::NoneEnabled);
     }
     for (a, da) in on.iter().enumerate() {
@@ -624,6 +629,7 @@ mod tests {
             transform: OutputTransform::Normal,
             adaptive_sync: None,
             suggested: None,
+            extra: false,
         }
     }
 
@@ -780,6 +786,15 @@ mod tests {
         let mut off = d.clone();
         off.iter_mut().for_each(|d| d.enabled = false);
         assert_eq!(check(&off), Err(Problem::NoneEnabled));
+        // The extra screen alone is not a display in front of you.
+        let mut tv = vec![
+            draft("a", (100, 100, 0), 1.0, (0, 0)),
+            draft("HEADLESS-2", (100, 100, 0), 1.0, (100, 0)),
+        ];
+        tv[1].extra = true;
+        assert_eq!(check(&tv), Ok(()));
+        tv[0].enabled = false;
+        assert_eq!(check(&tv), Err(Problem::NoneEnabled));
     }
 
     #[test]

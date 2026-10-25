@@ -155,9 +155,11 @@ pub fn begin(target: Target) {
         v.problem = None;
     });
     let for_worker = target.clone();
+    // The profile on screen may say where the extra screen goes.
+    let layout = crate::services::displays::extra_layout().unwrap_or_default();
     spawn_work(
         move || {
-            let name = output::create()?;
+            let name = output::create(&layout)?;
             match backend.start(&name, &for_worker) {
                 Ok(stream) => Ok((name, stream)),
                 Err(e) => {

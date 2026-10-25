@@ -18,6 +18,15 @@
 //! config's `output` lines back. An apply that changes nothing is never
 //! sent: it would be a modeset, and a modeset blanks the screen.
 //!
+//! # The extra screen
+//!
+//! A virtual output made for a cast (`services::cast::output`) is never
+//! matched: a cast that starts or stops must not change the profile. It is
+//! in the view, so the Displays tab arranges it like a screen, and a
+//! profile keeps its layout (`DisplayProfile::extra_screen`): saved with
+//! the rest, sent with the rest when the profile is shown, and read by the
+//! cast when it makes the next one ([`extra_layout`]).
+//!
 //! `failed` leaves the outputs as they were (the compositor stores nothing)
 //! and says so in a notification. `cancelled` means the outputs changed
 //! while the configuration was on its way; the next `done` matches again,
@@ -37,13 +46,14 @@ pub use wayland::Outcome;
 use crate::service::Observed;
 use crate::services::notifications::store::{StoreRef, store_add};
 use crate::services::notifications::{Notification, Urgency};
-use crate::settings::store::{self, DisplayProfile, Displays};
+use crate::settings::store::{self, DisplayProfile, Displays, ExtraScreenLayout};
 
 /// What the Displays section shows.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct View {
     /// Whether the compositor offers output management at all.
     pub available: bool,
+    /// The screens, then the extra screens (`naming::is_virtual`).
     pub heads: Vec<HeadState>,
     /// The profile on screen.
     pub current: Option<String>,
@@ -105,7 +115,10 @@ struct Engine {
     notify: Notify,
     /// The profiles in force: the settings in the panel.
     source: Source,
+    /// The screens: what the profiles are matched against.
     heads: RefCell<Vec<HeadState>>,
+    /// The extra screens beside them, never matched.
+    extra: RefCell<Vec<HeadState>>,
     serial: Cell<u32>,
     /// The connected outputs' identities at the last match, sorted.
     identities: RefCell<Vec<String>>,
@@ -193,7 +206,7 @@ pub fn configure(heads: &[HeadState], plans: Vec<HeadPlan>, reply: impl FnOnce(O
     let Some(e) = engine() else {
         return answer(reply, Outcome::Failed);
     };
-    let now = e.heads.borrow().clone();
+    let now = e.all_heads();
     let Some(plans) = onto(heads, &plans, &now) else {
         return answer(reply, Outcome::Failed);
     };
@@ -240,13 +253,32 @@ pub fn save_current(name: &str) {
     if name.is_empty() {
         return;
     }
-    let profile = matcher::capture(name, &e.heads.borrow());
+    let mut profile = matcher::capture(name, &e.heads.borrow());
+    profile.extra_screen = e.extra.borrow().first().map(matcher::capture_extra);
     *e.current.borrow_mut() = Some(name.to_string());
     store::edit::<Displays>(|d| match d.profiles.iter().position(|p| p.name == name) {
-        Some(i) => d.profiles[i] = profile,
+        Some(i) => {
+            // Saved without an extra screen on: the one it had stays.
+            if profile.extra_screen.is_none() {
+                profile.extra_screen = d.profiles[i].extra_screen.take();
+            }
+            d.profiles[i] = profile;
+        }
         None => d.profiles.insert(0, profile),
     });
     e.publish();
+}
+
+/// The extra screen's layout under the profile on screen, for the cast to
+/// make the next one with. `None` without one: the cast's own default.
+pub fn extra_layout() -> Option<ExtraScreenLayout> {
+    let current = engine()?.current.borrow().clone()?;
+    store::current()
+        .displays()
+        .profiles
+        .into_iter()
+        .find(|p| p.name == current)?
+        .extra_screen
 }
 
 /// Remove the profile `name`.
@@ -293,6 +325,7 @@ impl Engine {
             notify,
             source,
             heads: RefCell::default(),
+            extra: RefCell::default(),
             serial: Cell::new(0),
             identities: RefCell::default(),
             before: RefCell::default(),
@@ -308,9 +341,10 @@ impl Engine {
     fn event(&self, event: wayland::Event) {
         match event {
             wayland::Event::Heads { serial, heads } => {
-                // An extra screen for a cast is neither matched nor shown;
-                // a configuration leaves it as it is (`wayland::send`).
-                let heads = matcher::screens(heads);
+                // An extra screen for a cast is never matched; a profile's
+                // layout for it goes with the profile (`show`).
+                let (heads, extra) = matcher::split(heads);
+                *self.extra.borrow_mut() = extra;
                 self.serial.set(serial);
                 let mut ids: Vec<String> = heads.iter().map(HeadState::identity).collect();
                 ids.sort();
@@ -402,7 +436,7 @@ impl Engine {
     }
 
     fn show(&self, profile: &DisplayProfile, assignment: &[usize], heads: &[HeadState]) {
-        let plans: Vec<HeadPlan> = match matcher::plan(profile, assignment, heads) {
+        let mut plans: Vec<HeadPlan> = match matcher::plan(profile, assignment, heads) {
             Ok(p) => p,
             Err(PlanError::NoneEnabled) => {
                 (self.notify)(
@@ -412,12 +446,28 @@ impl Engine {
                 return;
             }
         };
-        if matcher::satisfied(&plans, heads) {
+        // The extra screen, when one is on and the profile says where it
+        // goes; else it stays as it is.
+        let mut heads = heads.to_vec();
+        if let Some(layout) = &profile.extra_screen {
+            for h in self.extra.borrow().iter() {
+                heads.push(h.clone());
+                plans.push(matcher::extra_plan(layout));
+            }
+        }
+        if matcher::satisfied(&plans, &heads) {
             *self.current.borrow_mut() = Some(profile.name.clone());
             self.publish();
             return;
         }
-        self.send(&profile.name, &plans, heads);
+        self.send(&profile.name, &plans, &heads);
+    }
+
+    /// The screens, then the extra screens.
+    fn all_heads(&self) -> Vec<HeadState> {
+        let mut all = self.heads.borrow().clone();
+        all.extend(self.extra.borrow().iter().cloned());
+        all
     }
 
     fn send(&self, name: &str, plans: &[HeadPlan], heads: &[HeadState]) {
@@ -448,6 +498,14 @@ impl Engine {
             .iter()
             .map(|p| (p.name.clone(), matcher::assign(p, &heads).is_some()))
             .collect();
+        let mut heads = heads;
+        heads.extend(
+            self.extra
+                .borrow()
+                .iter()
+                .cloned()
+                .map(matcher::offer_modes),
+        );
         let v = View {
             available: true,
             heads,
@@ -490,6 +548,7 @@ mod tests {
                 transform: None,
                 adaptive_sync: None,
             }],
+            extra_screen: None,
         }
     }
 
@@ -681,10 +740,69 @@ mod tests {
     }
 
     #[test]
+    fn a_profiles_extra_screen_layout_goes_with_the_profile() {
+        let mut p = profile("big", 2.0);
+        p.extra_screen = Some(ExtraScreenLayout {
+            mode: Some([1280, 720, 60000]),
+            position: Some([960, 0]),
+            scale: Some(1.5),
+            transform: None,
+        });
+        let (e, rec, _) = engine(vec![p]);
+        let mut screen = head("DP-1", "X", "Y");
+        screen.scale = 1.0;
+        let mut cast = head("HEADLESS-2", "", "");
+        cast.modes.clear();
+        cast.position = (1920, 0);
+        // The screens arrive with an extra screen on: one configuration
+        // carries both, the extra screen's mode as a custom one.
+        e.event(wayland::Event::Heads {
+            serial: 1,
+            heads: vec![screen.clone(), cast.clone()],
+        });
+        let sent = rec.sent.borrow().clone();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].2.len(), 2);
+        assert_eq!(
+            sent[0].2[1],
+            HeadPlan::Enable {
+                mode: Some(ModeChoice::Custom((1280, 720, 60000))),
+                position: Some((960, 0)),
+                scale: Some(1.5),
+                transform: None,
+                adaptive_sync: None,
+            }
+        );
+        // The view lists it after the screens, with sizes to pick from.
+        e.publish();
+        let v = view();
+        assert_eq!(v.heads.len(), 2);
+        assert_eq!(v.heads[1].name, "HEADLESS-2");
+        assert!(!v.heads[1].modes.is_empty());
+        // A cast that starts later sends nothing here: the cast places it
+        // (`extra_layout`), and the profile stays.
+        e.event(wayland::Event::Outcome {
+            id: sent[0].0,
+            outcome: Outcome::Succeeded,
+        });
+        screen.scale = 2.0;
+        e.event(wayland::Event::Heads {
+            serial: 2,
+            heads: vec![screen.clone()],
+        });
+        e.event(wayland::Event::Heads {
+            serial: 3,
+            heads: vec![screen, cast],
+        });
+        assert_eq!(rec.sent.borrow().len(), 1);
+        assert_eq!(e.current.borrow().as_deref(), Some("big"));
+    }
+
+    #[test]
     fn a_session_of_only_virtual_outputs_keeps_them() {
         let only = vec![head("HEADLESS-1", "", ""), head("HEADLESS-2", "", "")];
-        assert_eq!(matcher::screens(only.clone()), only);
+        assert_eq!(matcher::split(only.clone()).0, only);
         let mixed = vec![head("eDP-1", "", ""), head("HEADLESS-2", "", "")];
-        assert_eq!(matcher::screens(mixed).len(), 1);
+        assert_eq!(matcher::split(mixed).0.len(), 1);
     }
 }
