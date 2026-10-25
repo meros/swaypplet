@@ -130,6 +130,8 @@ pub enum Ev {
     LockerGone {
         rc: i32,
     },
+    /// A presence event is queued; the top of the loop drains it.
+    Wake,
     Fatal(String),
     /// The settings file was written (`crate::watch`, inotify).
     SettingsChanged,
@@ -254,7 +256,28 @@ pub fn run() -> ! {
     //
     // None on hardware without the sensor, which keeps the timer-only
     // behaviour intact.
-    let presence = presence::serve();
+    //
+    // The loop sleeps on `rx`, not on a tick, so a presence edge has to wake
+    // it. Without the forwarder below it was drained only when some other
+    // event happened to arrive: on 2026-10-25 a return was acted on 3 s late,
+    // and only because the face unlock woke the loop. On a blanked lock
+    // screen that is a walk-up to a dark panel while face unlock runs
+    // behind it.
+    let presence = presence::serve().map(|events| {
+        let (queue, drained) = mpsc::channel();
+        let wake = tx.clone();
+        std::thread::Builder::new()
+            .name("presence-wake".into())
+            .spawn(move || {
+                while let Ok(event) = events.recv_blocking() {
+                    if queue.send(event).is_err() || wake.send(Ev::Wake).is_err() {
+                        return;
+                    }
+                }
+            })
+            .expect("spawn presence-wake");
+        drained
+    });
     // Mirrors the sensor, for the tiers that ask whether anyone is here.
     // None until the first reading lands.
     let mut present: Option<bool> = None;
@@ -268,8 +291,8 @@ pub fn run() -> ! {
     log::info!("idle: manager started");
     loop {
         // Transitions arrive from the owner thread, which samples on its own
-        // cadence; this drain rides the 250 ms tick below, so that tick is
-        // the only latency between the sensor changing and us acting on it.
+        // cadence; each one also sends `Ev::Wake`, so the loop is here within
+        // microseconds of the sensor changing.
         let mut now_present = None;
         if let Some(events) = &presence {
             while let Ok(event) = events.try_recv() {
@@ -679,6 +702,8 @@ pub fn run() -> ! {
             }
             // Handled at the top of the next pass, with the clock.
             Ev::SettingsChanged => settings_changed = true,
+            // The presence queue is drained at the top of the next pass.
+            Ev::Wake => {}
         }
     }
 }
