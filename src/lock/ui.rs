@@ -539,6 +539,26 @@ impl SurfaceSet {
             let caption = caption.clone();
             entry.connect_changed(move |_| caption.clear_status());
         }
+        // Only the focused surface receives keys, so the other monitors
+        // would show an empty field while the user types. Copy the text to
+        // every other entry; `set_text` on equal text is skipped, which ends
+        // the echo between two entries. `try_borrow` skips the copy while the
+        // set is being mutated, and a surface that registers later starts empty.
+        {
+            let set = self.inner.clone();
+            entry.connect_changed(move |changed| {
+                let Ok(surfaces) = set.try_borrow() else {
+                    return;
+                };
+                let text = changed.text();
+                for s in surfaces.iter().filter(|s| &s.entry != changed) {
+                    if s.entry.text() != text {
+                        s.entry.set_text(&text);
+                        s.entry.set_position(-1);
+                    }
+                }
+            });
+        }
         // The secret leaves the widget the moment Enter takes it. Clearing it
         // later, on the reject path in `set_verifying(false)`, left it sitting
         // in the field on every path that never gets there: a greeter jump to
