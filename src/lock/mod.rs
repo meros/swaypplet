@@ -612,8 +612,12 @@ pub fn run() -> ! {
                 let surfaces = surfaces.clone();
                 let end_lock = end_lock.clone();
                 let unlocking = unlocking.clone();
-                glib::timeout_add_local(Duration::from_millis(200), move || {
-                    while let Ok(ev) = face_rx.try_recv() {
+                // Awaited rather than polled. A 200 ms poll added up to
+                // 200 ms between faced's match and the unlock starting, and
+                // the same again to every progress hint, on the one path
+                // whose whole point is to be instant.
+                glib::spawn_future_local(async move {
+                    while let Ok(ev) = face_rx.recv().await {
                         match ev {
                             EngineEvent::Match(_) => {
                                 // Show the success state, then unlock a beat
@@ -626,7 +630,7 @@ pub fn run() -> ! {
                                 // long enough to see, short enough that the
                                 // attempt still reads as instant.
                                 if unlocking.replace(true) {
-                                    return glib::ControlFlow::Break;
+                                    return;
                                 }
                                 surfaces
                                     .show_face(Some(crate::ui::FaceState::Ok), "Recognised you");
@@ -635,7 +639,7 @@ pub fn run() -> ! {
                                 glib::timeout_add_local_once(face_settle(), move || {
                                     end_lock();
                                 });
-                                return glib::ControlFlow::Break;
+                                return;
                             }
                             EngineEvent::Progress(p) => {
                                 surfaces.show_face(Some(p.ring()), p.text());
@@ -658,7 +662,6 @@ pub fn run() -> ! {
                             EngineEvent::Ready => {}
                         }
                     }
-                    glib::ControlFlow::Continue
                 });
             }
 

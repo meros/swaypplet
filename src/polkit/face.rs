@@ -231,7 +231,8 @@ fn progress(state: &Rc<RefCell<PolkitState>>, req: Request) {
     if !live {
         return;
     }
-    let Some(progress) = Progress::parse(&req.state) else {
+    let hint = (!req.hint.is_empty()).then_some(req.hint.as_str());
+    let Some(progress) = Progress::parse(&req.state, hint) else {
         return;
     };
     report(state, progress.ring(), progress.text(), progress.text());

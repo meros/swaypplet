@@ -38,31 +38,31 @@
 //! and the one signal that should unlock it never fires. The lid edge is the
 //! arrival neither the sensor nor logind reports.
 //!
-//! Verification shells out to `howdy-verify <user>` (nixos repo,
-//! pkgs/howdy-verify), the one face-verification implementation on the system —
-//! the same binary PAM uses for sudo and pkexec, so "is this the user" is
-//! decided in exactly one place. It reads howdy's config, model format and
-//! dlib data, but replaces howdy's compare.py, which is a script rather than a
-//! library and whose only route into PAM synthesises an Enter keypress through
-//! uinput. Not a PAM module here either, for the same reason fingerprint uses
-//! fprintd's bus API: the locker's PAM stack stays password-only.
+//! Verification asks faced (nixos repo, pkgs/faced) over its session socket,
+//! the one face-verification implementation on the system, so "is this the
+//! user" is decided in exactly one place. Not a PAM module, for the same
+//! reason fingerprint uses fprintd's bus API: the locker's PAM stack stays
+//! password-only.
 //!
-//! Exit codes (inherited from compare.py, so the contract predates the
-//! rewrite): 0 match, 11 no match before its own timeout, 13 every frame too
-//! dark, 10 no enrolled model, 1 detector or camera init failed, 12 no
-//! username given. The first three are worth retrying; the rest are permanent
-//! for this session, and retrying them would just burn the emitter, so they
-//! stop the worker.
+//! One burst per arrival, and faced decides how long it lasts: it stays open
+//! while a face is in view, compares only frontal, still frames, and ends on
+//! a match, on no face for 1.5 s, or on too many good frames that did not
+//! match. So this worker no longer paces attempts. It starts one the moment
+//! an arrival edge lands, and after a burst that ended without a match it
+//! starts the next one almost at once, for as long as the arrival window
+//! lasts. faced bounds the emitter and the attempts on its own side.
 //!
-//! This runs as the session user, so it needs read access to the models
-//! (/var/lib/howdy/models) and the camera node, both group `howdy` — the IR
-//! node is deliberately not group `video`, because whoever can open the
-//! loopback's OUTPUT side can inject frames, and an injected frame is a face
-//! unlock bypass needing neither a photo nor physical access. Group changes
-//! need a fresh login before the locker inherits them.
+//! Exit codes: 0 match, 11 no match / no face / no good look, 13 every frame
+//! too dark, 14 busy or cooling down, 10 no enrolled model, 15 locked out,
+//! 1 unavailable. The first four are worth retrying; the rest are permanent
+//! for this lock episode, and retrying them would only burn the emitter, so
+//! they stop the worker.
+//!
+//! This runs as the session user and needs nothing but the session socket
+//! (group `howdy`). The IR node and the enrolled models are root only: faced
+//! reads them, and nothing in the session should.
 
 use std::sync::mpsc;
-use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use crate::fp::EngineEvent;
@@ -101,44 +101,89 @@ fn watch_resume() -> mpsc::Receiver<()> {
     rx
 }
 
-/// Tick for this engine's own deadlines. Presence itself is pushed from
-/// whoever owns the sensor (see `services::presence`), so this no longer sets
-/// a sampling rate — it only decides how soon after arrival an attempt
-/// starts, and how finely `RETRY_AFTER` is honoured.
-const POLL: Duration = Duration::from_millis(250);
-
-/// Gap between attempts while presence holds.
+/// How long after an arrival this worker keeps starting bursts.
 ///
-/// Was 6 s, sized around a verifier that spent 2.097 s on interpreter and
-/// dlib startup before looking at a frame: retrying sooner mostly bought more
-/// startup. That cost is now zero, an attempt is about 0.6 s warm, and the
-/// daemon enforces its own 1.5 s cooldown, so the gap only has to be long
-/// enough for a person to react to "didn't recognise you" and adjust.
-const RETRY_AFTER: Duration = Duration::from_millis(2500);
+/// Replaces a fixed four attempts with a 2.5 s gap between them. The gap was
+/// there to pace a verifier that judged a fixed 3 s window; faced now keeps a
+/// burst open while a face is in view and ends it itself, so the only thing
+/// left to bound here is how long one arrival keeps the camera in play. Past
+/// this the person is not looking, or it is not them, and the password field
+/// is right there. faced's duty window bounds the emitter regardless.
+const ARRIVAL_WINDOW: Duration = Duration::from_secs(15);
 
-/// Attempts per arrival before falling silent until the next one.
-///
-/// Four rather than three, because each one now costs a fraction of what it
-/// did and the whole sequence finishes in about 12 s instead of 21 s. Beyond
-/// that the light is wrong or it is not you, and the password field is right
-/// there.
-const MAX_ATTEMPTS: u32 = 4;
+/// Gaps before the next burst, by how the last one ended. Short: nothing is
+/// waited out here any more. A face that was there but never good, or nobody
+/// in frame, starts again at once; "didn't recognise you" gets long enough to
+/// be read; a busy daemon gets the floor faced enforces anyway.
+const AGAIN_SOON: Duration = Duration::from_millis(100);
+const AGAIN_AFTER_NO_MATCH: Duration = Duration::from_millis(800);
+const AGAIN_AFTER_FAULT: Duration = Duration::from_millis(1000);
 
 enum Attempt {
     Match,
-    Retryable(Option<String>),
+    Retryable { hint: Option<String>, after: Duration },
+    /// Locked out: stop for this arrival, try again on the next one.
+    StandDown(String),
     Fatal(String),
+}
+
+/// Everything that can arm or disarm an attempt, on one channel, so the
+/// worker blocks on it instead of polling three sources on a tick. The tick
+/// was 250 ms, which was up to 250 ms between the lid opening and the camera
+/// being asked.
+enum Wake {
+    Presence(PresenceEvent),
+    Resume,
+    Lid(bool),
+}
+
+fn wakes() -> mpsc::Receiver<Wake> {
+    let (tx, rx) = mpsc::channel();
+    // The idle manager owns the device and publishes it; this listens. Doing
+    // its own reads here put a third 4 Hz reader on hardware that serves
+    // about three reads a second, and every reader queued behind the others.
+    let events = presence::subscribe();
+    let resumes = watch_resume();
+    let lid = crate::services::lid::watch();
+    {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            while let Ok(ev) = events.recv_blocking() {
+                if tx.send(Wake::Presence(ev)).is_err() {
+                    return;
+                }
+            }
+        });
+    }
+    {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            while resumes.recv().is_ok() {
+                if tx.send(Wake::Resume).is_err() {
+                    return;
+                }
+            }
+        });
+    }
+    std::thread::spawn(move || {
+        while let Ok(open) = lid.recv() {
+            if tx.send(Wake::Lid(open)).is_err() {
+                return;
+            }
+        }
+    });
+    rx
 }
 
 /// Spawn the face worker. The thread is detached and ends on a match, on a
 /// fatal error, or when the lock UI drops the receiver.
-pub fn start(user: String) -> mpsc::Receiver<EngineEvent> {
-    let (tx, rx) = mpsc::channel();
+pub fn start(user: String) -> async_channel::Receiver<EngineEvent> {
+    let (tx, rx) = async_channel::unbounded();
     std::thread::spawn(move || run(&user, &tx));
     rx
 }
 
-fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
+fn run(user: &str, tx: &async_channel::Sender<EngineEvent>) {
     // No sensor is not nothing to do. Presence is one of the two things that
     // arm an attempt and resume is the other, and resume comes from logind, so
     // a machine without the sensor still face-unlocks when the lid opens. It
@@ -146,14 +191,15 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
     // carry on rather than ending the worker, which is what used to happen and
     // what would now silently take the lid with it.
     if Presence::detect().is_none() {
-        let _ = tx.send(EngineEvent::Unavailable(
+        let _ = tx.send_blocking(EngineEvent::Unavailable(
             "no presence sensor — face unlock waits for a resume".to_string(),
         ));
     }
 
     // Register as the lock agent and hold the connection for the whole lock
     // episode. faced treats the connection itself as the registration, so
-    // this must outlive every attempt; dropping it deregisters.
+    // this must outlive every attempt; dropping it deregisters, and faced
+    // reads that as the end of the episode (it resets the unlock lockout).
     //
     // This is what lets the daemon refuse unlock verification when no lock
     // screen is actually up, rather than trusting that whoever asked had a
@@ -170,12 +216,7 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
         }
     };
 
-    // The idle manager owns the device and publishes it; this listens. Doing
-    // its own reads here put a third 4 Hz reader on hardware that serves
-    // about three reads a second, and every reader queued behind the others.
-    let events = presence::subscribe();
-    let resumes = watch_resume();
-    let lid = crate::services::lid::watch();
+    let wakes = wakes();
     // None until the first reading lands, so the opening state is a starting
     // point rather than an arrival — arming on it would run face unlock
     // against whoever locked the machine a moment ago.
@@ -183,34 +224,53 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
 
     // Some(deadline) means an attempt is armed for that instant.
     let mut armed: Option<Instant> = None;
-    let mut attempts = 0u32;
+    // The arrival this run of bursts belongs to: when, and what it was.
+    let mut arrival: Option<(Instant, &'static str)> = None;
     // Transient Unavailable results, reset on each fresh arrival. See attempt().
     let mut transient = 0u32;
 
     loop {
-        sleep(POLL);
+        // Block until something happens or the armed attempt is due. Nothing
+        // here ticks: an arrival starts the camera as soon as it is read.
+        let wait = armed.map_or(Duration::from_secs(3600), |due| {
+            due.saturating_duration_since(Instant::now())
+        });
+        let mut queued = Vec::new();
+        match wakes.recv_timeout(wait) {
+            Ok(w) => queued.push(w),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            // Every source has gone. Nothing can arm any more; sleep out an
+            // armed attempt rather than spin.
+            Err(mpsc::RecvTimeoutError::Disconnected) => std::thread::sleep(wait),
+        }
+        queued.extend(wakes.try_iter());
 
-        // Collapse everything queued since the last tick into one edge; only
-        // a change in settled state is an arrival or a departure.
+        // Collapse everything queued into one edge; only a change in settled
+        // state is an arrival or a departure.
         let mut edge = None;
-        while let Ok(event) = events.try_recv() {
-            if let PresenceEvent::Changed(state) = event
-                && present != Some(state)
-            {
-                let first = present.is_none();
-                present = Some(state);
-                if !first {
-                    edge = Some(state);
+        let mut woke = None;
+        for w in queued {
+            match w {
+                Wake::Presence(PresenceEvent::Changed(state)) if present != Some(state) => {
+                    let first = present.is_none();
+                    present = Some(state);
+                    if !first {
+                        edge = Some(state);
+                    }
                 }
+                Wake::Presence(_) => {}
+                Wake::Resume => woke = Some("resumed from sleep"),
+                Wake::Lid(true) => woke = Some("lid opened"),
+                Wake::Lid(false) => {}
             }
         }
 
         match edge {
             Some(true) => {
                 log::info!("face: presence returned — arming");
-                attempts = 0;
                 transient = 0;
                 armed = Some(Instant::now());
+                arrival = Some((Instant::now(), "presence returned"));
             }
             Some(false) => {
                 log::info!("face: presence gone — standing down");
@@ -221,25 +281,15 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
 
         // A wake outranks whatever presence last said. The lid was shut and
         // is now open, which is an arrival however still the sensor reads, and
-        // it resets the attempt budget for the same reason an arrival does:
+        // it resets the arrival window for the same reason an arrival does:
         // this is a fresh approach to the machine, not the tail of the last
-        // one. Drained after presence so the two cannot arm twice for one
-        // return, and both sources collapse into one edge for the same
-        // reason: a lid open that also resumes must arm once, not twice.
-        let mut woke = None;
-        while resumes.try_recv().is_ok() {
-            woke = Some("resumed from sleep");
-        }
-        while let Ok(open) = lid.try_recv() {
-            if open {
-                woke = Some("lid opened");
-            }
-        }
+        // one. Collapsed with presence above so a lid open that also resumes
+        // arms once, not twice.
         if let Some(why) = woke {
             log::info!("face: {why} — arming");
-            attempts = 0;
             transient = 0;
             armed = Some(Instant::now());
+            arrival = Some((Instant::now(), why));
         }
 
         let Some(due) = armed else { continue };
@@ -249,56 +299,58 @@ fn run(user: &str, tx: &mpsc::Sender<EngineEvent>) {
 
         match attempt(tx, &mut transient) {
             Attempt::Match => {
-                log::info!("face: match — unlocking");
-                let _ = tx.send(EngineEvent::Match(user.to_string()));
+                // End to end, for the journal: the arrival edge as this
+                // process read it, to the match. faced logs its own split.
+                if let Some((at, why)) = arrival {
+                    log::info!(
+                        "face: match — unlocking, {} ms after {why}",
+                        at.elapsed().as_millis()
+                    );
+                }
+                let _ = tx.send_blocking(EngineEvent::Match(user.to_string()));
                 return;
             }
-            Attempt::Retryable(hint) => {
-                attempts += 1;
+            Attempt::Retryable { hint, after } => {
                 if let Some(hint) = hint {
                     log::info!("face: {hint}");
-                    if tx.send(EngineEvent::Hint(hint)).is_err() {
+                    if tx.send_blocking(EngineEvent::Hint(hint)).is_err() {
                         return;
                     }
                 }
-                if attempts >= MAX_ATTEMPTS {
+                let spent = arrival.map_or(ARRIVAL_WINDOW, |(at, _)| at.elapsed());
+                if spent >= ARRIVAL_WINDOW {
                     log::info!(
-                        "face: {attempts} attempts without a match — waiting for next arrival"
+                        "face: no match in {} s — waiting for next arrival",
+                        ARRIVAL_WINDOW.as_secs()
                     );
                     armed = None;
                 } else {
-                    armed = Some(Instant::now() + RETRY_AFTER);
+                    armed = Some(Instant::now() + after);
                 }
+            }
+            Attempt::StandDown(why) => {
+                log::info!("face: {why} — waiting for next arrival");
+                if tx.send_blocking(EngineEvent::Hint(why)).is_err() {
+                    return;
+                }
+                armed = None;
             }
             Attempt::Fatal(why) => {
                 log::info!("face: disabled — {why}");
-                let _ = tx.send(EngineEvent::Unavailable(why));
+                let _ = tx.send_blocking(EngineEvent::Unavailable(why));
                 return;
             }
         }
     }
 }
 
-/// The exit-code contract, as documented in docs/face-unlock-architecture.md
-/// §4.2 in the nixos repo. The verifier is the authority; this is the reader.
-///
-/// The default arm is `Retryable`, deliberately. It used to be `Fatal`, which
-/// meant any code this match did not know about ended the worker thread and
-/// disabled face unlock for the whole lock episode. Two things made that bad:
-/// a single transient stall looked identical to a broken install, and adding
-/// any new code on the verifier side would silently disable the feature on an
-/// older locker. Unknown means unknown, and the safe reading of unknown is
-/// "try again"; the attempt counter already bounds how long that goes on.
 /// Run one verification against faced, forwarding progress to the UI.
 ///
-/// Holds a socket for the length of the burst rather than forking a process.
-/// The old path forked `howdy-verify`, which paid 2.1 s of interpreter and
-/// dlib startup before looking at a frame and could report nothing until it
-/// exited. The exit-code contract is unchanged; it now arrives over the wire
-/// instead of through a process status.
-fn attempt(tx: &mpsc::Sender<EngineEvent>, transient: &mut u32) -> Attempt {
+/// Holds a socket for the length of the burst rather than forking a process,
+/// so progress and hints arrive while the burst runs.
+fn attempt(tx: &async_channel::Sender<EngineEvent>, transient: &mut u32) -> Attempt {
     let verdict = crate::face::verify(|state| {
-        let _ = tx.send(EngineEvent::Progress(state));
+        let _ = tx.send_blocking(EngineEvent::Progress(state));
     });
 
     let verdict = match verdict {
@@ -308,7 +360,7 @@ fn attempt(tx: &mpsc::Sender<EngineEvent>, transient: &mut u32) -> Attempt {
         Err(e) => {
             *transient += 1;
             return if *transient <= 1 {
-                Attempt::Retryable(None)
+                Attempt::Retryable { hint: None, after: AGAIN_AFTER_FAULT }
             } else {
                 Attempt::Fatal(format!("faced unreachable: {e}"))
             };
@@ -329,34 +381,92 @@ fn attempt(tx: &mpsc::Sender<EngineEvent>, transient: &mut u32) -> Attempt {
 fn map_exit(exit: i32, saw_face: bool, outcome: &str, transient: &mut u32) -> Attempt {
     match exit {
         0 => Attempt::Match,
-        // no_match | no_face | deadline. Which of the three decides the
-        // wording, and the daemon is the only thing that knows: "didn't
-        // recognise you" and "didn't see you" send the user to completely
-        // different actions, so this must not guess.
-        11 => Attempt::Retryable(Some(if saw_face || outcome == "no_match" {
-            "Didn't recognise you".to_string()
-        } else {
-            "Didn't see you".to_string()
-        })),
+        // no_match | deadline | no_face. Which one decides the wording, and
+        // the daemon is the only thing that knows: "didn't recognise you",
+        // "look at the screen" and nothing at all send the user to different
+        // actions, so this must not guess.
+        11 => match outcome {
+            "no_match" => Attempt::Retryable {
+                hint: Some("Didn't recognise you".to_string()),
+                after: AGAIN_AFTER_NO_MATCH,
+            },
+            // A face, but never frontal and still enough to compare. The
+            // burst already said so live; start the next one at once.
+            "deadline" if saw_face => Attempt::Retryable {
+                hint: None,
+                after: AGAIN_SOON,
+            },
+            // Nobody in frame for the no-face window. Silent: "Looking for
+            // you" is already on screen, and a failure flashed every couple
+            // of seconds at someone reading a notification is noise.
+            _ => Attempt::Retryable { hint: None, after: AGAIN_SOON },
+        },
         // Never the user's fault, and never the room's: the camera carries
         // its own illuminator, so nothing lit means the emitter or the relay
         // is wrong. Asking someone to reposition their face, or to turn a
         // light on, would be misleading.
-        13 => Attempt::Retryable(Some("No infrared light".to_string())),
-        14 => Attempt::Retryable(Some("Face unlock busy".to_string())),
+        13 => Attempt::Retryable {
+            hint: Some("No infrared light".to_string()),
+            after: AGAIN_AFTER_FAULT,
+        },
+        // Busy or cooling down: faced's own floor, a fraction of a second.
+        14 => Attempt::Retryable { hint: None, after: AGAIN_SOON },
         1 => {
             *transient += 1;
             if *transient <= 1 {
-                Attempt::Retryable(None)
+                Attempt::Retryable { hint: None, after: AGAIN_AFTER_FAULT }
             } else {
                 Attempt::Fatal("face unlock unavailable".to_string())
             }
         }
         10 => Attempt::Fatal("no enrolled face model".to_string()),
         12 => Attempt::Fatal("compare rejected the username".to_string()),
-        15 => Attempt::Fatal("too many failed face attempts".to_string()),
+        // Locked out. The first lockout is timed and the next arrival may
+        // find it over; the second holds until a password. Either way a
+        // retry is refused before the camera opens, so stand down rather than
+        // end the worker.
+        15 => Attempt::StandDown("Too many tries — use your password".to_string()),
         16 => Attempt::Fatal("face unlock refused".to_string()),
         17 => Attempt::Fatal("face unlock declined".to_string()),
-        code => Attempt::Retryable(Some(format!("face unlock returned {code}"))),
+        code => Attempt::Retryable {
+            hint: Some(format!("face unlock returned {code}")),
+            after: AGAIN_AFTER_FAULT,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_burst_that_never_got_a_good_look_retries_at_once_and_silently() {
+        let mut t = 0;
+        assert!(matches!(
+            map_exit(11, true, "deadline", &mut t),
+            Attempt::Retryable { hint: None, after } if after == AGAIN_SOON
+        ));
+        assert!(matches!(
+            map_exit(11, false, "no_face", &mut t),
+            Attempt::Retryable { hint: None, after } if after == AGAIN_SOON
+        ));
+    }
+
+    #[test]
+    fn a_real_no_match_says_so_and_waits_long_enough_to_read() {
+        let mut t = 0;
+        match map_exit(11, true, "no_match", &mut t) {
+            Attempt::Retryable { hint: Some(h), after } => {
+                assert_eq!(h, "Didn't recognise you");
+                assert_eq!(after, AGAIN_AFTER_NO_MATCH);
+            }
+            _ => panic!("no_match must be retryable with a hint"),
+        }
+    }
+
+    #[test]
+    fn a_lockout_stands_down_for_this_arrival_rather_than_ending_the_worker() {
+        let mut t = 0;
+        assert!(matches!(map_exit(15, false, "LockedOut", &mut t), Attempt::StandDown(_)));
     }
 }

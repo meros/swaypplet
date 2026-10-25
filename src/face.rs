@@ -52,6 +52,8 @@ pub struct Request {
     pub peer_pid: u32,
     /// The engine state, on `Progress` only: `looking`, `dark` or `face`.
     pub state: String,
+    /// faced's hint beside the state, on `Progress` only, or empty.
+    pub hint: String,
     /// How the attempt ended, on `Cancel` only: an Outcome (`no_face`,
     /// `no_match`, `too_dark`, `deadline`, `preempted`, `declined`, `match`)
     /// or `error`. A card that stays up after the camera gives up needs to
@@ -184,6 +186,7 @@ fn run(tx: &Sender<Request>) -> std::io::Result<()> {
             peer_cmdline: field(text, "cmdline").unwrap_or("").to_string(),
             peer_pid: number(text, "pid").unwrap_or(0) as u32,
             state: field(text, "state").unwrap_or("").to_string(),
+            hint: field(text, "hint").unwrap_or("").to_string(),
             outcome: field(text, "outcome").unwrap_or("").to_string(),
         };
         if tx.send_blocking(request).is_err() {
@@ -252,6 +255,18 @@ mod tests {
         assert_eq!(field(msg, "stage"), Some("progress"));
         assert_eq!(field(msg, "state"), Some("dark"));
     }
+
+    #[test]
+    fn a_hint_refines_the_face_state_and_an_unknown_one_is_ignored() {
+        let msg = r#"{"parameters":{"event":"progress","progress":{"state":"face","frames":4,"elapsed_ms":180,"hint":"look_at_screen"}},"continues":true}"#;
+        let p = Progress::parse(field(msg, "state").unwrap(), field(msg, "hint"));
+        assert_eq!(p, Some(Progress::TurnToScreen));
+        assert_eq!(p.unwrap().text(), "Look at the screen");
+        assert!(p.unwrap().saw_face());
+        assert_eq!(Progress::parse("face", Some("blink")), Some(Progress::Face));
+        assert_eq!(Progress::parse("looking", Some("hold_still")), Some(Progress::Looking));
+        assert_eq!(Progress::parse("nope", None), None);
+    }
 }
 
 // ── Verification, streamed ──────────────────────────────────────────────
@@ -284,6 +299,12 @@ pub enum Progress {
     Dark,
     /// A face was found and is being compared. Hold still.
     Face,
+    /// A face is in view but turned away, so faced will not compare it.
+    TurnToScreen,
+    /// A face is in view but moving, so faced will not compare it yet.
+    HoldStill,
+    /// A face is in view but too far away to compare.
+    MoveCloser,
 }
 
 impl Progress {
@@ -294,8 +315,16 @@ impl Progress {
         match self {
             Progress::Looking => crate::ui::FaceState::Looking,
             Progress::Dark => crate::ui::FaceState::Dark,
-            Progress::Face => crate::ui::FaceState::Found,
+            Progress::Face
+            | Progress::TurnToScreen
+            | Progress::HoldStill
+            | Progress::MoveCloser => crate::ui::FaceState::Found,
         }
+    }
+
+    /// Whether faced saw a face at all in this state.
+    pub fn saw_face(self) -> bool {
+        !matches!(self, Progress::Looking | Progress::Dark)
     }
 
     /// What to tell the user. One wording, wherever the indicator appears.
@@ -306,17 +335,28 @@ impl Progress {
             // what is wrong, and telling somebody to move their face sends
             // them after nothing.
             Progress::Dark => "No infrared light",
-            Progress::Face => "Hold still",
+            Progress::Face | Progress::HoldStill => "Hold still",
+            Progress::TurnToScreen => "Look at the screen",
+            Progress::MoveCloser => "Move closer",
         }
     }
 
-    pub fn parse(s: &str) -> Option<Progress> {
-        match s {
-            "looking" => Some(Progress::Looking),
-            "dark" => Some(Progress::Dark),
-            "face" => Some(Progress::Face),
-            _ => None,
-        }
+    /// The engine state, refined by faced's hint when it sent one. A hint
+    /// this build does not know falls back to the state alone, so a newer
+    /// daemon never breaks an older locker.
+    pub fn parse(state: &str, hint: Option<&str>) -> Option<Progress> {
+        let base = match state {
+            "looking" => Progress::Looking,
+            "dark" => Progress::Dark,
+            "face" => Progress::Face,
+            _ => return None,
+        };
+        Some(match (base, hint) {
+            (Progress::Face, Some("look_at_screen")) => Progress::TurnToScreen,
+            (Progress::Face, Some("hold_still")) => Progress::HoldStill,
+            (Progress::Face, Some("move_closer")) => Progress::MoveCloser,
+            _ => base,
+        })
     }
 }
 
@@ -416,8 +456,9 @@ pub fn verify(mut on_progress: impl FnMut(Progress)) -> std::io::Result<Verdict>
 
         match field(text, "event") {
             Some("progress") => {
-                if let Some(state) = field(text, "state").and_then(Progress::parse) {
-                    if state == Progress::Face {
+                let hint = field(text, "hint");
+                if let Some(state) = field(text, "state").and_then(|s| Progress::parse(s, hint)) {
+                    if state.saw_face() {
                         saw_face = true;
                     }
                     on_progress(state);
