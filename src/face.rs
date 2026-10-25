@@ -29,7 +29,7 @@
 //! behaviour an attacker wants.
 
 use async_channel::Sender;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
@@ -224,6 +224,23 @@ mod tests {
     const SAMPLE: &str = r#"{"parameters":{"id":"q7","stage":"confirm","purpose":"elevate","target_user":"meros","peer":{"uid":0,"pid":31844,"exe":"/run/wrappers/bin/sudo","cmdline":"sudo systemctl restart foo"},"expires_ms":6000},"continues":true}"#;
 
     #[test]
+    fn a_registration_is_alive_until_faced_closes_it_even_behind_its_reply() {
+        let (ours, faced) = UnixStream::pair().unwrap();
+        ours.set_nonblocking(true).unwrap();
+        assert!(still_registered(&ours), "nothing sent yet is alive");
+
+        (&faced).write_all(b"{\"parameters\":{\"ok\":true}}\0").unwrap();
+        assert!(still_registered(&ours), "the reply is drained, not read as gone");
+        assert!(still_registered(&ours), "and stays alive after the drain");
+
+        // faced restarts: its reply was already drained, and a second one
+        // waiting in front of the end-of-file must not hide it.
+        (&faced).write_all(b"{\"parameters\":{\"ok\":true}}\0").unwrap();
+        drop(faced);
+        assert!(!still_registered(&ours));
+    }
+
+    #[test]
     fn a_confirm_request_is_read_off_the_stream() {
         assert_eq!(field(SAMPLE, "id"), Some("q7"));
         assert_eq!(field(SAMPLE, "stage"), Some("confirm"));
@@ -395,7 +412,36 @@ pub fn register_lock() -> std::io::Result<UnixStream> {
              \"parameters\":{{\"role\":\"lock\"}}}}"
         ),
     )?;
+    // Only `still_registered` reads from here on. Non-blocking so that check
+    // cannot park the face worker.
+    stream.set_nonblocking(true)?;
     Ok(stream)
+}
+
+/// Whether faced still holds a registration made by [`register_lock`].
+///
+/// A faced restart (every `nx` that touches it) closes the connection, and
+/// with it the registration, while the lock screen holding it lives on. faced
+/// then refuses every unlock verification for the rest of that lock, and the
+/// user types a password with face unlock looking enabled.
+///
+/// Reads and discards whatever is waiting (faced's `{"ok":true}` reply to the
+/// registration; nothing else is sent on it), because unread bytes would sit
+/// in front of the end-of-file and hide it. Gone only on end-of-file or a real
+/// error: a wrong "gone" makes the caller register again, which faced refuses
+/// while the old registration is alive.
+pub fn still_registered(stream: &UnixStream) -> bool {
+    let mut buf = [0u8; 256];
+    let mut reader = stream;
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => return false,
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => return true,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => return false,
+        }
+    }
 }
 
 /// Run one verification, reporting progress as it arrives.

@@ -205,16 +205,11 @@ fn run(user: &str, tx: &async_channel::Sender<EngineEvent>) {
     // screen is actually up, rather than trusting that whoever asked had a
     // good reason. Held in a binding rather than discarded: `let _ = ...`
     // would drop it immediately and deregister on the spot.
-    let _lock_agent = match crate::face::register_lock() {
-        Ok(stream) => Some(stream),
-        Err(e) => {
-            // Not fatal. The daemon only enforces the requirement when
-            // configured to, and face unlock working without the extra guard
-            // is better than not working at all.
-            log::warn!("face: could not register as lock agent: {e}");
-            None
-        }
-    };
+    //
+    // Checked again before every attempt: a faced restart drops it while this
+    // lock screen lives on, and faced then refuses every unlock until the
+    // next lock (2026-10-25, a password typed after an `nx`).
+    let mut lock_agent = register_lock_agent();
 
     let wakes = wakes();
     // None until the first reading lands, so the opening state is a starting
@@ -297,6 +292,14 @@ fn run(user: &str, tx: &async_channel::Sender<EngineEvent>) {
             continue;
         }
 
+        if !lock_agent
+            .as_ref()
+            .is_some_and(crate::face::still_registered)
+        {
+            log::info!("face: lock agent registration lost — registering again");
+            lock_agent = register_lock_agent();
+        }
+
         match attempt(tx, &mut transient) {
             Attempt::Match => {
                 // End to end, for the journal: the arrival edge as this
@@ -348,6 +351,15 @@ fn run(user: &str, tx: &async_channel::Sender<EngineEvent>) {
 ///
 /// Holds a socket for the length of the burst rather than forking a process,
 /// so progress and hints arrive while the burst runs.
+/// Register with faced as the lock agent. Not fatal when it fails: faced only
+/// enforces the registration when configured to, and face unlock working
+/// without the extra guard is better than not working at all.
+fn register_lock_agent() -> Option<std::os::unix::net::UnixStream> {
+    crate::face::register_lock()
+        .map_err(|e| log::warn!("face: could not register as lock agent: {e}"))
+        .ok()
+}
+
 fn attempt(tx: &async_channel::Sender<EngineEvent>, transient: &mut u32) -> Attempt {
     let verdict = crate::face::verify(|state| {
         let _ = tx.send_blocking(EngineEvent::Progress(state));
