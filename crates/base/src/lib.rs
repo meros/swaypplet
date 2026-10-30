@@ -13,3 +13,4 @@ pub mod spawn;
 pub mod sway;
 pub mod user;
 pub mod watch;
+pub mod wayland;

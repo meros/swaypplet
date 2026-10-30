@@ -71,9 +71,7 @@ impl Gamma {
     /// Connect and start dispatching. `None` off Wayland, or on a
     /// compositor without `zwlr_gamma_control_manager_v1`.
     pub fn start() -> Option<Gamma> {
-        let conn = Connection::connect_to_env()
-            .map_err(|e| log::info!("night light: no Wayland connection: {e}"))
-            .ok()?;
+        let conn = swaypplet_base::wayland::connect("night light")?;
         let mut queue = conn.new_event_queue::<State>();
         let qh = queue.handle();
         let shared = Arc::new(Shared {
@@ -101,19 +99,13 @@ impl Gamma {
             "night light: gamma control offered, {} output(s)",
             shared.lock().outputs.len()
         );
-        std::thread::Builder::new()
-            .name("swaypplet-gamma".into())
-            .spawn(move || {
-                loop {
-                    if let Err(e) = queue.blocking_dispatch(&mut state) {
-                        log::warn!("night light: dispatch stopped: {e}");
-                        AVAILABLE.store(false, Ordering::Relaxed);
-                        return;
-                    }
-                }
-            })
-            .map_err(|e| log::warn!("night light: thread: {e}"))
-            .ok()?;
+        swaypplet_base::wayland::dispatch_on_thread(
+            "swaypplet-gamma",
+            "night light",
+            queue,
+            state,
+            || AVAILABLE.store(false, Ordering::Relaxed),
+        )?;
         Some(Gamma { shared })
     }
 
@@ -130,7 +122,7 @@ impl Gamma {
 
 impl Shared {
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+        swaypplet_base::wayland::lock(&self.inner)
     }
 
     /// Bring every output in line with `inner.white`: controls released at

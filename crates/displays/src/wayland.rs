@@ -116,9 +116,7 @@ impl Outputs {
     /// Connect and start dispatching; events arrive on the returned channel.
     /// `None` off Wayland, or on a compositor without output management.
     pub fn start() -> Option<(Outputs, async_channel::Receiver<Event>)> {
-        let conn = Connection::connect_to_env()
-            .map_err(|e| log::info!("displays: no Wayland connection: {e}"))
-            .ok()?;
+        let conn = swaypplet_base::wayland::connect("displays")?;
         let mut queue = conn.new_event_queue::<State>();
         let qh = queue.handle();
         let (tx, rx) = async_channel::unbounded();
@@ -141,18 +139,13 @@ impl Outputs {
             log::info!("displays: zwlr_output_manager_v1 not offered");
             return None;
         }
-        std::thread::Builder::new()
-            .name("swaypplet-outputs".into())
-            .spawn(move || {
-                loop {
-                    if let Err(e) = queue.blocking_dispatch(&mut state) {
-                        log::warn!("displays: dispatch stopped: {e}");
-                        return;
-                    }
-                }
-            })
-            .map_err(|e| log::warn!("displays: thread: {e}"))
-            .ok()?;
+        swaypplet_base::wayland::dispatch_on_thread(
+            "swaypplet-outputs",
+            "displays",
+            queue,
+            state,
+            || {},
+        )?;
         Some((Outputs { shared }, rx))
     }
 
@@ -291,7 +284,7 @@ fn from_wl(t: WEnum<wl_output::Transform>) -> OutputTransform {
 
 impl Shared {
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+        swaypplet_base::wayland::lock(&self.inner)
     }
 
     fn head_mut<'a>(inner: &'a mut Inner, proxy: &ZwlrOutputHeadV1) -> Option<&'a mut Head> {

@@ -20,7 +20,7 @@
 //! One thread owns a second Wayland connection (GDK keeps its own, and this
 //! one blocks on pipe reads that must never sit in front of a frame). It
 //! pushes through an `async_channel` into an [`Observed`] on the GTK side,
-//! the same shape `sway::ipc` and `bar::tray` use, so consumers connect and
+//! the same shape `swaypplet_base::sway::ipc` and `crate::tray` use, so consumers connect and
 //! read exactly as they do there. Requests go the other way as plain
 //! Wayland calls: proxies are `Send`, so setting the selection from the GTK
 //! thread is safe as long as the watcher thread is the one dispatching the
@@ -44,6 +44,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use swaypplet_base::service::Observed;
+use swaypplet_base::wayland::lock;
 
 use wayland_client::protocol::{wl_registry, wl_seat};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, delegate_noop};
@@ -150,9 +151,7 @@ impl ClipboardService {
     /// the compositor does not offer `ext-data-control-v1`, which leaves the
     /// section to say so rather than showing an empty list that looks full.
     fn start() -> Option<Rc<Self>> {
-        let conn = Connection::connect_to_env()
-            .map_err(|e| log::info!("clipboard: no Wayland connection: {e}"))
-            .ok()?;
+        let conn = swaypplet_base::wayland::connect("clipboard")?;
 
         let mut queue = conn.new_event_queue::<Bootstrap>();
         let qh_boot = queue.handle();
@@ -195,11 +194,13 @@ impl ClipboardService {
             offers: HashMap::new(),
             tx,
         };
-        std::thread::Builder::new()
-            .name("swaypplet-clipboard".into())
-            .spawn(move || run(queue, watcher))
-            .map_err(|e| log::warn!("clipboard: watcher thread: {e}"))
-            .ok()?;
+        swaypplet_base::wayland::dispatch_on_thread(
+            "swaypplet-clipboard",
+            "clipboard",
+            queue,
+            watcher,
+            || {},
+        )?;
 
         let service = Rc::new(ClipboardService {
             shared,
@@ -228,11 +229,7 @@ impl ClipboardService {
     }
 
     fn snapshot(&self) -> Vec<EntryView> {
-        let history = self
-            .shared
-            .history
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let history = lock(&self.shared.history);
         history
             .iter()
             .take(VISIBLE_ENTRIES)
@@ -247,11 +244,7 @@ impl ClipboardService {
     /// that named it is from a snapshot, and the ring may have moved on.
     pub fn restore(&self, id: u64) {
         let payload = {
-            let history = self
-                .shared
-                .history
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let history = lock(&self.shared.history);
             match history.iter().find(|e| e.id == id) {
                 Some(e) => Payload {
                     mime: e.mime.clone(),
@@ -267,11 +260,7 @@ impl ClipboardService {
     /// history is not the same as taking the clipboard away from whoever
     /// owns it, and a Clear that wiped the live selection would surprise.
     pub fn clear(&self) {
-        self.shared
-            .history
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clear();
+        lock(&self.shared.history).clear();
         self.state.set_if_changed(Vec::new());
     }
 }
@@ -285,11 +274,7 @@ impl Shared {
         self.device.set_selection(Some(&source));
         // Destroy the previous source only after the new one is in place, so
         // the selection never blinks through empty.
-        let previous = self
-            .own
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .replace(source);
+        let previous = lock(&self.own).replace(source);
         if let Some(old) = previous {
             old.destroy();
         }
@@ -298,15 +283,6 @@ impl Shared {
 }
 
 // ── Watcher thread ──────────────────────────────────────────────────────
-
-fn run(mut queue: wayland_client::EventQueue<Watcher>, mut watcher: Watcher) {
-    loop {
-        if let Err(e) = queue.blocking_dispatch(&mut watcher) {
-            log::warn!("clipboard: watcher stopped: {e}");
-            return;
-        }
-    }
-}
 
 struct Watcher {
     shared: Arc<Shared>,
@@ -361,11 +337,7 @@ impl Watcher {
     /// wake the GTK side.
     fn file(&self, entry: Entry) {
         {
-            let mut history = self
-                .shared
-                .history
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let mut history = lock(&self.shared.history);
             if let Some(pos) = history.iter().position(|e| e.bytes == entry.bytes) {
                 // Re-copying something is a bump, not a second row.
                 let existing = history.remove(pos);
@@ -485,12 +457,7 @@ impl Dispatch<ExtDataControlDeviceV1, ()> for Watcher {
                 state.offers.insert(id.id(), Vec::new());
             }
             ext_data_control_device_v1::Event::Selection { id: Some(offer) } => {
-                let owned = state
-                    .shared
-                    .own
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .is_some();
+                let owned = lock(&state.shared.own).is_some();
                 if owned {
                     // Our own restore coming back. Reading it would ask this
                     // client to write while this thread blocks on the read.
@@ -569,7 +536,7 @@ impl Dispatch<ExtDataControlSourceV1, Arc<Payload>> for Watcher {
                 // Someone else took the selection. Letting go here is what
                 // re-arms the watcher: with no source of our own, the next
                 // selection event is somebody else's and gets read.
-                let mut own = state.shared.own.lock().unwrap_or_else(|e| e.into_inner());
+                let mut own = lock(&state.shared.own);
                 if own.as_ref().is_some_and(|s| s == source) {
                     own.take();
                 }
