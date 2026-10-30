@@ -69,7 +69,7 @@ struct Hooks {
     /// Runs after an activation, so a host popup can hide itself.
     done: Option<Box<dyn Fn()>>,
     /// Opens a settings row or a panel section a result names, given the
-    /// row's identifier (`settings::search::Target::id`). Set by the host
+    /// row's identifier (`swaypplet_settings_kit::search::Target::id`). Set by the host
     /// that can open them; without one the launcher lists no settings rows.
     setting: Option<OpenSetting>,
     /// Runs an action row by its identifier (`set_actions`), and says what
@@ -266,7 +266,7 @@ impl LauncherView {
 
     /// Offer the settings and the panel sections by what they do, and open
     /// one through `f` when its row is activated. `f` gets the row's
-    /// identifier, a `settings::search::Target` id.
+    /// identifier, a `swaypplet_settings_kit::search::Target` id.
     pub fn set_on_setting<F: Fn(&str) + 'static>(&self, f: F) {
         self.on_activate.borrow_mut().setting = Some(Box::new(f));
         self.state.borrow_mut().settings_host = true;
@@ -708,36 +708,13 @@ fn local_pass(state: &Rc<RefCell<LauncherState>>, text: &str) {
         let mut s = state.borrow_mut();
         s.tabbed = false;
         let actions = s.actions.clone().map(|f| f()).unwrap_or_default();
-        s.local = sources::local(&l, q, &actions, &s.pages, &user_shell());
-        (s.tail, s.local) = if s.settings_host {
-            // A setting the query names goes above the page rows too: "sudo"
-            // means the sudo row before the Idle & Lock tab its prefix opens.
-            let (clear, other) = sources::settings(&l, q);
-            let mut local = std::mem::take(&mut s.local);
-            let at = local
-                .iter()
-                .take_while(|r| r.provider == sources::CALC)
-                .count();
-            local.splice(at..at, clear);
-            (other, local)
-        } else {
-            (Vec::new(), std::mem::take(&mut s.local))
-        };
-        let words: Vec<String> = q
-            .text()
-            .to_lowercase()
-            .split_whitespace()
-            .map(str::to_string)
-            .collect();
-        s.remote.retain(|r| match q {
-            Query::Plain(_) => {
-                let hay = format!("{} {}", r.text, r.subtext).to_lowercase();
-                words.iter().all(|w| hay.contains(w.as_str()))
-            }
-            // A prefix changes what is asked: nothing of the old answer
-            // stands.
-            _ => false,
-        });
+        let local = sources::local(&l, q, &actions, &s.pages, &user_shell());
+        let settings = s.settings_host.then(|| sources::settings(&l, q));
+        let remote = std::mem::take(&mut s.remote);
+        let pass = sources::merge(local, settings, remote, q);
+        s.local = pass.local;
+        s.remote = pass.remote;
+        s.tail = pass.tail;
     }
     compose(state);
 }
@@ -1269,5 +1246,36 @@ fn provider_icon(provider: &str) -> &'static str {
         "menus" => "󰍜",
         "bookmarks" => "󰃃",
         _ => "󰍉",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rows_made_here_carry_a_word_and_elephant_rows_their_provider() {
+        assert_eq!(provider_label(sources::CALC), "calc");
+        assert_eq!(provider_label(sources::RUN), "run");
+        assert_eq!(provider_label(sources::PAGE), "open");
+        assert_eq!(provider_label(sources::ACTION), "do");
+        assert_eq!(provider_label(sources::SETTING), "setting");
+        assert_eq!(provider_label("desktopapplications"), "desktopapplications");
+    }
+
+    #[test]
+    fn a_row_runs_its_first_action_or_starts() {
+        let mut r = SearchResult {
+            identifier: "firefox.desktop".into(),
+            text: "Firefox".into(),
+            subtext: String::new(),
+            icon: String::new(),
+            provider: "desktopapplications".into(),
+            score: 0,
+            actions: Vec::new(),
+        };
+        assert_eq!(default_action(&r), "start");
+        r.actions = vec!["new_window".into(), "start".into()];
+        assert_eq!(default_action(&r), "new_window");
     }
 }
