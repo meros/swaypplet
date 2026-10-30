@@ -6,7 +6,8 @@
 //!
 //! | module | holds |
 //! |---|---|
-//! | `sources.rs` | the query's prefix (`=`, `>`), which elephant providers the Launcher settings ask, the rows made locally (settings rows among them, from `settings::search`) |
+//! | `route.rs` | where typed text goes: a deck page, a settings pane (`:` prefixes) or a search |
+//! | `sources.rs` | the query's prefix (`=`, `>`), which elephant providers the Launcher settings ask, the rows made locally (settings rows among them, from `swaypplet_settings_kit::search`) |
 //! | `calc.rs` | the `=` calculator |
 //! | `frecency.rs` | what you launch, and the ranking it gives |
 //! | `windows.rs` | open windows as rows, from sway's tree |
@@ -20,6 +21,7 @@
 
 mod calc;
 pub mod frecency;
+pub mod route;
 mod sources;
 mod windows;
 
@@ -31,8 +33,7 @@ use gtk4::prelude::*;
 use swaypplet_system::{elephant, elephant::SearchResult};
 use swaypplet_ui::shell::{Namespace, Surface};
 
-use sources::Query;
-pub use sources::{Action, Page, Ran};
+pub use sources::{Action, Page, Query, Ran};
 
 const MAX_VISIBLE_RESULTS: usize = 10;
 

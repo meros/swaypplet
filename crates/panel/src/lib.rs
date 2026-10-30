@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use swaypplet_launcher::route::{self, Route};
 use swaypplet_launcher::{LauncherView, Ran};
 use swaypplet_notifyd::store::NotificationStore;
 use swaypplet_settings::Open;
@@ -43,7 +44,8 @@ const HELM_CARD_SIZE: swaypplet_ui::shell::fit::CardSize = swaypplet_ui::shell::
 const SUBSHEET_HEIGHT: i32 = 340;
 
 /// Omnibox prefixes and the deck page each one opens. Settings' panes
-/// carry their own (`settings::PANES`) and open settings' own surface, on
+/// carry their own (`swaypplet_settings::PANE_PREFIXES`) and open settings'
+/// own surface, read by the same router (`swaypplet_launcher::route`), on
 /// Enter rather than as they are typed, since that closes the Helm; `:set`
 /// alone opens it as it was. A bare `:` lists all of them on the
 /// `prefixes` page, which is built from this table so the list cannot go
@@ -75,12 +77,29 @@ const ROUTES: &[(&[&str], &str, &str)] = &[
     ),
 ];
 
-/// The deck page a typed prefix opens.
-fn route(prefix: &str) -> Option<&'static str> {
-    ROUTES
-        .iter()
-        .find(|(prefixes, _, _)| prefixes.iter().any(|p| prefix.starts_with(p)))
-        .map(|(_, page, _)| *page)
+/// [`ROUTES`] as the router reads it: prefixes and the page.
+const DECKS: [(&[&str], &str); ROUTES.len()] = {
+    let mut table: [(&[&str], &str); ROUTES.len()] = [(&[], ""); ROUTES.len()];
+    let mut i = 0;
+    while i < ROUTES.len() {
+        table[i] = (ROUTES[i].0, ROUTES[i].1);
+        i += 1;
+    }
+    table
+};
+
+/// Where `text` goes, against this card's pages and settings' panes.
+fn resolve(text: &str) -> Route<'_> {
+    route::resolve(text, &DECKS, &swaypplet_settings::PANE_PREFIXES)
+}
+
+/// What settings opens for `route`, if it is one of settings' own.
+fn settings_open(route: Route<'_>) -> Option<Open> {
+    match route {
+        Route::Pane(pane) => Some(Open::Pane(pane)),
+        Route::Settings => Some(Open::Last),
+        _ => None,
+    }
 }
 
 /// Opens settings' own surface; the app hides the Helm first.
@@ -397,20 +416,22 @@ impl Panel {
             let deck_stack_c = deck_stack.clone();
             let network_c = network.clone();
             launcher.entry().connect_search_changed(move |entry| {
-                let text = entry.text().to_string();
-                let lower = text.to_lowercase();
-                let prefix = lower.trim();
-                if prefix == ":" {
-                    deck_stack_c.set_visible_child_name("prefixes");
-                } else if let Some(page) = route(prefix) {
-                    if page == "wifi" {
-                        network_c.trigger_scan();
+                match resolve(&entry.text()) {
+                    Route::Prefixes => deck_stack_c.set_visible_child_name("prefixes"),
+                    Route::Deck(page) => {
+                        if page == "wifi" {
+                            network_c.trigger_scan();
+                        }
+                        deck_stack_c.set_visible_child_name(page);
                     }
-                    deck_stack_c.set_visible_child_name(page);
-                } else if !prefix.starts_with(':')
-                    && deck_stack_c.visible_child_name().as_deref() != Some("launcher")
-                {
-                    deck_stack_c.set_visible_child_name("launcher");
+                    Route::Query(_)
+                        if deck_stack_c.visible_child_name().as_deref() != Some("launcher") =>
+                    {
+                        deck_stack_c.set_visible_child_name("launcher");
+                    }
+                    // A settings prefix waits for Enter; an unknown one
+                    // leaves the page as it is.
+                    _ => {}
                 }
             });
         }
@@ -420,7 +441,7 @@ impl Panel {
         // region shot its synonym matches, and for `:set` an app.
         {
             let on_settings = on_settings.clone();
-            launcher.set_on_enter(move |text| match Open::for_prefix(&text.to_lowercase()) {
+            launcher.set_on_enter(move |text| match settings_open(resolve(text)) {
                 Some(open) => {
                     on_settings(open);
                     true
@@ -572,7 +593,7 @@ impl Panel {
     }
 
     /// Open on the notification centre: the quiet summary card's click
-    /// (`services::notifications::context`).
+    /// (`swaypplet_notifyd::context`).
     pub fn show_notifications(&self) {
         if !(self.surface.is_shown() && self.surface.window().is_visible()) {
             self.toggle();
@@ -580,10 +601,10 @@ impl Panel {
         self.deck_stack.set_visible_child_name("notifications");
     }
 
-    /// Open what a launcher result names (`settings::search`): a settings
-    /// row in settings, or a Helm page, opening the Helm first.
+    /// Open what a launcher result names (`swaypplet_settings_kit::search`):
+    /// a settings row in settings, or a Helm page, opening the Helm first.
     pub fn open_setting(&self, id: &str) {
-        if !id.starts_with(':') || Open::for_prefix(id).is_some() {
+        if !id.starts_with(':') || settings_open(resolve(id)).is_some() {
             open_setting(&self.on_settings, self.launcher.entry(), id);
             return;
         }
@@ -658,7 +679,7 @@ fn elastic_lists(
 /// settings; a Helm page by its prefix, which the omnibox routes like a
 /// typed one.
 fn open_setting(on_settings: &OnSettings, entry: &gtk4::SearchEntry, id: &str) {
-    if let Some(open) = Open::for_prefix(id) {
+    if let Some(open) = settings_open(resolve(id)) {
         on_settings(open);
     } else if id.starts_with(':') {
         entry.set_text(id);
@@ -688,7 +709,7 @@ fn build_prefix_list() -> gtk4::Box {
         .map(|(prefixes, _, title)| (prefixes.join("  "), title.to_string()))
         .chain(swaypplet_settings::prefixes().map(|(prefixes, title)| (prefixes.join("  "), title)))
         .chain(std::iter::once((
-            ":set  :pref".to_string(),
+            route::SETTINGS.join("  "),
             "Settings, as it was".to_string(),
         )))
         .collect();
@@ -1419,21 +1440,49 @@ mod tests {
 
     #[test]
     fn prefixes_route_to_their_page_and_settings_is_not_a_page() {
-        assert_eq!(route(":wifi"), Some("wifi"));
-        assert_eq!(route(":vpn"), Some("wifi"));
-        assert_eq!(route(":mic"), Some("audio"));
-        assert_eq!(route(":notif"), Some("notifications"));
+        assert_eq!(resolve(":wifi"), Route::Deck("wifi"));
+        assert_eq!(resolve(":vpn"), Route::Deck("wifi"));
+        assert_eq!(resolve(":mic"), Route::Deck("audio"));
+        assert_eq!(resolve(":notif"), Route::Deck("notifications"));
         // Settings' prefixes open its own surface, not a deck page.
-        assert_eq!(route(":glass"), None);
-        assert_eq!(route(":settings"), None);
-        assert_eq!(route(":nothing"), None);
-        assert_eq!(route("firefox"), None);
+        assert_eq!(resolve(":glass"), Route::Pane("glass"));
+        assert_eq!(resolve(":wallpaper"), Route::Pane("look"));
+        assert_eq!(resolve(":sleep"), Route::Pane("idle"));
+        assert_eq!(resolve(":settings"), Route::Settings);
+        assert_eq!(resolve(":nothing"), Route::Unknown);
+        assert!(matches!(resolve("firefox"), Route::Query(_)));
+    }
+
+    #[test]
+    fn enter_opens_settings_only_for_its_own_prefixes() {
+        assert_eq!(settings_open(resolve(":glass")), Some(Open::Pane("glass")));
+        assert_eq!(settings_open(resolve(":pref")), Some(Open::Last));
+        assert_eq!(settings_open(resolve(":wifi")), None);
+        assert_eq!(settings_open(resolve("firefox")), None);
+    }
+
+    #[test]
+    fn every_prefix_routes_to_its_own_page() {
+        for (prefixes, page, _) in ROUTES {
+            for p in *prefixes {
+                assert_eq!(resolve(p), Route::Deck(page), "{p}");
+            }
+        }
+        for (prefixes, pane) in swaypplet_settings::PANE_PREFIXES {
+            for p in prefixes {
+                assert_eq!(resolve(p), Route::Pane(pane), "{p}");
+            }
+        }
     }
 
     #[test]
     fn every_quick_search_result_opens_a_page() {
         for q in swaypplet_settings_kit::search::QUICK {
-            assert!(route(q.prefix).is_some(), "{} routes nowhere", q.prefix);
+            assert!(
+                matches!(resolve(q.prefix), Route::Deck(_)),
+                "{} routes nowhere",
+                q.prefix
+            );
         }
     }
 

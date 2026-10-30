@@ -179,14 +179,18 @@ pub fn install_search() {
     );
 }
 
-/// The pane an omnibox prefix opens, if it names one. `:set` and `:pref`
-/// open settings on whatever pane it was last on and are not in this table.
-pub fn tab_for_prefix(prefix: &str) -> Option<&'static str> {
-    PANES
-        .iter()
-        .find(|p| p.prefixes.iter().any(|x| prefix.starts_with(x)))
-        .map(|p| p.name)
-}
+/// Every pane's prefixes and its stack name: the table the omnibox reads
+/// (`swaypplet_launcher::route`). `:set` and `:pref` open settings on
+/// whatever pane it was last on and are not in this table.
+pub const PANE_PREFIXES: [(&[&str], &str); PANES.len()] = {
+    let mut table: [(&[&str], &str); PANES.len()] = [(&[], ""); PANES.len()];
+    let mut i = 0;
+    while i < PANES.len() {
+        table[i] = (PANES[i].prefixes, PANES[i].name);
+        i += 1;
+    }
+    table
+};
 
 /// What to open settings on.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -197,17 +201,6 @@ pub enum Open {
     Pane(&'static str),
     /// A row of the search index, by its identifier (`swaypplet_settings_kit::search::Target::id`).
     Row(String),
-}
-
-impl Open {
-    /// What an omnibox prefix opens here: a pane, or settings as it was
-    /// (`:set`, `:pref`). `None` for a prefix settings does not own.
-    pub fn for_prefix(prefix: &str) -> Option<Open> {
-        if let Some(pane) = tab_for_prefix(prefix) {
-            return Some(Open::Pane(pane));
-        }
-        (prefix.starts_with(":set") || prefix.starts_with(":pref")).then_some(Open::Last)
-    }
 }
 
 type OnPage = std::rc::Rc<std::cell::RefCell<Option<Box<dyn Fn(&str)>>>>;
@@ -1049,26 +1042,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_prefix_opens_exactly_one_tab() {
+    fn every_prefix_is_claimed_by_one_pane() {
         let mut seen = std::collections::HashSet::new();
         for pane in &PANES {
             for prefix in pane.prefixes {
-                assert_eq!(tab_for_prefix(prefix), Some(pane.name), "{prefix}");
                 assert!(seen.insert(*prefix), "{prefix} is claimed twice");
             }
         }
-        assert_eq!(tab_for_prefix(":set"), None);
-        assert_eq!(tab_for_prefix(":wallpaper"), Some("look"));
         assert_eq!(prefixes().count(), PANES.len());
-    }
-
-    #[test]
-    fn a_prefix_opens_its_pane_or_settings_as_it_was() {
-        assert_eq!(Open::for_prefix(":glass"), Some(Open::Pane("glass")));
-        assert_eq!(Open::for_prefix(":sleep"), Some(Open::Pane("idle")));
-        assert_eq!(Open::for_prefix(":settings"), Some(Open::Last));
-        assert_eq!(Open::for_prefix(":pref"), Some(Open::Last));
-        assert_eq!(Open::for_prefix(":wifi"), None);
+        let names: Vec<&str> = PANE_PREFIXES.iter().map(|(_, name)| *name).collect();
+        let panes: Vec<&str> = PANES.iter().map(|p| p.name).collect();
+        assert_eq!(names, panes);
     }
 
     #[test]
