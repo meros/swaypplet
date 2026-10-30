@@ -32,7 +32,7 @@ pub(crate) mod fade;
 pub(crate) mod fprint;
 pub mod ui;
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::os::fd::AsRawFd;
 use std::rc::Rc;
 use std::time::Duration;
@@ -345,34 +345,21 @@ pub fn run() -> ! {
     // the warm-up's `switch_user::list()` plus its off-thread refresh went with
     // the row: two D-Bus round trips per lock whose only consumer it was.
 
-    // One unlock, whoever gets there first. `unlock()` consumes the
-    // session-lock object, so calling it twice is a protocol error that takes
-    // the locker down with it. Password, fingerprint and face all reach it,
-    // and the face path now waits face_settle() before it calls, which is long
-    // enough for a fingerprint touch or an Enter already queued in the entry
-    // to arrive and unlock the same session again.
-    let unlocking = Rc::new(Cell::new(false));
-
-    // `locked` is deferred until the entrance completes, which opens a window
-    // where the password entry is live but the session-lock object is not yet
-    // locked. gtk_session_lock_instance_unlock() is a silent no-op while
-    // is_locked is false, so an Enter landing in that window would wedge the
-    // session locked behind a UI that believes it is done.
-    let locked_yet = Rc::new(Cell::new(false));
-    let unlock_pending = Rc::new(Cell::new(false));
+    // One unlock, whoever gets there first, and none before the lock is
+    // real (auth::UnlockGate).
+    let unlock = Rc::new(RefCell::new(auth::UnlockGate::default()));
 
     // The one way out of the lock: ramp the surfaces down to transparent,
     // then hand the compositor unlock_and_destroy.
     let end_lock: Rc<dyn Fn()> = {
         let fade = fade.clone();
         let instance = instance.clone();
-        let locked_yet = locked_yet.clone();
-        let unlock_pending = unlock_pending.clone();
+        let unlock = unlock.clone();
         Rc::new(move || {
-            if !locked_yet.get() {
+            let end = unlock.borrow_mut().end();
+            if end == auth::End::WhenLocked {
                 // Finish arriving so the compositor can confirm the lock,
                 // rather than playing out an entrance nobody wants any more.
-                unlock_pending.set(true);
                 fade.rush_to_opaque();
                 return;
             }
@@ -386,7 +373,7 @@ pub fn run() -> ! {
         let surfaces = surfaces.clone();
         let gate = gate.clone();
         let end_lock = end_lock.clone();
-        let unlocking = unlocking.clone();
+        let unlock = unlock.clone();
         let user = user.clone();
         Rc::new(move |password: String| {
             if !gate.borrow_mut().try_begin(&password) {
@@ -398,13 +385,13 @@ pub fn run() -> ! {
             let surfaces = surfaces.clone();
             let gate = gate.clone();
             let end_lock = end_lock.clone();
-            let unlocking = unlocking.clone();
+            let unlock = unlock.clone();
             spawn_work(
                 move || auth::pam_verify(&user, &password),
                 move |result| match result {
                     Ok(()) => {
                         gate.borrow_mut().finish(true);
-                        if unlocking.replace(true) {
+                        if !unlock.borrow_mut().claim() {
                             return;
                         }
                         surfaces.flash_success();
@@ -462,10 +449,10 @@ pub fn run() -> ! {
     // send it, and the signal comes from logind's own bus name.
     {
         let end_lock = end_lock.clone();
-        let unlocking = unlocking.clone();
+        let unlock = unlock.clone();
         let surfaces = surfaces.clone();
         follow_unlock(move || {
-            if unlocking.replace(true) {
+            if !unlock.borrow_mut().claim() {
                 return;
             }
             log::info!("lock: logind Unlock, ending the lock");
@@ -538,10 +525,8 @@ pub fn run() -> ! {
     // Fingerprint + clock start once the compositor confirms the lock.
     {
         let surfaces = surfaces.clone();
-        let locked_yet = locked_yet.clone();
-        let unlock_pending = unlock_pending.clone();
         let end_lock_on_locked = end_lock.clone();
-        let unlocking = unlocking.clone();
+        let unlock = unlock.clone();
         let user_for_face = user.clone();
         instance.connect_locked(move |_| {
             log::info!("session locked");
@@ -559,18 +544,19 @@ pub fn run() -> ! {
                 let _ = out.flush();
             }
 
-            locked_yet.set(true);
-            // Authentication landed during the entrance and parked here
-            // waiting for the lock to become real. Now it is.
-            if unlock_pending.replace(false) {
-                end_lock_on_locked();
-                return;
-            }
-            // Same, but the unlock is already in flight: do not spin up the
-            // IR camera and grab the fingerprint device milliseconds before
-            // this process exits.
-            if unlocking.get() {
-                return;
+            let locked = unlock.borrow_mut().on_locked();
+            match locked {
+                // Authentication landed during the entrance and parked here
+                // waiting for the lock to become real. Now it is.
+                auth::Locked::Unlock => {
+                    end_lock_on_locked();
+                    return;
+                }
+                // The unlock is already in flight: do not spin up the IR
+                // camera and grab the fingerprint device milliseconds before
+                // this process exits.
+                auth::Locked::Quiet => return,
+                auth::Locked::Arm => {}
             }
 
             // Once now, then every second. Without the first call the Caps
@@ -616,7 +602,7 @@ pub fn run() -> ! {
                 let face_rx = face::start(user_for_face.clone());
                 let surfaces = surfaces.clone();
                 let end_lock = end_lock.clone();
-                let unlocking = unlocking.clone();
+                let unlock = unlock.clone();
                 // Awaited rather than polled. A 200 ms poll added up to
                 // 200 ms between faced's match and the unlock starting, and
                 // the same again to every progress hint, on the one path
@@ -634,7 +620,7 @@ pub fn run() -> ! {
                                 // thing that fixes that (see face_settle);
                                 // long enough to see, short enough that the
                                 // attempt still reads as instant.
-                                if unlocking.replace(true) {
+                                if !unlock.borrow_mut().claim() {
                                     return;
                                 }
                                 surfaces.show_face(
@@ -681,7 +667,7 @@ pub fn run() -> ! {
             let rx = fprint::start();
             let surfaces = surfaces.clone();
             let end_lock = end_lock.clone();
-            let unlocking = unlocking.clone();
+            let unlock = unlock.clone();
             glib::timeout_add_local(Duration::from_millis(40), move || {
                 while let Ok(ev) = rx.try_recv() {
                     match ev {
@@ -690,7 +676,7 @@ pub fn run() -> ! {
                         }
                         EngineEvent::Hint(h) => surfaces.fp_hint(&h),
                         EngineEvent::Match(_) => {
-                            if unlocking.replace(true) {
+                            if !unlock.borrow_mut().claim() {
                                 return glib::ControlFlow::Break;
                             }
                             surfaces.flash_success();
