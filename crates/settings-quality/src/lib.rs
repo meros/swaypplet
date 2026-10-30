@@ -308,9 +308,11 @@ fn stop_job(n: u64) {
         }
         return;
     }
-    let _ = std::process::Command::new("systemctl")
-        .args(["--user", "stop", "--no-block", &unit(n)])
-        .status();
+    if let Err(e) =
+        swaypplet_system::systemd::Unit::user(unit(n)).queue(swaypplet_system::systemd::Verb::Stop)
+    {
+        log::warn!("quality: {e}");
+    }
 }
 
 /// The programs a job needs on this process's PATH (or the user profile),

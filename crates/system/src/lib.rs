@@ -20,6 +20,8 @@ pub mod lid;
 pub mod mpris;
 pub mod power;
 pub mod presence;
+pub mod session;
 pub mod status;
+pub mod systemd;
 pub mod task_state;
 pub mod tray;

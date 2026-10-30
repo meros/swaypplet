@@ -8684,6 +8684,10 @@ rec {
             packageId = "swaypplet-settings-kit";
           }
           {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
             name = "swaypplet-ui";
             packageId = "swaypplet-ui";
           }
@@ -8725,6 +8729,10 @@ rec {
           {
             name = "swaypplet-settings-kit";
             packageId = "swaypplet-settings-kit";
+          }
+          {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
           }
           {
             name = "swaypplet-ui";

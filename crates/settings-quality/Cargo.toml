@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 swaypplet-base.workspace = true
 swaypplet-ui.workspace = true
+swaypplet-system.workspace = true
 swaypplet-screenshot.workspace = true
 swaypplet-settings-kit.workspace = true
 gtk4.workspace = true

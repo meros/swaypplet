@@ -145,11 +145,7 @@ fn log_path() -> PathBuf {
 }
 
 fn active() -> bool {
-    Command::new("systemctl")
-        .args(["--user", "is-active", "--quiet", UNIT])
-        .stdin(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+    swaypplet_system::systemd::Unit::user(UNIT).is_active()
 }
 
 /// The job as it stands. A file read and one `systemctl`; call it off the

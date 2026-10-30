@@ -15,6 +15,7 @@ use gtk4::prelude::*;
 use swaypplet_system::{
     power,
     power::{BatteryState, ChargeState, Profile, battery_icon, battery_summary_text},
+    session::Session,
 };
 use swaypplet_ui::ui;
 
@@ -432,40 +433,4 @@ fn wire_confirm<F: Fn() + 'static>(btn: &gtk4::Button, verb: &'static str, exec:
             glib::ControlFlow::Break
         });
     });
-}
-
-/// What the session rail does, and the Helm's typed rows the same way
-/// (`panel.rs`): one command each, whichever door it came through.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Session {
-    Lock,
-    Suspend,
-    Logout,
-    Reboot,
-    Poweroff,
-}
-
-impl Session {
-    pub fn run(self) {
-        // The render harness (dev/render.sh) sets this: its nested session
-        // runs the real binary as the real user, and a typed "restart" there
-        // must not restart the machine it runs on.
-        if std::env::var_os("SWAYPPLET_DRY_SESSION").is_some() {
-            log::info!("session: {self:?} (dry run)");
-            return;
-        }
-        match self {
-            Session::Lock => spawn_session_cmd("loginctl", &["lock-session"]),
-            Session::Suspend => spawn_session_cmd("systemctl", &["suspend"]),
-            Session::Logout => spawn_session_cmd("swaymsg", &["exit"]),
-            Session::Reboot => spawn_session_cmd("systemctl", &["reboot"]),
-            Session::Poweroff => spawn_session_cmd("systemctl", &["poweroff"]),
-        }
-    }
-}
-
-fn spawn_session_cmd(cmd: &str, args: &[&str]) {
-    if let Err(e) = std::process::Command::new(cmd).args(args).spawn() {
-        log::error!("Failed to spawn {} {:?}: {}", cmd, args, e);
-    }
 }

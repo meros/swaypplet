@@ -410,13 +410,7 @@ fn disk(mount: &'static str) -> Option<Disk> {
 fn switching() -> Option<&'static str> {
     ["nx-apply.service", "nx-converge.service"]
         .into_iter()
-        .find(|unit| {
-            Command::new("systemctl")
-                .args(["is-active", "--quiet", unit])
-                .stdin(Stdio::null())
-                .status()
-                .is_ok_and(|s| s.success())
-        })
+        .find(|unit| swaypplet_system::systemd::Unit::system(*unit).is_active())
 }
 
 fn locked() -> bool {

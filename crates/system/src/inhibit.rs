@@ -46,11 +46,12 @@
 //! source of truth.
 
 use std::cell::Cell;
-use std::process::Command;
 
 use swayipc::Node;
 
 use swaypplet_base::service::Observed;
+
+use crate::systemd::{Transient, Unit, Verb};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Inhibitor {
@@ -72,6 +73,10 @@ impl Inhibitor {
             NoSleep => "swaypplet-nosleep-inhibit.service",
             NoLock => "swaypplet-nolock-inhibit.service",
         }
+    }
+
+    fn user_unit(self) -> Unit {
+        Unit::user(self.unit())
     }
 
     /// What the held logind inhibitor blocks. For No Sleep this is the whole
@@ -144,17 +149,8 @@ impl Inhibitor {
     /// When a timed inhibitor lifts ("14:30"), from its unit's description;
     /// `None` for one armed until turned off, or not armed. Blocking.
     pub fn until(self) -> Option<String> {
-        let out = Command::new("systemctl")
-            .args([
-                "--user",
-                "show",
-                "--property=Description",
-                "--value",
-                self.unit(),
-            ])
-            .output()
-            .ok()?;
-        parse_until(&String::from_utf8_lossy(&out.stdout))
+        let props = self.user_unit().show(&["Description"]).ok()?;
+        parse_until(props.get("Description"))
     }
 
     /// [`read`](Self::read) as a policy answer: an authority we cannot reach
@@ -183,10 +179,7 @@ impl Inhibitor {
         if on {
             // Re-arming with a new duration replaces the old unit.
             if self.read() == Some(true) {
-                run(
-                    self.scope(),
-                    Command::new("systemctl").args(["--user", "stop", self.unit()]),
-                );
+                logged(self.scope(), self.user_unit().run(Verb::Stop));
             }
             let (sleep, until) = match minutes {
                 Some(m) => {
@@ -200,30 +193,26 @@ impl Inhibitor {
                 }
                 None => ("infinity".to_string(), String::new()),
             };
-            let args: Vec<String> = vec![
-                "--user".into(),
-                "--quiet".into(),
-                "--collect".into(),
-                format!("--unit={}", self.unit()),
-                format!(
-                    "--description=swaypplet {} ({} inhibitor){until}",
-                    self.label(),
-                    self.what()
-                ),
-                "systemd-inhibit".into(),
-                format!("--what={}", self.what()),
-                "--who=swaypplet".into(),
-                format!("--why={} mode", self.label()),
-                "--mode=block".into(),
-                "sleep".into(),
-                sleep,
-            ];
-            run(self.scope(), Command::new("systemd-run").args(&args));
+            let job = Transient::new(
+                self.unit(),
+                [
+                    "systemd-inhibit".to_string(),
+                    format!("--what={}", self.what()),
+                    "--who=swaypplet".into(),
+                    format!("--why={} mode", self.label()),
+                    "--mode=block".into(),
+                    "sleep".into(),
+                    sleep,
+                ],
+            )
+            .description(format!(
+                "swaypplet {} ({} inhibitor){until}",
+                self.label(),
+                self.what()
+            ));
+            logged(self.scope(), job.start());
         } else {
-            run(
-                self.scope(),
-                Command::new("systemctl").args(["--user", "stop", self.unit()]),
-            );
+            logged(self.scope(), self.user_unit().run(Verb::Stop));
         }
 
         // The authority decides, not the exit status. See the module docs.
@@ -388,48 +377,26 @@ enum UnitState {
 }
 
 fn unit_state(unit: &str) -> UnitState {
-    let out = Command::new("systemctl")
-        .args([
-            "--user",
-            "show",
-            "-p",
-            "LoadState",
-            "-p",
-            "ActiveState",
-            unit,
-        ])
-        .output();
-    let out = match out {
-        Ok(out) => out,
+    let props = match Unit::user(unit).show(&["LoadState", "ActiveState"]) {
+        Ok(props) => props,
         Err(e) => {
-            log::warn!("inhibit: systemctl show {unit} failed: {e}");
+            log::warn!("inhibit: {e}");
             return UnitState::NoSystemctl;
         }
     };
-    let text = String::from_utf8_lossy(&out.stdout);
-    let prop = |key: &str| {
-        text.lines()
-            .find_map(|l| l.strip_prefix(key)?.strip_prefix('='))
-            .unwrap_or_default()
-            .to_string()
-    };
-    match (prop("LoadState").as_str(), prop("ActiveState").as_str()) {
+    match (props.get("LoadState"), props.get("ActiveState")) {
         ("loaded", "active") => UnitState::Active,
         ("loaded", _) => UnitState::Inactive,
         _ => UnitState::NotLoaded,
     }
 }
 
-/// Run a command to completion, logging what it did. The caller decides
-/// success by reading the authority back, so this returns nothing.
-fn run(scope: &str, cmd: &mut Command) {
-    match cmd.status() {
-        Ok(st) if st.success() => log::info!("inhibit[{scope}]: {:?} ok", cmd.get_program()),
-        Ok(st) => log::info!("inhibit[{scope}]: {:?} exited {st}", cmd.get_program()),
-        Err(e) => log::warn!(
-            "inhibit[{scope}]: {:?} failed to spawn: {e}",
-            cmd.get_program()
-        ),
+/// Log what a start or a stop did. The caller decides success by reading
+/// the authority back, so this returns nothing.
+fn logged(scope: &str, result: Result<(), String>) {
+    match result {
+        Ok(()) => log::info!("inhibit[{scope}]: ok"),
+        Err(e) => log::info!("inhibit[{scope}]: {e}"),
     }
 }
 

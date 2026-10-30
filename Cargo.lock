@@ -2590,6 +2590,7 @@ dependencies = [
  "swaypplet-base",
  "swaypplet-screenshot",
  "swaypplet-settings-kit",
+ "swaypplet-system",
  "swaypplet-ui",
 ]
 
@@ -2604,6 +2605,7 @@ dependencies = [
  "serde_json",
  "swaypplet-base",
  "swaypplet-settings-kit",
+ "swaypplet-system",
  "swaypplet-ui",
 ]
 
