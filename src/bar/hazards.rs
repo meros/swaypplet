@@ -91,6 +91,7 @@ pub fn build(
     }
     // A bar without a panel beside it never sees a toggle, so ask once.
     inhibit::prime();
+    inhibit::watch_external();
 
     let (mode, mode_glyph) = hazard("󰌌");
     lane.append(&mode);

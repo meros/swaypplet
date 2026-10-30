@@ -307,6 +307,10 @@ pub fn run() -> ! {
     // The motion setting, for the fade and the ring (`anim::duration`).
     crate::settings::store::init();
     stage("css");
+    // The inhibitor glyphs on the surfaces: real state now, outside
+    // changes followed.
+    crate::services::inhibit::prime();
+    crate::services::inhibit::watch_external();
 
     // Pre-warmed mode: absorb the first-window cost and park until told to
     // lock. Spawned the old way (no supervisor), fall straight through.

@@ -340,6 +340,7 @@ impl DurationFold {
 /// The optimistic toggle, its revert on failure, and the `loading` state,
 /// on any toggle button.
 fn wire(btn: &gtk4::ToggleButton, spec: &TileSpec) {
+    follow_inhibitor(btn, spec);
     let spec = spec.clone();
     let btn_h = btn.clone();
     btn.connect_clicked(move |_| {
@@ -374,6 +375,33 @@ fn wire(btn: &gtk4::ToggleButton, spec: &TileSpec) {
             },
         );
     });
+}
+
+/// An inhibitor tile follows the established state cell, so a change made
+/// by another process (published by `inhibit::watch_external`) moves the
+/// toggle. `set_active` emits `toggled`, not `clicked`, so the arm action
+/// (wired on `clicked`) does not run again. A tile that is mid-toggle
+/// (`loading`) is left alone: its own result publishes when it lands.
+fn follow_inhibitor(btn: &gtk4::ToggleButton, spec: &TileSpec) {
+    let Some(which) = Inhibitor::ALL.into_iter().find(|w| w.label() == spec.label) else {
+        return;
+    };
+    let weak = btn.downgrade();
+    // One sync, used at build time and on every change. A tile built before
+    // an outside change still shows the cell's value when the panel opens.
+    let sync = move || {
+        let Some(btn) = weak.upgrade() else { return };
+        if btn.has_css_class("loading") {
+            return;
+        }
+        let armed = inhibit::observed(which, |c| c.with(|a| *a));
+        if btn.is_active() != armed {
+            btn.set_active(armed);
+        }
+        set_tooltip(&btn, armed, which.tooltip_on(), which.tooltip_off());
+    };
+    inhibit::observed(which, |cell| cell.connect_change(sync.clone()));
+    sync();
 }
 
 /// Read the initial state for a tile (on a background thread) and apply it.

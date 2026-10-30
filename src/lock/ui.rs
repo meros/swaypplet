@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use gtk4::prelude::*;
 
 use crate::anim::animations_enabled;
+use crate::services::inhibit::{self, Inhibitor};
 use crate::services::status::{Severity, StatusItem};
 use crate::auth_field::{AuthField, Caption, Tone};
 use crate::switch_user;
@@ -213,6 +214,44 @@ struct SessionLine {
     text: gtk4::Label,
 }
 
+/// The armed session inhibitors (No Sleep, No Lock) as quiet glyphs under
+/// the date, hidden when none is armed. Display only: labels take no focus,
+/// and nothing here touches the auth path. Each surface builds its own row
+/// from the shared `inhibit::observed` cells, as the bar does.
+fn inhibitor_row() -> gtk4::Box {
+    let row = ui::hbox(2);
+    row.set_halign(gtk4::Align::Center);
+    row.set_can_focus(false);
+    row.set_can_target(false);
+    let glyphs: Vec<(Inhibitor, gtk4::Label)> = Inhibitor::ALL
+        .into_iter()
+        .map(|which| {
+            let glyph = ui::text(which.icon(), ui::Text::Title, ui::Tone::Muted);
+            glyph.set_can_focus(false);
+            ui::on_shade::adopt(&glyph);
+            row.append(&glyph);
+            (which, glyph)
+        })
+        .collect();
+    let weak = row.downgrade();
+    let sync = Rc::new(move || {
+        let Some(row) = weak.upgrade() else { return };
+        let mut any = false;
+        for (which, glyph) in &glyphs {
+            let armed = inhibit::observed(*which, |c| c.with(|a| *a));
+            glyph.set_visible(armed);
+            any |= armed;
+        }
+        row.set_visible(any);
+    });
+    for which in Inhibitor::ALL {
+        let sync = sync.clone();
+        inhibit::observed(which, |cell| cell.connect_change(move || sync()));
+    }
+    sync();
+    row
+}
+
 impl SessionLine {
     fn new() -> Self {
         let row = ui::hbox(2);
@@ -409,6 +448,7 @@ impl SurfaceSet {
         let sessions = SessionLine::new();
         sessions.show(self.sessions.borrow().as_ref());
         stamp.append(&sessions.row);
+        stamp.append(&inhibitor_row());
         let plate = gtk4::Overlay::new();
         plate.add_css_class("lock-stamp");
         plate.set_child(Some(&clock_shade()));

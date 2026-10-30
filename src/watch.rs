@@ -34,6 +34,16 @@ pub struct Monitors(#[allow(dead_code)] Vec<gio::FileMonitor>);
 /// changed, was created, replaced or removed. The returned handle must be
 /// kept for as long as the watch should last.
 pub fn files(files: &[PathBuf], on_change: impl Fn() + 'static) -> Monitors {
+    files_within(files, SETTLE, on_change)
+}
+
+/// [`files`] with its own settle time, for a file that is only ever touched
+/// (a signal, with no half-written content to wait out).
+pub fn files_within(
+    files: &[PathBuf],
+    settle: Duration,
+    on_change: impl Fn() + 'static,
+) -> Monitors {
     let on_change: Rc<dyn Fn()> = Rc::new(on_change);
     let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::default();
     let mut monitors = Vec::new();
@@ -60,7 +70,7 @@ pub fn files(files: &[PathBuf], on_change: impl Fn() + 'static) -> Monitors {
             }
             let on_change = on_change.clone();
             let slot = pending.clone();
-            *pending.borrow_mut() = Some(glib::timeout_add_local_once(SETTLE, move || {
+            *pending.borrow_mut() = Some(glib::timeout_add_local_once(settle, move || {
                 slot.borrow_mut().take();
                 on_change();
             }));

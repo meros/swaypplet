@@ -247,6 +247,59 @@ thread_local! {
     static STATE: [Observed<bool>; 2] = [Observed::new(false), Observed::new(false)];
     /// [`prime`] runs once per process, not once per bar window.
     static PRIMED: Cell<bool> = const { Cell::new(false) };
+    /// [`watch_external`] arms one watch per process.
+    static EXTERNAL: std::cell::RefCell<Option<crate::watch::Monitors>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The file another process touches after it started or stopped one of the
+/// inhibitor units (the laptop-companion BLE agent does, on a phone switch):
+/// `$XDG_RUNTIME_DIR/swaypplet/inhibit-changed`. Its content is irrelevant;
+/// only that it was created or rewritten.
+pub fn signal_path(runtime_dir: Option<std::ffi::OsString>) -> Option<std::path::PathBuf> {
+    let dir = std::path::PathBuf::from(runtime_dir.filter(|d| !d.is_empty())?);
+    Some(dir.join("swaypplet").join("inhibit-changed"))
+}
+
+/// Re-read every inhibitor on a worker and publish, so the bar and the
+/// tiles follow a change made outside this process.
+fn refresh_all() {
+    for which in Inhibitor::ALL {
+        crate::spawn::spawn_work(
+            move || which.read(),
+            move |state| {
+                if let Some(armed) = state {
+                    publish(which, armed);
+                }
+            },
+        );
+    }
+}
+
+/// A touched signal file carries no content to wait for, so the settle
+/// is only long enough to merge the create and the write of one touch.
+const SIGNAL_SETTLE: std::time::Duration = std::time::Duration::from_millis(10);
+
+/// Follow changes made by other processes: watch [`signal_path`] by inotify
+/// and, on a touch, re-read the real state ([`refresh_all`]). Idempotent.
+/// The directory is created here because `watch::files` monitors the parent
+/// directory, which must exist for the monitor to start.
+pub fn watch_external() {
+    if EXTERNAL.with(|e| e.borrow().is_some()) {
+        return;
+    }
+    let Some(path) = signal_path(std::env::var_os("XDG_RUNTIME_DIR")) else {
+        log::warn!("inhibit: no XDG_RUNTIME_DIR, not following outside changes");
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            log::warn!("inhibit: cannot create {}: {e}", dir.display());
+            return;
+        }
+    }
+    let monitors = crate::watch::files_within(&[path], SIGNAL_SETTLE, refresh_all);
+    EXTERNAL.with(|e| *e.borrow_mut() = Some(monitors));
 }
 
 /// Borrow an inhibitor's state cell (to read it or to observe changes).
@@ -266,16 +319,7 @@ pub fn prime() {
     if PRIMED.with(|p| p.replace(true)) {
         return;
     }
-    for which in Inhibitor::ALL {
-        crate::spawn::spawn_work(
-            move || which.read(),
-            move |state| {
-                if let Some(armed) = state {
-                    publish(which, armed);
-                }
-            },
-        );
-    }
+    refresh_all();
 }
 
 // ── Compositor idle inhibition ──────────────────────────────────────────
@@ -395,6 +439,16 @@ mod tests {
         );
         assert_eq!(parse_until("swaypplet No Sleep (handle-lid-switch inhibitor)"), None);
         assert_eq!(parse_until(""), None);
+    }
+
+    #[test]
+    fn the_signal_file_lives_under_the_runtime_dir() {
+        assert_eq!(
+            signal_path(Some("/run/user/1000".into())),
+            Some("/run/user/1000/swaypplet/inhibit-changed".into())
+        );
+        assert_eq!(signal_path(None), None);
+        assert_eq!(signal_path(Some("".into())), None);
     }
 
     #[test]
