@@ -12,7 +12,6 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
-use std::time::Duration;
 
 use gtk4::prelude::*;
 
@@ -76,21 +75,12 @@ pub fn build() -> gtk4::Button {
 /// Arm a one-shot for the next minute boundary; each fire updates and
 /// re-arms while the widget is alive.
 fn schedule_tick(update: Rc<dyn Fn() -> bool>) {
-    glib::timeout_add_local_once(millis_to_next_minute(), move || {
+    let delay = swaypplet_base::time::until_next_minute(swaypplet_base::time::now());
+    glib::timeout_add_local_once(delay, move || {
         if update() {
             schedule_tick(update);
         }
     });
-}
-
-fn millis_to_next_minute() -> Duration {
-    let remaining_ms = match glib::DateTime::now_local() {
-        // seconds() carries the fraction; +50ms lands safely past the
-        // boundary so the fresh minute is already readable.
-        Ok(now) => ((60.0 - now.seconds()) * 1000.0).ceil() as u64 + 50,
-        Err(_) => 60_000,
-    };
-    Duration::from_millis(remaining_ms.clamp(50, 60_050))
 }
 
 /// Label text for `now` in the active format (unit-tested).

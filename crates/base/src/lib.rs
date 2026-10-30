@@ -13,5 +13,6 @@ pub mod pid;
 pub mod service;
 pub mod spawn;
 pub mod sway;
+pub mod time;
 pub mod user;
 pub mod watch;

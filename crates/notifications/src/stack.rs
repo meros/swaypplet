@@ -32,7 +32,6 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Duration;
 
 use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
@@ -418,19 +417,22 @@ fn ensure_age_timer(st: &Rc<RefCell<State>>) {
         return;
     }
     let st_c = st.clone();
-    let source = glib::timeout_add_local(Duration::from_secs(60), move || {
-        let mut s = st_c.borrow_mut();
-        if s.cards.is_empty() {
+    let delay = swaypplet_base::time::until_next_minute(swaypplet_base::time::now());
+    let source = glib::timeout_add_local_once(delay, move || {
+        {
+            let mut s = st_c.borrow_mut();
             s.age_timer = None;
-            return glib::ControlFlow::Break;
-        }
-        let now = std::time::SystemTime::now();
-        for card in &s.cards {
-            if let Some(label) = &card.age {
-                label.set_label(&age_label(card.stamp, now).unwrap_or_default());
+            if s.cards.is_empty() {
+                return;
+            }
+            let now = std::time::SystemTime::now();
+            for card in &s.cards {
+                if let Some(label) = &card.age {
+                    label.set_label(&age_label(card.stamp, now).unwrap_or_default());
+                }
             }
         }
-        glib::ControlFlow::Continue
+        ensure_age_timer(&st_c);
     });
     st.borrow_mut().age_timer = Some(source);
 }

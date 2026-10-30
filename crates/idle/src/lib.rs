@@ -155,10 +155,7 @@ const SLEEP_RELEASE_MAX: Duration = Duration::from_secs(4);
 /// The instant the next minute of the day starts, when the night window may
 /// open or close. The settings file itself arrives as an event.
 fn next_minute() -> Instant {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0.0, |d| d.as_secs_f64());
-    Instant::now() + Duration::from_secs_f64(60.0 - secs % 60.0 + 0.05)
+    Instant::now() + swaypplet_base::time::until_next_minute(swaypplet_base::time::now())
 }
 
 /// When the locked, idle session's outputs should go off, counted from now.

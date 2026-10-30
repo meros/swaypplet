@@ -513,9 +513,8 @@ fn leading_fraction(s: &str) -> Option<(u32, u32)> {
 }
 
 /// Delay until the next waiting session crosses a whole-minute age
-/// boundary; `None` when nothing waits, so the timer stands down. +50 ms
-/// lands safely past the boundary (clock.rs). A missing or future mtime
-/// (suspend skew) counts as age zero.
+/// boundary; `None` when nothing waits, so the timer stands down. A
+/// missing or future mtime (suspend skew) counts as age zero.
 fn next_age_delay(snapshot: &TaskSnapshot, now: SystemTime) -> Option<Duration> {
     snapshot
         .tasks
@@ -527,10 +526,9 @@ fn next_age_delay(snapshot: &TaskSnapshot, now: SystemTime) -> Option<Duration> 
                 .status_mtime
                 .and_then(|m| now.duration_since(m).ok())
                 .unwrap_or(Duration::ZERO);
-            Duration::from_secs(60 - elapsed.as_secs() % 60)
+            swaypplet_base::time::until_next_minute(elapsed)
         })
         .min()
-        .map(|d| d + Duration::from_millis(50))
 }
 
 #[cfg(test)]
