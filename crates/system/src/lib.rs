@@ -5,13 +5,13 @@
 //! where there is a state to observe. Surfaces (`bar`, `widgets`, `panel`,
 //! `notifications`) depend on these; nothing here depends on a surface.
 //!
-//! Sway is the exception to living here: its IPC, workspace naming and tree
-//! searches are their own module (`crate::sway`), because the services read
-//! it too.
+//! The larger services have crates of their own (`swaypplet_audio`,
+//! `swaypplet_devices`, `swaypplet_displays`, `swaypplet_notifyd`,
+//! `swaypplet_cast`), and sway's IPC, workspace naming and tree searches
+//! live in `swaypplet_base::sway`, because the services read it too.
 
 pub mod backup;
 pub mod battery;
-pub mod bluez;
 pub mod capture;
 pub mod clipboard;
 pub mod elephant;

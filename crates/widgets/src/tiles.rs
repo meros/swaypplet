@@ -120,7 +120,7 @@ fn bluetooth_spec() -> TileSpec {
         label: "Bluetooth",
         tooltip_on: "Bluetooth: powered on",
         tooltip_off: "Bluetooth: powered off",
-        action: Arc::new(|on| swaypplet_system::bluez::set_powered(on).is_ok()),
+        action: Arc::new(|on| swaypplet_devices::bluetooth::blocking::set_powered(on).is_ok()),
         read_state: Arc::new(read_bluetooth_state),
         on_state: None,
         status: None,
@@ -533,7 +533,7 @@ fn read_wifi_state() -> TileState {
 }
 
 fn read_bluetooth_state() -> TileState {
-    let snapshot = swaypplet_system::bluez::snapshot();
+    let snapshot = swaypplet_devices::bluetooth::blocking::snapshot();
     if !snapshot.available {
         return TileState::Unavailable;
     }

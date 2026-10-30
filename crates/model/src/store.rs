@@ -210,6 +210,42 @@ pub fn observe(cb: impl Fn() + 'static) {
     LIVE.with(|live| live.connect_change(cb));
 }
 
+/// Run `cb` with the new `select` of the live copy when, and only when, it
+/// changed. The settings notify on every edit (a slider drag is dozens), so
+/// an observer that cares about one section would otherwise redo its work
+/// for every other section's edit.
+pub fn observe_section<T: PartialEq + Clone + 'static>(
+    select: impl Fn(&Settings) -> T + 'static,
+    cb: impl Fn(T) + 'static,
+) {
+    let latest = Latest::new(with(&select));
+    observe(move || {
+        // Read and compared before `cb` runs, so `cb` may edit the settings.
+        if let Some(now) = latest.moved(with(&select)) {
+            cb(now);
+        }
+    });
+}
+
+/// The last value an observer saw.
+struct Latest<T>(RefCell<T>);
+
+impl<T: PartialEq + Clone> Latest<T> {
+    fn new(initial: T) -> Self {
+        Self(RefCell::new(initial))
+    }
+
+    /// `now` if it differs from the last value, which it then becomes.
+    fn moved(&self, now: T) -> Option<T> {
+        let mut last = self.0.borrow_mut();
+        if *last == now {
+            return None;
+        }
+        *last = now.clone();
+        Some(now)
+    }
+}
+
 /// Change the live copy, notify observers now, and write the file after the
 /// debounce. A no-op edit is dropped before it reaches either.
 pub fn update(edit: impl FnOnce(&mut Settings)) {
@@ -265,6 +301,15 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("swaypplet-settings-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join(name)
+    }
+
+    #[test]
+    fn a_section_observer_hears_only_its_own_section_move() {
+        let latest = Latest::new(Some(1));
+        assert_eq!(latest.moved(Some(1)), None, "another section's edit");
+        assert_eq!(latest.moved(Some(2)), Some(Some(2)));
+        assert_eq!(latest.moved(Some(2)), None, "said once");
+        assert_eq!(latest.moved(None), Some(None), "a reset is a change");
     }
 
     #[test]

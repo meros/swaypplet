@@ -18,8 +18,8 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use swaypplet_devices::bluetooth::blocking::Device;
 use swaypplet_devices::bluetooth::{BluetoothService, BtState, Command, Op};
-use swaypplet_system::bluez::Device;
 use swaypplet_ui::ui;
 use swaypplet_ui::ui::icons;
 
@@ -523,7 +523,7 @@ impl BluetoothSection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use swaypplet_system::bluez::Snapshot;
+    use swaypplet_devices::bluetooth::blocking::Snapshot;
 
     fn dev(mac: &str, name: &str, connected: bool, paired: bool, rssi: Option<i16>) -> Device {
         Device {

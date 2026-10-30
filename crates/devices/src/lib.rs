@@ -7,7 +7,7 @@
 //! file's user-only `devices` section, keyed by [`DeviceKey`]: something
 //! that follows the device itself rather than the port it is plugged into.
 //! Bluetooth is the exception: BlueZ keeps a per-device `Alias` of its own,
-//! and Rename writes that (`services::bluez::set_alias`).
+//! and Rename writes that ([`bluetooth::Command::Rename`]).
 //!
 //! The technical name (interface, connector, node description, sway name)
 //! is never replaced, only moved: callers put it in the subtitle or the
@@ -69,15 +69,7 @@ pub fn rename(key: &DeviceKey, name: &str) {
 /// drag is dozens), so this passes on only the edits that moved the
 /// `devices` section.
 pub fn observe(cb: impl Fn() + 'static) {
-    let names = || swaypplet_model::store::with(|s| s.devices.clone());
-    let last = std::cell::RefCell::new(names());
-    swaypplet_model::store::observe(move || {
-        let now = names();
-        if *last.borrow() != now {
-            *last.borrow_mut() = now;
-            cb();
-        }
-    });
+    swaypplet_model::store::observe_section(|s| s.devices.clone(), move |_| cb());
 }
 
 #[cfg(test)]

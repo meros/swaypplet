@@ -1,5 +1,6 @@
 pub mod alpha;
 pub mod build;
+pub mod dbus;
 pub mod face;
 pub mod frame_stats;
 pub mod glib_unix;

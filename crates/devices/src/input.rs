@@ -195,7 +195,14 @@ pub fn changed(old: &Input, new: &Input) -> (Vec<String>, bool) {
 /// The section some layer sets, or `None` when neither file has one: then
 /// there is nothing to send and the sway config is the whole story.
 fn in_force() -> Option<Input> {
-    store::with(|s| s.input.clone()).or_else(|| store::system().input.clone())
+    store::with(in_force_of)
+}
+
+fn in_force_of(settings: &store::Settings) -> Option<Input> {
+    settings
+        .input
+        .clone()
+        .or_else(|| store::system().input.clone())
 }
 
 thread_local! {
@@ -237,13 +244,10 @@ fn follow_edit() {
 /// hotplug or a reload. Once per process, from the panel's startup.
 pub fn follow() {
     apply_all();
-    store::observe(follow_edit);
+    store::observe_section(in_force_of, |_| follow_edit());
 
     let (tx, rx) = async_channel::bounded::<()>(1);
-    std::thread::Builder::new()
-        .name("sway-input".into())
-        .spawn(move || watch(tx))
-        .expect("spawn sway-input thread");
+    swaypplet_base::spawn::spawn_thread("sway-input", move || watch(tx));
     glib::MainContext::default().spawn_local(async move {
         while rx.recv().await.is_ok() {
             glib::timeout_future(std::time::Duration::from_millis(SETTLE_MS)).await;
@@ -256,37 +260,33 @@ pub fn follow() {
 
 /// The event thread: a device added, or the config read again.
 fn watch(tx: async_channel::Sender<()>) {
-    let mut backoff = swaypplet_base::service::Backoff::new();
-    loop {
-        let started = std::time::Instant::now();
-        let result = ipc::connect()
-            .and_then(|c| c.subscribe([swayipc::EventType::Input, swayipc::EventType::Workspace]));
-        let events = match result {
-            Ok(events) => events,
-            Err(e) => {
-                let delay = backoff.next_delay(started.elapsed());
-                log::warn!("input: {e}; reconnecting in {delay:?}");
-                std::thread::sleep(delay);
-                continue;
-            }
-        };
-        for event in events {
-            let wanted = match event {
-                Ok(swayipc::Event::Input(e)) => matches!(e.change, swayipc::InputChange::Added),
-                Ok(swayipc::Event::Workspace(w)) => w.change == swayipc::WorkspaceChange::Reload,
-                Ok(_) => false,
-                Err(e) => {
-                    log::warn!("input: event stream: {e}");
-                    break;
-                }
-            };
-            // A full channel already holds a pending apply; that is enough.
-            if wanted && let Err(async_channel::TrySendError::Closed(())) = tx.try_send(()) {
-                return; // the GTK side is gone
-            }
+    swaypplet_base::service::reconnect("input", || session(&tx), |_| true);
+}
+
+/// One subscription's lifetime. `Ok(())` means the GTK side is gone.
+fn session(tx: &async_channel::Sender<()>) -> Result<(), String> {
+    let events = ipc::connect()
+        .and_then(|c| c.subscribe([swayipc::EventType::Input, swayipc::EventType::Workspace]))
+        .map_err(|e| e.to_string())?;
+    for event in events {
+        let event = event.map_err(|e| format!("event stream: {e}"))?;
+        // A full channel already holds a pending apply; that is enough.
+        if wants_apply(&event)
+            && let Err(async_channel::TrySendError::Closed(())) = tx.try_send(())
+        {
+            return Ok(());
         }
-        let delay = backoff.next_delay(started.elapsed());
-        std::thread::sleep(delay);
+    }
+    Err("event stream ended".into())
+}
+
+/// Whether `event` calls for applying the section again: a device plugged
+/// in, or the config read again.
+fn wants_apply(event: &swayipc::Event) -> bool {
+    match event {
+        swayipc::Event::Input(e) => matches!(e.change, swayipc::InputChange::Added),
+        swayipc::Event::Workspace(w) => w.change == swayipc::WorkspaceChange::Reload,
+        _ => false,
     }
 }
 
@@ -692,6 +692,36 @@ mod tests {
         assert_eq!(changed(&old, &new), (Vec::new(), true));
         assert!(changed(&old, &Input::default()).1);
         assert!(!changed(&Input::default(), &old).1);
+    }
+
+    fn input_event(change: &str) -> swayipc::Event {
+        let event = serde_json::json!({
+            "change": change,
+            "input": {"identifier": "1:1:kb", "name": "kb", "type": "keyboard"}
+        });
+        swayipc::Event::Input(Box::new(
+            serde_json::from_value(event).expect("input event"),
+        ))
+    }
+
+    fn workspace_event(change: &str) -> swayipc::Event {
+        let event = serde_json::json!({"change": change, "current": null, "old": null});
+        swayipc::Event::Workspace(Box::new(
+            serde_json::from_value(event).expect("workspace event"),
+        ))
+    }
+
+    #[test]
+    fn a_plugged_device_or_a_reload_applies_again_and_nothing_else_does() {
+        assert!(wants_apply(&input_event("added")));
+        assert!(wants_apply(&workspace_event("reload")));
+        assert!(!wants_apply(&input_event("removed")));
+        assert!(!wants_apply(&input_event("xkb_layout")));
+        assert!(!wants_apply(&workspace_event("focus")));
+        let mode = serde_json::json!({"change": "resize", "pango_markup": false});
+        assert!(!wants_apply(&swayipc::Event::Mode(
+            serde_json::from_value(mode).expect("mode event")
+        )));
     }
 
     #[test]

@@ -18,15 +18,24 @@
 
 use std::collections::HashSet;
 
-use gtk4::glib;
-
 use super::Wired;
 use swaypplet_base::service::Observed;
 
 thread_local! {
     /// The banned adapters, in NM's order.
-    pub static BANNED: Observed<Vec<Wired>> = Observed::new(Vec::new());
+    static BANNED: Observed<Vec<Wired>> = Observed::new(Vec::new());
     static STARTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Read `f` of the banned adapters, in NM's order. Empty until [`start`]
+/// has read NM once.
+pub fn banned<R>(f: impl FnOnce(&[Wired]) -> R) -> R {
+    BANNED.with(|b| b.with(|banned| f(banned)))
+}
+
+/// Run `cb` after the banned set changes.
+pub fn observe(cb: impl Fn() + 'static) {
+    BANNED.with(|b| b.connect_change(cb));
 }
 
 /// Start following NM, once per process; later calls do nothing.

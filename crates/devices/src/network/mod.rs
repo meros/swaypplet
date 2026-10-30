@@ -9,6 +9,7 @@
 use std::collections::HashSet;
 
 use crate::DeviceKey;
+use swaypplet_base::dbus;
 
 pub mod blocked;
 pub mod fixture;
@@ -55,7 +56,7 @@ impl From<Result<(), String>> for NmResult {
 /// Do something on the bus, turning a connection failure into the same
 /// `NmResult` the operation itself would produce.
 fn acting(f: impl FnOnce(&zbus::blocking::Connection) -> Result<(), String>) -> NmResult {
-    match nm::system() {
+    match dbus::system() {
         Ok(conn) => f(&conn).into(),
         Err(e) => NmResult::Failure(e),
     }
@@ -140,7 +141,7 @@ pub enum ConnectivityState {
 /// Named for what it answers rather than for the binary it used to look for;
 /// the callers ask "can this section draw anything".
 pub fn network_manager_available() -> bool {
-    let Ok(conn) = nm::system() else {
+    let Ok(conn) = dbus::system() else {
         return false;
     };
     nm::prop::<u32>(&conn, nm::MANAGER_PATH, nm::IFACE_MANAGER, "State").is_some()
@@ -149,7 +150,7 @@ pub fn network_manager_available() -> bool {
 // ── WiFi radio state ──────────────────────────────────────────────────────────
 
 pub fn wifi_radio_enabled() -> bool {
-    let Ok(conn) = nm::system() else {
+    let Ok(conn) = dbus::system() else {
         return false;
     };
     nm::prop::<bool>(
@@ -211,7 +212,7 @@ pub fn merge_and_rank(found: Vec<WifiNetwork>) -> Vec<WifiNetwork> {
 }
 
 pub fn get_active_connection() -> ActiveConnection {
-    let Ok(conn) = nm::system() else {
+    let Ok(conn) = dbus::system() else {
         return ActiveConnection::Disconnected;
     };
 
@@ -272,7 +273,7 @@ pub fn freq_band_label(freq_mhz: u32) -> &'static str {
 // ── VPN ───────────────────────────────────────────────────────────────────────
 
 pub fn get_vpn_connections() -> Vec<VpnConnection> {
-    let Ok(conn) = nm::system() else {
+    let Ok(conn) = dbus::system() else {
         return Vec::new();
     };
 
@@ -310,7 +311,7 @@ pub fn vpn_down(name: &str) -> NmResult {
 // ── Interface management ──────────────────────────────────────────────────────
 
 pub fn get_network_interfaces() -> Vec<NetworkInterface> {
-    let Ok(conn) = nm::system() else {
+    let Ok(conn) = dbus::system() else {
         return Vec::new();
     };
     nm::devices(&conn)
@@ -374,7 +375,7 @@ pub struct Wired {
 
 /// Every real wired adapter with a physical name, managed or not.
 pub fn wired_adapters() -> Vec<Wired> {
-    let Ok(conn) = nm::system() else {
+    let Ok(conn) = dbus::system() else {
         return Vec::new();
     };
     nm::devices(&conn)
@@ -548,7 +549,7 @@ pub fn iface_type_icon(iface_type: &str) -> &'static str {
 // ── Connectivity ──────────────────────────────────────────────────────────────
 
 pub fn check_connectivity() -> ConnectivityState {
-    let Ok(conn) = nm::system() else {
+    let Ok(conn) = dbus::system() else {
         return ConnectivityState::Unknown;
     };
     // The cached property, not `CheckConnectivity()` — that one runs a live

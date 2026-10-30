@@ -669,7 +669,7 @@ fn live() -> bool {
 mod fixtures {
     use swaypplet_audio::{AudioState, Card, Device, DeviceKind, Profile, Stream, VolumeState};
     use swaypplet_devices::bluetooth::{BtState, Op};
-    use swaypplet_system::{bluez, bluez::Snapshot};
+    use swaypplet_devices::bluetooth::{blocking as bluez, blocking::Snapshot};
 
     fn vol(volume: f64, muted: bool) -> VolumeState {
         VolumeState { volume, muted }

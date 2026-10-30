@@ -18,6 +18,7 @@
 
 use std::collections::HashMap;
 
+use swaypplet_base::dbus::{self, as_string};
 use zbus::blocking::{Connection, Proxy};
 use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
 
@@ -61,18 +62,9 @@ const AP_SEC_KEY_MGMT_OWE: u32 = 0x800;
 /// `NM_802_11_AP_FLAGS_PRIVACY`.
 const AP_FLAGS_PRIVACY: u32 = 0x1;
 
-/// One connection to the system bus, opened per call.
-///
-/// zbus caches the underlying socket per process, so this is cheaper than it
-/// reads; making it a long-lived field would mean handing a `!Send` handle
-/// across the worker threads that use it.
-pub fn system() -> Result<Connection, String> {
-    Connection::system().map_err(|e| format!("system bus: {e}"))
-}
-
 /// A proxy on a NetworkManager object.
 pub fn proxy<'a>(conn: &Connection, path: &'a str, iface: &'a str) -> Result<Proxy<'a>, String> {
-    Proxy::new(conn, SERVICE, path, iface).map_err(|e| format!("{iface} at {path}: {e}"))
+    dbus::proxy(conn, SERVICE, path, iface)
 }
 
 /// Read one property, or `None` if anything at all went wrong.
@@ -518,15 +510,6 @@ pub fn read_device_failure_reason(conn: &Connection, device_path: &str) -> Optio
         55 => Some("Supplicant failed".to_string()),
         _ => None,
     }
-}
-
-/// A `OwnedValue` holding a string, as a `String`.
-///
-/// zvariant 4's `OwnedValue` is not `Clone`, so the usual `try_from(v.clone())`
-/// silently clones the *reference* instead and fails to convert. Going through
-/// `downcast_ref` says what is meant and cannot do that.
-pub fn as_string(value: &OwnedValue) -> Option<String> {
-    value.downcast_ref::<&str>().ok().map(str::to_string)
 }
 
 pub fn as_u32(value: &OwnedValue) -> Option<u32> {

@@ -14,6 +14,7 @@ use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 use super::model::{Activation, Details, Metered, SavedNetwork, Snapshot, stage_text};
 use super::nm;
 use super::{ActiveConnection, NmResult, WifiNetwork, merge_and_rank};
+use swaypplet_base::dbus;
 
 type Settings = HashMap<String, HashMap<String, OwnedValue>>;
 
@@ -46,10 +47,10 @@ fn stored_wifi(conn: &Connection) -> Vec<Stored> {
             let path = p.as_str().to_string();
             let settings = settings_of(conn, &path)?;
             let c = settings.get("connection")?;
-            if c.get("type").and_then(nm::as_string).as_deref() != Some("802-11-wireless") {
+            if c.get("type").and_then(dbus::as_string).as_deref() != Some("802-11-wireless") {
                 return None;
             }
-            let id = c.get("id").and_then(nm::as_string)?;
+            let id = c.get("id").and_then(dbus::as_string)?;
             let ssid = settings
                 .get("802-11-wireless")
                 .and_then(|w| w.get("ssid"))
@@ -85,7 +86,7 @@ fn stored_wifi(conn: &Connection) -> Vec<Stored> {
 
 /// Everything, as NetworkManager has it now.
 pub fn read() -> Snapshot {
-    let Ok(conn) = nm::system() else {
+    let Ok(conn) = dbus::system() else {
         return Snapshot::default();
     };
     let Some(_) = nm::prop::<u32>(&conn, nm::MANAGER_PATH, nm::IFACE_MANAGER, "State") else {
@@ -108,7 +109,7 @@ pub fn read() -> Snapshot {
         wifi_enabled: manager("WirelessEnabled").unwrap_or(false),
         wwan_enabled: has_modem.then(|| manager("WwanEnabled").unwrap_or(false)),
         bluetooth_powered: {
-            let b = swaypplet_system::bluez::snapshot();
+            let b = crate::bluetooth::blocking::snapshot();
             (b.available && b.adapter.is_some()).then_some(b.powered)
         },
         active: super::get_active_connection(),
@@ -193,7 +194,7 @@ fn details(conn: &Connection, active: &ActiveConnection, stored: &[Stored]) -> O
         let data: Vec<HashMap<String, OwnedValue>> =
             nm::prop(conn, cfg.as_deref()?, iface, "AddressData")?;
         data.iter()
-            .filter_map(|e| e.get("address").and_then(nm::as_string))
+            .filter_map(|e| e.get("address").and_then(dbus::as_string))
             // A link-local IPv6 address says nothing a person needs.
             .find(|a| !a.starts_with("fe80"))
     };
@@ -250,7 +251,7 @@ fn details(conn: &Connection, active: &ActiveConnection, stored: &[Stored]) -> O
             })
             .unwrap_or_default()
             .iter()
-            .filter_map(|e| e.get("address").and_then(nm::as_string))
+            .filter_map(|e| e.get("address").and_then(dbus::as_string))
             .collect(),
         bitrate_mbps: nm::prop::<u32>(conn, &dev.path, nm::IFACE_WIRELESS, "Bitrate")
             .map(|kbps| kbps / 1000),
@@ -267,7 +268,7 @@ fn details(conn: &Connection, active: &ActiveConnection, stored: &[Stored]) -> O
 /// Ask the Wi-Fi device to scan. Returns at once; the results arrive as
 /// change signals. Harmless: it changes no configuration.
 pub fn request_scan() {
-    let Ok(conn) = nm::system() else { return };
+    let Ok(conn) = dbus::system() else { return };
     for d in nm::devices(&conn) {
         if d.device_type != nm::DEVICE_TYPE_WIFI {
             continue;
@@ -282,7 +283,7 @@ pub fn request_scan() {
 // ── Actions ─────────────────────────────────────────────────────────────
 
 fn acting(f: impl FnOnce(&Connection) -> Result<(), String>) -> NmResult {
-    match nm::system() {
+    match dbus::system() {
         Ok(conn) => f(&conn).into(),
         Err(e) => NmResult::Failure(e),
     }
@@ -438,8 +439,8 @@ pub fn set_airplane(on: bool) -> NmResult {
         let _ = p.set_property("WwanEnabled", !on);
         Ok(())
     });
-    if swaypplet_system::bluez::snapshot().adapter.is_some() {
-        let _ = swaypplet_system::bluez::set_powered(!on);
+    if crate::bluetooth::blocking::snapshot().adapter.is_some() {
+        let _ = crate::bluetooth::blocking::set_powered(!on);
     }
     radios
 }
@@ -461,7 +462,7 @@ mod tests {
     use super::*;
 
     fn text(v: &OwnedValue) -> String {
-        nm::as_string(v).unwrap()
+        dbus::as_string(v).unwrap()
     }
 
     #[test]

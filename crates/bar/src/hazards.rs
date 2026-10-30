@@ -102,13 +102,11 @@ pub fn build(
     let (wired, wired_glyph) = hazard("󰈂");
     lane.append(&wired);
     let apply_wired = Rc::new(move || {
-        let banned: Vec<String> = network::blocked::BANNED.with(|b| {
-            b.with(|banned| {
-                banned
-                    .iter()
-                    .map(|w| network::display_name(&w.label, w.mac.as_deref()))
-                    .collect()
-            })
+        let banned: Vec<String> = network::blocked::banned(|banned| {
+            banned
+                .iter()
+                .map(|w| network::display_name(&w.label, w.mac.as_deref()))
+                .collect()
         });
         if let Some(text) = banned_tooltip(&banned) {
             wired_glyph.set_tooltip_text(Some(&text));
@@ -116,11 +114,9 @@ pub fn build(
         wired.set_reveal_child(!banned.is_empty());
     });
     apply_wired();
-    network::blocked::BANNED.with(|b| {
-        b.connect_change({
-            let apply = apply_wired.clone();
-            move || apply()
-        })
+    network::blocked::observe({
+        let apply = apply_wired.clone();
+        move || apply()
     });
     // A rename shows in the tooltip without waiting for the next ban.
     swaypplet_devices::observe(move || apply_wired());

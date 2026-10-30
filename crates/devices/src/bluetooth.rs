@@ -26,21 +26,21 @@
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use zbus::export::futures_util::StreamExt;
 use zbus::zvariant::{ObjectPath, OwnedObjectPath};
 use zbus::{Connection, MatchRule, MessageStream, Proxy};
 
-use swaypplet_base::service::{Backoff, Observed};
-use swaypplet_system::{
-    bluez,
-    bluez::{Managed, Snapshot},
-};
+use swaypplet_base::service::{Observed, reconnect_async};
+
+pub mod blocking;
+use blocking::{Managed, Snapshot};
 
 const SERVICE: &str = "org.bluez";
 const IFACE_ADAPTER: &str = "org.bluez.Adapter1";
 const IFACE_DEVICE: &str = "org.bluez.Device1";
+const IFACE_BATTERY: &str = "org.bluez.Battery1";
 const IFACE_AGENT_MANAGER: &str = "org.bluez.AgentManager1";
 const IFACE_OBJECT_MANAGER: &str = "org.freedesktop.DBus.ObjectManager";
 const AGENT_PATH: &str = "/dev/swaypplet/bluetooth/agent";
@@ -104,7 +104,7 @@ pub enum Command {
 }
 
 pub struct BluetoothService {
-    state: Observed<BtState>,
+    state: Rc<Observed<BtState>>,
     commands: Option<async_channel::Sender<Command>>,
 }
 
@@ -114,15 +114,10 @@ impl BluetoothService {
         let (cmd_tx, cmd_rx) = async_channel::unbounded::<Command>();
         swaypplet_base::spawn::spawn_tokio_thread("bluetooth", run(state_tx, cmd_rx));
         let service = Rc::new(BluetoothService {
-            state: Observed::new(BtState::default()),
+            state: Rc::new(Observed::new(BtState::default())),
             commands: Some(cmd_tx),
         });
-        let for_recv = service.clone();
-        glib::spawn_future_local(async move {
-            while let Ok(state) = state_rx.recv().await {
-                for_recv.state.set_if_changed(state);
-            }
-        });
+        service.state.follow(state_rx);
         service
     }
 
@@ -130,7 +125,7 @@ impl BluetoothService {
     /// every command is dropped. For the preview.
     pub fn fixture(state: BtState) -> Rc<Self> {
         Rc::new(BluetoothService {
-            state: Observed::new(state),
+            state: Rc::new(Observed::new(state)),
             commands: None,
         })
     }
@@ -158,19 +153,16 @@ impl BluetoothService {
 // ── The thread ─────────────────────────────────────────────────────────
 
 async fn run(state_tx: async_channel::Sender<BtState>, commands: async_channel::Receiver<Command>) {
-    let mut backoff = Backoff::new();
-    loop {
-        let started = Instant::now();
-        match session(&state_tx, &commands).await {
-            Ok(()) => return,
-            Err(e) => {
-                let _ = state_tx.send(BtState::default()).await;
-                let delay = backoff.next_delay(started.elapsed());
-                log::warn!("bluetooth: {e}; reconnecting in {delay:?}");
-                tokio::time::sleep(delay).await;
-            }
-        }
-    }
+    reconnect_async(
+        "bluetooth",
+        || session(&state_tx, &commands),
+        |_| {
+            // Unbounded: this only fails once the panel is gone.
+            let _ = state_tx.try_send(BtState::default());
+            true
+        },
+    )
+    .await;
 }
 
 /// What the tasks and the agent share with the loop.
@@ -279,7 +271,7 @@ async fn fetch(conn: &Connection) -> Snapshot {
         return Snapshot::default();
     };
     match proxy.call::<_, _, Managed>("GetManagedObjects", &()).await {
-        Ok(objects) => bluez::parse(&objects),
+        Ok(objects) => blocking::parse(&objects),
         Err(e) => {
             log::debug!("bluetooth: GetManagedObjects: {e}");
             Snapshot::default()
@@ -315,16 +307,10 @@ fn handle(command: Command, shared: &Shared, snapshot: &Snapshot) {
         }
         Command::Power(on) => {
             let Some(adapter) = adapter else { return };
-            tokio::spawn(async move {
-                let result = async {
-                    Proxy::new(&shared.conn, SERVICE, adapter.as_str(), IFACE_ADAPTER)
-                        .await?
-                        .set_property("Powered", on)
-                        .await
-                        .map_err(zbus::Error::from)
-                }
-                .await;
-                if let Err(e) = result {
+            // The tile's blocking setter, on a plain thread: zbus's blocking
+            // calls must not run on this runtime's own thread.
+            std::thread::spawn(move || {
+                if let Err(e) = blocking::set_adapter_powered(&adapter, on) {
                     log::warn!("bluetooth: power {on}: {e}");
                 }
             });
