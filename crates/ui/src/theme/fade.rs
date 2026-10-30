@@ -56,14 +56,8 @@ fn declarations(css: &str) -> impl Iterator<Item = (&str, &str)> {
     })
 }
 
-fn hex(word: &str) -> Option<Rgb> {
-    let h = word.strip_prefix('#')?;
-    (h.len() == 6).then_some(())?;
-    Some(Rgb::hex(u32::from_str_radix(h, 16).ok()?))
-}
-
 fn value(raw: &str) -> Option<Value> {
-    if let Some(c) = hex(raw) {
+    if let Some(c) = Rgb::parse_css(raw) {
         return Some(Value::Solid(c));
     }
     let inner = raw
@@ -71,7 +65,7 @@ fn value(raw: &str) -> Option<Value> {
         .strip_suffix(", transparent)")?;
     let (color, share) = inner.split_once(' ')?;
     let share: f64 = share.strip_suffix('%')?.parse().ok()?;
-    Some(Value::Mixed(hex(color)?, share / 100.0))
+    Some(Value::Mixed(Rgb::parse_css(color)?, share / 100.0))
 }
 
 /// The colour tokens that differ between two `tokens.css`, each with both

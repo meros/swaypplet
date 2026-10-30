@@ -20,6 +20,27 @@ impl Rgb {
         )
     }
 
+    /// A CSS hex colour: `#rrggbb`, or the short `#rgb` (each digit
+    /// doubled). Anything else is `None`, including a sign, which
+    /// `from_str_radix` alone would let through.
+    pub fn parse_css(word: &str) -> Option<Rgb> {
+        let digits = word.strip_prefix('#')?;
+        if !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let v = u32::from_str_radix(digits, 16).ok()?;
+        match digits.len() {
+            6 => Some(Rgb::hex(v)),
+            3 => {
+                let (r, g, b) = ((v >> 8) & 0xf, (v >> 4) & 0xf, v & 0xf);
+                Some(Rgb::hex(
+                    ((r * 0x11) << 16) | ((g * 0x11) << 8) | (b * 0x11),
+                ))
+            }
+            _ => None,
+        }
+    }
+
     pub fn css(self) -> String {
         let c = |x: f64| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
         format!("#{:02x}{:02x}{:02x}", c(self.0), c(self.1), c(self.2))
@@ -113,6 +134,23 @@ pub(super) fn mix(a: Oklch, b: Oklch, t: f64) -> Oklch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn css_hex_colours_parse_in_both_lengths() {
+        assert_eq!(Rgb::parse_css("#ff8000"), Some(Rgb::hex(0xff8000)));
+        assert_eq!(Rgb::parse_css("#FF8000"), Some(Rgb::hex(0xff8000)));
+        assert_eq!(Rgb::parse_css("#f80"), Some(Rgb::hex(0xff8800)));
+        assert_eq!(Rgb::parse_css("#000"), Some(Rgb::BLACK));
+        for bad in [
+            "ff8000", "#ff800", "#ff80000", "#+f8000", "#gg8000", "#", "", "#ff 800",
+        ] {
+            assert_eq!(Rgb::parse_css(bad), None, "{bad:?}");
+        }
+        assert_eq!(
+            Rgb::parse_css(&Rgb::hex(0x123456).css()),
+            Some(Rgb::hex(0x123456))
+        );
+    }
 
     #[test]
     fn oklch_round_trips() {

@@ -175,6 +175,8 @@ impl Material {
     /// error: this value reaches here from a file a human may have edited,
     /// and the card's own colour is always a safe answer.
     pub fn fill_rgb(&self) -> Option<(f64, f64, f64)> {
+        // The `#` is optional here and the short form is not taken, as
+        // before the shared parser: a file that worked keeps working.
         let hex = self
             .fill_color
             .strip_prefix('#')
@@ -182,12 +184,8 @@ impl Material {
         if hex.len() != 6 {
             return None;
         }
-        let v = u32::from_str_radix(hex, 16).ok()?;
-        Some((
-            ((v >> 16) & 0xff) as f64 / 255.0,
-            ((v >> 8) & 0xff) as f64 / 255.0,
-            (v & 0xff) as f64 / 255.0,
-        ))
+        let swaypplet_tokens::Rgb(r, g, b) = swaypplet_tokens::Rgb::parse_css(&format!("#{hex}"))?;
+        Some((r, g, b))
     }
 
     /// Set it from a colour, or clear it back to the card's own.

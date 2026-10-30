@@ -449,15 +449,6 @@ fn cells(word: &str) -> Option<[u8; GRID * GRID]> {
     Some(out)
 }
 
-/// A `#rrggbb` word.
-fn colour(word: &str) -> Option<Rgb> {
-    let hex = word.strip_prefix('#')?;
-    let v = u32::from_str_radix(hex, 16)
-        .ok()
-        .filter(|_| hex.len() == 6)?;
-    Some(Rgb::hex(v))
-}
-
 /// The key and the sample out of a cache line this build wrote.
 fn parse(text: &str) -> Option<(String, Cached)> {
     let mut words = text.split_whitespace();
@@ -468,14 +459,14 @@ fn parse(text: &str) -> Option<(String, Cached)> {
         "none" => None,
         list => Some(
             list.split(',')
-                .map(colour)
+                .map(Rgb::parse_css)
                 .collect::<Option<Vec<Rgb>>>()
                 .filter(|v| (1..=CHOICES).contains(&v.len()))?,
         ),
     };
     let ground = match words.next()?.strip_prefix("ground=")? {
         "none" => None,
-        word => Some(colour(word)?),
+        word => Some(Rgb::parse_css(word)?),
     };
     let mean = cells(words.next()?.strip_prefix("luma=")?)?;
     let spread = cells(words.next()?.strip_prefix("spread=")?)?;
