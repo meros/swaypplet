@@ -65,14 +65,16 @@ fn connect() -> io::Result<UnixStream> {
     Ok(stream)
 }
 
-fn send_message(stream: &mut UnixStream, msg_type: u8, payload: &[u8]) -> io::Result<()> {
+/// One request frame: type, format, big-endian length, payload.
+fn send_message(stream: &mut impl Write, msg_type: u8, payload: &[u8]) -> io::Result<()> {
     let mut buf = vec![msg_type, FORMAT_PROTOBUF];
     buf.extend_from_slice(&(payload.len() as u32).to_be_bytes());
     buf.extend_from_slice(payload);
     stream.write_all(&buf)
 }
 
-fn read_response_header(stream: &mut UnixStream) -> io::Result<(u8, u32)> {
+/// One response frame's header: the status and the payload's length.
+fn read_response_header(stream: &mut impl Read) -> io::Result<(u8, u32)> {
     let mut header = [0u8; 5];
     stream.read_exact(&mut header)?;
     let status = header[0];
@@ -191,4 +193,76 @@ pub fn activate(
     send_message(&mut stream, MSG_TYPE_ACTIVATE, &payload)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+
+    #[test]
+    fn a_request_is_type_format_length_payload() {
+        let mut out = Cursor::new(Vec::new());
+        send_message(&mut out, MSG_TYPE_ACTIVATE, b"abc").unwrap();
+        assert_eq!(
+            out.into_inner(),
+            [
+                MSG_TYPE_ACTIVATE,
+                FORMAT_PROTOBUF,
+                0,
+                0,
+                0,
+                3,
+                b'a',
+                b'b',
+                b'c'
+            ]
+        );
+        let mut out = Cursor::new(Vec::new());
+        send_message(&mut out, MSG_TYPE_QUERY, &[]).unwrap();
+        assert_eq!(
+            out.into_inner(),
+            [MSG_TYPE_QUERY, FORMAT_PROTOBUF, 0, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn a_response_header_is_status_and_big_endian_length() {
+        let mut input = Cursor::new(vec![RESP_QUERY_ITEM, 0, 0, 1, 2, 0xff]);
+        assert_eq!(
+            read_response_header(&mut input).unwrap(),
+            (RESP_QUERY_ITEM, 258)
+        );
+        // The payload is left for the caller.
+        assert_eq!(input.position(), 5);
+        // A header cut short is an error, not a guess.
+        let mut short = Cursor::new(vec![RESP_QUERY_DONE, 0, 0]);
+        assert_eq!(
+            read_response_header(&mut short).unwrap_err().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+    }
+
+    /// A query's payload survives the framing: what is sent reads back.
+    #[test]
+    fn a_query_round_trips_through_a_frame() {
+        let mut req = QueryRequest::new();
+        req.query = "fire".into();
+        req.maxresults = 5;
+        let payload = req.write_to_bytes().unwrap();
+        let mut wire = Cursor::new(Vec::new());
+        send_message(&mut wire, MSG_TYPE_QUERY, &payload).unwrap();
+        let mut wire = Cursor::new(wire.into_inner());
+        let mut head = [0u8; 2];
+        wire.read_exact(&mut head).unwrap();
+        assert_eq!(head, [MSG_TYPE_QUERY, FORMAT_PROTOBUF]);
+        let mut len = [0u8; 4];
+        wire.read_exact(&mut len).unwrap();
+        let mut body = vec![0u8; u32::from_be_bytes(len) as usize];
+        wire.read_exact(&mut body).unwrap();
+        let back = QueryRequest::parse_from_bytes(&body).unwrap();
+        assert_eq!(back.query, "fire");
+        assert_eq!(back.maxresults, 5);
+    }
 }

@@ -60,7 +60,7 @@
 //! mains free of the wake-up.
 //!
 //! Paused or black and settled, the player's unit is frozen (systemd's
-//! cgroup freezer, `swaypplet_model::wallpaper::freeze_video`): mpvpaper polls on a
+//! cgroup freezer, `swaypplet_system::wallpaper::freeze_video`): mpvpaper polls on a
 //! 10 ms timer whether mpv plays or not, about 200 wake-ups a second and
 //! 0.7 % of a core paused (meros-laptop, 2026-10-03), and none frozen. Its
 //! last frame, the paused video or black, stays on screen and behind the
@@ -537,12 +537,12 @@ fn remember_black(black: bool) {
 fn restore(pick: Option<&Wallpaper>, speed: f64) {
     let wallpaper = pick
         .cloned()
-        .or_else(swaypplet_model::wallpaper::system_default);
+        .or_else(swaypplet_system::wallpaper::system_default);
     let Some(w) = wallpaper else {
         log::warn!("wallpaper-battery: no wallpaper to put back");
         return;
     };
-    match swaypplet_model::wallpaper::apply_blocking(&w, speed) {
+    match swaypplet_system::wallpaper::apply_blocking(&w, speed) {
         Ok(()) => remember_black(false),
         Err(e) => log::warn!("wallpaper-battery: {e}"),
     }
@@ -630,7 +630,7 @@ impl Worker {
     /// connection in the kernel and never answers it.
     fn connect(&self, path: &Path) -> io::Result<Ipc> {
         if self.frozen.replace(false) {
-            swaypplet_model::wallpaper::freeze_video(false);
+            swaypplet_system::wallpaper::freeze_video(false);
         }
         Ipc::connect(path)
     }
@@ -640,7 +640,7 @@ impl Worker {
     fn hold(&self) {
         if self.target != Target::Play && !self.frozen.replace(true) {
             log::debug!("wallpaper-battery: freezing the player");
-            swaypplet_model::wallpaper::freeze_video(true);
+            swaypplet_system::wallpaper::freeze_video(true);
         }
     }
 
@@ -665,7 +665,7 @@ impl Worker {
             return;
         }
         let speed = self.speed.get();
-        swaypplet_model::wallpaper::sync_video_speed(speed);
+        swaypplet_system::wallpaper::sync_video_speed(speed);
         let mut ipc = match self.connect(path) {
             Ok(ipc) => ipc,
             Err(e) => {

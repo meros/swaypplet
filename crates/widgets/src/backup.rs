@@ -5,14 +5,9 @@
 //! how much it held and which snapshot that was, then what the repository
 //! costs on meros-server and what is left beside it.
 //!
-//! "Back up now" starts both units. It needs no authentication prompt
-//! because the nixos side grants this user `start` on exactly those two
-//! units (`modules/nixos/services/backup.nix`). It passes `--no-block`,
-//! because `systemctl start` on a `Type=oneshot` unit waits for the unit to
-//! finish and a backup is minutes long, and it still goes out on a worker
+//! "Back up now" starts both units ([`backup::start_now`]), on a worker
 //! thread so the polkit round trip cannot stall a frame.
 
-use std::process::Command;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
@@ -20,11 +15,6 @@ use gtk4::prelude::*;
 use swaypplet_base::spawn::spawn_work;
 use swaypplet_system::{backup, backup::BackupStatusService};
 use swaypplet_ui::ui;
-
-const UNITS: [&str; 2] = [
-    "restic-backups-home.service",
-    "restic-backups-locked.service",
-];
 
 pub struct BackupSection {
     root: gtk4::Box,
@@ -61,7 +51,7 @@ impl BackupSection {
         // seconds before that lands.
         run_now.connect_clicked(|btn| {
             btn.set_sensitive(false);
-            spawn_work(start_units, |()| {});
+            spawn_work(backup::start_now, |()| {});
         });
         root.append(&run_now);
 
@@ -182,19 +172,4 @@ fn job_row(name: &str, detail: &str) -> gtk4::Box {
         .build();
     r.end.append(&when);
     r.root
-}
-
-/// Both units, one call. systemd queues the second behind the first through
-/// the ordering the units already declare.
-fn start_units() {
-    let mut cmd = Command::new("systemctl");
-    cmd.arg("start").arg("--no-block");
-    for unit in UNITS {
-        cmd.arg(unit);
-    }
-    match cmd.status() {
-        Ok(status) if status.success() => {}
-        Ok(status) => log::warn!("backup: systemctl start exited {status}"),
-        Err(e) => log::warn!("backup: systemctl start: {e}"),
-    }
 }

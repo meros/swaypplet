@@ -13,6 +13,9 @@
 //! leaving the bus. The chosen player is the one playing, else the first,
 //! which is what `playerctl` picks by default. Observers are told only when
 //! the state they would draw changed.
+//!
+//! [`MprisService::control`] sends play/pause, next and previous to that
+//! same player over the same connection, with no `playerctl` process.
 
 use std::collections::HashMap;
 use std::process::Command;
@@ -113,22 +116,44 @@ fn resolve_art_path(url: &str) -> Option<String> {
     url.strip_prefix("file://").map(|path| path.to_string())
 }
 
+/// What a media button asks of the player.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Control {
+    PlayPause,
+    Next,
+    Previous,
+}
+
+impl Control {
+    /// The `org.mpris.MediaPlayer2.Player` method.
+    fn method(self) -> &'static str {
+        match self {
+            Control::PlayPause => "PlayPause",
+            Control::Next => "Next",
+            Control::Previous => "Previous",
+        }
+    }
+}
+
 const PREFIX: &str = "org.mpris.MediaPlayer2.";
 const PATH: &str = "/org/mpris/MediaPlayer2";
 const PLAYER: &str = "org.mpris.MediaPlayer2.Player";
 
 pub struct MprisService {
     state: Observed<Option<MediaState>>,
+    controls: async_channel::Sender<Control>,
 }
 
 impl MprisService {
     pub fn start() -> Rc<MprisService> {
+        let (controls, control_rx) = async_channel::unbounded::<Control>();
         let service = Rc::new(MprisService {
             state: Observed::new(None),
+            controls,
         });
         let (tx, rx) = async_channel::unbounded::<Option<MediaState>>();
         swaypplet_base::spawn::spawn_tokio_thread("mpris", async move {
-            if let Err(e) = follow(&tx).await {
+            if let Err(e) = follow(&tx, &control_rx).await {
                 log::warn!("mpris: {e}");
             }
         });
@@ -148,9 +173,21 @@ impl MprisService {
     pub fn connect_change(&self, cb: impl Fn() + 'static) {
         self.state.connect_change(cb);
     }
+
+    /// Send `control` to the player [`snapshot`](Self::snapshot) shows.
+    /// Returns at once; the player's own change signal brings the new
+    /// state. Nothing happens when no player is on the bus.
+    pub fn control(&self, control: Control) {
+        if self.controls.try_send(control).is_err() {
+            log::warn!("mpris: {control:?} dropped, the connection is gone");
+        }
+    }
 }
 
-async fn follow(tx: &async_channel::Sender<Option<MediaState>>) -> zbus::Result<()> {
+async fn follow(
+    tx: &async_channel::Sender<Option<MediaState>>,
+    controls: &async_channel::Receiver<Control>,
+) -> zbus::Result<()> {
     use zbus::export::futures_util::StreamExt;
 
     let conn = zbus::Connection::session().await?;
@@ -174,24 +211,48 @@ async fn follow(tx: &async_channel::Sender<Option<MediaState>>) -> zbus::Result<
         .build();
     let mut owners = zbus::MessageStream::for_match_rule(rule, &conn, None).await?;
 
-    if tx.send(read(&conn, &dbus).await).await.is_err() {
-        return Ok(());
-    }
     loop {
-        tokio::select! {
-            Some(_) = changes.next() => {}
-            Some(_) = owners.next() => {}
-            else => return Ok(()),
-        }
-        if tx.send(read(&conn, &dbus).await).await.is_err() {
+        let found = read(&conn, &dbus).await;
+        let state = found.as_ref().map(|(_, s)| s.clone());
+        // The bus name of the player this state came from: where a
+        // control goes.
+        let current = found.map(|(name, _)| name);
+        if tx.send(state).await.is_err() {
             return Ok(());
+        }
+        loop {
+            tokio::select! {
+                Some(_) = changes.next() => break,
+                Some(_) = owners.next() => break,
+                Ok(control) = controls.recv() => {
+                    if let Some(name) = &current {
+                        send(&conn, name, control).await;
+                    }
+                }
+                else => return Ok(()),
+            }
         }
     }
 }
 
-/// The state of the player that counts: the first one playing, else the
-/// first one there is. `None` when no player is on the bus.
-async fn read(conn: &zbus::Connection, dbus: &zbus::fdo::DBusProxy<'_>) -> Option<MediaState> {
+/// Call `control`'s method on the player `name`. A failure is logged: the
+/// player may have left between the read and the press.
+async fn send(conn: &zbus::Connection, name: &str, control: Control) {
+    let sent = conn
+        .call_method(Some(name), PATH, Some(PLAYER), control.method(), &())
+        .await;
+    if let Err(e) = sent {
+        log::warn!("mpris: {} on {name}: {e}", control.method());
+    }
+}
+
+/// The state of the player that counts, with its bus name: the first one
+/// playing, else the first one there is. `None` when no player is on the
+/// bus.
+async fn read(
+    conn: &zbus::Connection,
+    dbus: &zbus::fdo::DBusProxy<'_>,
+) -> Option<(String, MediaState)> {
     let names = dbus.list_names().await.ok()?;
     let mut players: Vec<String> = names
         .iter()
@@ -205,11 +266,14 @@ async fn read(conn: &zbus::Connection, dbus: &zbus::fdo::DBusProxy<'_>) -> Optio
         let Some(props) = player_props(conn, &name).await else {
             continue;
         };
-        let state = parse(&name, &props);
-        match &state {
-            Some(s) if s.status == PlaybackStatus::Playing => return state,
-            Some(_) if first.is_none() => first = state,
-            _ => {}
+        let Some(state) = parse(&name, &props) else {
+            continue;
+        };
+        if state.status == PlaybackStatus::Playing {
+            return Some((name, state));
+        }
+        if first.is_none() {
+            first = Some((name, state));
         }
     }
     first
@@ -285,6 +349,18 @@ fn parse(name: &str, props: &HashMap<String, OwnedValue>) -> Option<MediaState> 
         length_secs,
         position_secs: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_control_is_its_mpris_method() {
+        assert_eq!(Control::PlayPause.method(), "PlayPause");
+        assert_eq!(Control::Next.method(), "Next");
+        assert_eq!(Control::Previous.method(), "Previous");
+    }
 }
 
 #[cfg(test)]

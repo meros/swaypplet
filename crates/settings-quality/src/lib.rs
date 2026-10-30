@@ -2,11 +2,10 @@
 //! on each, the fix's progress, and Merge & apply for one that is ready.
 //!
 //! Nothing works on an issue until Auto-fix is pressed. The press starts
-//! `dev/autofix/run.sh --issue <n>` as a transient user unit
-//! (`swaypplet-autofix-<n>`), not as a child of this process, so it
-//! survives the panel restarting; jobs queue on the runner's lock. The
-//! runner's files (`status::Job`) are read every two seconds while the tab
-//! is open, which is what the phase line, the log tail and Stop follow.
+//! the runner for it (`swaypplet_screenshot::quality::autofix`, which holds
+//! everything here that is not drawing). The runner's files
+//! (`status::Job`) are read every two seconds while the tab is open, which
+//! is what the phase line, the log tail and Stop follow.
 //!
 //! GitHub is asked only while the tab is on screen: once when it maps
 //! (unless the last answer is under a minute old), then once a minute. One
@@ -16,28 +15,29 @@
 //! An issue someone else filed asks before it runs: its text is the
 //! agent's input, and anyone can write one on a public repository.
 //!
-//! Merge & apply squash-merges the PR and runs `nx` as its own unit
-//! (`swaypplet-deploy`), because nx switches home-manager, which restarts
-//! this process; its log is followed here, and a reopened tab shows how it
-//! ended. "Try locally" is not offered: `nx dev` rebuilds the system with
+//! Merge & apply squash-merges the PR and runs `nx` as its own unit, the
+//! one the System tab's actions run in too (`swaypplet_system::nx`),
+//! because nx switches home-manager, which restarts this process; its log
+//! is followed here, and a reopened tab shows how it ended. "Try locally" is not offered: `nx dev` rebuilds the system with
 //! sudo, which prompts for a password that nothing here can answer.
 //!
-//! `SWAYPPLET_QUALITY_FIXTURE=<dir>` reads `issues.json`, `prs.json`, the
-//! jobs (`jobs/<n>/`) and the pictures from a directory, for the harness.
+//! `SWAYPPLET_QUALITY_FIXTURE=<dir>` (`autofix::fixture`) plays the tab
+//! from a directory, for the harness.
 
 use std::cell::{Cell, RefCell};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gtk4::prelude::*;
 
-use swaypplet_screenshot::quality::body;
+use swaypplet_screenshot::quality::{autofix, autofix::Pair, body};
 use swaypplet_screenshot::quality::{
     status,
     status::{Fix, Issue, Job, Pr},
 };
 use swaypplet_settings_kit::{form, form::section_box};
+use swaypplet_system::nx;
 use swaypplet_ui::{
     ui,
     ui::{Text, Tone},
@@ -48,12 +48,6 @@ const POLL: Duration = Duration::from_secs(60);
 
 /// How often the local jobs are read while the tab is open.
 const TICK: Duration = Duration::from_secs(2);
-
-/// How many open issues the tab lists.
-const LIMIT: u32 = 30;
-
-/// The systemd unit a deploy runs in.
-const DEPLOY_UNIT: &str = "swaypplet-deploy";
 
 /// A thumbnail's size, in logical pixels.
 const THUMB_W: i32 = 240;
@@ -85,40 +79,11 @@ pub fn age(now: i64, then: i64) -> String {
     }
 }
 
-/// `tests pass · gate pass` from check.sh's `RESULT` lines.
-pub fn checks_line(text: &str) -> Option<String> {
-    let parts: Vec<String> = text
-        .lines()
-        .filter_map(|l| l.trim().strip_prefix("RESULT "))
-        .map(|r| r.replace(':', "").to_lowercase())
-        .collect();
-    (!parts.is_empty()).then(|| parts.join(" \u{00b7} "))
-}
-
-/// The deploy log's last line, and the exit code once the wrapper wrote it.
+/// The deploy log's last line, and the exit code once the runner wrote it.
 pub fn deploy_state(log: &str) -> (String, Option<i32>) {
-    let mut last = String::new();
-    let mut code = None;
-    for line in log.lines().map(strip_ansi) {
-        let line = line.trim().to_string();
-        if let Some(c) = line.strip_prefix("deploy-exit: ") {
-            code = c.trim().parse().ok();
-        } else if !line.is_empty() {
-            last = line;
-        }
-    }
-    (last, code)
-}
-
-/// The last `n` non-empty lines of a log, without colour codes.
-pub fn tail(log: &str, n: usize) -> Vec<String> {
-    let lines: Vec<String> = log
-        .lines()
-        .map(strip_ansi)
-        .map(|l| l.trim_end().to_string())
-        .filter(|l| !l.trim().is_empty())
-        .collect();
-    lines[lines.len().saturating_sub(n)..].to_vec()
+    let log = nx::parse_log(log);
+    let last = log.tail.last().map(|l| l.trim().to_string());
+    (last.unwrap_or_default(), log.exit)
 }
 
 /// "3/5 agent working" → "Step 3 of 5: agent working".
@@ -130,272 +95,6 @@ pub fn phase_text(phase: &str) -> String {
         },
         None => phase.to_string(),
     }
-}
-
-/// nx colours its step headers; the tab shows words.
-fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '\u{1b}' {
-            for c in chars.by_ref() {
-                if c.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
-// ── Where things are ────────────────────────────────────────────────────
-
-fn fixture() -> Option<PathBuf> {
-    std::env::var_os("SWAYPPLET_QUALITY_FIXTURE").map(PathBuf::from)
-}
-
-/// The runner's state folder (run.sh's `STATE`).
-fn runner_state() -> PathBuf {
-    if let Some(dir) = fixture() {
-        return dir;
-    }
-    std::env::var_os("AUTOFIX_STATE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let base = std::env::var_os("XDG_STATE_HOME")
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from)
-                .unwrap_or_else(|| {
-                    Path::new(&swaypplet_screenshot::quality::home()).join(".local/state")
-                });
-            base.join("swaypplet-autofix")
-        })
-}
-
-fn job_dir(n: u64) -> PathBuf {
-    runner_state().join("jobs").join(n.to_string())
-}
-
-/// The job for issue `n`, if one ever ran here.
-fn read_job(n: u64) -> Option<Job> {
-    let dir = job_dir(n);
-    let phase = std::fs::read_to_string(dir.join("phase")).ok()?;
-    let result = std::fs::read_to_string(dir.join("result"))
-        .ok()
-        .map(|r| r.trim().to_string())
-        .filter(|r| !r.is_empty());
-    let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
-    let idle_s = std::fs::metadata(dir.join("log"))
-        .or_else(|_| std::fs::metadata(dir.join("phase")))
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.elapsed().ok())
-        .map_or(0, |d| d.as_secs());
-    Some(Job {
-        phase: phase.trim().to_string(),
-        result,
-        idle_s: if fixture().is_some() { 0 } else { idle_s },
-        // The phase headers repeat the phase line above the tail.
-        tail: tail(
-            &log.lines()
-                .filter(|l| !l.contains("\u{2500}\u{2500} "))
-                .collect::<Vec<_>>()
-                .join("\n"),
-            2,
-        ),
-    })
-}
-
-/// The runner script: `SWAYPPLET_AUTOFIX_RUNNER`, or the clone nx builds
-/// from.
-fn runner() -> PathBuf {
-    std::env::var_os("SWAYPPLET_AUTOFIX_RUNNER")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(&swaypplet_screenshot::quality::home())
-                .join("git/personal/swaypplet/dev/autofix/run.sh")
-        })
-}
-
-fn unit(n: u64) -> String {
-    format!("swaypplet-autofix-{n}")
-}
-
-/// Start the runner for issue `n`, as a unit (or, in a dry run, as a plain
-/// child with `--dry-run`, so the user's systemd is left alone).
-fn start_job(n: u64, allow: Option<&str>) -> Result<(), String> {
-    let script = runner();
-    if !script.is_file() {
-        return Err(format!("no runner at {}", script.display()));
-    }
-    let mut args = vec!["--issue".to_string(), n.to_string()];
-    if let Some(author) = allow {
-        args.push("--allow-author".into());
-        args.push(author.to_string());
-    }
-    // Queued at once on screen; the runner rewrites it as it starts.
-    let dir = job_dir(n);
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::remove_file(dir.join("result"));
-    let _ = std::fs::write(dir.join("phase"), "1/5 queued\n");
-    let _ = std::fs::write(dir.join("log"), "");
-    if swaypplet_screenshot::quality::dry_run() {
-        args.push("--dry-run".into());
-        eprintln!(
-            "DRY RUN: would start systemd-run --user --unit={} -- {} {}",
-            unit(n),
-            script.display(),
-            args.join(" ")
-        );
-        return std::process::Command::new(&script)
-            .args(&args)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| e.to_string());
-    }
-    let mut command = std::process::Command::new("systemd-run");
-    command.args([
-        "--user",
-        "--collect",
-        "--quiet",
-        &format!("--unit={}", unit(n)),
-    ]);
-    // What the runner needs from this session: the profile's PATH (git,
-    // gh, nix, claude, jq), the home, and the SSH agent for the push. The
-    // runner takes the agent socket and the GitHub token away from claude.
-    for var in [
-        "PATH",
-        "HOME",
-        "USER",
-        "SSH_AUTH_SOCK",
-        "NIX_PATH",
-        "SWAYPPLET_SWAY",
-    ] {
-        if let Ok(value) = std::env::var(var) {
-            command.arg(format!("--setenv={var}={value}"));
-        }
-    }
-    let status = command
-        .arg("--")
-        .arg(&script)
-        .args(&args)
-        .status()
-        .map_err(|e| format!("systemd-run: {e}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("systemd-run: {status} (is #{n} already running?)"))
-    }
-}
-
-/// Stop the runner for issue `n`: the unit, or the dry run's process.
-fn stop_job(n: u64) {
-    if swaypplet_screenshot::quality::dry_run() {
-        if let Some(pid) = std::fs::read_to_string(job_dir(n).join("pid"))
-            .ok()
-            .and_then(|p| p.trim().parse::<i32>().ok())
-        {
-            // The runner leads its own process group (run.sh re-execs
-            // under setsid), so the build or the agent under it goes too.
-            // SAFETY: a plain kill(2) of the group the runner wrote for us.
-            unsafe {
-                libc::kill(-pid, libc::SIGTERM);
-            }
-        }
-        return;
-    }
-    let _ = std::process::Command::new("systemctl")
-        .args(["--user", "stop", "--no-block", &unit(n)])
-        .status();
-}
-
-/// The programs a job needs on this process's PATH (or the user profile),
-/// by name, that are not there.
-fn missing_tools() -> Vec<&'static str> {
-    ["claude", "jq", "gh", "nix", "git", "systemd-run"]
-        .into_iter()
-        .filter(|t| swaypplet_screenshot::quality::gh::which(t).is_none())
-        .collect()
-}
-
-/// What GitHub says, fetched on a worker thread.
-fn fetch() -> Result<(Vec<Issue>, Vec<Pr>), String> {
-    if let Some(dir) = fixture() {
-        let read = |f: &str| std::fs::read_to_string(dir.join(f)).unwrap_or_default();
-        let issues = serde_json::from_str(&read("issues.json")).map_err(|e| e.to_string())?;
-        let prs = serde_json::from_str(&read("prs.json")).unwrap_or_default();
-        return Ok((issues, prs));
-    }
-    let issues = swaypplet_screenshot::quality::gh::issues(None, "open", LIMIT)?;
-    let prs = swaypplet_screenshot::quality::gh::prs(LIMIT)?;
-    Ok((issues, prs))
-}
-
-/// Where a picture from the asset branch is cached.
-fn cached(path: &str) -> PathBuf {
-    swaypplet_screenshot::quality::cache_dir("quality").join(path.replace('/', "_"))
-}
-
-/// A picture from the asset branch on disk, downloaded the first time.
-fn download(path: &str) -> Result<PathBuf, String> {
-    let file = cached(path);
-    if file.exists() {
-        return Ok(file);
-    }
-    let bytes = swaypplet_screenshot::quality::gh::fetch_asset(path)?;
-    if let Some(dir) = file.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    }
-    std::fs::write(&file, bytes).map_err(|e| e.to_string())?;
-    Ok(file)
-}
-
-/// The first before/after pair: the job's own pictures, else the PR's.
-enum Pair {
-    Local(PathBuf, PathBuf),
-    Remote(String, String),
-}
-
-fn pair(n: u64, pr: Option<&Pr>) -> Option<Pair> {
-    let shots = job_dir(n).join("out/shots");
-    let mut befores: Vec<PathBuf> = std::fs::read_dir(&shots)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| {
-            p.file_name()
-                .is_some_and(|f| f.to_string_lossy().starts_with("before-"))
-        })
-        .collect();
-    befores.sort();
-    for before in befores {
-        let name = before
-            .file_name()?
-            .to_string_lossy()
-            .replacen("before-", "after-", 1);
-        let after = shots.join(name);
-        if after.exists() {
-            return Some(Pair::Local(before, after));
-        }
-    }
-    let assets = body::parse_assets(&pr?.body);
-    Some(Pair::Remote(
-        assets.before.first()?.clone(),
-        assets.after.first()?.clone(),
-    ))
-}
-
-/// The checks line: the job's check.txt, else the PR body's.
-fn checks(n: u64, pr: Option<&Pr>) -> Option<String> {
-    std::fs::read_to_string(job_dir(n).join("check.txt"))
-        .ok()
-        .and_then(|t| checks_line(&t))
-        .or_else(|| checks_line(&pr?.body))
 }
 
 // ── The tab ─────────────────────────────────────────────────────────────
@@ -582,7 +281,7 @@ fn fetch_now(state: &Rc<State>) {
     }
     state.status.set_text("Asking GitHub\u{2026}");
     let state = state.clone();
-    swaypplet_base::spawn::spawn_work(fetch, move |result| {
+    swaypplet_base::spawn::spawn_work(autofix::fetch, move |result| {
         state.fetching.set(false);
         state.last_fetch.set(Some(Instant::now()));
         let when = glib::DateTime::now_local()
@@ -617,7 +316,7 @@ fn fill(state: &Rc<State>, issues: Vec<Issue>, prs: &[Pr]) {
     }
     state.entries.borrow_mut().clear();
     // Checked here rather than by a job that would fail at its first step.
-    let missing = missing_tools();
+    let missing = autofix::missing_tools();
     if !missing.is_empty() {
         let note = caption(
             &format!("Auto-fix needs: {}", missing.join(", ")),
@@ -719,7 +418,7 @@ fn entry_widget(issue: Issue, pr: Option<Pr>, now: i64) -> (gtk4::Box, Rc<Entry>
 fn tick(state: &Rc<State>) {
     let entries = state.entries.borrow().clone();
     for entry in entries {
-        let job = read_job(entry.issue.number);
+        let job = autofix::read_job(entry.issue.number);
         let fix = status::fix(job.as_ref(), entry.pr.as_ref());
         let same_kind = entry
             .fix
@@ -783,12 +482,12 @@ fn build_detail(state: &Rc<State>, entry: &Rc<Entry>, fix: &Fix, job: Option<&Jo
             stop.set_tooltip_text(Some("Stop the agent and throw its work away"));
             ui::arm(&stop, "Stop and discard?", move |b| {
                 b.set_sensitive(false);
-                stop_job(n);
+                autofix::stop_job(n);
             });
             actions.append(&stop);
         }
         Fix::Ready => {
-            if let Some(pair) = pair(n, entry.pr.as_ref()) {
+            if let Some(pair) = autofix::pair(n, entry.pr.as_ref()) {
                 let row = ui::hbox(3);
                 let (before, after) = match pair {
                     Pair::Local(b, a) => (thumb_local("Before", &b), thumb_local("After", &a)),
@@ -798,7 +497,7 @@ fn build_detail(state: &Rc<State>, entry: &Rc<Entry>, fix: &Fix, job: Option<&Jo
                 row.append(&after);
                 d.append(&row);
             }
-            if let Some(line) = checks(n, entry.pr.as_ref()) {
+            if let Some(line) = autofix::checks(n, entry.pr.as_ref()) {
                 d.append(&caption(&line, Tone::Success));
             }
             let url = entry
@@ -906,7 +605,7 @@ fn autofix_button(state: &Rc<State>, entry: &Rc<Entry>, label: &str) -> gtk4::Bu
     let go = move |b: &gtk4::Button| {
         b.set_sensitive(false);
         let allow = stranger.then(|| author.clone());
-        if let Err(e) = start_job(n, allow.as_deref()) {
+        if let Err(e) = autofix::start_job(n, allow.as_deref()) {
             log::warn!("quality: {e}");
             state.status.set_text(&format!("#{n} did not start: {e}"));
             form::mark_source(&state.status, false);
@@ -947,7 +646,7 @@ fn thumb_remote(label: &str, path: &str) -> gtk4::Box {
     let (b, pic) = thumb_frame(label);
     let path = path.to_string();
     swaypplet_base::spawn::spawn_work(
-        move || download(&path),
+        move || autofix::download(&path),
         move |got| match got {
             Ok(file) => show_thumb(&pic, &file),
             Err(e) => log::warn!("quality: picture: {e}"),
@@ -967,10 +666,6 @@ fn show_thumb(pic: &gtk4::Picture, file: &Path) {
 }
 
 // ── Merge & apply ───────────────────────────────────────────────────────
-
-fn deploy_log() -> PathBuf {
-    swaypplet_screenshot::quality::state_dir("deploy.log")
-}
 
 fn set_deploying(state: &Rc<State>, on: bool) {
     state.deploying.set(on);
@@ -998,29 +693,7 @@ fn apply_fix(state: &Rc<State>, pr: u64) {
     ui::set_progress_status(&state.deploy_bar, None);
     let state = state.clone();
     swaypplet_base::spawn::spawn_work(
-        move || {
-            // nx commits whatever the tree holds; a half-done edit there
-            // must not ride along with a merge pressed in a settings tab.
-            // Checked before the merge, so a refusal leaves the PR open.
-            let flake = nixos_dir();
-            let porcelain = std::process::Command::new("git")
-                .arg("-C")
-                .arg(&flake)
-                .args(["status", "--porcelain"])
-                .output()
-                .map_err(|e| format!("git status in {}: {e}", flake.display()))?;
-            if !porcelain.status.success() {
-                return Err(format!("{} is not a git repository", flake.display()));
-            }
-            if let Some(why) = dirty(&String::from_utf8_lossy(&porcelain.stdout)) {
-                return Err(format!(
-                    "{} has uncommitted changes ({why}); commit or stash them, then apply again",
-                    form::pretty_path(&flake)
-                ));
-            }
-            swaypplet_screenshot::quality::gh::merge(pr)?;
-            start_deploy(&deploy_log())
-        },
+        move || autofix::merge_and_deploy(pr),
         move |result| match result {
             Ok(()) => follow_deploy(&state),
             Err(e) => {
@@ -1040,106 +713,9 @@ fn apply_fix(state: &Rc<State>, pr: u64) {
     );
 }
 
-/// The nixos checkout nx commits from: `NX_FLAKE`, as nx's lib.sh says.
-fn nixos_dir() -> PathBuf {
-    std::env::var_os("NX_FLAKE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(&swaypplet_screenshot::quality::home()).join("nixos"))
-}
-
-/// What `git status --porcelain` says is uncommitted, briefly: the first
-/// three paths and how many more. `None` for a clean tree.
-pub fn dirty(porcelain: &str) -> Option<String> {
-    let paths: Vec<&str> = porcelain
-        .lines()
-        .filter_map(|l| l.get(3..))
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .collect();
-    if paths.is_empty() {
-        return None;
-    }
-    let mut out = paths[..paths.len().min(3)].join(", ");
-    if paths.len() > 3 {
-        out.push_str(&format!(" and {} more", paths.len() - 3));
-    }
-    Some(out)
-}
-
-/// The deploy command: `SWAYPPLET_DEPLOY` (a shell command line), or `nx`.
-fn deploy_command() -> Result<String, String> {
-    if let Ok(cmd) = std::env::var("SWAYPPLET_DEPLOY")
-        && !cmd.trim().is_empty()
-    {
-        return Ok(cmd);
-    }
-    swaypplet_screenshot::quality::gh::which("nx")
-        .map(|p| shell_quote(&p.to_string_lossy()))
-        .ok_or_else(|| "nx is not on PATH or in the user profile".to_string())
-}
-
-fn shell_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', r"'\''"))
-}
-
-/// Start the deploy, its output into `log`, ending with `deploy-exit: N`.
-fn start_deploy(log: &Path) -> Result<(), String> {
-    if let Some(dir) = log.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    }
-    std::fs::write(log, "").map_err(|e| e.to_string())?;
-    let cmd = deploy_command()?;
-    let script = format!("{cmd}; echo \"deploy-exit: $?\"");
-    if swaypplet_screenshot::quality::dry_run() {
-        // Not a unit: a dry run leaves the user's systemd alone, and says
-        // what it would have started.
-        let shown = "echo 'DRY RUN: nx would run now'; sleep 2; echo '── personal repos: push, fast-forward'; sleep 3; echo '── build every host'; sleep 3; echo 'deploy-exit: 0'";
-        let out = std::fs::OpenOptions::new()
-            .append(true)
-            .open(log)
-            .map_err(|e| e.to_string())?;
-        std::process::Command::new("sh")
-            .args(["-c", shown])
-            .stdout(out.try_clone().map_err(|e| e.to_string())?)
-            .stderr(out)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-        eprintln!("DRY RUN: would start {DEPLOY_UNIT}: sh -c {script}");
-        return Ok(());
-    }
-    let log = log.to_string_lossy();
-    let mut command = std::process::Command::new("systemd-run");
-    command.args([
-        "--user",
-        "--collect",
-        "--quiet",
-        &format!("--unit={DEPLOY_UNIT}"),
-        &format!("--property=StandardOutput=append:{log}"),
-        &format!("--property=StandardError=append:{log}"),
-    ]);
-    // What nx needs from this session: the profile's PATH (git, nix, gh),
-    // the SSH agent for pushing the personal repos, and the home.
-    for var in ["PATH", "HOME", "SSH_AUTH_SOCK", "USER", "NIX_PATH"] {
-        if let Ok(value) = std::env::var(var) {
-            command.arg(format!("--setenv={var}={value}"));
-        }
-    }
-    let status = command
-        .args(["--", "sh", "-c", &script])
-        .status()
-        .map_err(|e| format!("systemd-run: {e}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "systemd-run: {status} (is a deploy already running?)"
-        ))
-    }
-}
-
 /// Follow the deploy log once a second while the tab is open.
 fn follow_deploy(state: &Rc<State>) {
-    let log = deploy_log();
+    let log = nx::log_path();
     // A log from over an hour ago is history, not a deploy to show.
     let recent = std::fs::metadata(&log)
         .and_then(|m| m.modified())
@@ -1227,13 +803,6 @@ mod tests {
     }
 
     #[test]
-    fn checks_read_the_result_lines() {
-        let text = "== cargo test --release\nok\nRESULT tests: pass\n== gate\nRESULT gate: pass\n";
-        assert_eq!(checks_line(text).as_deref(), Some("tests pass · gate pass"));
-        assert_eq!(checks_line("no results"), None);
-    }
-
-    #[test]
     fn a_phase_reads_as_a_step() {
         assert_eq!(
             phase_text("3/5 agent working"),
@@ -1243,31 +812,13 @@ mod tests {
     }
 
     #[test]
-    fn the_log_tail_skips_blanks_and_colour() {
-        assert_eq!(
-            tail("a\n\n\u{1b}[1m── b\u{1b}[0m\n  \nc\n", 2),
-            vec!["── b".to_string(), "c".to_string()]
-        );
-        assert!(tail("", 2).is_empty());
-    }
-
-    #[test]
-    fn a_dirty_nixos_tree_is_named_briefly() {
-        assert_eq!(dirty(""), None);
-        assert_eq!(dirty(" M flake.lock\n").as_deref(), Some("flake.lock"));
-        assert_eq!(
-            dirty(" M a\n?? b\nA  c\n M d\n M e\n").as_deref(),
-            Some("a, b, c and 2 more")
-        );
-    }
-
-    #[test]
     fn the_deploy_log_ends_with_its_exit() {
-        let (last, code) = deploy_state("\u{1b}[1m── build\u{1b}[0m\nbuilding x\n");
+        let (last, code) =
+            deploy_state("swaypplet-nx: start sync\n\u{1b}[1m── build\u{1b}[0m\nbuilding x\n");
         assert_eq!((last.as_str(), code), ("building x", None));
-        let (last, code) = deploy_state("── switch\nswitched\ndeploy-exit: 0\n");
+        let (last, code) = deploy_state("── switch\nswitched\nswaypplet-nx: exit 0\n");
         assert_eq!((last.as_str(), code), ("switched", Some(0)));
-        assert_eq!(deploy_state("deploy-exit: 1").1, Some(1));
+        assert_eq!(deploy_state("swaypplet-nx: exit 1").1, Some(1));
     }
 }
 

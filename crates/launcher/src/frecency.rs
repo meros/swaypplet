@@ -23,7 +23,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use swaypplet_system::elephant::SearchResult;
+use crate::elephant::SearchResult;
 
 /// The time a score takes to halve: a week, so last month's habit fades
 /// and this week's shows.

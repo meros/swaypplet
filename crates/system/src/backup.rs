@@ -228,6 +228,28 @@ pub fn bytes(n: u64) -> String {
     }
 }
 
+// ── Back up now ─────────────────────────────────────────────────────────
+
+/// The units that run the jobs, in [`JOBS`] order.
+const UNITS: [&str; 2] = [
+    "restic-backups-home.service",
+    "restic-backups-locked.service",
+];
+
+/// Start both jobs now, in one call; systemd queues the second behind the
+/// first through the ordering the units already declare. It needs no
+/// authentication prompt because the nixos side grants this user `start` on
+/// exactly those two units (`modules/nixos/services/backup.nix`). Queued
+/// (`--no-block`), because a start of a `Type=oneshot` unit waits for it to
+/// finish and a backup is minutes long. Blocking all the same (the polkit
+/// round trip): call it on a worker.
+pub fn start_now() {
+    let units = UNITS.map(crate::systemd::Unit::system);
+    if let Err(e) = crate::systemd::start_together(&units, crate::systemd::Verb::Start) {
+        log::warn!("backup: {e}");
+    }
+}
+
 // ── Service ─────────────────────────────────────────────────────────────
 
 pub struct BackupStatusService {

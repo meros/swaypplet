@@ -19,6 +19,7 @@
 //! on a worker, ranked by frecency (a hash lookup per row).
 
 mod calc;
+pub mod elephant;
 pub mod frecency;
 mod sources;
 mod windows;
@@ -28,7 +29,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use swaypplet_system::{elephant, elephant::SearchResult};
+use elephant::SearchResult;
 use swaypplet_ui::shell::{Namespace, Surface};
 
 use sources::Query;

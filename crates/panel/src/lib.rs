@@ -1311,7 +1311,7 @@ fn run_deck_action(
     launcher: &Rc<LauncherView>,
     id: &str,
 ) -> Ran {
-    use swaypplet_widgets::power::Session;
+    use swaypplet_system::session::Session;
     log::debug!("helm: action {id}");
     if let Some(label) = id.strip_prefix("tile:") {
         // The tile's own click: its action, its state, its status line.

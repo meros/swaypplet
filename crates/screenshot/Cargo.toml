@@ -9,6 +9,7 @@ swaypplet-base.workspace = true
 swaypplet-tokens.workspace = true
 swaypplet-model.workspace = true
 swaypplet-ui.workspace = true
+swaypplet-system.workspace = true
 swaypplet-notifyd.workspace = true
 swaypplet-jump.workspace = true
 gtk4.workspace = true

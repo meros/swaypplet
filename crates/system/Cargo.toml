@@ -3,16 +3,15 @@ name = "swaypplet-system"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-build = "build.rs"
 
 [dependencies]
 swaypplet-base.workspace = true
+swaypplet-model.workspace = true
 gtk4.workspace = true
 glib.workspace = true
 gio.workspace = true
 zbus.workspace = true
 tokio.workspace = true
-protobuf.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 async-channel.workspace = true
@@ -22,9 +21,6 @@ wayland-client.workspace = true
 wayland-protocols.workspace = true
 swayipc.workspace = true
 system-tray.workspace = true
-
-[build-dependencies]
-protobuf-codegen.workspace = true
 
 [lints]
 workspace = true

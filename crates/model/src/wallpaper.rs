@@ -1,42 +1,15 @@
-//! The wallpaper as something the panel can set and put back. The tab that
-//! shows it is `look_pane.rs`; this is what the tab, the CLI and the panel's
-//! startup share.
-//!
-//! sway owns the wallpaper: `output * bg <path> <mode>` from the config,
-//! which Nix writes (`users/modules/sway.nix`). A pick here is the same
-//! command sent live over IPC, so it lands on every output at once and the
-//! lock screen follows for free — the compositor draws the lock's backdrop
-//! from the background layer (`glass-config.nix`, "session-lock"). The
-//! greeter is another sway with its own config and is not reached.
-//!
-//! The system default is not guessed and not stored: [`system_default`]
-//! reads the config sway actually loaded and finds the `bg` line, which is
-//! what Reset applies. `apply_saved` replays the pick when the panel starts,
-//! after the config has run. One thing it cannot follow is a `swaymsg
-//! reload`, which re-runs the config's line; the next panel start puts the
-//! pick back.
-//!
-//! A still can stand for a video: a file beside it with the same name and a
-//! video extension (`beach-waves-4k.jpg` and `beach-waves-4k.mp4`). Picking
-//! that still starts the video (the `wallpaper-video` user unit, mpvpaper,
-//! which plays the file named in its environment file) over it; picking any
-//! other stops it, so the still shows. The still stays sway's `bg` either
-//! way: it is what the lock screen and the greeter fall back to. The same
-//! file carries `look.video_speed` for the unit's start; a change of speed
-//! reaches a playing video over IPC instead (`services::wallpaper_battery`).
+//! The wallpaper's pure parts: which files are pictures, the command sway
+//! takes, the `bg` line out of a sway config, and the video unit's
+//! environment file. Setting it, the video and the panel's startup replay
+//! are the service, `swaypplet_system::wallpaper`, whose docs say how the
+//! pieces fit.
 
 use std::path::{Path, PathBuf};
 
-use super::store::{self, Wallpaper, WallpaperMode};
+use super::store::{Wallpaper, WallpaperMode};
 
-/// Where the candidates live: the directory Nix copies the shipped
-/// wallpapers into. Anything else is reachable with Browse.
-pub fn candidates_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join("Pictures").join("wallpapers"))
-}
-
-fn is_image(path: &Path) -> bool {
+/// Whether `path` names a picture, by its extension.
+pub fn is_image(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
         matches!(
             e.to_ascii_lowercase().as_str(),
@@ -45,29 +18,10 @@ fn is_image(path: &Path) -> bool {
     })
 }
 
-/// The images in the candidates directory, sorted by name.
-pub fn candidates() -> Vec<PathBuf> {
-    let Some(dir) = candidates_dir() else {
-        return Vec::new();
-    };
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return Vec::new();
-    };
-    let mut paths: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| p.is_file() && is_image(p))
-        .collect();
-    paths.sort();
-    paths
-}
-
-// ── Applying ────────────────────────────────────────────────────────────
-
 /// The command sway takes. The path is quoted, so a space in it survives
 /// sway's splitter; a path with a `"` in it is refused rather than sent
 /// half-parsed.
-fn command(w: &Wallpaper) -> Option<String> {
+pub fn command(w: &Wallpaper) -> Option<String> {
     let path = w.path.to_str()?;
     if path.contains('"') {
         log::warn!("wallpaper: refusing a path with a quote in it: {path}");
@@ -76,58 +30,7 @@ fn command(w: &Wallpaper) -> Option<String> {
     Some(format!("output * bg \"{path}\" {}", w.mode.as_str()))
 }
 
-pub fn apply(w: &Wallpaper) {
-    if let Some(cmd) = command(w) {
-        swaypplet_base::sway::ipc::run_command(&cmd);
-    }
-    let still = w.path.clone();
-    let speed = video_speed();
-    swaypplet_base::spawn::spawn_work(move || follow_video(&still, speed), |()| ());
-}
-
-/// [`apply`] for a process with no main loop (`swaypplet settings`): one
-/// connection, one command, and sway's answer. `speed` is
-/// `look.video_speed`, which a thread off the panel's main one cannot read
-/// from the live settings.
-pub fn apply_blocking(w: &Wallpaper, speed: f64) -> Result<(), String> {
-    let cmd = command(w).ok_or("path not sendable")?;
-    let outcomes = swaypplet_base::sway::ipc::connect()
-        .and_then(|mut c| c.run_command(&cmd))
-        .map_err(|e| format!("sway ipc: {e}"))?;
-    follow_video(&w.path, speed);
-    outcomes
-        .into_iter()
-        .find_map(Result::err)
-        .map_or(Ok(()), |e| Err(format!("sway: {e}")))
-}
-
-// ── The video a still stands for ────────────────────────────────────────
-
-/// The user unit that plays the wallpaper video (nixos
-/// `users/modules/wallpaper-video.nix`).
-const VIDEO_UNIT: &str = "wallpaper-video.service";
-
-/// The video `still` stands for: a file beside it with the same name and a
-/// video extension.
-pub fn video_for(still: &Path) -> Option<PathBuf> {
-    ["mp4", "webm", "mkv"]
-        .iter()
-        .map(|ext| still.with_extension(ext))
-        .find(|p| p.is_file())
-}
-
-/// The unit's environment file: `VIDEO=<path>`, the one thing it plays,
-/// and `SPEED=<multiple>`, how fast (mpv's `speed`).
-fn video_env() -> PathBuf {
-    glib::user_runtime_dir()
-        .join("swaypplet")
-        .join("wallpaper-video.env")
-}
-
-/// `look.video_speed` from the live settings: the panel's main thread only.
-fn video_speed() -> f64 {
-    store::with(|s| s.look().video_speed)
-}
+// ── The video unit's environment file ───────────────────────────────────
 
 /// The environment file's text for `video` played at `speed`.
 fn env_text(video: &Path, speed: f64) -> String {
@@ -140,22 +43,22 @@ fn env_video(text: &str) -> Option<&str> {
 }
 
 /// What following `video` at `speed` does to a unit whose environment file
-/// reads `old`: the text to write, if it changed, and the `systemctl` verb.
-/// Only another video restarts the unit. A speed alone does not: the player
-/// takes a new one over IPC (`services::wallpaper_battery`), and the file
-/// is for its next start.
-fn env_change(old: Option<&str>, video: &Path, speed: f64) -> (Option<String>, &'static str) {
+/// reads `old`: the text to write, if it changed, and whether the unit
+/// restarts (otherwise it is only started, a no-op on a running one). Only
+/// another video restarts it. A speed alone does not: the player takes a
+/// new one over IPC (`ambient::wallpaper_battery`), and the file is for its
+/// next start.
+pub fn env_change(old: Option<&str>, video: &Path, speed: f64) -> (Option<String>, bool) {
     let text = env_text(video, speed);
     let same_video = old
         .and_then(env_video)
         .is_some_and(|v| Path::new(v) == video);
     let write = (old != Some(text.as_str())).then_some(text);
-    // `start` is a no-op on a running unit; a new file needs a restart.
-    (write, if same_video { "start" } else { "restart" })
+    (write, !same_video)
 }
 
 /// `text` with its speed line made `speed`, the video left as it is.
-fn with_speed(text: &str, speed: f64) -> String {
+pub fn with_speed(text: &str, speed: f64) -> String {
     let mut out: String = text
         .lines()
         .filter(|l| !l.starts_with("SPEED="))
@@ -165,141 +68,12 @@ fn with_speed(text: &str, speed: f64) -> String {
     out
 }
 
-fn write_env(env: &Path, text: &str) -> std::io::Result<()> {
-    env.parent()
-        .map_or(Ok(()), std::fs::create_dir_all)
-        .and_then(|()| std::fs::write(env, text))
-}
+// ── The config's own wallpaper ──────────────────────────────────────────
 
-/// Start the video `still` stands for, or stop the one playing. A video
-/// already playing the same file is left alone, so replaying a pick (panel
-/// start, `settings apply` on reload, the battery service putting the
-/// wallpaper back) does not restart it; nor does a new `speed`, which only
-/// waits in the file for the next start. Blocking: two small file
-/// operations and a `systemctl` call.
-fn follow_video(still: &Path, speed: f64) {
-    if dry_session() {
-        log::info!("wallpaper: video for {} (dry run)", still.display());
-        return;
-    }
-    let Some(video) = video_for(still) else {
-        systemctl("stop");
-        return;
-    };
-    let env = video_env();
-    let old = std::fs::read_to_string(&env).ok();
-    let (write, verb) = env_change(old.as_deref(), &video, speed);
-    if let Some(text) = write
-        && let Err(e) = write_env(&env, &text)
-    {
-        log::warn!("wallpaper: {}: {e}", env.display());
-        return;
-    }
-    systemctl(verb);
-}
-
-/// Put a new `look.video_speed` in the environment file, for the unit's
-/// next start; the playing video takes it over IPC. Nothing when no video
-/// was ever picked (no file), and never a restart. Blocking: a small file
-/// read and write.
-pub fn sync_video_speed(speed: f64) {
-    let env = video_env();
-    let Ok(old) = std::fs::read_to_string(&env) else {
-        return;
-    };
-    let text = with_speed(&old, speed);
-    if text != old
-        && let Err(e) = write_env(&env, &text)
-    {
-        log::warn!("wallpaper: {}: {e}", env.display());
-    }
-}
-
-/// Freeze the video's unit (systemd's cgroup freezer), or thaw it. mpvpaper
-/// polls on a 10 ms timer whether mpv plays or not, about 200 wake-ups a
-/// second paused; frozen, it runs not at all, and its last frame stays on
-/// screen. Blocking: `systemctl` returns once the unit is frozen or thawed
-/// (13 ms measured). A unit that is not running cannot be frozen, which is
-/// the normal state of a session without the video: logged at debug only.
-pub fn freeze_video(frozen: bool) {
-    let verb = if frozen { "freeze" } else { "thaw" };
-    if dry_session() {
-        return;
-    }
-    match std::process::Command::new("systemctl")
-        .args(["--user", verb, VIDEO_UNIT])
-        .stderr(std::process::Stdio::null())
-        .status()
-    {
-        Ok(s) if s.success() => {}
-        Ok(s) => log::debug!("wallpaper: systemctl {verb} {VIDEO_UNIT}: {s}"),
-        Err(e) => log::warn!("wallpaper: systemctl {verb} {VIDEO_UNIT}: {e}"),
-    }
-}
-
-/// A test run (`dev/render.sh` and the other harnesses set
-/// `SWAYPPLET_DRY_SESSION`): the binary runs as the real user, and
-/// `systemctl --user` reaches the real user manager whatever display it is
-/// nested in, so a harness run that picked or replayed a wallpaper stopped,
-/// started or froze the video playing on the person's own desktop, and its
-/// environment file lives in their runtime directory. None of that happens
-/// in a test run.
-fn dry_session() -> bool {
-    std::env::var_os("SWAYPPLET_DRY_SESSION").is_some()
-}
-
-fn systemctl(verb: &str) {
-    if dry_session() {
-        log::info!("wallpaper: systemctl {verb} {VIDEO_UNIT} (dry run)");
-        return;
-    }
-    match std::process::Command::new("systemctl")
-        .args(["--user", "--no-block", verb, VIDEO_UNIT])
-        .status()
-    {
-        Ok(s) if s.success() => {}
-        Ok(s) => log::warn!("wallpaper: systemctl {verb} {VIDEO_UNIT}: {s}"),
-        Err(e) => log::warn!("wallpaper: systemctl {verb} {VIDEO_UNIT}: {e}"),
-    }
-}
-
-/// Replay the saved pick at panel startup.
-pub fn apply_saved() {
-    if let Some(w) = store::current().wallpaper {
-        log::info!("wallpaper: replaying {}", w.path.display());
-        apply(&w);
-    } else {
-        // No pick: sway's config line stands, and only the video it may
-        // stand for is this process's to start.
-        let speed = video_speed();
-        swaypplet_base::spawn::spawn_work(
-            move || {
-                if let Some(w) = system_default() {
-                    follow_video(&w.path, speed);
-                }
-            },
-            |()| (),
-        );
-    }
-}
-
-/// What the config sway loaded says the wallpaper is: the `bg` under
-/// `output *` (block form or one-liner), or failing that the first `bg` of
-/// any output. `None` when the config sets none, or sway could not be asked.
-///
-/// Blocking (one IPC round trip); the pane calls it on a worker.
-pub fn system_default() -> Option<Wallpaper> {
-    match swaypplet_base::sway::ipc::config_text() {
-        Ok(text) => parse_bg(&text),
-        Err(e) => {
-            log::warn!("wallpaper: {e}");
-            None
-        }
-    }
-}
-
-/// The `bg` line out of a sway config, as `system_default` documents.
-fn parse_bg(config: &str) -> Option<Wallpaper> {
+/// The `bg` line out of a sway config: the one under `output *` (block
+/// form or one-liner), or failing that the first `bg` of any output.
+/// `None` when the config sets none.
+pub fn parse_bg(config: &str) -> Option<Wallpaper> {
     let mut block: Option<String> = None;
     let mut fallback = None;
     for raw in config.lines() {
@@ -418,6 +192,15 @@ seat \"*\" {
     }
 
     #[test]
+    fn a_config_line_splits_on_spaces_outside_quotes() {
+        assert_eq!(
+            split_words("output \"*\"  bg \"/a b.png\" fill"),
+            ["output", "*", "bg", "/a b.png", "fill"]
+        );
+        assert!(split_words("   ").is_empty());
+    }
+
+    #[test]
     fn the_command_quotes_the_path_and_refuses_a_quote_in_it() {
         let w = Wallpaper {
             path: PathBuf::from("/tmp/a b.png"),
@@ -440,27 +223,6 @@ seat \"*\" {
         assert!(!is_image(Path::new("/x/noext")));
     }
 
-    /// A still with a same-named video beside it stands for the video; one
-    /// without, or with only a differently named video, does not.
-    #[test]
-    fn a_still_stands_for_the_video_named_like_it() {
-        let dir = std::env::temp_dir().join(format!("swpp-video-for-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let still = dir.join("beach.jpg");
-        let other = dir.join("fields.jpg");
-        for f in [
-            &still,
-            &other,
-            &dir.join("beach.mp4"),
-            &dir.join("waves.mp4"),
-        ] {
-            std::fs::write(f, b"").unwrap();
-        }
-        assert_eq!(video_for(&still), Some(dir.join("beach.mp4")));
-        assert_eq!(video_for(&other), None);
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
     /// The file names the video and its speed; only another video restarts
     /// the unit, and a file already right is not written again.
     #[test]
@@ -469,23 +231,23 @@ seat \"*\" {
         assert_eq!(env_text(beach, 0.5), "VIDEO=/w/beach.mp4\nSPEED=0.5\n");
         assert_eq!(env_text(beach, 1.0), "VIDEO=/w/beach.mp4\nSPEED=1\n");
         // Nothing yet: written, and started afresh.
-        let (write, verb) = env_change(None, beach, 1.0);
+        let (write, restart) = env_change(None, beach, 1.0);
         assert_eq!(write.as_deref(), Some("VIDEO=/w/beach.mp4\nSPEED=1\n"));
-        assert_eq!(verb, "restart");
+        assert!(restart);
         // The same file: left alone, and a running unit with it.
-        let (write, verb) = env_change(Some("VIDEO=/w/beach.mp4\nSPEED=1\n"), beach, 1.0);
-        assert_eq!((write, verb), (None, "start"));
+        let (write, restart) = env_change(Some("VIDEO=/w/beach.mp4\nSPEED=1\n"), beach, 1.0);
+        assert_eq!((write, restart), (None, false));
         // Another speed: written, but no restart.
-        let (write, verb) = env_change(Some("VIDEO=/w/beach.mp4\nSPEED=1\n"), beach, 2.0);
+        let (write, restart) = env_change(Some("VIDEO=/w/beach.mp4\nSPEED=1\n"), beach, 2.0);
         assert_eq!(write.as_deref(), Some("VIDEO=/w/beach.mp4\nSPEED=2\n"));
-        assert_eq!(verb, "start");
+        assert!(!restart);
         // A file from before the speed, with the same video: no restart.
-        let (write, verb) = env_change(Some("VIDEO=/w/beach.mp4\n"), beach, 1.0);
+        let (write, restart) = env_change(Some("VIDEO=/w/beach.mp4\n"), beach, 1.0);
         assert!(write.is_some());
-        assert_eq!(verb, "start");
+        assert!(!restart);
         // Another video: a restart.
-        let (_, verb) = env_change(Some("VIDEO=/w/waves.mp4\nSPEED=1\n"), beach, 1.0);
-        assert_eq!(verb, "restart");
+        let (_, restart) = env_change(Some("VIDEO=/w/waves.mp4\nSPEED=1\n"), beach, 1.0);
+        assert!(restart);
     }
 
     #[test]

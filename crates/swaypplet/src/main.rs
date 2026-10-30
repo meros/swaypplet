@@ -21,8 +21,8 @@ fn main() {
         // idle manager (swayidle replacement) — standalone process, no GTK.
         Some("idle") => swaypplet_idle::run(),
         // The settings file from a keybind or a script — standalone, no GTK,
-        // never a request to the panel (crates/model/src/cli.rs).
-        Some("settings") => swaypplet_model::cli::run(args),
+        // never a request to the panel (crates/app/src/settings_cli.rs).
+        Some("settings") => swaypplet_app::settings_cli::run(args),
         // Root fingerprint agent for the greeter (see crates/fp/src/agent.rs) and
         // its pam_exec token-check counterpart in greetd's PAM stack.
         Some("fp-agent") => swaypplet_fp::agent::run_agent(),

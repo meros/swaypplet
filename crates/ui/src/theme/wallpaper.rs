@@ -547,12 +547,19 @@ fn picked_wallpaper() -> Option<PathBuf> {
     store::current().wallpaper.map(|w| w.path)
 }
 
-/// `picked` when the caller found one, else the one the sway config set.
+/// `picked` when the caller found one, else the one the sway config set
+/// (what `swaypplet_system::wallpaper::system_default` reads too; this
+/// layer sits below the services, so it asks sway itself).
 ///
 /// Blocking when there is no pick: it asks sway for its config. Call it off
 /// the main thread, and read `picked` on the main thread (see above).
 fn wallpaper_path(picked: Option<PathBuf>) -> Option<PathBuf> {
-    picked.or_else(|| swaypplet_model::wallpaper::system_default().map(|w| w.path))
+    picked.or_else(|| {
+        let config = swaypplet_base::sway::ipc::config_text()
+            .map_err(|e| log::warn!("wallpaper: {e}"))
+            .ok()?;
+        swaypplet_model::wallpaper::parse_bg(&config).map(|w| w.path)
+    })
 }
 
 /// Sample the current wallpaper on a worker thread if the cache does not

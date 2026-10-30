@@ -6870,6 +6870,10 @@ rec {
             packageId = "log";
           }
           {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
             name = "swaypplet-ambient";
             packageId = "swaypplet-ambient";
           }
@@ -7680,6 +7684,10 @@ rec {
             packageId = "log";
           }
           {
+            name = "protobuf";
+            packageId = "protobuf";
+          }
+          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
@@ -7711,6 +7719,12 @@ rec {
           {
             name = "swaypplet-ui";
             packageId = "swaypplet-ui";
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "protobuf-codegen";
+            packageId = "protobuf-codegen";
           }
         ];
 
@@ -8185,6 +8199,10 @@ rec {
           {
             name = "swaypplet-notifyd";
             packageId = "swaypplet-notifyd";
+          }
+          {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
           }
           {
             name = "swaypplet-tokens";
@@ -8665,6 +8683,10 @@ rec {
             packageId = "swaypplet-settings-kit";
           }
           {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
             name = "swaypplet-ui";
             packageId = "swaypplet-ui";
           }
@@ -8706,6 +8728,10 @@ rec {
           {
             name = "swaypplet-settings-kit";
             packageId = "swaypplet-settings-kit";
+          }
+          {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
           }
           {
             name = "swaypplet-ui";
@@ -8789,10 +8815,6 @@ rec {
             packageId = "log";
           }
           {
-            name = "protobuf";
-            packageId = "protobuf";
-          }
-          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
@@ -8808,6 +8830,10 @@ rec {
           {
             name = "swaypplet-base";
             packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
           }
           {
             name = "system-tray";
@@ -8834,12 +8860,6 @@ rec {
             packageId = "zbus 4.4.0";
             usesDefaultFeatures = false;
             features = [ "tokio" ];
-          }
-        ];
-        buildDependencies = [
-          {
-            name = "protobuf-codegen";
-            packageId = "protobuf-codegen";
           }
         ];
 

@@ -151,10 +151,11 @@ says which files, while the nixos checkout nx commits from (`NX_FLAKE`,
 default `~/nixos`) has uncommitted changes: nx would commit them along
 with the merge. Otherwise it runs
 `gh pr merge --squash --delete-branch`, then the deploy as the transient
-unit `swaypplet-deploy` with its output in
-`$XDG_STATE_HOME/swaypplet/deploy.log`: a unit and not a child, because nx
-switches home-manager, which restarts the panel; a reopened tab reads the
-log and shows how it ended. `SWAYPPLET_DEPLOY` replaces `nx`.
+unit `swaypplet-nx` with its output in `$XDG_RUNTIME_DIR/swaypplet/nx.log`,
+the same unit and log as the System tab's Apply now and Update: a unit and
+not a child, because nx switches home-manager, which restarts the panel; a
+reopened tab reads the log and shows how it ended, and while either tab's
+run is going the other cannot start one. `SWAYPPLET_DEPLOY` replaces `nx`.
 
 There is no "Try locally": `nx dev swaypplet` rebuilds the system with
 sudo, which asks for a password nothing in the panel can answer.

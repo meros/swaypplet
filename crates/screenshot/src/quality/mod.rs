@@ -20,6 +20,7 @@
 //! and on an issue someone else filed the button names the author and asks
 //! first (`status::needs_confirm`).
 
+pub mod autofix;
 pub mod body;
 pub mod crash;
 pub mod gh;

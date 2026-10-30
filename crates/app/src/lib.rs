@@ -1,4 +1,5 @@
 pub mod preview;
+pub mod settings_cli;
 use std::cell::RefCell;
 use std::fs;
 use std::rc::Rc;
@@ -126,19 +127,14 @@ fn defer_to_service() -> bool {
     if panel_listening() {
         return false;
     }
-    // A test run (SWAYPPLET_DRY_SESSION, dev/render.sh) must not start the
-    // person's own panel unit through their user manager.
-    if std::env::var_os("SWAYPPLET_DRY_SESSION").is_some() {
-        log::warn!("no panel owns {APP_ID}; not starting {PANEL_UNIT} (dry run)");
-        return true;
-    }
+    // A test run (SWAYPPLET_DRY_SESSION, dev/render.sh) does not start the
+    // person's own panel unit through their user manager: `queue` says so
+    // and skips it.
     log::warn!("no panel owns {APP_ID}; starting {PANEL_UNIT} rather than becoming one");
-    // --no-block: nothing here waits on the unit, and the caller may be a
+    // Queued: nothing here waits on the unit, and the caller may be a
     // watcher loop that must get its thread back.
-    let started = std::process::Command::new("systemctl")
-        .args(["--user", "start", "--no-block", PANEL_UNIT])
-        .status();
-    if let Err(e) = started {
+    let unit = swaypplet_system::systemd::Unit::user(PANEL_UNIT);
+    if let Err(e) = unit.queue(swaypplet_system::systemd::Verb::Start) {
         log::warn!("could not start {PANEL_UNIT}: {e}");
     }
     true
@@ -196,7 +192,7 @@ pub fn run() {
         // than something the settings pane has to remember to do the first
         // time it is opened.
         swaypplet_ui::glass::apply_saved();
-        swaypplet_model::wallpaper::apply_saved();
+        swaypplet_system::wallpaper::apply_saved();
 
         // The wallpaper's hue for `look.tint`. This process is the only one
         // that samples it (`theme::wallpaper::follow_settings`, for why);

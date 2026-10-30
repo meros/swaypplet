@@ -11,11 +11,13 @@
 //!
 //! Standalone process, no GTK, and routed in `main.rs` before `app::run`,
 //! which would otherwise treat the word as a request to the running panel.
+//! It lives here rather than beside the store because setting the
+//! wallpaper is the service's (`swaypplet_system::wallpaper`).
 
 use serde_json::Value;
 
-use super::store::Settings;
-use super::wallpaper;
+use swaypplet_model::store::Settings;
+use swaypplet_system::wallpaper;
 
 const USAGE: &str = "\
 usage: swaypplet settings                      the settings in force, as JSON
