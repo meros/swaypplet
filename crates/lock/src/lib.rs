@@ -5,7 +5,8 @@
 //! even with a sick session bus. The compositor arbitrates concurrent lockers
 //! at the protocol level (second locker gets `::failed`).
 //!
-//! Exit codes (the swayidle supervisor branches on these):
+//! Exit codes (the idle supervisor branches on these; both ends read them
+//! from `swaypplet_base::lock_proto`):
 //!   0 — clean unlock: successful auth, or the compositor ended the lock
 //!   2 — lock unavailable: protocol unsupported, or another client holds it
 //!   1 — anything else (crash-ish). While locked, a dead client keeps the
@@ -40,6 +41,9 @@ use std::time::Duration;
 use gtk4::glib;
 use gtk4::prelude::*;
 
+use swaypplet_base::lock_proto::{
+    self, EXIT_ERROR, EXIT_UNAVAILABLE, EXIT_UNLOCKED, LockCmd, UNKNOWN_REASON,
+};
 use swaypplet_base::spawn::spawn_work;
 use swaypplet_fp::EngineEvent;
 use ui::{StatusKind, SurfaceSet};
@@ -114,15 +118,15 @@ static NO_FADE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 /// telling the same story.
 pub fn fade_suppressed() -> bool {
     NO_FADE.load(std::sync::atomic::Ordering::Relaxed)
-        || std::env::var("SWAYPPLET_LOCK_FADE").as_deref() == Ok("0")
+        || std::env::var(lock_proto::ENV_FADE).as_deref() == Ok("0")
 }
 
 pub fn reason() -> String {
     REASON
         .get()
         .cloned()
-        .or_else(|| std::env::var("SWAYPPLET_LOCK_REASON").ok())
-        .unwrap_or_else(|| "unknown".into())
+        .or_else(|| std::env::var(lock_proto::ENV_REASON).ok())
+        .unwrap_or_else(|| UNKNOWN_REASON.into())
 }
 
 /// Pay the first-window cost now, then wait to be told to lock.
@@ -188,7 +192,7 @@ fn warm_and_wait() {
     {
         use std::io::Write;
         let mut out = std::io::stdout();
-        let _ = writeln!(out, "READY");
+        let _ = writeln!(out, "{}", lock_proto::READY);
         let _ = out.flush();
     }
 
@@ -226,18 +230,11 @@ fn warm_and_wait() {
         );
     }
     waiting.run();
-    let line = line.borrow().clone();
-    let mut words = line.split_whitespace();
-    let _ = words.next(); // "LOCK"
-    let reason = words.next().unwrap_or("").to_string();
-    if words.any(|w| w == "nofade") {
+    let cmd = LockCmd::parse(&line.borrow());
+    if !cmd.fade {
         NO_FADE.store(true, std::sync::atomic::Ordering::Relaxed);
     }
-    let _ = REASON.set(if reason.is_empty() {
-        "unknown".into()
-    } else {
-        reason
-    });
+    let _ = REASON.set(cmd.reason);
     stage("lock commanded");
 }
 
@@ -270,10 +267,6 @@ fn follow_unlock(on_unlock: impl Fn() + 'static) {
         }
     });
 }
-
-const EXIT_UNLOCKED: i32 = 0;
-const EXIT_ERROR: i32 = 1;
-const EXIT_UNAVAILABLE: i32 = 2;
 
 pub fn run() -> ! {
     stage("entry");
@@ -315,7 +308,7 @@ pub fn run() -> ! {
 
     // Pre-warmed mode: absorb the first-window cost and park until told to
     // lock. Spawned the old way (no supervisor), fall straight through.
-    if std::env::var_os("SWAYPPLET_LOCK_WAIT").is_some() {
+    if std::env::var_os(lock_proto::ENV_WAIT).is_some() {
         warm_and_wait();
     }
 
@@ -540,7 +533,7 @@ pub fn run() -> ! {
             {
                 use std::io::Write;
                 let mut out = std::io::stdout();
-                let _ = writeln!(out, "LOCKED");
+                let _ = writeln!(out, "{}", lock_proto::LOCKED);
                 let _ = out.flush();
             }
 

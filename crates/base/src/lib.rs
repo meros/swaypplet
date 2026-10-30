@@ -4,6 +4,7 @@ pub mod face;
 pub mod frame_stats;
 pub mod glib_unix;
 pub mod handoff;
+pub mod lock_proto;
 pub mod logind;
 pub mod naming;
 pub mod pid;
