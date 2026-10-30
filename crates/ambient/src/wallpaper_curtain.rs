@@ -1,5 +1,5 @@
 //! The black curtain the animated wallpaper fades behind on battery
-//! (`services::wallpaper_battery`'s `black`).
+//! (`crate::wallpaper_battery`'s `black`).
 //!
 //! The fade used to be the player's own: contrast and saturation eased over
 //! mpv's IPC. mpv applies those only when it renders a video frame, which is

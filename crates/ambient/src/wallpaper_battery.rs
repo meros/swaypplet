@@ -13,7 +13,7 @@
 //!   set. Back on mains, `pause` goes first and the speed climbs from the
 //!   floor, slowly at first.
 //! - **black**: a black curtain fades in over the video
-//!   (`services::wallpaper_curtain`, a layer surface eased on GTK's frame
+//!   (`crate::wallpaper_curtain`, a layer surface eased on GTK's frame
 //!   clock) over [`FADE_SPAN`], with the video playing on at its own
 //!   speed under it: only `pause` slows down and speeds up. Once the
 //!   curtain is up the player is paused, its video track dropped with
@@ -53,14 +53,14 @@
 //! `-p` while the screen is off, a person over IPC) stays paused, though its
 //! speed still goes back, since nothing else moves it.
 //!
-//! Three things re-assert the state: a battery change (`services::battery`,
+//! Three things re-assert the state: a battery change (`swaypplet_system::battery`,
 //! UPower), a settings change, and a 30-second tick while the wallpaper is
 //! not meant to be playing, for a player that restarted (nothing announces
 //! it) or that something else resumed. Polling only then keeps a machine on
 //! mains free of the wake-up.
 //!
 //! Paused or black and settled, the player's unit is frozen (systemd's
-//! cgroup freezer, `settings::wallpaper::freeze_video`): mpvpaper polls on a
+//! cgroup freezer, `swaypplet_model::wallpaper::freeze_video`): mpvpaper polls on a
 //! 10 ms timer whether mpv plays or not, about 200 wake-ups a second and
 //! 0.7 % of a core paused (meros-laptop, 2026-10-03), and none frozen. Its
 //! last frame, the paused video or black, stays on screen and behind the

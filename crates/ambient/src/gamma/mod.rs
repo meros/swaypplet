@@ -69,6 +69,28 @@ struct Ramp {
     duration: Duration,
 }
 
+impl Ramp {
+    /// Where the ramp is `elapsed` after its start, in mired, and whether
+    /// it has arrived. Eased at both ends, so a change starts and settles
+    /// softly.
+    fn at(&self, elapsed: Duration) -> (f64, bool) {
+        let t = (elapsed.as_secs_f64() / self.duration.as_secs_f64()).min(1.0);
+        let e = t * t * (3.0 - 2.0 * t);
+        (self.from + (self.to - self.from) * e, t >= 1.0)
+    }
+}
+
+/// How often a ramp over `mired` in `duration` steps: as often as it moves
+/// [`STEP_MIRED`], never faster than [`MIN_STEP`] and never slower than the
+/// whole ramp. A slow sun minute ticks every few seconds, a manual change
+/// every 100 ms.
+fn tick_every(mired: f64, duration: Duration) -> Duration {
+    let steps = (mired.abs() / STEP_MIRED).max(1.0);
+    duration
+        .div_f64(steps)
+        .clamp(MIN_STEP, duration.max(MIN_STEP))
+}
+
 struct Engine {
     gamma: wayland::Gamma,
     /// What is on screen, in kelvin.
@@ -106,12 +128,7 @@ impl Engine {
             start: Instant::now(),
             duration,
         });
-        // As often as the ramp moves a step, within the bounds: a slow sun
-        // minute ticks every few seconds, a manual change every 100 ms.
-        let steps = ((to - from).abs() / STEP_MIRED).max(1.0);
-        let every = duration
-            .div_f64(steps)
-            .clamp(MIN_STEP, duration.max(MIN_STEP));
+        let every = tick_every(to - from, duration);
         let this = self.clone();
         let id = glib::timeout_add_local(every, move || this.step());
         *self.tick.borrow_mut() = Some(id);
@@ -123,10 +140,7 @@ impl Engine {
             let Some(r) = ramp.as_ref() else {
                 return glib::ControlFlow::Break;
             };
-            let t = (r.start.elapsed().as_secs_f64() / r.duration.as_secs_f64()).min(1.0);
-            // Eased at both ends, so a change starts and settles softly.
-            let e = t * t * (3.0 - 2.0 * t);
-            (r.from + (r.to - r.from) * e, t >= 1.0)
+            r.at(r.start.elapsed())
         };
         self.show(1e6 / m);
         if done {
@@ -187,14 +201,51 @@ pub fn follow_settings() {
     });
     engine.retarget(STARTUP);
     engine.follow_sun();
-    store::observe(move || {
-        let now = store::current().night_light();
-        if now == engine.settings.get() {
-            return;
+    store::observe_section(
+        |s| s.night_light(),
+        move |now| {
+            ENABLED.store(now.enabled, Ordering::Relaxed);
+            engine.settings.set(now);
+            engine.retarget(MANUAL);
+            engine.follow_sun();
+        },
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ramp(from: f64, to: f64, secs: u64) -> Ramp {
+        Ramp {
+            from,
+            to,
+            start: Instant::now(),
+            duration: Duration::from_secs(secs),
         }
-        ENABLED.store(now.enabled, Ordering::Relaxed);
-        engine.settings.set(now);
-        engine.retarget(MANUAL);
-        engine.follow_sun();
-    });
+    }
+
+    #[test]
+    fn a_ramp_eases_from_start_to_end_and_then_holds() {
+        let r = ramp(200.0, 300.0, 2);
+        assert_eq!(r.at(Duration::ZERO), (200.0, false));
+        assert_eq!(r.at(Duration::from_secs(1)), (250.0, false), "halfway");
+        assert_eq!(r.at(Duration::from_secs(2)), (300.0, true));
+        assert_eq!(r.at(Duration::from_secs(9)), (300.0, true));
+        // Eased: the first tenth covers less than a tenth of the way.
+        let (early, _) = r.at(Duration::from_millis(200));
+        assert!(early > 200.0 && early < 210.0, "{early}");
+    }
+
+    #[test]
+    fn a_ramp_ticks_once_per_half_mired_within_its_bounds() {
+        // A manual change over a second: never faster than 10 Hz.
+        assert_eq!(tick_every(150.0, MANUAL), MIN_STEP);
+        // A slow sun minute moving 6 mired: twelve steps, every 5 s.
+        assert_eq!(tick_every(-6.0, SUN_PERIOD), Duration::from_secs(5));
+        // Less than a step is one step, over the whole ramp.
+        assert_eq!(tick_every(0.1, SUN_PERIOD), SUN_PERIOD);
+        // A ramp shorter than the floor still ticks at the floor.
+        assert_eq!(tick_every(0.1, Duration::from_millis(20)), MIN_STEP);
+    }
 }
