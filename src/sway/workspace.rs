@@ -80,6 +80,26 @@ pub fn label_for_name(name: &str) -> String {
     label_text(num, name)
 }
 
+/// Each name mapped to the label the bar draws for it, as one JSON object. Behind
+/// `swaypplet workspace-labels NAME...`, which the laptop-companion agent calls so
+/// the phone lists workspaces under the names the bar shows.
+pub fn labels_json(names: impl IntoIterator<Item = String>) -> serde_json::Value {
+    serde_json::Value::Object(
+        names
+            .into_iter()
+            .map(|name| {
+                let label = label_for_name(&name);
+                (name, serde_json::Value::String(label))
+            })
+            .collect(),
+    )
+}
+
+/// `swaypplet workspace-labels NAME...`: standalone, no GTK.
+pub fn labels_cli(args: impl Iterator<Item = String>) {
+    println!("{}", labels_json(args));
+}
+
 /// Numbered workspaces switch by number, so "5:t2a" and a bare "5" resolve
 /// to the same target (matches waybar and the sway keybindings);
 /// named-only ones by quoted name. The bar's buttons, the popover session
@@ -130,6 +150,14 @@ mod tests {
             switch_command(-1, "we\"ird\\ws"),
             "workspace \"we\\\"ird\\\\ws\""
         );
+    }
+
+    #[test]
+    fn labels_json_maps_each_name_to_its_bar_label() {
+        let json = labels_json(["2:t1b".to_string(), "24:wg".to_string(), "mail".to_string()]);
+        assert_eq!(json["2:t1b"], "1\u{00b2}");
+        assert_eq!(json["24:wg"], "󰊤 g");
+        assert_eq!(json["mail"], "mail");
     }
 
     #[test]

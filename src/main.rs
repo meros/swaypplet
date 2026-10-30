@@ -88,6 +88,8 @@ fn main() {
         // The Cast devices on the network, from avahi (services::cast). No
         // GTK.
         Some("cast") => services::cast::cli(args),
+        // The labels the bar draws for the named workspaces, as JSON. No GTK.
+        Some("workspace-labels") => sway::workspace::labels_cli(args),
         // Dev-only: render one component (or the whole panel) in a plain window
         // for visual validation. See src/preview.rs and dev/render.sh.
         Some("--preview") => preview::run(args.next().as_deref().unwrap_or("panel")),
