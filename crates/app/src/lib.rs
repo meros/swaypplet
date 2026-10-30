@@ -61,6 +61,28 @@ struct AppState {
 /// the owner, which is the whole problem below. On any error this answers
 /// "yes" — a client that cannot reach the bus should fail the way it always
 /// did, not start a second panel.
+/// How the display profiles say an apply failed: a card from "Displays".
+pub(crate) fn displays_notify(
+    store: &swaypplet_notifyd::store::StoreRef,
+) -> impl Fn(&str, &str) + 'static {
+    let store = store.clone();
+    move |summary, body| {
+        swaypplet_notifyd::store::store_add(
+            &store,
+            swaypplet_notifyd::Notification {
+                app_name: "Displays".into(),
+                summary: summary.into(),
+                body: body.into(),
+                urgency: swaypplet_notifyd::Urgency::Normal,
+                expire_timeout: 8000,
+                // `Default` leaves the epoch, which the card shows as its age.
+                timestamp: std::time::SystemTime::now(),
+                ..Default::default()
+            },
+        );
+    }
+}
+
 fn panel_listening() -> bool {
     let Ok(bus) = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE) else {
         return true;
@@ -199,7 +221,7 @@ pub fn run() {
 
         // Display profiles: kanshi's job, matched against the outputs the
         // compositor reports and applied in one step (`services::displays`).
-        swaypplet_displays::start(store_startup.clone());
+        swaypplet_displays::start(displays_notify(&store_startup));
 
         // An extra screen for a TV (`services::cast`); this removes one the
         // panel before this one left behind.
@@ -491,12 +513,43 @@ pub fn run() {
                     panel.show_notifications();
                 }
             });
+            let capture = swaypplet_system::capture::CaptureService::start();
+            let read = {
+                let (sway, capture, audio) = (sway_model.clone(), capture.clone(), audio.clone());
+                move || {
+                    let (fullscreen, mirrored) = sway.as_ref().map_or((false, false), |s| {
+                        let s = s.snapshot();
+                        (s.fullscreen_on_focused_output, s.mirrored)
+                    });
+                    let c = capture.snapshot();
+                    swaypplet_notifyd::context::Signals {
+                        sharing: c.screen,
+                        mirrored,
+                        call: swaypplet_notifyd::context::in_a_call(
+                            c.camera,
+                            &audio.snapshot().recorder_names(),
+                        ),
+                        fullscreen,
+                    }
+                }
+            };
+            let mut on_change: Vec<swaypplet_notifyd::context::OnChange> = vec![
+                Box::new(move |f: Rc<dyn Fn()>| capture.connect_change(move || f())),
+                {
+                    let audio = audio.clone();
+                    Box::new(move |f: Rc<dyn Fn()>| audio.connect_change(move || f()))
+                },
+            ];
+            if let Some(sway) = sway_model {
+                on_change.push(Box::new(move |f: Rc<dyn Fn()>| {
+                    sway.connect_change(move || f())
+                }));
+            }
             swaypplet_notifyd::context::install(
                 store_activate.clone(),
                 swaypplet_notifyd::context::Sources {
-                    sway: sway_model,
-                    capture: Some(swaypplet_system::capture::CaptureService::start()),
-                    audio: Some(audio.clone()),
+                    read: Box::new(read),
+                    on_change,
                     open_centre,
                 },
             );

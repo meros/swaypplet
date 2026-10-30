@@ -2074,7 +2074,6 @@ name = "swaypplet-audio"
 version = "0.1.0"
 dependencies = [
  "async-channel",
- "glib",
  "libpulse-binding",
  "log",
  "swaypplet-base",
@@ -2150,7 +2149,6 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "glib",
- "gtk4",
  "log",
  "serde",
  "serde_json",
@@ -2158,7 +2156,6 @@ dependencies = [
  "swaypplet-audio",
  "swaypplet-base",
  "swaypplet-model",
- "swaypplet-system",
  "tokio",
  "zbus 4.4.0",
 ]
@@ -2172,7 +2169,6 @@ dependencies = [
  "log",
  "swaypplet-base",
  "swaypplet-model",
- "swaypplet-notifyd",
  "wayland-client",
  "wayland-protocols-wlr",
 ]
@@ -2351,12 +2347,11 @@ dependencies = [
 name = "swaypplet-notifyd"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
  "glib",
  "log",
- "swaypplet-audio",
  "swaypplet-base",
  "swaypplet-model",
- "swaypplet-system",
  "tokio",
  "zbus 4.4.0",
 ]

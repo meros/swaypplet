@@ -443,7 +443,7 @@ pub fn run(component: &str) {
             // compositor the preview runs in, as `display` does.
             c if c == "settings" || c.starts_with("settings.") => {
                 if c == "settings.displays" {
-                    swaypplet_displays::start(store.clone());
+                    swaypplet_displays::start(crate::displays_notify(&store));
                 }
                 if c == "settings.input" {
                     swaypplet_devices::input::follow();
@@ -527,7 +527,7 @@ pub fn run(component: &str) {
             "display" => {
                 // The profiles come from the service, as in the panel; here
                 // it drives the nested compositor the preview runs in.
-                swaypplet_displays::start(store.clone());
+                swaypplet_displays::start(crate::displays_notify(&store));
                 let s = Box::leak(Box::new(DisplaySection::new()));
                 s.expand_for_page();
                 host.append(s.widget());

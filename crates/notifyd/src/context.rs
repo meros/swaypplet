@@ -25,8 +25,9 @@
 //! the next presentation is quiet again.
 //!
 //! No timer and no poll: the sway snapshot, the PipeWire graph
-//! (`services::capture`), the sound server and the settings file all push,
-//! and [`install`] re-evaluates on each push.
+//! (`swaypplet_system::capture`), the sound server and the settings file
+//! all push, and [`install`] re-evaluates on each push. The app wires the
+//! services in ([`Sources`]), so this crate depends on none of them.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -331,12 +332,19 @@ pub fn set_override(store: &StoreRef, on: bool) {
     update(store, |c| c.set_override(on));
 }
 
-/// Where the signals come from. Each is optional: a process without a bar
-/// has no sway model, and a machine without `pw-dump` has no capture feed.
+/// A source's change hook, for [`Sources::on_change`].
+pub type OnChange = Box<dyn FnOnce(Rc<dyn Fn()>)>;
+
+/// Where the signals come from, built by the process that owns the
+/// services. A source may be missing: a process without a bar has no sway
+/// model, and a machine without `pw-dump` has no capture feed; `read` then
+/// reports its signals as off.
 pub struct Sources {
-    pub sway: Option<Rc<swaypplet_base::sway::ipc::SwayService>>,
-    pub capture: Option<Rc<swaypplet_system::capture::CaptureService>>,
-    pub audio: Option<Rc<swaypplet_audio::AudioService>>,
+    /// What the world says right now.
+    pub read: Box<dyn Fn() -> Signals>,
+    /// One per source `read` looks at: given the re-evaluation, it calls it
+    /// on every change that source pushes.
+    pub on_change: Vec<OnChange>,
     /// Opens the panel on the notification centre.
     pub open_centre: Rc<dyn Fn()>,
 }
@@ -355,34 +363,9 @@ pub fn install(store: StoreRef, sources: Sources) {
         }
     });
 
-    let sway = sources.sway.clone();
-    let capture = sources.capture.clone();
-    let audio = sources.audio.clone();
-    let read = Rc::new(move || {
-        let (fullscreen, mirrored) = sway
-            .as_ref()
-            .map(|s| s.snapshot())
-            .map_or((false, false), |s| {
-                (s.fullscreen_on_focused_output, s.mirrored)
-            });
-        let (sharing, camera) = capture
-            .as_ref()
-            .map(|c| c.snapshot())
-            .map_or((false, false), |c| (c.screen, c.camera));
-        let call_mic = audio
-            .as_ref()
-            .is_some_and(|a| a.snapshot().recorder_names().iter().any(|n| is_call_app(n)));
-        Signals {
-            sharing,
-            mirrored,
-            call: camera || call_mic,
-            fullscreen,
-        }
-    });
-
-    let evaluate = {
+    let evaluate: Rc<dyn Fn()> = {
         let store = store.clone();
-        let read = read.clone();
+        let read = sources.read;
         Rc::new(move || {
             let signals = read();
             update(&store, |c| {
@@ -396,17 +379,8 @@ pub fn install(store: StoreRef, sources: Sources) {
         })
     };
 
-    if let Some(s) = &sources.sway {
-        let evaluate = evaluate.clone();
-        s.connect_change(move || evaluate());
-    }
-    if let Some(c) = &sources.capture {
-        let evaluate = evaluate.clone();
-        c.connect_change(move || evaluate());
-    }
-    if let Some(a) = &sources.audio {
-        let evaluate = evaluate.clone();
-        a.connect_change(move || evaluate());
+    for hook in sources.on_change {
+        hook(evaluate.clone());
     }
     {
         let store = store.clone();
@@ -418,6 +392,12 @@ pub fn install(store: StoreRef, sources: Sources) {
         swaypplet_model::store::observe(apply);
     }
     evaluate();
+}
+
+/// The call signal: a camera streaming, or a call application recording
+/// (`recorders`, the sound server's recording stream names).
+pub fn in_a_call(camera: bool, recorders: &[String]) -> bool {
+    camera || recorders.iter().any(|n| is_call_app(n))
 }
 
 /// A sound-server stream name that belongs to a call. Browsers count:
@@ -682,5 +662,13 @@ mod tests {
         assert!(is_call_app("ZOOM VoiceEngine"));
         assert!(is_call_app("Chromium input"));
         assert!(!is_call_app("arecord"));
+    }
+
+    #[test]
+    fn a_call_is_the_camera_or_a_call_app_on_the_microphone() {
+        assert!(in_a_call(true, &[]));
+        assert!(in_a_call(false, &["arecord".into(), "Zoom".into()]));
+        assert!(!in_a_call(false, &["arecord".into()]));
+        assert!(!in_a_call(false, &[]));
     }
 }

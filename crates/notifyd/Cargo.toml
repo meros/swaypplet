@@ -7,9 +7,8 @@ license.workspace = true
 [dependencies]
 swaypplet-base.workspace = true
 swaypplet-model.workspace = true
-swaypplet-system.workspace = true
-swaypplet-audio.workspace = true
 glib.workspace = true
+async-channel.workspace = true
 zbus.workspace = true
 tokio.workspace = true
 log.workspace = true

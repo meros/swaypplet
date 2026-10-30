@@ -20,7 +20,7 @@
 //!
 //! # The extra screen
 //!
-//! A virtual output made for a cast (`services::cast::output`) is never
+//! A virtual output made for a cast (`swaypplet_cast::output`) is never
 //! matched: a cast that starts or stops must not change the profile. It is
 //! in the view, so the Displays tab arranges it like a screen, and a
 //! profile keeps its layout (`DisplayProfile::extra_screen`): saved with
@@ -48,8 +48,6 @@ use swaypplet_model::{
     store,
     store::{DisplayProfile, Displays, ExtraScreenLayout},
 };
-use swaypplet_notifyd::store::{StoreRef, store_add};
-use swaypplet_notifyd::{Notification, Urgency};
 
 /// What the Displays section shows.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -135,23 +133,21 @@ struct Engine {
     /// That match is running now: what it sends is the one retry.
     retrying: Cell<bool>,
     next_id: Cell<u64>,
-    /// The profiles at the last match, to notice an edit.
-    profiles: RefCell<Displays>,
 }
 
 /// Start following the outputs. Call once, in the panel process, on the
 /// GTK thread. A compositor without output management leaves the outputs
-/// to whatever else sets them.
-pub fn start(store: StoreRef) {
+/// to whatever else sets them. `notify` posts a notification (summary,
+/// body): how a failed apply is told.
+pub fn start(notify: impl Fn(&str, &str) + 'static) {
     let Some((outputs, rx)) = wayland::Outputs::start() else {
         return;
     };
     let engine = Rc::new(Engine::new(
         Box::new(outputs),
-        Box::new(move |summary, body| notify(&store, summary, body)),
+        Box::new(notify),
         Box::new(|| store::current().displays().profiles),
     ));
-    *engine.profiles.borrow_mut() = store::current().displays();
     ENGINE.with(|e| *e.borrow_mut() = Some(engine.clone()));
     {
         let engine = engine.clone();
@@ -161,13 +157,7 @@ pub fn start(store: StoreRef) {
             }
         });
     }
-    store::observe(move || {
-        let now = store::current().displays();
-        if *engine.profiles.borrow() != now {
-            *engine.profiles.borrow_mut() = now;
-            engine.rematch();
-        }
-    });
+    store::observe_section(|s| s.displays(), move |_| engine.rematch());
 }
 
 /// Sway reloaded its config and put its own `output` lines back: show the
@@ -305,22 +295,6 @@ fn engine() -> Option<Rc<Engine>> {
     ENGINE.with(|e| e.borrow().clone())
 }
 
-fn notify(store: &StoreRef, summary: &str, body: &str) {
-    store_add(
-        store,
-        Notification {
-            app_name: "Displays".into(),
-            summary: summary.into(),
-            body: body.into(),
-            urgency: Urgency::Normal,
-            expire_timeout: 8000,
-            // `Default` leaves the epoch, which the card shows as its age.
-            timestamp: std::time::SystemTime::now(),
-            ..Default::default()
-        },
-    );
-}
-
 impl Engine {
     fn new(sink: Box<dyn Sink>, notify: Notify, source: Source) -> Engine {
         Engine {
@@ -337,7 +311,6 @@ impl Engine {
             retry: Cell::new(false),
             retrying: Cell::new(false),
             next_id: Cell::new(1),
-            profiles: RefCell::default(),
         }
     }
 

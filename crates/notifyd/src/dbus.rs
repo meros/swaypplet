@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 
 use zbus::zvariant::Value;
 use zbus::{SignalContext, interface};
@@ -29,11 +28,6 @@ enum SignalEvent {
     ActionInvoked(u32, String),
     ActivationToken(u32, String),
     Replied(u32, String),
-}
-
-/// Thread-safe sender for D-Bus → main thread communication.
-struct EventSender {
-    tx: std::sync::mpsc::Sender<DbusEvent>,
 }
 
 // ── Hint parsing ─────────────────────────────────────────────────────────
@@ -157,9 +151,113 @@ fn hint_image_data(hints: &HashMap<String, Value<'_>>, key: &str) -> Option<Imag
 
 // ── D-Bus interface struct (must be Send + Sync) ─────────────────────────
 
+/// One `Notify` call as a [`Notification`], before the store gives it an id.
+#[allow(clippy::too_many_arguments)]
+fn notification_from(
+    app_name: &str,
+    replaces_id: u32,
+    app_icon: &str,
+    summary: &str,
+    body: &str,
+    actions: &[String],
+    hints: &HashMap<String, Value<'_>>,
+    expire_timeout: i32,
+) -> Notification {
+    let urgency = hints
+        .get("urgency")
+        .and_then(|v| match v {
+            Value::U8(u) => Some(*u),
+            _ => None,
+        })
+        .map(Urgency::from)
+        .unwrap_or(Urgency::Normal);
+
+    let transient = hints
+        .get("transient")
+        .and_then(|v| match v {
+            Value::Bool(b) => Some(*b),
+            Value::U8(u) => Some(*u != 0),
+            Value::I32(i) => Some(*i != 0),
+            _ => None,
+        })
+        .unwrap_or(false);
+
+    let progress = hints.get("value").and_then(|v| match v {
+        Value::I32(i) => Some(*i as u32),
+        Value::U32(u) => Some(*u),
+        _ => None,
+    });
+
+    // Claude stop-notification attribution (vision O2): the nixos-side
+    // hook sends `--hint=int:claude-pid:<PID>`; notify-send ints are I32.
+    let claude_pid = hints.get("claude-pid").and_then(|v| match v {
+        Value::I32(i) => Some(*i),
+        _ => None,
+    });
+
+    let category = hint_str(hints, "category");
+    let desktop_entry = hint_str(hints, "desktop-entry");
+    // Both spellings are in the wild: the spec says the first, GLib and
+    // several toolkits send the second.
+    let sync_tag = hint_str(hints, "x-canonical-private-synchronous")
+        .or_else(|| hint_str(hints, "x-dunst-stack-tag"));
+    let resident = hint_bool(hints, "resident").unwrap_or(false);
+    let action_icons = hint_bool(hints, "action-icons").unwrap_or(false);
+
+    // Spec precedence for the picture: image-data outranks image-path,
+    // and `icon_data` is the 1.1 spelling kept for older senders.
+    let image = hint_image_data(hints, "image-data")
+        .or_else(|| hint_image_data(hints, "image_data"))
+        .or_else(|| hint_str(hints, "image-path").map(image_from_str))
+        .or_else(|| hint_str(hints, "image_path").map(image_from_str))
+        .or_else(|| hint_image_data(hints, "icon_data"));
+
+    // The app's own identity, which is a different question from what the
+    // notification is about. Falls back to the desktop entry, since a
+    // sender that names one is telling us where to find its icon.
+    let icon = (!app_icon.is_empty())
+        .then(|| image_from_str(app_icon.to_string()))
+        .or_else(|| desktop_entry.clone().map(ImageSource::Named));
+
+    // Paired action strings: [id, label, id, label, ...]; a trailing id
+    // without its label is dropped.
+    let actions = actions
+        .chunks_exact(2)
+        .map(|pair| (pair[0].clone(), pair[1].clone()))
+        .collect();
+
+    Notification {
+        id: 0, // assigned by store on main thread
+        app_name: app_name.to_string(),
+        summary: summary.to_string(),
+        body: body.to_string(),
+        urgency,
+        actions,
+        expire_timeout,
+        timestamp: std::time::SystemTime::now(),
+        transient,
+        progress,
+        replaces_id,
+        claude_pid,
+        // Resolved by the store at add time (set_task_resolver).
+        task: None,
+        suppressed: false,
+        held: false,
+        icon,
+        image,
+        category,
+        desktop_entry,
+        sync_tag,
+        resident,
+        action_icons,
+    }
+}
+
 /// D-Bus interface implementing `org.freedesktop.Notifications` (spec v1.2).
 pub struct NotificationServer {
-    sender: Arc<Mutex<EventSender>>,
+    /// To the GTK main thread. `async_channel`'s sender is `Sync`, which the
+    /// interface needs, so no lock wraps it.
+    events: async_channel::Sender<DbusEvent>,
 }
 
 #[interface(name = "org.freedesktop.Notifications")]
@@ -208,108 +306,24 @@ impl NotificationServer {
         hints: HashMap<String, Value<'_>>,
         expire_timeout: i32,
     ) -> zbus::fdo::Result<u32> {
-        let urgency = hints
-            .get("urgency")
-            .and_then(|v| match v {
-                Value::U8(u) => Some(*u),
-                _ => None,
-            })
-            .map(Urgency::from)
-            .unwrap_or(Urgency::Normal);
-
-        let transient = hints
-            .get("transient")
-            .and_then(|v| match v {
-                Value::Bool(b) => Some(*b),
-                Value::U8(u) => Some(*u != 0),
-                Value::I32(i) => Some(*i != 0),
-                _ => None,
-            })
-            .unwrap_or(false);
-
-        let progress = hints.get("value").and_then(|v| match v {
-            Value::I32(i) => Some(*i as u32),
-            Value::U32(u) => Some(*u),
-            _ => None,
-        });
-
-        // Claude stop-notification attribution (vision O2): the nixos-side
-        // hook sends `--hint=int:claude-pid:<PID>`; notify-send ints are I32.
-        let claude_pid = hints.get("claude-pid").and_then(|v| match v {
-            Value::I32(i) => Some(*i),
-            _ => None,
-        });
-
-        let category = hint_str(&hints, "category");
-        let desktop_entry = hint_str(&hints, "desktop-entry");
-        // Both spellings are in the wild: the spec says the first, GLib and
-        // several toolkits send the second.
-        let sync_tag = hint_str(&hints, "x-canonical-private-synchronous")
-            .or_else(|| hint_str(&hints, "x-dunst-stack-tag"));
-        let resident = hint_bool(&hints, "resident").unwrap_or(false);
-        let action_icons = hint_bool(&hints, "action-icons").unwrap_or(false);
-
-        // Spec precedence for the picture: image-data outranks image-path,
-        // and `icon_data` is the 1.1 spelling kept for older senders.
-        let image = hint_image_data(&hints, "image-data")
-            .or_else(|| hint_image_data(&hints, "image_data"))
-            .or_else(|| hint_str(&hints, "image-path").map(image_from_str))
-            .or_else(|| hint_str(&hints, "image_path").map(image_from_str))
-            .or_else(|| hint_image_data(&hints, "icon_data"));
-
-        // The app's own identity, which is a different question from what the
-        // notification is about. Falls back to the desktop entry, since a
-        // sender that names one is telling us where to find its icon.
-        let icon = (!app_icon.is_empty())
-            .then(|| image_from_str(app_icon.to_string()))
-            .or_else(|| desktop_entry.clone().map(ImageSource::Named));
-
-        // Parse paired action strings: [id, label, id, label, ...]
-        let action_pairs: Vec<(String, String)> = actions
-            .chunks(2)
-            .filter_map(|chunk| {
-                if chunk.len() == 2 {
-                    Some((chunk[0].clone(), chunk[1].clone()))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let notif = Notification {
-            id: 0, // assigned by store on main thread
-            app_name: app_name.to_string(),
-            summary: summary.to_string(),
-            body: body.to_string(),
-            urgency,
-            actions: action_pairs,
-            expire_timeout,
-            timestamp: std::time::SystemTime::now(),
-            transient,
-            progress,
+        let notif = notification_from(
+            app_name,
             replaces_id,
-            claude_pid,
-            // Resolved by the store at add time (set_task_resolver).
-            task: None,
-            suppressed: false,
-            held: false,
-            icon,
-            image,
-            category,
-            desktop_entry,
-            sync_tag,
-            resident,
-            action_icons,
-        };
+            app_icon,
+            summary,
+            body,
+            &actions,
+            &hints,
+            expire_timeout,
+        );
 
-        // Send to main thread and wait for the assigned ID.
+        // Send to main thread and wait for the assigned ID. `try_send` on an
+        // unbounded channel never blocks; it fails only once the GTK side is
+        // gone, which the reply channel below reports.
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        {
-            // Scoped: a std Mutex guard must not be held across the await
-            // below, and `send` on an unbounded channel never blocks.
-            let sender = self.sender.lock().unwrap();
-            let _ = sender.tx.send(DbusEvent::Notify(Box::new(notif), reply_tx));
-        }
+        let _ = self
+            .events
+            .try_send(DbusEvent::Notify(Box::new(notif), reply_tx));
 
         // Await — never block. This runs on the object-server dispatch task,
         // which shares its single-threaded runtime with zbus's socket reader.
@@ -332,8 +346,7 @@ impl NotificationServer {
     }
 
     async fn close_notification(&self, id: u32) -> zbus::fdo::Result<()> {
-        let sender = self.sender.lock().unwrap();
-        let _ = sender.tx.send(DbusEvent::Close(id));
+        let _ = self.events.try_send(DbusEvent::Close(id));
         Ok(())
     }
 
@@ -376,11 +389,10 @@ impl NotificationServer {
 /// to the GTK main thread via a channel, where the `NotificationStore` is
 /// updated (keeping it safely `Rc<RefCell<>>`).
 pub fn start_server(store: Rc<RefCell<NotificationStore>>) {
-    let (tx, rx) = std::sync::mpsc::channel::<DbusEvent>();
+    let (tx, rx) = async_channel::unbounded::<DbusEvent>();
     let (signal_tx, mut signal_rx) = tokio::sync::mpsc::unbounded_channel::<SignalEvent>();
 
-    let sender = Arc::new(Mutex::new(EventSender { tx }));
-    let server = NotificationServer { sender };
+    let server = NotificationServer { events: tx };
 
     swaypplet_base::spawn::spawn_tokio_thread("notify-dbus", async move {
         // Headroom over zbus's 64-message default: this connection is the
@@ -484,9 +496,9 @@ pub fn start_server(store: Rc<RefCell<NotificationStore>>) {
         });
     }
 
-    // Poll the channel on the GTK main thread
-    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-        while let Ok(event) = rx.try_recv() {
+    // Apply each call on the GTK main thread as it arrives.
+    glib::spawn_future_local(async move {
+        while let Ok(event) = rx.recv().await {
             match event {
                 DbusEvent::Notify(notif, reply_tx) => {
                     let id = store::store_add(&store, *notif);
@@ -497,7 +509,6 @@ pub fn start_server(store: Rc<RefCell<NotificationStore>>) {
                 }
             }
         }
-        glib::ControlFlow::Continue
     });
 }
 
@@ -519,6 +530,106 @@ mod tests {
             image_from_str("dialog-information".into()),
             ImageSource::Named(n) if n == "dialog-information"
         ));
+    }
+
+    fn parse<const N: usize>(
+        app_icon: &str,
+        actions: &[&str],
+        hints: [(&str, Value<'static>); N],
+    ) -> Notification {
+        let actions: Vec<String> = actions.iter().map(|a| a.to_string()).collect();
+        let hints: HashMap<String, Value> =
+            hints.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        notification_from("app", 0, app_icon, "summary", "body", &actions, &hints, -1)
+    }
+
+    /// A 1×1 RGBA picture of `byte`, in the spec's `(iiibiiay)` struct.
+    fn pixel(byte: u8) -> Value<'static> {
+        Value::from((1i32, 1i32, 4i32, true, 8i32, 4i32, vec![byte; 4]))
+    }
+
+    fn data_byte(image: &Option<ImageSource>) -> Option<u8> {
+        match image {
+            Some(ImageSource::Data(d)) => d.data.first().copied(),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn image_data_outranks_a_path_and_icon_data_comes_last() {
+        let n = parse(
+            "",
+            &[],
+            [
+                ("icon_data", pixel(3)),
+                ("image-path", Value::from("/tmp/a.png")),
+                ("image_data", pixel(2)),
+            ],
+        );
+        assert_eq!(data_byte(&n.image), Some(2));
+        // The hyphenated spelling beats the underscored one.
+        let n = parse(
+            "",
+            &[],
+            [("image_data", pixel(2)), ("image-data", pixel(1))],
+        );
+        assert_eq!(data_byte(&n.image), Some(1));
+        let n = parse(
+            "",
+            &[],
+            [
+                ("icon_data", pixel(3)),
+                ("image_path", Value::from("x-icon")),
+            ],
+        );
+        assert!(matches!(n.image, Some(ImageSource::Named(ref s)) if s == "x-icon"));
+        let n = parse("", &[], [("icon_data", pixel(3))]);
+        assert_eq!(data_byte(&n.image), Some(3));
+        // A picture whose bytes do not cover its geometry is not trusted.
+        let short = Value::from((2i32, 2i32, 8i32, true, 8i32, 4i32, vec![0u8; 4]));
+        assert!(parse("", &[], [("image-data", short)]).image.is_none());
+    }
+
+    #[test]
+    fn transient_is_read_in_each_spelling_senders_use() {
+        assert!(parse("", &[], [("transient", Value::Bool(true))]).transient);
+        assert!(parse("", &[], [("transient", Value::U8(1))]).transient);
+        assert!(parse("", &[], [("transient", Value::I32(1))]).transient);
+        assert!(!parse("", &[], [("transient", Value::I32(0))]).transient);
+        assert!(!parse("", &[], []).transient);
+    }
+
+    #[test]
+    fn actions_pair_up_and_a_trailing_id_is_dropped() {
+        let n = parse("", &["default", "Open", "reply", "Reply", "orphan"], []);
+        assert_eq!(
+            n.actions,
+            [
+                ("default".to_string(), "Open".to_string()),
+                ("reply".to_string(), "Reply".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn the_icon_falls_back_to_the_desktop_entry_and_hints_are_unboxed() {
+        let n = parse(
+            "",
+            &[],
+            [
+                ("desktop-entry", Value::from("firefox")),
+                ("urgency", Value::U8(2)),
+                (
+                    "x-dunst-stack-tag",
+                    Value::Value(Box::new(Value::from("volume"))),
+                ),
+            ],
+        );
+        assert!(matches!(n.icon, Some(ImageSource::Named(ref s)) if s == "firefox"));
+        assert_eq!(n.urgency, Urgency::Critical);
+        assert_eq!(n.sync_tag.as_deref(), Some("volume"));
+        let n = parse("/usr/share/icons/a.png", &[], []);
+        assert!(matches!(n.icon, Some(ImageSource::Path(_))));
     }
 
     #[test]
