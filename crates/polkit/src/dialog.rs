@@ -1,9 +1,9 @@
 //! The elevation card: one GTK4 modal for `pkexec` and `sudo`.
 //!
-//! Visual language matches `osd.rs` and `launcher.rs`: full-screen
+//! Visual language matches `swaypplet_osd` and `swaypplet_launcher`: full-screen
 //! transparent layer-shell window with a centred card. What is on it is
 //! described once, by a [`Card`], and which methods are accepting input at
-//! this instant by a [`Methods`]; the orchestrator (`mod.rs`) computes both
+//! this instant by a [`Methods`]; the orchestrator (`lib.rs`) computes both
 //! and this file only paints them. There is no elevate mode and no polkit
 //! mode, only a card with or without a command well, with or without a
 //! password field, and a caption that names what works right now.

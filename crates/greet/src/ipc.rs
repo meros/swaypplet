@@ -3,10 +3,10 @@
 //! Owns the `$GREETD_SOCK` connection and speaks the strictly synchronous
 //! greetd protocol: one request on the wire, then block until its reply.
 //! The reply to `post_auth_message_response` only arrives when PAM produces
-//! its next event — acking pam_fprintd's "place your finger" message parks
-//! this thread for the whole fingerprint wait, and nothing (not even a
-//! cancel) reaches greetd until it resolves. The controller works around
-//! that by delaying the ack (see `super`).
+//! its next event, and nothing (not even a cancel) reaches greetd until it
+//! does. That is why greetd's stack is password-only and the fingerprint
+//! runs beside it through the fp-agent (see the crate docs): every reply here
+//! is milliseconds away, never a fingerprint wait.
 //!
 //! Requests come in over a std mpsc channel; every reply is translated to
 //! an [`Ev`] the GTK side drains from a periodic timeout.

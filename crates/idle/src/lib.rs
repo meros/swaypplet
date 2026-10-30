@@ -11,7 +11,7 @@
 //! Behavior ported 1:1 from the old swayidle config (users/modules/swayidle.nix
 //! in the nixos repo — see its comments for the incident history behind each
 //! rule). The durations are the defaults; the settings pane's Idle & Lock tab
-//! overrides them (`settings::store::Idle`):
+//! overrides them (`swaypplet_model::store::Idle`):
 //!
 //!   240 s  dim to 10% brightness, restore on resume
 //!   300 s  lock the session (the screen stays LIT; locking does not blank)
@@ -21,7 +21,7 @@
 //!  1200 s  suspend, only on battery
 //!
 //! The pane is another process, so an edit reaches here as a file: an
-//! inotify watch on `~/.config/swaypplet/settings.json` (`crate::watch`)
+//! inotify watch on `~/.config/swaypplet/settings.json` (`swaypplet_base::watch`)
 //! sends `Ev::SettingsChanged`, and the loop reloads and hands the wayland
 //! thread new timeouts to re-arm with. Zero on any tier is "never". The loop
 //! sleeps until the next event or its nearest deadline; nothing ticks.
@@ -72,7 +72,7 @@
 //! set of SWAYPPLET_GLASS_* material numbers as well; the compositor draws the
 //! lock's wallpaper and glass now, and the locker reads neither.
 //!
-//! Inhibitors (panel tiles, `services::inhibit`) are two standing switches, and
+//! Inhibitors (panel tiles, `swaypplet_system::inhibit`) are two standing switches, and
 //! both are read at fire time rather than being cached here. **No Sleep**
 //! holds a logind lid-switch inhibitor, which stops logind suspending on a
 //! lid close; the suspend tier below reads it too, because "don't sleep with
@@ -136,7 +136,7 @@ pub enum Ev {
     /// A presence event is queued; the top of the loop drains it.
     Wake,
     Fatal(String),
-    /// The settings file was written (`crate::watch`, inotify).
+    /// The settings file was written (`swaypplet_base::watch`, inotify).
     SettingsChanged,
 }
 
@@ -255,7 +255,7 @@ pub fn run() -> ! {
     // the session bus; the bar and the lock screen's face engine listen there
     // rather than reading the device themselves. Reads cost 250-400 ms each
     // and the hardware serves about three a second, so three independent
-    // readers meant all three queued. See `services::presence`.
+    // readers meant all three queued. See `swaypplet_system::presence`.
     //
     // None on hardware without the sensor, which keeps the timer-only
     // behaviour intact.

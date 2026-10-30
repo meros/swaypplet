@@ -43,7 +43,7 @@
 //! blit the image itself, which is what forced its card to fake its glass.
 //!
 //! The richer chip data (avatars, presence, fingerprint enrollment) and the
-//! jump-to-a-running-session path both come from [`crate::switch_user`],
+//! jump-to-a-running-session path both come from [`swaypplet_switch_user`],
 //! which is configured by /etc/swaypplet/switch-user.json rather than the
 //! environment.
 

@@ -9,7 +9,7 @@
 //!
 //! The rule the whole design rests on: **stepping never moves you.** No
 //! workspace command is issued until the modifier is released. That is not
-//! only about not disturbing the view. `task_state.rs` treats focusing a
+//! only about not disturbing the view. `swaypplet_system::task_state` treats focusing a
 //! waiting session's workspace as acknowledging it, permanently for that
 //! episode - so a switcher that previewed by focusing would silently clear the
 //! very "task 2 is waiting" state the row exists to show, for every place you

@@ -32,7 +32,7 @@
 //! A lid *opening* arms an attempt too, and for once that is not the same
 //! argument again. Two cases close the lid without a suspend behind it, and
 //! in both the resume edge above never comes: logind's 30 s holdoff after a
-//! resume, and No Sleep mode (`services::inhibit`), where inhibiting the lid
+//! resume, and No Sleep mode (`swaypplet_system::inhibit`), where inhibiting the lid
 //! switch is half the point. sway's `bindswitch lid:on` still locks and
 //! blanks in both, so without this the machine sits locked with the lid open
 //! and the one signal that should unlock it never fires. The lid edge is the
@@ -52,11 +52,13 @@
 //! starts the next one almost at once, for as long as the arrival window
 //! lasts. faced bounds the emitter and the attempts on its own side.
 //!
-//! Exit codes: 0 match, 11 no match / no face / no good look, 13 every frame
-//! too dark, 14 busy or cooling down, 10 no enrolled model, 15 locked out,
-//! 1 unavailable. The first four are worth retrying; the rest are permanent
-//! for this lock episode, and retrying them would only burn the emitter, so
-//! they stop the worker.
+//! Exit codes (`map_exit`): 0 match; 11 no match / no face / no good look,
+//! 13 every frame too dark and 14 busy or cooling down are retried, as is a
+//! code this reader does not know. 1 unavailable is retried once and then
+//! stops the worker. 15 locked out stands down until the next arrival. 10 no
+//! enrolled model, 12 username rejected, 16 refused and 17 declined are
+//! permanent for this lock episode, and retrying them would only burn the
+//! emitter, so they stop the worker.
 //!
 //! This runs as the session user and needs nothing but the session socket
 //! (group `howdy`). The IR node and the enrolled models are root only: faced
@@ -353,10 +355,6 @@ fn run(user: &str, tx: &async_channel::Sender<EngineEvent>) {
     }
 }
 
-/// Run one verification against faced, forwarding progress to the UI.
-///
-/// Holds a socket for the length of the burst rather than forking a process,
-/// so progress and hints arrive while the burst runs.
 /// Register with faced as the lock agent. Not fatal when it fails: faced only
 /// enforces the registration when configured to, and face unlock working
 /// without the extra guard is better than not working at all.
@@ -366,6 +364,10 @@ fn register_lock_agent() -> Option<std::os::unix::net::UnixStream> {
         .ok()
 }
 
+/// Run one verification against faced, forwarding progress to the UI.
+///
+/// Holds a socket for the length of the burst rather than forking a process,
+/// so progress and hints arrive while the burst runs.
 fn attempt(tx: &async_channel::Sender<EngineEvent>, transient: &mut u32) -> Attempt {
     let verdict = swaypplet_base::face::verify(|state| {
         let _ = tx.send_blocking(EngineEvent::Progress(state));

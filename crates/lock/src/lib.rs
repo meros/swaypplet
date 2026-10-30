@@ -14,8 +14,11 @@
 //!       relaunches us.
 //!
 //! Auth: PAM password (worker thread, service `swaypplet-lock`) concurrent
-//! with fprintd fingerprint (see `fprint.rs`). Unlock only ever follows a
-//! PAM success or a fingerprint match.
+//! with fprintd fingerprint (`fprint.rs`) and, when the Idle & Lock tab
+//! allows it, faced face verification (`face.rs`). logind's Unlock for this
+//! session (`follow_unlock`, sent by `switch-user --resume` after the
+//! greeter authenticated) ends the lock too. Unlock only ever follows one of
+//! those four, and the first one wins (`auth::UnlockGate`).
 //!
 //! What this process draws is a transparent surface: the clock's plate and
 //! the card, both glass. The wallpaper under it and the glass behind the card
