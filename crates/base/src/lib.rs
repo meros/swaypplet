@@ -10,5 +10,6 @@ pub mod pid;
 pub mod service;
 pub mod spawn;
 pub mod sway;
+pub mod systemd;
 pub mod user;
 pub mod watch;

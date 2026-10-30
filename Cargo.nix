@@ -8886,10 +8886,6 @@ rec {
         libName = "swaypplet_ui";
         dependencies = [
           {
-            name = "async-channel";
-            packageId = "async-channel";
-          }
-          {
             name = "gdk4";
             packageId = "gdk4";
           }
@@ -8953,12 +8949,6 @@ rec {
           {
             name = "wayland-scanner";
             packageId = "wayland-scanner";
-          }
-          {
-            name = "zbus";
-            packageId = "zbus 4.4.0";
-            usesDefaultFeatures = false;
-            features = [ "tokio" ];
           }
         ];
 

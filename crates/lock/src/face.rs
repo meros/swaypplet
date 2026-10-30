@@ -89,7 +89,7 @@ fn watch_resume() -> mpsc::Receiver<()> {
             }
         };
         let (sleep_tx, mut sleep_rx) = tokio::sync::watch::channel(false);
-        tokio::spawn(swaypplet_fp::watch_sleep(conn, sleep_tx));
+        tokio::spawn(swaypplet_base::logind::watch_sleep(conn, sleep_tx));
         let mut asleep = *sleep_rx.borrow_and_update();
         while sleep_rx.changed().await.is_ok() {
             let now = *sleep_rx.borrow_and_update();

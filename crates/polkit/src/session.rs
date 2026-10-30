@@ -4,6 +4,8 @@
 //! `session-id` detail so it can route auth requests to the right agent.
 
 use std::collections::HashMap;
+
+use swaypplet_base::logind;
 use zbus::zvariant::{OwnedValue, Value};
 
 /// Try `$XDG_SESSION_ID` first (always set by `pam_systemd` in any logind
@@ -15,27 +17,9 @@ pub async fn current_session_id(system_bus: &zbus::Connection) -> zbus::Result<S
         return Ok(id);
     }
 
-    let manager = zbus::Proxy::new(
-        system_bus,
-        "org.freedesktop.login1",
-        "/org/freedesktop/login1",
-        "org.freedesktop.login1.Manager",
-    )
-    .await?;
-
-    let pid: u32 = std::process::id();
-    let path: zbus::zvariant::OwnedObjectPath = manager.call("GetSessionByPID", &(pid,)).await?;
-
-    let session = zbus::Proxy::new(
-        system_bus,
-        "org.freedesktop.login1",
-        path.as_str(),
-        "org.freedesktop.login1.Session",
-    )
-    .await?;
-
-    let id: String = session.get_property("Id").await?;
-    Ok(id)
+    let manager = logind::ManagerProxy::new(system_bus).await?;
+    let path = manager.get_session_by_pid(std::process::id()).await?;
+    logind::session_at(system_bus, path).await?.id().await
 }
 
 /// Build the polkit Subject details map for a `unix-session` subject.

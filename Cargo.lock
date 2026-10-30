@@ -2654,7 +2654,6 @@ dependencies = [
 name = "swaypplet-ui"
 version = "0.1.0"
 dependencies = [
- "async-channel",
  "gdk4",
  "gdk4-wayland",
  "gio",
@@ -2670,7 +2669,6 @@ dependencies = [
  "swaypplet-tokens",
  "wayland-client",
  "wayland-scanner",
- "zbus 4.4.0",
 ]
 
 [[package]]

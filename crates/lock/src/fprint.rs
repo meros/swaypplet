@@ -16,9 +16,8 @@
 
 use std::sync::mpsc;
 
-use swaypplet_fp::{
-    EngineEvent, Flow, SessionGate, verify_engine, watch_session_active, watch_sleep,
-};
+use swaypplet_base::logind::{SessionGate, watch_session_active, watch_sleep};
+use swaypplet_fp::{EngineEvent, Flow, verify_engine};
 
 /// Spawn the fingerprint worker. Returns the event channel; the thread is
 /// detached and exits after a match (the engine's sink returns `Stop`) or when

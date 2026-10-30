@@ -37,7 +37,9 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Semaphore, mpsc, watch};
 
-use super::{EngineEvent, Flow, SessionGate, verify_engine, watch_session_active, watch_sleep};
+use swaypplet_base::logind::{SessionGate, watch_session_active, watch_sleep};
+
+use super::{EngineEvent, Flow, verify_engine};
 
 const DEFAULT_SOCK: &str = "/run/swaypplet-fp/agent.sock";
 const DEFAULT_TOKEN: &str = "/run/swaypplet-fp/token.json";

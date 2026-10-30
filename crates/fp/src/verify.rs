@@ -40,7 +40,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::watch;
 
-use super::{EngineEvent, Flow, verify_engine, watch_sleep};
+use swaypplet_base::logind::watch_sleep;
+
+use super::{EngineEvent, Flow, verify_engine};
 
 const EXIT_MATCH: i32 = 0;
 const EXIT_NO_READER: i32 = 1;

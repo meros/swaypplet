@@ -18,7 +18,10 @@ use std::collections::HashMap;
 use serde::Deserialize;
 use zbus::Connection;
 use zbus::names::InterfaceName;
-use zbus::zvariant::{OwnedObjectPath, OwnedValue};
+use zbus::zvariant::OwnedValue;
+
+use swaypplet_base::logind::{self, ManagerProxy as LogindProxy};
+use swaypplet_base::systemd::ManagerProxy as SystemdProxy;
 
 use super::SwitchUser;
 use super::rows::{self, Session};
@@ -60,44 +63,6 @@ pub fn config() -> Option<Config> {
             None
         }
     }
-}
-
-// --- D-Bus proxies ---------------------------------------------------------
-
-/// ListSessions row: (session_id, uid, user, seat, object_path).
-type SessionRow = (String, u32, String, String, OwnedObjectPath);
-
-#[zbus::proxy(
-    interface = "org.freedesktop.login1.Manager",
-    default_service = "org.freedesktop.login1",
-    default_path = "/org/freedesktop/login1"
-)]
-trait Logind {
-    fn list_sessions(&self) -> zbus::Result<Vec<SessionRow>>;
-    fn get_session(&self, id: &str) -> zbus::Result<OwnedObjectPath>;
-    /// `loginctl activate` — the VT switch itself.
-    fn activate_session(&self, id: &str) -> zbus::Result<()>;
-    /// `loginctl unlock-session`: logind emits Unlock on that session, and
-    /// its locker ends. Allowed without polkit for the session's own user.
-    fn unlock_session(&self, id: &str) -> zbus::Result<()>;
-}
-
-#[zbus::proxy(
-    interface = "org.freedesktop.login1.Session",
-    default_service = "org.freedesktop.login1"
-)]
-trait LogindSession {
-    /// Emits the Lock signal our own idle daemon listens for.
-    fn lock(&self) -> zbus::Result<()>;
-}
-
-#[zbus::proxy(
-    interface = "org.freedesktop.systemd1.Manager",
-    default_service = "org.freedesktop.systemd1",
-    default_path = "/org/freedesktop/systemd1"
-)]
-trait Systemd {
-    fn start_unit(&self, name: &str, mode: &str) -> zbus::Result<OwnedObjectPath>;
 }
 
 // --- session snapshot ------------------------------------------------------
@@ -221,12 +186,7 @@ async fn lock_own(conn: &Connection) {
     let attempt = async {
         let manager = LogindProxy::new(conn).await?;
         let path = manager.get_session("auto").await?;
-        LogindSessionProxy::builder(conn)
-            .path(path)?
-            .build()
-            .await?
-            .lock()
-            .await
+        logind::session_at(conn, path).await?.request_lock().await
     }
     .await;
     if let Err(e) = attempt {

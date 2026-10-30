@@ -10,7 +10,7 @@ use std::sync::mpsc::Sender;
 use zbus::export::futures_util::StreamExt;
 use zbus::zvariant::OwnedFd;
 
-use swaypplet_base::logind::{ManagerProxy, session};
+use swaypplet_base::logind::{ManagerProxy, inhibit_sleep, session};
 
 use super::Ev;
 
@@ -108,9 +108,7 @@ async fn run(
 }
 
 async fn take_inhibitor(manager: &ManagerProxy<'_>) -> zbus::Result<OwnedFd> {
-    let fd = manager
-        .inhibit("sleep", "swaypplet", "lock screen before sleep", "delay")
-        .await?;
+    let fd = inhibit_sleep(manager, "swaypplet", "lock screen before sleep").await?;
     log::info!("logind: sleep delay-inhibitor taken");
     Ok(fd)
 }

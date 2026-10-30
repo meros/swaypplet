@@ -22,14 +22,10 @@ pub(super) fn is_locked() -> bool {
     LOCKED.with(Cell::get)
 }
 
-/// Start following LockedHint, for as long as this process lives.
+/// Start following LockedHint (`base::logind::watch_locked_hint`), for as
+/// long as this process lives.
 pub(super) fn follow() {
-    let (tx, rx) = async_channel::unbounded::<bool>();
-    swaypplet_base::spawn::spawn_tokio_thread("theme-locked", async move {
-        if let Err(e) = run(&tx).await {
-            log::debug!("theme: not following the lock state: {e}");
-        }
-    });
+    let rx = swaypplet_base::logind::watch_locked_hint();
     glib::spawn_future_local(async move {
         while let Ok(locked) = rx.recv().await {
             if LOCKED.with(|l| l.replace(locked)) != locked {
@@ -37,23 +33,4 @@ pub(super) fn follow() {
             }
         }
     });
-}
-
-async fn run(tx: &async_channel::Sender<bool>) -> zbus::Result<()> {
-    use zbus::export::futures_util::StreamExt;
-    let conn = zbus::Connection::system().await?;
-    let manager = swaypplet_base::logind::ManagerProxy::new(&conn).await?;
-    let session = swaypplet_base::logind::session(&conn, &manager).await?;
-    let mut changes = session.receive_locked_hint_changed().await;
-    if let Ok(v) = session.locked_hint().await {
-        let _ = tx.send(v).await;
-    }
-    while let Some(change) = changes.next().await {
-        if let Ok(v) = change.get().await
-            && tx.send(v).await.is_err()
-        {
-            break;
-        }
-    }
-    Ok(())
 }
