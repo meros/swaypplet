@@ -2372,6 +2372,7 @@ dependencies = [
  "swaypplet-audio",
  "swaypplet-base",
  "swaypplet-model",
+ "swaypplet-system",
  "swaypplet-ui",
 ]
 

@@ -1,5 +1,4 @@
 use std::cell::{Cell, RefCell};
-use std::process::Command;
 use std::rc::Rc;
 
 use gtk4::gdk;
@@ -7,13 +6,14 @@ use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
 use swaypplet_base::spawn::spawn_work;
+use swaypplet_system::brightness;
 use swaypplet_ui::shell::{Namespace, PerMonitor, Surface};
 
 const OSD_TIMEOUT_MS: u32 = 1500;
 
 /// One press of a volume or brightness key, from the Bar tab's Keys group.
 /// The ceiling is the over-amplification limit the panel's slider also
-/// stops at (`widgets/audio.rs`).
+/// stops at (`swaypplet_widgets::audio`), and where the OSD's bar is full.
 fn keys() -> swaypplet_model::store::Keys {
     swaypplet_model::store::with(|s| s.keys())
 }
@@ -22,7 +22,7 @@ use swaypplet_ui::ui::icons;
 
 // ── Commands ─────────────────────────────────────────────────────────────────
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OsdCommand {
     OutputVolumeRaise,
     OutputVolumeLower,
@@ -94,21 +94,17 @@ enum OsdDisplay {
 // ── Action execution + state reading ─────────────────────────────────────────
 
 /// The commands that still need a process spawned. Volume left with the
-/// `wpctl` dependency: it is answered from `services::audio`'s snapshot on the
+/// `wpctl` dependency: it is answered from `swaypplet_audio`'s snapshot on the
 /// GTK thread, which is both faster and the only way the OSD and the panel
 /// slider can agree on what the volume is.
 fn execute_command(cmd: &OsdCommand) -> OsdDisplay {
     match cmd {
         OsdCommand::BrightnessRaise => {
-            let _ = Command::new("brightnessctl")
-                .args(["set", &format!("{}%+", keys().brightness_step)])
-                .output();
+            brightness::adjust(keys().brightness_step.into(), true);
             read_brightness_display()
         }
         OsdCommand::BrightnessLower => {
-            let _ = Command::new("brightnessctl")
-                .args(["set", &format!("{}%-", keys().brightness_step)])
-                .output();
+            brightness::adjust(keys().brightness_step.into(), false);
             read_brightness_display()
         }
         OsdCommand::CapsLock => {
@@ -123,7 +119,7 @@ fn execute_command(cmd: &OsdCommand) -> OsdDisplay {
         OsdCommand::OutputVolumeRaise
         | OsdCommand::OutputVolumeLower
         | OsdCommand::OutputVolumeMuteToggle
-        | OsdCommand::InputVolumeMuteToggle => volume_display(0.0, true, false),
+        | OsdCommand::InputVolumeMuteToggle => volume_display(0.0, true, false, 1.0),
     }
 }
 
@@ -134,11 +130,17 @@ fn drawn_key(volume: f64, muted: bool) -> (i32, bool) {
     ((volume * 100.0).round() as i32, muted)
 }
 
-fn volume_display(volume: f64, muted: bool, is_mic: bool) -> OsdDisplay {
+/// `ceiling` is where the bar is full: the end the panel's slider has too,
+/// so a level fills the same share of both.
+fn volume_display(volume: f64, muted: bool, is_mic: bool, ceiling: f64) -> OsdDisplay {
     let icon = icons::volume_icon(volume, muted, is_mic);
 
     let pct = (volume * 100.0).round() as u32;
-    let fraction = if muted { 0.0 } else { volume.min(1.5) / 1.5 };
+    let fraction = if muted {
+        0.0
+    } else {
+        (volume / ceiling).clamp(0.0, 1.0)
+    };
 
     OsdDisplay::Bar {
         icon: icon.to_string(),
@@ -152,21 +154,8 @@ fn volume_display(volume: f64, muted: bool, is_mic: bool) -> OsdDisplay {
 }
 
 fn read_brightness_display() -> OsdDisplay {
-    let output = Command::new("brightnessctl").arg("-m").output().ok();
-
-    let pct = output
-        .and_then(|o| {
-            let text = String::from_utf8_lossy(&o.stdout).to_string();
-            let line = text.lines().next()?.to_string();
-            let field = line
-                .split(',')
-                .nth(3)?
-                .trim()
-                .trim_end_matches('%')
-                .to_string();
-            field.parse::<u32>().ok()
-        })
-        .unwrap_or(0);
+    // A failed read draws 0 %, as it always has.
+    let pct = brightness::read().unwrap_or(0);
 
     OsdDisplay::Bar {
         icon: icons::BRIGHTNESS.to_string(),
@@ -203,7 +192,7 @@ fn read_lock_display(lock_name: &str, icon_on: &str, icon_off: &str, label: &str
 // ── OSD Widget ───────────────────────────────────────────────────────────────
 
 /// Volume/brightness route into the bar's decision slot (icon, fraction,
-/// text) → handled? Installed by app.rs once the bar exists.
+/// text) → handled? Installed by `swaypplet_app` once the bar exists.
 type BarRoute = Box<dyn Fn(&str, f64, &str) -> bool>;
 type Hold = Box<dyn Fn() -> bool>;
 
@@ -255,14 +244,9 @@ impl Card {
             .anchor(&[Edge::Bottom])
             .margin(Edge::Bottom, 72)
             .card(swaypplet_ui::ui::Card::Thin)
+            // The window's geometry was tuned with this apron's padding.
+            .apron(gtk4::Align::Center, "osd-wrapper")
             .build();
-
-        // Transparent apron around the card (48px CSS padding); must stay
-        // alpha-0 so compositor blur clips to the card
-        let wrapper = surface.root();
-        wrapper.set_halign(gtk4::Align::Center);
-        wrapper.set_valign(gtk4::Align::Center);
-        wrapper.add_css_class("osd-wrapper");
 
         // Vertical layout: icon → bar → percentage
         let outer = surface.card();
@@ -437,7 +421,7 @@ impl Osd {
     }
 
     /// Install the question "hold the card now?", asked per display: true
-    /// while the screen is shared (`services::notifications::context`).
+    /// while the screen is shared (`swaypplet_notifyd::context`).
     pub fn set_hold(&self, hold: impl Fn() -> bool + 'static) {
         *self.hold.borrow_mut() = Some(Box::new(hold));
     }
@@ -480,7 +464,12 @@ impl Osd {
             return;
         }
         self.drawn.set(Some(key));
-        self.show_display(&volume_display(volume.volume, volume.muted, is_mic));
+        self.show_display(&volume_display(
+            volume.volume,
+            volume.muted,
+            is_mic,
+            keys().volume_ceiling(),
+        ));
     }
 
     /// Note a press, and return the level to draw for it.
@@ -587,7 +576,12 @@ impl Osd {
         };
 
         self.drawn.set(Some(drawn_key(level, muted)));
-        Some(volume_display(level, muted, is_mic))
+        Some(volume_display(
+            level,
+            muted,
+            is_mic,
+            keys().volume_ceiling(),
+        ))
     }
 
     /// A one-line notice on the indicator card: an icon over a word or
@@ -653,5 +647,89 @@ impl Osd {
             },
         );
         *self.timeout_id.borrow_mut() = Some(id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bar(display: OsdDisplay) -> (f64, String) {
+        match display {
+            OsdDisplay::Bar { fraction, text, .. } => (fraction, text),
+            OsdDisplay::Indicator { .. } => panic!("a volume draws a bar"),
+        }
+    }
+
+    #[test]
+    fn volume_fills_the_bar_up_to_the_ceiling() {
+        assert_eq!(
+            bar(volume_display(0.5, false, false, 1.0)),
+            (0.5, "50%".into())
+        );
+        assert_eq!(bar(volume_display(1.0, false, false, 1.0)).0, 1.0);
+        // With boost on, the panel's slider ends at 150 %, and so does the bar.
+        assert_eq!(bar(volume_display(0.75, false, false, 1.5)).0, 0.5);
+        assert_eq!(bar(volume_display(1.5, false, false, 1.5)).0, 1.0);
+    }
+
+    #[test]
+    fn volume_over_the_ceiling_fills_the_bar_and_keeps_the_true_number() {
+        assert_eq!(
+            bar(volume_display(1.2, false, false, 1.0)),
+            (1.0, "120%".into())
+        );
+    }
+
+    fn parse(line: &str) -> Option<OsdCommand> {
+        let words: Vec<String> = line.split_whitespace().map(str::to_string).collect();
+        OsdCommand::parse(&words)
+    }
+
+    #[test]
+    fn each_flag_and_action_is_one_command() {
+        use OsdCommand::*;
+        for (line, cmd) in [
+            ("--output-volume raise", OutputVolumeRaise),
+            ("--output-volume lower", OutputVolumeLower),
+            ("--output-volume mute-toggle", OutputVolumeMuteToggle),
+            ("--input-volume mute-toggle", InputVolumeMuteToggle),
+            ("--brightness raise", BrightnessRaise),
+            ("--brightness lower", BrightnessLower),
+            ("--caps-lock", CapsLock),
+            ("--num-lock", NumLock),
+            ("--scroll-lock", ScrollLock),
+            // Words before the first flag are skipped.
+            ("now --caps-lock", CapsLock),
+        ] {
+            assert_eq!(parse(line), Some(cmd), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_flag_without_its_action_or_with_a_wrong_one_is_nothing() {
+        assert_eq!(parse(""), None);
+        assert_eq!(parse("--output-volume"), None);
+        assert_eq!(parse("--output-volume up"), None);
+        assert_eq!(parse("--input-volume raise"), None);
+        // The first flag decides, even when a later one would parse.
+        assert_eq!(parse("--brightness up --caps-lock"), None);
+    }
+
+    #[test]
+    fn the_drawn_key_is_the_rounded_percentage_and_the_mute() {
+        assert_eq!(drawn_key(0.704, false), (70, false));
+        assert_eq!(drawn_key(0.706, true), (71, true));
+        assert_eq!(drawn_key(1.5, false), (150, false));
+        // Two levels the card would draw as one number are one key.
+        assert_eq!(drawn_key(0.701, false), drawn_key(0.699, false));
+    }
+
+    #[test]
+    fn muted_volume_draws_an_empty_bar() {
+        assert_eq!(
+            bar(volume_display(0.8, true, false, 1.0)),
+            (0.0, "Muted".into())
+        );
     }
 }

@@ -12,6 +12,7 @@
 pub mod backup;
 pub mod battery;
 pub mod bluez;
+pub mod brightness;
 pub mod capture;
 pub mod clipboard;
 pub mod elephant;

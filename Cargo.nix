@@ -7989,6 +7989,10 @@ rec {
             packageId = "swaypplet-model";
           }
           {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
             name = "swaypplet-ui";
             packageId = "swaypplet-ui";
           }
