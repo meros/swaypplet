@@ -11,14 +11,14 @@
 //! boundary except the crate's own plain-data model types.
 
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use system_tray::client::{ActivateRequest, Client};
 use system_tray::item::{Status, StatusNotifierItem};
 use system_tray::menu::TrayMenu;
 use tokio::sync::broadcast::error::RecvError;
 
-use swaypplet_base::service::{Backoff, Observed};
+use swaypplet_base::service::{Observed, reconnect_async};
 
 /// One SNI item as the bar renders it.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -37,28 +37,22 @@ enum Cmd {
 
 /// SNI item service; [`Observed`] documents the `Rc` lifetime story.
 pub struct TrayService {
-    items: Observed<Vec<TrayItem>>,
-    cmd: tokio::sync::mpsc::UnboundedSender<Cmd>,
+    items: Rc<Observed<Vec<TrayItem>>>,
+    cmd: async_channel::Sender<Cmd>,
 }
 
 impl TrayService {
     pub fn start() -> Rc<Self> {
-        let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = async_channel::unbounded();
         let service = Rc::new(Self {
-            items: Observed::new(Vec::new()),
+            items: Rc::new(Observed::new(Vec::new())),
             cmd: cmd_tx,
         });
 
         let (tx, rx) = async_channel::unbounded::<Vec<TrayItem>>();
         swaypplet_base::spawn::spawn_tokio_thread("tray", run(tx, cmd_rx));
-
-        let for_events = service.clone();
-        glib::MainContext::default().spawn_local(async move {
-            while let Ok(items) = rx.recv().await {
-                for_events.items.set(items);
-            }
-        });
-
+        // The worker already drops repeats (`send_changed`).
+        service.items.follow_with(rx, Observed::set);
         service
     }
 
@@ -79,7 +73,7 @@ impl TrayService {
     /// Left-click activation. Coordinates are a hint the spec allows us to
     /// omit — Wayland has no global coordinates to offer anyway.
     pub fn activate_default(&self, address: &str) {
-        let _ = self.cmd.send(Cmd::Activate(ActivateRequest::Default {
+        let _ = self.cmd.try_send(Cmd::Activate(ActivateRequest::Default {
             address: address.into(),
             x: 0,
             y: 0,
@@ -88,7 +82,7 @@ impl TrayService {
 
     /// Middle-click (secondary) activation.
     pub fn activate_secondary(&self, address: &str) {
-        let _ = self.cmd.send(Cmd::Activate(ActivateRequest::Secondary {
+        let _ = self.cmd.try_send(Cmd::Activate(ActivateRequest::Secondary {
             address: address.into(),
             x: 0,
             y: 0,
@@ -97,7 +91,7 @@ impl TrayService {
 
     /// "clicked" event for a menu entry.
     pub fn menu_item_clicked(&self, address: &str, menu_path: &str, id: i32) {
-        let _ = self.cmd.send(Cmd::Activate(ActivateRequest::MenuItem {
+        let _ = self.cmd.try_send(Cmd::Activate(ActivateRequest::MenuItem {
             address: address.into(),
             menu_path: menu_path.into(),
             submenu_id: id,
@@ -108,7 +102,7 @@ impl TrayService {
     /// populate it. A "needs update" answer arrives as a normal layout
     /// event, so the result is not routed back.
     pub fn about_to_show(&self, address: &str, menu_path: &str) {
-        let _ = self.cmd.send(Cmd::AboutToShow {
+        let _ = self.cmd.try_send(Cmd::AboutToShow {
             address: address.into(),
             menu_path: menu_path.into(),
         });
@@ -117,29 +111,15 @@ impl TrayService {
 
 // ── Worker (tokio thread) ───────────────────────────────────────────────
 
-async fn run(
-    tx: async_channel::Sender<Vec<TrayItem>>,
-    mut cmd: tokio::sync::mpsc::UnboundedReceiver<Cmd>,
-) {
-    let mut backoff = Backoff::new();
-    loop {
-        let started = Instant::now();
-        match session(&tx, &mut cmd).await {
-            Ok(()) => return, // receiver gone — process is shutting down
-            Err(e) => {
-                let delay = backoff.next_delay(started.elapsed());
-                log::warn!("tray: {e}; reconnecting in {delay:?}");
-                tokio::time::sleep(delay).await;
-            }
-        }
-    }
+async fn run(tx: async_channel::Sender<Vec<TrayItem>>, cmd: async_channel::Receiver<Cmd>) {
+    reconnect_async("tray", || session(&tx, &cmd), |_| true).await;
 }
 
 /// One client lifetime. `Ok(())` means the GTK side hung up; `Err` means
 /// the bus/stream dropped and the caller should reconnect.
 async fn session(
     tx: &async_channel::Sender<Vec<TrayItem>>,
-    cmd: &mut tokio::sync::mpsc::UnboundedReceiver<Cmd>,
+    cmd: &async_channel::Receiver<Cmd>,
 ) -> Result<(), system_tray::error::Error> {
     let client = Client::new().await?;
     let mut events = client.subscribe();
@@ -171,7 +151,7 @@ async fn session(
                     }
                 }
             }
-            recv = cmd.recv() => match recv {
+            recv = cmd.recv() => match recv.ok() {
                 // Both calls proxy to apps that may hang; bound them so a
                 // stuck app can't wedge event forwarding for good.
                 Some(Cmd::Activate(req)) => {

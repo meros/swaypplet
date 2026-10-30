@@ -14,6 +14,7 @@
 //! stands in, and says so in the log once.
 
 use std::cell::Cell;
+use std::rc::Rc;
 
 use crate::{power, power::BatteryState};
 use swaypplet_base::service::Observed;
@@ -33,7 +34,7 @@ trait Device {
 }
 
 thread_local! {
-    static STATE: Observed<Option<BatteryState>> = Observed::new(None);
+    static STATE: Rc<Observed<Option<BatteryState>>> = Rc::new(Observed::new(None));
     static STARTED: Cell<bool> = const { Cell::new(false) };
 }
 
@@ -72,13 +73,13 @@ pub fn start() -> bool {
             }
         }
     });
-    glib::spawn_future_local(async move {
-        while let Ok(reading) = rx.recv().await {
+    STATE.with(|s| {
+        s.follow_with(rx, |state, reading| {
             // A failed read keeps the last one: sysfs hiccups around suspend.
             if reading.is_some() {
-                STATE.with(|s| s.set(reading));
+                state.set(reading);
             }
-        }
+        })
     });
     true
 }

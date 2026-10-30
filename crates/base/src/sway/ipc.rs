@@ -19,11 +19,11 @@ use std::hash::{Hash, Hasher};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::{Instant, SystemTime};
+use std::time::SystemTime;
 
 use swayipc::{Connection, EventType, Node, NodeType};
 
-use crate::service::{Backoff, Observed};
+use crate::service::{Observed, reconnect};
 
 // ── Model ───────────────────────────────────────────────────────────────
 
@@ -152,7 +152,7 @@ fn order_candidates(env: Vec<PathBuf>, mut found: Vec<(SystemTime, PathBuf)>) ->
 
 /// Sway model service; [`Observed`] documents the `Rc` lifetime story.
 pub struct SwayService {
-    state: Observed<SwayState>,
+    state: Rc<Observed<SwayState>>,
     /// [`windows_signature`] of the last snapshot.
     windows: Cell<u64>,
     on_windows: RefCell<Vec<Rc<dyn Fn()>>>,
@@ -161,24 +161,22 @@ pub struct SwayService {
 impl SwayService {
     pub fn start() -> Rc<Self> {
         let service = Rc::new(Self {
-            state: Observed::new(SwayState::default()),
+            state: Rc::new(Observed::new(SwayState::default())),
             windows: Cell::new(0),
             on_windows: RefCell::default(),
         });
 
         let (tx, rx) = async_channel::unbounded::<(SwayState, u64)>();
-        std::thread::Builder::new()
-            .name("sway-ipc".into())
-            .spawn(move || run(tx))
-            .expect("spawn sway-ipc thread");
+        crate::spawn::spawn_thread("sway-ipc", move || run(tx));
 
         let for_events = service.clone();
-        glib::MainContext::default().spawn_local(async move {
-            while let Ok((snapshot, windows)) = rx.recv().await {
-                // Window events fire per keystroke in some terminals
-                // (title changes) without altering this model; dropping
-                // no-op snapshots keeps observers from re-rendering.
-                let changed = for_events.state.set_if_changed(snapshot);
+        service
+            .state
+            .follow_with(rx, move |state, (snapshot, windows)| {
+                // Window events fire per keystroke in some terminals (title
+                // changes) without altering this model; dropping no-op
+                // snapshots keeps observers from re-rendering.
+                let changed = state.set_if_changed(snapshot);
                 let moved = for_events.windows.replace(windows) != windows;
                 if changed || moved {
                     let callbacks: Vec<_> = for_events.on_windows.borrow().clone();
@@ -186,9 +184,7 @@ impl SwayService {
                         cb();
                     }
                 }
-            }
-        });
-
+            });
         service
     }
 
@@ -400,18 +396,7 @@ pub fn config_text() -> Result<String, String> {
 // ── Worker thread ───────────────────────────────────────────────────────
 
 fn run(tx: async_channel::Sender<(SwayState, u64)>) {
-    let mut backoff = Backoff::new();
-    loop {
-        let started = Instant::now();
-        match session(&tx) {
-            Ok(()) => return, // receiver gone — process is shutting down
-            Err(e) => {
-                let delay = backoff.next_delay(started.elapsed());
-                log::warn!("sway ipc: {e}; reconnecting in {delay:?}");
-                std::thread::sleep(delay);
-            }
-        }
-    }
+    reconnect("sway ipc", || session(&tx), |_| true);
 }
 
 /// One connection lifetime. `Ok(())` means the GTK side hung up; `Err`

@@ -6980,10 +6980,6 @@ rec {
             packageId = "async-channel";
           }
           {
-            name = "glib";
-            packageId = "glib";
-          }
-          {
             name = "libpulse-binding";
             packageId = "libpulse-binding";
           }
@@ -7246,11 +7242,6 @@ rec {
             packageId = "glib";
           }
           {
-            name = "gtk4";
-            packageId = "gtk4";
-            features = [ "v4_14" ];
-          }
-          {
             name = "log";
             packageId = "log";
           }
@@ -7268,20 +7259,12 @@ rec {
             packageId = "swayipc";
           }
           {
-            name = "swaypplet-audio";
-            packageId = "swaypplet-audio";
-          }
-          {
             name = "swaypplet-base";
             packageId = "swaypplet-base";
           }
           {
             name = "swaypplet-model";
             packageId = "swaypplet-model";
-          }
-          {
-            name = "swaypplet-system";
-            packageId = "swaypplet-system";
           }
           {
             name = "tokio";
@@ -7293,6 +7276,12 @@ rec {
             packageId = "zbus 4.4.0";
             usesDefaultFeatures = false;
             features = [ "tokio" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "swaypplet-audio";
+            packageId = "swaypplet-audio";
           }
         ];
 
@@ -7323,10 +7312,6 @@ rec {
           {
             name = "swaypplet-model";
             packageId = "swaypplet-model";
-          }
-          {
-            name = "swaypplet-notifyd";
-            packageId = "swaypplet-notifyd";
           }
           {
             name = "wayland-client";
@@ -7915,6 +7900,10 @@ rec {
         libName = "swaypplet_notifyd";
         dependencies = [
           {
+            name = "async-channel";
+            packageId = "async-channel";
+          }
+          {
             name = "glib";
             packageId = "glib";
           }
@@ -7923,20 +7912,12 @@ rec {
             packageId = "log";
           }
           {
-            name = "swaypplet-audio";
-            packageId = "swaypplet-audio";
-          }
-          {
             name = "swaypplet-base";
             packageId = "swaypplet-base";
           }
           {
             name = "swaypplet-model";
             packageId = "swaypplet-model";
-          }
-          {
-            name = "swaypplet-system";
-            packageId = "swaypplet-system";
           }
           {
             name = "tokio";

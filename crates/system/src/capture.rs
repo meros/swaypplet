@@ -11,7 +11,7 @@
 //! ends. The camera is a `Video/Source` node from a device API (`libcamera`,
 //! `v4l2`) whose state is `running`.
 //!
-//! libpipewire itself cannot be linked here (`services::audio` explains the
+//! libpipewire itself cannot be linked here (`swaypplet_audio` explains the
 //! bindgen collision), and the PulseAudio protocol that the audio service
 //! uses carries no video. `pw-dump --monitor` is PipeWire's own client
 //! printing the graph as JSON and then each change as it happens, so this is
@@ -31,11 +31,10 @@ use std::collections::HashMap;
 use std::io::BufReader;
 use std::process::{Command, Stdio};
 use std::rc::Rc;
-use std::time::Instant;
 
 use serde_json::Value;
 
-use swaypplet_base::service::{Backoff, Observed};
+use swaypplet_base::service::{Observed, reconnect};
 
 /// The two things the graph says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -47,27 +46,19 @@ pub struct CaptureState {
 }
 
 pub struct CaptureService {
-    state: Observed<CaptureState>,
+    state: Rc<Observed<CaptureState>>,
 }
 
 impl CaptureService {
     pub fn start() -> Rc<Self> {
         let service = Rc::new(Self {
-            state: Observed::new(CaptureState::default()),
+            state: Rc::new(Observed::new(CaptureState::default())),
         });
         let (tx, rx) = async_channel::unbounded::<CaptureState>();
-        std::thread::Builder::new()
-            .name("capture".into())
-            .spawn(move || run(&tx))
-            .map_err(|e| log::error!("capture: could not start thread: {e}"))
-            .ok();
-        let for_recv = service.clone();
-        glib::spawn_future_local(async move {
-            while let Ok(state) = rx.recv().await {
-                if state != for_recv.snapshot() {
-                    log::info!("capture: {state:?}");
-                }
-                for_recv.state.set_if_changed(state);
+        swaypplet_base::spawn::spawn_thread("capture", move || run(&tx));
+        service.state.follow_with(rx, |current, state| {
+            if current.set_if_changed(state) {
+                log::info!("capture: {state:?}");
             }
         });
         service
@@ -86,26 +77,18 @@ impl CaptureService {
 
 fn run(tx: &async_channel::Sender<CaptureState>) {
     let program = std::env::var("SWAYPPLET_PW_DUMP").unwrap_or_else(|_| "pw-dump".into());
-    let mut backoff = Backoff::new();
-    loop {
-        let started = Instant::now();
-        match session(&program, tx) {
-            Ok(()) => return,
-            Err(Fatal(e)) => {
+    reconnect(
+        "capture",
+        || session(&program, tx),
+        |failure| match failure {
+            Fatal(e) => {
                 log::warn!("capture: {e}; screen sharing and the camera go unseen");
-                return;
+                false
             }
-            Err(Retry(e)) => {
-                // Whatever was live went with the process that saw it.
-                if tx.send_blocking(CaptureState::default()).is_err() {
-                    return;
-                }
-                let delay = backoff.next_delay(started.elapsed());
-                log::warn!("capture: {e}; restarting in {delay:?}");
-                std::thread::sleep(delay);
-            }
-        }
-    }
+            // Whatever was live went with the process that saw it.
+            Retry(_) => tx.send_blocking(CaptureState::default()).is_ok(),
+        },
+    );
 }
 
 enum Failure {
@@ -115,6 +98,13 @@ enum Failure {
     Retry(String),
 }
 use Failure::{Fatal, Retry};
+
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (Fatal(e) | Retry(e)) = self;
+        f.write_str(e)
+    }
+}
 
 /// One child's lifetime. `Ok(())` means the GTK side is gone.
 fn session(program: &str, tx: &async_channel::Sender<CaptureState>) -> Result<(), Failure> {

@@ -34,7 +34,7 @@
 //!
 //! One thread owns the connection and its mainloop; snapshots cross to the
 //! GTK side through an `async_channel` into an [`Observed`], the same shape
-//! `sway::ipc`, `bar::tray` and `clipboard` use. Commands go the other way
+//! `swaypplet_base::sway::ipc` and `swaypplet_system::tray` use. Commands go the other way
 //! through an `mpsc`. Nothing polls: the server sends a subscription event,
 //! the thread re-reads, and the panel redraws only when the snapshot
 //! actually differs.
@@ -73,7 +73,7 @@ use pulse::mainloop::standard::{IterateResult, Mainloop};
 use pulse::proplist::Proplist;
 use pulse::volume::{ChannelVolumes, Volume};
 
-use swaypplet_base::service::{Backoff, Observed};
+use swaypplet_base::service::{Observed, reconnect};
 
 /// A device's or stream's loudness, as the panel draws it.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -109,7 +109,7 @@ pub struct Device {
     /// stable across a reconnect and indices are not, so both are kept.
     pub index: u32,
     /// The automatic name ([`device_name`]); what the person reads is
-    /// `services::devices::display_name` of it, keyed by `id`.
+    /// `swaypplet_devices::display_name` of it, keyed by `id`.
     pub name: String,
     /// The server's own description ("Creative Pebble X Analog Stereo"),
     /// kept for the tooltip so the technical name stays findable.
@@ -205,7 +205,7 @@ impl AudioState {
 
 /// Maximum output volume, as a fraction of nominal. Above 1.0 is software
 /// amplification. The setting that allows it owns the number
-/// (`settings::schema::VOLUME_CEILING`); this module clamps to it.
+/// (`swaypplet_model::schema::VOLUME_CEILING`); this module clamps to it.
 pub use swaypplet_model::schema::VOLUME_CEILING;
 
 /// What the GTK side can ask the server to do.
@@ -308,9 +308,9 @@ pub fn detail(bus: Option<&str>, port_description: Option<&str>, name: &str) -> 
 type Waker = RefCell<UnixStream>;
 
 pub struct AudioService {
-    state: Observed<AudioState>,
+    state: Rc<Observed<AudioState>>,
     /// The input meter's peak, 0–1, while `Command::Meter(true)` holds.
-    level: Observed<f32>,
+    level: Rc<Observed<f32>>,
     commands: mpsc::Sender<Command>,
     /// `None` only if the pipe could not be made, which costs latency
     /// rather than correctness: commands then wait for the next event.
@@ -339,32 +339,18 @@ impl AudioService {
             .ok()
             .unzip();
 
-        std::thread::Builder::new()
-            .name("audio".into())
-            .spawn(move || run(&tx, &level_tx, &cmd_rx, wake_rx.as_ref()))
-            .map_err(|e| log::error!("audio: could not start thread: {e}"))
-            .ok();
+        swaypplet_base::spawn::spawn_thread("audio", move || {
+            run(&tx, &level_tx, &cmd_rx, wake_rx.as_ref())
+        });
 
         let service = Rc::new(AudioService {
-            state: Observed::new(AudioState::default()),
-            level: Observed::new(0.0),
+            state: Rc::new(Observed::new(AudioState::default())),
+            level: Rc::new(Observed::new(0.0)),
             commands: cmd_tx,
             wake: wake_tx.map(RefCell::new),
         });
-
-        let for_recv = service.clone();
-        glib::spawn_future_local(async move {
-            while let Ok(snapshot) = rx.recv().await {
-                for_recv.state.set_if_changed(snapshot);
-            }
-        });
-        let for_level = service.clone();
-        glib::spawn_future_local(async move {
-            while let Ok(peak) = level_rx.recv().await {
-                for_level.level.set_if_changed(peak);
-            }
-        });
-
+        service.state.follow(rx);
+        service.level.follow(level_rx);
         service
     }
 
@@ -374,8 +360,8 @@ impl AudioService {
     pub fn fixture(state: AudioState) -> Rc<Self> {
         let (commands, _) = mpsc::channel::<Command>();
         Rc::new(AudioService {
-            state: Observed::new(state),
-            level: Observed::new(0.0),
+            state: Rc::new(Observed::new(state)),
+            level: Rc::new(Observed::new(0.0)),
             commands,
             wake: None,
         })
@@ -421,27 +407,22 @@ impl AudioService {
 
 // ── The audio thread ────────────────────────────────────────────────────
 
-/// Connect, serve, reconnect. Mirrors `sway::ipc::run`.
+/// Connect, serve, reconnect ([`reconnect`]).
 fn run(
     tx: &async_channel::Sender<AudioState>,
     level: &async_channel::Sender<f32>,
     commands: &mpsc::Receiver<Command>,
     wake: Option<&UnixStream>,
 ) {
-    let mut backoff = Backoff::new();
-    loop {
-        let started = std::time::Instant::now();
-        match session(tx, level, commands, wake) {
-            Ok(()) => return, // receiver gone — the process is shutting down
-            Err(e) => {
-                // Say so once, so the panel's banner has a reason behind it.
-                let _ = tx.send_blocking(AudioState::default());
-                let delay = backoff.next_delay(started.elapsed());
-                log::warn!("audio: {e}; reconnecting in {delay:?}");
-                std::thread::sleep(delay);
-            }
-        }
-    }
+    reconnect(
+        "audio",
+        || session(tx, level, commands, wake),
+        |_| {
+            // Say so once, so the panel's banner has a reason behind it.
+            let _ = tx.send_blocking(AudioState::default());
+            true
+        },
+    );
 }
 
 fn session(
@@ -592,6 +573,56 @@ fn iterate(mainloop: &mut Mainloop) -> Result<(), String> {
     }
 }
 
+/// What the server says about one sink or source, as plain data for
+/// [`device`].
+#[derive(Debug, Default)]
+struct NodeInfo {
+    /// `name`: what selecting a default takes.
+    id: String,
+    description: Option<String>,
+    index: u32,
+    channels: u8,
+    level: f64,
+    muted: bool,
+    form_factor: Option<String>,
+    bus: Option<String>,
+    /// `node.nick`.
+    nick: Option<String>,
+    /// The card's `device.description`.
+    card_description: Option<String>,
+    port_name: Option<String>,
+    port_description: Option<String>,
+    /// False when the active port reports nothing plugged in.
+    port_available: bool,
+    card: Option<u32>,
+}
+
+/// A [`NodeInfo`] out of a `SinkInfo` or a `SourceInfo`, which carry the
+/// same fields under the same names without sharing a type.
+macro_rules! node_info {
+    ($info:expr) => {{
+        let info = $info;
+        let port = info.active_port.as_deref();
+        NodeInfo {
+            id: info.name.as_deref().unwrap_or_default().to_string(),
+            description: info.description.as_deref().map(str::to_string),
+            index: info.index,
+            channels: info.volume.len(),
+            level: to_level(&info.volume),
+            muted: info.mute,
+            form_factor: info.proplist.get_str("device.form_factor"),
+            bus: info.proplist.get_str("device.bus"),
+            nick: info.proplist.get_str("node.nick"),
+            card_description: info.proplist.get_str("device.description"),
+            port_name: port.and_then(|p| p.name.as_deref()).map(str::to_string),
+            port_description: port
+                .and_then(|p| p.description.as_deref())
+                .map(str::to_string),
+            port_available: port.is_none_or(|p| p.available != pulse::def::PortAvailable::No),
+            card: info.card,
+        }
+    }};
+}
 /// Everything, in four queries.
 fn read(mainloop: &mut Mainloop, context: &Context) -> Result<AudioState, String> {
     let introspect = context.introspect();
@@ -608,46 +639,9 @@ fn read(mainloop: &mut Mainloop, context: &Context) -> Result<AudioState, String
         let default = default_sink.clone();
         let op = introspect.get_sink_info_list(move |result| match result {
             ListResult::Item(info) => {
-                let id = info.name.as_deref().unwrap_or_default().to_string();
-                let description = info.description.as_deref().unwrap_or(&id).to_string();
-                let port = info.active_port.as_deref();
-                let (form_factor, bus) = (
-                    info.proplist.get_str("device.form_factor"),
-                    info.proplist.get_str("device.bus"),
-                );
-                let bluetooth = bus.as_deref() == Some("bluetooth");
-                let name = device_name(&NodeNames {
-                    description: &description,
-                    nick: info.proplist.get_str("node.nick").as_deref(),
-                    card: info.proplist.get_str("device.description").as_deref(),
-                    bluetooth,
-                });
-                sinks.borrow_mut().push(Device {
-                    is_default: id == default,
-                    index: info.index,
-                    channels: info.volume.len(),
-                    kind: classify(
-                        form_factor.as_deref(),
-                        bus.as_deref(),
-                        port.and_then(|p| p.name.as_deref()),
-                        false,
-                    ),
-                    detail: detail(
-                        bus.as_deref(),
-                        port.and_then(|p| p.description.as_deref()),
-                        &name,
-                    ),
-                    card: info.card,
-                    available: port.is_none_or(|p| p.available != pulse::def::PortAvailable::No),
-                    name,
-                    description,
-                    bluetooth,
-                    id,
-                    volume: VolumeState {
-                        volume: to_level(&info.volume),
-                        muted: info.mute,
-                    },
-                });
+                sinks
+                    .borrow_mut()
+                    .push(device(&node_info!(info), &default, false));
             }
             ListResult::End | ListResult::Error => flag.set(true),
         });
@@ -668,46 +662,9 @@ fn read(mainloop: &mut Mainloop, context: &Context) -> Result<AudioState, String
                 if info.monitor_of_sink.is_some() {
                     return;
                 }
-                let id = info.name.as_deref().unwrap_or_default().to_string();
-                let description = info.description.as_deref().unwrap_or(&id).to_string();
-                let port = info.active_port.as_deref();
-                let (form_factor, bus) = (
-                    info.proplist.get_str("device.form_factor"),
-                    info.proplist.get_str("device.bus"),
-                );
-                let bluetooth = bus.as_deref() == Some("bluetooth");
-                let name = device_name(&NodeNames {
-                    description: &description,
-                    nick: info.proplist.get_str("node.nick").as_deref(),
-                    card: info.proplist.get_str("device.description").as_deref(),
-                    bluetooth,
-                });
-                sources.borrow_mut().push(Device {
-                    is_default: id == default,
-                    index: info.index,
-                    channels: info.volume.len(),
-                    kind: classify(
-                        form_factor.as_deref(),
-                        bus.as_deref(),
-                        port.and_then(|p| p.name.as_deref()),
-                        true,
-                    ),
-                    detail: detail(
-                        bus.as_deref(),
-                        port.and_then(|p| p.description.as_deref()),
-                        &name,
-                    ),
-                    card: info.card,
-                    available: port.is_none_or(|p| p.available != pulse::def::PortAvailable::No),
-                    name,
-                    description,
-                    bluetooth,
-                    id,
-                    volume: VolumeState {
-                        volume: to_level(&info.volume),
-                        muted: info.mute,
-                    },
-                });
+                sources
+                    .borrow_mut()
+                    .push(device(&node_info!(info), &default, true));
             }
             ListResult::End | ListResult::Error => flag.set(true),
         });
@@ -828,6 +785,41 @@ fn read(mainloop: &mut Mainloop, context: &Context) -> Result<AudioState, String
     })
 }
 
+/// The [`Device`] a sink (`input: false`) or source is. `default` is the
+/// server's default of that kind.
+fn device(n: &NodeInfo, default: &str, input: bool) -> Device {
+    let description = n.description.clone().unwrap_or_else(|| n.id.clone());
+    let bluetooth = n.bus.as_deref() == Some("bluetooth");
+    let name = device_name(&NodeNames {
+        description: &description,
+        nick: n.nick.as_deref(),
+        card: n.card_description.as_deref(),
+        bluetooth,
+    });
+    Device {
+        is_default: n.id == default,
+        index: n.index,
+        channels: n.channels,
+        kind: classify(
+            n.form_factor.as_deref(),
+            n.bus.as_deref(),
+            n.port_name.as_deref(),
+            input,
+        ),
+        detail: detail(n.bus.as_deref(), n.port_description.as_deref(), &name),
+        card: n.card,
+        available: n.port_available,
+        name,
+        description,
+        bluetooth,
+        id: n.id.clone(),
+        volume: VolumeState {
+            volume: n.level,
+            muted: n.muted,
+        },
+    }
+}
+
 /// Iterate until an operation finishes or its callback flags the end.
 fn wait<T: ?Sized>(
     mainloop: &mut Mainloop,
@@ -878,9 +870,15 @@ struct Batch {
 }
 
 impl Batch {
+    /// Everything queued right now, folded.
     fn collect(commands: &mpsc::Receiver<Command>) -> Self {
+        Self::fold(commands.try_iter())
+    }
+
+    /// `commands`, in the order they were sent, as one intent.
+    fn fold(commands: impl IntoIterator<Item = Command>) -> Self {
         let mut batch = Self::default();
-        while let Ok(command) = commands.try_recv() {
+        for command in commands {
             match command {
                 Command::SetSinkVolume(level) => {
                     batch.sink_level = Some(level);
@@ -1504,6 +1502,132 @@ mod tests {
         // A port the name already says is not repeated.
         assert_eq!(detail(Some("pci"), Some("Speaker"), "Speaker"), "Built-in");
         assert_eq!(detail(None, None, "X"), "");
+    }
+
+    #[test]
+    fn a_key_burst_folds_into_one_summed_step() {
+        let b = Batch::fold([0.05, 0.05, -0.02].map(Command::AdjustSinkVolume));
+        assert!((b.sink_delta - 0.08).abs() < 1e-9);
+        assert_eq!(b.sink_level, None);
+        assert!(b.touches_sink() && !b.touches_source());
+    }
+
+    #[test]
+    fn an_absolute_level_supersedes_the_steps_before_it_but_not_after() {
+        let b = Batch::fold([
+            Command::AdjustSinkVolume(0.1),
+            Command::SetSinkVolume(0.4),
+            Command::AdjustSinkVolume(0.05),
+        ]);
+        assert_eq!(b.sink_level, Some(0.4));
+        assert!((b.sink_delta - 0.05).abs() < 1e-9);
+    }
+
+    #[test]
+    fn mute_toggles_cancel_in_pairs() {
+        let b = Batch::fold([Command::ToggleSinkMute, Command::ToggleSinkMute]);
+        assert!(!b.sink_mute_toggle);
+        assert!(b.is_empty());
+        let b = Batch::fold([
+            Command::ToggleSourceMute,
+            Command::ToggleSourceMute,
+            Command::ToggleSourceMute,
+        ]);
+        assert!(b.source_mute_toggle && b.touches_source());
+    }
+
+    #[test]
+    fn the_last_write_wins_per_stream_card_and_default() {
+        let b = Batch::fold([
+            Command::SetStreamVolume {
+                index: 1,
+                level: 0.2,
+            },
+            Command::SetStreamVolume {
+                index: 2,
+                level: 0.3,
+            },
+            Command::SetStreamVolume {
+                index: 1,
+                level: 0.9,
+            },
+            Command::SetStreamMute {
+                index: 2,
+                mute: true,
+            },
+            Command::SetStreamMute {
+                index: 2,
+                mute: false,
+            },
+            Command::SetCardProfile {
+                card: 5,
+                profile: "a2dp".into(),
+            },
+            Command::SetCardProfile {
+                card: 5,
+                profile: "hfp".into(),
+            },
+            Command::SetDefaultSink("a".into()),
+            Command::SetDefaultSink("b".into()),
+            Command::Meter(true),
+            Command::Meter(false),
+        ]);
+        assert_eq!(b.stream_levels, [(1, 0.9), (2, 0.3)]);
+        assert_eq!(b.stream_mutes, [(2, false)]);
+        assert_eq!(b.card_profiles, [(5, "hfp".to_string())]);
+        assert_eq!(b.default_sink.as_deref(), Some("b"));
+        assert_eq!(b.meter, Some(false));
+        assert!(!b.is_empty());
+    }
+
+    #[test]
+    fn nothing_queued_is_an_empty_batch() {
+        assert!(Batch::fold([]).is_empty());
+        assert!(!Batch::fold([Command::Meter(true)]).is_empty());
+    }
+
+    fn sink_info(id: &str) -> NodeInfo {
+        NodeInfo {
+            id: id.into(),
+            description: Some("Creative Pebble X Analog Stereo".into()),
+            index: 7,
+            channels: 2,
+            level: 0.5,
+            bus: Some("usb".into()),
+            card_description: Some("Creative Pebble X".into()),
+            port_name: Some("analog-output-speaker".into()),
+            port_description: Some("Speakers".into()),
+            port_available: true,
+            card: Some(3),
+            ..NodeInfo::default()
+        }
+    }
+
+    #[test]
+    fn a_node_becomes_a_device_marked_default_by_name() {
+        let d = device(&sink_info("alsa_output.usb"), "alsa_output.usb", false);
+        assert!(d.is_default);
+        assert_eq!(d.name, "Creative Pebble X");
+        assert_eq!(d.description, "Creative Pebble X Analog Stereo");
+        assert_eq!(d.kind, DeviceKind::Usb);
+        assert_eq!(d.detail, "USB · Speakers");
+        assert_eq!((d.index, d.channels, d.card), (7, 2, Some(3)));
+        assert_eq!(d.volume.volume, 0.5);
+        assert!(!d.bluetooth && d.available);
+        assert!(!device(&sink_info("other"), "alsa_output.usb", false).is_default);
+    }
+
+    #[test]
+    fn a_node_without_a_description_is_named_by_its_id_and_an_input_is_a_microphone() {
+        let n = NodeInfo {
+            id: "alsa_input.pci".into(),
+            bus: Some("pci".into()),
+            ..NodeInfo::default()
+        };
+        let d = device(&n, "", true);
+        assert_eq!(d.description, "alsa_input.pci");
+        assert_eq!(d.kind, DeviceKind::Microphone);
+        assert!(!d.available, "a port reported unplugged");
     }
 
     #[test]
