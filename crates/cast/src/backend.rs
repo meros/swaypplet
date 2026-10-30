@@ -129,8 +129,7 @@ pub fn for_target(target: &Target) -> Option<&'static dyn Backend> {
 }
 
 fn runtime_dir() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
+    swaypplet_base::paths::runtime_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("swaypplet")
 }

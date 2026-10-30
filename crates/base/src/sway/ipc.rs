@@ -116,7 +116,7 @@ fn socket_candidates() -> Vec<PathBuf> {
 /// that orders them. Unreadable directory or entry: skip it, the caller
 /// still has the environment's path to try.
 fn runtime_dir_sockets() -> Vec<(SystemTime, PathBuf)> {
-    let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") else {
+    let Some(dir) = crate::paths::runtime_dir() else {
         return Vec::new();
     };
     let Ok(entries) = fs::read_dir(dir) else {

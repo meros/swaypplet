@@ -439,11 +439,10 @@ impl System {
 
 /// `~/.config/swaypplet/glass.json`, absent until something is changed.
 pub fn override_path() -> PathBuf {
-    let dir = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-        .unwrap_or_else(|| PathBuf::from("."));
-    dir.join("swaypplet").join("glass.json")
+    swaypplet_base::paths::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("swaypplet")
+        .join("glass.json")
 }
 
 /// The saved override, or `None` when there is none (or it no longer parses,

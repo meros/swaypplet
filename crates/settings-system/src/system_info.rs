@@ -281,7 +281,7 @@ pub fn bytes_label(n: u64) -> String {
 // ── Reading ─────────────────────────────────────────────────────────────
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
+    swaypplet_base::paths::home().unwrap_or_else(|| PathBuf::from("/"))
 }
 
 /// The nixos-config clone nx works in (`NX_FLAKE`).

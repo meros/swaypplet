@@ -5,6 +5,7 @@
 /// can forge or clobber it. The /tmp fallback matches the wrapper scripts'
 /// `$XDG_RUNTIME_DIR/swaypplet.pid` with the same /tmp fallback.
 pub fn file_path() -> std::path::PathBuf {
-    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    std::path::Path::new(&dir).join("swaypplet.pid")
+    crate::paths::runtime_dir()
+        .unwrap_or_else(|| "/tmp".into())
+        .join("swaypplet.pid")
 }

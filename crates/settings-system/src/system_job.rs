@@ -139,8 +139,8 @@ pub fn job(log: Option<Log>, active: bool) -> Job {
 }
 
 fn log_path() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .map_or_else(std::env::temp_dir, PathBuf::from)
+    swaypplet_base::paths::runtime_dir()
+        .unwrap_or_else(std::env::temp_dir)
         .join("swaypplet/nx.log")
 }
 

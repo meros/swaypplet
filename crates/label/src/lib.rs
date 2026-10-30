@@ -148,11 +148,10 @@ impl Data {
     }
 
     fn path() -> PathBuf {
-        let dir = std::env::var_os("XDG_STATE_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
-            .unwrap_or_else(|| PathBuf::from("."));
-        dir.join("swaypplet").join("workspace-labels.json")
+        swaypplet_base::paths::state_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("swaypplet")
+            .join("workspace-labels.json")
     }
 
     fn load() -> Data {
@@ -165,15 +164,7 @@ impl Data {
     /// file and never half of the new one.
     fn save(&self) {
         let path = Self::path();
-        let write = || -> std::io::Result<()> {
-            if let Some(dir) = path.parent() {
-                std::fs::create_dir_all(dir)?;
-            }
-            let tmp = path.with_extension("json.tmp");
-            std::fs::write(&tmp, self.to_json())?;
-            std::fs::rename(&tmp, &path)
-        };
-        if let Err(e) = write() {
+        if let Err(e) = swaypplet_base::fs::write_atomic(&path, self.to_json()) {
             log::warn!("label: could not save {}: {e}", path.display());
         }
     }

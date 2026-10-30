@@ -32,8 +32,11 @@ use super::store::{self, Wallpaper, WallpaperMode};
 /// Where the candidates live: the directory Nix copies the shipped
 /// wallpapers into. Anything else is reachable with Browse.
 pub fn candidates_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join("Pictures").join("wallpapers"))
+    Some(
+        swaypplet_base::paths::home()?
+            .join("Pictures")
+            .join("wallpapers"),
+    )
 }
 
 fn is_image(path: &Path) -> bool {
@@ -119,7 +122,10 @@ pub fn video_for(still: &Path) -> Option<PathBuf> {
 /// The unit's environment file: `VIDEO=<path>`, the one thing it plays,
 /// and `SPEED=<multiple>`, how fast (mpv's `speed`).
 fn video_env() -> PathBuf {
-    glib::user_runtime_dir()
+    // glib's answer without a runtime directory, kept: the cache directory.
+    swaypplet_base::paths::runtime_dir()
+        .or_else(swaypplet_base::paths::cache_dir)
+        .unwrap_or_else(glib::user_runtime_dir)
         .join("swaypplet")
         .join("wallpaper-video.env")
 }
@@ -324,7 +330,7 @@ fn parse_bg(config: &str) -> Option<Wallpaper> {
         if rest.first().map(String::as_str) != Some("bg") {
             continue;
         }
-        let path = expand_home(rest.get(1)?);
+        let path = swaypplet_base::paths::expand_home(rest.get(1)?);
         let mode = rest
             .get(2)
             .and_then(|m| WallpaperMode::parse(m))
@@ -358,15 +364,6 @@ fn split_words(line: &str) -> Vec<String> {
         words.push(current);
     }
     words
-}
-
-fn expand_home(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~/")
-        && let Some(home) = std::env::var_os("HOME")
-    {
-        return PathBuf::from(home).join(rest);
-    }
-    PathBuf::from(path)
 }
 
 #[cfg(test)]

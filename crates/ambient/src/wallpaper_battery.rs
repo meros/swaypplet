@@ -512,9 +512,15 @@ struct ToCurtain(wallpaper_curtain::Cmd, u64);
 /// restarts. In the runtime directory, so a new login starts without it, as
 /// it starts with swaybg showing the wallpaper.
 fn black_marker() -> PathBuf {
-    glib::user_runtime_dir()
-        .join("swaypplet")
-        .join("wallpaper-black")
+    runtime_dir().join("swaypplet").join("wallpaper-black")
+}
+
+/// The runtime directory, or glib's answer without one (the cache
+/// directory), which is where these files have always gone.
+fn runtime_dir() -> PathBuf {
+    swaypplet_base::paths::runtime_dir()
+        .or_else(swaypplet_base::paths::cache_dir)
+        .unwrap_or_else(glib::user_runtime_dir)
 }
 
 fn remember_black(black: bool) {
@@ -963,7 +969,7 @@ fn script() -> Option<Vec<(Target, f64)>> {
 pub fn follow(app: &gtk4::Application) {
     let script = script();
     let on_battery_matters = battery::start() || script.is_some();
-    let path = glib::user_runtime_dir().join("mpvpaper.sock");
+    let path = runtime_dir().join("mpvpaper.sock");
     let (tx, rx) = mpsc::channel::<Msg>();
     let (to_gtk, from_worker) = async_channel::unbounded::<ToCurtain>();
     let tell: Box<dyn Fn(ToCurtain) + Send> = Box::new(move |c| {

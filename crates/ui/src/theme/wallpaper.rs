@@ -380,10 +380,7 @@ fn hue_of(source: Rgb) -> u16 {
 // ── The cache ───────────────────────────────────────────────────────────
 
 fn cache_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
-    Some(base.join("swaypplet"))
+    Some(swaypplet_base::paths::cache_dir()?.join("swaypplet"))
 }
 
 fn cache_path() -> Option<PathBuf> {
@@ -514,20 +511,8 @@ fn write_cache(text: &str) -> bool {
     let Some(path) = cache_path() else {
         return false;
     };
-    if let Some(dir) = path.parent()
-        && let Err(e) = std::fs::create_dir_all(dir)
-    {
-        log::warn!("wallpaper: cannot make {}: {e}", dir.display());
-        return false;
-    }
-    let tmp = path.with_extension("tmp");
-    if let Err(e) = std::fs::write(&tmp, text) {
-        log::warn!("wallpaper: cannot write {}: {e}", tmp.display());
-        return false;
-    }
-    if let Err(e) = std::fs::rename(&tmp, &path) {
-        log::warn!("wallpaper: cannot replace {}: {e}", path.display());
-        let _ = std::fs::remove_file(&tmp);
+    if let Err(e) = swaypplet_base::fs::write_atomic(&path, text) {
+        log::warn!("wallpaper: cannot write {}: {e}", path.display());
         return false;
     }
     true

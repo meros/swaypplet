@@ -102,15 +102,9 @@ fn publish(inputs: Inputs) {
         return;
     }
     let path = theme_file();
-    let tmp = path.with_extension("tmp");
     let written = serde_json::to_string(&inputs)
         .map_err(std::io::Error::other)
-        .and_then(|json| {
-            path.parent()
-                .map_or(Ok(()), std::fs::create_dir_all)
-                .and_then(|()| std::fs::write(&tmp, json))
-        })
-        .and_then(|()| std::fs::rename(&tmp, &path));
+        .and_then(|json| swaypplet_base::fs::write_atomic(&path, json));
     if let Err(e) = written {
         log::warn!("theme: cannot write {}: {e}", path.display());
         PUBLISHED.with(|p| p.set(None));

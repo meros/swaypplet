@@ -7382,6 +7382,10 @@ rec {
             packageId = "serde_json";
           }
           {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
             name = "swaypplet-ui";
             packageId = "swaypplet-ui";
           }

@@ -2189,6 +2189,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "swaypplet-base",
  "swaypplet-ui",
 ]
 

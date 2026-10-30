@@ -48,11 +48,9 @@ pub struct SearchResult {
 // ── Socket path ─────────────────────────────────────────────────────────────
 
 fn socket_path() -> PathBuf {
-    if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
-        PathBuf::from(runtime_dir).join("elephant/elephant.sock")
-    } else {
-        PathBuf::from("/tmp/elephant/elephant.sock")
-    }
+    swaypplet_base::paths::runtime_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("elephant/elephant.sock")
 }
 
 // ── Connection ──────────────────────────────────────────────────────────────
