@@ -1,7 +1,7 @@
 //! The Input tab: the keyboard, the touchpad and the mouse, and what the
 //! volume and brightness keys do.
 //!
-//! Two sections: `input`, which `services::input` sends to sway by device
+//! Two sections: `input`, which `swaypplet_devices::input` sends to sway by device
 //! type the moment it changes, and `keys`, read per press by the OSD. Every
 //! `input` field is optional, and a row nobody touched stays as the sway
 //! config sets it: the row shows the value the devices report
@@ -12,7 +12,7 @@
 //! Devices are listed so per-device rows can come later; today everything
 //! applies to every device of a type.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
@@ -210,24 +210,16 @@ struct State {
     shown: RefCell<Vec<Device>>,
     reported: RefCell<Input>,
     status: gtk4::Label,
-    updating: Cell<bool>,
+    guard: form::Sync,
 }
 
 impl State {
     fn edit(self: &Rc<Self>, f: impl FnOnce(&mut Input)) {
-        if self.updating.get() {
-            return;
-        }
-        store::edit(f);
-        self.sync();
+        self.guard.edit(f, || self.sync());
     }
 
     fn edit_keys(self: &Rc<Self>, f: impl FnOnce(&mut Keys)) {
-        if self.updating.get() {
-            return;
-        }
-        store::edit(f);
-        self.sync();
+        self.guard.edit(f, || self.sync());
     }
 
     /// The layouts in force: the override, else what the keyboard reports.
@@ -247,7 +239,10 @@ impl State {
     }
 
     fn sync(self: &Rc<Self>) {
-        self.updating.set(true);
+        self.guard.writing(|| self.draw());
+    }
+
+    fn draw(self: &Rc<Self>) {
         let settings = store::current();
         let shown = overlay(&settings.input(), &self.reported.borrow());
         let keys = settings.keys();
@@ -302,7 +297,6 @@ impl State {
             settings.input.is_some() || settings.keys.is_some(),
             &describe_default(&keys),
         );
-        self.updating.set(false);
     }
 
     /// One row per layout: its name, its code, and up, down and remove.
@@ -661,22 +655,11 @@ impl InputPane {
         let reset = form::ResetButtons::new(
             "Put the system's keyboard, touchpad and mouse settings and key steps back.",
         );
-        let (footer, status) = form::footer(&[&reset.button, &reset.undo]);
-        let copy = form::copy_nix_button(
-            &status,
+        let (footer, status) = form::reset_footer(
+            &reset,
             "The input and keys sections as theme/settings.nix holds them.",
-            || {
-                let s = store::current();
-                Some(format!(
-                    "{}{}",
-                    s.section_as_nix("input")?,
-                    s.section_as_nix("keys")?
-                ))
-            },
+            &["input", "keys"],
         );
-        if let Some(row) = reset.button.parent().and_downcast::<gtk4::Box>() {
-            row.append(&copy);
-        }
 
         let state = Rc::new(State {
             catalogue,
@@ -707,7 +690,7 @@ impl InputPane {
             shown: RefCell::default(),
             reported: RefCell::new(Input::default()),
             status,
-            updating: Cell::new(false),
+            guard: form::Sync::default(),
         });
 
         {
@@ -911,7 +894,7 @@ impl InputPane {
     }
 }
 
-// The rows the launcher's settings search finds (`settings::search`).
+// The rows the launcher's settings search finds (`swaypplet_settings_kit::search`).
 use swaypplet_settings_kit::search::{Entry, row};
 
 pub const SEARCH: &[Entry] = &[

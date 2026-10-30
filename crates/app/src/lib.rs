@@ -1,3 +1,4 @@
+mod command;
 pub mod preview;
 pub mod settings_cli;
 use std::cell::RefCell;
@@ -9,6 +10,7 @@ use gtk4::Application;
 use gtk4::glib;
 use gtk4::prelude::*;
 
+use command::{JumpAction, KeybindsAction, PanelCommand, PinAction};
 use swaypplet_bar::BarManager;
 use swaypplet_base::sway::ipc::SwayService;
 use swaypplet_jump::jump::Jump;
@@ -53,6 +55,46 @@ struct AppState {
     /// Keep-alive only: the bar follows monitor hotplug by itself and has
     /// no external control surface.
     _bar: Option<Rc<BarManager>>,
+}
+
+/// The Helm's key: it closes settings when settings is what is open (one
+/// key, one surface to put away), else shows or hides the panel. Nothing
+/// before the panel is built.
+fn toggle_panel(st: &AppState) {
+    let Some(ref panel) = st.panel else { return };
+    match st.settings.as_ref().filter(|s| s.is_shown()) {
+        Some(settings) => settings.hide(),
+        None => panel.toggle(),
+    }
+}
+
+/// Build the panel's surfaces if `built` says this one is not there yet:
+/// the first request of a session activates, which builds them all. The
+/// state is not borrowed across the activation, which borrows it itself.
+fn ensure_built(
+    app: &gtk4::Application,
+    state: &RefCell<AppState>,
+    built: impl Fn(&AppState) -> bool,
+) {
+    if !built(&state.borrow()) {
+        app.activate();
+    }
+}
+
+/// Show `cmd` on the OSD, and bring the panel's slider for it up to date.
+fn trigger_osd(st: &AppState, cmd: OsdCommand) {
+    if let Some(ref osd) = st.osd {
+        osd.trigger(&cmd);
+    }
+    let Some(ref panel) = st.panel else { return };
+    match cmd {
+        OsdCommand::OutputVolumeRaise
+        | OsdCommand::OutputVolumeLower
+        | OsdCommand::OutputVolumeMuteToggle
+        | OsdCommand::InputVolumeMuteToggle => panel.refresh_audio(),
+        OsdCommand::BrightnessRaise | OsdCommand::BrightnessLower => panel.refresh_brightness(),
+        OsdCommand::CapsLock | OsdCommand::NumLock | OsdCommand::ScrollLock => {}
+    }
 }
 
 /// Does something already own [`APP_ID`] on the session bus?
@@ -216,15 +258,15 @@ pub fn run() {
         swaypplet_ambient::wallpaper_battery::follow(app);
 
         // Display profiles: kanshi's job, matched against the outputs the
-        // compositor reports and applied in one step (`services::displays`).
+        // compositor reports and applied in one step (`swaypplet_displays`).
         swaypplet_displays::start(displays_notify(&store_startup));
 
-        // An extra screen for a TV (`services::cast`); this removes one the
+        // An extra screen for a TV (`swaypplet_cast`); this removes one the
         // panel before this one left behind.
         swaypplet_cast::start();
 
         // Keyboard, touchpad and mouse: the saved `input` section on sway,
-        // again after a hotplug or a reload (`services::input`).
+        // again after a hotplug or a reload (`swaypplet_devices::input`).
         swaypplet_devices::input::follow();
 
         // Start D-Bus notification server
@@ -237,13 +279,7 @@ pub fn run() {
         // SIGUSR1 toggles panel visibility
         let s = state_clone.clone();
         swaypplet_base::glib_unix::signal_add_local(10 /* SIGUSR1 */, move || {
-            let st = s.borrow();
-            if let Some(ref panel) = st.panel {
-                match st.settings.as_ref().filter(|s| s.is_shown()) {
-                    Some(settings) => settings.hide(),
-                    None => panel.toggle(),
-                }
-            }
+            toggle_panel(&s.borrow());
             glib::ControlFlow::Continue
         });
 
@@ -269,13 +305,8 @@ pub fn run() {
     let store_activate = store.clone();
     app.connect_activate(move |app| {
         let mut st = state_clone.borrow_mut();
-        if let Some(ref panel) = st.panel {
-            // The Helm's key closes settings when settings is what is open:
-            // one key, one surface to put away.
-            match st.settings.as_ref().filter(|s| s.is_shown()) {
-                Some(settings) => settings.hide(),
-                None => panel.toggle(),
-            }
+        if st.panel.is_some() {
+            toggle_panel(&st);
             return;
         }
 
@@ -568,200 +599,135 @@ pub fn run() {
         let args: Vec<String> = cmdline
             .arguments()
             .iter()
+            .skip(1)
             .map(|a| a.to_string_lossy().to_string())
             .collect();
 
-        if args.len() > 1 && args[1] == "launcher" {
-            let st = state_clone.borrow();
-            if st.launcher.is_none() {
-                drop(st);
-                app.activate();
-                let st = state_clone.borrow();
-                if let Some(ref launcher) = st.launcher {
+        match PanelCommand::parse(&args) {
+            PanelCommand::Launcher => {
+                ensure_built(app, &state_clone, |st| st.launcher.is_some());
+                if let Some(ref launcher) = state_clone.borrow().launcher {
                     launcher.toggle();
                 }
-            } else if let Some(ref launcher) = st.launcher {
-                launcher.toggle();
             }
-        } else if args.len() > 1 && args[1] == "jump" {
-            // Every press is its own client, so the surface has to exist
-            // already: activating here would build it after the keypress that
-            // wanted it. On a cold session `defer_to_service` has started the
-            // panel by now and this first press is simply dropped, which is
-            // the same trade the keybind sheet makes.
-            let st = state_clone.borrow();
-            if let Some(ref jump) = st.jump {
-                match args.get(2).map(String::as_str) {
-                    Some("step-back") => jump.step_back(),
-                    // From sway's `swaypplet-jump` mode, which holds
-                    // `Super+Escape` and `Super+p` while the card is up.
-                    Some("cancel") => jump.cancel(),
-                    Some("pin") => jump.pin(),
-                    _ => jump.step(),
+            PanelCommand::Jump(action) => {
+                // Every press is its own client, so the surface has to exist
+                // already: activating here would build it after the keypress
+                // that wanted it. On a cold session `defer_to_service` has
+                // started the panel by now and this first press is simply
+                // dropped, which is the same trade the keybind sheet makes.
+                if let Some(ref jump) = state_clone.borrow().jump {
+                    match action {
+                        JumpAction::Step => jump.step(),
+                        JumpAction::StepBack => jump.step_back(),
+                        JumpAction::Cancel => jump.cancel(),
+                        JumpAction::Pin => jump.pin(),
+                    }
                 }
             }
-        } else if args.len() > 1 && args[1] == "label" {
-            // Like `jump`, a request to the running panel: a cold session has
-            // no pill yet and the first press is dropped.
-            let st = state_clone.borrow();
-            if let Some(ref labels) = st.labels {
-                let rest: Vec<&str> = args[2..].iter().map(String::as_str).collect();
-                labels.command(&rest);
+            PanelCommand::Label(rest) => {
+                // Like `jump`, a request to the running panel: a cold session
+                // has no pill yet and the first press is dropped.
+                if let Some(ref labels) = state_clone.borrow().labels {
+                    let rest: Vec<&str> = rest.iter().map(String::as_str).collect();
+                    labels.command(&rest);
+                }
             }
-        } else if args.len() > 1 && args[1] == "pin" {
-            let st = state_clone.borrow();
-            if let Some(ref pins) = st.pins {
-                // `pin region x,y,w,h`: that rectangle on the focused
-                // output, no selector. For scripts, and for the harness,
-                // which has no pointer to drag with.
-                let given = args.get(3).and_then(|a| {
-                    let v: Vec<f64> = a.split(',').filter_map(|n| n.trim().parse().ok()).collect();
-                    (v.len() == 4).then(|| (v[0], v[1], v[2], v[3]))
-                });
-                if args.get(2).map(String::as_str) == Some("region")
-                    && let Some(area) = given
-                {
-                    let pins = pins.clone();
-                    swaypplet_base::spawn::spawn_work(
-                        move || {
-                            let output = swaypplet_base::sway::ipc::focused_output()?;
-                            let tree =
-                                swaypplet_base::sway::ipc::connect().ok()?.get_tree().ok()?;
-                            Some((
-                                swaypplet_jump::jump::scene::window_at(&tree, &output, area)?,
-                                output,
-                            ))
-                        },
-                        move |found| {
-                            if let Some((region, output)) = found {
-                                pins.pin_region(region, Some(output));
-                            }
-                        },
-                    );
-                } else if args.get(2).map(String::as_str) == Some("region") {
+            PanelCommand::Pin(action) => {
+                let Some(pins) = state_clone.borrow().pins.clone() else {
+                    return glib::ExitCode::SUCCESS;
+                };
+                match action {
+                    PinAction::Region(area) => {
+                        swaypplet_base::spawn::spawn_work(
+                            move || {
+                                let output = swaypplet_base::sway::ipc::focused_output()?;
+                                let tree =
+                                    swaypplet_base::sway::ipc::connect().ok()?.get_tree().ok()?;
+                                Some((
+                                    swaypplet_jump::jump::scene::window_at(&tree, &output, area)?,
+                                    output,
+                                ))
+                            },
+                            move |found| {
+                                if let Some((region, output)) = found {
+                                    pins.pin_region(region, Some(output));
+                                }
+                            },
+                        );
+                    }
                     // Drag a rectangle on the frozen screen, and pin that
                     // piece of the window under it.
-                    let pins = pins.clone();
-                    swaypplet_screenshot::screenshot::select::region(
-                        app,
-                        swaypplet_screenshot::screenshot::select::Mode::Region,
-                        move |selection| {
-                            let Some(selection) = selection else { return };
-                            let Some(area) = selection.area else { return };
-                            let output = selection.output.clone();
-                            swaypplet_base::spawn::spawn_work(
-                                {
-                                    let output = output.clone();
-                                    move || {
-                                        let tree = swaypplet_base::sway::ipc::connect()
-                                            .ok()?
-                                            .get_tree()
-                                            .ok()?;
-                                        swaypplet_jump::jump::scene::window_at(&tree, &output, area)
-                                    }
-                                },
-                                move |region| {
-                                    if let Some(region) = region {
-                                        pins.pin_region(region, Some(output));
-                                    }
-                                },
-                            );
-                        },
-                    );
-                } else {
-                    pins.toggle_focused();
+                    PinAction::SelectRegion => {
+                        swaypplet_screenshot::screenshot::select::region(
+                            app,
+                            swaypplet_screenshot::screenshot::select::Mode::Region,
+                            move |selection| {
+                                let Some(selection) = selection else { return };
+                                let Some(area) = selection.area else { return };
+                                let output = selection.output.clone();
+                                swaypplet_base::spawn::spawn_work(
+                                    {
+                                        let output = output.clone();
+                                        move || {
+                                            let tree = swaypplet_base::sway::ipc::connect()
+                                                .ok()?
+                                                .get_tree()
+                                                .ok()?;
+                                            swaypplet_jump::jump::scene::window_at(
+                                                &tree, &output, area,
+                                            )
+                                        }
+                                    },
+                                    move |region| {
+                                        if let Some(region) = region {
+                                            pins.pin_region(region, Some(output));
+                                        }
+                                    },
+                                );
+                            },
+                        );
+                    }
+                    PinAction::Focused => pins.toggle_focused(),
                 }
             }
-        } else if args.len() > 1 && args[1] == "screenshot" {
-            let shot =
-                swaypplet_screenshot::screenshot::Shot::parse(args.get(2).map(String::as_str));
-            let st = state_clone.borrow();
-            if st.panel.is_none() {
-                drop(st);
-                app.activate();
+            PanelCommand::Screenshot(kind) => {
+                let shot = swaypplet_screenshot::screenshot::Shot::parse(kind.as_deref());
+                ensure_built(app, &state_clone, |st| st.panel.is_some());
+                swaypplet_screenshot::screenshot::take(app, &store_cmdline, shot);
             }
-            swaypplet_screenshot::screenshot::take(app, &store_cmdline, shot);
-        } else if args.len() > 1 && args[1] == "report" {
-            // A screenshot and a description, on their way to an issue.
-            let area =
-                swaypplet_screenshot::quality::report::Area::parse(args.get(2).map(String::as_str));
-            let st = state_clone.borrow();
-            if st.panel.is_none() {
-                drop(st);
-                app.activate();
+            PanelCommand::Report(area) => {
+                // A screenshot and a description, on their way to an issue.
+                let area = swaypplet_screenshot::quality::report::Area::parse(area.as_deref());
+                ensure_built(app, &state_clone, |st| st.panel.is_some());
+                swaypplet_screenshot::quality::report::start(app, &store_cmdline, area);
             }
-            swaypplet_screenshot::quality::report::start(app, &store_cmdline, area);
-        } else if args.len() > 1 && args[1] == "keybinds" {
-            // The overlay is driven by key press and release, so the client
-            // says which edge it saw rather than asking for a toggle it
-            // cannot reason about.
-            let action = args.get(2).map(String::as_str).unwrap_or("toggle");
-            let st = state_clone.borrow();
-            if st.keybinds.is_none() {
-                drop(st);
-                app.activate();
-            }
-            let st = state_clone.borrow();
-            if let Some(ref keybinds) = st.keybinds {
-                match action {
-                    "show" => keybinds.show(),
-                    "hide" => keybinds.hide(),
-                    "reload" => keybinds.invalidate(),
-                    _ => keybinds.toggle(),
-                }
-            }
-        } else if args.len() > 1 && args[1] == "osd" {
-            let osd_args: Vec<String> = args[2..].to_vec();
-            if let Some(cmd) = OsdCommand::parse(&osd_args) {
-                let st = state_clone.borrow();
-                if st.osd.is_none() {
-                    drop(st);
-                    app.activate();
-                    let st = state_clone.borrow();
-                    if let Some(ref osd) = st.osd {
-                        osd.trigger(&cmd);
-                    }
-                    // Sync panel sliders with the new value
-                    if let Some(ref panel) = st.panel {
-                        match cmd {
-                            OsdCommand::OutputVolumeRaise
-                            | OsdCommand::OutputVolumeLower
-                            | OsdCommand::OutputVolumeMuteToggle
-                            | OsdCommand::InputVolumeMuteToggle => panel.refresh_audio(),
-                            OsdCommand::BrightnessRaise | OsdCommand::BrightnessLower => {
-                                panel.refresh_brightness()
-                            }
-                            _ => {}
-                        }
-                    }
-                } else {
-                    if let Some(ref osd) = st.osd {
-                        osd.trigger(&cmd);
-                    }
-                    // Sync panel sliders with the new value
-                    if let Some(ref panel) = st.panel {
-                        match cmd {
-                            OsdCommand::OutputVolumeRaise
-                            | OsdCommand::OutputVolumeLower
-                            | OsdCommand::OutputVolumeMuteToggle
-                            | OsdCommand::InputVolumeMuteToggle => panel.refresh_audio(),
-                            OsdCommand::BrightnessRaise | OsdCommand::BrightnessLower => {
-                                panel.refresh_brightness()
-                            }
-                            _ => {}
-                        }
+            PanelCommand::Keybinds(action) => {
+                ensure_built(app, &state_clone, |st| st.keybinds.is_some());
+                if let Some(ref keybinds) = state_clone.borrow().keybinds {
+                    match action {
+                        KeybindsAction::Show => keybinds.show(),
+                        KeybindsAction::Hide => keybinds.hide(),
+                        KeybindsAction::Reload => keybinds.invalidate(),
+                        KeybindsAction::Toggle => keybinds.toggle(),
                     }
                 }
-            } else {
-                log::warn!("Unknown OSD command: {:?}", &args[2..]);
             }
-        } else if args.len() > 1 && args[1] == "toggle" {
+            PanelCommand::Osd(cmd) => {
+                ensure_built(app, &state_clone, |st| st.osd.is_some());
+                trigger_osd(&state_clone.borrow(), cmd);
+            }
+            PanelCommand::BadOsd(words) => log::warn!("Unknown OSD command: {words:?}"),
             // Super+Space (the nixos repo's sway.nix). Over D-Bus to the
             // running panel, never a signal to a pid file's pid: a second
             // activation shows or hides the panel.
-            app.activate();
-        } else {
-            app.activate();
+            PanelCommand::Toggle | PanelCommand::Activate => app.activate(),
+            PanelCommand::Unknown(word) => {
+                // Kept as it always was: an unknown word shows or hides the
+                // panel. Said here, so a typo in a keybind is findable.
+                log::warn!("Unknown command {word:?}; toggling the panel");
+                app.activate();
+            }
         }
 
         glib::ExitCode::SUCCESS

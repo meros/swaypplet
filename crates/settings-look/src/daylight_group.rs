@@ -8,7 +8,6 @@
 //! system's time zone only turns them into the clock times the last row
 //! shows, so a change is never a guess.
 
-use std::cell::Cell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
@@ -63,7 +62,7 @@ struct Group {
     set_row: gtk4::Box,
     set: gtk4::Scale,
     today: gtk4::Label,
-    updating: Cell<bool>,
+    guard: form::Sync,
 }
 
 /// An offset as the row shows it.
@@ -106,7 +105,10 @@ impl Group {
     /// Bring the controls in line with the store, and show only the rows the
     /// switches make live.
     fn sync(&self) {
-        self.updating.set(true);
+        self.guard.writing(|| self.draw());
+    }
+
+    fn draw(&self) {
         let d = store::with(|s| s.daylight());
         self.fixed.set_active(d.fixed_times);
         self.day.set(d.day_from_h, d.day_from_m);
@@ -123,7 +125,6 @@ impl Group {
         self.rise_row.set_visible(sun);
         self.set_row.set_visible(sun);
         self.today.set_text(&describe_today(&d));
-        self.updating.set(false);
     }
 }
 
@@ -220,7 +221,7 @@ pub fn build() -> gtk4::Box {
         set_row,
         set,
         today,
-        updating: Cell::new(false),
+        guard: form::Sync::default(),
     });
 
     // Each control writes one field; the store's observer below brings the
@@ -228,10 +229,8 @@ pub fn build() -> gtk4::Box {
     let edit = {
         let group = Rc::downgrade(&group);
         move |f: &dyn Fn(&Group, &mut Daylight)| {
-            if let Some(g) = group.upgrade()
-                && !g.updating.get()
-            {
-                store::edit::<Daylight>(|d| f(&g, d));
+            if let Some(g) = group.upgrade() {
+                g.guard.edit::<Daylight>(|d| f(&g, d), || {});
             }
         }
     };

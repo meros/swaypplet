@@ -6,13 +6,13 @@
 //! it turns static red with one onset nudge (P2: onset-only, nothing
 //! loops). CSS classes change on threshold edges only, so the 30 s poll
 //! never restyles a resting instrument. The decision slot's
-//! battery-critical occupant shares [`CRITICAL_PCT`] (bar/decision.rs),
+//! battery-critical occupant shares [`CRITICAL_PCT`] (`decision.rs`),
 //! so slot escalation and the red tier fire on the same edge.
 //!
 //! Sysfs readers come from `widgets::power`; the icon table here is
 //! waybar's 11-step ladder (power.rs keeps its own coarser 5-step icon
 //! for the panel summary row). Click opens the read-layer chassis
-//! (bar/popover.rs) with the battery section: time-to-empty prose + the
+//! (`popover.rs`) with the battery section: time-to-empty prose + the
 //! present draw in watts, one fresh sysfs read per open.
 
 use std::cell::Cell;
@@ -29,7 +29,7 @@ use swaypplet_ui::ui;
 use swaypplet_ui::{anim, anim::SlideBin};
 
 const WARNING_PCT: u8 = 30;
-/// Shared with the decision slot's battery occupant (bar/decision.rs).
+/// Shared with the decision slot's battery occupant (`decision.rs`).
 pub(crate) const CRITICAL_PCT: u8 = 15;
 const ICON_CHARGING: &str = "󰂄";
 /// Plugged in with no current flowing: full, or holding at a charge
@@ -170,7 +170,7 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
         on_state(&bat);
     }
 
-    // UPower's change signals move it (`services::battery`): a plug shows
+    // UPower's change signals move it (`swaypplet_system::battery`): a plug shows
     // at once, and nothing wakes while the battery holds still.
     let weak = root.downgrade();
     swaypplet_system::battery::observe(move || {

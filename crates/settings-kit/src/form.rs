@@ -348,6 +348,76 @@ pub fn copy_nix_button(
     )
 }
 
+/// The footer every settings pane ends with: Reset and its Undo, "Copy as
+/// Nix" for the pane's `sections` beside them, and the status line under
+/// them. Returns the footer and its status line.
+pub fn reset_footer(
+    reset: &ResetButtons,
+    copy_hint: &str,
+    sections: &'static [&'static str],
+) -> (gtk4::Box, gtk4::Label) {
+    let (footer, status) = footer(&[&reset.button, &reset.undo]);
+    let copy = copy_nix_button(&status, copy_hint, move || {
+        sections_as_nix(&swaypplet_model::store::current(), sections)
+    });
+    // Beside Reset, in the row `footer` built.
+    if let Some(row) = reset.button.parent().and_downcast::<gtk4::Box>() {
+        row.append(&copy);
+    }
+    (footer, status)
+}
+
+/// `sections` of `settings` as `theme/settings.nix` holds them, one after
+/// the other; `None` if any of them is not a section that has a Nix side.
+pub fn sections_as_nix(
+    settings: &swaypplet_model::store::Settings,
+    sections: &[&str],
+) -> Option<String> {
+    sections
+        .iter()
+        .map(|section| settings.section_as_nix(section))
+        .collect()
+}
+
+/// The guard a pane keeps while it writes its own controls from the
+/// store: those writes fire the controls' change signals, and an edit from
+/// a signal the pane fired itself must not go back to the store.
+#[derive(Debug, Default)]
+pub struct Sync {
+    writing: std::cell::Cell<bool>,
+}
+
+impl Sync {
+    /// Whether the pane is writing its controls now, so a change signal is
+    /// its own and not an edit.
+    pub fn busy(&self) -> bool {
+        self.writing.get()
+    }
+
+    /// Write the controls with the guard up. Nests: an inner write leaves
+    /// the guard as the outer one had it.
+    pub fn writing<R>(&self, write: impl FnOnce() -> R) -> R {
+        let was = self.writing.replace(true);
+        let out = write();
+        self.writing.set(was);
+        out
+    }
+
+    /// An edit from a control: into the store, then `sync` to bring the
+    /// other controls along. Nothing while the pane is writing.
+    pub fn edit<S: swaypplet_model::store::Section>(
+        &self,
+        f: impl FnOnce(&mut S),
+        sync: impl FnOnce(),
+    ) {
+        if self.busy() {
+            return;
+        }
+        swaypplet_model::store::edit(f);
+        sync();
+    }
+}
+
 /// "Reset to system", and the "Undo reset" that stands beside it after a
 /// reset until anything in the settings changes again. Every settings pane
 /// has the pair at the head of its footer. [`ResetButtons::connect`] says
@@ -605,6 +675,30 @@ pub fn time_row(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_copy_holds_every_section_in_order_or_nothing() {
+        let s = swaypplet_model::store::Settings::default();
+        let bar = s.section_as_nix("bar").unwrap();
+        let pins = s.section_as_nix("pins").unwrap();
+        assert_eq!(sections_as_nix(&s, &["bar"]), Some(bar.clone()));
+        assert_eq!(sections_as_nix(&s, &["bar", "pins"]), Some(bar + &pins));
+        assert_eq!(sections_as_nix(&s, &["bar", "no-such-section"]), None);
+    }
+
+    #[test]
+    fn the_guard_is_up_only_while_writing_and_nests() {
+        let sync = Sync::default();
+        assert!(!sync.busy());
+        sync.writing(|| {
+            assert!(sync.busy());
+            sync.writing(|| assert!(sync.busy()));
+            // The inner write left the outer one's guard up.
+            assert!(sync.busy());
+        });
+        assert!(!sync.busy());
+        assert_eq!(sync.writing(|| 7), 7);
+    }
 
     #[test]
     fn an_undone_reset_puts_back_only_what_it_changed() {

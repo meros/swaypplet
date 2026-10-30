@@ -9,7 +9,7 @@
 //!
 //! Hazards shipping now; failed-units is deferred (severable):
 //! - **Session inhibitors** (No Sleep, No Lock): one glyph each, driven
-//!   off `services::inhibit`'s observed state. That module owns the
+//!   off `swaypplet_system::inhibit`'s observed state. That module owns the
 //!   readings and the wording; this lane only decides where the glyph
 //!   sits, so a third inhibitor arrives here for free. It is a push
 //!   path rather than a poll: whoever establishes a state publishes it
@@ -19,18 +19,18 @@
 //! - **Binding mode**: non-default sway modes off the existing IPC
 //!   subscription's `mode` event; the mode name lives in the tooltip.
 //! - **Microphone**: something is recording. The sound server pushes this
-//!   (`services::audio`), so it costs no timer, and its stand-down (P10) is
+//!   (`swaypplet_audio`), so it costs no timer, and its stand-down (P10) is
 //!   exactly the recorder list going empty. The tooltip names what is
 //!   listening, which is the question the glyph provokes.
 //! - **Banned wired adapter**: NetworkManager has been told to leave an
-//!   ethernet adapter alone (`services::network::blocked`), by hand from
+//!   ethernet adapter alone (`swaypplet_devices::network::blocked`), by hand from
 //!   the panel or by the host when the link dropped while plugged in. The
 //!   machine is on Wi-Fi without the owner having chosen it in the moment,
 //!   which is what the glyph says. Stand-down: the adapter is unplugged or
 //!   the ban lifted in the panel. NM's device signals drive it.
 //!
 //! - **Extra screen**: a virtual output is on and something is sent to it
-//!   (`services::cast`): a TV cast or a VNC viewer. Your desktop is
+//!   (`swaypplet_cast`): a TV cast or a VNC viewer. Your desktop is
 //!   reaching a screen you may not be looking at, so the lane says so,
 //!   and the tooltip says where. `cast::observe` drives it; it stands down
 //!   when the session ends, by Stop or by itself (the TV went away, the
@@ -45,7 +45,7 @@
 //! in-use broadcast, and `org.freedesktop.portal.Camera` reports only
 //! `IsCameraPresent` while `ScreenCast` exposes methods to *start* a cast
 //! and no way to enumerate live ones. Both are visible in PipeWire's node
-//! graph, which this process cannot reach — see `services::audio` on the
+//! graph, which this process cannot reach — see `swaypplet_audio` on the
 //! bindgen collision that keeps libpipewire out of the build. They are
 //! blocked on that, not on design.
 //!

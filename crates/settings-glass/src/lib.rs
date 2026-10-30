@@ -23,7 +23,7 @@
 //! deletes it and puts the system material back, so there is always one way
 //! out of a material that turned out to be unreadable.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::glib;
@@ -181,9 +181,9 @@ struct State {
     history: RefCell<Vec<Tuning>>,
     /// Filled in as the controls are built; see [`Sync`].
     sync: RefCell<Vec<Sync>>,
-    /// True while `sync` is driving the widgets, so their change handlers do
+    /// Up while `sync` is driving the widgets, so their change handlers do
     /// not treat a programmatic write as an edit and push it straight back.
-    updating: Cell<bool>,
+    guard: form::Sync,
     apply_timer: RefCell<Option<glib::SourceId>>,
     save_timer: RefCell<Option<glib::SourceId>>,
     status: gtk4::Label,
@@ -214,7 +214,7 @@ impl State {
     /// Take an edit: update the widgets that did not make it, and start both
     /// clocks.
     fn edited(self: &Rc<Self>) {
-        if self.updating.get() {
+        if self.guard.busy() {
             return;
         }
         self.sync_controls();
@@ -248,12 +248,12 @@ impl State {
     }
 
     fn sync_controls(&self) {
-        self.updating.set(true);
-        let tuning = self.tuning.borrow();
-        for sync in self.sync.borrow().iter() {
-            sync(&tuning);
-        }
-        self.updating.set(false);
+        self.guard.writing(|| {
+            let tuning = self.tuning.borrow();
+            for sync in self.sync.borrow().iter() {
+                sync(&tuning);
+            }
+        });
     }
 
     fn schedule_apply(self: &Rc<Self>) {
@@ -341,7 +341,7 @@ impl GlassPane {
             tuning: RefCell::new(tuning),
             history: RefCell::new(Vec::new()),
             sync: RefCell::new(Vec::new()),
-            updating: Cell::new(false),
+            guard: form::Sync::default(),
             apply_timer: RefCell::new(None),
             save_timer: RefCell::new(None),
             status: status.clone(),
@@ -503,7 +503,7 @@ fn build_kinds(state: &Rc<State>) -> gtk4::Box {
             // Before the borrow, not after: `sync_controls` sets the selection
             // while holding `material`, and a `borrow_mut` under that is a
             // panic rather than a wasted round trip.
-            if state.updating.get() {
+            if state.guard.busy() {
                 return;
             }
             let Some(kind) = SurfaceKind::ALL.get(d.selected() as usize).copied() else {
@@ -548,7 +548,7 @@ fn build_knob(state: &Rc<State>, knob: &'static Knob) -> gtk4::Box {
             // 1.8734921 in the exported Nix.
             let raw = (s.value() / knob.step).round() * knob.step;
             value.set_text(&format!("{raw:.prec$}", prec = knob.decimals));
-            if state.updating.get() {
+            if state.guard.busy() {
                 return;
             }
             (knob.set)(&mut state.tuning.borrow_mut(), raw);

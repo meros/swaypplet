@@ -6,7 +6,8 @@
 //! **Local** results are made here, on the main thread, in the frame the key
 //! was typed in: the calculator, the command row and the pages of the panel.
 //! They cost microseconds and need nothing but the query. The settings
-//! rows are local too: a walk over the static index (`settings::search`).
+//! rows are local too: a walk over the static index
+//! (`swaypplet_settings_kit::search`).
 
 use crate::elephant::SearchResult;
 use swaypplet_model::store::Launcher;
@@ -80,44 +81,43 @@ pub fn providers(l: &Launcher, q: Query) -> Vec<&'static str> {
                 Vec::new()
             }
         }
-        Query::Plain(_) => [
-            (l.apps, "desktopapplications"),
-            (l.calculator, "calc"),
-            (l.commands, "runner"),
-            (l.windows, "windows"),
-            (l.clipboard, "clipboard"),
-            (l.menus, "menus"),
-            (l.web_search, "websearch"),
-            (l.files, "files"),
-            (l.bookmarks, "bookmarks"),
-            (l.symbols, "symbols"),
-            (l.symbols, "unicode"),
-            // Elephant's own list of what it can search; always on, it is
-            // how a provider not listed here is found at all.
-            (true, "providerlist"),
-        ]
-        .into_iter()
-        .filter_map(|(on, p)| on.then_some(p))
-        .collect(),
+        Query::Plain(_) => PROVIDERS
+            .iter()
+            .filter_map(|(p, on)| on(l).then_some(*p))
+            .collect(),
     }
 }
 
+/// The Launcher setting that switches a provider on.
+type Switch = fn(&Launcher) -> bool;
+
+/// Every elephant provider a plain query asks, in the order asked, and the
+/// Launcher setting that switches it.
+const PROVIDERS: &[(&str, Switch)] = &[
+    ("desktopapplications", |l| l.apps),
+    ("calc", |l| l.calculator),
+    ("runner", |l| l.commands),
+    ("windows", |l| l.windows),
+    ("clipboard", |l| l.clipboard),
+    ("menus", |l| l.menus),
+    ("websearch", |l| l.web_search),
+    ("files", |l| l.files),
+    ("bookmarks", |l| l.bookmarks),
+    ("symbols", |l| l.symbols),
+    ("unicode", |l| l.symbols),
+    // Elephant's own list of what it can search; always on, it is how a
+    // provider not listed here is found at all.
+    ("providerlist", |_| true),
+];
+
 /// Whether a remembered row of `provider` may show under `l`: the empty
-/// query's frecent rows follow the same switches as the search.
+/// query's frecent rows follow the same switches as the search. A provider
+/// no setting names is always allowed.
 pub fn allows(l: &Launcher, provider: &str) -> bool {
-    match provider {
-        "desktopapplications" => l.apps,
-        "runner" => l.commands,
-        "menus" => l.menus,
-        "websearch" => l.web_search,
-        "files" => l.files,
-        "bookmarks" => l.bookmarks,
-        "symbols" | "unicode" => l.symbols,
-        "clipboard" => l.clipboard,
-        "windows" => l.windows,
-        "calc" => l.calculator,
-        _ => true,
-    }
+    PROVIDERS
+        .iter()
+        .find(|(p, _)| *p == provider)
+        .is_none_or(|(_, on)| on(l))
 }
 
 /// A page the launcher can open by name: a deck page or a settings tab of
@@ -331,6 +331,58 @@ pub fn local(
     out
 }
 
+/// What one keystroke puts on screen before elephant answers: `local`,
+/// then `remote`, then `tail`.
+#[derive(Debug, Default)]
+pub struct Pass {
+    pub local: Vec<SearchResult>,
+    pub remote: Vec<SearchResult>,
+    pub tail: Vec<SearchResult>,
+}
+
+/// Put one keystroke's rows together: the rows made here, the settings rows
+/// (`None` when the host has no settings to open), and elephant's rows for
+/// the query before, narrowed to those whose name still has every query
+/// word in it.
+pub fn merge(
+    mut local: Vec<SearchResult>,
+    settings: Option<(Vec<SearchResult>, Vec<SearchResult>)>,
+    mut remote: Vec<SearchResult>,
+    q: Query,
+) -> Pass {
+    let tail = match settings {
+        Some((clear, other)) => {
+            // A setting the query names goes above the page rows too:
+            // "sudo" means the sudo row before the Idle & Lock tab its
+            // prefix opens. Only the calculator's answer stays above it.
+            let at = local.iter().take_while(|r| r.provider == CALC).count();
+            local.splice(at..at, clear);
+            other
+        }
+        None => Vec::new(),
+    };
+    let words: Vec<String> = q
+        .text()
+        .to_lowercase()
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    remote.retain(|r| match q {
+        Query::Plain(_) => {
+            let hay = format!("{} {}", r.text, r.subtext).to_lowercase();
+            words.iter().all(|w| hay.contains(w.as_str()))
+        }
+        // A prefix changes what is asked: nothing of the old answer
+        // stands.
+        _ => false,
+    });
+    Pass {
+        local,
+        remote,
+        tail,
+    }
+}
+
 /// At most this many settings rows above the apps, for a query that names a
 /// setting, and below them, for one that only might.
 const MAX_CLEAR_SETTINGS: usize = 3;
@@ -449,6 +501,69 @@ mod tests {
         assert_eq!(providers(&all, Query::Command("ls")), ["runner"]);
         let no_apps = Launcher { apps: false, ..all };
         assert!(providers(&no_apps, Query::Empty).is_empty());
+    }
+
+    #[test]
+    fn a_remembered_row_follows_the_switch_its_search_does() {
+        let all = Launcher {
+            files: true,
+            bookmarks: true,
+            symbols: true,
+            ..Launcher::default()
+        };
+        for (provider, _) in PROVIDERS {
+            assert!(allows(&all, provider), "{provider}");
+        }
+        let no_symbols = Launcher {
+            symbols: false,
+            ..all
+        };
+        assert!(!allows(&no_symbols, "symbols"));
+        assert!(!allows(&no_symbols, "unicode"));
+        assert!(allows(&no_symbols, "files"));
+        // A provider no setting names cannot be switched off.
+        assert!(allows(&no_symbols, "providerlist"));
+        assert!(allows(&no_symbols, "something-new"));
+    }
+
+    fn named(provider: &str, text: &str) -> SearchResult {
+        row(provider, text.to_string(), text.to_string(), String::new())
+    }
+
+    fn texts(rows: &[SearchResult]) -> Vec<&str> {
+        rows.iter().map(|r| r.text.as_str()).collect()
+    }
+
+    #[test]
+    fn a_setting_the_query_names_goes_under_the_calculator_only() {
+        let local = vec![named(CALC, "= 4"), named(PAGE, "Idle & Lock")];
+        let settings = (vec![named(SETTING, "sudo")], vec![named(SETTING, "su")]);
+        let pass = merge(local, Some(settings), Vec::new(), Query::Plain("su"));
+        assert_eq!(texts(&pass.local), ["= 4", "sudo", "Idle & Lock"]);
+        assert_eq!(texts(&pass.tail), ["su"]);
+
+        // A host with no settings gets no settings rows and no tail.
+        let local = vec![named(PAGE, "Idle & Lock")];
+        let pass = merge(local, None, Vec::new(), Query::Plain("su"));
+        assert_eq!(texts(&pass.local), ["Idle & Lock"]);
+        assert!(pass.tail.is_empty());
+    }
+
+    #[test]
+    fn the_old_answer_keeps_only_rows_with_every_word() {
+        let remote = vec![
+            named("desktopapplications", "Firefox Web Browser"),
+            named("desktopapplications", "Files"),
+            SearchResult {
+                subtext: "web browser".into(),
+                ..named("desktopapplications", "Chromium")
+            },
+        ];
+        let pass = merge(Vec::new(), None, remote.clone(), Query::Plain("WEB bro"));
+        assert_eq!(texts(&pass.remote), ["Firefox Web Browser", "Chromium"]);
+        // A prefix asks something else: none of the old answer stands.
+        let pass = merge(Vec::new(), None, remote, Query::Command("web"));
+        assert!(pass.remote.is_empty());
     }
 
     #[test]

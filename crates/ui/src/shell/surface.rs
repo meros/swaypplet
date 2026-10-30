@@ -98,6 +98,7 @@ pub struct Builder<'a> {
     card: Option<Option<crate::ui::Card>>,
     slide: Option<(gtk4::Orientation, f64)>,
     wrap: Option<Wrap<'a>>,
+    apron: Option<(gtk4::Align, &'a str)>,
 }
 
 impl Surface {
@@ -121,6 +122,7 @@ impl Surface {
             card: None,
             slide: None,
             wrap: None,
+            apron: None,
         }
     }
 
@@ -357,6 +359,15 @@ impl<'a> Builder<'a> {
         self
     }
 
+    /// A transparent apron around a small card (the OSD, a workspace
+    /// label): the root centred across, at `valign` down, carrying `class`,
+    /// whose stylesheet rule gives the apron its padding. It must stay
+    /// alpha 0, so the compositor's glass clips to the card.
+    pub fn apron(mut self, valign: gtk4::Align, class: &'a str) -> Self {
+        self.apron = Some((valign, class));
+        self
+    }
+
     pub fn build(self) -> Surface {
         let card_kind = self
             .card
@@ -401,6 +412,11 @@ impl<'a> Builder<'a> {
         // Base type and colour on the window's child, not the window: the
         // GTK theme's `window.background` outranks a class on the window.
         crate::ui::surface::adopt(&root);
+        if let Some((valign, class)) = self.apron {
+            root.set_halign(gtk4::Align::Center);
+            root.set_valign(valign);
+            root.add_css_class(class);
+        }
 
         let card = card_kind.map(|kind| {
             let card = crate::ui::vbox(0);

@@ -43,7 +43,7 @@ thread_local! {
 }
 
 /// Force dark mode over the Look setting, or stop forcing it: the
-/// wallpaper's `black` on battery (`services::wallpaper_battery`). Layered
+/// wallpaper's `black` on battery (`swaypplet_ambient::wallpaper_battery`). Layered
 /// over the setting rather than written to it, so plugging in brings back
 /// what the person chose. Whether it moved: the caller resolves again only
 /// then.

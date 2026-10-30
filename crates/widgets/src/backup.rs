@@ -1,6 +1,6 @@
 //! Backup readout for the Helm's System State & Power sheet.
 //!
-//! The bar's segment (`bar/backup.rs`) carries one glyph and a tooltip. This
+//! The bar's segment (`crates/bar/src/backup.rs`) carries one glyph and a tooltip. This
 //! is the same snapshot spelled out: a row per job with when it last ran,
 //! how much it held and which snapshot that was, then what the repository
 //! costs on meros-server and what is left beside it.

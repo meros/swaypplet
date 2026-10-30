@@ -4,15 +4,20 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use swaypplet_base::spawn::spawn_work;
-use swaypplet_system::mpris::{MediaState, PlaybackStatus, playerctl, read_state};
+use swaypplet_system::mpris::{MediaState, MprisService, PlaybackStatus, playerctl, progress};
 use swaypplet_ui::ui;
 use swaypplet_ui::ui::icons;
 
-fn format_time(secs: f64) -> String {
-    let total = secs.round() as u64;
-    let m = total / 60;
-    let s = total % 60;
-    format!("{}:{:02}", m, s)
+/// Fire a playerctl transport command off-thread; playerctl blocks on
+/// D-Bus, which must not happen on the GTK thread. The player announces
+/// the result itself (`swaypplet_system::mpris`), so nothing is read back.
+fn send(cmd: &'static str) {
+    spawn_work(
+        move || {
+            playerctl(&[cmd]);
+        },
+        |_| {},
+    );
 }
 
 // ── MediaSection ──────────────────────────────────────────────────────────────
@@ -31,21 +36,25 @@ struct Widgets {
 /// Cancel flag for the running progress timer.
 ///
 /// Only the flag is kept, never the timer's `SourceId`. The timer can end
-/// itself (it returns `Break` once the flag is set, or once a position read
-/// fails), which would leave a stored id dangling; removing that id later
+/// itself (it returns `Break` once the flag is set, or once the position is
+/// gone), which would leave a stored id dangling; removing that id later
 /// panics inside a glib trampoline and aborts the process. Setting the flag
 /// instead lets the timer retire itself on its next tick.
 type ProgressTimer = Rc<RefCell<Option<Rc<std::cell::Cell<bool>>>>>;
 
+/// The panel's Now Playing group. State comes from the players over D-Bus
+/// (`swaypplet_system::mpris`), as the bar's media mark gets it; the
+/// position, which no player signals as it advances, is counted on from the
+/// last read while a track plays.
 pub struct MediaSection {
     root: gtk4::Box,
     widgets: Rc<Widgets>,
-    state: Rc<RefCell<Option<MediaState>>>,
+    mpris: Rc<MprisService>,
     progress_timer: ProgressTimer,
 }
 
 impl MediaSection {
-    pub fn new() -> Self {
+    pub fn new(mpris: Rc<MprisService>) -> Self {
         // ── Root container ───────────────────────────────────────────────────
         let root = ui::group(2);
         root.add_css_class("section-group");
@@ -174,7 +183,13 @@ impl MediaSection {
         controls.append(&next_btn);
         root.append(&controls);
 
-        let play_pause_btn_for_signal = play_pause_btn.clone();
+        for (button, cmd) in [
+            (&prev_btn, "previous"),
+            (&play_pause_btn, "play-pause"),
+            (&next_btn, "next"),
+        ] {
+            button.connect_clicked(move |_| send(cmd));
+        }
 
         let widgets = Rc::new(Widgets {
             title_label,
@@ -187,115 +202,47 @@ impl MediaSection {
             time_label,
         });
 
-        let state: Rc<RefCell<Option<MediaState>>> = Rc::new(RefCell::new(None));
         let progress_timer: ProgressTimer = Rc::new(RefCell::new(None));
 
-        // ── Button signals ────────────────────────────────────────────────
+        // Pushed by the players themselves: nothing runs while nothing
+        // changes.
         {
+            let weak = root.downgrade();
             let w = widgets.clone();
-            let s = state.clone();
-            let root_ref = root.clone();
             let pt = progress_timer.clone();
-            prev_btn.connect_clicked(move |_| {
-                Self::send_command_and_refresh(
-                    "previous",
-                    root_ref.clone(),
-                    w.clone(),
-                    s.clone(),
-                    pt.clone(),
-                );
-            });
-        }
-
-        {
-            let w = widgets.clone();
-            let s = state.clone();
-            let root_ref = root.clone();
-            let pt = progress_timer.clone();
-            play_pause_btn_for_signal.connect_clicked(move |_| {
-                Self::send_command_and_refresh(
-                    "play-pause",
-                    root_ref.clone(),
-                    w.clone(),
-                    s.clone(),
-                    pt.clone(),
-                );
-            });
-        }
-
-        {
-            let w = widgets.clone();
-            let s = state.clone();
-            let root_ref = root.clone();
-            let pt = progress_timer.clone();
-            next_btn.connect_clicked(move |_| {
-                Self::send_command_and_refresh(
-                    "next",
-                    root_ref.clone(),
-                    w.clone(),
-                    s.clone(),
-                    pt.clone(),
-                );
+            let mpris_c = mpris.clone();
+            mpris.connect_change(move || {
+                // The service outlives a panel that is torn down.
+                if let Some(root) = weak.upgrade() {
+                    Self::apply_state(&root, &w, &mpris_c, &pt);
+                }
             });
         }
 
         let section = MediaSection {
             root,
             widgets,
-            state,
+            mpris,
             progress_timer,
         };
         section.refresh();
         section
     }
 
-    fn schedule_refresh(
-        root: gtk4::Box,
-        w: Rc<Widgets>,
-        state: Rc<RefCell<Option<MediaState>>>,
-        progress_timer: ProgressTimer,
-    ) {
-        spawn_work(read_state, move |new_state| {
-            Self::apply_state(&root, &w, &new_state, &progress_timer);
-            *state.borrow_mut() = new_state;
-        });
-    }
-
-    /// Run a playerctl command on a background thread, then refresh state.
-    fn send_command_and_refresh(
-        command: &'static str,
-        root: gtk4::Box,
-        w: Rc<Widgets>,
-        state: Rc<RefCell<Option<MediaState>>>,
-        progress_timer: ProgressTimer,
-    ) {
-        spawn_work(
-            move || {
-                playerctl(&[command]);
-                read_state()
-            },
-            move |new_state| {
-                Self::apply_state(&root, &w, &new_state, &progress_timer);
-                *state.borrow_mut() = new_state;
-            },
-        );
-    }
-
     fn apply_state(
         root: &gtk4::Box,
         w: &Rc<Widgets>,
-        state: &Option<MediaState>,
+        mpris: &Rc<MprisService>,
         progress_timer: &ProgressTimer,
     ) {
-        // Cancel the existing progress timer. The flag both retires the timer
-        // on its next tick and makes any in-flight spawn_work callback from it
-        // (already dispatched to the background thread) drop its stale result
-        // instead of overwriting the new track's just-applied state.
+        // Cancel the existing progress timer; the flag retires it on its
+        // next tick.
         if let Some(cancelled) = progress_timer.borrow_mut().take() {
             cancelled.set(true);
         }
 
-        match state {
+        let state: Option<MediaState> = mpris.snapshot();
+        match &state {
             None => {
                 root.set_visible(false);
             }
@@ -303,19 +250,13 @@ impl MediaSection {
                 root.set_visible(true);
 
                 // Title + artist
-                let display_title = if ms.title.is_empty() {
-                    "Unknown track"
-                } else {
-                    &ms.title
-                };
-                w.title_label.set_label(display_title);
+                w.title_label.set_label(ms.display_title());
                 w.artist_label.set_label(&ms.artist);
                 w.artist_label.set_visible(!ms.artist.is_empty());
 
                 // Player badge
-                if let Some(ref name) = ms.player_name {
-                    let display_name = capitalize(name);
-                    w.player_badge.set_label(&display_name);
+                if let Some(name) = ms.player_label() {
+                    w.player_badge.set_label(&name);
                     w.player_badge.set_visible(true);
                 } else {
                     w.player_badge.set_visible(false);
@@ -337,48 +278,30 @@ impl MediaSection {
                 }
 
                 // Progress bar + time
-                if let (Some(pos), Some(len)) = (ms.position_secs, ms.length_secs) {
-                    let fraction = (pos / len).clamp(0.0, 1.0);
+                if let (Some(pos), Some(len)) = (mpris.position(), ms.length_secs) {
+                    let (fraction, time) = progress(pos, len);
                     w.progress_bar.set_fraction(fraction);
                     w.progress_bar.set_visible(true);
-                    w.time_label
-                        .set_label(&format!("{} / {}", format_time(pos), format_time(len)));
+                    w.time_label.set_label(&time);
                     w.time_label.set_visible(true);
 
                     // Live-update progress while playing
                     if ms.status == PlaybackStatus::Playing {
                         let w_c = w.clone();
-                        let len_c = len;
+                        let mpris_c = mpris.clone();
                         let cancelled = Rc::new(std::cell::Cell::new(false));
                         let cancelled_c = cancelled.clone();
                         glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
                             if cancelled_c.get() {
                                 return glib::ControlFlow::Break;
                             }
-                            let w_inner = w_c.clone();
-                            let cancelled_inner = cancelled_c.clone();
-                            spawn_work(
-                                || playerctl(&["position"]).and_then(|s| s.parse::<f64>().ok()),
-                                move |pos| {
-                                    // A track change since this was dispatched marks
-                                    // `cancelled`; drop the stale result rather than
-                                    // applying it over the new track's state.
-                                    if cancelled_inner.get() {
-                                        return;
-                                    }
-                                    if let Some(pos) = pos {
-                                        let frac = (pos / len_c).clamp(0.0, 1.0);
-                                        w_inner.progress_bar.set_fraction(frac);
-                                        w_inner.time_label.set_label(&format!(
-                                            "{} / {}",
-                                            format_time(pos),
-                                            format_time(len_c)
-                                        ));
-                                    } else {
-                                        cancelled_inner.set(true);
-                                    }
-                                },
-                            );
+                            let Some(pos) = mpris_c.position() else {
+                                cancelled_c.set(true);
+                                return glib::ControlFlow::Break;
+                            };
+                            let (fraction, time) = progress(pos, len);
+                            w_c.progress_bar.set_fraction(fraction);
+                            w_c.time_label.set_label(&time);
                             glib::ControlFlow::Continue
                         });
                         *progress_timer.borrow_mut() = Some(cancelled);
@@ -403,23 +326,10 @@ impl MediaSection {
     // ── Public API ────────────────────────────────────────────────────────────
 
     pub fn refresh(&self) {
-        Self::schedule_refresh(
-            self.root.clone(),
-            self.widgets.clone(),
-            self.state.clone(),
-            self.progress_timer.clone(),
-        );
+        Self::apply_state(&self.root, &self.widgets, &self.mpris, &self.progress_timer);
     }
 
     pub fn widget(&self) -> &gtk4::Box {
         &self.root
-    }
-}
-
-fn capitalize(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
     }
 }

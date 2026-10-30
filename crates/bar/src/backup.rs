@@ -8,8 +8,8 @@
 //!
 //! One glyph, no text: the numbers belong in the tooltip, which is where
 //! the question the glyph provokes gets answered, and in the Helm's power
-//! sheet (`widgets/backup.rs`) for the full readout. State comes from
-//! `services::backup`, which watches the status directory, so this segment
+//! sheet (`swaypplet_widgets::backup`) for the full readout. State comes from
+//! `swaypplet_system::backup`, which watches the status directory, so this segment
 //! owns no timer and reads no files.
 
 use std::rc::Rc;

@@ -7,9 +7,10 @@ fn main() {
     // A panic note for the crash reporter (crates/screenshot/src/quality/crash.rs).
     swaypplet_screenshot::quality::crash::install_panic_hook();
 
-    // The polkit agent runs as its own GApplication so it coexists with
-    // the main panel process. Anything else falls through to `swaypplet_app::run`,
-    // which itself does subcommand routing for `osd` / `launcher`.
+    // The words below run a process of their own (the polkit agent, the
+    // lock screen, the bar on its own…). Anything else falls through to
+    // `swaypplet_app::run`, which hands it to the running panel as a
+    // request (`launcher`, `osd`, `jump`, `pin`, …; crates/app/src/command.rs).
     let mut args = std::env::args();
     let _argv0 = args.next();
     match args.next().as_deref() {
@@ -37,8 +38,9 @@ fn main() {
         // Root D-Bus shim standing in for GDM, so GNOME's "Switch User…"
         // reaches the same greeter as everything else.
         Some("gdm-shim") => swaypplet_switch_user::gdm_shim::run(),
-        // Native status bar (waybar replacement) — own GApplication so it
-        // can run standalone next to the panel during the migration.
+        // The status bar as its own GApplication. The panel hosts the same
+        // bars in-process; this one is for a session without them
+        // (`SWAYPPLET_NO_BAR=1`) or without the panel.
         Some("bar") => swaypplet_bar::run(),
         // dmenu-style picker — thin client to the panel's picker server,
         // with a standalone GTK fallback when no panel is listening.

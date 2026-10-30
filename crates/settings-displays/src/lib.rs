@@ -2,7 +2,7 @@
 //! rotation and adaptive sync, apply with a way back, and keep the result
 //! as a profile.
 //!
-//! The outputs come from `services::displays`, which already follows them
+//! The outputs come from `swaypplet_displays`, which already follows them
 //! over `zwlr_output_manager_v1`; this tab edits a draft of them
 //! (`arrange::Draft`) and sends the draft through the same service, which
 //! tests every configuration before it applies it. An applied layout is on
@@ -328,22 +328,11 @@ impl DisplaysPane {
             "Put the system's display profiles back, and show nothing of the shell on extra screens. Your saved profiles go.",
         )
         .asking("Delete saved profiles?");
-        let (reset_footer, reset_status) = form::footer(&[&reset.button, &reset.undo]);
-        let copy = form::copy_nix_button(
-            &reset_status,
+        let (reset_footer, reset_status) = form::reset_footer(
+            &reset,
             "The profiles and the extra-screen choices as theme/settings.nix holds them.",
-            || {
-                let s = swaypplet_model::store::current();
-                Some(format!(
-                    "{}{}",
-                    s.section_as_nix("displays")?,
-                    s.section_as_nix("extra_screens")?
-                ))
-            },
+            &["displays", "extra_screens"],
         );
-        if let Some(row) = reset.button.parent().and_downcast::<gtk4::Box>() {
-            row.append(&copy);
-        }
         let show_source = move || {
             let s = swaypplet_model::store::current();
             form::set_source(

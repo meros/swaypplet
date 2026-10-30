@@ -4,9 +4,9 @@
 //! Hidden while no player exists; a stopped or paused player recedes
 //! (`ui::set_receded`). No title text and no ambient progress — the mark is
 //! ambient; prose (art + title/artist) and the play-pause action live in
-//! the click-opened read-layer popover (bar/popover.rs). State comes from
-//! `services::mpris`, which the players push over D-Bus: nothing is polled,
-//! and a mark whose state did not change is not touched.
+//! the click-opened read-layer popover (`popover.rs`). State comes from
+//! `swaypplet_system::mpris`, which the players push over D-Bus: nothing is
+//! polled, and a mark whose state did not change is not touched.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -31,7 +31,7 @@ struct Ui {
     body: gtk4::Box,
     state: Rc<RefCell<Option<MediaState>>>,
     /// "Play on": the output picker, kept across renders
-    /// (`widgets::audio::output_picker`).
+    /// (`swaypplet_widgets::audio::output_picker`).
     outputs: gtk4::Box,
 }
 
@@ -44,7 +44,8 @@ fn control_button(face: &gtk4::Label) -> gtk4::Button {
 
 /// Fire a playerctl transport command off-thread; playerctl blocks on
 /// D-Bus, which must not happen on the GTK thread. The player announces
-/// the result itself (services::mpris), so nothing is read back here.
+/// the result itself (`swaypplet_system::mpris`), so nothing is read back
+/// here.
 fn send(cmd: &'static str) {
     spawn_work(
         move || {
@@ -106,9 +107,13 @@ pub fn build(
         outputs: swaypplet_widgets::audio::output_picker(audio),
     };
 
-    // Pushed by the players themselves (services::mpris): no poll, and nothing
-    // runs while nothing changes.
-    apply(&ui, mpris.snapshot());
+    // Pushed by the players themselves (`swaypplet_system::mpris`): no poll,
+    // and nothing runs while nothing changes. The bar shows no position, so
+    // a read that only moved it is the state already on screen.
+    let snapshot = |mpris: &swaypplet_system::mpris::MprisService| {
+        mpris.snapshot().map(MediaState::without_position)
+    };
+    apply(&ui, snapshot(mpris));
     {
         let weak = btn.downgrade();
         let ui = ui.clone();
@@ -116,7 +121,7 @@ pub fn build(
         mpris.connect_change(move || {
             // The service outlives a bar unplugged with its output.
             if weak.upgrade().is_some() {
-                apply(&ui, mpris_c.snapshot());
+                apply(&ui, snapshot(&mpris_c));
             }
         });
     }
@@ -162,7 +167,9 @@ fn apply(ui: &Ui, state: Option<MediaState>) {
             }
             None => ui.art.set_visible(false),
         }
-        ui.text.set_label(&pill_text(ms));
+        // The label ellipsizes, so a long track name cannot push the clock
+        // off the bar.
+        ui.text.set_label(&ms.pill_text());
         ui.play.set_label(if playing {
             icons::MEDIA_PAUSE
         } else {
@@ -178,17 +185,6 @@ fn apply(ui: &Ui, state: Option<MediaState>) {
         ui.pop.popdown();
     } else if ui.pop.is_visible() {
         render(ui);
-    }
-}
-
-/// One line for the pill: "Title · Artist", or whichever half exists. The
-/// label ellipsizes, so a long track name cannot push the clock off the bar.
-fn pill_text(ms: &MediaState) -> String {
-    match (ms.title.trim(), ms.artist.trim()) {
-        ("", "") => "♪".to_owned(),
-        (title, "") => title.to_owned(),
-        ("", artist) => artist.to_owned(),
-        (title, artist) => format!("{} · {}", title, artist),
     }
 }
 
@@ -229,15 +225,7 @@ fn render(ui: &Ui) {
 
     let info = ui::vbox(1);
     info.set_valign(gtk4::Align::Center);
-    let title = ui::text(
-        if ms.title.is_empty() {
-            "Unknown track"
-        } else {
-            &ms.title
-        },
-        ui::Text::Body,
-        ui::Tone::Fg,
-    );
+    let title = ui::text(ms.display_title(), ui::Text::Body, ui::Tone::Fg);
     swaypplet_ui::ui::set_weight(&title, swaypplet_ui::ui::Weight::Strong);
     title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     title.set_max_width_chars(28);

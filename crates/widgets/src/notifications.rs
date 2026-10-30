@@ -4,6 +4,7 @@ use std::time::SystemTime;
 
 use gtk4::prelude::*;
 
+use swaypplet_notifications::activate;
 use swaypplet_notifyd::{CloseReason, group};
 use swaypplet_notifyd::{store, store::NotificationStore};
 use swaypplet_ui::ui;
@@ -288,26 +289,27 @@ fn build_entry(
     if !notif.actions.is_empty() {
         let actions_box = ui::hbox(2);
 
-        for (key, label) in &notif.actions {
-            // "default" is what clicking the entry means; it keeps a button
-            // as well, because a click is out of reach of the keyboard.
-            let btn = ui::button_with(ui::Face::Label(label), ui::Kind::Secondary, ui::Size::Small);
+        // "default" is what clicking the entry means; it keeps a button as
+        // well, because a click is out of reach of the keyboard.
+        for action in activate::visible_actions(notif, activate::Place::Panel) {
+            let btn = ui::button_with(
+                ui::Face::Label(action.label),
+                ui::Kind::Secondary,
+                ui::Size::Small,
+            );
 
             let id = notif.id;
-            let key_c = key.clone();
+            let key = action.key.to_string();
             let store_c = store.clone();
             let resident = notif.resident;
             let notif_c = notif.clone();
             let on_activate_c = on_activate.clone();
             btn.connect_clicked(move |_| {
-                if key_c == "default" {
+                if key == "default" {
                     go_to_source(&notif_c, &store_c, &on_activate_c);
                     return;
                 }
-                swaypplet_notifications::activate::invoke(&store_c, id, &key_c);
-                if !resident {
-                    store::store_close(&store_c, id, CloseReason::Dismissed);
-                }
+                activate::run_action(&store_c, id, &key, resident);
             });
             actions_box.append(&btn);
         }
@@ -343,7 +345,7 @@ fn go_to_source(
     store: &Rc<RefCell<NotificationStore>>,
     on_activate: &OnActivate,
 ) {
-    swaypplet_notifications::activate::activate(notif, store, || {});
+    activate::activate(notif, store, || {});
     let hide = on_activate.borrow().clone();
     if let Some(hide) = hide {
         hide();

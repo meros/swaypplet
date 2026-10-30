@@ -1,35 +1,11 @@
 use std::cell::RefCell;
-use std::process::Command;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use swaypplet_system::brightness;
 use swaypplet_ui::ui;
 use swaypplet_ui::ui::icons;
-
-// ── brightnessctl helpers ─────────────────────────────────────────────────────
-
-/// Returns current brightness as a percentage (1–100), or `None` on failure.
-fn read_brightness() -> Option<u32> {
-    // `brightnessctl -m` emits: device,class,current,max,percentage%
-    let out = Command::new("brightnessctl")
-        .arg("-m")
-        .output()
-        .ok()
-        .filter(|o| o.status.success())?;
-
-    let text = String::from_utf8_lossy(&out.stdout);
-    let line = text.lines().next()?;
-    // Field 3 (0-indexed) is "NN%"
-    let pct_field = line.split(',').nth(3)?;
-    let pct_str = pct_field.trim().trim_end_matches('%');
-    pct_str.parse::<u32>().ok()
-}
-
-fn set_brightness(value: u32) {
-    let arg = format!("{}%", value);
-    let _ = Command::new("brightnessctl").args(["set", &arg]).spawn();
-}
 
 // ── BrightnessSection ─────────────────────────────────────────────────────────
 
@@ -51,7 +27,7 @@ impl BrightnessSection {
         let row = ui::slider_row(icons::BRIGHTNESS, 1.0, 100.0, 1.0);
         ui::glyph::adopt(&row.icon, ui::Text::Title, ui::Tone::Fg);
         let scale = row.scale.clone();
-        // Same rail furniture as the volume scale (widgets/audio.rs): quarter
+        // Same rail furniture as the volume scale (`audio.rs`): quarter
         // ticks plus one labelled reference. Both scales are hoisted into the
         // start menu's telemetry ribbon side by side, and one rail with ticks
         // beside one without read as two different kinds of control.
@@ -79,19 +55,19 @@ impl BrightnessSection {
                     return;
                 }
                 let value = s.value().round() as u32;
-                set_brightness(value);
+                brightness::set(value);
                 lbl.set_text(&format!("{}%", value));
             });
         }
 
-        let brightness = BrightnessSection {
+        let section = BrightnessSection {
             section,
             scale,
             pct_label,
             updating,
         };
-        brightness.refresh();
-        brightness
+        section.refresh();
+        section
     }
 
     /// Re-reads brightness from `brightnessctl` on a background thread and
@@ -102,7 +78,8 @@ impl BrightnessSection {
         let pct_label = self.pct_label.clone();
         let summary_text = self.section.summary.clone();
 
-        swaypplet_base::spawn::spawn_work(read_brightness, move |pct_opt| {
+        // A failed read leaves the slider where it was.
+        swaypplet_base::spawn::spawn_work(brightness::read, move |pct_opt| {
             if let Some(pct) = pct_opt {
                 *updating.borrow_mut() = true;
                 scale.set_value(pct as f64);

@@ -7,7 +7,7 @@
 //! same way with the last (BAR_VISION P2: motion at onset only; P10: the
 //! last unpin is its stand-down).
 //!
-//! A click opens the read-layer popover (bar/popover.rs): every pin, live,
+//! A click opens the read-layer popover (`popover.rs`): every pin, live,
 //! with a button to go there and one to unpin, and a tuck that takes the
 //! floating pins away without unpinning anything. Everything is a button,
 //! so nothing needs a pointer to dwell (P8). The pictures stream only while

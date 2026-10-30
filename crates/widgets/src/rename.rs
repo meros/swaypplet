@@ -2,7 +2,7 @@
 //! (the row's title, or a whole pressable row) for an entry in its place. Enter commits the text
 //! (empty means "go back to the automatic name"), Escape leaves the name as
 //! it was. What committing does is the caller's: a stored name
-//! (`services::devices::rename`) or BlueZ's alias.
+//! (`swaypplet_devices::rename`) or BlueZ's alias.
 
 use std::rc::Rc;
 

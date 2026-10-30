@@ -8,7 +8,6 @@
 //! change here, and the capture rows by `screenshot/` at the moment of the
 //! shot.
 
-use std::cell::Cell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
@@ -73,28 +72,23 @@ struct State {
     after: gtk4::DropDown,
     annotate: gtk4::Switch,
     status: gtk4::Label,
-    updating: Cell<bool>,
+    guard: form::Sync,
 }
 
 impl State {
     fn edit_alerts(&self, f: impl FnOnce(&mut Alerts)) {
-        if self.updating.get() {
-            return;
-        }
-        store::edit(f);
-        self.sync();
+        self.guard.edit(f, || self.sync());
     }
 
     fn edit_capture(&self, f: impl FnOnce(&mut Capture)) {
-        if self.updating.get() {
-            return;
-        }
-        store::edit(f);
-        self.sync();
+        self.guard.edit(f, || self.sync());
     }
 
     fn sync(&self) {
-        self.updating.set(true);
+        self.guard.writing(|| self.draw());
+    }
+
+    fn draw(&self) {
         let settings = store::current();
         let alerts = settings.alerts();
         let capture = settings.capture();
@@ -131,7 +125,6 @@ impl State {
             settings.alerts.is_some() || settings.capture.is_some(),
             &describe(&alerts, &capture),
         );
-        self.updating.set(false);
     }
 }
 
@@ -264,22 +257,11 @@ impl AlertsPane {
         let reset = form::ResetButtons::new(
             "Put the system's choices back and drop the alerts and capture sections from the settings file.",
         );
-        let (footer, status) = form::footer(&[&reset.button, &reset.undo]);
-        let copy = form::copy_nix_button(
-            &status,
+        let (footer, status) = form::reset_footer(
+            &reset,
             "The alerts and capture sections as theme/settings.nix holds them.",
-            || {
-                let s = store::current();
-                Some(format!(
-                    "{}{}",
-                    s.section_as_nix("alerts")?,
-                    s.section_as_nix("capture")?
-                ))
-            },
+            &["alerts", "capture"],
         );
-        if let Some(row) = reset.button.parent().and_downcast::<gtk4::Box>() {
-            row.append(&copy);
-        }
 
         let state = Rc::new(State {
             linger: linger.clone(),
@@ -304,7 +286,7 @@ impl AlertsPane {
             after: after.clone(),
             annotate: annotate.clone(),
             status,
-            updating: Cell::new(false),
+            guard: form::Sync::default(),
         });
 
         {

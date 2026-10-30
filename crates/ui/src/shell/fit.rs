@@ -262,10 +262,16 @@ fn refresh_monitor_fit(
 /// screenful. Whatever this returns early is corrected by the `layout` hook
 /// in [`install_monitor_fit`] as soon as the real size arrives.
 fn usable_height(window: &gtk4::Window, monitor: &gtk4::gdk::Monitor) -> i32 {
-    let screen = monitor.geometry().height();
-    window
-        .surface()
-        .map(|surface| surface.height())
+    believed_height(
+        window.surface().map(|surface| surface.height()),
+        monitor.geometry().height(),
+    )
+}
+
+/// [`usable_height`]'s rule: the surface's `reported` height when it is at
+/// least half the `screen`, capped at the screen; else the screen.
+fn believed_height(reported: Option<i32>, screen: i32) -> i32 {
+    reported
         .filter(|height| height * 2 >= screen)
         .map_or(screen, |height| height.min(screen))
 }
@@ -354,12 +360,17 @@ fn fit_card(
     // A card that grows with its list is placed for the tallest it can grow
     // to, not for what it holds now, so its top edge (the launcher's search
     // field) stays put while the rows below come and go.
-    let tallest = match (ceiling, &fit.list) {
-        (Some(ceiling), Some(_)) => card_min.max(ceiling),
-        _ => card_min,
-    };
+    let grows_to = ceiling.filter(|_| fit.list.is_some());
+    top_spacer.set_height_request(top_offset(screen_height, room, card_min, grows_to));
+}
+
+/// How far down the card starts: a quarter of the screen, the sweet spot,
+/// unless the card would then run past `room`. A card that grows with its
+/// list to `grows_to` is placed for that height rather than for `card_min`.
+fn top_offset(screen_height: i32, room: i32, card_min: i32, grows_to: Option<i32>) -> i32 {
+    let tallest = grows_to.map_or(card_min, |ceiling| card_min.max(ceiling));
     let limit = (room - tallest).max(0);
-    top_spacer.set_height_request((screen_height / 4).min(limit));
+    (screen_height / 4).min(limit)
 }
 
 /// Cap `list` so the card around it grows to `ceiling` and no further.
@@ -376,4 +387,33 @@ fn cap_list(card: &gtk4::Widget, list: &gtk4::ScrolledWindow, width: i32, ceilin
     let list_height = list.measure(gtk4::Orientation::Vertical, -1).1;
     let around = card_height - list_height;
     list.set_max_content_height((ceiling - around).max(0));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_surface_is_believed_only_once_it_is_most_of_the_screen() {
+        // Before its first configure a surface reports 1 px: not believed.
+        assert_eq!(believed_height(Some(1), 1080), 1080);
+        assert_eq!(believed_height(None, 1080), 1080);
+        // The output minus a bar's exclusive zone is.
+        assert_eq!(believed_height(Some(1019), 1080), 1019);
+        assert_eq!(believed_height(Some(540), 1080), 540);
+        assert_eq!(believed_height(Some(539), 1080), 1080);
+        // The size the previous, larger output gave it is capped.
+        assert_eq!(believed_height(Some(1440), 1080), 1080);
+    }
+
+    #[test]
+    fn the_card_starts_a_quarter_down_unless_it_would_run_off() {
+        assert_eq!(top_offset(1080, 1000, 400, None), 270);
+        // Taller than three quarters: it starts higher, flush at worst.
+        assert_eq!(top_offset(1080, 1000, 900, None), 100);
+        assert_eq!(top_offset(1080, 1000, 1200, None), 0);
+        // A card that grows is placed for the height it grows to.
+        assert_eq!(top_offset(1080, 1000, 400, Some(850)), 150);
+        assert_eq!(top_offset(1080, 1000, 400, Some(300)), 270);
+    }
 }

@@ -2,8 +2,9 @@
 //! range, VPNs, Tailscale, saved networks and the wired adapters.
 //!
 //! One source of truth, [`Snapshot`], read whole from NetworkManager
-//! (`services::network::snapshot`) whenever it signals a change
-//! (`services::network::watch`), and only while the page is on screen.
+//! (`swaypplet_devices::network::snapshot`) whenever it signals a change
+//! (`swaypplet_devices::network::watch`), and only while the page is on
+//! screen.
 //! Nothing polls. Opening the page draws what NetworkManager already knows
 //! at once, then asks for a scan; the rows are kept per network and updated
 //! in place (`wifi.rs`), so a list that is being scanned does not jump, and
@@ -14,7 +15,7 @@
 //! password" opens the password field again, with the text still in it).
 //!
 //! `SWAYPPLET_NET_FIXTURE=<state>` draws a canned state instead
-//! (`services::network::fixture`) and makes every action a no-op, so the
+//! (`swaypplet_devices::network::fixture`) and makes every action a no-op, so the
 //! render harness can show "connecting" or "sign-in required" without
 //! touching the machine's network.
 
