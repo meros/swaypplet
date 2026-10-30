@@ -572,9 +572,7 @@ impl SettingsSection {
     /// List the index's hits for `query` in place of the panes; the panes
     /// again when it is empty.
     fn search_for(&self, query: &str) {
-        while let Some(child) = self.results.first_child() {
-            self.results.remove(&child);
-        }
+        swaypplet_ui::ui::clear_children(&self.results);
         self.hits.borrow_mut().clear();
         let searching = !query.is_empty();
         self.nav_scroller.set_visible(!searching);

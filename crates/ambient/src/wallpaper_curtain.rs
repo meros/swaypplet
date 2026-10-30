@@ -124,7 +124,7 @@ struct Inner {
     done: RefCell<Option<Box<dyn FnOnce()>>>,
     /// Lands the run if no frame clock does: an output that is off ticks
     /// nothing, and the worker must not wait on it.
-    guard: RefCell<Option<glib::SourceId>>,
+    guard: swaypplet_base::spawn::Timeout,
     /// The whole fade in ms, before `anim::duration`, which is applied per
     /// fade so a Motion change lands on the next one.
     full_ms: f64,
@@ -147,7 +147,7 @@ impl Curtain {
             run: Cell::new(Run::CLEAR),
             landed: Cell::new(true),
             done: RefCell::new(None),
-            guard: RefCell::new(None),
+            guard: swaypplet_base::spawn::Timeout::new(),
             full_ms,
         });
         let weak = Rc::downgrade(&inner);
@@ -197,9 +197,7 @@ impl Curtain {
 
 impl Inner {
     fn start(this: &Rc<Inner>, run: Run, now: i64, done: Box<dyn FnOnce()>) {
-        if let Some(id) = this.guard.borrow_mut().take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
+        this.guard.cancel();
         this.run.set(run);
         this.landed.set(false);
         // A run cut off by this one never finishes: its waiter is the
@@ -212,12 +210,11 @@ impl Inner {
         this.sheets.for_each(|sheet| this.show(sheet, now));
         let weak = Rc::downgrade(this);
         let after = Duration::from_micros(run.span.max(0) as u64) + Duration::from_millis(250);
-        *this.guard.borrow_mut() = Some(glib::timeout_add_local_once(after, move || {
+        this.guard.arm(after, move || {
             if let Some(inner) = weak.upgrade() {
-                inner.guard.borrow_mut().take();
                 inner.land();
             }
-        }));
+        });
     }
 
     /// Map `sheet` at the level of `now` and keep it following the run.
@@ -255,9 +252,7 @@ impl Inner {
         if self.landed.replace(true) {
             return;
         }
-        if let Some(id) = self.guard.borrow_mut().take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
+        self.guard.cancel();
         let to = self.run.get().to;
         log::debug!("curtain: at {to}");
         self.sheets.for_each(|sheet| {

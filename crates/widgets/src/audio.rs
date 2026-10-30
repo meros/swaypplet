@@ -188,9 +188,7 @@ impl DevicePicker {
         let ids: Vec<String> = devices.iter().map(|d| d.id.clone()).collect();
         let mut rows = self.rows.borrow_mut();
         if *self.order.borrow() != ids {
-            while let Some(child) = self.container.first_child() {
-                self.container.remove(&child);
-            }
+            ui::clear_children(&self.container);
             rows.retain(|id, _| ids.contains(id));
             for d in devices {
                 let (line, _, _) = rows.entry(d.id.clone()).or_insert_with(|| {
@@ -394,7 +392,7 @@ struct Widgets {
     meter_btn: gtk4::Button,
     meter: gtk4::ProgressBar,
     metering: Cell<bool>,
-    meter_timer: RefCell<Option<glib::SourceId>>,
+    meter_timer: swaypplet_base::spawn::Timeout,
 }
 
 pub struct AudioSection {
@@ -505,7 +503,7 @@ impl AudioSection {
             meter_btn,
             meter,
             metering: Cell::new(false),
-            meter_timer: RefCell::new(None),
+            meter_timer: swaypplet_base::spawn::Timeout::new(),
         });
 
         let section = AudioSection {
@@ -658,9 +656,7 @@ impl AudioSection {
                 .collect::<Vec<_>>()
                 == names;
         if !same {
-            while let Some(child) = w.profile_box.first_child() {
-                w.profile_box.remove(&child);
-            }
+            ui::clear_children(&w.profile_box);
             let mut chips = Vec::new();
             for p in &usable {
                 let label = profile_label(&p.name, &p.description);
@@ -689,9 +685,7 @@ impl AudioSection {
         w.apps_head.set_visible(!streams.is_empty());
         let mut rows = w.app_rows.borrow_mut();
         if *w.app_order.borrow() != order {
-            while let Some(child) = w.apps.first_child() {
-                w.apps.remove(&child);
-            }
+            ui::clear_children(&w.apps);
             rows.retain(|index, _| order.contains(index));
             for stream in streams {
                 let row = rows
@@ -761,16 +755,13 @@ fn set_meter(w: &Rc<Widgets>, audio: &Rc<AudioService>, on: bool) {
     w.meter.set_fraction(0.0);
     w.meter_btn
         .set_label(if on { "Stop test" } else { "Test microphone" });
-    if let Some(id) = w.meter_timer.borrow_mut().take() {
-        id.remove();
-    }
+    w.meter_timer.cancel();
     if on {
         let (w2, audio) = (w.clone(), audio.clone());
-        let id = glib::timeout_add_seconds_local_once(METER_SECONDS, move || {
-            w2.meter_timer.borrow_mut().take();
-            set_meter(&w2, &audio, false);
-        });
-        *w.meter_timer.borrow_mut() = Some(id);
+        w.meter_timer.arm(
+            std::time::Duration::from_secs(METER_SECONDS.into()),
+            move || set_meter(&w2, &audio, false),
+        );
     }
 }
 

@@ -160,9 +160,7 @@ impl Saved {
             return;
         }
         *self.shown.borrow_mut() = saved.to_vec();
-        while let Some(c) = self.list.first_child() {
-            self.list.remove(&c);
-        }
+        ui::clear_children(&self.list);
         self.disclosure.root.set_visible(!saved.is_empty());
         for s in saved {
             let sub = if s.ssid != s.id {

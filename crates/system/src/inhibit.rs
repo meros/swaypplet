@@ -40,7 +40,7 @@
 //! This module provides the ACTIONS ([`Inhibitor::arm`]) and the readings
 //! ([`Inhibitor::read`], [`Inhibitor::armed`], [`idle_inhibited`]). It holds
 //! no policy: what to do when one is armed is the idle manager's business
-//! (idle/mod.rs), and how to draw an armed inhibitor is the widgets'
+//! (crates/idle/src/lib.rs), and how to draw an armed inhibitor is the widgets'
 //! (widgets/tiles.rs, bar/hazards.rs). The in-process [`Observed`] cells
 //! below are a cache of established readings for the GTK side, never a second
 //! source of truth.
@@ -251,9 +251,8 @@ thread_local! {
 /// inhibitor units (the laptop-companion BLE agent does, on a phone switch):
 /// `$XDG_RUNTIME_DIR/swaypplet/inhibit-changed`. Its content is irrelevant;
 /// only that it was created or rewritten.
-pub fn signal_path(runtime_dir: Option<std::ffi::OsString>) -> Option<std::path::PathBuf> {
-    let dir = std::path::PathBuf::from(runtime_dir.filter(|d| !d.is_empty())?);
-    Some(dir.join("swaypplet").join("inhibit-changed"))
+pub fn signal_path(runtime_dir: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    Some(runtime_dir?.join("swaypplet").join("inhibit-changed"))
 }
 
 /// Re-read every inhibitor on a worker and publish, so the bar and the
@@ -283,7 +282,7 @@ pub fn watch_external() {
     if EXTERNAL.with(|e| e.borrow().is_some()) {
         return;
     }
-    let Some(path) = signal_path(std::env::var_os("XDG_RUNTIME_DIR")) else {
+    let Some(path) = signal_path(swaypplet_base::paths::runtime_dir()) else {
         log::warn!("inhibit: no XDG_RUNTIME_DIR, not following outside changes");
         return;
     };
@@ -424,7 +423,6 @@ mod tests {
             Some("/run/user/1000/swaypplet/inhibit-changed".into())
         );
         assert_eq!(signal_path(None), None);
-        assert_eq!(signal_path(Some("".into())), None);
     }
 
     #[test]

@@ -232,9 +232,7 @@ impl View {
 
     fn clear(&mut self) {
         self.feed = None;
-        while let Some(child) = self.holder.first_child() {
-            self.holder.remove(&child);
-        }
+        swaypplet_ui::ui::clear_children(&self.holder);
         *self.live.borrow_mut() = Live::default();
         self.shown = Shown::Nothing;
     }

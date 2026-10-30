@@ -364,14 +364,12 @@ impl LauncherView {
         let entry = self.entry.clone();
         let on_activate = self.on_activate.clone();
 
-        let debounce_id: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+        let debounce = Rc::new(swaypplet_base::spawn::Timeout::new());
 
         entry.connect_search_changed(move |entry| {
             let query = entry.text().to_string();
 
-            if let Some(id) = debounce_id.borrow_mut().take() {
-                swaypplet_base::spawn::remove_source(id);
-            }
+            debounce.cancel();
 
             // This frame: the local rows, and the last answer narrowed to
             // what still matches.
@@ -393,23 +391,17 @@ impl LauncherView {
 
             let generation = bump_generation(&state_c);
 
-            let debounce_id_c = debounce_id.clone();
-            let id = glib::timeout_add_local_once(
-                std::time::Duration::from_millis(DEBOUNCE_MS),
-                move || {
-                    *debounce_id_c.borrow_mut() = None;
-                    run_search(
-                        query,
-                        generation,
-                        state_c,
-                        results_box_c,
-                        scroller_c,
-                        on_activate_c,
-                        entry_c,
-                    );
-                },
-            );
-            *debounce_id.borrow_mut() = Some(id);
+            debounce.arm(std::time::Duration::from_millis(DEBOUNCE_MS), move || {
+                run_search(
+                    query,
+                    generation,
+                    state_c,
+                    results_box_c,
+                    scroller_c,
+                    on_activate_c,
+                    entry_c,
+                );
+            });
         });
     }
 }
@@ -856,9 +848,7 @@ fn activate_async(provider: String, identifier: String, action: String, query: S
 }
 
 fn clear_results_box(results_box: &gtk4::Box) {
-    while let Some(child) = results_box.first_child() {
-        results_box.remove(&child);
-    }
+    swaypplet_ui::ui::clear_children(&results_box);
 }
 
 #[allow(clippy::too_many_arguments)]

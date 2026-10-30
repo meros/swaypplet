@@ -4,7 +4,7 @@
 //! are the service, `swaypplet_system::wallpaper`, whose docs say how the
 //! pieces fit.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::store::{Wallpaper, WallpaperMode};
 
@@ -98,7 +98,7 @@ pub fn parse_bg(config: &str) -> Option<Wallpaper> {
         if rest.first().map(String::as_str) != Some("bg") {
             continue;
         }
-        let path = expand_home(rest.get(1)?);
+        let path = swaypplet_base::paths::expand_home(rest.get(1)?);
         let mode = rest
             .get(2)
             .and_then(|m| WallpaperMode::parse(m))
@@ -134,17 +134,10 @@ fn split_words(line: &str) -> Vec<String> {
     words
 }
 
-fn expand_home(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~/")
-        && let Some(home) = std::env::var_os("HOME")
-    {
-        return PathBuf::from(home).join(rest);
-    }
-    PathBuf::from(path)
-}
-
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     #[test]

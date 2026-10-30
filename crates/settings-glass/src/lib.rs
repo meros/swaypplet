@@ -26,9 +26,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use gtk4::glib;
 use gtk4::prelude::*;
 
+use swaypplet_base::spawn::Timeout;
 use swaypplet_settings_kit::{
     form,
     form::{kind_row, pretty_path, section_box},
@@ -184,8 +184,8 @@ struct State {
     /// Up while `sync` is driving the widgets, so their change handlers do
     /// not treat a programmatic write as an edit and push it straight back.
     guard: form::Sync,
-    apply_timer: RefCell<Option<glib::SourceId>>,
-    save_timer: RefCell<Option<glib::SourceId>>,
+    apply_timer: Timeout,
+    save_timer: Timeout,
     status: gtk4::Label,
     undo_btn: gtk4::Button,
 }
@@ -239,9 +239,7 @@ impl State {
             // Reset is the one path that removes the file rather than writing
             // one. A pending save from the edits being discarded would put it
             // straight back, so it has to be cancelled, not just skipped.
-            if let Some(id) = self.save_timer.replace(None) {
-                swaypplet_base::spawn::remove_source(id);
-            }
+            self.save_timer.cancel();
             glass::clear_override();
         }
         self.set_status(modified);
@@ -257,14 +255,10 @@ impl State {
     }
 
     fn schedule_apply(self: &Rc<Self>) {
-        if let Some(id) = self.apply_timer.replace(None) {
-            swaypplet_base::spawn::remove_source(id);
-        }
         let this = self.clone();
-        let id = glib::timeout_add_local_once(
+        self.apply_timer.arm(
             std::time::Duration::from_millis(APPLY_DEBOUNCE_MS),
             move || {
-                this.apply_timer.replace(None);
                 // Through the mode, like every other path to the
                 // compositor: the raw tuning carries the dark material.
                 let tuning =
@@ -272,22 +266,14 @@ impl State {
                 this.system.apply(&tuning);
             },
         );
-        self.apply_timer.replace(Some(id));
     }
 
     fn schedule_save(self: &Rc<Self>) {
-        if let Some(id) = self.save_timer.replace(None) {
-            swaypplet_base::spawn::remove_source(id);
-        }
         let this = self.clone();
-        let id = glib::timeout_add_local_once(
+        self.save_timer.arm(
             std::time::Duration::from_millis(SAVE_DEBOUNCE_MS),
-            move || {
-                this.save_timer.replace(None);
-                glass::save_override(&this.tuning.borrow());
-            },
+            move || glass::save_override(&this.tuning.borrow()),
         );
-        self.save_timer.replace(Some(id));
     }
 
     fn set_status(&self, modified: bool) {
@@ -342,8 +328,8 @@ impl GlassPane {
             history: RefCell::new(Vec::new()),
             sync: RefCell::new(Vec::new()),
             guard: form::Sync::default(),
-            apply_timer: RefCell::new(None),
-            save_timer: RefCell::new(None),
+            apply_timer: Timeout::new(),
+            save_timer: Timeout::new(),
             status: status.clone(),
             undo_btn: undo_btn.clone(),
         });

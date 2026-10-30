@@ -70,13 +70,10 @@ pub fn tone(f: &Fix) -> ui::Status {
 
 /// "3 min ago", "5 h ago", "2 d ago" from two Unix times.
 pub fn age(now: i64, then: i64) -> String {
-    let s = (now - then).max(0);
-    match s {
-        0..60 => "just now".into(),
-        60..3600 => format!("{} min ago", s / 60),
-        3600..86_400 => format!("{} h ago", s / 3600),
-        _ => format!("{} d ago", s / 86_400),
-    }
+    swaypplet_base::fmt::ago(
+        (now - then).max(0) as u64,
+        swaypplet_base::fmt::Ago::Floored,
+    )
 }
 
 /// The deploy log's last line, and the exit code once the runner wrote it.
@@ -121,9 +118,9 @@ struct State {
     deploy_bar: gtk4::ProgressBar,
     last_fetch: Cell<Option<Instant>>,
     fetching: Cell<bool>,
-    poll: RefCell<Option<glib::SourceId>>,
-    tick: RefCell<Option<glib::SourceId>>,
-    follow: RefCell<Option<glib::SourceId>>,
+    poll: swaypplet_base::spawn::Timeout,
+    tick: swaypplet_base::spawn::Timeout,
+    follow: swaypplet_base::spawn::Timeout,
     deploying: Cell<bool>,
     /// Whether every program a job needs was found at the last fetch.
     tools_ok: Cell<bool>,
@@ -182,9 +179,9 @@ impl QualityPane {
             deploy_bar,
             last_fetch: Cell::new(None),
             fetching: Cell::new(false),
-            poll: RefCell::new(None),
-            tick: RefCell::new(None),
-            follow: RefCell::new(None),
+            poll: swaypplet_base::spawn::Timeout::new(),
+            tick: swaypplet_base::spawn::Timeout::new(),
+            follow: swaypplet_base::spawn::Timeout::new(),
             deploying: Cell::new(false),
             tools_ok: Cell::new(true),
         });
@@ -220,21 +217,15 @@ impl QualityPane {
                     fetch_now(&state);
                 }
                 let s = state.clone();
-                let id = glib::timeout_add_local(POLL, move || {
+                state.poll.every(POLL, move || {
                     fetch_now(&s);
                     glib::ControlFlow::Continue
                 });
-                if let Some(old) = state.poll.replace(Some(id)) {
-                    swaypplet_base::spawn::remove_source(old);
-                }
                 let s = state.clone();
-                let id = glib::timeout_add_local(TICK, move || {
+                state.tick.every(TICK, move || {
                     tick(&s);
                     glib::ControlFlow::Continue
                 });
-                if let Some(old) = state.tick.replace(Some(id)) {
-                    swaypplet_base::spawn::remove_source(old);
-                }
                 follow_deploy(&state);
             });
         }
@@ -242,9 +233,7 @@ impl QualityPane {
             let state = state.clone();
             root.connect_unmap(move |_| {
                 for slot in [&state.poll, &state.tick, &state.follow] {
-                    if let Some(id) = slot.take() {
-                        swaypplet_base::spawn::remove_source(id);
-                    }
+                    slot.cancel();
                 }
             });
         }
@@ -311,9 +300,7 @@ fn fetch_now(state: &Rc<State>) {
 }
 
 fn fill(state: &Rc<State>, issues: Vec<Issue>, prs: &[Pr]) {
-    while let Some(child) = state.list.first_child() {
-        state.list.remove(&child);
-    }
+    ui::clear_children(&state.list);
     state.entries.borrow_mut().clear();
     // Checked here rather than by a job that would fail at its first step.
     let missing = autofix::missing_tools();
@@ -389,7 +376,10 @@ fn entry_widget(issue: Issue, pr: Option<Pr>, now: i64) -> (gtk4::Box, Rc<Entry>
     if !labels.is_empty() {
         facts.push(labels.join(", "));
     }
-    facts.push(age(now, created));
+    facts.push(swaypplet_base::fmt::ago(
+        now.saturating_sub(created).max(0) as u64,
+        swaypplet_base::fmt::Ago::Floored,
+    ));
     if let Some(pr) = &pr {
         facts.push(format!("PR #{}", pr.number));
     }
@@ -449,9 +439,7 @@ fn caption(text: &str, tone: Tone) -> gtk4::Label {
 
 fn build_detail(state: &Rc<State>, entry: &Rc<Entry>, fix: &Fix, job: Option<&Job>) {
     let d = &entry.detail;
-    while let Some(child) = d.first_child() {
-        d.remove(&child);
-    }
+    ui::clear_children(&d);
     entry.phase.replace(None);
     entry.log.replace(None);
     let n = entry.issue.number;
@@ -753,7 +741,6 @@ fn follow_deploy(state: &Rc<State>) {
                     ));
                     ui::set_progress_status(&s.deploy_bar, Some(ui::Status::Danger));
                 }
-                s.follow.replace(None);
                 if s.deploying.get() {
                     set_deploying(&s, false);
                 }
@@ -764,10 +751,7 @@ fn follow_deploy(state: &Rc<State>) {
     if tick() == glib::ControlFlow::Break {
         return;
     }
-    let id = glib::timeout_add_local(Duration::from_secs(1), tick);
-    if let Some(old) = state.follow.replace(Some(id)) {
-        swaypplet_base::spawn::remove_source(old);
-    }
+    state.follow.every(Duration::from_secs(1), tick);
 }
 
 /// The tab in the settings search (`search.rs`): its groups, which have no

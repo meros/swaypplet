@@ -49,14 +49,7 @@ struct Response {
 /// the same path would unlink the live panel's socket and answer its
 /// clients. One panel per compositor, one socket per panel.
 fn socket_path() -> PathBuf {
-    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    let display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "default".into());
-    // WAYLAND_DISPLAY may be an absolute path; only the leaf names the socket.
-    let display = std::path::Path::new(&display)
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "default".into());
-    std::path::Path::new(&dir).join(format!("swaypplet-dmenu-{display}.sock"))
+    swaypplet_base::paths::per_display_file("swaypplet-dmenu", "sock", "default")
 }
 
 pub fn run(mut args: impl Iterator<Item = String>) {
@@ -433,9 +426,7 @@ impl Picker {
         let mut s = self.state.borrow_mut();
         s.filter(query);
 
-        while let Some(child) = self.results_box.first_child() {
-            self.results_box.remove(&child);
-        }
+        swaypplet_ui::ui::clear_children(&self.results_box);
         // Nothing matched: say so, and name what Enter will do — the raw
         // query is the reply in that case, which the empty list alone hides.
         if s.visible.is_empty() {

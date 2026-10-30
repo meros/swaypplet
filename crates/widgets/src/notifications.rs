@@ -245,7 +245,13 @@ fn build_entry(
 
     // The time sits after the summary, in the row's metadata tone.
     let time_label = ui::text(
-        &format_relative_time(notif.timestamp),
+        &swaypplet_base::fmt::ago(
+            SystemTime::now()
+                .duration_since(notif.timestamp)
+                .unwrap_or_default()
+                .as_secs(),
+            swaypplet_base::fmt::Ago::Short,
+        ),
         ui::Text::Caption,
         ui::Tone::Faint,
     );
@@ -349,22 +355,5 @@ fn go_to_source(
     let hide = on_activate.borrow().clone();
     if let Some(hide) = hide {
         hide();
-    }
-}
-
-fn format_relative_time(timestamp: SystemTime) -> String {
-    let elapsed = SystemTime::now()
-        .duration_since(timestamp)
-        .unwrap_or_default();
-
-    let secs = elapsed.as_secs();
-    if secs < 60 {
-        "just now".to_string()
-    } else if secs < 3600 {
-        format!("{}m ago", secs / 60)
-    } else if secs < 86400 {
-        format!("{}h ago", secs / 3600)
-    } else {
-        format!("{}d ago", secs / 86400)
     }
 }

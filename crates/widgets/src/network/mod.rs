@@ -126,7 +126,7 @@ struct Inner {
     watch: RefCell<Option<watch::Watch>>,
     reading: Cell<bool>,
     reread: Cell<bool>,
-    settle: RefCell<Option<glib::SourceId>>,
+    settle: swaypplet_base::spawn::Timeout,
 }
 
 #[derive(Clone)]
@@ -332,7 +332,7 @@ impl NetworkSection {
                 watch: RefCell::default(),
                 reading: Cell::new(false),
                 reread: Cell::new(false),
-                settle: RefCell::default(),
+                settle: swaypplet_base::spawn::Timeout::new(),
             }
         });
         let this = NetworkSection(inner);
@@ -495,17 +495,14 @@ impl NetworkSection {
     /// A change signal: reread once the burst is over.
     fn changed(&self) {
         let i = &self.0;
-        if i.settle.borrow().is_some() {
+        if i.settle.is_armed() {
             return;
         }
         let s = self.clone();
-        *i.settle.borrow_mut() = Some(glib::timeout_add_local_once(
-            std::time::Duration::from_millis(SETTLE_MS),
-            move || {
-                s.0.settle.borrow_mut().take();
-                s.refresh();
-            },
-        ));
+        i.settle
+            .arm(std::time::Duration::from_millis(SETTLE_MS), move || {
+                s.refresh()
+            });
     }
 
     /// Read the whole state and draw it. One read at a time; a request
@@ -846,9 +843,7 @@ impl NetworkSection {
         c.portal
             .set_visible(matches!(s.connectivity, ConnectivityState::Portal));
 
-        while let Some(ch) = c.lines.first_child() {
-            c.lines.remove(&ch);
-        }
+        ui::clear_children(&c.lines);
         if let Some(d) = &s.details {
             let add = |k: &str, v: &str| {
                 let l = ui::text(&format!("{k:<9} {v}"), ui::Text::Caption, ui::Tone::Muted);

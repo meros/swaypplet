@@ -49,9 +49,7 @@ impl VpnList {
             rows.len() == vpns.len() && rows.iter().zip(vpns).all(|((n, ..), v)| *n == v.name)
         };
         if !same {
-            while let Some(c) = self.list.first_child() {
-                self.list.remove(&c);
-            }
+            ui::clear_children(&self.list);
             let mut rows = self.rows.borrow_mut();
             rows.clear();
             for v in vpns {

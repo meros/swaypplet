@@ -18,11 +18,12 @@
 //! TaskStateService change while open — no timer of its own.
 
 use std::rc::Rc;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use gtk4::prelude::*;
 
 use super::board::session_age;
+use swaypplet_base::fmt::{Hm, hm};
 use swaypplet_base::spawn::spawn_work;
 use swaypplet_base::sway::ipc;
 use swaypplet_base::sway::workspace::switch_command;
@@ -95,9 +96,7 @@ impl TaskPopover {
 
     fn render(&self, task: &TaskState, skew: Option<SystemTime>) {
         let body = &self.inner.body;
-        while let Some(child) = body.first_child() {
-            body.remove(&child);
-        }
+        ui::clear_children(&body);
 
         let title = match &task.manual {
             Some(manual) => format!("TASK {} · {manual}", self.inner.n),
@@ -241,25 +240,14 @@ fn age_text(s: &SessionState, now: SystemTime, skew: Option<SystemTime>) -> Stri
     format!(
         "{}{}",
         if approx { "~" } else { "" },
-        fmt_age(session_age(s, now))
+        hm(session_age(s, now).as_secs(), Hm::Compact)
     )
-}
-
-/// Minute-floor prose age ("<1m", "12m", "1h 5m") — the bay chip keeps
-/// its terser form (board.rs).
-fn fmt_age(age: Duration) -> String {
-    let mins = age.as_secs() / 60;
-    match mins {
-        0 => "<1m".into(),
-        m if m < 60 => format!("{m}m"),
-        m if m % 60 == 0 => format!("{}h", m / 60),
-        m => format!("{}h {}m", m / 60, m % 60),
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     use swaypplet_system::task_state::Progress;
 
     fn session(activity: Activity, age: Option<Duration>, now: SystemTime) -> SessionState {
@@ -272,15 +260,6 @@ mod tests {
             status_mtime: age.map(|a| now - a),
             acked: false,
         }
-    }
-
-    #[test]
-    fn ages_format_as_prose() {
-        assert_eq!(fmt_age(Duration::ZERO), "<1m");
-        assert_eq!(fmt_age(Duration::from_secs(59)), "<1m");
-        assert_eq!(fmt_age(Duration::from_secs(12 * 60)), "12m");
-        assert_eq!(fmt_age(Duration::from_secs(65 * 60)), "1h 5m");
-        assert_eq!(fmt_age(Duration::from_secs(9 * 3600)), "9h");
     }
 
     #[test]

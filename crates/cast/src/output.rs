@@ -204,7 +204,7 @@ fn current_socket() -> Option<String> {
 }
 
 fn record_path() -> Option<PathBuf> {
-    std::env::var_os("XDG_RUNTIME_DIR").map(|d| PathBuf::from(d).join("swaypplet/cast-output"))
+    swaypplet_base::paths::runtime_dir().map(|d| d.join("swaypplet/cast-output"))
 }
 
 fn record(name: &str) {

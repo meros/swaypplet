@@ -113,9 +113,7 @@ fn draw(
     ui::set_status(verdict, status(tier));
     verdict.set_label(&format!("{} {}", tier.icon(), label(tier)));
 
-    while let Some(child) = rows.first_child() {
-        rows.remove(&child);
-    }
+    ui::clear_children(&rows);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -129,8 +127,8 @@ fn draw(
             target.set_visible(true);
             target.set_label(&format!(
                 "meros-server   {} used · {} free",
-                backup::bytes(job.repo_bytes),
-                backup::bytes(job.target_avail_bytes)
+                swaypplet_base::fmt::bytes(job.repo_bytes),
+                swaypplet_base::fmt::bytes(job.target_avail_bytes)
             ));
         }
         _ => target.set_visible(false),

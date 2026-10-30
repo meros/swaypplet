@@ -167,7 +167,7 @@ impl std::fmt::Debug for Link {
 }
 
 fn socket_path() -> Option<PathBuf> {
-    std::env::var_os("XDG_RUNTIME_DIR").map(|d| PathBuf::from(d).join(SOCKET_NAME))
+    swaypplet_base::paths::runtime_dir().map(|d| d.join(SOCKET_NAME))
 }
 
 /// The uid on the other end, or `None` when the kernel will not say.

@@ -118,11 +118,9 @@ fn runner_state() -> PathBuf {
     std::env::var_os("AUTOFIX_STATE")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            let base = std::env::var_os("XDG_STATE_HOME")
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from)
-                .unwrap_or_else(|| Path::new(&super::home()).join(".local/state"));
-            base.join("swaypplet-autofix")
+            swaypplet_base::paths::state_dir()
+                .unwrap_or_else(|| PathBuf::from(".local/state"))
+                .join("swaypplet-autofix")
         })
 }
 

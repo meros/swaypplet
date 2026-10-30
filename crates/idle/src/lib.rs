@@ -103,6 +103,7 @@ use swaypplet_model::{
     store,
     store::{Idle, Settings},
 };
+use swaypplet_system::power::{POWER_SUPPLY, Supplies};
 use swaypplet_system::{presence, presence::Event as PresenceEvent};
 
 pub use wayland::Timeout;
@@ -155,10 +156,7 @@ const SLEEP_RELEASE_MAX: Duration = Duration::from_secs(4);
 /// The instant the next minute of the day starts, when the night window may
 /// open or close. The settings file itself arrives as an event.
 fn next_minute() -> Instant {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0.0, |d| d.as_secs_f64());
-    Instant::now() + Duration::from_secs_f64(60.0 - secs % 60.0 + 0.05)
+    Instant::now() + swaypplet_base::time::until_next_minute(swaypplet_base::time::now())
 }
 
 /// When the locked, idle session's outputs should go off, counted from now.
@@ -759,31 +757,20 @@ pub(crate) fn run_cmd_timed(scope: &str, cmd: &str, args: &[&str], waited: Durat
     }
 }
 
-/// True when the machine has a battery and nothing is charging it: a
-/// `Battery` supply exists and no supply reports online=1.
-///
-/// Deliberately not `!on_ac()`, which reads a machine with no supply at all
-/// (a desktop) as off AC. The battery screen-off tier must not reach a
-/// machine that has no battery.
+/// True when the machine has a battery and nothing is charging it. The
+/// battery screen-off tier must not reach a machine that has no battery
+/// (`Supplies::on_battery`).
 fn on_battery() -> bool {
-    let Ok(entries) = std::fs::read_dir("/sys/class/power_supply") else {
-        return false;
-    };
-    let read = |e: &std::fs::DirEntry, file: &str| {
-        std::fs::read_to_string(e.path().join(file)).unwrap_or_default()
-    };
-    let entries: Vec<_> = entries.flatten().collect();
-    entries.iter().any(|e| read(e, "type").trim() == "Battery")
-        && !entries.iter().any(|e| read(e, "online").trim() == "1")
+    supplies().on_battery()
 }
 
 /// True when any power supply reports online=1 (AC adapter present).
 /// Mirrors the old `grep -q 1 /sys/class/power_supply/*/online`.
 fn on_ac() -> bool {
-    let Ok(entries) = std::fs::read_dir("/sys/class/power_supply") else {
-        return false;
-    };
-    entries
-        .flatten()
-        .any(|e| std::fs::read_to_string(e.path().join("online")).is_ok_and(|s| s.trim() == "1"))
+    supplies().on_ac()
+}
+
+/// The supplies now; none when the directory cannot be read.
+fn supplies() -> Supplies {
+    Supplies::scan(std::path::Path::new(POWER_SUPPLY)).unwrap_or_default()
 }

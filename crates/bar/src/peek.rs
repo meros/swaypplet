@@ -22,6 +22,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 
 use super::popover;
+use swaypplet_base::spawn::Timeout;
 use swaypplet_jump::jump::pin;
 use swaypplet_jump::jump::{
     view,
@@ -36,9 +37,9 @@ const GRACE_MS: u64 = 250;
 #[derive(Default)]
 struct Peek {
     /// The hover delay, before the peek opens.
-    opening: Option<glib::SourceId>,
+    opening: Timeout,
     /// The grace, before it closes.
-    closing: Option<glib::SourceId>,
+    closing: Timeout,
     popover: Option<gtk4::Popover>,
     view: Option<View>,
     /// Bumped on every close, so a tree read that lands after the pointer
@@ -60,7 +61,7 @@ pub fn attach(button: &gtk4::Button, workspace: String, on_screen: Rc<dyn Fn(&st
         motion.connect_enter(move |_, _, _| {
             cancel_close(&state);
             // Back from the card, or never gone: the peek is still up.
-            if state.borrow().popover.is_some() || state.borrow().opening.is_some() {
+            if state.borrow().popover.is_some() || state.borrow().opening.is_armed() {
                 return;
             }
             if on_screen(&workspace) {
@@ -69,22 +70,20 @@ pub fn attach(button: &gtk4::Button, workspace: String, on_screen: Rc<dyn Fn(&st
             let state_c = state.clone();
             let button_w = button_w.clone();
             let workspace = workspace.clone();
-            let id = glib::timeout_add_local_once(Duration::from_millis(HOVER_MS), move || {
-                state_c.borrow_mut().opening = None;
-                if let Some(button) = button_w.upgrade() {
-                    open(&state_c, &button, workspace);
-                }
-            });
-            state.borrow_mut().opening = Some(id);
+            state
+                .borrow()
+                .opening
+                .arm(Duration::from_millis(HOVER_MS), move || {
+                    if let Some(button) = button_w.upgrade() {
+                        open(&state_c, &button, workspace);
+                    }
+                });
         });
     }
     {
         let state = state.clone();
         motion.connect_leave(move |_| {
-            let opening = state.borrow_mut().opening.take();
-            if let Some(id) = opening {
-                swaypplet_base::spawn::remove_source(id);
-            }
+            state.borrow().opening.cancel();
             close_soon(&state);
         });
     }
@@ -196,10 +195,7 @@ fn show(
 }
 
 fn cancel_close(state: &State) {
-    let closing = state.borrow_mut().closing.take();
-    if let Some(id) = closing {
-        swaypplet_base::spawn::remove_source(id);
-    }
+    state.borrow().closing.cancel();
 }
 
 /// Close after the grace, unless the pointer comes back first.
@@ -209,11 +205,10 @@ fn close_soon(state: &State) {
         return;
     }
     let state_c = state.clone();
-    let id = glib::timeout_add_local_once(Duration::from_millis(GRACE_MS), move || {
-        state_c.borrow_mut().closing = None;
-        close(&state_c);
-    });
-    state.borrow_mut().closing = Some(id);
+    state
+        .borrow()
+        .closing
+        .arm(Duration::from_millis(GRACE_MS), move || close(&state_c));
 }
 
 fn close(state: &State) {
@@ -221,9 +216,7 @@ fn close(state: &State) {
     let (popover, view) = {
         let mut st = state.borrow_mut();
         st.generation += 1;
-        if let Some(id) = st.opening.take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
+        st.opening.cancel();
         (st.popover.take(), st.view.take())
     };
     // The capture before the card it draws into.

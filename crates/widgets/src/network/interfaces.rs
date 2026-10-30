@@ -75,9 +75,7 @@ impl Adapters {
             return;
         }
         *self.shown.borrow_mut() = now;
-        while let Some(c) = self.list.first_child() {
-            self.list.remove(&c);
-        }
+        ui::clear_children(&self.list);
         self.syncing.set(true);
         for iface in interfaces {
             let name = display_name(&iface.label, iface.mac.as_deref());

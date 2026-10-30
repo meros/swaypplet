@@ -15,7 +15,6 @@
 //! Bursts (a save is a create, a write and a rename) collapse into one call
 //! after [`SETTLE`], so a reader never reloads a half-written file twice.
 
-use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
@@ -45,7 +44,7 @@ pub fn files_within(
     on_change: impl Fn() + 'static,
 ) -> Monitors {
     let on_change: Rc<dyn Fn()> = Rc::new(on_change);
-    let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::default();
+    let pending: Rc<crate::spawn::Timeout> = Rc::default();
     let mut monitors = Vec::new();
     for path in files {
         let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
@@ -65,15 +64,8 @@ pub fn files_within(
             if !named(file) && !other.is_some_and(named) {
                 return;
             }
-            if let Some(id) = pending.borrow_mut().take() {
-                id.remove();
-            }
             let on_change = on_change.clone();
-            let slot = pending.clone();
-            *pending.borrow_mut() = Some(glib::timeout_add_local_once(settle, move || {
-                slot.borrow_mut().take();
-                on_change();
-            }));
+            pending.arm(settle, move || on_change());
         });
         monitors.push(monitor);
     }

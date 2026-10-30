@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+swaypplet-base.workspace = true
 swaypplet-ui.workspace = true
 gtk4.workspace = true
 gtk4-layer-shell.workspace = true

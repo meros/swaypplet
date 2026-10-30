@@ -545,7 +545,7 @@ pub struct Keybinds {
     /// The hold has lasted long enough to mean "show me", as opposed to
     /// being the leading edge of `⌘ b`.
     held: Rc<Cell<bool>>,
-    hold_timer: Rc<RefCell<Option<glib::SourceId>>>,
+    hold_timer: Rc<swaypplet_base::spawn::Timeout>,
     fetching: Rc<Cell<bool>>,
     rows: Rc<RefCell<Sheet>>,
 }
@@ -573,7 +573,7 @@ impl Keybinds {
             loaded: Rc::new(Cell::new(false)),
             pending_show: Rc::new(Cell::new(false)),
             held: Rc::new(Cell::new(false)),
-            hold_timer: Rc::new(RefCell::new(None)),
+            hold_timer: Rc::default(),
             fetching: Rc::new(Cell::new(false)),
             rows: Rc::new(RefCell::new(Vec::new())),
         });
@@ -610,17 +610,15 @@ impl Keybinds {
     pub fn show(self: &Rc<Self>) {
         self.pending_show.set(true);
 
-        if !self.held.get() && self.hold_timer.borrow().is_none() {
+        if !self.held.get() && !self.hold_timer.is_armed() {
             let this = self.clone();
-            let id = glib::timeout_add_local_once(
+            self.hold_timer.arm(
                 std::time::Duration::from_millis(u64::from(HOLD_MS)),
                 move || {
-                    this.hold_timer.replace(None);
                     this.held.set(true);
                     this.try_reveal();
                 },
             );
-            self.hold_timer.replace(Some(id));
         }
 
         if self.loaded.get() || self.fetching.replace(true) {
@@ -654,9 +652,7 @@ impl Keybinds {
     pub fn hide(&self) {
         self.pending_show.set(false);
         self.held.set(false);
-        if let Some(id) = self.hold_timer.replace(None) {
-            swaypplet_base::spawn::remove_source(id);
-        }
+        self.hold_timer.cancel();
         self.shown.set(false);
         self.cards.for_each(|card| card.surface.hide());
     }
@@ -704,9 +700,7 @@ fn build_card(app: &gtk4::Application, monitor: &gdk::Monitor) -> Card {
 
 /// Print the sheet into one card's body, replacing what was there.
 fn fill(body: &gtk4::Box, sections: &Sheet) {
-    while let Some(child) = body.first_child() {
-        body.remove(&child);
-    }
+    swaypplet_ui::ui::clear_children(&body);
 
     // Each section goes in whichever column is currently shortest, costed
     // as its rows plus its heading. Filling left-to-right instead would

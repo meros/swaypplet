@@ -185,7 +185,7 @@ thread_local! {
     /// `None` until the file has been read.
     static STORE: RefCell<Option<Store>> = const { RefCell::new(None) };
     static LOADING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static SAVE: RefCell<Option<glib::SourceId>> = const { RefCell::new(None) };
+    static SAVE: swaypplet_base::spawn::Timeout = swaypplet_base::spawn::Timeout::new();
 }
 
 pub fn now() -> f64 {
@@ -195,10 +195,11 @@ pub fn now() -> f64 {
 }
 
 fn path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
-    Some(base.join("swaypplet").join("launcher-frecency.json"))
+    Some(
+        swaypplet_base::paths::state_dir()?
+            .join("swaypplet")
+            .join("launcher-frecency.json"),
+    )
 }
 
 /// Read the file on a worker, once per process. Until it lands the launcher
@@ -261,20 +262,14 @@ pub fn forget() {
 
 fn schedule_save() {
     SAVE.with(|s| {
-        if let Some(id) = s.borrow_mut().take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
-    });
-    let id =
-        glib::timeout_add_local_once(std::time::Duration::from_millis(SAVE_DEBOUNCE_MS), || {
-            SAVE.with(|s| s.borrow_mut().take());
+        s.arm(std::time::Duration::from_millis(SAVE_DEBOUNCE_MS), || {
             let Some(store) = with(|s| s.pruned(now())) else {
                 return;
             };
             let Some(p) = path() else { return };
             swaypplet_base::spawn::spawn_work(move || write(&p, &store), |()| {});
         });
-    SAVE.with(|s| *s.borrow_mut() = Some(id));
+    });
 }
 
 /// Write next to the file and rename over it.
@@ -282,13 +277,7 @@ fn write(p: &std::path::Path, store: &Store) {
     let Ok(json) = serde_json::to_vec(store) else {
         return;
     };
-    if let Some(dir) = p.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let tmp = p.with_extension("tmp");
-    if std::fs::write(&tmp, json).is_ok() && std::fs::rename(&tmp, p).is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
+    let _ = swaypplet_base::fs::write_atomic(p, json);
 }
 
 #[cfg(test)]

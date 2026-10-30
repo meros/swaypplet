@@ -1,7 +1,8 @@
 //! logind's D-Bus interfaces, and the session this process belongs to.
 //!
-//! Shared by the idle manager (`idle::logind`: the sleep inhibitor and the
-//! Lock/Unlock signals) and the theme (`theme::locked`: LockedHint).
+//! Shared by the idle manager (`swaypplet_idle::logind`: the sleep inhibitor
+//! and the Lock/Unlock signals) and the theme (`swaypplet_ui::theme::locked`:
+//! LockedHint).
 
 use zbus::zvariant::{OwnedFd, OwnedObjectPath};
 

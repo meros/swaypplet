@@ -132,7 +132,7 @@ pub struct TaskStateService {
     dir: PathBuf,
     /// Armed only while some session is Waiting (vision P7); one-shot,
     /// aimed at the next whole-minute age boundary (clock.rs pattern).
-    age_timer: RefCell<Option<glib::SourceId>>,
+    age_timer: swaypplet_base::spawn::Timeout,
     /// Acked waiting episodes, pid → status mtime at ack. Sticky for the
     /// episode: focus leaving does not un-acknowledge; a status rewrite
     /// (new mtime) starts a fresh, unacked episode.
@@ -157,7 +157,7 @@ impl TaskStateService {
             state: Observed::new(TaskSnapshot::default()),
             sway: sway.clone(),
             dir: state_dir(),
-            age_timer: RefCell::new(None),
+            age_timer: swaypplet_base::spawn::Timeout::new(),
             acked: RefCell::new(HashMap::new()),
             _monitor: RefCell::new(None),
             skew: RefCell::new(SkewTracker {
@@ -245,24 +245,17 @@ impl TaskStateService {
     }
 
     fn reconcile_age_timer(self: &Rc<Self>) {
-        if let Some(id) = self.age_timer.borrow_mut().take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
+        self.age_timer.cancel();
         let now = SystemTime::now();
         let Some(delay) = self.state.with(|s| next_age_delay(s, now)) else {
             return;
         };
         let weak = Rc::downgrade(self);
-        let id = glib::timeout_add_local_once(delay, move || {
-            let Some(service) = weak.upgrade() else {
-                return;
-            };
-            // The fired source id is dead; drop it so reconcile can't
-            // remove() a stale id.
-            service.age_timer.borrow_mut().take();
-            service.refresh(true);
+        self.age_timer.arm(delay, move || {
+            if let Some(service) = weak.upgrade() {
+                service.refresh(true);
+            }
         });
-        *self.age_timer.borrow_mut() = Some(id);
     }
 }
 
@@ -513,9 +506,8 @@ fn leading_fraction(s: &str) -> Option<(u32, u32)> {
 }
 
 /// Delay until the next waiting session crosses a whole-minute age
-/// boundary; `None` when nothing waits, so the timer stands down. +50 ms
-/// lands safely past the boundary (clock.rs). A missing or future mtime
-/// (suspend skew) counts as age zero.
+/// boundary; `None` when nothing waits, so the timer stands down. A
+/// missing or future mtime (suspend skew) counts as age zero.
 fn next_age_delay(snapshot: &TaskSnapshot, now: SystemTime) -> Option<Duration> {
     snapshot
         .tasks
@@ -527,10 +519,9 @@ fn next_age_delay(snapshot: &TaskSnapshot, now: SystemTime) -> Option<Duration> 
                 .status_mtime
                 .and_then(|m| now.duration_since(m).ok())
                 .unwrap_or(Duration::ZERO);
-            Duration::from_secs(60 - elapsed.as_secs() % 60)
+            swaypplet_base::time::until_next_minute(elapsed)
         })
         .min()
-        .map(|d| d + Duration::from_millis(50))
 }
 
 #[cfg(test)]

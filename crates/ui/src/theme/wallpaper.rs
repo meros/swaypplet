@@ -380,10 +380,7 @@ fn hue_of(source: Rgb) -> u16 {
 // ── The cache ───────────────────────────────────────────────────────────
 
 fn cache_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
-    Some(base.join("swaypplet"))
+    Some(swaypplet_base::paths::cache_dir()?.join("swaypplet"))
 }
 
 fn cache_path() -> Option<PathBuf> {
@@ -452,15 +449,6 @@ fn cells(word: &str) -> Option<[u8; GRID * GRID]> {
     Some(out)
 }
 
-/// A `#rrggbb` word.
-fn colour(word: &str) -> Option<Rgb> {
-    let hex = word.strip_prefix('#')?;
-    let v = u32::from_str_radix(hex, 16)
-        .ok()
-        .filter(|_| hex.len() == 6)?;
-    Some(Rgb::hex(v))
-}
-
 /// The key and the sample out of a cache line this build wrote.
 fn parse(text: &str) -> Option<(String, Cached)> {
     let mut words = text.split_whitespace();
@@ -471,14 +459,14 @@ fn parse(text: &str) -> Option<(String, Cached)> {
         "none" => None,
         list => Some(
             list.split(',')
-                .map(colour)
+                .map(Rgb::parse_css)
                 .collect::<Option<Vec<Rgb>>>()
                 .filter(|v| (1..=CHOICES).contains(&v.len()))?,
         ),
     };
     let ground = match words.next()?.strip_prefix("ground=")? {
         "none" => None,
-        word => Some(colour(word)?),
+        word => Some(Rgb::parse_css(word)?),
     };
     let mean = cells(words.next()?.strip_prefix("luma=")?)?;
     let spread = cells(words.next()?.strip_prefix("spread=")?)?;
@@ -514,20 +502,8 @@ fn write_cache(text: &str) -> bool {
     let Some(path) = cache_path() else {
         return false;
     };
-    if let Some(dir) = path.parent()
-        && let Err(e) = std::fs::create_dir_all(dir)
-    {
-        log::warn!("wallpaper: cannot make {}: {e}", dir.display());
-        return false;
-    }
-    let tmp = path.with_extension("tmp");
-    if let Err(e) = std::fs::write(&tmp, text) {
-        log::warn!("wallpaper: cannot write {}: {e}", tmp.display());
-        return false;
-    }
-    if let Err(e) = std::fs::rename(&tmp, &path) {
-        log::warn!("wallpaper: cannot replace {}: {e}", path.display());
-        let _ = std::fs::remove_file(&tmp);
+    if let Err(e) = swaypplet_base::fs::write_atomic(&path, text) {
+        log::warn!("wallpaper: cannot write {}: {e}", path.display());
         return false;
     }
     true

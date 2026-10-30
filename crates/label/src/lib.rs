@@ -49,6 +49,7 @@ use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, KeyboardMode, LayerShell as _};
 use serde_json::{Value, json};
 
+use swaypplet_base::spawn::Timeout;
 use swaypplet_base::sway::ipc::SwayService;
 use swaypplet_ui::shell::{Namespace, PerMonitor, Surface};
 use swaypplet_ui::ui;
@@ -148,11 +149,10 @@ impl Data {
     }
 
     fn path() -> PathBuf {
-        let dir = std::env::var_os("XDG_STATE_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
-            .unwrap_or_else(|| PathBuf::from("."));
-        dir.join("swaypplet").join("workspace-labels.json")
+        swaypplet_base::paths::state_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("swaypplet")
+            .join("workspace-labels.json")
     }
 
     fn load() -> Data {
@@ -165,15 +165,7 @@ impl Data {
     /// file and never half of the new one.
     fn save(&self) {
         let path = Self::path();
-        let write = || -> std::io::Result<()> {
-            if let Some(dir) = path.parent() {
-                std::fs::create_dir_all(dir)?;
-            }
-            let tmp = path.with_extension("json.tmp");
-            std::fs::write(&tmp, self.to_json())?;
-            std::fs::rename(&tmp, &path)
-        };
-        if let Err(e) = write() {
+        if let Err(e) = swaypplet_base::fs::write_atomic(&path, self.to_json()) {
             log::warn!("label: could not save {}: {e}", path.display());
         }
     }
@@ -408,7 +400,7 @@ impl EdgeZone {
         surface.root().append(&strip);
 
         // Rest here for DWELL_MS and the pill comes; passing through does not.
-        let dwell: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+        let dwell = Rc::new(swaypplet_base::spawn::Timeout::new());
         let motion = gtk4::EventControllerMotion::new();
         {
             let dwell = dwell.clone();
@@ -416,24 +408,17 @@ impl EdgeZone {
                 log::debug!("label: pointer in the strip");
                 let owner = owner.clone();
                 let connector = connector.clone();
-                let slot = dwell.clone();
-                let id = glib::timeout_add_local_once(Duration::from_millis(DWELL_MS), move || {
-                    slot.borrow_mut().take();
+                dwell.arm(Duration::from_millis(DWELL_MS), move || {
                     log::debug!("label: dwell over");
                     if let Some(owner) = owner.upgrade() {
                         Labels { inner: owner }.peek(&connector, true, PEEK_MS);
                     }
                 });
-                if let Some(old) = dwell.borrow_mut().replace(id) {
-                    swaypplet_base::spawn::remove_source(old);
-                }
             });
         }
         motion.connect_leave(move |_| {
             log::debug!("label: pointer left the strip");
-            if let Some(id) = dwell.borrow_mut().take() {
-                swaypplet_base::spawn::remove_source(id);
-            }
+            dwell.cancel();
         });
         // On the window, not the root: the controller then sees the pointer
         // wherever it is on the surface, with or without a child under it.
@@ -460,8 +445,8 @@ struct Inner {
     /// Outputs showing for a moment, and whether with the controls.
     peeking: RefCell<HashMap<String, bool>>,
     /// Ends every peek.
-    peek_timer: RefCell<Option<glib::SourceId>>,
-    edit_timer: RefCell<Option<glib::SourceId>>,
+    peek_timer: Timeout,
+    edit_timer: Timeout,
     /// Set while a change is being drawn, so a draw never starts another.
     drawing: Cell<bool>,
 }
@@ -483,8 +468,8 @@ impl Labels {
             editing: RefCell::new(None),
             hover: RefCell::new(Vec::new()),
             peeking: RefCell::new(HashMap::new()),
-            peek_timer: RefCell::new(None),
-            edit_timer: RefCell::new(None),
+            peek_timer: Timeout::new(),
+            edit_timer: Timeout::new(),
             drawing: Cell::new(false),
         });
         let labels = Labels { inner };
@@ -622,17 +607,14 @@ impl Labels {
     }
 
     fn arm_peek(&self, ms: u64) {
-        if let Some(id) = self.inner.peek_timer.borrow_mut().take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
         let weak = Rc::downgrade(&self.inner);
-        let id = glib::timeout_add_local_once(Duration::from_millis(ms), move || {
-            let Some(inner) = weak.upgrade() else { return };
-            inner.peek_timer.borrow_mut().take();
-            inner.peeking.borrow_mut().clear();
-            Labels { inner }.apply();
-        });
-        *self.inner.peek_timer.borrow_mut() = Some(id);
+        self.inner
+            .peek_timer
+            .arm(Duration::from_millis(ms), move || {
+                let Some(inner) = weak.upgrade() else { return };
+                inner.peeking.borrow_mut().clear();
+                Labels { inner }.apply();
+            });
     }
 
     /// The pointer came onto or left the pill on `output`.
@@ -756,9 +738,7 @@ impl Labels {
         let Some((output, ws)) = self.inner.editing.borrow_mut().take() else {
             return;
         };
-        if let Some(id) = self.inner.edit_timer.borrow_mut().take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
+        self.inner.edit_timer.cancel();
         let mut typed = None;
         self.inner.pills.for_each(|pill| {
             if pill.connector == output {
@@ -782,16 +762,13 @@ impl Labels {
         if self.inner.editing.borrow().is_none() {
             return;
         }
-        if let Some(id) = self.inner.edit_timer.borrow_mut().take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
         let weak = Rc::downgrade(&self.inner);
-        let id = glib::timeout_add_local_once(Duration::from_millis(EDIT_IDLE_MS), move || {
-            let Some(inner) = weak.upgrade() else { return };
-            inner.edit_timer.borrow_mut().take();
-            Labels { inner }.finish_edit(true);
-        });
-        *self.inner.edit_timer.borrow_mut() = Some(id);
+        self.inner
+            .edit_timer
+            .arm(Duration::from_millis(EDIT_IDLE_MS), move || {
+                let Some(inner) = weak.upgrade() else { return };
+                Labels { inner }.finish_edit(true);
+            });
     }
 
     fn set_label(&self, ws: &str, text: &str) {

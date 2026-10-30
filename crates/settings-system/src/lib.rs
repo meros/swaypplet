@@ -19,7 +19,8 @@ use crate::{
     system_info as info,
     system_info::{OriginSource, Snapshot, Verdict},
 };
-use swaypplet_base::spawn::{remove_source, spawn_work};
+use swaypplet_base::fmt;
+use swaypplet_base::spawn::{Timeout, spawn_work};
 use swaypplet_settings_kit::{form, form::section_box};
 use swaypplet_system::{
     nx as job,
@@ -67,8 +68,8 @@ struct Pane {
     snapshot: RefCell<Option<Snapshot>>,
     job: RefCell<Job>,
     reading: Cell<bool>,
-    poll: RefCell<Option<glib::SourceId>>,
-    job_poll: RefCell<Option<glib::SourceId>>,
+    poll: Timeout,
+    job_poll: Timeout,
     /// The fixture's simulated run: its action and how far it has got.
     fake: Cell<Option<(Action, usize)>>,
 }
@@ -256,8 +257,8 @@ impl SystemPane {
             snapshot: RefCell::new(None),
             job: RefCell::new(Job::Idle),
             reading: Cell::new(false),
-            poll: RefCell::new(None),
-            job_poll: RefCell::new(None),
+            poll: Timeout::new(),
+            job_poll: Timeout::new(),
             fake: Cell::new(None),
         });
 
@@ -304,26 +305,21 @@ impl SystemPane {
 impl Pane {
     fn shown(self: &Rc<Self>) {
         self.read();
-        if self.poll.borrow().is_none() {
+        if !self.poll.is_armed() {
             let p = Rc::downgrade(self);
-            let id = glib::timeout_add_local(POLL, move || {
+            self.poll.every(POLL, move || {
                 let Some(p) = p.upgrade() else {
                     return glib::ControlFlow::Break;
                 };
                 p.read();
                 glib::ControlFlow::Continue
             });
-            self.poll.replace(Some(id));
         }
     }
 
     fn hidden(&self) {
-        if let Some(id) = self.poll.take() {
-            remove_source(id);
-        }
-        if let Some(id) = self.job_poll.take() {
-            remove_source(id);
-        }
+        self.poll.cancel();
+        self.job_poll.cancel();
     }
 
     /// Everything, on a worker thread. A read already out is not doubled.
@@ -413,12 +409,12 @@ impl Pane {
 
     /// Read the log every [`JOB_TICK`] until the run ends or the tab goes.
     fn watch_job(self: &Rc<Self>) {
-        if self.job_poll.borrow().is_some() || !self.root.is_mapped() {
+        if self.job_poll.is_armed() || !self.root.is_mapped() {
             return;
         }
         let p = Rc::downgrade(self);
         let busy = Rc::new(Cell::new(false));
-        let id = glib::timeout_add_local(JOB_TICK, move || {
+        self.job_poll.every(JOB_TICK, move || {
             let Some(p) = p.upgrade() else {
                 return glib::ControlFlow::Break;
             };
@@ -429,7 +425,6 @@ impl Pane {
                 p.set_job(now);
                 if over {
                     p.fake.set(None);
-                    p.job_poll.replace(None);
                     p.show_actions();
                     return glib::ControlFlow::Break;
                 }
@@ -444,16 +439,13 @@ impl Pane {
                 let over = !now.running();
                 q.set_job(now);
                 if over {
-                    if let Some(id) = q.job_poll.take() {
-                        remove_source(id);
-                    }
+                    q.job_poll.cancel();
                     // The switch moved what the rest of the tab says.
                     q.read();
                 }
             });
             glib::ControlFlow::Continue
         });
-        self.job_poll.replace(Some(id));
     }
 
     fn set_job(self: &Rc<Self>, now: Job) {
@@ -591,9 +583,7 @@ impl Pane {
     }
 
     fn show_news(&self, s: &Snapshot) {
-        while let Some(child) = self.news.first_child() {
-            self.news.remove(&child);
-        }
+        ui::clear_children(&self.news);
         if s.new_commits.is_empty() && s.shell_commits.is_empty() {
             let text = match info::verdict(s) {
                 Verdict::InSync => "Nothing: this host runs origin/main.",
@@ -624,25 +614,15 @@ impl Pane {
         f.version.set_text(&or_unknown(s.nixos_version.clone()));
         f.kernel.set_text(&or_unknown(s.kernel.clone()));
         f.uptime
-            .set_text(&or_unknown(s.uptime_s.map(info::uptime_label)));
+            .set_text(&or_unknown(s.uptime_s.map(|s| fmt::hm(s, fmt::Hm::Prose))));
         for (label, mount) in [(&f.root, "/"), (&f.nix, "/nix")] {
             label.set_text(&or_unknown(s.disks.iter().find(|d| d.mount == mount).map(
-                |d| {
-                    format!(
-                        "{} free of {}",
-                        info::bytes_label(d.free),
-                        info::bytes_label(d.total)
-                    )
-                },
+                |d| format!("{} free of {}", fmt::bytes(d.free), fmt::bytes(d.total)),
             )));
         }
         f.memory
             .set_text(&or_unknown(s.memory.map(|(avail, total)| {
-                format!(
-                    "{} available of {}",
-                    info::bytes_label(avail),
-                    info::bytes_label(total)
-                )
+                format!("{} available of {}", fmt::bytes(avail), fmt::bytes(total))
             })));
     }
 }

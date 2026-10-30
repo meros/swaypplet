@@ -483,9 +483,7 @@ impl BluetoothSection {
             let changed = w.members.borrow().get(group) != Some(&macs);
             let mut rows = w.rows.borrow_mut();
             if changed {
-                while let Some(child) = list.first_child() {
-                    list.remove(&child);
-                }
+                ui::clear_children(&list);
                 for d in &members {
                     // A row that moved from another group starts fresh.
                     rows.remove(&d.mac);

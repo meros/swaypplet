@@ -2,7 +2,7 @@
 //! §2): mode, accent, neutral, contrast, the Motion setting and the tint.
 //!
 //! Plain values. Resolving them at runtime (the Look settings, the sun, the
-//! wallpaper's hue) is `theme::inputs`, which is the one place an
+//! wallpaper's hue) is `swaypplet_ui::theme::inputs`, which is the one place an
 //! [`Inputs`] is built outside tests.
 
 use super::{Backdrop, Rgb, Tint};
@@ -105,7 +105,7 @@ impl Neutral {
 }
 
 /// Serialisable because the panel publishes the inputs it resolved and every
-/// other process draws those (`theme::inputs`).
+/// other process draws those (`swaypplet_ui::theme::inputs`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Inputs {
     pub mode: Mode,
@@ -193,5 +193,50 @@ pub(super) mod every {
             }
         }
         v
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Oklch;
+
+    fn lightness(c: Rgb) -> f64 {
+        Oklch::from(c).0
+    }
+
+    #[test]
+    fn each_accent_is_brighter_for_dark_than_for_light() {
+        for accent in Accent::ALL {
+            let (dark, light) = accent.pair();
+            assert!(lightness(dark) > lightness(light), "{accent:?}");
+        }
+    }
+
+    #[test]
+    fn neutral_anchors_run_from_the_ground_to_the_text() {
+        for neutral in Neutral::ALL {
+            let [d1, d3, d12] = neutral.anchors(Mode::Dark).map(lightness);
+            assert!(d1 < d3 && d3 < d12, "{neutral:?} dark");
+            let [l1, l3, l12] = neutral.anchors(Mode::Light).map(lightness);
+            assert!(l1 > l3 && l3 > l12, "{neutral:?} light");
+        }
+    }
+
+    #[test]
+    fn the_test_sets_cover_what_they_say() {
+        // Off, then four tints at each of 72 hues, every 5 degrees.
+        let tints = every::tint();
+        assert_eq!(tints.len(), 1 + 72 * 4);
+        assert_eq!(tints[0], Tint::Off);
+        assert!(
+            tints
+                .iter()
+                .flat_map(|t| t.palette())
+                .flat_map(|p| p.hues())
+                .all(|h| h % 5.0 == 0.0 && h < 360.0)
+        );
+        // 72 untinted combinations, each at every tint.
+        assert_eq!(every::input().len(), 72 * tints.len());
     }
 }

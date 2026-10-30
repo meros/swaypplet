@@ -428,7 +428,7 @@ pub fn glass_channel(from: f64, to: f64, t: f64) -> f64 {
 
 struct FramesInner {
     tick: RefCell<Option<gtk4::TickCallbackId>>,
-    guard: RefCell<Option<glib::SourceId>>,
+    guard: swaypplet_base::spawn::Timeout,
     done: RefCell<Option<Box<dyn FnOnce()>>>,
 }
 
@@ -457,7 +457,7 @@ impl Frames {
             .find(|w| w.is_mapped())?;
         let this = Frames(Rc::new(FramesInner {
             tick: RefCell::new(None),
-            guard: RefCell::new(None),
+            guard: swaypplet_base::spawn::Timeout::new(),
             done: RefCell::new(Some(Box::new(done))),
         }));
         let span_us = (ms * 1000.0).max(1.0);
@@ -482,15 +482,10 @@ impl Frames {
         });
         *this.0.tick.borrow_mut() = Some(id);
         let inner = this.0.clone();
-        let guard = glib::timeout_add_local_once(
+        this.0.guard.arm(
             std::time::Duration::from_millis(ms.round() as u64 + 250),
-            move || {
-                // Already fired: its id is spent, so only forget it.
-                inner.guard.borrow_mut().take();
-                Frames(inner).end(true);
-            },
+            move || Frames(inner).end(true),
         );
-        *this.0.guard.borrow_mut() = Some(guard);
         Some(this)
     }
 
@@ -503,9 +498,7 @@ impl Frames {
         if let Some(id) = self.0.tick.borrow_mut().take() {
             id.remove();
         }
-        if let Some(id) = self.0.guard.borrow_mut().take() {
-            id.remove();
-        }
+        self.0.guard.cancel();
         let done = self.0.done.borrow_mut().take();
         if call_done && let Some(done) = done {
             done();
@@ -989,9 +982,7 @@ mod imp {
 
     impl ObjectImpl for SlideBin {
         fn dispose(&self) {
-            while let Some(child) = self.obj().first_child() {
-                child.unparent();
-            }
+            crate::ui::clear_children(&*self.obj());
         }
     }
 

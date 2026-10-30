@@ -262,9 +262,7 @@ fn show_profile(view: &Rc<ProfileView>, p: &Profile, inert: bool) {
             _ => ui::Status::Neutral,
         },
     );
-    while let Some(c) = view.choices.first_child() {
-        view.choices.remove(&c);
-    }
+    ui::clear_children(&view.choices);
     let Profile::Daemon {
         active, choices, ..
     } = p

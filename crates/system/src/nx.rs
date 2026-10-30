@@ -147,8 +147,8 @@ pub fn job(log: Option<Log>, active: bool) -> Job {
 
 /// `$XDG_RUNTIME_DIR/swaypplet/nx.log`.
 pub fn log_path() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .map_or_else(std::env::temp_dir, PathBuf::from)
+    swaypplet_base::paths::runtime_dir()
+        .unwrap_or_else(std::env::temp_dir)
         .join("swaypplet/nx.log")
 }
 
@@ -198,7 +198,9 @@ fn unit(action: Action, log: &std::path::Path) -> Transient {
     let path = with_profile(
         std::env::var("PATH").ok().as_deref(),
         &swaypplet_base::user::current().unwrap_or_default(),
-        &std::env::var("HOME").unwrap_or_default(),
+        &swaypplet_base::paths::home()
+            .map(|h| h.display().to_string())
+            .unwrap_or_default(),
     );
     Transient::new(
         UNIT,

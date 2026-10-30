@@ -97,8 +97,8 @@ struct Engine {
     shown: Cell<f64>,
     /// Where the running ramp started and ends, in mired.
     ramp: RefCell<Option<Ramp>>,
-    tick: RefCell<Option<glib::SourceId>>,
-    minute: RefCell<Option<glib::SourceId>>,
+    tick: swaypplet_base::spawn::Timeout,
+    minute: swaypplet_base::spawn::Timeout,
     settings: Cell<NightLight>,
 }
 
@@ -115,9 +115,7 @@ impl Engine {
     /// Ramp from what is shown to the target over `duration`.
     fn retarget(self: &Rc<Self>, duration: Duration) {
         let (from, to) = (color::mired(self.shown.get()), color::mired(self.target()));
-        if let Some(id) = self.tick.borrow_mut().take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
+        self.tick.cancel();
         if (to - from).abs() < STEP_MIRED / 2.0 {
             *self.ramp.borrow_mut() = None;
             return;
@@ -130,8 +128,7 @@ impl Engine {
         });
         let every = tick_every(to - from, duration);
         let this = self.clone();
-        let id = glib::timeout_add_local(every, move || this.step());
-        *self.tick.borrow_mut() = Some(id);
+        self.tick.every(every, move || this.step());
     }
 
     fn step(&self) -> glib::ControlFlow {
@@ -145,7 +142,6 @@ impl Engine {
         self.show(1e6 / m);
         if done {
             *self.ramp.borrow_mut() = None;
-            self.tick.borrow_mut().take();
             glib::ControlFlow::Break
         } else {
             glib::ControlFlow::Continue
@@ -164,20 +160,16 @@ impl Engine {
             let s = self.settings.get();
             s.enabled && s.schedule == NightSchedule::Sun
         };
-        let running = self.minute.borrow().is_some();
-        if wanted == running {
+        if wanted == self.minute.is_armed() {
             return;
         }
-        if let Some(id) = self.minute.borrow_mut().take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
+        self.minute.cancel();
         if wanted {
             let this = self.clone();
-            let id = glib::timeout_add_local(SUN_PERIOD, move || {
+            self.minute.every(SUN_PERIOD, move || {
                 this.retarget(SUN_PERIOD);
                 glib::ControlFlow::Continue
             });
-            *self.minute.borrow_mut() = Some(id);
         }
     }
 }
@@ -195,8 +187,8 @@ pub fn follow_settings() {
         gamma,
         shown: Cell::new(f64::from(NightLight::DAY_K)),
         ramp: RefCell::new(None),
-        tick: RefCell::new(None),
-        minute: RefCell::new(None),
+        tick: swaypplet_base::spawn::Timeout::new(),
+        minute: swaypplet_base::spawn::Timeout::new(),
         settings: Cell::new(settings),
     });
     engine.retarget(STARTUP);

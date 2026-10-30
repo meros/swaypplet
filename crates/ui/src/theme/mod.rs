@@ -384,26 +384,16 @@ pub fn publish_to_apps() {
 fn follow_the_sun(check: fn()) {
     use swaypplet_model::store::ThemeMode;
     let auto = || swaypplet_model::store::with(|s| s.look().mode) == ThemeMode::Auto;
-    let timer: std::rc::Rc<RefCell<Option<glib::SourceId>>> = std::rc::Rc::default();
+    let timer: std::rc::Rc<swaypplet_base::spawn::Timeout> = std::rc::Rc::default();
     let arm = {
         let timer = timer.clone();
-        move || {
-            let on = auto();
-            let mut t = timer.borrow_mut();
-            match (on, t.is_some()) {
-                (true, false) => {
-                    *t = Some(glib::timeout_add_seconds_local(60, move || {
-                        check();
-                        glib::ControlFlow::Continue
-                    }));
-                }
-                (false, true) => {
-                    if let Some(id) = t.take() {
-                        id.remove();
-                    }
-                }
-                _ => {}
-            }
+        move || match (auto(), timer.is_armed()) {
+            (true, false) => timer.every_seconds(60, move || {
+                check();
+                glib::ControlFlow::Continue
+            }),
+            (false, true) => timer.cancel(),
+            _ => {}
         }
     };
     arm();

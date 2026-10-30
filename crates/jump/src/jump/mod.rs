@@ -86,7 +86,7 @@ struct State {
     origin_xy: (f64, f64),
     /// The selected position in `names`.
     selected: usize,
-    watchdog: Option<glib::SourceId>,
+    watchdog: swaypplet_base::spawn::Timeout,
 }
 
 /// What `p` does with the selected workspace's name: pin or unpin it, and
@@ -190,7 +190,7 @@ impl Jump {
                 row: None,
                 origin_xy: (0.0, 0.0),
                 selected: 0,
-                watchdog: None,
+                watchdog: swaypplet_base::spawn::Timeout::new(),
             }),
         });
         this.wire();
@@ -528,22 +528,17 @@ impl Jump {
     }
 
     fn arm_watchdog(self: &Rc<Self>) {
-        self.disarm_watchdog();
         let this = self.clone();
-        let id = glib::timeout_add_local_once(
-            std::time::Duration::from_millis(WATCHDOG_MS),
-            move || {
-                this.state.borrow_mut().watchdog = None;
-                this.feed(Ev::Watchdog);
-            },
-        );
-        self.state.borrow_mut().watchdog = Some(id);
+        self.state
+            .borrow()
+            .watchdog
+            .arm(std::time::Duration::from_millis(WATCHDOG_MS), move || {
+                this.feed(Ev::Watchdog)
+            });
     }
 
     fn disarm_watchdog(&self) {
-        if let Some(id) = self.state.borrow_mut().watchdog.take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
+        self.state.borrow().watchdog.cancel();
     }
 
     /// What `p` does: set by the app, which owns the pins.

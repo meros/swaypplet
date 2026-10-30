@@ -151,3 +151,53 @@ pub fn open_from(widget: &impl IsA<gtk4::Widget>) {
         },
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A 200x100 surface on a 1920x1080 output at x 1920, anchored by
+    /// `edges` (left, right, top, bottom) with 10 px margins on each.
+    fn placed(edges: [bool; 4]) -> Placement {
+        Placement {
+            monitor: (1920.0, 0.0, 1920.0, 1080.0),
+            connector: None,
+            size: (200.0, 100.0),
+            edges: edges.map(|on| (on, 10.0)),
+        }
+    }
+
+    #[test]
+    fn an_anchored_edge_puts_the_surface_at_its_margin() {
+        // Top left.
+        assert_eq!(
+            placed([true, false, true, false]).origin(None),
+            (1930.0, 10.0)
+        );
+        // Bottom right: the far edge, less the size and the margin.
+        assert_eq!(
+            placed([false, true, false, true]).origin(None),
+            (1920.0 + 1920.0 - 200.0 - 10.0, 1080.0 - 100.0 - 10.0)
+        );
+    }
+
+    #[test]
+    fn both_edges_or_neither_centre_the_surface() {
+        let centre = (
+            1920.0 + 10.0 + (1920.0 - 20.0 - 200.0) / 2.0,
+            10.0 + (1080.0 - 20.0 - 100.0) / 2.0,
+        );
+        assert_eq!(placed([false; 4]).origin(None), centre);
+        assert_eq!(placed([true; 4]).origin(None), centre);
+    }
+
+    #[test]
+    fn the_usable_area_replaces_the_output_when_given() {
+        // A 30 px bar along the top of the output.
+        let usable = (1920.0, 30.0, 1920.0, 1050.0);
+        assert_eq!(
+            placed([true, false, true, false]).origin(Some(usable)),
+            (1930.0, 40.0)
+        );
+    }
+}

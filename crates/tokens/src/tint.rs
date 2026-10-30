@@ -7,7 +7,7 @@
 //! sets to the same targets as the shipped ones.
 //!
 //! What the wallpaper gives is a [`Palette`] of up to three OKLCH hues
-//! (`theme::wallpaper` samples them), each with its own job. The image gives
+//! (`swaypplet_ui::theme::wallpaper` samples them), each with its own job. The image gives
 //! hue only: every rule keeps a colour's **lightness**, because lightness is
 //! what the contrast is made of.
 //!

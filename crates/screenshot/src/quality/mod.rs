@@ -30,6 +30,8 @@ pub mod status;
 
 use std::path::PathBuf;
 
+use swaypplet_base::paths;
+
 /// Where reports and crashes go. `SWAYPPLET_QUALITY_REPO` points a test at
 /// a fork.
 pub fn repo() -> String {
@@ -75,24 +77,20 @@ pub const ASSET_BRANCH: &str = "report-assets";
 /// How many log lines a report or a crash carries.
 pub const LOG_LINES: usize = 80;
 
-/// `$XDG_STATE_HOME/swaypplet/<leaf>`.
+/// `$XDG_STATE_HOME/swaypplet/<leaf>`; under `/tmp` without a home.
 pub fn state_dir(leaf: &str) -> PathBuf {
-    base_dir("XDG_STATE_HOME", ".local/state").join(leaf)
+    paths::state_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp/.local/state"))
+        .join("swaypplet")
+        .join(leaf)
 }
 
-/// `$XDG_CACHE_HOME/swaypplet/<leaf>`.
+/// `$XDG_CACHE_HOME/swaypplet/<leaf>`; under `/tmp` without a home.
 pub fn cache_dir(leaf: &str) -> PathBuf {
-    base_dir("XDG_CACHE_HOME", ".cache").join(leaf)
-}
-
-fn base_dir(var: &str, fallback: &str) -> PathBuf {
-    let base = std::env::var_os(var)
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| "/tmp".into())).join(fallback)
-        });
-    base.join("swaypplet")
+    paths::cache_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp/.cache"))
+        .join("swaypplet")
+        .join(leaf)
 }
 
 /// A line for a public issue: the home directory as `~`, so the account's
@@ -107,7 +105,9 @@ pub fn redact(line: &str, home: &str) -> String {
 
 /// `$HOME`, for [`redact`].
 pub fn home() -> String {
-    std::env::var("HOME").unwrap_or_default()
+    paths::home()
+        .map(|h| h.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// Standard base64, for the contents API (no crate for thirty lines).

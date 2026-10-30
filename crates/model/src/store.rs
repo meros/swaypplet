@@ -16,12 +16,12 @@
 //! line, which `wallpaper::system_default` reads back from the compositor.
 //!
 //! Three processes touch the user file and none of them share memory. The
-//! panel (`app::run`) writes on every edit, coalesced by [`SAVE_DEBOUNCE_MS`],
+//! panel (`swaypplet_app::run`) writes on every edit, coalesced by [`SAVE_DEBOUNCE_MS`],
 //! and publishes the new value in-process through [`observe`] so the bar's
 //! clock and the OSD route follow without a restart. `swaypplet settings`
 //! (`cli.rs`) writes it from a keybind or a script. The idle manager
-//! (`idle::run`) only reads. So every reader watches the file's mtime on a
-//! one-second tick — the idle loop on its own (`idle/mod.rs`), the panel
+//! (`swaypplet_idle::run`) only reads. So every reader watches the file's mtime on a
+//! one-second tick — the idle loop on its own (`crates/idle/src/lib.rs`), the panel
 //! through [`watch`] — and reloads when it moves. Nothing here talks to
 //! systemd or sway.
 //!
@@ -152,11 +152,10 @@ pub fn system() -> &'static Settings {
 
 /// `~/.config/swaypplet/settings.json`.
 pub fn path() -> PathBuf {
-    let dir = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-        .unwrap_or_else(|| PathBuf::from("."));
-    dir.join("swaypplet").join("settings.json")
+    swaypplet_base::paths::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("swaypplet")
+        .join("settings.json")
 }
 
 // ── The panel's live copy ───────────────────────────────────────────────
@@ -166,7 +165,7 @@ pub fn path() -> PathBuf {
 
 thread_local! {
     static LIVE: Observed<Settings> = Observed::new(Settings::default());
-    static SAVE_TIMER: RefCell<Option<glib::SourceId>> = const { RefCell::new(None) };
+    static SAVE_TIMER: swaypplet_base::spawn::Timeout = swaypplet_base::spawn::Timeout::new();
 }
 
 /// Read the file into the live copy. Once, at panel startup, before anything
@@ -177,7 +176,7 @@ pub fn init() {
 
 /// Follow the file for the life of the process: a write by `swaypplet
 /// settings` (or by hand) lands in the live copy as soon as it is renamed
-/// into place (`crate::watch`, inotify; nothing polls). The panel's own
+/// into place (`swaypplet_base::watch`, inotify; nothing polls). The panel's own
 /// saves reload to what is already live, which `set_if_changed` drops.
 pub fn watch() {
     let monitors = swaypplet_base::watch::files(&[path()], || {
@@ -194,7 +193,7 @@ pub fn watch() {
 /// worker it does not fail and does not warn: it answers with a
 /// default-constructed `Settings`, which looks like a session where nothing
 /// was ever changed. Read what a worker needs before you spawn it and hand
-/// the values over. `theme::wallpaper::picked_wallpaper` carries the scar.
+/// the values over. `swaypplet_ui::theme::wallpaper::picked_wallpaper` carries the scar.
 pub fn current() -> Settings {
     LIVE.with(|live| live.with(Clone::clone))
 }
@@ -279,17 +278,9 @@ pub fn reset<S: Section>() {
 
 fn schedule_save() {
     SAVE_TIMER.with(|timer| {
-        if let Some(id) = timer.borrow_mut().take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
-        let id = glib::timeout_add_local_once(
-            std::time::Duration::from_millis(SAVE_DEBOUNCE_MS),
-            || {
-                SAVE_TIMER.with(|timer| timer.borrow_mut().take());
-                current().save();
-            },
-        );
-        *timer.borrow_mut() = Some(id);
+        timer.arm(std::time::Duration::from_millis(SAVE_DEBOUNCE_MS), || {
+            current().save()
+        });
     });
 }
 
