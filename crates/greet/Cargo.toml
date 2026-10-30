@@ -15,8 +15,8 @@ gtk4.workspace = true
 gtk4-layer-shell.workspace = true
 glib.workspace = true
 tokio.workspace = true
-serde_json.workspace = true
 log.workspace = true
+async-channel.workspace = true
 greetd_ipc.workspace = true
 
 [lints]

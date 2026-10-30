@@ -2211,6 +2211,7 @@ dependencies = [
 name = "swaypplet-fp"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
  "libc",
  "log",
  "serde",
@@ -2224,12 +2225,12 @@ dependencies = [
 name = "swaypplet-greet"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
  "glib",
  "greetd_ipc",
  "gtk4",
  "gtk4-layer-shell",
  "log",
- "serde_json",
  "swaypplet-auth-card",
  "swaypplet-base",
  "swaypplet-fp",

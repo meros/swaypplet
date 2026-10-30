@@ -47,14 +47,12 @@
 //! which is configured by /etc/swaypplet/switch-user.json rather than the
 //! environment.
 
-mod agent;
 mod ipc;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc;
-use std::time::Duration;
 
 use greetd_ipc::AuthMessageType;
 use gtk4::glib;
@@ -196,7 +194,7 @@ pub fn run() -> ! {
         .collect();
 
     let (tx, rx) = ipc::start();
-    let (fp_tx, fp_rx) = agent::start();
+    let (fp_tx, fp_rx) = swaypplet_fp::agent::client::start();
     let main_loop = glib::MainLoop::new(None, false);
     let exit_code = Rc::new(RefCell::new(EXIT_ERROR));
 
@@ -315,18 +313,23 @@ pub fn run() -> ! {
         });
     }
 
+    // greetd's replies and the reader's events, each awaited as it lands.
     {
         let st = st.clone();
         let ml = main_loop.clone();
         let code = exit_code.clone();
-        glib::timeout_add_local(Duration::from_millis(40), move || {
-            while let Ok(ev) = rx.try_recv() {
+        glib::spawn_future_local(async move {
+            while let Ok(ev) = rx.recv().await {
                 handle_event(&st, ev, &ml, &code);
             }
-            while let Ok(ev) = fp_rx.try_recv() {
+        });
+    }
+    {
+        let st = st.clone();
+        glib::spawn_future_local(async move {
+            while let Ok(ev) = fp_rx.recv().await {
                 handle_fp_event(&st, ev);
             }
-            glib::ControlFlow::Continue
         });
     }
 

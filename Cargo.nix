@@ -7453,6 +7453,10 @@ rec {
         libName = "swaypplet_fp";
         dependencies = [
           {
+            name = "async-channel";
+            packageId = "async-channel";
+          }
+          {
             name = "libc";
             packageId = "libc";
           }
@@ -7495,6 +7499,10 @@ rec {
         libName = "swaypplet_greet";
         dependencies = [
           {
+            name = "async-channel";
+            packageId = "async-channel";
+          }
+          {
             name = "glib";
             packageId = "glib";
           }
@@ -7515,10 +7523,6 @@ rec {
           {
             name = "log";
             packageId = "log";
-          }
-          {
-            name = "serde_json";
-            packageId = "serde_json";
           }
           {
             name = "swaypplet-auth-card";

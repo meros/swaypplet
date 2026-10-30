@@ -24,8 +24,12 @@
 //! another greeter — can claim it. Several greeters may be connected at once;
 //! the active-session gate ensures at most one holds the device.
 //!
+//! The greeter's end of the socket is [`client`].
+//!
 //! Env (both ends): SWAYPPLET_FP_SOCK, SWAYPPLET_FP_TOKEN override the
 //! socket and token paths (tests / dev boxes).
+
+pub mod client;
 
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
