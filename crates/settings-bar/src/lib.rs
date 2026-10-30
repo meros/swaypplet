@@ -1,21 +1,21 @@
 //! The Bar tab: what the bar does that is a matter of taste, where a volume
 //! or brightness press draws, and the pins and peeks the bar keeps. How far
-//! a press goes is on the Input tab (`input_pane.rs`), with the rest of the
-//! keys.
+//! a press goes is on the Input tab (`swaypplet_settings_input`), with the
+//! rest of the keys.
 //!
 //! Two sections, `bar` and `pins`, on one tab with one footer, the way
 //! Alerts carries `alerts` and `capture`. Pins are here rather than on a tab
 //! of their own because the bar is where they live when they are not
-//! floating (`bar/pins.rs`), and the peek is the bar's.
+//! floating (`crates/bar/src/pins.rs`), and the peek is the bar's.
 //!
 //! Every row here is read live by something in this process — the clock
-//! (`bar/clock.rs`), the segments (`bar/mod.rs`), the OSD and its route
-//! (`osd.rs`, `app.rs`), the panel's volume rail (`widgets/audio.rs`), the
-//! pins (`jump/pin.rs`) and the peek (`bar/peek.rs`) — through
+//! (`crates/bar/src/clock.rs`), the segments (`crates/bar/src/lib.rs`), the
+//! OSD and its route (`swaypplet_osd`, `swaypplet_app`), the panel's volume
+//! rail (`swaypplet_widgets::audio`), the pins
+//! (`crates/jump/src/jump/pin.rs`) and the peek (`crates/bar/src/peek.rs`) — through
 //! `store::observe` or per use, so a switch takes effect on release and the
 //! file is only there for the next start.
 
-use std::cell::Cell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
@@ -147,28 +147,23 @@ struct State {
     pin_fps: gtk4::DropDown,
     pin_corner: gtk4::DropDown,
     status: gtk4::Label,
-    updating: Cell<bool>,
+    guard: form::Sync,
 }
 
 impl State {
     fn edit_bar(&self, f: impl FnOnce(&mut Bar)) {
-        if self.updating.get() {
-            return;
-        }
-        store::edit(f);
-        self.sync();
+        self.guard.edit(f, || self.sync());
     }
 
     fn edit_pins(&self, f: impl FnOnce(&mut Pins)) {
-        if self.updating.get() {
-            return;
-        }
-        store::edit(f);
-        self.sync();
+        self.guard.edit(f, || self.sync());
     }
 
     fn sync(&self) {
-        self.updating.set(true);
+        self.guard.writing(|| self.draw());
+    }
+
+    fn draw(&self) {
         let settings = store::current();
         let bar = settings.bar();
         self.clock_24h.set_active(bar.clock_24h);
@@ -193,7 +188,6 @@ impl State {
             settings.bar.is_some() || settings.pins.is_some(),
             &describe(&bar, &pins),
         );
-        self.updating.set(false);
     }
 }
 
@@ -278,22 +272,11 @@ impl BarPane {
         let reset = form::ResetButtons::new(
             "Put the system's choices back and drop the bar and pins sections from the settings file.",
         );
-        let (footer, status) = form::footer(&[&reset.button, &reset.undo]);
-        let copy = form::copy_nix_button(
-            &status,
+        let (footer, status) = form::reset_footer(
+            &reset,
             "The bar and pins sections as theme/settings.nix holds them, for promoting a keeper into the Nix side by hand.",
-            || {
-                let s = store::current();
-                Some(format!(
-                    "{}{}",
-                    s.section_as_nix("bar")?,
-                    s.section_as_nix("pins")?
-                ))
-            },
+            &["bar", "pins"],
         );
-        if let Some(row) = reset.button.parent().and_downcast::<gtk4::Box>() {
-            row.append(&copy);
-        }
 
         let state = Rc::new(State {
             clock_24h: clock_24h.clone(),
@@ -304,7 +287,7 @@ impl BarPane {
             pin_fps: pin_fps.clone(),
             pin_corner: pin_corner.clone(),
             status,
-            updating: Cell::new(false),
+            guard: form::Sync::default(),
         });
 
         {

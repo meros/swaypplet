@@ -908,23 +908,11 @@ impl LookPane {
         let reset = form::ResetButtons::new(
             "Put the system's wallpaper back, and the system's colours, motion, day and night, and night light.",
         );
-        let (footer, status) = form::footer(&[&reset.button, &reset.undo]);
-        let copy = form::copy_nix_button(
-            &status,
+        let (footer, status) = form::reset_footer(
+            &reset,
             "The look, day and night, and night light sections as theme/settings.nix holds them.",
-            || {
-                let s = store::current();
-                Some(format!(
-                    "{}{}{}",
-                    s.section_as_nix("look")?,
-                    s.section_as_nix("daylight")?,
-                    s.section_as_nix("night_light")?
-                ))
-            },
+            &["look", "daylight", "night_light"],
         );
-        if let Some(row) = reset.button.parent().and_downcast::<gtk4::Box>() {
-            row.append(&copy);
-        }
 
         let state = Rc::new(State {
             grid: grid.clone(),
@@ -1186,7 +1174,7 @@ impl LookPane {
                     return;
                 };
                 // The panel's battery service gives the playing video the
-                // new speed (`services::wallpaper_battery`).
+                // new speed (`swaypplet_ambient::wallpaper_battery`).
                 store::edit::<Look>(|l| l.video_speed = speed);
                 state.sync();
             });

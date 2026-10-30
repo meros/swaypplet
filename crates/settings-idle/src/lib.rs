@@ -16,7 +16,6 @@
 //! which. The rows below the switch go insensitive when it is off, so the
 //! values stay visible and stay saved.
 
-use std::cell::Cell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
@@ -179,7 +178,7 @@ struct State {
     /// One per [`ELEVATE`] entry, in order.
     elevate: Vec<gtk4::Switch>,
     status: gtk4::Label,
-    updating: Cell<bool>,
+    guard: form::Sync,
 }
 
 /// One switch on the Administrator access group: which field it edits.
@@ -219,23 +218,18 @@ const ELEVATE: [Toggle; 4] = [
 
 impl State {
     fn edit(&self, f: impl FnOnce(&mut Idle)) {
-        if self.updating.get() {
-            return;
-        }
-        store::edit(f);
-        self.sync();
+        self.guard.edit(f, || self.sync());
     }
 
     fn edit_elevate(&self, f: impl FnOnce(&mut Elevate)) {
-        if self.updating.get() {
-            return;
-        }
-        store::edit(f);
-        self.sync();
+        self.guard.edit(f, || self.sync());
     }
 
     fn sync(&self) {
-        self.updating.set(true);
+        self.guard.writing(|| self.draw());
+    }
+
+    fn draw(&self) {
         let settings = store::current();
         let idle = settings.idle();
         for (timer, (dropdown, durations)) in TIMERS.iter().zip(&self.dropdowns) {
@@ -282,7 +276,6 @@ impl State {
             settings.idle.is_some() || settings.elevate.is_some(),
             &describe(&idle),
         );
-        self.updating.set(false);
     }
 }
 
@@ -405,16 +398,11 @@ impl IdlePane {
         let reset = form::ResetButtons::new(
             "Put the system's timers and access switches back and drop both sections from the settings file.",
         );
-        let (footer, status) = form::footer(&[&reset.button, &reset.undo]);
-        let copy = form::copy_nix_button(
-            &status,
+        let (footer, status) = form::reset_footer(
+            &reset,
             "The timers as the `idle` attrset of theme/settings.nix, for promoting a keeper into the Nix side by hand.",
-            || store::current().section_as_nix("idle"),
+            &["idle"],
         );
-        // Beside Reset, in the row `footer` built.
-        if let Some(row) = reset.button.parent().and_downcast::<gtk4::Box>() {
-            row.append(&copy);
-        }
 
         let state = Rc::new(State {
             dropdowns,
@@ -436,7 +424,7 @@ impl IdlePane {
             face: face.clone(),
             elevate,
             status,
-            updating: Cell::new(false),
+            guard: form::Sync::default(),
         });
 
         for (index, switch) in state.elevate.iter().enumerate() {

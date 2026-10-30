@@ -5,7 +5,6 @@
 //! (`launcher::sources`), so a switch here applies to the next keystroke;
 //! nothing is rebuilt.
 
-use std::cell::Cell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
@@ -111,20 +110,19 @@ struct State {
     switches: Vec<(gtk4::Switch, &'static Switch)>,
     frecency: gtk4::Switch,
     status: gtk4::Label,
-    updating: Cell<bool>,
+    guard: form::Sync,
 }
 
 impl State {
     fn edit(&self, f: impl FnOnce(&mut Launcher)) {
-        if self.updating.get() {
-            return;
-        }
-        store::edit(f);
-        self.sync();
+        self.guard.edit(f, || self.sync());
     }
 
     fn sync(&self) {
-        self.updating.set(true);
+        self.guard.writing(|| self.draw());
+    }
+
+    fn draw(&self) {
         let settings = store::current();
         let l = settings.launcher();
         for (w, s) in &self.switches {
@@ -132,7 +130,6 @@ impl State {
         }
         self.frecency.set_active(l.frecency);
         form::set_source(&self.status, settings.launcher.is_some(), &describe(&l));
-        self.updating.set(false);
     }
 }
 
@@ -185,21 +182,17 @@ impl LauncherPane {
         let reset = form::ResetButtons::new(
             "Put the system's choices back and drop the launcher section from the settings file.",
         );
-        let (footer, status) = form::footer(&[&reset.button, &reset.undo]);
-        let copy = form::copy_nix_button(
-            &status,
+        let (footer, status) = form::reset_footer(
+            &reset,
             "The launcher section as theme/settings.nix holds it.",
-            || store::current().section_as_nix("launcher"),
+            &["launcher"],
         );
-        if let Some(row) = reset.button.parent().and_downcast::<gtk4::Box>() {
-            row.append(&copy);
-        }
 
         let state = Rc::new(State {
             switches,
             frecency: frecency.clone(),
             status,
-            updating: Cell::new(false),
+            guard: form::Sync::default(),
         });
 
         for (w, s) in &state.switches {
