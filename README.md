@@ -169,13 +169,13 @@ The code is a Cargo workspace of 41 crates. Nix builds each crate as its own der
 |---|---|---|
 | Foundation | `base` | spawning work, file watches, the observed-state cell, sway IPC, logind, the faced client, user names, naming rules |
 | | `tokens` | the design tokens: colour scales, contrast, motion, the emitted CSS variables |
-| | `model` | the settings schema and store, keyboard layouts, the wallpaper, `swaypplet settings` |
+| | `model` | the settings schema and store, keyboard layouts, the wallpaper's parsing |
 | | `ui` | the theme, layer-shell surfaces, motion, the glass material and the UI components |
-| Services | `system` | the small services: power, battery, clipboard, inhibitors, tray, MPRIS, task state, elephant |
+| Services | `system` | the small services: power, battery, clipboard, inhibitors, tray, MPRIS, task state, the wallpaper, the session actions; every `systemctl` and `systemd-run`, and the nx runner both settings panes deploy with |
 | | `audio`, `devices`, `notifyd`, `displays`, `cast`, `ambient` | sound; network, input and Bluetooth; the notification daemon; output management; casting; night light and the wallpaper on battery |
 | Features | `jump`, `screenshot`, `fp`, `switch-user`, `lock`, `greet`, `idle`, `polkit`, `notifications`, `widgets` | Super+Tab and the key sheet; screenshots and reports; fingerprints; user switching; the lock screen; the greeter; the idle manager; the polkit agent; the popups; the panel's sections |
 | Settings | `settings-kit`, `launcher`, `settings-<pane>` (ten), `settings` | the form helpers and the search index; the launcher, which searches it too; one crate per pane; the window that holds them |
-| Surfaces | `bar`, `panel`, `osd`, `dmenu`, `label`, `app`, `swaypplet` | the status bar, the panel, the OSD, the picker, workspace labels; the panel process; `main.rs` |
+| Surfaces | `bar`, `panel`, `osd`, `dmenu`, `label`, `app`, `swaypplet` | the status bar, the panel, the OSD, the picker, workspace labels; the panel process and `swaypplet settings`; `main.rs` |
 
 A crate depends only on crates in earlier rows, or earlier in its own row. The services other than `ambient` do not use the UI layer, so a change to the theme rebuilds none of them. After a change to a `Cargo.toml` or `Cargo.lock`, `dev/cargo-nix.sh` regenerates `Cargo.nix`; the pre-commit hook does it for you, and the Nix build stops with a message when it is stale.
 

@@ -26,3 +26,4 @@ pub mod status;
 pub mod systemd;
 pub mod task_state;
 pub mod tray;
+pub mod wallpaper;

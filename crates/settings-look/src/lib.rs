@@ -23,7 +23,6 @@ use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::prelude::*;
 
 use swaypplet_model::schema::{OnBattery, ThemeMode};
-use swaypplet_model::wallpaper::{apply, candidates, candidates_dir, system_default, video_for};
 use swaypplet_model::{
     store,
     store::{Daylight, Look, Motion, NightLight, NightSchedule, Tint, Wallpaper, WallpaperMode},
@@ -32,6 +31,7 @@ use swaypplet_settings_kit::{
     form,
     form::{dropdown_row, section_box},
 };
+use swaypplet_system::wallpaper::{apply, candidates, candidates_dir, system_default, video_for};
 use swaypplet_tokens::{Accent, Contrast, Neutral, Palette, Tint as Reach};
 use swaypplet_ui::theme::wallpaper::Sample;
 

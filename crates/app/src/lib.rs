@@ -1,4 +1,5 @@
 pub mod preview;
+pub mod settings_cli;
 use std::cell::RefCell;
 use std::fs;
 use std::rc::Rc;
@@ -169,7 +170,7 @@ pub fn run() {
         // than something the settings pane has to remember to do the first
         // time it is opened.
         swaypplet_ui::glass::apply_saved();
-        swaypplet_model::wallpaper::apply_saved();
+        swaypplet_system::wallpaper::apply_saved();
 
         // The wallpaper's hue for `look.tint`. This process is the only one
         // that samples it (`theme::wallpaper::follow_settings`, for why);

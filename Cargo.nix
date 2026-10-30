@@ -6870,6 +6870,10 @@ rec {
             packageId = "log";
           }
           {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
             name = "swaypplet-ambient";
             packageId = "swaypplet-ambient";
           }
@@ -8839,6 +8843,10 @@ rec {
           {
             name = "swaypplet-base";
             packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
           }
           {
             name = "system-tray";
