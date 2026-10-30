@@ -8206,6 +8206,10 @@ rec {
             packageId = "swaypplet-notifyd";
           }
           {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
             name = "swaypplet-tokens";
             packageId = "swaypplet-tokens";
           }
