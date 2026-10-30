@@ -82,11 +82,7 @@ pub fn own_mode() {
 /// (the render harness) or the greeter has its own. In the runtime
 /// directory, so a new session never reads the last one's answer.
 pub fn theme_file() -> std::path::PathBuf {
-    let dir = std::env::var_os("XDG_RUNTIME_DIR").unwrap_or_else(|| "/tmp".into());
-    let display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-0".into());
-    std::path::PathBuf::from(dir)
-        .join("swaypplet")
-        .join(format!("theme-{display}.json"))
+    swaypplet_base::paths::per_display_file("swaypplet/theme", "json", "wayland-0")
 }
 
 /// The inputs the owner published, or `None` before it has (the panel is not
