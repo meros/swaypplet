@@ -26,7 +26,10 @@ pub(super) fn cancel_timer(timer: &mut Timer) {
     }
 }
 
-fn timeout_for(notif: &Notification) -> Option<u64> {
+/// How long `notif`'s card stays, in ms, or `None` for until dismissed.
+/// `linger` is the Alerts tab's (base, per character) for a sender that
+/// leaves the timeout to the server.
+fn timeout_for(notif: &Notification, linger: (u64, u64)) -> Option<u64> {
     // Critical notifications with no explicit timeout are persistent
     if notif.urgency == Urgency::Critical && notif.expire_timeout <= 0 {
         return None;
@@ -38,9 +41,8 @@ fn timeout_for(notif: &Notification) -> Option<u64> {
     if notif.expire_timeout > 0 {
         Some(notif.expire_timeout as u64)
     } else {
-        // -1 means server decides: scale with content length, from the
-        // Alerts tab's linger.
-        let (base, per_char) = alerts().linger.ms();
+        // -1 means server decides: scale with content length.
+        let (base, per_char) = linger;
         let char_count = notif.summary.len() + notif.body.len();
         Some(base + (char_count as u64) * per_char)
     }
@@ -51,7 +53,7 @@ pub(super) fn make_timer(
     notif: &Notification,
     hovered: bool,
 ) -> Timer {
-    let Some(ms) = timeout_for(notif) else {
+    let Some(ms) = timeout_for(notif, alerts().linger.ms()) else {
         return Timer::None;
     };
     let remaining = Duration::from_millis(ms);
@@ -101,5 +103,55 @@ pub(super) fn resume_timers(st: &Rc<RefCell<State>>) {
         // doesn't vanish the instant the pointer leaves
         let after = remaining.max(Duration::from_millis(500));
         card.timer = schedule_close(&store, card.id, after);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LINGER: (u64, u64) = (5000, 40);
+
+    fn notif(urgency: Urgency, expire_timeout: i32, summary: &str, body: &str) -> Notification {
+        Notification {
+            urgency,
+            expire_timeout,
+            summary: summary.into(),
+            body: body.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_sender_s_own_timeout_wins_and_zero_is_never() {
+        assert_eq!(
+            timeout_for(&notif(Urgency::Normal, 1200, "", ""), LINGER),
+            Some(1200)
+        );
+        assert_eq!(
+            timeout_for(&notif(Urgency::Normal, 0, "", ""), LINGER),
+            None
+        );
+        assert_eq!(
+            timeout_for(&notif(Urgency::Critical, 1200, "", ""), LINGER),
+            Some(1200)
+        );
+    }
+
+    #[test]
+    fn the_server_s_timeout_grows_with_the_text_and_spares_critical() {
+        // Ten characters at 40 ms each on top of the 5 s base.
+        assert_eq!(
+            timeout_for(&notif(Urgency::Normal, -1, "Hello", "World"), LINGER),
+            Some(5400)
+        );
+        assert_eq!(
+            timeout_for(&notif(Urgency::Low, -1, "", ""), (3000, 25)),
+            Some(3000)
+        );
+        assert_eq!(
+            timeout_for(&notif(Urgency::Critical, -1, "Hello", ""), LINGER),
+            None
+        );
     }
 }

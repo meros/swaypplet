@@ -32,6 +32,60 @@ pub fn activation_token() -> Option<String> {
         .map(|token| token.to_string())
 }
 
+/// The action key a sender uses to ask for a reply field (KDE's convention,
+/// which is what the `inline-reply` capability promises).
+pub const INLINE_REPLY_KEY: &str = "inline-reply";
+
+/// Where a notification's action buttons are drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    /// A popup card: the card itself is the default action and the reply
+    /// field is the inline reply, so neither gets a button.
+    Popup,
+    /// A row in the panel's list: every action gets a button, "default"
+    /// included, because a click on the row is out of reach of the keyboard.
+    Panel,
+}
+
+/// One action button to draw.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VisibleAction<'a> {
+    pub key: &'a str,
+    pub label: &'a str,
+    /// The icon to draw in place of the label, when the sender says its
+    /// keys are icon names (`action-icons`) and this place honours that.
+    /// The caller still checks the theme has it; the label is the tooltip.
+    pub icon: Option<&'a str>,
+}
+
+/// The buttons `notif`'s actions get at `place`, in the sender's order.
+pub fn visible_actions(notif: &Notification, place: Place) -> Vec<VisibleAction<'_>> {
+    notif
+        .actions
+        .iter()
+        .filter(|(key, _)| match place {
+            Place::Popup => key != "default" && key != INLINE_REPLY_KEY,
+            Place::Panel => true,
+        })
+        .map(|(key, label)| VisibleAction {
+            key,
+            label,
+            icon: (place == Place::Popup && notif.action_icons).then_some(key.as_str()),
+        })
+        .collect()
+}
+
+/// Run a button's action: send it to the sender and close the notification,
+/// unless it is `resident`, which is the spec's way of saying an action does
+/// not dismiss. Without honouring it every button is terminal, so a
+/// "snooze" or a "mark read" could never be offered by a sender.
+pub fn run_action(store: &StoreRef, id: u32, key: &str, resident: bool) {
+    invoke(store, id, key);
+    if !resident {
+        store::store_close(store, id, CloseReason::Dismissed);
+    }
+}
+
 /// Invoke one of the sender's actions, with a token to act on it.
 pub fn invoke(store: &StoreRef, id: u32, key: &str) {
     send_action(store, id, key, activation_token());
@@ -127,5 +181,58 @@ mod tests {
         assert_eq!(window_names(&notif), ["org.gnome.fractal", "fractal"]);
         // A sender that says nothing about itself gets no lookup at all.
         assert!(window_names(&Notification::default()).is_empty());
+    }
+
+    fn offering(actions: &[(&str, &str)], action_icons: bool) -> Notification {
+        Notification {
+            actions: actions
+                .iter()
+                .map(|(key, label)| (key.to_string(), label.to_string()))
+                .collect(),
+            action_icons,
+            ..Default::default()
+        }
+    }
+
+    fn keys(actions: Vec<VisibleAction<'_>>) -> Vec<&str> {
+        actions.into_iter().map(|action| action.key).collect()
+    }
+
+    #[test]
+    fn a_popup_draws_neither_the_default_nor_the_reply_as_a_button() {
+        let notif = offering(
+            &[
+                ("default", "Open"),
+                (INLINE_REPLY_KEY, "Reply…"),
+                ("archive", "Archive"),
+                ("snooze", "Later"),
+            ],
+            false,
+        );
+        assert_eq!(
+            keys(visible_actions(&notif, Place::Popup)),
+            ["archive", "snooze"]
+        );
+        assert_eq!(
+            keys(visible_actions(&notif, Place::Panel)),
+            ["default", INLINE_REPLY_KEY, "archive", "snooze"]
+        );
+        assert!(visible_actions(&Notification::default(), Place::Popup).is_empty());
+    }
+
+    #[test]
+    fn only_a_popup_draws_action_icons() {
+        let notif = offering(&[("media-skip-forward", "Next")], true);
+        assert_eq!(
+            visible_actions(&notif, Place::Popup),
+            [VisibleAction {
+                key: "media-skip-forward",
+                label: "Next",
+                icon: Some("media-skip-forward"),
+            }]
+        );
+        assert_eq!(visible_actions(&notif, Place::Panel)[0].icon, None);
+        let plain = offering(&[("media-skip-forward", "Next")], false);
+        assert_eq!(visible_actions(&plain, Place::Popup)[0].icon, None);
     }
 }

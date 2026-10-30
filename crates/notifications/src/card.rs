@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
+use super::activate::{INLINE_REPLY_KEY, Place, run_action, visible_actions};
 use super::menu::card_menu;
 use super::stack::{CARD_WIDTH, State, reflow};
 use super::timers::{pause_timers, resume_timers};
@@ -13,10 +14,6 @@ use swaypplet_notifyd::group::describe;
 use swaypplet_notifyd::{CloseReason, ImageSource, Notification, Urgency};
 use swaypplet_notifyd::{store, store::NotificationStore};
 use swaypplet_ui::anim;
-
-/// The action key a sender uses to ask for a reply field (KDE's convention,
-/// which is what the `inline-reply` capability promises).
-const INLINE_REPLY_KEY: &str = "inline-reply";
 
 // Drag-to-dismiss: how far before the gesture takes the event sequence off
 // the click handler, and how far before releasing means "gone".
@@ -186,7 +183,7 @@ fn is_compact(notif: &Notification) -> bool {
 /// inside — including gesture handlers — is rebuilt with fresh store refs.
 ///
 /// `earlier` is the rest of the sender's group behind this card, newest
-/// first (`services::notifications::group`): counted in the header and
+/// first (`swaypplet_notifyd::group`): counted in the header and
 /// listed under a disclosure. Empty for a card that stands alone.
 ///
 /// Returns the age label, if the card has one, so the stack can retitle it on
@@ -599,24 +596,18 @@ fn action_buttons(
     let actions_box = swaypplet_ui::ui::hbox(2);
     actions_box.add_css_class("notification-actions");
 
-    for (key, label) in &notif.actions {
-        if key == "default" {
-            continue; // default action is handled by clicking the popup body
-        }
-        if key == INLINE_REPLY_KEY {
-            continue; // rendered as the text field above
-        }
+    for action in visible_actions(notif, Place::Popup) {
         let btn = gtk4::Button::builder().build();
         // With `action-icons` the key names an icon rather than being an
         // opaque token, and the label is the tooltip instead.
-        if notif.action_icons
+        if let Some(icon) = action.icon
             && let Some(display) = gtk4::gdk::Display::default()
-            && gtk4::IconTheme::for_display(&display).has_icon(key)
+            && gtk4::IconTheme::for_display(&display).has_icon(icon)
         {
-            btn.set_child(Some(&gtk4::Image::from_icon_name(key)));
-            btn.set_tooltip_text(Some(label));
+            btn.set_child(Some(&gtk4::Image::from_icon_name(icon)));
+            btn.set_tooltip_text(Some(action.label));
         } else {
-            btn.set_label(label);
+            btn.set_label(action.label);
         }
         swaypplet_ui::ui::button::adopt(
             &btn,
@@ -626,17 +617,9 @@ fn action_buttons(
 
         let id = notif.id;
         let store_c = store.clone();
-        let key_c = key.clone();
-        // `resident` is the spec's way of saying an action does not
-        // dismiss. Without honouring it every button is terminal, so a
-        // "snooze" or a "mark read" could never be offered by a sender.
+        let key = action.key.to_string();
         let resident = notif.resident;
-        btn.connect_clicked(move |_| {
-            super::activate::invoke(&store_c, id, &key_c);
-            if !resident {
-                store::store_close(&store_c, id, CloseReason::Dismissed);
-            }
-        });
+        btn.connect_clicked(move |_| run_action(&store_c, id, &key, resident));
         actions_box.append(&btn);
     }
 
@@ -719,7 +702,8 @@ fn drag_to_dismiss(
                 .iter()
                 .find(|c| c.id == id && !c.exiting)
             {
-                card.surface.settle_back(anim::duration(anim::MOVE_MS));
+                card.surface
+                    .settle_back(anim::ms(swaypplet_tokens::motion::MOVE));
             }
         });
     }

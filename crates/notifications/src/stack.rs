@@ -10,7 +10,7 @@
 //! What is left here is the choreography: which card sits where, which one
 //! gives way when the stack is full, and when each one expires.
 //!
-//! One card per sender (`services::notifications::group`). A notification
+//! One card per sender (`swaypplet_notifyd::group`). A notification
 //! from a sender that already has a card joins it: the card shows the newest,
 //! counts the rest, and moves to the newest slot, all on the surface it
 //! already has, so a burst is one card updating in place rather than a
@@ -21,7 +21,7 @@
 //! `card_surface::CardSurface`.
 //!
 //! One column per output, not one column. A card is pinned to the focused
-//! output when it is created (`sway::ipc::focused_output_from`: the panel's
+//! output when it is created (`swaypplet_base::sway::ipc::focused_output_from`: the panel's
 //! `SwayService` when it runs one, else a round trip), and both the
 //! layout and the depth cap are per pinned output. They used to be global
 //! while the surfaces were placed by the compositor: a notification arriving
@@ -67,9 +67,10 @@ const GAP: f64 = swaypplet_tokens::space(3) as f64;
 const PEEK: f64 = 12.0;
 const PEEK_SCALE_STEP: f64 = 0.05;
 
-/// The Alerts tab, read once per card: a card keeps the corner and the
-/// stack depth it was born with, so a change lands on the next card rather
-/// than moving the ones on screen.
+/// The Alerts tab. A card keeps the corner it was born with, so a corner
+/// change lands on the next card rather than moving the ones on screen.
+/// The stack depth is read again on every reflow and eviction, so a new
+/// depth applies to the cards on screen at the next arrival or departure.
 pub(super) fn alerts() -> Alerts {
     swaypplet_model::store::with(|s| s.alerts())
 }
@@ -561,6 +562,70 @@ fn ranks_per_output(outputs: &[Option<&str>]) -> Vec<usize> {
         .collect()
 }
 
+/// One showing card, as the layout reads it.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Placing<'a> {
+    pub output: Option<&'a str>,
+    pub height: f64,
+    /// Its column hangs from the bottom edge.
+    pub bottom: bool,
+}
+
+/// Where a card goes: its top in its window, its scale, and whether it is
+/// collapsed behind the stack.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Slot {
+    pub y: f64,
+    pub scale: f64,
+    pub collapsed: bool,
+}
+
+/// The slots of `cards`, newest first, with `full` cards at full size per
+/// column; the arithmetic [`reflow`] runs.
+pub(super) fn slots(cards: &[Placing], full: usize) -> Vec<Slot> {
+    let outputs: Vec<Option<&str>> = cards.iter().map(|c| c.output).collect();
+    let ranks = ranks_per_output(&outputs);
+    // The running geometry is per column, so a card on one screen never
+    // reads a `y` another screen's card left behind.
+    let mut columns: std::collections::HashMap<Option<&str>, (f64, f64, f64)> =
+        std::collections::HashMap::new();
+    let margin = f64::from(EDGE_MARGIN);
+    let mut out = Vec::with_capacity(cards.len());
+    for (card, rank) in cards.iter().zip(ranks) {
+        let column = columns
+            .entry(card.output)
+            .or_insert((margin, margin, margin));
+        let (y, full_top, full_bottom) = column;
+        let height = card.height;
+        let (slot, scale) = if rank < full {
+            let slot = *y;
+            *full_top = *y;
+            *full_bottom = *y + height;
+            *y += height + GAP;
+            (slot, 1.0)
+        } else {
+            let k = (rank - full + 1) as f64;
+            let scale = 1.0 - PEEK_SCALE_STEP * k;
+            // Far edge peeks PEEK px per level beyond the last full card;
+            // clamp so a tall collapsed card can't poke out past the
+            // anchored edge.
+            let slot = (*full_bottom + PEEK * k - height * scale).max(*full_top + 2.0 * k);
+            (slot, scale)
+        };
+        let y = if card.bottom {
+            f64::from(WINDOW_HEIGHT) - slot - height
+        } else {
+            slot
+        };
+        out.push(Slot {
+            y,
+            scale,
+            collapsed: rank >= full,
+        });
+    }
+    out
+}
+
 /// Give every card its slot: newest nearest the anchored edge, cards past
 /// the stack depth collapsed behind the last full one with their far edges
 /// peeking out. One column per output ([`ranks_per_output`]).
@@ -570,53 +635,37 @@ fn ranks_per_output(outputs: &[Option<&str>]) -> Vec<usize> {
 /// arithmetic rather than two.
 pub(super) fn reflow(st: &Rc<RefCell<State>>) {
     let full = usize::from(alerts().stack);
-    let plan: Vec<(CardSurface, f64, f64, bool)> = {
+    let plan: Vec<(CardSurface, Slot)> = {
         let s = st.borrow();
         let showing: Vec<&Card> = s.cards.iter().rev().filter(|c| !c.exiting).collect();
-        let outputs: Vec<Option<&str>> = showing.iter().map(|c| c.output.as_deref()).collect();
-        let ranks = ranks_per_output(&outputs);
-        // The running geometry is per column, so a card on one screen never
-        // reads a `y` another screen's card left behind.
-        let mut columns: std::collections::HashMap<Option<&str>, (f64, f64, f64)> =
-            std::collections::HashMap::new();
-        let mut plan = Vec::new();
-        let margin = f64::from(EDGE_MARGIN);
-        for (card, rank) in showing.iter().zip(ranks) {
-            let column = columns
-                .entry(card.output.as_deref())
-                .or_insert((margin, margin, margin));
-            let (y, full_top, full_bottom) = column;
-            let height = card.surface.height();
-            let (slot, scale) = if rank < full {
-                let slot = *y;
-                *full_top = *y;
-                *full_bottom = *y + height;
-                *y += height + GAP;
-                (slot, 1.0)
-            } else {
-                let k = (rank - full + 1) as f64;
-                let scale = 1.0 - PEEK_SCALE_STEP * k;
-                // Far edge peeks PEEK px per level beyond the last full
-                // card; clamp so a tall collapsed card can't poke out past
-                // the anchored edge.
-                let slot = (*full_bottom + PEEK * k - height * scale).max(*full_top + 2.0 * k);
-                (slot, scale)
-            };
-            let slot = if card.corner.is_bottom() {
-                f64::from(WINDOW_HEIGHT) - slot - height
-            } else {
-                slot
-            };
-            plan.push((card.surface.clone(), slot, scale, rank >= full));
-        }
-        plan
+        let placing: Vec<Placing> = showing
+            .iter()
+            .map(|c| Placing {
+                output: c.output.as_deref(),
+                height: c.surface.height(),
+                bottom: c.corner.is_bottom(),
+            })
+            .collect();
+        showing
+            .iter()
+            .map(|c| c.surface.clone())
+            .zip(slots(&placing, full))
+            .collect()
     };
 
-    for (surface, slot, scale, collapsed) in plan {
+    for (
+        surface,
+        Slot {
+            y: slot,
+            scale,
+            collapsed,
+        },
+    ) in plan
+    {
         // A card that has not been shown yet is placed outright: it should
         // fade in where it belongs, not travel there.
         let ms = if surface.is_shown() {
-            anim::duration(anim::MOVE_MS)
+            anim::ms(swaypplet_tokens::motion::MOVE)
         } else {
             0.0
         };
@@ -686,5 +735,86 @@ mod tests {
         // which is what every card did before outputs were known.
         assert_eq!(ranks_per_output(&[None, a, None]), vec![0, 0, 1]);
         assert_eq!(ranks_per_output(&[]), Vec::<usize>::new());
+    }
+
+    fn card(output: Option<&str>, height: f64, bottom: bool) -> Placing<'_> {
+        Placing {
+            output,
+            height,
+            bottom,
+        }
+    }
+
+    #[test]
+    fn full_cards_stack_from_the_edge_and_the_rest_peek_out_behind() {
+        let m = f64::from(EDGE_MARGIN);
+        let a = Some("DP-1");
+        let got = slots(
+            &[
+                card(a, 100.0, false),
+                card(a, 80.0, false),
+                card(a, 60.0, false),
+                card(a, 60.0, false),
+            ],
+            2,
+        );
+        assert_eq!(
+            got[0],
+            Slot {
+                y: m,
+                scale: 1.0,
+                collapsed: false
+            }
+        );
+        assert_eq!(
+            got[1],
+            Slot {
+                y: m + 100.0 + GAP,
+                scale: 1.0,
+                collapsed: false
+            }
+        );
+        // The last full card ends at m + 180 + GAP; the first collapsed one
+        // shows PEEK px of its far edge past it, the next twice that.
+        let bottom = m + 180.0 + GAP;
+        let s1 = 1.0 - PEEK_SCALE_STEP;
+        assert_eq!(
+            got[2],
+            Slot {
+                y: bottom + PEEK - 60.0 * s1,
+                scale: s1,
+                collapsed: true
+            }
+        );
+        let s2 = 1.0 - 2.0 * PEEK_SCALE_STEP;
+        assert_eq!(got[3].scale, s2);
+        assert!((got[3].y - (bottom + 2.0 * PEEK - 60.0 * s2)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_tall_collapsed_card_stays_behind_the_last_full_one() {
+        let m = f64::from(EDGE_MARGIN);
+        let got = slots(&[card(None, 40.0, false), card(None, 400.0, false)], 1);
+        // Clamped to two px per level below the last full card's top.
+        assert_eq!(got[1].y, m + 2.0);
+    }
+
+    #[test]
+    fn a_bottom_column_is_the_top_one_mirrored_and_columns_do_not_mix() {
+        let m = f64::from(EDGE_MARGIN);
+        let h = f64::from(WINDOW_HEIGHT);
+        let got = slots(
+            &[
+                card(Some("DP-1"), 100.0, true),
+                card(Some("eDP-1"), 50.0, false),
+                card(Some("DP-1"), 60.0, true),
+            ],
+            3,
+        );
+        assert_eq!(got[0].y, h - m - 100.0);
+        // The other screen's column starts at its own edge.
+        assert_eq!(got[1].y, m);
+        assert_eq!(got[2].y, h - (m + 100.0 + GAP) - 60.0);
+        assert!(slots(&[], 3).is_empty());
     }
 }
