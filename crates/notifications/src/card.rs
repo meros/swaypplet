@@ -123,12 +123,7 @@ fn is_wide_picture(src: &ImageSource) -> bool {
 /// budget (P7) does not pay for.
 pub(super) fn age_label(ts: std::time::SystemTime, now: std::time::SystemTime) -> Option<String> {
     let secs = now.duration_since(ts).ok()?.as_secs();
-    Some(match secs {
-        0..=59 => return None,
-        60..=3599 => format!("{}m", secs / 60),
-        3600..=86_399 => format!("{}h", secs / 3600),
-        _ => format!("{}d", secs / 86_400),
-    })
+    (secs >= 60).then(|| swaypplet_base::fmt::ago(secs, swaypplet_base::fmt::Ago::Bare))
 }
 
 /// A body long enough that the 3-line cap will hide part of it, so the card

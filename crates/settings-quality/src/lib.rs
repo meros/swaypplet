@@ -74,17 +74,6 @@ pub fn tone(f: &Fix) -> ui::Status {
     }
 }
 
-/// "3 min ago", "5 h ago", "2 d ago" from two Unix times.
-pub fn age(now: i64, then: i64) -> String {
-    let s = (now - then).max(0);
-    match s {
-        0..60 => "just now".into(),
-        60..3600 => format!("{} min ago", s / 60),
-        3600..86_400 => format!("{} h ago", s / 3600),
-        _ => format!("{} d ago", s / 86_400),
-    }
-}
-
 /// `tests pass · gate pass` from check.sh's `RESULT` lines.
 pub fn checks_line(text: &str) -> Option<String> {
     let parts: Vec<String> = text
@@ -686,7 +675,10 @@ fn entry_widget(issue: Issue, pr: Option<Pr>, now: i64) -> (gtk4::Box, Rc<Entry>
     if !labels.is_empty() {
         facts.push(labels.join(", "));
     }
-    facts.push(age(now, created));
+    facts.push(swaypplet_base::fmt::ago(
+        now.saturating_sub(created).max(0) as u64,
+        swaypplet_base::fmt::Ago::Floored,
+    ));
     if let Some(pr) = &pr {
         facts.push(format!("PR #{}", pr.number));
     }
@@ -1211,15 +1203,6 @@ mod tests {
         assert_eq!(tone(&Fix::Failed(String::new())), ui::Status::Danger);
         assert_eq!(tone(&Fix::Merged), ui::Status::Success);
         assert_eq!(tone(&Fix::Closed), ui::Status::Neutral);
-    }
-
-    #[test]
-    fn ages_pick_one_unit() {
-        assert_eq!(age(100, 100), "just now");
-        assert_eq!(age(100, 200), "just now");
-        assert_eq!(age(1000, 100), "15 min ago");
-        assert_eq!(age(7300, 100), "2 h ago");
-        assert_eq!(age(3 * 86_400 + 5, 0), "3 d ago");
     }
 
     #[test]

@@ -382,13 +382,10 @@ fn format_hours(h: f64) -> Option<String> {
         return Some("24h+".to_owned());
     }
     let total_mins = (h * 60.0).round() as u64;
-    let hrs = total_mins / 60;
-    let mins = total_mins % 60;
-    Some(if hrs == 0 {
-        format!("{}m", mins)
-    } else {
-        format!("{}h {}m", hrs, mins)
-    })
+    Some(swaypplet_base::fmt::hm(
+        total_mins * 60,
+        swaypplet_base::fmt::Hm::Clock,
+    ))
 }
 
 fn battery_sub_text(bat: &BatteryState) -> String {

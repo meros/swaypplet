@@ -177,14 +177,8 @@ pub(crate) fn session_age(s: &SessionState, now: SystemTime) -> Duration {
 
 /// `None` below the 2 min threshold. Shared with the decision slot.
 pub(crate) fn chip_label(age: Duration) -> Option<String> {
-    let mins = age.as_secs() / 60;
-    (age >= CHIP_AFTER).then(|| {
-        if mins < 60 {
-            format!("{mins}m")
-        } else {
-            format!("{}h", mins / 60)
-        }
-    })
+    (age >= CHIP_AFTER)
+        .then(|| swaypplet_base::fmt::hm(age.as_secs(), swaypplet_base::fmt::Hm::Largest))
 }
 
 fn tooltip(n: u8, task: &TaskState) -> String {

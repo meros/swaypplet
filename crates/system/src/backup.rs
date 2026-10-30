@@ -24,6 +24,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use gio::prelude::*;
 use serde::Deserialize;
 
+use swaypplet_base::fmt::{self, Ago, bytes};
 use swaypplet_base::service::Observed;
 
 const DIR: &str = "/var/lib/backup-status";
@@ -204,28 +205,8 @@ fn now_s() -> u64 {
 
 /// Coarse on purpose: nobody acts on the difference between 61 and 62
 /// minutes, and a bar that rewrites itself every second is a moving target.
-pub fn ago(secs: u64) -> String {
-    match secs {
-        0..=89 => "just now".to_string(),
-        90..=5399 => format!("{} min ago", (secs + 30) / 60),
-        5400..=169_199 => format!("{} h ago", (secs + 1800) / 3600),
-        _ => format!("{} days ago", (secs + 43200) / 86400),
-    }
-}
-
-pub fn bytes(n: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut value = n as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit + 1 < UNITS.len() {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{n} B")
-    } else {
-        format!("{value:.1} {}", UNITS[unit])
-    }
+fn ago(secs: u64) -> String {
+    fmt::ago(secs, Ago::Rounded)
 }
 
 // ── Service ─────────────────────────────────────────────────────────────
@@ -353,13 +334,5 @@ mod tests {
         assert_eq!(bytes(job.snapshot_bytes), "63.2 GiB");
         let snap = Snapshot { jobs: vec![job] };
         assert!(snap.tooltip().contains("meros-server"));
-    }
-
-    #[test]
-    fn ago_rounds_to_something_a_human_would_say() {
-        assert_eq!(ago(30), "just now");
-        assert_eq!(ago(720), "12 min ago");
-        assert_eq!(ago(7200), "2 h ago");
-        assert_eq!(ago(3 * 86400), "3 days ago");
     }
 }

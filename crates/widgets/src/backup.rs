@@ -139,8 +139,8 @@ fn draw(
             target.set_visible(true);
             target.set_label(&format!(
                 "meros-server   {} used · {} free",
-                backup::bytes(job.repo_bytes),
-                backup::bytes(job.target_avail_bytes)
+                swaypplet_base::fmt::bytes(job.repo_bytes),
+                swaypplet_base::fmt::bytes(job.target_avail_bytes)
             ));
         }
         _ => target.set_visible(false),

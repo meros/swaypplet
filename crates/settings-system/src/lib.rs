@@ -23,6 +23,7 @@ use crate::{
     system_job as job,
     system_job::{Action, Job},
 };
+use swaypplet_base::fmt;
 use swaypplet_base::spawn::{remove_source, spawn_work};
 use swaypplet_settings_kit::{form, form::section_box};
 use swaypplet_ui::{
@@ -621,25 +622,15 @@ impl Pane {
         f.version.set_text(&or_unknown(s.nixos_version.clone()));
         f.kernel.set_text(&or_unknown(s.kernel.clone()));
         f.uptime
-            .set_text(&or_unknown(s.uptime_s.map(info::uptime_label)));
+            .set_text(&or_unknown(s.uptime_s.map(|s| fmt::hm(s, fmt::Hm::Prose))));
         for (label, mount) in [(&f.root, "/"), (&f.nix, "/nix")] {
             label.set_text(&or_unknown(s.disks.iter().find(|d| d.mount == mount).map(
-                |d| {
-                    format!(
-                        "{} free of {}",
-                        info::bytes_label(d.free),
-                        info::bytes_label(d.total)
-                    )
-                },
+                |d| format!("{} free of {}", fmt::bytes(d.free), fmt::bytes(d.total)),
             )));
         }
         f.memory
             .set_text(&or_unknown(s.memory.map(|(avail, total)| {
-                format!(
-                    "{} available of {}",
-                    info::bytes_label(avail),
-                    info::bytes_label(total)
-                )
+                format!("{} available of {}", fmt::bytes(avail), fmt::bytes(total))
             })));
     }
 }

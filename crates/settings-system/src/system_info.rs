@@ -253,31 +253,6 @@ pub fn short(rev: &str) -> &str {
     rev.get(..7).unwrap_or(rev)
 }
 
-pub fn uptime_label(secs: u64) -> String {
-    let (d, h, m) = (secs / 86_400, secs % 86_400 / 3600, secs % 3600 / 60);
-    match (d, h) {
-        (0, 0) => format!("{m} min"),
-        (0, h) => format!("{h} h {m} min"),
-        (d, h) => format!("{d} d {h} h"),
-    }
-}
-
-/// Bytes in the largest binary unit that keeps a whole part, one decimal.
-pub fn bytes_label(n: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut v = n as f64;
-    let mut unit = 0;
-    while v >= 1024.0 && unit < UNITS.len() - 1 {
-        v /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{n} B")
-    } else {
-        format!("{v:.1} {}", UNITS[unit])
-    }
-}
-
 // ── Reading ─────────────────────────────────────────────────────────────
 
 fn home() -> PathBuf {
@@ -662,12 +637,6 @@ esac
 
     #[test]
     fn labels() {
-        assert_eq!(uptime_label(59), "0 min");
-        assert_eq!(uptime_label(3 * 3600 + 5 * 60), "3 h 5 min");
-        assert_eq!(uptime_label(3 * 86_400 + 4 * 3600 + 1200), "3 d 4 h");
-        assert_eq!(bytes_label(512), "512 B");
-        assert_eq!(bytes_label(182 << 30), "182.0 GiB");
-        assert_eq!(bytes_label(1536 << 20), "1.5 GiB");
         assert_eq!(short(REV_A), "98c70da");
         assert_eq!(short("abc"), "abc");
     }
