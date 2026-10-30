@@ -6,10 +6,10 @@
 //! auto exclusive zone so tiled windows sit above the bar + margins, while
 //! the Overlay panel/OSD/launcher surfaces still stack over it.
 //!
-//! The default swaypplet process hosts the bar (app.rs); `swaypplet bar`
+//! The default swaypplet process hosts the bar (`swaypplet_app`); `swaypplet bar`
 //! (own GApplication id) still runs it standalone for development next to
 //! a live panel, and `SWAYPPLET_NO_BAR=1` keeps the hosted bar off while
-//! an external bar owns the strip (see app.rs).
+//! an external bar owns the strip (see `swaypplet_app`).
 
 mod backup;
 mod battery;
@@ -190,7 +190,7 @@ fn build_bar_window(bar: &BarManager, monitor: &gdk::Monitor) -> (Surface, decis
     // every bar, and its groups say which screen each workspace is on.
     left.append(&workspaces::build(sway, tasks));
     // Center: the decision slot — priority-muxed single occupant, empty
-    // at nominal (bar/decision.rs).
+    // at nominal (`decision.rs`).
     let center = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Horizontal)
         .build();

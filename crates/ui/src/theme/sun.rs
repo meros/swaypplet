@@ -1,5 +1,5 @@
 //! Where the sun is, for the two things that follow it: the automatic mode
-//! (docs/design-system.md §2.1) and the night light (`services::gamma`).
+//! (docs/design-system.md §2.1) and the night light (`swaypplet_ambient::gamma`).
 //! One calculation and one location, so the screen warms and the theme
 //! darkens against the same horizon.
 //!

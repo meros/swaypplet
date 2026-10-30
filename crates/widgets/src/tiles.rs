@@ -544,7 +544,7 @@ fn read_bluetooth_state() -> TileState {
     }
 }
 
-/// The night light is in this process (`services::gamma`): available when
+/// The night light is in this process (`swaypplet_ambient::gamma`): available when
 /// the compositor gave it the gamma tables, on when the setting says so.
 fn read_night_state() -> TileState {
     use swaypplet_ambient::gamma;

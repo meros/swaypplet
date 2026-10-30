@@ -1,6 +1,6 @@
 //! The panel's power section: the battery, its limits, and the power
-//! profile, from `services::battery` (UPower's change signals) and
-//! `services::power` (the profile, read when the section opens). Nothing
+//! profile, from `swaypplet_system::battery` (UPower's change signals) and
+//! `swaypplet_system::power` (the profile, read when the section opens). Nothing
 //! here runs on a timer.
 //!
 //! `SWAYPPLET_PREVIEW_POWER=charging|low|saver|degraded` draws a fixture
@@ -384,7 +384,7 @@ pub fn build_session_row() -> gtk4::Box {
 }
 
 /// One icon-only button on the Helm's action deck: the same glyph button
-/// as the deck's own (panel.rs), the glyph in the danger tone for the
+/// as the deck's own (`swaypplet_panel`), the glyph in the danger tone for the
 /// destructive actions.
 fn rail_btn(icon: &str, tooltip: &str, danger: bool) -> gtk4::Button {
     let lbl = gtk4::Label::new(Some(icon));
@@ -435,7 +435,7 @@ fn wire_confirm<F: Fn() + 'static>(btn: &gtk4::Button, verb: &'static str, exec:
 }
 
 /// What the session rail does, and the Helm's typed rows the same way
-/// (`panel.rs`): one command each, whichever door it came through.
+/// (`swaypplet_panel`): one command each, whichever door it came through.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Session {
     Lock,

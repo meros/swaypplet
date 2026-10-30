@@ -1,11 +1,11 @@
 //! The wired and other physical adapters, under "Advanced": one switch
 //! each, to bring the device up or down, and on a wired adapter a Block
 //! button that tells NetworkManager to leave it alone until it is unplugged
-//! (`services::network::is_banned`). A blocked adapter stays listed with
+//! (`swaypplet_devices::network::is_banned`). A blocked adapter stays listed with
 //! Unblock in the switch's place, since NM no longer brings it up or down.
 //!
 //! Each row reads as the adapter's name ("Ethernet on Lenovo dock",
-//! `services::network::naming`, or the one the person gave it) over the
+//! `swaypplet_devices::network::naming`, or the one the person gave it) over the
 //! chipset and the kernel name. Rename (`widgets::rename`) stores a name
 //! under the adapter's MAC address.
 

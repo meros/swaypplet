@@ -13,7 +13,7 @@
 /// A layer-shell namespace (see the module docs for why this is a type).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Namespace {
-    /// The control centre (Helm), `app.rs`.
+    /// The control centre (Helm), `swaypplet_app::panel_surface`.
     Panel,
     /// One per output, `bar/`.
     Bar,
@@ -59,7 +59,7 @@ pub enum Namespace {
     /// options it parses (`anim::motion_support`).
     MotionProbe,
     /// The black sheet over the animated wallpaper, one per output, that
-    /// fades it to black on battery (`services::wallpaper_curtain`).
+    /// fades it to black on battery (`swaypplet_ambient::wallpaper_curtain`).
     /// Deliberately without glass: it is plain black, and a `layer_effects`
     /// block on it would frost the desktop it is fading out.
     WallpaperCurtain,

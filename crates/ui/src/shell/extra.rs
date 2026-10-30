@@ -1,5 +1,5 @@
 //! What may show on an extra screen: a virtual output made for a TV or a
-//! VNC viewer (`services::cast`, `displays::naming::is_virtual`).
+//! VNC viewer (`swaypplet_cast`, `swaypplet_base::naming::display::is_virtual`).
 //!
 //! An extra screen is somebody else's view of this desktop, often a TV in a
 //! room full of people, so by default nothing of the shell's goes there: no

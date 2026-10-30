@@ -12,7 +12,7 @@
 //! keybindings are independent and unaffected. A last-message row appears
 //! per session once the nixos-side Stop hook writes last-<pid>; without
 //! the hook the row is simply absent. Battery and media marks reuse the
-//! chassis with their own sections (bar/battery.rs, bar/media.rs).
+//! chassis with their own sections (`battery.rs`, `media.rs`).
 //!
 //! Cadence: content renders at open and, for the task section, on
 //! TaskStateService change while open — no timer of its own.
