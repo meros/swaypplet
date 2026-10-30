@@ -2045,6 +2045,7 @@ dependencies = [
  "log",
  "swaypplet-ambient",
  "swaypplet-audio",
+ "swaypplet-auth-card",
  "swaypplet-bar",
  "swaypplet-base",
  "swaypplet-cast",
@@ -2054,7 +2055,6 @@ dependencies = [
  "swaypplet-jump",
  "swaypplet-label",
  "swaypplet-launcher",
- "swaypplet-lock",
  "swaypplet-model",
  "swaypplet-notifications",
  "swaypplet-notifyd",
@@ -2079,6 +2079,21 @@ dependencies = [
  "log",
  "swaypplet-base",
  "swaypplet-model",
+]
+
+[[package]]
+name = "swaypplet-auth-card"
+version = "0.1.0"
+dependencies = [
+ "gdk4",
+ "glib",
+ "gtk4",
+ "log",
+ "swaypplet-base",
+ "swaypplet-switch-user",
+ "swaypplet-system",
+ "swaypplet-tokens",
+ "swaypplet-ui",
 ]
 
 [[package]]
@@ -2215,9 +2230,9 @@ dependencies = [
  "gtk4-layer-shell",
  "log",
  "serde_json",
+ "swaypplet-auth-card",
  "swaypplet-base",
  "swaypplet-fp",
- "swaypplet-lock",
  "swaypplet-model",
  "swaypplet-switch-user",
  "swaypplet-ui",
@@ -2306,10 +2321,10 @@ dependencies = [
  "gtk4-session-lock",
  "log",
  "pam",
+ "swaypplet-auth-card",
  "swaypplet-base",
  "swaypplet-fp",
  "swaypplet-model",
- "swaypplet-switch-user",
  "swaypplet-system",
  "swaypplet-tokens",
  "swaypplet-ui",

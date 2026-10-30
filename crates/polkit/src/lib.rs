@@ -65,11 +65,12 @@ use gtk4::Application;
 use tokio::sync::oneshot;
 
 use swaypplet_model::{store, store::Elevate};
+use swaypplet_ui::auth_field::Tone;
 use swaypplet_ui::theme;
 
 use agent::{AgentEvent, AuthOutcome, AuthRequest, ResolvedIdentity};
 use cue::Cue;
-use dialog::{Callbacks, Card, Methods, PolkitDialog, StatusKind};
+use dialog::{Callbacks, Card, Methods, PolkitDialog};
 use face::FaceSession;
 use helper::{Helper, HelperEvent};
 
@@ -389,10 +390,7 @@ fn spawn_helper(state: &Rc<RefCell<PolkitState>>, username: &str) {
         Err(e) => {
             log::error!("polkit: failed to spawn helper: {e}");
             let dialog = state.borrow().dialog.clone();
-            dialog.set_status(
-                &format!("Failed to spawn polkit helper: {e}"),
-                StatusKind::Error,
-            );
+            dialog.set_status(&format!("Failed to spawn polkit helper: {e}"), Tone::Error);
             dialog.lock_inputs();
             let s = state.clone();
             glib::timeout_add_local_once(Duration::from_secs(3), move || {
@@ -464,7 +462,7 @@ fn drain_helper(state: &Rc<RefCell<PolkitState>>) -> bool {
         if still {
             log::warn!("polkit helper exited unexpectedly");
             let dialog = state.borrow().dialog.clone();
-            dialog.set_status("Authentication helper exited", StatusKind::Error);
+            dialog.set_status("Authentication helper exited", Tone::Error);
             dialog.shake();
             let username = helper_username(state);
             if !username.is_empty() {
@@ -539,7 +537,7 @@ fn apply_helper_event(state: &Rc<RefCell<PolkitState>>, event: HelperEvent) -> b
                 set_channel(state, race::Channel::Fp, true);
                 dialog.hint(&humanise_fingerprint(&msg));
             } else {
-                dialog.set_status(&msg, StatusKind::Info);
+                dialog.set_status(&msg, Tone::Info);
             }
             true
         }
@@ -875,7 +873,7 @@ fn settle_success(state: &Rc<RefCell<PolkitState>>) {
         active.settled = true;
     }
     let dialog = state.borrow().dialog.clone();
-    dialog.set_status("Authorised", StatusKind::Success);
+    dialog.set_status("Authorised", Tone::Success);
     dialog.flash_success();
     let s = state.clone();
     glib::timeout_add_local_once(Duration::from_millis(450), move || {

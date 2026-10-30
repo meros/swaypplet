@@ -60,9 +60,10 @@ use greetd_ipc::AuthMessageType;
 use gtk4::glib;
 use gtk4::prelude::*;
 
+use swaypplet_auth_card::{SurfaceSet, UserChip};
 use swaypplet_fp::agent::{Cmd as FpCmd, Ev as FpEv};
-use swaypplet_lock::ui::{StatusKind, SurfaceSet, UserChip};
 use swaypplet_switch_user as switch_user;
+use swaypplet_ui::auth_field::Tone;
 
 const EXIT_STARTED: i32 = 0;
 const EXIT_ERROR: i32 = 1;
@@ -263,6 +264,7 @@ pub fn run() -> ! {
         }
     });
     surfaces.tick();
+    surfaces.follow_caps_lock();
 
     // Kick off the conversation for the prefilled user right away and arm
     // the reader for them — the common case fingerprints straight in
@@ -388,7 +390,7 @@ fn submit(st: &Rc<RefCell<State>>, password: String) {
         return;
     }
     let Some(user) = s.username() else {
-        s.surfaces.set_status("Enter a username", StatusKind::Error);
+        s.surfaces.set_status("Enter a username", Tone::Error);
         return;
     };
 
@@ -405,7 +407,7 @@ fn submit(st: &Rc<RefCell<State>>, password: String) {
     let same_user = s.session_user.as_deref() == Some(user.as_str());
     if s.prompt_open && same_user {
         s.prompt_open = false;
-        s.surfaces.set_status("", StatusKind::Info);
+        s.surfaces.set_status("", Tone::Info);
         s.surfaces.set_verifying(true);
         s.send(ipc::Req::Respond(Some(password)));
         return;
@@ -418,7 +420,7 @@ fn submit(st: &Rc<RefCell<State>>, password: String) {
         user: user.clone(),
         password,
     });
-    s.surfaces.set_status("", StatusKind::Info);
+    s.surfaces.set_status("", Tone::Info);
     s.surfaces.set_verifying(true);
     if !s.blocked {
         restart_conversation(&mut s, user);
@@ -437,7 +439,7 @@ fn switch_user(st: &Rc<RefCell<State>>, user: String) {
     s.default_user = user.clone();
     s.surfaces.set_username(&user);
     s.pending = None;
-    s.surfaces.set_status("", StatusKind::Info);
+    s.surfaces.set_status("", Tone::Info);
     s.surfaces.set_verifying(false);
     s.retarget_fp();
     if s.canceling {
@@ -525,7 +527,7 @@ fn handle_event(
             match kind {
                 AuthMessageType::Secret | AuthMessageType::Visible => {
                     if matches!(kind, AuthMessageType::Visible) {
-                        s.surfaces.set_status(&text, StatusKind::Info);
+                        s.surfaces.set_status(&text, Tone::Info);
                     }
                     match s.pending.take() {
                         Some(p) if s.session_user.as_deref() == Some(p.user.as_str()) => {
@@ -548,9 +550,9 @@ fn handle_event(
                     // the like) — show and ack immediately so the
                     // conversation keeps moving.
                     if matches!(kind, AuthMessageType::Info) {
-                        s.surfaces.set_status(&text, StatusKind::Info);
+                        s.surfaces.set_status(&text, Tone::Info);
                     } else {
-                        s.surfaces.set_status(&text, StatusKind::Error);
+                        s.surfaces.set_status(&text, Tone::Error);
                     }
                     s.send(ipc::Req::Respond(None));
                 }
@@ -562,7 +564,7 @@ fn handle_event(
             let _ = s.fp_tx.send(FpCmd::Stop);
             s.surfaces.flash_success();
             if s.session_user.as_deref().is_some_and(|u| s.has_session(u)) {
-                s.surfaces.set_status("Resuming\u{2026}", StatusKind::Info);
+                s.surfaces.set_status("Resuming\u{2026}", Tone::Info);
             }
             let cmd = s.session_cmd.clone();
             let env = s.session_env.clone();
@@ -594,11 +596,11 @@ fn handle_event(
                 // its own mode — "Login failed" here and "Wrong password"
                 // there told the same person two different stories about
                 // the same mistyped key.
-                s.surfaces.set_status("Wrong password", StatusKind::Error);
+                s.surfaces.set_status("Wrong password", Tone::Error);
                 s.surfaces.shake();
             } else {
                 log::warn!("greetd error: {text}");
-                s.surfaces.set_status(&text, StatusKind::Error);
+                s.surfaces.set_status(&text, Tone::Error);
             }
             if let Some(user) = s.username() {
                 s.session_user = Some(user.clone());

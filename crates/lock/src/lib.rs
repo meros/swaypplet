@@ -34,7 +34,6 @@ pub(crate) mod auth;
 pub(crate) mod face;
 pub(crate) mod fade;
 pub(crate) mod fprint;
-pub mod ui;
 
 use std::cell::RefCell;
 use std::os::fd::AsRawFd;
@@ -44,12 +43,13 @@ use std::time::Duration;
 use gtk4::glib;
 use gtk4::prelude::*;
 
+use swaypplet_auth_card::SurfaceSet;
 use swaypplet_base::lock_proto::{
     self, EXIT_ERROR, EXIT_UNAVAILABLE, EXIT_UNLOCKED, LockCmd, UNKNOWN_REASON,
 };
 use swaypplet_base::spawn::spawn_work;
 use swaypplet_fp::EngineEvent;
-use ui::{StatusKind, SurfaceSet};
+use swaypplet_ui::auth_field::Tone;
 
 /// How long a matched face stays on screen before the session unlocks.
 ///
@@ -337,7 +337,7 @@ pub fn run() -> ! {
     // greeter draws, which on this surface asked a question it could not
     // answer — a locked session authenticates one user, so every chip but one
     // had to hand the seat away and the one that didn't was inert. The card
-    // says both of those with one "Switch user" button now (lock/ui.rs), and
+    // says both of those with one "Switch user" button now (`swaypplet_auth_card`), and
     // the warm-up's `switch_user::list()` plus its off-thread refresh went with
     // the row: two D-Bus round trips per lock whose only consumer it was.
 
@@ -375,7 +375,7 @@ pub fn run() -> ! {
             if !gate.borrow_mut().try_begin(&password) {
                 return;
             }
-            surfaces.set_status("", StatusKind::Info);
+            surfaces.set_status("", Tone::Info);
             surfaces.set_verifying(true);
             let user = user.clone();
             let surfaces = surfaces.clone();
@@ -403,7 +403,7 @@ pub fn run() -> ! {
                             } else {
                                 format!("Wrong password ({failures} attempts)")
                             },
-                            StatusKind::Error,
+                            Tone::Error,
                         );
                         surfaces.shake();
                     }
@@ -555,12 +555,13 @@ pub fn run() -> ! {
                 auth::Locked::Arm => {}
             }
 
-            // Once now, then every second. Without the first call the Caps
-            // Lock warning is a second late, which puts it inside the
-            // entrance — the card does not resize for it any more, but a
-            // warning that fades in behind a card still fading in reads as
+            // The clock once now, then every second, and Caps Lock from here
+            // on. A key already latched shows now, after the entrance rather
+            // than inside it — the card does not resize for it any more, but
+            // a warning that fades in behind a card still fading in reads as
             // something having gone wrong.
             surfaces.tick();
+            surfaces.follow_caps_lock();
             // The Claude Code line under the date. The directory watch sees
             // every hook write; the tick sees a session whose process died
             // without one.

@@ -28,6 +28,7 @@ swaypplet-jump = { path = "crates/jump" }
 swaypplet-screenshot = { path = "crates/screenshot" }
 swaypplet-fp = { path = "crates/fp" }
 swaypplet-switch-user = { path = "crates/switch-user" }
+swaypplet-auth-card = { path = "crates/auth-card" }
 swaypplet-lock = { path = "crates/lock" }
 swaypplet-greet = { path = "crates/greet" }
 swaypplet-idle = { path = "crates/idle" }
@@ -139,6 +140,8 @@ opt-level = 1
 [profile.release.package.swaypplet-fp]
 opt-level = 1
 [profile.release.package.swaypplet-switch-user]
+opt-level = 1
+[profile.release.package.swaypplet-auth-card]
 opt-level = 1
 [profile.release.package.swaypplet-lock]
 opt-level = 1

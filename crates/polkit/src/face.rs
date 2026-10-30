@@ -39,8 +39,8 @@ use swaypplet_base::{
     face,
     face::{Progress, Request, Stage},
 };
+use swaypplet_ui::auth_field::Tone;
 
-use super::dialog::StatusKind;
 use super::{Backing, PolkitState, Session, elevate_settings, end_session, pop_queue};
 
 /// A face confirm currently on screen.
@@ -250,10 +250,7 @@ fn confirm(state: &Rc<RefCell<PolkitState>>, req: Request) {
         }
     }
     let dialog = state.borrow().dialog.clone();
-    dialog.set_status(
-        "Recognised you — press Allow to authorise",
-        StatusKind::Info,
-    );
+    dialog.set_status("Recognised you — press Allow to authorise", Tone::Info);
     dialog.arm_allow();
     state
         .borrow()
