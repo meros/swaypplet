@@ -244,3 +244,60 @@ pub fn is_fingerprint_hint(text: &str) -> bool {
         || lower.contains("touch the sensor")
         || lower.contains("fprint")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_helper_line_maps_to_its_event() {
+        assert!(matches!(
+            parse_line("PAM_PROMPT_ECHO_OFF Password: "),
+            Some(HelperEvent::PromptEchoOff(p)) if p == "Password: "
+        ));
+        assert!(matches!(
+            parse_line("PAM_PROMPT_ECHO_ON Code:"),
+            Some(HelperEvent::PromptEchoOn(p)) if p == "Code:"
+        ));
+        assert!(matches!(
+            parse_line("PAM_ERROR_MSG Account locked"),
+            Some(HelperEvent::Error(m)) if m == "Account locked"
+        ));
+        assert!(matches!(
+            parse_line("PAM_TEXT_INFO Place your finger on the reader"),
+            Some(HelperEvent::Info(m)) if m == "Place your finger on the reader"
+        ));
+        assert!(matches!(parse_line("SUCCESS"), Some(HelperEvent::Success)));
+        assert!(matches!(parse_line("FAILURE"), Some(HelperEvent::Failure)));
+    }
+
+    #[test]
+    fn a_line_that_only_looks_like_a_verdict_is_ignored() {
+        // The verdicts are whole lines: anything around them is noise, never
+        // a success.
+        assert!(parse_line("SUCCESS ").is_none());
+        assert!(parse_line(" SUCCESS").is_none());
+        assert!(parse_line("success").is_none());
+        assert!(parse_line("").is_none());
+        // A prefix with no separating space is not that prefix.
+        assert!(parse_line("PAM_PROMPT_ECHO_OFF").is_none());
+    }
+
+    #[test]
+    fn fingerprint_chatter_is_recognised() {
+        for line in [
+            "Place your finger on the fingerprint reader",
+            "Swipe your right index finger across the fingerprint reader",
+            "Please touch the sensor again",
+            "fprintd: device busy",
+        ] {
+            assert!(is_fingerprint_hint(line), "{line}");
+        }
+    }
+
+    #[test]
+    fn other_info_lines_are_not_reader_hints() {
+        assert!(!is_fingerprint_hint("Your password will expire in 3 days"));
+        assert!(!is_fingerprint_hint(""));
+    }
+}

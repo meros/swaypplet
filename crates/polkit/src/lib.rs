@@ -936,7 +936,7 @@ fn pop_queue(state: &Rc<RefCell<PolkitState>>) {
 
 fn humanise_fingerprint(msg: &str) -> String {
     let lower = msg.to_ascii_lowercase();
-    if lower.contains("not centered") || lower.contains("centered") {
+    if lower.contains("centered") {
         "Centre your finger on the reader".into()
     } else if lower.contains("too short") || lower.contains("swipe") {
         "Swipe again, slower".into()
@@ -948,5 +948,55 @@ fn humanise_fingerprint(msg: &str) -> String {
         "Touch fingerprint reader".into()
     } else {
         msg.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::humanise_fingerprint;
+
+    #[test]
+    fn pam_fprintd_lines_become_the_card_words() {
+        for (pam, card) in [
+            (
+                "Your finger was not centered, try again",
+                "Centre your finger on the reader",
+            ),
+            ("Swipe was too short, try again", "Swipe again, slower"),
+            (
+                "Remove your finger, and try again",
+                "Remove finger and try again",
+            ),
+            ("Fingerprint no match", "Not recognised — try again"),
+            (
+                "Place your finger on the fingerprint reader",
+                "Touch fingerprint reader",
+            ),
+        ] {
+            assert_eq!(humanise_fingerprint(pam), card, "{pam}");
+        }
+    }
+
+    #[test]
+    fn the_first_rule_that_matches_wins() {
+        // "swipe" alone would read as too short; "centered" is checked first.
+        assert_eq!(
+            humanise_fingerprint("Swipe not centered"),
+            "Centre your finger on the reader"
+        );
+        // "touch" is the last rule, so a no-match that says it loses to it
+        // only when nothing earlier claims the line.
+        assert_eq!(
+            humanise_fingerprint("No match, touch again"),
+            "Not recognised — try again"
+        );
+    }
+
+    #[test]
+    fn an_unknown_line_passes_through_unchanged() {
+        assert_eq!(
+            humanise_fingerprint("Fingerprint reader busy"),
+            "Fingerprint reader busy"
+        );
     }
 }
