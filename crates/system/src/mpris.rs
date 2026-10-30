@@ -12,11 +12,15 @@
 //! `PropertiesChanged` on `/org/mpris/MediaPlayer2`, or a player arriving or
 //! leaving the bus. The chosen player is the one playing, else the first,
 //! which is what `playerctl` picks by default. Observers are told only when
-//! the state they would draw changed.
+//! the state they would draw changed; the position is read along with the
+//! rest, so a reader that does not show it drops it before comparing
+//! ([`MediaState::without_position`]).
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::process::Command;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use zbus::zvariant::OwnedValue;
 
@@ -37,7 +41,9 @@ pub struct MediaState {
     pub player_name: Option<String>,
     /// Track length in seconds (from mpris:length, which is in microseconds).
     pub length_secs: Option<f64>,
-    /// Current position in seconds.
+    /// The position in seconds when this state was read. MPRIS does not
+    /// signal the position as it advances, only when it jumps (`Seeked`), so
+    /// a reader that shows it counts on from here while the player plays.
     pub position_secs: Option<f64>,
 }
 
@@ -47,8 +53,69 @@ impl MediaState {
     pub fn art_path(&self) -> Option<String> {
         self.art_url.as_deref().and_then(resolve_art_path)
     }
+
+    /// The state without its position, for a reader that does not show
+    /// one: a read that only moved the position then compares equal.
+    pub fn without_position(self) -> MediaState {
+        MediaState {
+            position_secs: None,
+            ..self
+        }
+    }
+
+    /// The title to show, with a stand-in for a player that names none.
+    pub fn display_title(&self) -> &str {
+        if self.title.is_empty() {
+            "Unknown track"
+        } else {
+            &self.title
+        }
+    }
+
+    /// One line for the bar's pill: "Title · Artist", or whichever half
+    /// exists.
+    pub fn pill_text(&self) -> String {
+        match (self.title.trim(), self.artist.trim()) {
+            ("", "") => "♪".to_owned(),
+            (title, "") => title.to_owned(),
+            ("", artist) => artist.to_owned(),
+            (title, artist) => format!("{} · {}", title, artist),
+        }
+    }
+
+    /// The player's name as a badge shows it: `spotify` → `Spotify`.
+    pub fn player_label(&self) -> Option<String> {
+        self.player_name.as_deref().map(capitalize)
+    }
 }
 
+/// `m:ss` for a position or a length in seconds.
+pub fn format_time(secs: f64) -> String {
+    let total = secs.round() as u64;
+    let m = total / 60;
+    let s = total % 60;
+    format!("{}:{:02}", m, s)
+}
+
+/// How far through the track `pos` is, as a bar fraction and as
+/// "0:42 / 3:15".
+pub fn progress(pos: f64, len: f64) -> (f64, String) {
+    (
+        (pos / len).clamp(0.0, 1.0),
+        format!("{} / {}", format_time(pos), format_time(len)),
+    )
+}
+
+fn capitalize(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+    }
+}
+
+/// Run `playerctl` with `args`: the transport keys (`play-pause`, `next`,
+/// `previous`). Blocks on D-Bus, so never on the GTK thread.
 pub fn playerctl(args: &[&str]) -> Option<String> {
     let out = Command::new("playerctl").args(args).output().ok()?;
     if out.status.success() {
@@ -56,54 +123,6 @@ pub fn playerctl(args: &[&str]) -> Option<String> {
     } else {
         None
     }
-}
-
-pub fn read_state() -> Option<MediaState> {
-    let status_str = playerctl(&["status"])?;
-
-    let status = match status_str.as_str() {
-        "Playing" => PlaybackStatus::Playing,
-        "Paused" => PlaybackStatus::Paused,
-        _ => {
-            let artist = playerctl(&["metadata", "artist"]).unwrap_or_default();
-            let title = playerctl(&["metadata", "title"]).unwrap_or_default();
-            if artist.is_empty() && title.is_empty() {
-                return None;
-            }
-            PlaybackStatus::Paused
-        }
-    };
-
-    let artist = playerctl(&["metadata", "artist"]).unwrap_or_default();
-    let title = playerctl(&["metadata", "title"]).unwrap_or_default();
-
-    // Album art URL — may be file:///path or https://...
-    let art_url = playerctl(&["metadata", "mpris:artUrl"]).filter(|s| !s.is_empty());
-
-    // Player identity (e.g. "Spotify", "firefox")
-    let player_name =
-        playerctl(&["metadata", "--format", "{{playerName}}"]).filter(|s| !s.is_empty());
-
-    // Track length (mpris:length is in microseconds)
-    let length_secs = playerctl(&["metadata", "mpris:length"])
-        .and_then(|s| s.parse::<f64>().ok())
-        .map(|us| us / 1_000_000.0)
-        .filter(|&s| s > 0.0);
-
-    // Current position in seconds
-    let position_secs = playerctl(&["position"])
-        .and_then(|s| s.parse::<f64>().ok())
-        .filter(|&s| s >= 0.0);
-
-    Some(MediaState {
-        status,
-        artist,
-        title,
-        art_url,
-        player_name,
-        length_secs,
-        position_secs,
-    })
 }
 
 /// Resolve an art URL to a local file path for GTK.
@@ -117,14 +136,28 @@ const PREFIX: &str = "org.mpris.MediaPlayer2.";
 const PATH: &str = "/org/mpris/MediaPlayer2";
 const PLAYER: &str = "org.mpris.MediaPlayer2.Player";
 
+/// Where `state`'s player is `elapsed` after the state was read: counted on
+/// while it plays, up to the track's end; where it was otherwise.
+fn position_after(state: &MediaState, elapsed: Duration) -> Option<f64> {
+    let pos = state.position_secs?;
+    if state.status != PlaybackStatus::Playing {
+        return Some(pos);
+    }
+    let pos = pos + elapsed.as_secs_f64();
+    Some(state.length_secs.map_or(pos, |len| pos.min(len)))
+}
+
 pub struct MprisService {
     state: Observed<Option<MediaState>>,
+    /// When `state` was last read, which is when its position was true.
+    read_at: Cell<Instant>,
 }
 
 impl MprisService {
     pub fn start() -> Rc<MprisService> {
         let service = Rc::new(MprisService {
             state: Observed::new(None),
+            read_at: Cell::new(Instant::now()),
         });
         let (tx, rx) = async_channel::unbounded::<Option<MediaState>>();
         swaypplet_base::spawn::spawn_tokio_thread("mpris", async move {
@@ -135,6 +168,8 @@ impl MprisService {
         let this = service.clone();
         gtk4::glib::spawn_future_local(async move {
             while let Ok(state) = rx.recv().await {
+                // Before the observers hear of it, so they count from now.
+                this.read_at.set(Instant::now());
                 this.state.set_if_changed(state);
             }
         });
@@ -143,6 +178,15 @@ impl MprisService {
 
     pub fn snapshot(&self) -> Option<MediaState> {
         self.state.with(Clone::clone)
+    }
+
+    /// The player's position now, in seconds. Nothing is asked of the
+    /// player: this counts on from the last read, which a seek, a pause or
+    /// a new track refreshes.
+    pub fn position(&self) -> Option<f64> {
+        let elapsed = self.read_at.get().elapsed();
+        self.state
+            .with(|state| state.as_ref().and_then(|s| position_after(s, elapsed)))
     }
 
     pub fn connect_change(&self, cb: impl Fn() + 'static) {
@@ -173,6 +217,14 @@ async fn follow(tx: &async_channel::Sender<Option<MediaState>>) -> zbus::Result<
         .arg0ns("org.mpris.MediaPlayer2")?
         .build();
     let mut owners = zbus::MessageStream::for_match_rule(rule, &conn, None).await?;
+    // The position is not a property that signals; a jump in it is.
+    let rule = zbus::MatchRule::builder()
+        .msg_type(zbus::message::Type::Signal)
+        .interface(PLAYER)?
+        .member("Seeked")?
+        .path(PATH)?
+        .build();
+    let mut seeks = zbus::MessageStream::for_match_rule(rule, &conn, None).await?;
 
     if tx.send(read(&conn, &dbus).await).await.is_err() {
         return Ok(());
@@ -181,6 +233,7 @@ async fn follow(tx: &async_channel::Sender<Option<MediaState>>) -> zbus::Result<
         tokio::select! {
             Some(_) = changes.next() => {}
             Some(_) = owners.next() => {}
+            Some(_) = seeks.next() => {}
             else => return Ok(()),
         }
         if tx.send(read(&conn, &dbus).await).await.is_err() {
@@ -263,6 +316,11 @@ fn parse(name: &str, props: &HashMap<String, OwnedValue>) -> Option<MediaState> 
         })
         .map(|us| us as f64 / 1_000_000.0)
         .filter(|s| *s > 0.0);
+    let position_secs = props
+        .get("Position")
+        .and_then(|v| i64::try_from(v).ok())
+        .map(|us| us as f64 / 1_000_000.0)
+        .filter(|s| *s >= 0.0);
 
     let status = match status {
         "Playing" => PlaybackStatus::Playing,
@@ -275,7 +333,6 @@ fn parse(name: &str, props: &HashMap<String, OwnedValue>) -> Option<MediaState> 
         // names it.
         p.split('.').next().unwrap_or(p).to_string()
     });
-    // No position: MPRIS does not signal it, and the bar does not show it.
     Some(MediaState {
         status,
         artist,
@@ -283,8 +340,87 @@ fn parse(name: &str, props: &HashMap<String, OwnedValue>) -> Option<MediaState> 
         art_url,
         player_name: player,
         length_secs,
-        position_secs: None,
+        position_secs,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track(title: &str, artist: &str) -> MediaState {
+        MediaState {
+            status: PlaybackStatus::Playing,
+            artist: artist.into(),
+            title: title.into(),
+            art_url: None,
+            player_name: None,
+            length_secs: None,
+            position_secs: Some(12.0),
+        }
+    }
+
+    #[test]
+    fn the_pill_says_whichever_half_there_is() {
+        assert_eq!(track("Song", "Band").pill_text(), "Song · Band");
+        assert_eq!(track("Song", " ").pill_text(), "Song");
+        assert_eq!(track("", "Band").pill_text(), "Band");
+        assert_eq!(track("", "").pill_text(), "♪");
+    }
+
+    #[test]
+    fn a_track_without_a_title_gets_a_stand_in() {
+        assert_eq!(track("", "Band").display_title(), "Unknown track");
+        assert_eq!(track("Song", "").display_title(), "Song");
+    }
+
+    #[test]
+    fn the_badge_capitalizes_the_player() {
+        let mut ms = track("Song", "Band");
+        assert_eq!(ms.player_label(), None);
+        ms.player_name = Some("spotify".into());
+        assert_eq!(ms.player_label().as_deref(), Some("Spotify"));
+        ms.player_name = Some(String::new());
+        assert_eq!(ms.player_label().as_deref(), Some(""));
+    }
+
+    #[test]
+    fn times_read_as_minutes_and_seconds() {
+        assert_eq!(format_time(0.0), "0:00");
+        assert_eq!(format_time(59.6), "1:00");
+        assert_eq!(format_time(195.0), "3:15");
+        assert_eq!(format_time(3725.0), "62:05");
+    }
+
+    #[test]
+    fn progress_is_a_clamped_fraction_and_both_times() {
+        assert_eq!(progress(42.0, 195.0).1, "0:42 / 3:15");
+        assert_eq!(progress(97.5, 195.0).0, 0.5);
+        assert_eq!(progress(200.0, 195.0).0, 1.0);
+    }
+
+    #[test]
+    fn the_position_counts_on_only_while_playing_and_stops_at_the_end() {
+        let mut ms = track("Song", "Band");
+        ms.length_secs = Some(13.0);
+        assert_eq!(position_after(&ms, Duration::from_millis(500)), Some(12.5));
+        assert_eq!(position_after(&ms, Duration::from_secs(5)), Some(13.0));
+        ms.status = PlaybackStatus::Paused;
+        assert_eq!(position_after(&ms, Duration::from_secs(5)), Some(12.0));
+        ms.position_secs = None;
+        assert_eq!(position_after(&ms, Duration::from_secs(5)), None);
+    }
+
+    #[test]
+    fn a_state_without_its_position_equals_one_read_later() {
+        let a = track("Song", "Band");
+        let b = MediaState {
+            position_secs: Some(40.0),
+            ..a.clone()
+        };
+        assert_ne!(a, b);
+        assert_eq!(a.without_position(), b.without_position());
+    }
 }
 
 #[cfg(test)]

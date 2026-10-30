@@ -191,7 +191,9 @@ impl Panel {
         let bluetooth =
             BluetoothSection::new(swaypplet_devices::bluetooth::BluetoothService::start());
         let display = DisplaySection::new();
-        let media = MediaSection::new();
+        // Its own MPRIS connection, as the bar has: one D-Bus match set,
+        // and the panel is not tied to any one bar.
+        let media = MediaSection::new(swaypplet_system::mpris::MprisService::start());
         let notifications = NotificationsSection::new(store.clone());
         let clipboard = ClipboardSection::new();
         let power = PowerSection::new();

@@ -533,12 +533,14 @@ pub fn run(component: &str) {
                 host.append(s.widget());
             }
             "media" => {
-                let s = Box::leak(Box::new(MediaSection::new()));
+                let s = Box::leak(Box::new(MediaSection::new(
+                    swaypplet_system::mpris::MprisService::start(),
+                )));
                 host.append(s.widget());
             }
             "notifications" => {
                 // A sender with a burst and two single ones, so the centre's
-                // grouping (`services::notifications::group`) is on screen.
+                // grouping (`swaypplet_notifyd::group`) is on screen.
                 for (app, summary, body) in [
                     ("CI", "Pipeline #411 failed", "test: 2 of 418 failed on main."),
                     ("Kalender", "Möte nu — Åsa, Öresund", "Startade 10:45."),
