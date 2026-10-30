@@ -586,7 +586,9 @@ impl Panel {
             // them once the enter transition is over.
             let sections = self.sections.clone();
             glib::timeout_add_local_once(
-                std::time::Duration::from_millis((anim::duration(anim::ENTER_MS) + 60.0) as u64),
+                std::time::Duration::from_millis(
+                    (anim::ms(swaypplet_tokens::motion::ENTER) + 60.0) as u64,
+                ),
                 move || sections.refresh(),
             );
         }

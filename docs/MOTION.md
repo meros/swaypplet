@@ -141,7 +141,7 @@ animate itself on top of that — its opacity would become CSS × surface and it
 would visibly lag the wallpaper under it. That is why `.lock-crossfade
 .lock-card { animation: none; }` exists and it stays.
 
-But the fade *itself* runs on `ENTER_MS`/`EXIT_MS` from this scale, and when
+But the fade *itself* runs on the `enter` and `exit` tokens of this scale, and when
 the compositor cannot cross-fade — an unpatched compositor, a before-sleep
 lock, a relaunch onto an abandoned lock — the card falls back to its own
 entrance, which is now the same curve and duration as every other modal's.

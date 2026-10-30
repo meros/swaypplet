@@ -3,22 +3,9 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use swaypplet_base::spawn::spawn_work;
-use swaypplet_system::mpris::{MediaState, MprisService, PlaybackStatus, playerctl, progress};
+use swaypplet_system::mpris::{Control, MediaState, MprisService, PlaybackStatus, progress};
 use swaypplet_ui::ui;
 use swaypplet_ui::ui::icons;
-
-/// Fire a playerctl transport command off-thread; playerctl blocks on
-/// D-Bus, which must not happen on the GTK thread. The player announces
-/// the result itself (`swaypplet_system::mpris`), so nothing is read back.
-fn send(cmd: &'static str) {
-    spawn_work(
-        move || {
-            playerctl(&[cmd]);
-        },
-        |_| {},
-    );
-}
 
 // ── MediaSection ──────────────────────────────────────────────────────────────
 
@@ -183,12 +170,15 @@ impl MediaSection {
         controls.append(&next_btn);
         root.append(&controls);
 
-        for (button, cmd) in [
-            (&prev_btn, "previous"),
-            (&play_pause_btn, "play-pause"),
-            (&next_btn, "next"),
+        // Sent on the service's own connection to the player it shows; the
+        // player announces the result itself, so nothing is read back.
+        for (button, control) in [
+            (&prev_btn, Control::Previous),
+            (&play_pause_btn, Control::PlayPause),
+            (&next_btn, Control::Next),
         ] {
-            button.connect_clicked(move |_| send(cmd));
+            let mpris = mpris.clone();
+            button.connect_clicked(move |_| mpris.control(control));
         }
 
         let widgets = Rc::new(Widgets {

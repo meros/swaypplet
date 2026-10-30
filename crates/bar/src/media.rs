@@ -10,11 +10,11 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use swaypplet_system::mpris::Control;
 
 use gtk4::prelude::*;
 
 use super::popover;
-use swaypplet_base::spawn::spawn_work;
 use swaypplet_system::mpris::{MediaState, PlaybackStatus};
 use swaypplet_ui::ui;
 use swaypplet_ui::ui::icons;
@@ -33,6 +33,8 @@ struct Ui {
     /// "Play on": the output picker, kept across renders
     /// (`swaypplet_widgets::audio::output_picker`).
     outputs: gtk4::Box,
+    /// Where the transport keys go: the player the bar shows.
+    mpris: Rc<swaypplet_system::mpris::MprisService>,
 }
 
 /// A transport key: a mark, muted, ink under the pointer.
@@ -40,19 +42,6 @@ fn control_button(face: &gtk4::Label) -> gtk4::Button {
     let b = ui::mark(face, false);
     b.add_css_class("bar-media-btn");
     b
-}
-
-/// Fire a playerctl transport command off-thread; playerctl blocks on
-/// D-Bus, which must not happen on the GTK thread. The player announces
-/// the result itself (`swaypplet_system::mpris`), so nothing is read back
-/// here.
-fn send(cmd: &'static str) {
-    spawn_work(
-        move || {
-            swaypplet_system::mpris::playerctl(&[cmd]);
-        },
-        |_| {},
-    );
 }
 
 /// Album-art edge in the bar. Small enough to sit inside the bar's height
@@ -105,6 +94,7 @@ pub fn build(
         body,
         state: Rc::new(RefCell::new(None)),
         outputs: swaypplet_widgets::audio::output_picker(audio),
+        mpris: mpris.clone(),
     };
 
     // Pushed by the players themselves (`swaypplet_system::mpris`): no poll,
@@ -134,12 +124,13 @@ pub fn build(
         });
     }
 
-    for (button, cmd) in [
-        (&prev_btn, "previous"),
-        (&play_btn, "play-pause"),
-        (&next_btn, "next"),
+    for (button, control) in [
+        (&prev_btn, Control::Previous),
+        (&play_btn, Control::PlayPause),
+        (&next_btn, Control::Next),
     ] {
-        button.connect_clicked(move |_| send(cmd));
+        let mpris = mpris.clone();
+        button.connect_clicked(move |_| mpris.control(control));
     }
 
     root
@@ -254,7 +245,8 @@ fn render(ui: &Ui) {
     play.add_css_class("icon");
     play.add_css_class("pill");
     play.add_css_class("bar-media-play");
-    play.connect_clicked(|_| send("play-pause"));
+    let mpris = ui.mpris.clone();
+    play.connect_clicked(move |_| mpris.control(Control::PlayPause));
     ui.body.append(&play);
     ui.body.append(&ui.outputs);
 }

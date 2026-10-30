@@ -116,7 +116,7 @@ impl SettingsWindow {
             let section = self.section.clone();
             glib::timeout_add_local_once(
                 std::time::Duration::from_millis(
-                    (swaypplet_ui::anim::duration(swaypplet_ui::anim::ENTER_MS) + 60.0) as u64,
+                    (swaypplet_ui::anim::ms(swaypplet_tokens::motion::ENTER) + 60.0) as u64,
                 ),
                 move || section.refresh(),
             );

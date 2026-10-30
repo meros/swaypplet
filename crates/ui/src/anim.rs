@@ -46,11 +46,8 @@ use std::rc::Rc;
 use gtk4::{glib, graphene, prelude::*, subclass::prelude::*};
 use gtk4_layer_shell::LayerShell;
 
-/// The enter token's length (docs/design-system.md §3.8), for the two
-/// waits that are timed to outlast an enter (the panel's and settings'
-/// refresh after they open). Anything that moves plays the tokens of
-/// `swaypplet_tokens::motion` through [`ms`].
-pub const ENTER_MS: f64 = swaypplet_tokens::motion::ENTER.ms;
+// Anything that moves plays the tokens of `swaypplet_tokens::motion`
+// through [`ms`] (docs/design-system.md §3.8).
 // The scale's other three tiers — micro (150ms), emphasis (400ms) and dwell
 // (500ms) — have no Rust consumer. Micro is below the threshold where a
 // hand-driven tick is worth its wakeups, and the other two are only ever

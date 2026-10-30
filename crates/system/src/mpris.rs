@@ -21,7 +21,6 @@
 
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::process::Command;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -114,17 +113,6 @@ fn capitalize(s: &str) -> String {
     match chars.next() {
         None => String::new(),
         Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
-    }
-}
-
-/// Run `playerctl` with `args`: the transport keys (`play-pause`, `next`,
-/// `previous`). Blocks on D-Bus, so never on the GTK thread.
-pub fn playerctl(args: &[&str]) -> Option<String> {
-    let out = Command::new("playerctl").args(args).output().ok()?;
-    if out.status.success() {
-        Some(String::from_utf8_lossy(&out.stdout).trim().to_owned())
-    } else {
-        None
     }
 }
 
