@@ -665,8 +665,10 @@ pub fn run() -> ! {
             let surfaces = surfaces.clone();
             let end_lock = end_lock.clone();
             let unlock = unlock.clone();
-            glib::timeout_add_local(Duration::from_millis(40), move || {
-                while let Ok(ev) = rx.try_recv() {
+            // Awaited, like the face channel above: a 40 ms poll stood
+            // between the reader's match and the unlock starting.
+            glib::spawn_future_local(async move {
+                while let Ok(ev) = rx.recv().await {
                     match ev {
                         EngineEvent::Ready => {
                             surfaces.set_fp_armed(true);
@@ -674,11 +676,11 @@ pub fn run() -> ! {
                         EngineEvent::Hint(h) => surfaces.fp_hint(&h),
                         EngineEvent::Match(_) => {
                             if !unlock.borrow_mut().claim() {
-                                return glib::ControlFlow::Break;
+                                return;
                             }
                             surfaces.flash_success();
                             end_lock();
-                            return glib::ControlFlow::Break;
+                            return;
                         }
                         EngineEvent::Unavailable(why) => {
                             log::info!("fingerprint unavailable: {why}");
@@ -689,7 +691,6 @@ pub fn run() -> ! {
                         EngineEvent::Progress(_) => {}
                     }
                 }
-                glib::ControlFlow::Continue
             });
         });
     }
