@@ -183,6 +183,95 @@ fn wakes() -> mpsc::Receiver<Wake> {
     rx
 }
 
+/// What arms an attempt and when it is due: the rules in the module doc, out
+/// of the worker loop so they can be tested.
+#[derive(Default)]
+struct Arming {
+    /// None until the first reading lands, so the opening state is a starting
+    /// point rather than an arrival — arming on it would run face unlock
+    /// against whoever locked the machine a moment ago.
+    present: Option<bool>,
+    /// Some(deadline) means an attempt is armed for that instant.
+    armed: Option<Instant>,
+    /// The arrival this run of bursts belongs to: when, and what it was.
+    arrival: Option<(Instant, &'static str)>,
+    /// Transient Unavailable results, reset on each fresh arrival. See attempt().
+    transient: u32,
+}
+
+impl Arming {
+    /// Take one batch of wakes, read together at `now`, and say when the
+    /// next attempt is due (`None`: nothing armed).
+    fn on(&mut self, wakes: impl IntoIterator<Item = Wake>, now: Instant) -> Option<Instant> {
+        // Collapse everything queued into one edge; only a change in settled
+        // state is an arrival or a departure.
+        let mut edge = None;
+        let mut woke = None;
+        for w in wakes {
+            match w {
+                Wake::Presence(PresenceEvent::Changed(state)) if self.present != Some(state) => {
+                    let first = self.present.is_none();
+                    self.present = Some(state);
+                    if !first {
+                        edge = Some(state);
+                    }
+                }
+                Wake::Presence(_) => {}
+                Wake::Resume => woke = Some("resumed from sleep"),
+                Wake::Lid(true) => woke = Some("lid opened"),
+                Wake::Lid(false) => {}
+            }
+        }
+
+        match edge {
+            Some(true) => {
+                log::info!("face: presence returned — arming");
+                self.arrive(now, "presence returned");
+            }
+            Some(false) => {
+                log::info!("face: presence gone — standing down");
+                self.armed = None;
+            }
+            None => {}
+        }
+
+        // A wake outranks whatever presence last said. The lid was shut and
+        // is now open, which is an arrival however still the sensor reads, and
+        // it resets the arrival window for the same reason an arrival does:
+        // this is a fresh approach to the machine, not the tail of the last
+        // one. Collapsed with presence above so a lid open that also resumes
+        // arms once, not twice.
+        if let Some(why) = woke {
+            log::info!("face: {why} — arming");
+            self.arrive(now, why);
+        }
+        self.armed
+    }
+
+    fn arrive(&mut self, now: Instant, why: &'static str) {
+        self.transient = 0;
+        self.armed = Some(now);
+        self.arrival = Some((now, why));
+    }
+
+    /// A burst ended without a match and may be retried `after` from `now`,
+    /// for as long as the arrival window lasts.
+    fn retry(&mut self, after: Duration, now: Instant) {
+        let spent = self
+            .arrival
+            .map_or(ARRIVAL_WINDOW, |(at, _)| now.saturating_duration_since(at));
+        if spent >= ARRIVAL_WINDOW {
+            log::info!(
+                "face: no match in {} s — waiting for next arrival",
+                ARRIVAL_WINDOW.as_secs()
+            );
+            self.armed = None;
+        } else {
+            self.armed = Some(now + after);
+        }
+    }
+}
+
 /// Spawn the face worker. The thread is detached and ends on a match, on a
 /// fatal error, or when the lock UI drops the receiver.
 pub fn start(user: String) -> async_channel::Receiver<EngineEvent> {
@@ -220,22 +309,12 @@ fn run(user: &str, tx: &async_channel::Sender<EngineEvent>) {
     let mut lock_agent = register_lock_agent();
 
     let wakes = wakes();
-    // None until the first reading lands, so the opening state is a starting
-    // point rather than an arrival — arming on it would run face unlock
-    // against whoever locked the machine a moment ago.
-    let mut present: Option<bool> = None;
-
-    // Some(deadline) means an attempt is armed for that instant.
-    let mut armed: Option<Instant> = None;
-    // The arrival this run of bursts belongs to: when, and what it was.
-    let mut arrival: Option<(Instant, &'static str)> = None;
-    // Transient Unavailable results, reset on each fresh arrival. See attempt().
-    let mut transient = 0u32;
+    let mut arming = Arming::default();
 
     loop {
         // Block until something happens or the armed attempt is due. Nothing
         // here ticks: an arrival starts the camera as soon as it is read.
-        let wait = armed.map_or(Duration::from_secs(3600), |due| {
+        let wait = arming.armed.map_or(Duration::from_secs(3600), |due| {
             due.saturating_duration_since(Instant::now())
         });
         let mut queued = Vec::new();
@@ -248,54 +327,9 @@ fn run(user: &str, tx: &async_channel::Sender<EngineEvent>) {
         }
         queued.extend(wakes.try_iter());
 
-        // Collapse everything queued into one edge; only a change in settled
-        // state is an arrival or a departure.
-        let mut edge = None;
-        let mut woke = None;
-        for w in queued {
-            match w {
-                Wake::Presence(PresenceEvent::Changed(state)) if present != Some(state) => {
-                    let first = present.is_none();
-                    present = Some(state);
-                    if !first {
-                        edge = Some(state);
-                    }
-                }
-                Wake::Presence(_) => {}
-                Wake::Resume => woke = Some("resumed from sleep"),
-                Wake::Lid(true) => woke = Some("lid opened"),
-                Wake::Lid(false) => {}
-            }
-        }
-
-        match edge {
-            Some(true) => {
-                log::info!("face: presence returned — arming");
-                transient = 0;
-                armed = Some(Instant::now());
-                arrival = Some((Instant::now(), "presence returned"));
-            }
-            Some(false) => {
-                log::info!("face: presence gone — standing down");
-                armed = None;
-            }
-            None => {}
-        }
-
-        // A wake outranks whatever presence last said. The lid was shut and
-        // is now open, which is an arrival however still the sensor reads, and
-        // it resets the arrival window for the same reason an arrival does:
-        // this is a fresh approach to the machine, not the tail of the last
-        // one. Collapsed with presence above so a lid open that also resumes
-        // arms once, not twice.
-        if let Some(why) = woke {
-            log::info!("face: {why} — arming");
-            transient = 0;
-            armed = Some(Instant::now());
-            arrival = Some((Instant::now(), why));
-        }
-
-        let Some(due) = armed else { continue };
+        let Some(due) = arming.on(queued, Instant::now()) else {
+            continue;
+        };
         if Instant::now() < due {
             continue;
         }
@@ -308,11 +342,11 @@ fn run(user: &str, tx: &async_channel::Sender<EngineEvent>) {
             lock_agent = register_lock_agent();
         }
 
-        match attempt(tx, &mut transient) {
+        match attempt(tx, &mut arming.transient) {
             Attempt::Match => {
                 // End to end, for the journal: the arrival edge as this
                 // process read it, to the match. faced logs its own split.
-                if let Some((at, why)) = arrival {
+                if let Some((at, why)) = arming.arrival {
                     log::info!(
                         "face: match — unlocking, {} ms after {why}",
                         at.elapsed().as_millis()
@@ -328,23 +362,14 @@ fn run(user: &str, tx: &async_channel::Sender<EngineEvent>) {
                         return;
                     }
                 }
-                let spent = arrival.map_or(ARRIVAL_WINDOW, |(at, _)| at.elapsed());
-                if spent >= ARRIVAL_WINDOW {
-                    log::info!(
-                        "face: no match in {} s — waiting for next arrival",
-                        ARRIVAL_WINDOW.as_secs()
-                    );
-                    armed = None;
-                } else {
-                    armed = Some(Instant::now() + after);
-                }
+                arming.retry(after, Instant::now());
             }
             Attempt::StandDown(why) => {
                 log::info!("face: {why} — waiting for next arrival");
                 if tx.send_blocking(EngineEvent::Hint(why)).is_err() {
                     return;
                 }
-                armed = None;
+                arming.armed = None;
             }
             Attempt::Fatal(why) => {
                 log::info!("face: disabled — {why}");
@@ -470,6 +495,88 @@ fn map_exit(exit: i32, saw_face: bool, outcome: &str, transient: &mut u32) -> At
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn seen(state: bool) -> Wake {
+        Wake::Presence(PresenceEvent::Changed(state))
+    }
+
+    #[test]
+    fn the_first_reading_is_not_an_arrival() {
+        // Locking deliberately while sitting at the machine must stay locked.
+        let mut a = Arming::default();
+        assert_eq!(a.on([seen(true)], Instant::now()), None);
+        // Nor is the same reading again.
+        assert_eq!(a.on([seen(true)], Instant::now()), None);
+    }
+
+    #[test]
+    fn leaving_and_coming_back_arms_at_once() {
+        let mut a = Arming::default();
+        let t = Instant::now();
+        a.on([seen(true)], t);
+        assert_eq!(a.on([seen(false)], t), None);
+        assert_eq!(a.on([seen(true)], t), Some(t));
+    }
+
+    #[test]
+    fn a_departure_stands_an_armed_attempt_down() {
+        let mut a = Arming::default();
+        let t = Instant::now();
+        a.on([seen(false)], t);
+        a.on([seen(true)], t);
+        assert_eq!(a.on([seen(false)], t), None);
+    }
+
+    #[test]
+    fn a_flicker_read_in_one_batch_is_where_it_settled() {
+        let mut a = Arming::default();
+        let t = Instant::now();
+        a.on([seen(false)], t);
+        assert_eq!(a.on([seen(true), seen(false)], t), None);
+    }
+
+    #[test]
+    fn resume_and_lid_open_arm_whatever_presence_says() {
+        let t = Instant::now();
+        for wake in [Wake::Resume, Wake::Lid(true)] {
+            let mut a = Arming::default();
+            // Present the whole time: the sensor never saw anyone leave.
+            a.on([seen(true)], t);
+            assert_eq!(a.on([wake], t), Some(t));
+        }
+        let mut a = Arming::default();
+        assert_eq!(a.on([Wake::Lid(false)], t), None);
+    }
+
+    #[test]
+    fn a_wake_outranks_a_departure_read_with_it() {
+        let mut a = Arming::default();
+        let t = Instant::now();
+        a.on([seen(true)], t);
+        assert_eq!(a.on([Wake::Resume, seen(false)], t), Some(t));
+    }
+
+    #[test]
+    fn retries_stop_when_the_arrival_window_closes() {
+        let mut a = Arming::default();
+        let t = Instant::now();
+        a.on([Wake::Resume], t);
+        let soon = t + Duration::from_secs(1);
+        a.retry(AGAIN_SOON, soon);
+        assert_eq!(a.armed, Some(soon + AGAIN_SOON));
+        a.retry(AGAIN_SOON, t + ARRIVAL_WINDOW);
+        assert_eq!(a.armed, None);
+    }
+
+    #[test]
+    fn a_fresh_arrival_forgives_earlier_faults() {
+        let mut a = Arming::default();
+        let t = Instant::now();
+        a.on([Wake::Resume], t);
+        a.transient = 1;
+        a.on([Wake::Lid(true)], t);
+        assert_eq!(a.transient, 0);
+    }
 
     #[test]
     fn a_burst_that_never_got_a_good_look_retries_at_once_and_silently() {
