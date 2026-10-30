@@ -121,9 +121,7 @@ fn output_row(output: &OutputInfo) -> Box {
 
 /// Clear `list` and rebuild it from pre-fetched output data.
 fn populate_output_list_with_data(list: &Box, outputs: &[OutputInfo]) {
-    while let Some(child) = list.first_child() {
-        list.remove(&child);
-    }
+    ui::clear_children(&list);
     for output in outputs {
         list.append(&output_row(output));
     }
@@ -184,9 +182,7 @@ fn profile_row(name: &str, current: bool, fits: bool, first: bool, icon: bool) -
 /// and saving them is the Displays settings pane's (`fill_profiles`). The
 /// group hides when there is nothing to pick, or no output management.
 fn populate_picks(group: &Box, list: &Box) {
-    while let Some(child) = list.first_child() {
-        list.remove(&child);
-    }
+    ui::clear_children(&list);
     let view = displays::view();
     let mut any = false;
     for (name, fits) in &view.profiles {
@@ -226,9 +222,7 @@ fn populate_picks(group: &Box, list: &Box) {
 /// `icon`: the glyph at each row's start. The settings pane's rows have
 /// none, so they read in its label column.
 pub fn fill_profiles(list: &Box, icon: bool) -> bool {
-    while let Some(child) = list.first_child() {
-        list.remove(&child);
-    }
+    ui::clear_children(&list);
     let view = displays::view();
     if view.profiles.is_empty() {
         let empty = ui::row(
@@ -289,9 +283,7 @@ fn cast_button(label: &str, busy: bool, on_click: impl Fn() + 'static) -> gtk4::
 /// a row says it is on its way.
 fn fill_extra_screen(list: &Box, icon: bool) {
     let glyph = |g: &'static str| if icon { g } else { "" };
-    while let Some(child) = list.first_child() {
-        list.remove(&child);
-    }
+    ui::clear_children(&list);
     let v = cast::view();
     if let Some(s) = &v.session {
         let title = match &s.target {

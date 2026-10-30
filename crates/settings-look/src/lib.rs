@@ -543,9 +543,7 @@ impl State {
             .set_visible(look.tint != Tint::Off && !hues.is_empty());
         let mut colours = self.colours.borrow_mut();
         if colours.0 != hues {
-            while let Some(child) = self.colour_box.first_child() {
-                self.colour_box.remove(&child);
-            }
+            swaypplet_ui::ui::clear_children(&self.colour_box);
             colours.1.clear();
             if let Some(sample) = &sample {
                 let mut first: Option<gtk4::ToggleButton> = None;

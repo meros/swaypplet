@@ -67,9 +67,7 @@ impl UserSection {
 }
 
 fn clear(list: &gtk4::Box) {
-    while let Some(child) = list.first_child() {
-        list.remove(&child);
-    }
+    ui::clear_children(&list);
 }
 
 fn rebuild_rows(list: &gtk4::Box, users: &[SwitchUser]) {

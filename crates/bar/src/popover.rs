@@ -96,9 +96,7 @@ impl TaskPopover {
 
     fn render(&self, task: &TaskState, skew: Option<SystemTime>) {
         let body = &self.inner.body;
-        while let Some(child) = body.first_child() {
-            body.remove(&child);
-        }
+        ui::clear_children(&body);
 
         let title = match &task.manual {
             Some(manual) => format!("TASK {} · {manual}", self.inner.n),

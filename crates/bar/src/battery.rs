@@ -129,9 +129,7 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
             let Some(bat) = swaypplet_system::battery::current() else {
                 return;
             };
-            while let Some(child) = body.first_child() {
-                body.remove(&child);
-            }
+            ui::clear_children(&body);
             body.append(&ui::text(
                 &power::battery_summary_text(&bat),
                 ui::Text::Body,

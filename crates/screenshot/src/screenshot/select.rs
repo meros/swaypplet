@@ -603,9 +603,7 @@ impl Session {
                         widget.remove_controller(&controller);
                     }
                 }
-                while let Some(child) = root.first_child() {
-                    root.remove(&child);
-                }
+                swaypplet_ui::ui::clear_children(&root);
             });
             // The window itself goes with the Surface, when the session
             // drops: the cycle above is what used to keep it.

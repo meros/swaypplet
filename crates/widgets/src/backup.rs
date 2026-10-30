@@ -123,9 +123,7 @@ fn draw(
     ui::set_status(verdict, status(tier));
     verdict.set_label(&format!("{} {}", tier.icon(), label(tier)));
 
-    while let Some(child) = rows.first_child() {
-        rows.remove(&child);
-    }
+    ui::clear_children(&rows);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())

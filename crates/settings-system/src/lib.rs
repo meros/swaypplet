@@ -580,9 +580,7 @@ impl Pane {
     }
 
     fn show_news(&self, s: &Snapshot) {
-        while let Some(child) = self.news.first_child() {
-            self.news.remove(&child);
-        }
+        ui::clear_children(&self.news);
         if s.new_commits.is_empty() && s.shell_commits.is_empty() {
             let text = match info::verdict(s) {
                 Verdict::InSync => "Nothing: this host runs origin/main.",

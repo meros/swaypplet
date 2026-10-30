@@ -160,9 +160,7 @@ fn fill(ui: &Rc<Ui>) {
 }
 
 fn rows(ui: &Rc<Ui>, scenes: &[(String, Option<swaypplet_jump::jump::scene::Scene>)]) {
-    while let Some(child) = ui.body.first_child() {
-        ui.body.remove(&child);
-    }
+    ui::clear_children(&ui.body);
     ui.body.append(&popover::title("PINNED"));
 
     *ui.live.borrow_mut() = Live::default();

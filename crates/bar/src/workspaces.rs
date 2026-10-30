@@ -194,9 +194,7 @@ fn raise(
     groups: &[Group],
     on_screen: &Rc<dyn Fn(&str) -> bool>,
 ) -> Vec<Pill> {
-    while let Some(child) = container.first_child() {
-        container.remove(&child);
-    }
+    ui::clear_children(&container);
     groups
         .iter()
         .map(|group| {

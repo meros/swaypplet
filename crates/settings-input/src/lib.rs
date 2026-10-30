@@ -307,9 +307,7 @@ impl State {
 
     /// One row per layout: its name, its code, and up, down and remove.
     fn fill_layouts(self: &Rc<Self>, codes: &[String]) {
-        while let Some(child) = self.layouts.first_child() {
-            self.layouts.remove(&child);
-        }
+        ui::clear_children(&self.layouts);
         if codes.is_empty() {
             let none = ui::text(
                 "The system's layouts. Add one to choose your own.",
@@ -383,9 +381,7 @@ impl State {
     /// The picker's hits for what is typed, the layouts already in the
     /// list left out.
     fn fill_hits(&self) {
-        while let Some(child) = self.hits.first_child() {
-            self.hits.remove(&child);
-        }
+        ui::clear_children(&self.hits);
         let have = self.layout_codes();
         let query = self.search.text();
         let hits: Vec<&xkb::Layout> = self
@@ -412,9 +408,7 @@ impl State {
 
     /// The device list, and the values the rows fall back on.
     fn take_devices(self: &Rc<Self>, devices: Vec<Device>) {
-        while let Some(child) = self.devices.first_child() {
-            self.devices.remove(&child);
-        }
+        ui::clear_children(&self.devices);
         let listed = service::listed(&devices);
         if listed.is_empty() {
             let none = ui::text(

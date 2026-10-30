@@ -589,9 +589,7 @@ fn fetch_now(state: &Rc<State>) {
 }
 
 fn fill(state: &Rc<State>, issues: Vec<Issue>, prs: &[Pr]) {
-    while let Some(child) = state.list.first_child() {
-        state.list.remove(&child);
-    }
+    ui::clear_children(&state.list);
     state.entries.borrow_mut().clear();
     // Checked here rather than by a job that would fail at its first step.
     let missing = missing_tools();
@@ -730,9 +728,7 @@ fn caption(text: &str, tone: Tone) -> gtk4::Label {
 
 fn build_detail(state: &Rc<State>, entry: &Rc<Entry>, fix: &Fix, job: Option<&Job>) {
     let d = &entry.detail;
-    while let Some(child) = d.first_child() {
-        d.remove(&child);
-    }
+    ui::clear_children(&d);
     entry.phase.replace(None);
     entry.log.replace(None);
     let n = entry.issue.number;

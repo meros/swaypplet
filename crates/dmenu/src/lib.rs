@@ -405,9 +405,7 @@ impl Picker {
             .collect();
         s.selected = 0;
 
-        while let Some(child) = self.results_box.first_child() {
-            self.results_box.remove(&child);
-        }
+        swaypplet_ui::ui::clear_children(&self.results_box);
         // Nothing matched: say so, and name what Enter will do — the raw
         // query is the reply in that case, which the empty list alone hides.
         if s.visible.is_empty() {

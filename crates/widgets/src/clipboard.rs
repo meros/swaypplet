@@ -80,9 +80,7 @@ impl ClipboardSection {
 
     /// Draw `entries`, or the unavailable notice when there is no service.
     fn render(w: &Rc<Widgets>, entries: Option<&[EntryView]>) {
-        while let Some(child) = w.entry_list.first_child() {
-            w.entry_list.remove(&child);
-        }
+        ui::clear_children(&w.entry_list);
 
         let Some(entries) = entries else {
             let notice = ui::text(

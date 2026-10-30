@@ -869,9 +869,7 @@ fn activate_async(provider: String, identifier: String, action: String, query: S
 }
 
 fn clear_results_box(results_box: &gtk4::Box) {
-    while let Some(child) = results_box.first_child() {
-        results_box.remove(&child);
-    }
+    swaypplet_ui::ui::clear_children(&results_box);
 }
 
 #[allow(clippy::too_many_arguments)]

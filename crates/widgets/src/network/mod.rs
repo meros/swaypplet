@@ -842,9 +842,7 @@ impl NetworkSection {
         c.portal
             .set_visible(matches!(s.connectivity, ConnectivityState::Portal));
 
-        while let Some(ch) = c.lines.first_child() {
-            c.lines.remove(&ch);
-        }
+        ui::clear_children(&c.lines);
         if let Some(d) = &s.details {
             let add = |k: &str, v: &str| {
                 let l = ui::text(&format!("{k:<9} {v}"), ui::Text::Caption, ui::Tone::Muted);

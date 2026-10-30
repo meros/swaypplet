@@ -700,9 +700,7 @@ fn build_card(app: &gtk4::Application, monitor: &gdk::Monitor) -> Card {
 
 /// Print the sheet into one card's body, replacing what was there.
 fn fill(body: &gtk4::Box, sections: &Sheet) {
-    while let Some(child) = body.first_child() {
-        body.remove(&child);
-    }
+    swaypplet_ui::ui::clear_children(&body);
 
     // Each section goes in whichever column is currently shortest, costed
     // as its rows plus its heading. Filling left-to-right instead would

@@ -916,9 +916,7 @@ mod imp {
 
     impl ObjectImpl for SlideBin {
         fn dispose(&self) {
-            while let Some(child) = self.obj().first_child() {
-                child.unparent();
-            }
+            crate::ui::clear_children(&*self.obj());
         }
     }
 

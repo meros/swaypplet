@@ -193,9 +193,7 @@ pub(super) fn populate_card(
     st: &Rc<RefCell<State>>,
     earlier: &[Notification],
 ) -> Option<gtk4::Label> {
-    while let Some(child) = card.first_child() {
-        card.remove(&child);
-    }
+    swaypplet_ui::ui::clear_children(&card);
 
     let compact = is_compact(notif);
     if compact {
