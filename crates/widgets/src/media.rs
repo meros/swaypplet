@@ -3,10 +3,10 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use swaypplet_core::spawn::spawn_work;
-use swaypplet_core::ui;
-use swaypplet_core::ui::icons;
-use swaypplet_services::mpris::{MediaState, PlaybackStatus, playerctl, read_state};
+use swaypplet_base::spawn::spawn_work;
+use swaypplet_system::mpris::{MediaState, PlaybackStatus, playerctl, read_state};
+use swaypplet_ui::ui;
+use swaypplet_ui::ui::icons;
 
 fn format_time(secs: f64) -> String {
     let total = secs.round() as u64;
@@ -98,7 +98,7 @@ impl MediaSection {
         info_box.set_valign(gtk4::Align::Center);
 
         let title_label = ui::text("", ui::Text::Body, ui::Tone::Fg);
-        swaypplet_core::ui::set_weight(&title_label, swaypplet_core::ui::Weight::Strong);
+        swaypplet_ui::ui::set_weight(&title_label, swaypplet_ui::ui::Weight::Strong);
         title_label.set_hexpand(true);
         title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         title_label.set_max_width_chars(28);
@@ -120,7 +120,7 @@ impl MediaSection {
         progress_bar.set_hexpand(true);
 
         let time_label = ui::text("", ui::Text::Caption, ui::Tone::Faint);
-        swaypplet_core::ui::set_numeric(&time_label, true);
+        swaypplet_ui::ui::set_numeric(&time_label, true);
         time_label.set_halign(gtk4::Align::End);
         time_label.set_visible(false);
 

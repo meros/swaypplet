@@ -1,0 +1,23 @@
+[package]
+name = "swaypplet-launcher"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+swaypplet-base.workspace = true
+swaypplet-model.workspace = true
+swaypplet-ui.workspace = true
+swaypplet-system.workspace = true
+swaypplet-jump.workspace = true
+swaypplet-settings-kit.workspace = true
+gtk4.workspace = true
+gtk4-layer-shell.workspace = true
+glib.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-channel.workspace = true
+log.workspace = true
+
+[lints]
+workspace = true

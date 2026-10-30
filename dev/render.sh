@@ -88,7 +88,7 @@ SOCK="$RUNTIME/sway-render-$$.sock"
   fi
   # A wallpaper, for a shot that is about one: the glass frosts what is
   # behind it, and `look.tint` takes its hue from whatever sway's `bg` line
-  # names (swaypplet crates/core/src/theme/wallpaper.rs). Without this the desktop is black,
+  # names (swaypplet crates/ui/src/theme/wallpaper.rs). Without this the desktop is black,
   # which is the best case for contrast and the wrong one for colour.
   #   SWPP_WALLPAPER=~/Pictures/wallpapers/x.jpg dev/render.sh --mode panel
   [ -n "${SWPP_WALLPAPER:-}" ] && printf 'output HEADLESS-1 bg "%s" fill\n' "$SWPP_WALLPAPER"
@@ -135,7 +135,7 @@ trap cleanup EXIT
 
 export SWAYSOCK="$SOCK"
 # The nested socket, not the live session's. `sway::ipc::connect` tries
-# I3SOCK before SWAYSOCK (crates/core/src/sway/ipc.rs), so a harness client that inherits
+# I3SOCK before SWAYSOCK (crates/base/src/sway/ipc.rs), so a harness client that inherits
 # the live session's I3SOCK sends its glass replays and IPC there — to the
 # desktop on the user's screen, not to this one.
 unset I3SOCK
@@ -338,7 +338,7 @@ case "$MODE" in
     sleep 1.2
     ;;
   quiet)
-    # Quiet by context (crates/services/src/notifications/context.rs): a window
+    # Quiet by context (crates/notifyd/src/context.rs): a window
     # fullscreen on the focused output, or with SWPP_QUIET_SHARE=1 a
     # screen-cast stream from dev/fake-screencast.sh, holds the normal
     # notifications sent next; the critical one still pops. Stage `during`

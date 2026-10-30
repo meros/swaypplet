@@ -1,7 +1,7 @@
 //! Bluetooth section: power, connected devices, your devices, and nearby
 //! ones while the section is on screen.
 //!
-//! State comes from [`swaypplet_services::bluetooth`], which follows BlueZ's
+//! State comes from [`swaypplet_devices::bluetooth`], which follows BlueZ's
 //! signals, so a device that connects by itself appears here without a
 //! refresh, and what a device is doing (connecting, pairing, a code to
 //! confirm, why it failed) is part of that state rather than of the row's
@@ -18,10 +18,10 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use swaypplet_core::ui;
-use swaypplet_core::ui::icons;
-use swaypplet_services::bluetooth::{BluetoothService, BtState, Command, Op};
-use swaypplet_services::bluez::Device;
+use swaypplet_devices::bluetooth::{BluetoothService, BtState, Command, Op};
+use swaypplet_system::bluez::Device;
+use swaypplet_ui::ui;
+use swaypplet_ui::ui::icons;
 
 /// The glyph for a device, from BlueZ's `Icon` hint.
 pub fn device_icon(hint: Option<&str>) -> &'static str {
@@ -523,7 +523,7 @@ impl BluetoothSection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use swaypplet_services::bluez::Snapshot;
+    use swaypplet_system::bluez::Snapshot;
 
     fn dev(mac: &str, name: &str, connected: bool, paired: bool, rssi: Option<i16>) -> Device {
         Device {

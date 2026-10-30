@@ -56,12 +56,13 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use swaypplet_core::sway::ipc::SwayService;
-use swaypplet_core::ui;
-use swaypplet_services::audio::AudioService;
-use swaypplet_services::cast::{self, backend::Target};
-use swaypplet_services::inhibit::{self, Inhibitor};
-use swaypplet_services::network;
+use swaypplet_audio::AudioService;
+use swaypplet_base::sway::ipc::SwayService;
+use swaypplet_cast as cast;
+use swaypplet_cast::backend::Target;
+use swaypplet_devices::network;
+use swaypplet_system::{inhibit, inhibit::Inhibitor};
+use swaypplet_ui::ui;
 
 // ── Widget ──────────────────────────────────────────────────────────────
 
@@ -122,7 +123,7 @@ pub fn build(
         })
     });
     // A rename shows in the tooltip without waiting for the next ban.
-    swaypplet_services::devices::observe(move || apply_wired());
+    swaypplet_devices::observe(move || apply_wired());
     network::blocked::start();
 
     let (rec, rec_glyph) = hazard("󰑋");
@@ -244,7 +245,7 @@ fn hazard(glyph: &str) -> (gtk4::Revealer, gtk4::Label) {
     ui::glyph::adopt(&label, ui::Text::Body, ui::Tone::Warning);
     let revealer = ui::revealer(
         gtk4::RevealerTransitionType::SlideRight,
-        swaypplet_core::tokens::motion::EXPAND,
+        swaypplet_tokens::motion::EXPAND,
     );
     revealer.set_child(Some(&label));
     (revealer, label)

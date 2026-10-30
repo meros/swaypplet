@@ -31,7 +31,7 @@ use super::scene::{self, Scene};
 /// Read once, when a view is made. A pin takes a new size by having its
 /// surface rebuilt (`pin.rs`), a peek on its next open.
 pub fn picture_box() -> (i32, i32) {
-    swaypplet_core::settings::store::with(|s| s.pins().size.picture())
+    swaypplet_model::store::with(|s| s.pins().size.picture())
 }
 
 /// Frames a second per window, for a pin and a peek alike: the setting's,
@@ -47,7 +47,7 @@ pub fn picture_box() -> (i32, i32) {
 /// restarting it faster. 60 follows a video frame for frame; 15 is for a
 /// pin that only needs to show that something moves.
 pub fn fps() -> u32 {
-    swaypplet_core::settings::store::with(|s| s.pins().fps)
+    swaypplet_model::store::with(|s| s.pins().fps)
 }
 
 /// The pin mark, filled and struck through.
@@ -80,42 +80,42 @@ pub struct View {
 impl View {
     /// An empty view named `label`, with `hint` for what a click does.
     pub fn new(label: &str, hint: &str) -> View {
-        let root = swaypplet_core::ui::vbox(2);
+        let root = swaypplet_ui::ui::vbox(2);
         root.add_css_class("jump-view");
 
         // The picture: a click on it is the caller's.
-        let holder = swaypplet_core::ui::vbox(0);
+        let holder = swaypplet_ui::ui::vbox(0);
         holder.set_cursor_from_name(Some("pointer"));
         root.append(&holder);
 
         // The footer: what this is, what a click does, and the actions. The
         // hint and the actions are quiet until the pointer is on the card.
-        let footer = swaypplet_core::ui::hbox(3);
+        let footer = swaypplet_ui::ui::hbox(3);
         footer.add_css_class("jump-view-footer");
         let mark = gtk4::Label::new(Some(PIN_GLYPH));
-        swaypplet_core::ui::glyph::adopt(
+        swaypplet_ui::ui::glyph::adopt(
             &mark,
-            swaypplet_core::ui::Text::Label,
-            swaypplet_core::ui::Tone::Muted,
+            swaypplet_ui::ui::Text::Label,
+            swaypplet_ui::ui::Tone::Muted,
         );
         footer.append(&mark);
-        let name = swaypplet_core::ui::text(
+        let name = swaypplet_ui::ui::text(
             label,
-            swaypplet_core::ui::Text::Label,
-            swaypplet_core::ui::Tone::Muted,
+            swaypplet_ui::ui::Text::Label,
+            swaypplet_ui::ui::Tone::Muted,
         );
-        swaypplet_core::ui::set_weight(&name, swaypplet_core::ui::Weight::Strong);
+        swaypplet_ui::ui::set_weight(&name, swaypplet_ui::ui::Weight::Strong);
         footer.append(&name);
-        let hint = swaypplet_core::ui::text(
+        let hint = swaypplet_ui::ui::text(
             hint,
-            swaypplet_core::ui::Text::Caption,
-            swaypplet_core::ui::Tone::Faint,
+            swaypplet_ui::ui::Text::Caption,
+            swaypplet_ui::ui::Tone::Faint,
         );
         hint.set_xalign(1.0);
         hint.set_hexpand(true);
         hint.add_css_class("jump-view-hint");
         footer.append(&hint);
-        let actions = swaypplet_core::ui::hbox(1);
+        let actions = swaypplet_ui::ui::hbox(1);
         footer.append(&actions);
         root.append(&footer);
 
@@ -154,10 +154,10 @@ impl View {
 
     /// A small quiet button at the footer's end, `glyph` with `tooltip`.
     pub fn action(&self, glyph: &'static str, tooltip: &'static str) -> gtk4::Button {
-        let button = swaypplet_core::ui::button_with(
-            swaypplet_core::ui::Face::Glyph { glyph, tooltip },
-            swaypplet_core::ui::Kind::Flat,
-            swaypplet_core::ui::Size::Normal,
+        let button = swaypplet_ui::ui::button_with(
+            swaypplet_ui::ui::Face::Glyph { glyph, tooltip },
+            swaypplet_ui::ui::Kind::Flat,
+            swaypplet_ui::ui::Size::Normal,
         );
         button.add_css_class("pill");
         button.add_css_class("small");

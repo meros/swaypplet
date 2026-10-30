@@ -1,0 +1,25 @@
+[package]
+name = "swaypplet-panel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+swaypplet-base.workspace = true
+swaypplet-tokens.workspace = true
+swaypplet-ui.workspace = true
+swaypplet-system.workspace = true
+swaypplet-audio.workspace = true
+swaypplet-devices.workspace = true
+swaypplet-notifyd.workspace = true
+swaypplet-screenshot.workspace = true
+swaypplet-widgets.workspace = true
+swaypplet-settings-kit.workspace = true
+swaypplet-launcher.workspace = true
+swaypplet-settings.workspace = true
+gtk4.workspace = true
+glib.workspace = true
+log.workspace = true
+
+[lints]
+workspace = true

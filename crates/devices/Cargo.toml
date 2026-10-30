@@ -1,0 +1,23 @@
+[package]
+name = "swaypplet-devices"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+swaypplet-base.workspace = true
+swaypplet-model.workspace = true
+swaypplet-system.workspace = true
+swaypplet-audio.workspace = true
+gtk4.workspace = true
+glib.workspace = true
+zbus.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-channel.workspace = true
+log.workspace = true
+swayipc.workspace = true
+
+[lints]
+workspace = true

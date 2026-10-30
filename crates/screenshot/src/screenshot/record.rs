@@ -9,9 +9,9 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
-use swaypplet_core::service::Observed;
-use swaypplet_services::notifications::store::{StoreRef, store_add};
-use swaypplet_services::notifications::{Notification, Urgency};
+use swaypplet_base::service::Observed;
+use swaypplet_notifyd::store::{StoreRef, store_add};
+use swaypplet_notifyd::{Notification, Urgency};
 
 thread_local! {
     static ACTIVE_RECORDING: RefCell<Option<RecordingState>> = const { RefCell::new(None) };

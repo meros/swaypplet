@@ -23,11 +23,11 @@ use std::time::{Duration, SystemTime};
 use gtk4::prelude::*;
 
 use super::board::session_age;
-use swaypplet_core::spawn::spawn_work;
-use swaypplet_core::sway::ipc;
-use swaypplet_core::sway::workspace::switch_command;
-use swaypplet_core::ui;
-use swaypplet_services::task_state::{Activity, SessionState, TaskState, first_line, state_dir};
+use swaypplet_base::spawn::spawn_work;
+use swaypplet_base::sway::ipc;
+use swaypplet_base::sway::workspace::switch_command;
+use swaypplet_system::task_state::{Activity, SessionState, TaskState, first_line, state_dir};
+use swaypplet_ui::ui;
 
 /// The shared chassis: a top-anchored popover whose child is the card.
 /// The card lives on the child, not the popover node: popup surfaces sit
@@ -54,7 +54,7 @@ pub fn chassis(parent: &impl IsA<gtk4::Widget>) -> (gtk4::Popover, gtk4::Box) {
 /// A popover's heading: small, strong, muted, above what it names.
 pub fn title(text: &str) -> gtk4::Label {
     let l = ui::text(text, ui::Text::Caption, ui::Tone::Muted);
-    swaypplet_core::ui::set_weight(&l, swaypplet_core::ui::Weight::Strong);
+    swaypplet_ui::ui::set_weight(&l, swaypplet_ui::ui::Weight::Strong);
     l
 }
 
@@ -176,7 +176,7 @@ fn session_row(s: &SessionState, now: SystemTime, skew: Option<SystemTime>) -> g
 fn last_message(pid: i32) -> Option<String> {
     let path = state_dir().join(format!("last-{pid}"));
     let written = std::fs::metadata(&path).and_then(|m| m.modified()).ok()?;
-    if swaypplet_services::task_state::proc_start_time(pid).is_some_and(|start| written < start) {
+    if swaypplet_system::task_state::proc_start_time(pid).is_some_and(|start| written < start) {
         return None;
     }
     first_line(&path)
@@ -260,7 +260,7 @@ fn fmt_age(age: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use swaypplet_services::task_state::Progress;
+    use swaypplet_system::task_state::Progress;
 
     fn session(activity: Activity, age: Option<Duration>, now: SystemTime) -> SessionState {
         SessionState {

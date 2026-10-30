@@ -20,7 +20,7 @@ use std::time::Duration;
 use gtk4::{gdk, prelude::*};
 use system_tray::item::{Status, StatusNotifierItem};
 
-use swaypplet_services::tray::{TrayItem, TrayService};
+use swaypplet_system::tray::{TrayItem, TrayService};
 
 /// Layout pushes into an *open* popover are batched — chatty apps fire
 /// menu updates in bursts and a rebuild per event flickers the popover.
@@ -28,8 +28,8 @@ const MENU_DEBOUNCE_MS: u64 = 50;
 
 /// The tray pill for one bar window, following the shared service.
 pub fn build(tray: &Rc<TrayService>) -> gtk4::Box {
-    let container = swaypplet_core::ui::hbox(1);
-    swaypplet_core::ui::segment::adopt(&container, false);
+    let container = swaypplet_ui::ui::hbox(1);
+    swaypplet_ui::ui::segment::adopt(&container, false);
     container.add_css_class("bar-tray");
     // Hidden until an item registers, so the empty pill never renders.
     // The tray owns its visibility rather than going through the bar's
@@ -54,7 +54,7 @@ pub fn build(tray: &Rc<TrayService>) -> gtk4::Box {
     // unplugged does not keep its tray alive through the observer list.
     let weak = container.downgrade();
     let items_seen = items.clone();
-    swaypplet_core::settings::store::observe(move || {
+    swaypplet_model::store::observe(move || {
         if let Some(container) = weak.upgrade() {
             show_if_wanted(&container, !items_seen.borrow().is_empty());
         }
@@ -66,7 +66,7 @@ pub fn build(tray: &Rc<TrayService>) -> gtk4::Box {
 /// Show the pill when the Bar tab has the tray on and an item is there to
 /// show; either one alone leaves it hidden.
 fn show_if_wanted(container: &gtk4::Box, has_items: bool) {
-    let wanted = swaypplet_core::settings::store::with(|s| s.bar().tray);
+    let wanted = swaypplet_model::store::with(|s| s.bar().tray);
     container.set_visible(wanted && has_items);
 }
 
@@ -146,8 +146,8 @@ impl ItemUi {
         let image = gtk4::Image::new();
         // The attention fill is unconditional: the service predicate
         // already filtered everything else out.
-        let button = swaypplet_core::ui::mark(&image, false);
-        swaypplet_core::ui::set_danger(&button, true);
+        let button = swaypplet_ui::ui::mark(&image, false);
+        swaypplet_ui::ui::set_danger(&button, true);
         button.add_css_class("bar-tray-item");
         container.append(&button);
 

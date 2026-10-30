@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use gtk4::gdk;
 use gtk4::prelude::*;
 
-use swaypplet_services::notifications::store::{StoreRef, store_add};
-use swaypplet_services::notifications::{ImageSource, Notification, Urgency};
+use swaypplet_notifyd::store::{StoreRef, store_add};
+use swaypplet_notifyd::{ImageSource, Notification, Urgency};
 
 use super::capture::Image;
 
@@ -27,7 +27,7 @@ use super::capture::Image;
 /// before, so an existing folder keeps growing rather than being orphaned.
 fn directory() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    let folder = swaypplet_core::settings::store::current().capture().folder;
+    let folder = swaypplet_model::store::current().capture().folder;
     if folder.is_empty() {
         return Path::new(&home).join("Pictures/Screenshots");
     }
@@ -110,7 +110,7 @@ pub fn copy(image: &Image) {
 /// the two are never in tension. The Capture group can drop either half
 /// for the owner who knows which they want.
 pub fn finish(store: &StoreRef, image: &Image) -> (u32, Option<PathBuf>) {
-    let after = swaypplet_core::settings::store::current().capture().after;
+    let after = swaypplet_model::store::current().capture().after;
     if after.copies() {
         copy(image);
     }

@@ -48,7 +48,7 @@ use gtk4::prelude::*;
 
 use gesture::{Action, Ev, Gesture};
 use rows::Row;
-use swaypplet_core::shell::{Namespace, Surface};
+use swaypplet_ui::shell::{Namespace, Surface};
 
 /// How long a gesture may sit with no event before the surface assumes the
 /// release was lost and lets go. A grab that outlives its keypress holds the
@@ -132,41 +132,41 @@ impl Jump {
         stage.set_vexpand(true);
         // The key that reaches this place without this surface: the part of
         // the caption worth learning.
-        let chord = swaypplet_core::ui::key("");
+        let chord = swaypplet_ui::ui::key("");
         // Straight on the wallpaper, so the words carry their own contrast.
-        let label = swaypplet_core::ui::text(
+        let label = swaypplet_ui::ui::text(
             "",
-            swaypplet_core::ui::Text::TitleSm,
-            swaypplet_core::ui::Tone::Fg,
+            swaypplet_ui::ui::Text::TitleSm,
+            swaypplet_ui::ui::Tone::Fg,
         );
-        swaypplet_core::ui::on_wallpaper::adopt(&label);
-        let detail = swaypplet_core::ui::text(
+        swaypplet_ui::ui::on_wallpaper::adopt(&label);
+        let detail = swaypplet_ui::ui::text(
             "",
-            swaypplet_core::ui::Text::Label,
-            swaypplet_core::ui::Tone::Fg,
+            swaypplet_ui::ui::Text::Label,
+            swaypplet_ui::ui::Tone::Fg,
         );
-        swaypplet_core::ui::on_wallpaper::adopt(&detail);
+        swaypplet_ui::ui::on_wallpaper::adopt(&detail);
         detail.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         // The bar's pin glyph (bar/workspaces.rs), so a pin reads the same in
         // both places.
         let pinned = gtk4::Label::new(Some("\u{f0403}"));
-        swaypplet_core::ui::glyph::adopt(
+        swaypplet_ui::ui::glyph::adopt(
             &pinned,
-            swaypplet_core::ui::Text::Label,
-            swaypplet_core::ui::Tone::Fg,
+            swaypplet_ui::ui::Text::Label,
+            swaypplet_ui::ui::Tone::Fg,
         );
-        swaypplet_core::ui::on_wallpaper::adopt(&pinned);
+        swaypplet_ui::ui::on_wallpaper::adopt(&pinned);
         pinned.set_visible(false);
         // Centred under the middle workspace: the outer box is as wide as
         // the workspace (`place_caption`), the line itself only as wide as it is.
-        let line = swaypplet_core::ui::hbox(3);
+        let line = swaypplet_ui::ui::hbox(3);
         line.set_halign(gtk4::Align::Center);
         line.add_css_class("jump-caption");
         line.append(&chord);
         line.append(&label);
         line.append(&detail);
         line.append(&pinned);
-        let caption = swaypplet_core::ui::hbox(0);
+        let caption = swaypplet_ui::ui::hbox(0);
         caption.append(&line);
         line.set_hexpand(true);
         caption.set_can_target(false);
@@ -481,7 +481,7 @@ impl Jump {
                 // twice. Put the row away instead. The question is a round
                 // trip, so it is asked on a worker, and the commands follow
                 // its answer from there.
-                swaypplet_core::spawn::spawn_work(focused_workspace, move |now| {
+                swaypplet_base::spawn::spawn_work(focused_workspace, move |now| {
                     if now.is_some_and(|now| now != origin) {
                         log::debug!("jump: cancelled, something else moved us from {origin:?}");
                         if let Some(r) = &r {
@@ -489,7 +489,7 @@ impl Jump {
                         }
                         return;
                     }
-                    swaypplet_core::sway::ipc::run_commands(cmds);
+                    swaypplet_base::sway::ipc::run_commands(cmds);
                 });
             }
         }
@@ -511,7 +511,7 @@ impl Jump {
         self.stage.move_(
             &self.caption,
             x,
-            y + h + f64::from(swaypplet_core::tokens::space(4)),
+            y + h + f64::from(swaypplet_tokens::space(4)),
         );
         self.caption.set_visible(true);
     }
@@ -542,7 +542,7 @@ impl Jump {
 
     fn disarm_watchdog(&self) {
         if let Some(id) = self.state.borrow_mut().watchdog.take() {
-            swaypplet_core::spawn::remove_source(id);
+            swaypplet_base::spawn::remove_source(id);
         }
     }
 
@@ -568,7 +568,7 @@ fn send(looks: Vec<(String, row::Look)>) {
     if looks.is_empty() {
         return;
     }
-    swaypplet_core::sway::ipc::run_commands(looks.iter().map(|(n, l)| l.command(n)).collect());
+    swaypplet_base::sway::ipc::run_commands(looks.iter().map(|(n, l)| l.command(n)).collect());
 }
 
 /// Everything the row needs.
@@ -583,7 +583,7 @@ struct Session {
 }
 
 fn read_session() -> Option<Session> {
-    let mut conn = swaypplet_core::sway::ipc::connect().ok()?;
+    let mut conn = swaypplet_base::sway::ipc::connect().ok()?;
     let tree = conn.get_tree().ok()?;
     let config = conn.get_config().ok().map(|c| c.config).unwrap_or_default();
     let places = place::mru(&tree);
@@ -621,7 +621,7 @@ fn read_session() -> Option<Session> {
 /// in the switcher's mode. One round trip on a unix socket is well under a
 /// millisecond.
 fn set_mode(mode: &str) {
-    let done = swaypplet_core::sway::ipc::connect()
+    let done = swaypplet_base::sway::ipc::connect()
         .map_err(|e| e.to_string())
         .and_then(|mut c| {
             c.run_command(format!("mode {mode}"))
@@ -633,7 +633,7 @@ fn set_mode(mode: &str) {
 }
 
 fn focused_workspace() -> Option<String> {
-    let mut conn = swaypplet_core::sway::ipc::connect().ok()?;
+    let mut conn = swaypplet_base::sway::ipc::connect().ok()?;
     conn.get_workspaces()
         .ok()?
         .into_iter()
@@ -642,7 +642,7 @@ fn focused_workspace() -> Option<String> {
 }
 
 /// The app ids of every window on a workspace, in tree order.
-pub fn apps_on(tree: &swayipc::Node, workspace: &str) -> Vec<String> {
+pub(crate) fn apps_on(tree: &swayipc::Node, workspace: &str) -> Vec<String> {
     fn collect(node: &swayipc::Node, out: &mut Vec<String>) {
         if let Some(app) = node.app_id.as_deref() {
             out.push(app.to_string());

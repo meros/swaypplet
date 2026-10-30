@@ -15,9 +15,9 @@
 //! Claude session by its pid, anything else by name) and the best match is
 //! focused.
 
-use swaypplet_core::sway::tree::Pick;
-use swaypplet_services::notifications::store::{self, StoreRef};
-use swaypplet_services::notifications::{CloseReason, ImageSource, Notification};
+use swaypplet_base::sway::tree::Pick;
+use swaypplet_notifyd::{CloseReason, ImageSource, Notification};
+use swaypplet_notifyd::{store, store::StoreRef};
 
 /// An xdg-activation token from the compositor, for handing to another
 /// client. Taken while the surface that was clicked still has the seat's
@@ -62,10 +62,10 @@ pub fn activate(notif: &Notification, store: &StoreRef, then: impl FnOnce() + 's
         Pick::Best
     };
     let store = store.clone();
-    swaypplet_core::sway::tree::focus_source(
+    swaypplet_base::sway::tree::focus_source(
         window_names(notif),
         notif.claude_pid,
-        swaypplet_services::task_state::parent_pid,
+        swaypplet_system::task_state::parent_pid,
         pick,
         move |_focused| {
             if has_default {

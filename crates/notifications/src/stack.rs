@@ -40,18 +40,18 @@ use gtk4_layer_shell::Edge;
 use super::card::{age_label, populate_card, set_critical_class};
 use super::card_surface::CardSurface;
 use super::timers::{Timer, cancel_timer, make_timer, pause_timers, resume_timers};
-use swaypplet_core::anim;
-use swaypplet_core::naming::display::is_virtual;
-use swaypplet_core::settings::store::{Alerts, Corner};
-use swaypplet_core::sway::ipc::SwayService;
-use swaypplet_services::notifications::group;
-use swaypplet_services::notifications::store::{self, NotificationStore};
-use swaypplet_services::notifications::{CloseReason, Notification};
+use swaypplet_base::naming::display::is_virtual;
+use swaypplet_base::sway::ipc::SwayService;
+use swaypplet_model::store::{Alerts, Corner};
+use swaypplet_notifyd::group;
+use swaypplet_notifyd::{CloseReason, Notification};
+use swaypplet_notifyd::{store, store::NotificationStore};
+use swaypplet_ui::anim;
 
 // ── Stack geometry ──
 pub(super) const CARD_WIDTH: i32 = 360;
 // Offset of the card column from the screen's top/right corner
-const EDGE_MARGIN: i32 = swaypplet_core::tokens::space(4);
+const EDGE_MARGIN: i32 = swaypplet_tokens::space(4);
 // Every card spans the whole column and is placed inside it, so the surface
 // never has to move: layer-shell margins are protocol state and animating a
 // slot by moving the surface would be a configure round trip per frame.
@@ -62,7 +62,7 @@ const WINDOW_HEIGHT: i32 = 720;
 // oldest is evicted.
 const COLLAPSED_TAIL: usize = 2;
 // Vertical gap between fully visible cards
-const GAP: f64 = swaypplet_core::tokens::space(3) as f64;
+const GAP: f64 = swaypplet_tokens::space(3) as f64;
 // Collapsed cards peek out below the last full card by this much per level
 const PEEK: f64 = 12.0;
 const PEEK_SCALE_STEP: f64 = 0.05;
@@ -71,7 +71,7 @@ const PEEK_SCALE_STEP: f64 = 0.05;
 /// stack depth it was born with, so a change lands on the next card rather
 /// than moving the ones on screen.
 pub(super) fn alerts() -> Alerts {
-    swaypplet_core::settings::store::with(|s| s.alerts())
+    swaypplet_model::store::with(|s| s.alerts())
 }
 
 /// One column per corner. Anchors are protocol state on the surface, so a
@@ -240,12 +240,12 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     // notification arriving on one display pushed the other display's cards
     // down. Ask sway, pin the surface, and keep the name for `reflow`.
     let sway = st.borrow().sway.clone();
-    let focused = swaypplet_core::sway::ipc::focused_output_from(sway.as_deref());
+    let focused = swaypplet_base::sway::ipc::focused_output_from(sway.as_deref());
     // Not on an extra screen unless switched on (`shell::extra`).
-    let output = swaypplet_core::shell::extra::place(
+    let output = swaypplet_ui::shell::extra::place(
         focused.as_deref(),
-        &swaypplet_core::shell::layer::connectors(),
-        swaypplet_core::shell::extra::Kind::Notifications.allowed(),
+        &swaypplet_ui::shell::layer::connectors(),
+        swaypplet_ui::shell::extra::Kind::Notifications.allowed(),
         st.borrow().last_screen.as_deref(),
     );
     if let Some(o) = output.as_deref().filter(|o| !is_virtual(o)) {
@@ -253,7 +253,7 @@ fn show(st: &Rc<RefCell<State>>, notif: &Notification) {
     }
     let monitor = output
         .as_deref()
-        .and_then(swaypplet_core::shell::layer::monitor_by_connector);
+        .and_then(swaypplet_ui::shell::layer::monitor_by_connector);
     if output.is_some() && monitor.is_none() {
         // Sway named an output GDK does not have. Letting the compositor
         // place the surface is still correct, so this is a note rather than
@@ -627,9 +627,9 @@ pub(super) fn reflow(st: &Rc<RefCell<State>>) {
         // surface, and that surface's alpha is the material fade, which this
         // must not fight. The frost stays: a collapsed card is still glass,
         // just further back.
-        swaypplet_core::ui::set_card_tint(
+        swaypplet_ui::ui::set_card_tint(
             surface.pane(),
-            swaypplet_core::ui::CardTint::Recessed,
+            swaypplet_ui::ui::CardTint::Recessed,
             collapsed,
         );
         surface.clip_input_to_card();

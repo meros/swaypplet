@@ -30,14 +30,17 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{Button, Label, ListBox, RevealerTransitionType, Spinner, Switch};
 
-use swaypplet_core::spawn::spawn_work;
-use swaypplet_core::ui;
-use swaypplet_services::network::model::{self, Failure, Snapshot};
-use swaypplet_services::network::tailscale::{self, Status};
-use swaypplet_services::network::{
+use swaypplet_base::spawn::spawn_work;
+use swaypplet_devices::network::{
     ActiveConnection, ConnectivityState, ICON_DISCONNECTED, ICON_ETHERNET, NmResult, display_name,
     fixture, signal_icon, snapshot, watch,
 };
+use swaypplet_devices::network::{
+    model,
+    model::{Failure, Snapshot},
+};
+use swaypplet_devices::network::{tailscale, tailscale::Status};
+use swaypplet_ui::ui;
 
 use extras::{Saved, SavedAsk, Tailscale, TailscaleAsk};
 use wifi::{Ask, WifiRow};
@@ -203,7 +206,7 @@ impl NetworkSection {
 
         let details = ui::revealer(
             RevealerTransitionType::SlideDown,
-            swaypplet_core::tokens::motion::EXPAND,
+            swaypplet_tokens::motion::EXPAND,
         );
         let tray = ui::vbox(2);
         tray.append(&ui::separator(gtk4::Orientation::Horizontal));
@@ -364,7 +367,7 @@ impl NetworkSection {
         this.refresh();
         {
             let weak = Rc::downgrade(&this.0);
-            swaypplet_services::devices::observe(move || {
+            swaypplet_devices::observe(move || {
                 if let Some(i) = weak.upgrade() {
                     NetworkSection(i).names_changed();
                 }
@@ -380,7 +383,7 @@ impl NetworkSection {
             i.wifi_switch.connect_state_set(move |_, on| {
                 if !s.0.syncing.get() {
                     s.act(
-                        move || swaypplet_services::network::set_wifi_radio(on),
+                        move || swaypplet_devices::network::set_wifi_radio(on),
                         |_| {},
                     );
                 }
@@ -658,7 +661,7 @@ impl NetworkSection {
     }
 
     fn adapter(&self, ask: interfaces::AdapterAsk) {
-        use swaypplet_services::network;
+        use swaypplet_devices::network;
         match ask {
             interfaces::AdapterAsk::Toggle(dev, on) => self.act(
                 move || {
@@ -678,10 +681,7 @@ impl NetworkSection {
             // Settings, not NetworkManager: stored on this thread; the
             // names redraw through `devices::observe` (`names_changed`).
             interfaces::AdapterAsk::Rename(mac, name) => {
-                swaypplet_services::devices::rename(
-                    &swaypplet_services::devices::DeviceKey::Net(mac),
-                    &name,
-                );
+                swaypplet_devices::rename(&swaypplet_devices::DeviceKey::Net(mac), &name);
             }
         }
     }

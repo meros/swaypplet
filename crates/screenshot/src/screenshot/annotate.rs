@@ -35,7 +35,7 @@ use super::capture::Image;
 /// survive being drawn on top of an arbitrary screenshot, which the muted
 /// fills do not reliably do. Read once per editor, in the mode it opened in.
 fn palette() -> [(f64, f64, f64); 5] {
-    let paint = swaypplet_core::theme::paint();
+    let paint = swaypplet_ui::theme::paint();
     let [_, yellow, blue, _, green, _] = paint.categorical;
     [paint.status.danger, yellow, green, blue, paint.fg].map(|c| (c.0, c.1, c.2))
 }
@@ -100,7 +100,7 @@ pub fn open(app: &gtk4::Application, image: Image, done: impl Fn(Image) + 'stati
     let canvas = gtk4::Overlay::new();
     canvas.set_hexpand(true);
     canvas.set_vexpand(true);
-    swaypplet_core::ui::canvas::adopt(&canvas);
+    swaypplet_ui::ui::canvas::adopt(&canvas);
     // The capture, fitted and never enlarged, as `Editor::scale` computes:
     // the strokes' layer maps through the same numbers.
     let picture = gtk4::Picture::for_paintable(&texture(&image));
@@ -121,8 +121,8 @@ pub fn open(app: &gtk4::Application, image: Image, done: impl Fn(Image) + 'stati
         window: window.clone(),
     });
 
-    let root = swaypplet_core::ui::vbox(0);
-    swaypplet_core::ui::window::adopt(&root);
+    let root = swaypplet_ui::ui::vbox(0);
+    swaypplet_ui::ui::window::adopt(&root);
     root.append(&toolbar(&editor, done));
     root.append(&canvas);
     window.set_child(Some(&root));
@@ -132,7 +132,7 @@ pub fn open(app: &gtk4::Application, image: Image, done: impl Fn(Image) + 'stati
 }
 
 fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
-    let bar = swaypplet_core::ui::toolbar(2);
+    let bar = swaypplet_ui::ui::toolbar(2);
     bar.add_css_class("annotate-toolbar");
 
     // Tools are a radio group: exactly one is active, and which one is the
@@ -146,18 +146,18 @@ fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
         (Tool::Pixelate, "󰸉", "Pixelate (X)"),
     ] {
         let face = gtk4::Label::new(Some(icon));
-        swaypplet_core::ui::glyph::adopt(
+        swaypplet_ui::ui::glyph::adopt(
             &face,
-            swaypplet_core::ui::Text::TitleSm,
-            swaypplet_core::ui::Tone::Fg,
+            swaypplet_ui::ui::Text::TitleSm,
+            swaypplet_ui::ui::Tone::Fg,
         );
-        let btn = swaypplet_core::ui::toggle_button(
-            swaypplet_core::ui::Face::Icon {
+        let btn = swaypplet_ui::ui::toggle_button(
+            swaypplet_ui::ui::Face::Icon {
                 child: face.upcast_ref(),
                 tooltip: name,
             },
-            swaypplet_core::ui::Kind::Flat,
-            swaypplet_core::ui::Size::Normal,
+            swaypplet_ui::ui::Kind::Flat,
+            swaypplet_ui::ui::Size::Normal,
         );
         match &first {
             Some(group) => btn.set_group(Some(group)),
@@ -193,7 +193,7 @@ fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
             let _ = cr.fill();
         });
 
-        let btn = swaypplet_core::ui::swatch(&dot);
+        let btn = swaypplet_ui::ui::swatch(&dot);
         btn.set_valign(gtk4::Align::Center);
         match &swatch_group {
             Some(group) => btn.set_group(Some(group)),
@@ -211,19 +211,19 @@ fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
 
     bar.append(&separator());
 
-    let undo = swaypplet_core::ui::button("Undo", swaypplet_core::ui::Kind::Secondary);
+    let undo = swaypplet_ui::ui::button("Undo", swaypplet_ui::ui::Kind::Secondary);
     let editor_c = editor.clone();
     undo.connect_clicked(move |_| editor_c.undo());
     bar.append(&undo);
 
     // The right-hand pair: the toolbar's left half changes the drawing, its
     // right half ends the session.
-    let spacer = swaypplet_core::ui::hbox(0);
+    let spacer = swaypplet_ui::ui::hbox(0);
     spacer.set_hexpand(true);
     bar.append(&spacer);
 
     // The one primary action on the bar (§1.2).
-    let keep = swaypplet_core::ui::button("Copy & save", swaypplet_core::ui::Kind::Primary);
+    let keep = swaypplet_ui::ui::button("Copy & save", swaypplet_ui::ui::Kind::Primary);
     let editor_c = editor.clone();
     keep.connect_clicked(move |_| {
         done(editor_c.export());
@@ -231,7 +231,7 @@ fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
     });
     bar.append(&keep);
 
-    let discard = swaypplet_core::ui::button("Discard edits", swaypplet_core::ui::Kind::Secondary);
+    let discard = swaypplet_ui::ui::button("Discard edits", swaypplet_ui::ui::Kind::Secondary);
     let editor_c = editor.clone();
     discard.connect_clicked(move |_| editor_c.window.close());
     bar.append(&discard);
@@ -240,7 +240,7 @@ fn toolbar(editor: &Rc<Editor>, done: impl Fn(Image) + 'static) -> gtk4::Box {
 }
 
 fn separator() -> gtk4::Box {
-    swaypplet_core::ui::separator(gtk4::Orientation::Vertical)
+    swaypplet_ui::ui::separator(gtk4::Orientation::Vertical)
 }
 
 impl Editor {

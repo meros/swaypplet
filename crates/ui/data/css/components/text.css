@@ -1,0 +1,94 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Text (crates/ui/src/ui/text.rs).
+
+   The type scale (§3.4) and the text tones (§3.2), and the small
+   typographic roles: strong, glyph, mono, numeric, overline, text on bare
+   wallpaper, a caption whose tone moves.
+
+   owns: ui-hero ui-display ui-display-sm ui-title ui-title-sm ui-body ui-label ui-caption ui-strong ui-glyph ui-mono ui-numeric ui-muted ui-faint ui-accent ui-success ui-warning ui-danger ui-overline ui-on-wallpaper ui-on-shade ui-live-caption
+   ══════════════════════════════════════════════════════════════════════ */
+
+.ui-hero       { font-size: var(--type-hero);       font-weight: var(--w-light); }
+
+.ui-display    { font-size: var(--type-display);    font-weight: var(--w-heavy); }
+
+.ui-display-sm { font-size: var(--type-display-sm); font-weight: var(--w-heavy); }
+
+.ui-title      { font-size: var(--type-title);      font-weight: var(--w-strong); }
+
+.ui-title-sm   { font-size: var(--type-title-sm);   font-weight: var(--w-strong); }
+
+.ui-body       { font-size: var(--type-body); }
+
+.ui-label      { font-size: var(--type-label); }
+
+.ui-caption    { font-size: var(--type-caption); }
+
+.ui-strong     { font-weight: var(--w-strong); }
+
+/* A glyph from the icon font takes a size from the scale but never its
+   weight: a bold glyph is a different glyph. */
+.ui-glyph      { font-weight: var(--w-regular); }
+
+.ui-mono       { font-family: var(--mono); }
+
+.ui-numeric    { font-feature-settings: "tnum"; }
+
+.ui-muted      { color: var(--fg-muted); }
+
+.ui-faint      { color: var(--fg-faint); }
+
+.ui-accent     { color: var(--accent); }
+
+.ui-success    { color: var(--success); }
+
+.ui-warning    { color: var(--warning); }
+
+.ui-danger     { color: var(--danger); }
+
+/* Text standing on bare wallpaper with no card behind it (the lock's clock,
+   date and switch-user button, the switcher's caption). Its ink and halo
+   follow the wallpaper behind it, not the mode: the panel measures the
+   region once per wallpaper and the tokens pick light ink on a dark halo or
+   dark ink on a light one, with a denser halo over a busy image
+   (crates/tokens/src/backdrop.rs, --fg-on-wallpaper and --halo-on-wallpaper).
+
+   Colour alone cannot make text readable on every image; a halo that moves
+   the ground around the glyphs toward the opposite of the ink can. Four
+   tight layers only, and their stacked alpha stays under the compositor's
+   glass mask threshold (backdrop.rs GLASS_MASK_THRESHOLD): a denser halo is
+   drawn as glass, and light glass turned it into a white smear. */
+.ui-on-wallpaper,
+button.ui-btn.ui-on-wallpaper {
+    color: var(--fg-on-wallpaper);
+    text-shadow:
+        0 1px 3px var(--halo-on-wallpaper),
+        0 1px 3px var(--halo-on-wallpaper),
+        0 1px 3px var(--halo-on-wallpaper),
+        0 1px 3px var(--halo-on-wallpaper);
+}
+
+/* The lock's clock and date, on the shade the lock draws behind them
+   (crates/tokens/src/backdrop.rs, "The lock's clock on its shade"). The shade holds
+   the contrast; the one wide, faint shadow only gives the digits depth, so
+   there is no outline around each glyph. Light ink in either mode: the shade
+   is dark in both. */
+.ui-on-shade {
+    color: var(--on-status);
+    text-shadow: 0 3px 28px var(--shadow-on-shade);
+}
+
+/* A caption whose tone changes in place (an error arriving, a success):
+   the colour moves as a state. */
+.ui-live-caption {
+    transition: color var(--motion-state);
+}
+
+/* A small uppercase label that names what follows: a sender, a task, a
+   group, a sheet's section. Tracked out because caps at caption size run
+   together otherwise. The caller uppercases the text. */
+.ui-overline {
+    font-size: var(--type-caption);
+    font-weight: var(--w-strong);
+    letter-spacing: 1px;
+}

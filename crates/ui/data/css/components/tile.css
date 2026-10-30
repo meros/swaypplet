@@ -1,0 +1,115 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Toggle tile (crates/ui/src/ui/tile.rs).
+
+   A glyph and a name on one toggle button. Accent means on.
+
+   A split tile (ui::tile_split): the body toggles, the chevron opens the
+   detail, a status line says why.
+
+   owns: ui-tile ui-tile-title ui-tile-toggle ui-tile-split ui-tile-body ui-tile-detail ui-tile-status
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Toggle tile: a pill with an optional drill-in. Accent means on. ─── */
+
+.ui-tile {
+    min-height: var(--tile-height);
+    border-radius: var(--radius-tile);
+    background-color: var(--fill-2);
+    color: var(--fg);
+}
+
+.ui-tile.on {
+    background-color: var(--accent-bg);
+    color: var(--on-accent);
+}
+
+.ui-tile-title {
+    font-size: var(--type-body);
+    font-weight: var(--w-strong);
+}
+
+/* ── Toggle tile as one button ──────────
+   The tile itself is the toggle, so the states sit on it rather than on a
+   button inside. Sizes stay on .ui-tile, where a surface may place it. */
+
+.ui-tile-toggle {
+    padding: 0 var(--space-4);
+    border: none;
+    background-image: none;
+    box-shadow: none;
+    outline: 0 solid transparent;
+    transition: background-color var(--motion-state),
+                background-image var(--motion-state),
+                color var(--motion-state),
+                opacity var(--motion-state);
+}
+
+button.ui-tile-toggle:hover {
+    background-image: linear-gradient(var(--state-hover), var(--state-hover));
+}
+
+button.ui-tile-toggle:active {
+    background-image: linear-gradient(var(--state-pressed), var(--state-pressed));
+}
+
+button.ui-tile-toggle:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+/* Disabled as a button is (button.css): the box stays, the label greys,
+   and a tile that is on stays on at half strength. */
+button.ui-tile-toggle:disabled {
+    background-color: var(--fill-disabled);
+    background-image: none;
+    color: var(--fg-disabled);
+}
+
+button.ui-tile-toggle.on:disabled {
+    background-color: var(--accent-bg);
+    color: var(--on-accent);
+    opacity: 0.5;
+}
+
+/* Waiting on the tool the tile drives. */
+.ui-tile-toggle.loading {
+    opacity: 0.6;
+}
+
+/* ── Split tile ──────────
+   The tile's fill and its accent stay on the outer box, which clips both
+   halves to its corners; the halves carry only the state overlays. */
+
+.ui-tile-split > .ui-tile-toggle,
+.ui-tile-split > button.ui-tile-toggle:disabled {
+    background-color: transparent;
+    min-height: var(--tile-height);
+    border-radius: 0;
+    color: inherit;
+}
+
+.ui-tile-split > .ui-tile-detail {
+    padding: 0 var(--space-3);
+    border-left: 1px solid var(--border-subtle);
+}
+
+.ui-tile-split.on > .ui-tile-detail {
+    border-left-color: var(--on-accent-muted);
+}
+
+/* The chevron whose detail is folded out: it turns to point at it. */
+.ui-tile-split > .ui-tile-detail image {
+    transition: -gtk-icon-transform var(--motion-state);
+}
+.ui-tile-split > .ui-tile-detail.open image {
+    -gtk-icon-transform: rotate(90deg);
+}
+
+.ui-tile-status {
+    font-size: var(--type-caption);
+    color: var(--fg-muted);
+}
+
+.ui-tile.on .ui-tile-status {
+    color: var(--on-accent-muted);
+}

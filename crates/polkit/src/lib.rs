@@ -51,7 +51,7 @@ mod cue;
 pub mod dialog;
 mod face;
 mod helper;
-pub mod race;
+pub(crate) mod race;
 mod session;
 
 use std::cell::{Cell, RefCell};
@@ -64,8 +64,8 @@ use gio::prelude::*;
 use gtk4::Application;
 use tokio::sync::oneshot;
 
-use swaypplet_core::settings::store::{self, Elevate};
-use swaypplet_core::theme;
+use swaypplet_model::{store, store::Elevate};
+use swaypplet_ui::theme;
 
 use agent::{AgentEvent, AuthOutcome, AuthRequest, ResolvedIdentity};
 use cue::Cue;
@@ -84,7 +84,7 @@ type SourceHandle = Rc<Cell<Option<glib::SourceId>>>;
 
 fn cancel_fd_source(handle: &SourceHandle) {
     if let Some(id) = handle.take() {
-        swaypplet_core::spawn::remove_source(id);
+        swaypplet_base::spawn::remove_source(id);
     }
 }
 
@@ -415,7 +415,7 @@ fn install_fd_watch(state: &Rc<RefCell<PolkitState>>, fd: RawFd) {
     let state_weak = Rc::downgrade(state);
     let handle: SourceHandle = Rc::new(Cell::new(None));
     let handle_cb = handle.clone();
-    let source = swaypplet_core::glib_unix::fd_add_local(
+    let source = swaypplet_base::glib_unix::fd_add_local(
         fd,
         glib::IOCondition::IN | glib::IOCondition::HUP | glib::IOCondition::ERR,
         move |_fd, _cond| {

@@ -1,0 +1,15 @@
+[package]
+name = "swaypplet-settings-idle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+swaypplet-model.workspace = true
+swaypplet-ui.workspace = true
+swaypplet-settings-kit.workspace = true
+gtk4.workspace = true
+log.workspace = true
+
+[lints]
+workspace = true

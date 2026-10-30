@@ -40,19 +40,19 @@ use gtk4_layer_shell::{Edge, LayerShell as _};
 use super::live;
 use super::scene::{self, Scene};
 use super::view::{self, PIN_GLYPH, UNPIN_GLYPH, View};
-use swaypplet_core::settings::store::{self, Corner};
-use swaypplet_core::shell::{Namespace, Surface, layer};
-use swaypplet_core::sway::ipc::SwayService;
+use swaypplet_base::sway::ipc::SwayService;
+use swaypplet_model::{store, store::Corner};
+use swaypplet_ui::shell::{Namespace, Surface, layer};
 
 /// From the screen's side, left or right.
-const MARGIN_SIDE: i32 = swaypplet_core::tokens::space(5);
+const MARGIN_SIDE: i32 = swaypplet_tokens::space(5);
 /// From the bottom edge, clear of the bar, which is there.
-const MARGIN_BOTTOM: i32 = 2 * swaypplet_core::tokens::space(7);
+const MARGIN_BOTTOM: i32 = 2 * swaypplet_tokens::space(7);
 /// From the top edge. Nothing of the shell's is up there, so the same gap as
 /// from the side.
 const MARGIN_TOP: i32 = MARGIN_SIDE;
 /// Between stacked pins.
-const GAP: i32 = swaypplet_core::tokens::space(4);
+const GAP: i32 = swaypplet_tokens::space(4);
 /// How long a new pin shows itself before its workspace's own screen hides
 /// it: long enough to see where it lives.
 const INTRODUCE: Duration = Duration::from_millis(1600);
@@ -158,7 +158,7 @@ fn publish(names: Vec<String>) {
 
 /// Go to `workspace`: what a click on its picture does, pinned or peeked.
 pub fn go(workspace: &str) {
-    swaypplet_core::sway::ipc::run_command(&format!(
+    swaypplet_base::sway::ipc::run_command(&format!(
         "workspace \"{}\"",
         workspace.replace('\\', "\\\\").replace('"', "\\\"")
     ));
@@ -266,7 +266,7 @@ impl Pins {
     fn follow_setting(&self) {
         let now = store::with(|s| s.pins());
         let was = std::mem::replace(&mut self.inner.borrow_mut().setting, now);
-        let extra = swaypplet_core::shell::extra::Kind::Pins.allowed();
+        let extra = swaypplet_ui::shell::extra::Kind::Pins.allowed();
         let extra_was = std::mem::replace(&mut self.inner.borrow_mut().on_extra, extra);
         if was == now {
             // The extra-screen switch moves pins off a TV, or lets them
@@ -358,9 +358,9 @@ impl Pins {
     /// Pin the focused workspace, or unpin it when it already is.
     pub fn toggle_focused(&self) {
         let this = self.clone();
-        swaypplet_core::spawn::spawn_work(
+        swaypplet_base::spawn::spawn_work(
             || {
-                let mut conn = swaypplet_core::sway::ipc::connect().ok()?;
+                let mut conn = swaypplet_base::sway::ipc::connect().ok()?;
                 let ws = conn
                     .get_workspaces()
                     .ok()?
@@ -380,7 +380,7 @@ impl Pins {
     /// it is pinned afterwards.
     pub fn toggle(&self, workspace: String) -> bool {
         let sway = self.inner.borrow().sway.clone();
-        let output = self.placed(swaypplet_core::sway::ipc::focused_output_from(
+        let output = self.placed(swaypplet_base::sway::ipc::focused_output_from(
             sway.as_deref(),
         ));
         self.toggle_on(workspace, output)
@@ -389,15 +389,15 @@ impl Pins {
     /// Where a pin for the focused output `focused` goes: there, unless it
     /// is an extra screen pins may not stand on (`shell::extra::place`).
     fn placed(&self, focused: Option<String>) -> Option<String> {
-        let output = swaypplet_core::shell::extra::place(
+        let output = swaypplet_ui::shell::extra::place(
             focused.as_deref(),
             &layer::connectors(),
-            swaypplet_core::shell::extra::Kind::Pins.allowed(),
+            swaypplet_ui::shell::extra::Kind::Pins.allowed(),
             self.inner.borrow().last_screen.as_deref(),
         );
         if let Some(o) = output
             .as_deref()
-            .filter(|o| !swaypplet_core::naming::display::is_virtual(o))
+            .filter(|o| !swaypplet_base::naming::display::is_virtual(o))
         {
             self.inner.borrow_mut().last_screen = Some(o.to_string());
         }
@@ -441,7 +441,7 @@ impl Pins {
             return;
         };
         let monitor = output.as_deref().and_then(layer::monitor_by_connector);
-        let label = swaypplet_core::sway::workspace::label_for_name(&workspace);
+        let label = swaypplet_base::sway::workspace::label_for_name(&workspace);
         let corner = self.inner.borrow().setting.corner;
         let parts = build_window(&app, monitor.as_ref(), &label, corner);
 
@@ -553,7 +553,7 @@ impl Pins {
             .map(|p| (p.workspace.clone(), p.region.as_ref().map(|r| r.con_id)));
         match target {
             Some((_, Some(con_id))) => {
-                swaypplet_core::sway::ipc::run_command(&format!("[con_id={con_id}] focus"));
+                swaypplet_base::sway::ipc::run_command(&format!("[con_id={con_id}] focus"));
             }
             Some((workspace, None)) => self.go(&workspace),
             None => {}
@@ -687,9 +687,9 @@ impl Pins {
             .collect();
         let this = self.clone();
         let read = self.inner.borrow_mut().reads.ask();
-        swaypplet_core::spawn::spawn_work(
+        swaypplet_base::spawn::spawn_work(
             move || {
-                let tree = swaypplet_core::sway::ipc::connect().ok()?.get_tree().ok()?;
+                let tree = swaypplet_base::sway::ipc::connect().ok()?.get_tree().ok()?;
                 Some(
                     wanted
                         .into_iter()
@@ -847,7 +847,7 @@ fn update(pin: &mut Pin, scene: Option<Scene>, show: bool) {
 fn region_label(app: &str, workspace: &str) -> String {
     format!(
         "{app} \u{00b7} {}",
-        swaypplet_core::sway::workspace::label_for_name(workspace)
+        swaypplet_base::sway::workspace::label_for_name(workspace)
     )
 }
 
@@ -877,7 +877,7 @@ fn build_window(
         // notifications' does); a surface that ended at the card clipped it
         // instead, and its glass stood still.
         .margin(at.stack, at.margin)
-        .card(swaypplet_core::ui::Card::Floating)
+        .card(swaypplet_ui::ui::Card::Floating)
         // Slides in from the side's edge and fades up, and leaves the same
         // way (anim::Reveal, the shell's one entrance).
         .slide(gtk4::Orientation::Horizontal, at.slide)
@@ -907,7 +907,7 @@ mod tests {
     use super::{MARGIN_BOTTOM, MARGIN_TOP, Reads, SLIDE_PX, pin_step, placement, with_arrival};
     use gtk4_layer_shell::Edge;
     use std::time::{Duration, Instant};
-    use swaypplet_core::settings::store::{Corner, PinSize};
+    use swaypplet_model::store::{Corner, PinSize};
 
     #[test]
     fn pins_stand_in_their_corner_and_slide_in_from_its_side() {

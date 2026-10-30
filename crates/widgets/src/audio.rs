@@ -1,7 +1,7 @@
 //! Audio section: output and input, their devices, and every application's
 //! volume.
 //!
-//! All state comes from [`swaypplet_services::audio`], which follows the sound
+//! All state comes from [`swaypplet_audio`], which follows the sound
 //! server's events. This file draws it, and draws it in place: device rows
 //! and application rows are kept per id and updated, and a list is rebuilt
 //! only when its members change. It used to rebuild every row on every
@@ -20,12 +20,13 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use swaypplet_core::ui;
-use swaypplet_core::ui::icons;
-use swaypplet_services::audio::{
+use swaypplet_audio::{
     AudioService, AudioState, Card, Command, Device, DeviceKind, Stream, VolumeState,
 };
-use swaypplet_services::devices::{self, DeviceKey};
+use swaypplet_devices as devices;
+use swaypplet_devices::DeviceKey;
+use swaypplet_ui::ui;
+use swaypplet_ui::ui::icons;
 
 /// How long one microphone test records.
 const METER_SECONDS: u32 = 20;
@@ -710,10 +711,7 @@ impl AudioSection {
     /// Redraw from the service's current snapshot.
     pub fn refresh(&self) {
         // The Keys group's boost switch: the rail ends where the keys do.
-        let ceiling = swaypplet_core::settings::store::current()
-            .keys()
-            .volume_ceiling()
-            * 100.0;
+        let ceiling = swaypplet_model::store::current().keys().volume_ceiling() * 100.0;
         let scale = self.output_volume_scale();
         if scale.adjustment().upper() != ceiling {
             scale.set_range(0.0, ceiling);

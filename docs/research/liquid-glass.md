@@ -191,7 +191,7 @@ path builds a plain toplevel. The probe takes its lock inside a nested headless
 sway, never the host session.
 
 **The lock screen was done by that route, and then undone.** `GlassPane`, its
-GL backend (`crates/lock/src/lock/glass_gl.rs`), the shaders and the harnesses around them
+GL backend (`crates/lock/src/glass_gl.rs`), the shaders and the harnesses around them
 are all gone from the tree; everything below about them is history, kept for
 the measurements. The compositor renders the lock's glass now: sway draws the
 wallpaper into the lock's own scene tree from the background layer's committed

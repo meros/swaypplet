@@ -1,0 +1,23 @@
+[package]
+name = "swaypplet-greet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+swaypplet-base.workspace = true
+swaypplet-model.workspace = true
+swaypplet-ui.workspace = true
+swaypplet-fp.workspace = true
+swaypplet-switch-user.workspace = true
+swaypplet-lock.workspace = true
+gtk4.workspace = true
+gtk4-layer-shell.workspace = true
+glib.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+log.workspace = true
+greetd_ipc.workspace = true
+
+[lints]
+workspace = true

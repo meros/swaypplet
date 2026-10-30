@@ -9,10 +9,10 @@ use gtk4::prelude::*;
 use super::menu::card_menu;
 use super::stack::{CARD_WIDTH, State, reflow};
 use super::timers::{pause_timers, resume_timers};
-use swaypplet_core::anim;
-use swaypplet_services::notifications::group::describe;
-use swaypplet_services::notifications::store::{self, NotificationStore};
-use swaypplet_services::notifications::{CloseReason, ImageSource, Notification, Urgency};
+use swaypplet_notifyd::group::describe;
+use swaypplet_notifyd::{CloseReason, ImageSource, Notification, Urgency};
+use swaypplet_notifyd::{store, store::NotificationStore};
+use swaypplet_ui::anim;
 
 /// The action key a sender uses to ask for a reply field (KDE's convention,
 /// which is what the `inline-reply` capability promises).
@@ -26,7 +26,7 @@ const DRAG_DISMISS_PX: f64 = 72.0;
 /// How many sender colours there are: the categorical slots of the design
 /// system (`--cat-1` … `--cat-6`, `ui::rail` and `ui::set_category`), none of
 /// them the red the URGENT chip owns.
-pub const ACCENTS: u64 = swaypplet_core::ui::CATEGORIES as u64;
+pub const ACCENTS: u64 = swaypplet_ui::ui::CATEGORIES as u64;
 
 /// Which accent a sender gets, 1 to [`ACCENTS`], from its name.
 ///
@@ -148,9 +148,9 @@ fn body_is_truncated(body: &str) -> bool {
 /// card that isn't, and the shape channel is the chip, which needs nothing
 /// to compare itself against.
 pub(super) fn set_critical_class(card: &gtk4::Box, notif: &Notification) {
-    swaypplet_core::ui::set_card_tint(
+    swaypplet_ui::ui::set_card_tint(
         card,
-        swaypplet_core::ui::CardTint::Danger,
+        swaypplet_ui::ui::CardTint::Danger,
         notif.urgency == Urgency::Critical,
     );
 }
@@ -209,7 +209,7 @@ pub(super) fn populate_card(
         card.remove_css_class("compact");
     }
 
-    let hbox = swaypplet_core::ui::hbox(3);
+    let hbox = swaypplet_ui::ui::hbox(3);
 
     // A picture wide enough to be a screenshot or a banner goes under the
     // text at full width; anything else is a thumbnail in the leading slot,
@@ -220,7 +220,7 @@ pub(super) fn populate_card(
     }
 
     // Text content
-    let vbox = swaypplet_core::ui::vbox(1);
+    let vbox = swaypplet_ui::ui::vbox(1);
     vbox.set_hexpand(true);
     vbox.set_valign(gtk4::Align::Center);
 
@@ -235,10 +235,10 @@ pub(super) fn populate_card(
         age
     });
 
-    let summary = swaypplet_core::ui::text(
+    let summary = swaypplet_ui::ui::text(
         &notif.summary,
-        swaypplet_core::ui::Text::Title,
-        swaypplet_core::ui::Tone::Fg,
+        swaypplet_ui::ui::Text::Title,
+        swaypplet_ui::ui::Tone::Fg,
     );
     summary.set_halign(gtk4::Align::Fill);
     summary.set_ellipsize(gtk4::pango::EllipsizeMode::End);
@@ -248,7 +248,7 @@ pub(super) fn populate_card(
     body_text(&vbox, notif, st);
 
     if let Some(widget) = wide.and_then(|src| image_widget(src, CARD_WIDTH)) {
-        let frame = swaypplet_core::ui::thumb();
+        let frame = swaypplet_ui::ui::thumb();
         frame.append(&widget);
         frame.add_css_class("notification-picture");
         frame.set_halign(gtk4::Align::Fill);
@@ -257,10 +257,10 @@ pub(super) fn populate_card(
 
     // Progress bar
     if let Some(progress) = notif.progress {
-        let bar = swaypplet_core::ui::progress(progress as f64 / 100.0);
+        let bar = swaypplet_ui::ui::progress(progress as f64 / 100.0);
         bar.set_hexpand(true);
         bar.add_css_class("notification-progress");
-        swaypplet_core::ui::set_breathing(&bar, true);
+        swaypplet_ui::ui::set_breathing(&bar, true);
         vbox.append(&bar);
     }
 
@@ -294,8 +294,8 @@ pub(super) fn populate_card(
     // same every time. Urgency does not touch the rail: that channel is the
     // warm glass and the URGENT chip, and a rail that meant severity on some
     // cards and sender on others would mean neither.
-    let row = swaypplet_core::ui::hbox(3);
-    let rail = swaypplet_core::ui::rail(
+    let row = swaypplet_ui::ui::hbox(3);
+    let rail = swaypplet_ui::ui::rail(
         (!notif.app_name.is_empty()).then(|| usize::from(accent_for(&notif.app_name))),
     );
     hbox.set_hexpand(true);
@@ -321,14 +321,14 @@ fn earlier_list(earlier: &[Notification], st: &Rc<RefCell<State>>) -> Option<gtk
     if earlier.is_empty() {
         return None;
     }
-    let d = swaypplet_core::ui::disclosure(&format!("{} earlier", earlier.len()));
+    let d = swaypplet_ui::ui::disclosure(&format!("{} earlier", earlier.len()));
     let now = std::time::SystemTime::now();
     for n in earlier {
-        let line = swaypplet_core::ui::hbox(2);
-        let summary = swaypplet_core::ui::text(
+        let line = swaypplet_ui::ui::hbox(2);
+        let summary = swaypplet_ui::ui::text(
             &n.summary,
-            swaypplet_core::ui::Text::Body,
-            swaypplet_core::ui::Tone::Muted,
+            swaypplet_ui::ui::Text::Body,
+            swaypplet_ui::ui::Tone::Muted,
         );
         summary.set_halign(gtk4::Align::Fill);
         summary.set_hexpand(true);
@@ -336,10 +336,10 @@ fn earlier_list(earlier: &[Notification], st: &Rc<RefCell<State>>) -> Option<gtk
         summary.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         summary.set_max_width_chars(1);
         line.append(&summary);
-        let age = swaypplet_core::ui::text(
+        let age = swaypplet_ui::ui::text(
             &age_label(n.timestamp, now).unwrap_or_default(),
-            swaypplet_core::ui::Text::Caption,
-            swaypplet_core::ui::Tone::Faint,
+            swaypplet_ui::ui::Text::Caption,
+            swaypplet_ui::ui::Tone::Faint,
         );
         line.append(&age);
         d.body.append(&line);
@@ -369,7 +369,7 @@ fn leading_picture(notif: &Notification, wide: Option<&ImageSource>) -> Option<g
     // treatment content gets: a rounded, clipped frame. An app icon is
     // not.
     let widget = if notif.image.is_some() && wide.is_none() {
-        let frame = swaypplet_core::ui::thumb();
+        let frame = swaypplet_ui::ui::thumb();
         frame.append(&widget);
         frame.upcast()
     } else {
@@ -386,7 +386,7 @@ fn leading_picture(notif: &Notification, wide: Option<&ImageSource>) -> Option<g
 /// dot would only repeat it. `None` when the card has nothing to put in a
 /// header, and so no header.
 fn header(notif: &Notification, count: usize) -> Option<(gtk4::Box, gtk4::Label)> {
-    let header = swaypplet_core::ui::hbox(2);
+    let header = swaypplet_ui::ui::hbox(2);
     // Urgency leads the header, because a critical card is the one card that
     // never expires (timeout_for) and the word is what says so. It used to be
     // a red ring around the whole card instead, which is an error dialog's
@@ -398,8 +398,8 @@ fn header(notif: &Notification, count: usize) -> Option<(gtk4::Box, gtk4::Label)
     // it costs nothing to leave on screen for as long as a card that never
     // expires stays there, which an infinite animation does (P7).
     if notif.urgency == Urgency::Critical {
-        let urgent = swaypplet_core::ui::badge("URGENT", swaypplet_core::ui::BadgeTone::Alert);
-        swaypplet_core::ui::overline::adopt(&urgent);
+        let urgent = swaypplet_ui::ui::badge("URGENT", swaypplet_ui::ui::BadgeTone::Alert);
+        swaypplet_ui::ui::overline::adopt(&urgent);
         urgent.set_valign(gtk4::Align::Center);
         header.append(&urgent);
     }
@@ -407,21 +407,21 @@ fn header(notif: &Notification, count: usize) -> Option<(gtk4::Box, gtk4::Label)
     // colour the hue (P3), so one label carries both and a separate dot would
     // only repeat it. Tasks 1–4 take the first four slots, as the bar does.
     if let Some(task) = notif.task {
-        let num = swaypplet_core::ui::overline(&format!("T{task}"), swaypplet_core::ui::Tone::Fg);
+        let num = swaypplet_ui::ui::overline(&format!("T{task}"), swaypplet_ui::ui::Tone::Fg);
         if (1..=4).contains(&task) {
-            swaypplet_core::ui::set_category(&num, usize::from(task));
+            swaypplet_ui::ui::set_category(&num, usize::from(task));
         }
         header.append(&num);
     }
     // The app name carries the rail's colour, so the header says who sent it
     // in the same channel the edge does.
     if !notif.app_name.is_empty() {
-        let app_label = swaypplet_core::ui::overline(&notif.app_name, swaypplet_core::ui::Tone::Fg);
+        let app_label = swaypplet_ui::ui::overline(&notif.app_name, swaypplet_ui::ui::Tone::Fg);
         app_label.set_halign(gtk4::Align::Fill);
         app_label.set_hexpand(true);
         app_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         app_label.set_max_width_chars(1);
-        swaypplet_core::ui::set_category(&app_label, usize::from(accent_for(&notif.app_name)));
+        swaypplet_ui::ui::set_category(&app_label, usize::from(accent_for(&notif.app_name)));
         header.append(&app_label);
     }
 
@@ -429,7 +429,7 @@ fn header(notif: &Notification, count: usize) -> Option<(gtk4::Box, gtk4::Label)
     // more of this" without spending a slot per copy.
     if let Some(words) = describe(count, &notif.app_name) {
         let badge =
-            swaypplet_core::ui::badge(&count.to_string(), swaypplet_core::ui::BadgeTone::Neutral);
+            swaypplet_ui::ui::badge(&count.to_string(), swaypplet_ui::ui::BadgeTone::Neutral);
         badge.set_valign(gtk4::Align::Center);
         badge.set_tooltip_text(Some(&words));
         header.append(&badge);
@@ -439,10 +439,10 @@ fn header(notif: &Notification, count: usize) -> Option<(gtk4::Box, gtk4::Label)
     // minute old, so the minute tick has something to write into.
     // Metadata, closing the header opposite the app name, never competing
     // with the summary.
-    let age = swaypplet_core::ui::text(
+    let age = swaypplet_ui::ui::text(
         &age_label(notif.timestamp, std::time::SystemTime::now()).unwrap_or_default(),
-        swaypplet_core::ui::Text::Caption,
-        swaypplet_core::ui::Tone::Faint,
+        swaypplet_ui::ui::Text::Caption,
+        swaypplet_ui::ui::Tone::Faint,
     );
     age.set_halign(gtk4::Align::End);
     if header.first_child().is_some() {
@@ -471,20 +471,20 @@ fn body_text(vbox: &gtk4::Box, notif: &Notification, st: &Rc<RefCell<State>>) {
             .build();
         // The body is what the card is for, so it reads at full ink: muted
         // text over a bright backdrop is a card you skip rather than read.
-        swaypplet_core::ui::set_text_style(
+        swaypplet_ui::ui::set_text_style(
             &body,
-            swaypplet_core::ui::Text::Body,
-            swaypplet_core::ui::Tone::Fg,
+            swaypplet_ui::ui::Text::Body,
+            swaypplet_ui::ui::Tone::Fg,
         );
         vbox.append(&body);
 
         // The rest of a long body is one click away rather than only in the
         // centre. A button, not a hover reveal (P8).
         if body_is_truncated(&notif.body) {
-            let more = swaypplet_core::ui::button_with(
-                swaypplet_core::ui::Face::Label("more"),
-                swaypplet_core::ui::Kind::Flat,
-                swaypplet_core::ui::Size::Small,
+            let more = swaypplet_ui::ui::button_with(
+                swaypplet_ui::ui::Face::Label("more"),
+                swaypplet_ui::ui::Kind::Flat,
+                swaypplet_ui::ui::Size::Small,
             );
             more.set_halign(gtk4::Align::Start);
             let body_c = body.clone();
@@ -530,7 +530,7 @@ fn reply_field(
         .placeholder_text(placeholder)
         .hexpand(true)
         .build();
-    swaypplet_core::ui::entry::adopt(&entry, swaypplet_core::ui::FieldSize::Normal);
+    swaypplet_ui::ui::entry::adopt(&entry, swaypplet_ui::ui::FieldSize::Normal);
     entry.add_css_class("notification-reply");
     let id = notif.id;
     let store_c = store.clone();
@@ -596,7 +596,7 @@ fn action_buttons(
     if notif.actions.is_empty() {
         return None;
     }
-    let actions_box = swaypplet_core::ui::hbox(2);
+    let actions_box = swaypplet_ui::ui::hbox(2);
     actions_box.add_css_class("notification-actions");
 
     for (key, label) in &notif.actions {
@@ -618,10 +618,10 @@ fn action_buttons(
         } else {
             btn.set_label(label);
         }
-        swaypplet_core::ui::button::adopt(
+        swaypplet_ui::ui::button::adopt(
             &btn,
-            swaypplet_core::ui::Kind::Secondary,
-            swaypplet_core::ui::Size::Small,
+            swaypplet_ui::ui::Kind::Secondary,
+            swaypplet_ui::ui::Size::Small,
         );
 
         let id = notif.id;
@@ -652,13 +652,13 @@ fn menu_button(
     store: &Rc<RefCell<NotificationStore>>,
     st: &Rc<RefCell<State>>,
 ) -> gtk4::Button {
-    let more_btn = swaypplet_core::ui::button_with(
-        swaypplet_core::ui::Face::Glyph {
+    let more_btn = swaypplet_ui::ui::button_with(
+        swaypplet_ui::ui::Face::Glyph {
             glyph: "⋯",
             tooltip: "Snooze, mute, dismiss all",
         },
-        swaypplet_core::ui::Kind::Flat,
-        swaypplet_core::ui::Size::Small,
+        swaypplet_ui::ui::Kind::Flat,
+        swaypplet_ui::ui::Size::Small,
     );
     more_btn.set_valign(gtk4::Align::Start);
     let menu = card_menu(notif, store, st);

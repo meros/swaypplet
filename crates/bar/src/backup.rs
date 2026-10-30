@@ -16,8 +16,8 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use swaypplet_core::ui;
-use swaypplet_services::backup::{BackupStatusService, Tier};
+use swaypplet_system::backup::{BackupStatusService, Tier};
+use swaypplet_ui::ui;
 
 /// The glyph's tone per tier. This breaks the battery's rest-is-faint rule
 /// on purpose: the glance this instrument exists for is "the nightly jobs

@@ -5,8 +5,11 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-swaypplet-core.workspace = true
-swaypplet-services.workspace = true
+swaypplet-base.workspace = true
+swaypplet-tokens.workspace = true
+swaypplet-model.workspace = true
+swaypplet-ui.workspace = true
+swaypplet-notifyd.workspace = true
 swaypplet-jump.workspace = true
 gtk4.workspace = true
 gtk4-layer-shell.workspace = true

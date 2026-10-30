@@ -49,7 +49,7 @@ since. The bug and the dependency both go away with `ext-data-control-v1`:
 swaypplet owns the selection watch, keeps its own ring, and sets the selection
 back through its own data source.
 
-Shipped as `crates/services/src/clipboard.rs`. Notes for later: history is in-memory only, so a
+Shipped as `crates/system/src/clipboard.rs`. Notes for later: history is in-memory only, so a
 panel restart clears it (deliberate for a clipboard, revisit only with a reason);
 text mimes only, images are a follow-up; `x-kde-passwordManagerHint: secret`
 offers are skipped, which is the cross-desktop convention password managers
@@ -178,7 +178,7 @@ background in a picture.
 
 Three migrations, all landed. Thirteen external binaries became ten.
 
-**Audio.** `crates/services/src/audio.rs` holds one connection to the sound server and pushes
+**Audio.** `crates/audio/src/lib.rs` holds one connection to the sound server and pushes
 snapshots into an `Observed`, the shape `sway_ipc` and `clipboard` use. Gone
 with it: the `wpctl status` parser (indentation depth, box-drawing characters,
 an asterisk for the default), a second `wpctl` call per device for its volume,

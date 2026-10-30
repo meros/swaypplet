@@ -1,0 +1,14 @@
+[package]
+name = "swaypplet-settings-alerts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+swaypplet-model.workspace = true
+swaypplet-ui.workspace = true
+swaypplet-settings-kit.workspace = true
+gtk4.workspace = true
+
+[lints]
+workspace = true

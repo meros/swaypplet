@@ -13,9 +13,12 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{ListBoxRow, PasswordEntry, Revealer, RevealerTransitionType, Spinner};
 
-use swaypplet_core::ui;
-use swaypplet_services::network::model::{self, Failure, Snapshot};
-use swaypplet_services::network::{WifiNetwork, signal_icon};
+use swaypplet_devices::network::{WifiNetwork, signal_icon};
+use swaypplet_devices::network::{
+    model,
+    model::{Failure, Snapshot},
+};
+use swaypplet_ui::ui;
 
 use super::{set_signal_glyph, signal_tone};
 
@@ -53,7 +56,7 @@ impl WifiRow {
 
         let pw = ui::revealer(
             RevealerTransitionType::SlideDown,
-            swaypplet_core::tokens::motion::EXPAND,
+            swaypplet_tokens::motion::EXPAND,
         );
         let pw_box = ui::vbox(1);
         pw_box.add_css_class("network-hero-line");

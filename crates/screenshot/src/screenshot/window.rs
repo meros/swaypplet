@@ -15,9 +15,12 @@ use gtk4::glib;
 use gtk4::prelude::*;
 
 use super::capture::Image;
-use swaypplet_core::shell::{Namespace, Surface};
-use swaypplet_jump::jump::card::{self, Live, LivePicture};
+use swaypplet_jump::jump::{
+    card,
+    card::{Live, LivePicture},
+};
 use swaypplet_jump::jump::{live, scene};
+use swaypplet_ui::shell::{Namespace, Surface};
 
 /// A window's picture in the grid, at most this box, keeping its shape.
 const TILE_W: i32 = 240;
@@ -43,9 +46,9 @@ struct Picker {
 /// picker is left without one.
 pub fn pick(app: &gtk4::Application, done: impl FnOnce(Option<Image>) + 'static) {
     let app = app.clone();
-    swaypplet_core::spawn::spawn_work(
+    swaypplet_base::spawn::spawn_work(
         || {
-            let tree = swaypplet_core::sway::ipc::connect().ok()?.get_tree().ok()?;
+            let tree = swaypplet_base::sway::ipc::connect().ok()?.get_tree().ok()?;
             Some(scene::all_windows(&tree))
         },
         move |windows| {
@@ -67,18 +70,18 @@ fn show(app: &gtk4::Application, windows: Vec<(scene::Window, String, String)>, 
     let surface = Surface::builder(app, Namespace::WindowPicker)
         // It is driven by the keyboard, so it takes it.
         .keyboard(gtk4_layer_shell::KeyboardMode::Exclusive)
-        .card(swaypplet_core::ui::Card::Floating)
+        .card(swaypplet_ui::ui::Card::Floating)
         .build();
     let window = surface.window().clone();
 
     let card = surface.card();
-    card.set_spacing(swaypplet_core::tokens::space(3));
+    card.set_spacing(swaypplet_tokens::space(3));
     card.set_halign(gtk4::Align::Center);
     card.set_valign(gtk4::Align::Center);
     card.add_css_class("window-picker");
-    card.append(&swaypplet_core::ui::overline(
+    card.append(&swaypplet_ui::ui::overline(
         "Screenshot a window",
-        swaypplet_core::ui::Tone::Muted,
+        swaypplet_ui::ui::Tone::Muted,
     ));
 
     let grid = gtk4::FlowBox::builder()
@@ -90,10 +93,10 @@ fn show(app: &gtk4::Application, windows: Vec<(scene::Window, String, String)>, 
         .selection_mode(gtk4::SelectionMode::Single)
         .activate_on_single_click(true)
         .homogeneous(true)
-        .row_spacing(swaypplet_core::tokens::space(3) as u32)
-        .column_spacing(swaypplet_core::tokens::space(3) as u32)
+        .row_spacing(swaypplet_tokens::space(3) as u32)
+        .column_spacing(swaypplet_tokens::space(3) as u32)
         .build();
-    swaypplet_core::ui::choice_grid::adopt(&grid);
+    swaypplet_ui::ui::choice_grid::adopt(&grid);
     let scroller = gtk4::ScrolledWindow::builder()
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .propagate_natural_height(true)
@@ -195,7 +198,7 @@ fn show(app: &gtk4::Application, windows: Vec<(scene::Window, String, String)>, 
 
 /// One window's tile: its live picture over its title and where it is.
 fn tile(win: &scene::Window, workspace: &str, name: &str, id: &str, live: &mut Live) -> gtk4::Box {
-    let b = swaypplet_core::ui::vbox(2);
+    let b = swaypplet_ui::ui::vbox(2);
 
     let (s, _, _) = scene::fit(win.w, win.h, TILE_W, TILE_H);
     let picture = LivePicture::new();
@@ -206,25 +209,25 @@ fn tile(win: &scene::Window, workspace: &str, name: &str, id: &str, live: &mut L
     picture.set_halign(gtk4::Align::Center);
     picture.set_valign(gtk4::Align::Center);
     // The box keeps every tile one size whatever the window's shape.
-    let frame = swaypplet_core::ui::vbox(0);
+    let frame = swaypplet_ui::ui::vbox(0);
     frame.set_size_request(TILE_W, TILE_H);
     frame.append(&picture);
     picture.set_vexpand(true);
     b.append(&frame);
     live.add(id.to_string(), picture);
 
-    let title = swaypplet_core::ui::text(
+    let title = swaypplet_ui::ui::text(
         if name.is_empty() { &win.app } else { name },
-        swaypplet_core::ui::Text::Body,
-        swaypplet_core::ui::Tone::Fg,
+        swaypplet_ui::ui::Text::Body,
+        swaypplet_ui::ui::Tone::Fg,
     );
     title.set_max_width_chars(28);
     title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     b.append(&title);
-    let place = swaypplet_core::ui::text(
+    let place = swaypplet_ui::ui::text(
         &format!("{} \u{00b7} {}", win.app, workspace),
-        swaypplet_core::ui::Text::Caption,
-        swaypplet_core::ui::Tone::Muted,
+        swaypplet_ui::ui::Text::Caption,
+        swaypplet_ui::ui::Tone::Muted,
     );
     place.set_max_width_chars(28);
     place.set_ellipsize(gtk4::pango::EllipsizeMode::End);
@@ -243,7 +246,7 @@ fn take(picker: &Rc<Picker>, id: String) {
     // The window at its own resolution, straight from the compositor: a
     // shot is a copy, never scaled.
     let picker = picker.clone();
-    swaypplet_core::spawn::spawn_work(
+    swaypplet_base::spawn::spawn_work(
         move || super::capture::window(&id),
         move |shot| {
             match shot {

@@ -15,7 +15,7 @@ use std::rc::Rc;
 use gtk4::{gio, prelude::*};
 use system_tray::menu::{MenuItem, MenuType, ToggleState, ToggleType, TrayMenu};
 
-use swaypplet_services::tray::TrayService;
+use swaypplet_system::tray::TrayService;
 
 /// Action group prefix; the group is inserted on the popover itself.
 const GROUP: &str = "tray";

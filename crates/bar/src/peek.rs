@@ -23,7 +23,10 @@ use gtk4::prelude::*;
 
 use super::popover;
 use swaypplet_jump::jump::pin;
-use swaypplet_jump::jump::view::{self, PIN_GLYPH, UNPIN_GLYPH, View};
+use swaypplet_jump::jump::{
+    view,
+    view::{PIN_GLYPH, UNPIN_GLYPH, View},
+};
 
 /// How long the pointer rests on a button before the peek opens.
 const HOVER_MS: u64 = 350;
@@ -80,7 +83,7 @@ pub fn attach(button: &gtk4::Button, workspace: String, on_screen: Rc<dyn Fn(&st
         motion.connect_leave(move |_| {
             let opening = state.borrow_mut().opening.take();
             if let Some(id) = opening {
-                swaypplet_core::spawn::remove_source(id);
+                swaypplet_base::spawn::remove_source(id);
             }
             close_soon(&state);
         });
@@ -113,9 +116,9 @@ fn open(state: &State, button: &gtk4::Button, workspace: String) {
     let state = state.clone();
     let button = button.clone();
     let name = workspace.clone();
-    swaypplet_core::spawn::spawn_work(
+    swaypplet_base::spawn::spawn_work(
         move || {
-            let tree = swaypplet_core::sway::ipc::connect().ok()?.get_tree().ok()?;
+            let tree = swaypplet_base::sway::ipc::connect().ok()?.get_tree().ok()?;
             swaypplet_jump::jump::scene::scene(&tree, &name)
         },
         move |scene| {
@@ -134,7 +137,7 @@ fn show(
     workspace: String,
     scene: swaypplet_jump::jump::scene::Scene,
 ) {
-    let label = swaypplet_core::sway::workspace::label_for_name(&workspace);
+    let label = swaypplet_base::sway::workspace::label_for_name(&workspace);
     let mut view = View::new(&label, "click to go");
     view.set_scale(swaypplet_jump::jump::card::device_scale(button));
     view.show_scene(Some(scene), view::fps());
@@ -195,7 +198,7 @@ fn show(
 fn cancel_close(state: &State) {
     let closing = state.borrow_mut().closing.take();
     if let Some(id) = closing {
-        swaypplet_core::spawn::remove_source(id);
+        swaypplet_base::spawn::remove_source(id);
     }
 }
 
@@ -219,7 +222,7 @@ fn close(state: &State) {
         let mut st = state.borrow_mut();
         st.generation += 1;
         if let Some(id) = st.opening.take() {
-            swaypplet_core::spawn::remove_source(id);
+            swaypplet_base::spawn::remove_source(id);
         }
         (st.popover.take(), st.view.take())
     };

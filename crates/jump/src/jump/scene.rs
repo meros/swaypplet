@@ -171,7 +171,7 @@ pub fn window_at(tree: &Node, output: &str, rect: (f64, f64, f64, f64)) -> Optio
 /// a workspace anyone can see.
 pub fn all_windows(tree: &Node) -> Vec<(Window, String, String)> {
     let mut out = Vec::new();
-    swaypplet_core::sway::tree::for_each(tree, |node, ws| {
+    swaypplet_base::sway::tree::for_each(tree, |node, ws| {
         if let Some(ws) = ws
             && !ws.starts_with("__")
             && is_view(node)
@@ -188,7 +188,7 @@ pub fn all_windows(tree: &Node) -> Vec<(Window, String, String)> {
 
 /// A window by its identifier, wherever it is, and the workspace holding it.
 pub fn find_window(tree: &Node, id: &str) -> Option<(Window, String)> {
-    swaypplet_core::sway::tree::walk(tree, &mut |node, ws| {
+    swaypplet_base::sway::tree::walk(tree, &mut |node, ws| {
         if is_view(node) && node.foreign_toplevel_identifier.as_deref() == Some(id) {
             ControlFlow::Break((content(node), ws.unwrap_or_default().to_string()))
         } else {

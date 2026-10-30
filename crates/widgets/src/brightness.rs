@@ -4,8 +4,8 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use swaypplet_core::ui;
-use swaypplet_core::ui::icons;
+use swaypplet_ui::ui;
+use swaypplet_ui::ui::icons;
 
 // ── brightnessctl helpers ─────────────────────────────────────────────────────
 
@@ -102,7 +102,7 @@ impl BrightnessSection {
         let pct_label = self.pct_label.clone();
         let summary_text = self.section.summary.clone();
 
-        swaypplet_core::spawn::spawn_work(read_brightness, move |pct_opt| {
+        swaypplet_base::spawn::spawn_work(read_brightness, move |pct_opt| {
             if let Some(pct) = pct_opt {
                 *updating.borrow_mut() = true;
                 scale.set_value(pct as f64);

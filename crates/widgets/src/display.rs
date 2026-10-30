@@ -10,13 +10,18 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{Box, Label};
 
-use swaypplet_core::settings::store::{self, NightLight, NightSchedule};
-use swaypplet_core::spawn::spawn_work;
-use swaypplet_core::ui;
-use swaypplet_core::ui::icons;
-use swaypplet_services::cast::{self, backend::Target};
-use swaypplet_services::devices::{self, DeviceKey};
-use swaypplet_services::displays;
+use swaypplet_base::spawn::spawn_work;
+use swaypplet_cast as cast;
+use swaypplet_cast::backend::Target;
+use swaypplet_devices as devices;
+use swaypplet_devices::DeviceKey;
+use swaypplet_displays as displays;
+use swaypplet_model::{
+    store,
+    store::{NightLight, NightSchedule},
+};
+use swaypplet_ui::ui;
+use swaypplet_ui::ui::icons;
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
@@ -49,7 +54,7 @@ impl OutputInfo {
 
 /// sway's outputs. Blocking (one IPC round trip); call from a worker.
 fn get_outputs() -> Vec<OutputInfo> {
-    let outputs = match swaypplet_core::sway::ipc::connect().and_then(|mut c| c.get_outputs()) {
+    let outputs = match swaypplet_base::sway::ipc::connect().and_then(|mut c| c.get_outputs()) {
         Ok(o) => o,
         Err(e) => {
             log::warn!("display: get_outputs: {e}");
@@ -59,8 +64,8 @@ fn get_outputs() -> Vec<OutputInfo> {
     outputs
         .into_iter()
         .map(|o| OutputInfo {
-            label: swaypplet_core::naming::display::auto_name(&o.name, &o.make, &o.model),
-            key: swaypplet_core::naming::display::key(&o.name, &o.make, &o.model, &o.serial),
+            label: swaypplet_base::naming::display::auto_name(&o.name, &o.make, &o.model),
+            key: swaypplet_base::naming::display::key(&o.name, &o.make, &o.model, &o.serial),
             product: Some(format!("{} {}", o.make, o.model))
                 .filter(|p| !p.trim().is_empty() && !p.contains("Unknown")),
             mode: o.current_mode.map(|m| (m.width, m.height, m.refresh)),

@@ -68,7 +68,7 @@ rail — but an unarmed reader gets no ink.
 
 ## Structure
 
-One widget tree, three surfaces, built once in `crates/core/src/auth_field.rs`:
+One widget tree, three surfaces, built once in `crates/ui/src/auth_field.rs`:
 
 ```
 GtkBox .auth-field            horizontal, spacing 12, hexpand   ← carries ALL chrome
@@ -89,7 +89,7 @@ named in the field's placeholder ("Password for melvin").
 `src/slot.rs` does not survive. It existed to hold rows open and fade them in
 place, and once the rows were gone it had no callers: the field paints its own
 marks and the caption is never empty, so there is nothing left to reserve. The
-rule it carried moved to `crates/core/src/auth_field.rs`, which is where it is now
+rule it carried moved to `crates/ui/src/auth_field.rs`, which is where it is now
 enforced. What genuinely varies card-to-card — the polkit identity row, the
 elevate face rows, the greeter's user row under the card — is still decided before the
 surface is presented, which is the same rule stated without a helper.

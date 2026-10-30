@@ -1,0 +1,24 @@
+[package]
+name = "swaypplet-cast"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+swaypplet-base.workspace = true
+swaypplet-model.workspace = true
+swaypplet-displays.workspace = true
+glib.workspace = true
+zbus.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+log.workspace = true
+libc.workspace = true
+swayipc.workspace = true
+rustls.workspace = true
+
+[dev-dependencies]
+rcgen.workspace = true
+
+[lints]
+workspace = true

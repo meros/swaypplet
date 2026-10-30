@@ -33,10 +33,10 @@ use gtk4::prelude::*;
 
 use crate::battery::CRITICAL_PCT;
 use crate::board::{chip_label, session_age};
-use swaypplet_core::anim;
-use swaypplet_core::ui;
-use swaypplet_services::power::{self, BatteryState};
-use swaypplet_services::task_state::{Activity, SessionState, TaskSnapshot, TaskStateService};
+use swaypplet_system::task_state::{Activity, SessionState, TaskSnapshot, TaskStateService};
+use swaypplet_system::{power, power::BatteryState};
+use swaypplet_ui::anim;
+use swaypplet_ui::ui;
 
 /// settask caps descriptions at 40 chars; the slot shows all of them
 /// (vision P5's one sanctioned exception) but never more.
@@ -215,7 +215,7 @@ impl DecisionSlot {
             .css_classes(["bar-decision-osd-text"])
             .build();
         ui::set_text_style(&osd_text, ui::Text::Label, ui::Tone::Muted);
-        swaypplet_core::ui::set_numeric(&osd_text, true);
+        swaypplet_ui::ui::set_numeric(&osd_text, true);
         let hair_shown: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
         let hairline = gtk4::DrawingArea::builder()
             .content_width(HAIRLINE_WIDTH)
@@ -269,7 +269,7 @@ impl DecisionSlot {
         // sub-threshold scale.
         let stack = ui::page_stack(
             gtk4::StackTransitionType::Crossfade,
-            swaypplet_core::tokens::motion::STATE,
+            swaypplet_tokens::motion::STATE,
         );
         stack.set_hhomogeneous(false);
         stack.add_child(&root);
@@ -281,7 +281,7 @@ impl DecisionSlot {
         // assembling itself. Opacity in, opacity out.
         let revealer = ui::revealer(
             gtk4::RevealerTransitionType::Crossfade,
-            swaypplet_core::tokens::motion::EXPAND,
+            swaypplet_tokens::motion::EXPAND,
         );
         revealer.set_child(Some(&stack));
 
@@ -373,7 +373,7 @@ impl DecisionSlot {
         }
         inner.revealer.set_reveal_child(true);
         if let Some(id) = inner.decay.borrow_mut().take() {
-            swaypplet_core::spawn::remove_source(id);
+            swaypplet_base::spawn::remove_source(id);
         }
         let slot = self.clone();
         let id = glib::timeout_add_local_once(Duration::from_millis(OSD_DECAY_MS), move || {
@@ -420,7 +420,7 @@ impl DecisionSlot {
         let tick = inner.hair_tick.clone();
         let id = inner.hairline.add_tick_callback(move |area, _| {
             let t = (((glib::monotonic_time() - start) as f64 / 1000.0)
-                / anim::ms(swaypplet_core::tokens::motion::STATE))
+                / anim::ms(swaypplet_tokens::motion::STATE))
             .clamp(0.0, 1.0);
             shown.set(from + (target - from) * anim::standard(t));
             area.queue_draw();
@@ -451,7 +451,7 @@ impl DecisionSlot {
         inner.revealer.set_reveal_child(false);
         // The revealer's own length (motion: expand), as this session plays
         // it: Look → Motion and reduced motion shorten both together.
-        let delay = anim::ms(swaypplet_core::tokens::motion::EXPAND) as u64;
+        let delay = anim::ms(swaypplet_tokens::motion::EXPAND) as u64;
         let slot = self.clone();
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
             slot.inner.swapping.set(false);

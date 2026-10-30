@@ -6,8 +6,8 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use super::stack::{State, alerts};
-use swaypplet_services::notifications::store::{self, NotificationStore};
-use swaypplet_services::notifications::{CloseReason, Notification, Urgency};
+use swaypplet_notifyd::{CloseReason, Notification, Urgency};
+use swaypplet_notifyd::{store, store::NotificationStore};
 
 pub(super) enum Timer {
     None,
@@ -22,7 +22,7 @@ pub(super) enum Timer {
 
 pub(super) fn cancel_timer(timer: &mut Timer) {
     if let Timer::Running { source, .. } = std::mem::replace(timer, Timer::None) {
-        swaypplet_core::spawn::remove_source(source);
+        swaypplet_base::spawn::remove_source(source);
     }
 }
 
@@ -81,7 +81,7 @@ pub(super) fn pause_timers(st: &Rc<RefCell<State>>) {
             && let Timer::Running { source, deadline } =
                 std::mem::replace(&mut card.timer, Timer::None)
         {
-            swaypplet_core::spawn::remove_source(source);
+            swaypplet_base::spawn::remove_source(source);
             card.timer = Timer::Paused {
                 remaining: deadline.saturating_duration_since(now),
             };

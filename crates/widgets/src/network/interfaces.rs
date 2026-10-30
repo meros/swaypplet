@@ -16,8 +16,8 @@ use gtk4::prelude::*;
 use gtk4::{ListBox, ListBoxRow};
 
 use super::set_signal_glyph;
-use swaypplet_core::ui;
-use swaypplet_services::network::{NetworkInterface, display_name, iface_type_icon};
+use swaypplet_devices::network::{NetworkInterface, display_name, iface_type_icon};
+use swaypplet_ui::ui;
 
 /// What a row asks for.
 pub enum AdapterAsk {

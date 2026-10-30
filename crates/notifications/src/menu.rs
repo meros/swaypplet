@@ -7,8 +7,8 @@ use std::time::Duration;
 use gtk4::prelude::*;
 
 use super::stack::{State, dismiss_all};
-use swaypplet_services::notifications::store::{self, NotificationStore};
-use swaypplet_services::notifications::{CloseReason, Notification};
+use swaypplet_notifyd::{CloseReason, Notification};
+use swaypplet_notifyd::{store, store::NotificationStore};
 
 /// The per-card menu: postpone it, silence the app, or go read the rest in
 /// the centre.
@@ -19,12 +19,12 @@ pub(super) fn card_menu(
 ) -> gtk4::Popover {
     // A popup, outside the compositor's layer effects: no glass behind it,
     // so the menu sits on the solid card.
-    let list = swaypplet_core::ui::menu();
-    swaypplet_core::ui::card::adopt(&list, swaypplet_core::ui::Card::Solid);
-    let popover = swaypplet_core::ui::popover(&list, gtk4::PositionType::Bottom);
+    let list = swaypplet_ui::ui::menu();
+    swaypplet_ui::ui::card::adopt(&list, swaypplet_ui::ui::Card::Solid);
+    let popover = swaypplet_ui::ui::popover(&list, gtk4::PositionType::Bottom);
 
     let item = |label: &str| {
-        let b = swaypplet_core::ui::menu_item(label, "", false);
+        let b = swaypplet_ui::ui::menu_item(label, "", false);
         b.set_halign(gtk4::Align::Fill);
         b
     };

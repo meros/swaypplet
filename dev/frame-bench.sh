@@ -5,7 +5,7 @@
 # keeps up. It boots the same nested headless sway, runs swaypplet with
 # GDK_DEBUG=frames, opens and closes the panel and pops notifications a few
 # times, and summarises the per-frame log that `SWAYPPLET_FRAME_STATS`
-# makes swaypplet write (crates/core/src/frame_stats.rs):
+# makes swaypplet write (crates/base/src/frame_stats.rs):
 #
 #   frames    frames drawn while something moved (a gap over 150 ms starts
 #             a new animation and is not counted as an interval)

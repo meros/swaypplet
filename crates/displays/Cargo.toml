@@ -1,0 +1,18 @@
+[package]
+name = "swaypplet-displays"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+swaypplet-base.workspace = true
+swaypplet-model.workspace = true
+swaypplet-notifyd.workspace = true
+glib.workspace = true
+async-channel.workspace = true
+log.workspace = true
+wayland-client.workspace = true
+wayland-protocols-wlr.workspace = true
+
+[lints]
+workspace = true

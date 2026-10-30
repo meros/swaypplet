@@ -33,7 +33,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use swaypplet_services::notifications::store::StoreRef;
+use swaypplet_notifyd::store::StoreRef;
 
 /// What the owner asked for.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -131,10 +131,7 @@ pub fn take(app: &gtk4::Application, store: &StoreRef, shot: Shot) {
         window::pick(app, move |image| {
             let Some(image) = image else { return };
             keep(&store, &image);
-            if swaypplet_core::settings::store::current()
-                .capture()
-                .annotate
-            {
+            if swaypplet_model::store::current().capture().annotate {
                 let store = store.clone();
                 annotate::open(&app_for_editor, image, move |edited| {
                     keep(&store, &edited);
@@ -162,10 +159,7 @@ pub fn take(app: &gtk4::Application, store: &StoreRef, shot: Shot) {
                 // The Capture group's "annotate every shot": the editor
                 // opens on the shot just kept, and what it produces is a
                 // second shot. Kept first, so a closed editor loses nothing.
-                if swaypplet_core::settings::store::current()
-                    .capture()
-                    .annotate
-                {
+                if swaypplet_model::store::current().capture().annotate {
                     let store = store.clone();
                     annotate::open(&app_for_editor, selection.image.clone(), move |edited| {
                         keep(&store, &edited);
@@ -199,9 +193,9 @@ fn pick(store: &StoreRef, selection: &select::Selection) {
         display.clipboard().set_text(&hex);
     }
 
-    swaypplet_services::notifications::store::store_add(
+    swaypplet_notifyd::store::store_add(
         store,
-        swaypplet_services::notifications::Notification {
+        swaypplet_notifyd::Notification {
             app_name: "Colour picker".into(),
             summary: hex.clone(),
             body: format!("rgb({r}, {g}, {b}) — copied"),

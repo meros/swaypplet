@@ -18,7 +18,7 @@
 
 use gtk4::prelude::*;
 
-use swaypplet_services::presence::{self, Event};
+use swaypplet_system::{presence, presence::Event};
 
 // Nerd Font: md-eye / md-eye_off.
 const ICON_PRESENT: &str = "󰈈";
@@ -34,7 +34,7 @@ pub fn build() -> Option<gtk4::Button> {
         .child(&label)
         .css_classes(["bar-seg"])
         .build();
-    swaypplet_core::ui::segment::adopt(&btn, false);
+    swaypplet_ui::ui::segment::adopt(&btn, false);
 
     let events = presence::subscribe();
 
@@ -71,11 +71,11 @@ fn draw(btn: &gtk4::Button, label: &gtk4::Label, present: Option<bool>, attentio
     // Away is quieter: nobody is at the keyboard, so the mark steps back to
     // the faint level rather than just changing its glyph.
     let tone = if present == Some(true) {
-        swaypplet_core::ui::Tone::Fg
+        swaypplet_ui::ui::Tone::Fg
     } else {
-        swaypplet_core::ui::Tone::Faint
+        swaypplet_ui::ui::Tone::Faint
     };
-    swaypplet_core::ui::set_tone(btn, tone);
+    swaypplet_ui::ui::set_tone(btn, tone);
 
     let attention = attention
         .map(|a| format!(", attention {a}"))

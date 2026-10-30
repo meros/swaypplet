@@ -17,9 +17,9 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use swaypplet_core::spawn::spawn_work;
-use swaypplet_core::ui;
-use swaypplet_services::backup::{self, BackupStatusService};
+use swaypplet_base::spawn::spawn_work;
+use swaypplet_system::{backup, backup::BackupStatusService};
+use swaypplet_ui::ui;
 
 const UNITS: [&str; 2] = [
     "restic-backups-home.service",
@@ -150,7 +150,7 @@ fn draw(
         !snapshot
             .jobs
             .iter()
-            .any(swaypplet_services::backup::Job::running),
+            .any(swaypplet_system::backup::Job::running),
     );
 }
 

@@ -35,7 +35,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use swaypplet_core::face::{self, Progress, Request, Stage};
+use swaypplet_base::{
+    face,
+    face::{Progress, Request, Stage},
+};
 
 use super::dialog::StatusKind;
 use super::{Backing, PolkitState, Session, elevate_settings, end_session, pop_queue};
@@ -200,7 +203,7 @@ fn announce(state: &Rc<RefCell<PolkitState>>, req: Request) {
     }
     report(
         state,
-        swaypplet_core::ui::FaceState::Looking,
+        swaypplet_ui::ui::FaceState::Looking,
         "Looking for you",
         "Look at the camera",
     );
@@ -211,7 +214,7 @@ fn announce(state: &Rc<RefCell<PolkitState>>, req: Request) {
 /// is the report, so a user reading peripherally is told what to do.
 fn report(
     state: &Rc<RefCell<PolkitState>>,
-    ring: swaypplet_core::ui::FaceState,
+    ring: swaypplet_ui::ui::FaceState,
     card_text: &str,
     cue_text: &str,
 ) {
@@ -235,7 +238,7 @@ fn progress(state: &Rc<RefCell<PolkitState>>, req: Request) {
     let Some(progress) = Progress::parse(&req.state, hint) else {
         return;
     };
-    report(state, progress.ring(), progress.text(), progress.text());
+    report(state, progress.into(), progress.text(), progress.text());
 }
 
 fn confirm(state: &Rc<RefCell<PolkitState>>, req: Request) {
@@ -255,7 +258,7 @@ fn confirm(state: &Rc<RefCell<PolkitState>>, req: Request) {
     state
         .borrow()
         .cue
-        .set(Some(swaypplet_core::ui::FaceState::Ok), "Recognised you");
+        .set(Some(swaypplet_ui::ui::FaceState::Ok), "Recognised you");
 }
 
 /// The attempt ended on faced's side, by any route. Drop the camera from the

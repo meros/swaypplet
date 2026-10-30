@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use swaypplet_core::ui;
+use swaypplet_ui::ui;
 
 /// A Rename button that puts an entry in `replaced`'s place while editing;
 /// `replaced` must sit in a `gtk4::Box`. Pass a row's title label, or the

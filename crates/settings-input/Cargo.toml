@@ -1,0 +1,18 @@
+[package]
+name = "swaypplet-settings-input"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+swaypplet-tokens.workspace = true
+swaypplet-model.workspace = true
+swaypplet-ui.workspace = true
+swaypplet-devices.workspace = true
+swaypplet-widgets.workspace = true
+swaypplet-settings-kit.workspace = true
+gtk4.workspace = true
+glib.workspace = true
+
+[lints]
+workspace = true

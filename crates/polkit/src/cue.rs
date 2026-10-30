@@ -29,12 +29,12 @@
 use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
-use swaypplet_core::shell::{Namespace, Surface, layer};
+use swaypplet_ui::shell::{Namespace, Surface, layer};
 
 pub struct Cue {
     surface: Surface,
     /// Carries the entrance animation, so a state change on the pill cannot
-    /// replay it. See `.ui-face-enter` in crates/core/data/css/components/face.css.
+    /// replay it. See `.ui-face-enter` in crates/ui/data/css/components/face.css.
     strip: gtk4::Box,
     pill: gtk4::Box,
     ring: gtk4::Box,
@@ -73,12 +73,12 @@ impl Cue {
         // The same indicator the lock screen pins under the camera, built by
         // the same component, so the two cannot drift: a face that means
         // "hold still" here and "searching" there is worse than none.
-        let swaypplet_core::ui::FacePill {
+        let swaypplet_ui::ui::FacePill {
             wrap: strip,
             pill,
             ring,
             label,
-        } = swaypplet_core::ui::face_pill(18);
+        } = swaypplet_ui::ui::face_pill(18);
         pill.add_css_class("face-pill");
 
         // The wrapper is a fixed strip. Height is the pill's offset plus its
@@ -110,12 +110,12 @@ impl Cue {
     /// arrival from the top — which is the behaviour wanted. The cue has to
     /// arrive to be seen peripherally; a pill that was already there is a
     /// pill the user's eye has already filtered out.
-    pub fn set(&self, state: Option<swaypplet_core::ui::FaceState>, text: &str) {
+    pub fn set(&self, state: Option<swaypplet_ui::ui::FaceState>, text: &str) {
         if state.is_none() {
             self.surface.window().set_visible(false);
             return;
         }
-        swaypplet_core::ui::set_face_state(&self.ring, Some(&self.pill), state);
+        swaypplet_ui::ui::set_face_state(&self.ring, Some(&self.pill), state);
         self.label.set_label(text);
         if self.surface.window().is_visible() {
             // Already up: this is a state change, not an arrival. Touching the
@@ -134,11 +134,11 @@ impl Cue {
         // so starting the entrance from here would spend its first frames
         // racing surface allocation -- which is visible, and always as a
         // stutter at exactly the moment the cue is trying to catch the eye.
-        swaypplet_core::ui::set_face_enter(&self.strip, false);
+        swaypplet_ui::ui::set_face_enter(&self.strip, false);
         self.surface.window().set_visible(true);
         let strip = self.strip.clone();
         self.surface.window().add_tick_callback(move |window, _| {
-            swaypplet_core::ui::set_face_enter(&strip, true);
+            swaypplet_ui::ui::set_face_enter(&strip, true);
             // Re-applied here as well as below: the region is a property of
             // the GdkSurface, which does not exist until the window maps, and
             // the strip spans the whole width of the output. An unset region

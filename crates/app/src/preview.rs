@@ -19,9 +19,9 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, glib};
 
-use crate::panel::Panel;
-use swaypplet_core::theme;
-use swaypplet_services::notifications::store::NotificationStore;
+use swaypplet_notifyd::store::NotificationStore;
+use swaypplet_panel::Panel;
+use swaypplet_ui::theme;
 use swaypplet_widgets::{
     audio::AudioSection, bluetooth::BluetoothSection, brightness::BrightnessSection,
     clipboard::ClipboardSection, display::DisplaySection, media::MediaSection,
@@ -29,6 +29,7 @@ use swaypplet_widgets::{
 };
 
 pub fn run(component: &str) {
+    swaypplet_settings::install_search();
     let component = component.to_string();
     let app = Application::builder()
         .application_id("dev.swaypplet.preview")
@@ -40,7 +41,7 @@ pub fn run(component: &str) {
         // own), so a preview shows the Look inputs it names (a tint, an
         // accent) rather than the binary's defaults.
         if std::env::var_os("SWAYPPLET_PREVIEW_SETTINGS").is_some() {
-            swaypplet_core::settings::store::init();
+            swaypplet_model::store::init();
         }
         theme::load_css();
         let store = Rc::new(RefCell::new(NotificationStore::new()));
@@ -49,9 +50,9 @@ pub fn run(component: &str) {
         if component == "panel" {
             // The panel's own layer surface, as the panel process builds it.
             let panel = Panel::new(
-                crate::app::panel_surface(app),
+                crate::panel_surface(app),
                 store.clone(),
-                swaypplet_services::audio::AudioService::start(),
+                swaypplet_audio::AudioService::start(),
                 // The harness shows the Helm alone; settings has its own
                 // component (`settings`).
                 Rc::new(|_| {}),
@@ -94,13 +95,13 @@ pub fn run(component: &str) {
         // its card are the compositor's, from `layer_effects "session-lock"`,
         // and no plain toplevel gets either.
         if component == "lock" {
-            swaypplet_core::theme::reload();
+            swaypplet_ui::theme::reload();
             // SWAYPPLET_PREVIEW_LAYER=1 hosts the lock content on a layer
             // surface named like the session lock, so the harness's real
             // `layer_effects "session-lock"` material draws behind it.
             let layer_surface = std::env::var_os("SWAYPPLET_PREVIEW_LAYER").map(|_| {
-                swaypplet_core::settings::glass::apply_saved();
-                swaypplet_core::shell::Surface::builder(app, swaypplet_core::shell::Namespace::SessionLock)
+                swaypplet_ui::glass::apply_saved();
+                swaypplet_ui::shell::Surface::builder(app, swaypplet_ui::shell::Namespace::SessionLock)
                     .fill()
                     .no_card()
                     .build()
@@ -114,7 +115,7 @@ pub fn run(component: &str) {
                     .build()
                     .upcast(),
             };
-            let set = swaypplet_lock::lock::ui::SurfaceSet::new();
+            let set = swaypplet_lock::ui::SurfaceSet::new();
             // Greeter-mode preview: SWAYPPLET_GREET_USERS=meros,melvin adds
             // the user row under the lock card.
             let users: Vec<String> = std::env::var("SWAYPPLET_GREET_USERS")
@@ -131,10 +132,10 @@ pub fn run(component: &str) {
                 // SWAYPPLET_PREVIEW_AVATAR=<image> gives it a real picture
                 // (the others keep the monogram fallback).
                 let icon = std::env::var("SWAYPPLET_PREVIEW_AVATAR").ok();
-                let chips: Vec<swaypplet_lock::lock::ui::UserChip> = users
+                let chips: Vec<swaypplet_lock::ui::UserChip> = users
                     .iter()
                     .enumerate()
-                    .map(|(i, u)| swaypplet_lock::lock::ui::UserChip {
+                    .map(|(i, u)| swaypplet_lock::ui::UserChip {
                         user: u.clone(),
                         logged_in: i == 0,
                         icon: if i == 0 { icon.clone() } else { None },
@@ -150,7 +151,7 @@ pub fn run(component: &str) {
                     if password == "ok" {
                         feedback.flash_success();
                     } else {
-                        feedback.set_status("Wrong password", swaypplet_lock::lock::ui::StatusKind::Error);
+                        feedback.set_status("Wrong password", swaypplet_lock::ui::StatusKind::Error);
                         feedback.shake();
                     }
                 }),
@@ -187,21 +188,21 @@ pub fn run(component: &str) {
                         set.set_fp_armed(true);
                         set.fp_hint("Remove and try again");
                     }
-                    "face" => set.show_face(Some(swaypplet_core::ui::FaceState::Looking), "Looking for you"),
-                    "face-ok" => set.show_face(Some(swaypplet_core::ui::FaceState::Ok), "Recognised you"),
+                    "face" => set.show_face(Some(swaypplet_ui::ui::FaceState::Looking), "Looking for you"),
+                    "face-ok" => set.show_face(Some(swaypplet_ui::ui::FaceState::Ok), "Recognised you"),
                     "face-fail" => {
-                        set.show_face(Some(swaypplet_core::ui::FaceState::Fail), "Didn't recognise you")
+                        set.show_face(Some(swaypplet_ui::ui::FaceState::Fail), "Didn't recognise you")
                     }
                     "error" => set.set_status(
                         "Wrong password (3 attempts)",
-                        swaypplet_lock::lock::ui::StatusKind::Error,
+                        swaypplet_lock::ui::StatusKind::Error,
                     ),
-                    "info" => set.set_status("Switching\u{2026}", swaypplet_lock::lock::ui::StatusKind::Info),
+                    "info" => set.set_status("Switching\u{2026}", swaypplet_lock::ui::StatusKind::Info),
                     // The case the reserved second line exists for, and the
                     // one a stray `line-height` in the stylesheet breaks.
                     "long" => set.set_status(
                         "Your account has expired; please contact your system administrator",
-                        swaypplet_lock::lock::ui::StatusKind::Error,
+                        swaypplet_lock::ui::StatusKind::Error,
                     ),
                     _ => {}
                 }
@@ -217,7 +218,7 @@ pub fn run(component: &str) {
         if component == "polkit" {
             use swaypplet_polkit::dialog::{Callbacks, Card, Methods, PolkitDialog, StatusKind};
             if std::env::var_os("SWAYPPLET_PREVIEW_LAYER").is_some() {
-                swaypplet_core::settings::glass::apply_saved();
+                swaypplet_ui::glass::apply_saved();
             }
             let dialog = PolkitDialog::new(app);
             let request = swaypplet_polkit::agent::AuthRequest {
@@ -301,7 +302,7 @@ pub fn run(component: &str) {
                 });
             let prompt =
                 std::env::var("SWAYPPLET_PREVIEW_PROMPT").unwrap_or_else(|_| "Chrome Profile".into());
-            let picker = crate::dmenu::present_picker(app, &prompt, items, |_| std::process::exit(0));
+            let picker = swaypplet_dmenu::present_picker(app, &prompt, items, |_| std::process::exit(0));
             if let Ok(query) = std::env::var("SWAYPPLET_PREVIEW_QUERY") {
                 picker.set_query(&query);
             }
@@ -330,9 +331,9 @@ pub fn run(component: &str) {
         // A plain toplevel has neither, and in light mode its dark text then
         // sits on nothing.
         let surface = std::env::var_os("SWAYPPLET_PREVIEW_LAYER").map(|_| {
-            swaypplet_core::settings::glass::apply_saved();
-            swaypplet_core::shell::Surface::builder(app, swaypplet_core::shell::Namespace::Panel)
-                .card(swaypplet_core::ui::Card::Floating)
+            swaypplet_ui::glass::apply_saved();
+            swaypplet_ui::shell::Surface::builder(app, swaypplet_ui::shell::Namespace::Panel)
+                .card(swaypplet_ui::ui::Card::Floating)
                 .width(width)
                 .build()
         });
@@ -348,16 +349,16 @@ pub fn run(component: &str) {
 
         let host = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
-            .spacing(swaypplet_core::tokens::space(4))
+            .spacing(swaypplet_tokens::space(4))
             .build();
-        swaypplet_core::ui::surface::adopt(&host);
+        swaypplet_ui::ui::surface::adopt(&host);
         host.add_css_class("startmenu-quick");
 
         match component.as_str() {
             "tiles" => {
                 let grid = gtk4::Grid::builder()
-                    .row_spacing(swaypplet_core::tokens::space(3))
-                    .column_spacing(swaypplet_core::tokens::space(3))
+                    .row_spacing(swaypplet_tokens::space(3))
+                    .column_spacing(swaypplet_tokens::space(3))
                     .column_homogeneous(true)
                     .build();
                 grid.add_css_class("startmenu-tile-grid");
@@ -388,7 +389,7 @@ pub fn run(component: &str) {
                         let tile = tiles::build_split(spec, |_| {});
                         if fixture {
                             tile.toggle.set_active(true);
-                            swaypplet_core::ui::set_tile_status(&tile, fixture_status(spec.label));
+                            swaypplet_ui::ui::set_tile_status(&tile, fixture_status(spec.label));
                         } else {
                             tiles::init_tile_state(&tile.toggle, spec);
                             tiles::refresh_status(&tile.status, spec);
@@ -407,7 +408,7 @@ pub fn run(component: &str) {
                 let dnd = tiles::build_dnd_split(store.clone(), |_| {});
                 if fixture {
                     dnd.toggle.set_active(true);
-                    swaypplet_core::ui::set_tile_status(&dnd, "Quiet until 07:00");
+                    swaypplet_ui::ui::set_tile_status(&dnd, "Quiet until 07:00");
                 }
                 place(dnd.root.upcast_ref());
                 host.append(&grid);
@@ -418,9 +419,9 @@ pub fn run(component: &str) {
             // the real ones instead.
             "audio" => {
                 let service = if live() {
-                    swaypplet_services::audio::AudioService::start()
+                    swaypplet_audio::AudioService::start()
                 } else {
-                    let s = swaypplet_services::audio::AudioService::fixture(fixtures::audio());
+                    let s = swaypplet_audio::AudioService::fixture(fixtures::audio());
                     s.set_fixture_level(0.42);
                     s
                 };
@@ -442,12 +443,12 @@ pub fn run(component: &str) {
             // compositor the preview runs in, as `display` does.
             c if c == "settings" || c.starts_with("settings.") => {
                 if c == "settings.displays" {
-                    swaypplet_services::displays::start(store.clone());
+                    swaypplet_displays::start(store.clone());
                 }
                 if c == "settings.input" {
-                    swaypplet_services::input::follow();
+                    swaypplet_devices::input::follow();
                 }
-                let s = Box::leak(Box::new(swaypplet_settings::settings::SettingsSection::new()));
+                let s = Box::leak(Box::new(swaypplet_settings::SettingsSection::new()));
                 if let Some(tab) = c.strip_prefix("settings.") {
                     s.show(tab);
                 }
@@ -477,7 +478,7 @@ pub fn run(component: &str) {
                 if c == "settings.displays"
                     && let Some(how) = std::env::var_os("SWAYPPLET_PREVIEW_DISPLAYS_APPLY")
                 {
-                    let s: &'static swaypplet_settings::settings::SettingsSection = s;
+                    let s: &'static swaypplet_settings::SettingsSection = s;
                     glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
                         s.demo_displays();
                     });
@@ -490,7 +491,7 @@ pub fn run(component: &str) {
                 if c == "settings.displays"
                     && std::env::var_os("SWAYPPLET_PREVIEW_DISPLAYS_CYCLE").is_some()
                 {
-                    let s: &'static swaypplet_settings::settings::SettingsSection = s;
+                    let s: &'static swaypplet_settings::SettingsSection = s;
                     glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
                         s.demo_displays_cycle();
                     });
@@ -514,9 +515,9 @@ pub fn run(component: &str) {
             }
             "bluetooth" => {
                 let service = if live() {
-                    swaypplet_services::bluetooth::BluetoothService::start()
+                    swaypplet_devices::bluetooth::BluetoothService::start()
                 } else {
-                    swaypplet_services::bluetooth::BluetoothService::fixture(fixtures::bluetooth())
+                    swaypplet_devices::bluetooth::BluetoothService::fixture(fixtures::bluetooth())
                 };
                 let s = BluetoothSection::new(service);
                 s.expand_for_page();
@@ -526,7 +527,7 @@ pub fn run(component: &str) {
             "display" => {
                 // The profiles come from the service, as in the panel; here
                 // it drives the nested compositor the preview runs in.
-                swaypplet_services::displays::start(store.clone());
+                swaypplet_displays::start(store.clone());
                 let s = Box::leak(Box::new(DisplaySection::new()));
                 s.expand_for_page();
                 host.append(s.widget());
@@ -545,9 +546,9 @@ pub fn run(component: &str) {
                     ("Chat", "Ada Lovelace", "Short one."),
                     ("CI", "Pipeline #413 passed", "All 418 tests passed."),
                 ] {
-                    swaypplet_services::notifications::store::store_add(
+                    swaypplet_notifyd::store::store_add(
                         &store,
-                        swaypplet_services::notifications::Notification {
+                        swaypplet_notifyd::Notification {
                             app_name: app.into(),
                             summary: summary.into(),
                             body: body.into(),
@@ -581,7 +582,7 @@ pub fn run(component: &str) {
                 // The window is filled first and left on screen: a dimmed
                 // capture of an empty desktop is a black rectangle, which is
                 // also what a selector that never mapped looks like.
-                let card = swaypplet_core::ui::overline("Behind the selector", swaypplet_core::ui::Tone::Fg);
+                let card = swaypplet_ui::ui::overline("Behind the selector", swaypplet_ui::ui::Tone::Fg);
                 card.set_xalign(0.5);
                 card.set_vexpand(true);
                 card.set_hexpand(true);
@@ -641,7 +642,7 @@ pub fn run(component: &str) {
 
         match surface {
             Some(surface) => {
-                swaypplet_core::ui::pad(&host, 5);
+                swaypplet_ui::ui::pad(&host, 5);
                 surface.card().append(&host);
                 surface.set_content(&host);
                 surface.show();
@@ -666,11 +667,9 @@ fn live() -> bool {
 
 /// Made-up states for the previews: every row state at once.
 mod fixtures {
-    use swaypplet_services::audio::{
-        AudioState, Card, Device, DeviceKind, Profile, Stream, VolumeState,
-    };
-    use swaypplet_services::bluetooth::{BtState, Op};
-    use swaypplet_services::bluez::{self, Snapshot};
+    use swaypplet_audio::{AudioState, Card, Device, DeviceKind, Profile, Stream, VolumeState};
+    use swaypplet_devices::bluetooth::{BtState, Op};
+    use swaypplet_system::{bluez, bluez::Snapshot};
 
     fn vol(volume: f64, muted: bool) -> VolumeState {
         VolumeState { volume, muted }

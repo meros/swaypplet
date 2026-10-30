@@ -25,7 +25,7 @@ Settings → Quality: every open issue
 | Panic hook, crash signature, de-duplication, `crash-report` | `crates/screenshot/src/quality/crash.rs` |
 | A fix's state from the local job and the PR; who must be asked about | `crates/screenshot/src/quality/status.rs` |
 | The log tail a report attaches | `crates/screenshot/src/quality/logring.rs` |
-| The tab, starting and stopping jobs, Merge & apply | `crates/settings/src/settings/quality_pane.rs` |
+| The tab, starting and stopping jobs, Merge & apply | `crates/settings-quality/src/lib.rs` |
 | The runner, its prompt, its checks, its pictures | `dev/autofix/` |
 
 ## Reports

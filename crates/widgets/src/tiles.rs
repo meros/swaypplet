@@ -9,7 +9,7 @@
 //! A spec is presentation plus two function pointers, and that is the whole
 //! contract: this module knows how to *draw* a toggle and nothing about what
 //! any of them switch. The inhibitor tiles (No Sleep / No Lock) are generated
-//! from [`swaypplet_services::inhibit`], which owns their wording, their actions and their
+//! from [`swaypplet_system::inhibit`], which owns their wording, their actions and their
 //! state; Wi-Fi and Bluetooth delegate the same way to their own modules.
 
 use std::cell::{Cell, RefCell};
@@ -18,9 +18,9 @@ use std::sync::Arc;
 
 use gtk4::prelude::*;
 
-use swaypplet_core::spawn;
-use swaypplet_services::inhibit::{self, Inhibitor};
-use swaypplet_services::notifications::store::NotificationStore;
+use swaypplet_base::spawn;
+use swaypplet_notifyd::store::NotificationStore;
+use swaypplet_system::{inhibit, inhibit::Inhibitor};
 
 /// Result of reading an external tool's state. `Unavailable` means the tool
 /// wasn't found or failed — the tile is shown disabled.
@@ -104,8 +104,8 @@ fn wifi_spec() -> TileSpec {
         tooltip_off: "Wi-Fi: disabled",
         action: Arc::new(|on| {
             matches!(
-                swaypplet_services::network::set_wifi_radio(on),
-                swaypplet_services::network::NmResult::Success
+                swaypplet_devices::network::set_wifi_radio(on),
+                swaypplet_devices::network::NmResult::Success
             )
         }),
         read_state: Arc::new(read_wifi_state),
@@ -120,7 +120,7 @@ fn bluetooth_spec() -> TileSpec {
         label: "Bluetooth",
         tooltip_on: "Bluetooth: powered on",
         tooltip_off: "Bluetooth: powered off",
-        action: Arc::new(|on| swaypplet_services::bluez::set_powered(on).is_ok()),
+        action: Arc::new(|on| swaypplet_system::bluez::set_powered(on).is_ok()),
         read_state: Arc::new(read_bluetooth_state),
         on_state: None,
         status: None,
@@ -134,10 +134,10 @@ fn night_light_spec() -> TileSpec {
         tooltip_on: "Night Light: active",
         tooltip_off: "Night Light: off",
         action: Arc::new(|on| {
-            if !swaypplet_services::gamma::available() {
+            if !swaypplet_ambient::gamma::available() {
                 return false;
             }
-            swaypplet_services::gamma::set_enabled(on);
+            swaypplet_ambient::gamma::set_enabled(on);
             true
         }),
         read_state: Arc::new(read_night_state),
@@ -147,7 +147,7 @@ fn night_light_spec() -> TileSpec {
 }
 
 /// One tile per session inhibitor, all of it delegated: wording, action and
-/// reading come from [`swaypplet_services::inhibit`], and the established state goes back
+/// reading come from [`swaypplet_system::inhibit`], and the established state goes back
 /// there for the bar's hazard lane to observe. Adding a third inhibitor is a
 /// change in that module alone.
 fn inhibitor_spec(which: Inhibitor) -> TileSpec {
@@ -176,8 +176,8 @@ pub fn build_tile(spec: &TileSpec) -> gtk4::ToggleButton {
 pub fn build_split(
     spec: &TileSpec,
     on_detail: impl Fn(&gtk4::Button) + 'static,
-) -> swaypplet_core::ui::SplitTile {
-    let tile = swaypplet_core::ui::tile_split(spec.icon, spec.label);
+) -> swaypplet_ui::ui::SplitTile {
+    let tile = swaypplet_ui::ui::tile_split(spec.icon, spec.label);
     tile.root.set_hexpand(true);
     wire(&tile.toggle, spec);
     tile.detail.connect_clicked(on_detail);
@@ -238,15 +238,15 @@ pub struct DurationFold {
 
 impl DurationFold {
     pub fn new() -> Rc<DurationFold> {
-        let root = swaypplet_core::ui::revealer(
+        let root = swaypplet_ui::ui::revealer(
             gtk4::RevealerTransitionType::SlideDown,
-            swaypplet_core::tokens::motion::EXPAND,
+            swaypplet_tokens::motion::EXPAND,
         );
-        let body = swaypplet_core::ui::vbox(2);
+        let body = swaypplet_ui::ui::vbox(2);
         body.add_css_class("deck-fold");
-        let title = swaypplet_core::ui::heading("");
+        let title = swaypplet_ui::ui::heading("");
         title.set_halign(gtk4::Align::Start);
-        let row = swaypplet_core::ui::hbox(2);
+        let row = swaypplet_ui::ui::hbox(2);
         body.append(&title);
         body.append(&row);
         root.set_child(Some(&body));
@@ -259,10 +259,10 @@ impl DurationFold {
             busy: Cell::new(false),
         });
         for (label, minutes) in DURATIONS {
-            let b = swaypplet_core::ui::button_with(
-                swaypplet_core::ui::Face::Label(label),
-                swaypplet_core::ui::Kind::Secondary,
-                swaypplet_core::ui::Size::Small,
+            let b = swaypplet_ui::ui::button_with(
+                swaypplet_ui::ui::Face::Label(label),
+                swaypplet_ui::ui::Kind::Secondary,
+                swaypplet_ui::ui::Size::Small,
             );
             let weak = Rc::downgrade(&fold);
             b.connect_clicked(move |_| {
@@ -352,14 +352,14 @@ fn wire(btn: &gtk4::ToggleButton, spec: &TileSpec) {
         set_tooltip(&btn_h, target, tooltip_on, tooltip_off);
         log::info!("tile[{label}]: toggle requested — target {target}");
 
-        swaypplet_core::ui::set_loading(&btn_h, true);
+        swaypplet_ui::ui::set_loading(&btn_h, true);
         let btn_done = btn_h.clone();
         let action = spec.action.clone();
         let on_state = spec.on_state.clone();
         spawn::spawn_work(
             move || action(target),
             move |success| {
-                swaypplet_core::ui::set_loading(&btn_done, false);
+                swaypplet_ui::ui::set_loading(&btn_done, false);
                 if success {
                     log::info!("tile[{label}]: now {target}");
                     // Established, not optimistic: a failed toggle never
@@ -437,12 +437,12 @@ pub fn init_tile_state(btn: &gtk4::ToggleButton, spec: &TileSpec) {
 pub fn build_dnd_split(
     store: Rc<RefCell<NotificationStore>>,
     on_detail: impl Fn(&gtk4::Button) + 'static,
-) -> swaypplet_core::ui::SplitTile {
-    let tile = swaypplet_core::ui::tile_split("󰍷", "DND");
+) -> swaypplet_ui::ui::SplitTile {
+    let tile = swaypplet_ui::ui::tile_split("󰍷", "DND");
     tile.root.set_hexpand(true);
     let (active, text) = dnd_view(&store.borrow());
     tile.toggle.set_active(active);
-    swaypplet_core::ui::set_tile_status(&tile, &text);
+    swaypplet_ui::ui::set_tile_status(&tile, &text);
     let status = tile.status.clone();
     tile.toggle.connect_clicked(move |b| {
         let on = b.is_active();
@@ -452,7 +452,7 @@ pub fn build_dnd_split(
         };
         if on {
             if context {
-                swaypplet_services::notifications::context::set_override(&store, false);
+                swaypplet_notifyd::context::set_override(&store, false);
             } else {
                 store.borrow_mut().set_dnd(true);
             }
@@ -461,7 +461,7 @@ pub fn build_dnd_split(
                 store.borrow_mut().set_dnd(false);
             }
             if context {
-                swaypplet_services::notifications::context::set_override(&store, true);
+                swaypplet_notifyd::context::set_override(&store, true);
             }
         }
         let (active, text) = dnd_view(&store.borrow());
@@ -493,7 +493,7 @@ pub fn dnd_view(store: &NotificationStore) -> (bool, String) {
 /// The tile component (`ui::tile_toggle`): glyph and name on one button,
 /// the accent fill when on.
 fn make_toggle(icon: &str, label_text: &str) -> gtk4::ToggleButton {
-    let btn = swaypplet_core::ui::tile_toggle(icon, label_text);
+    let btn = swaypplet_ui::ui::tile_toggle(icon, label_text);
     btn.set_hexpand(true);
     btn
 }
@@ -522,10 +522,10 @@ fn apply_tile_state(btn: &gtk4::ToggleButton, state: TileState) {
 // ── State readers (blocking — always called from a background thread) ─────────
 
 fn read_wifi_state() -> TileState {
-    if !swaypplet_services::network::network_manager_available() {
+    if !swaypplet_devices::network::network_manager_available() {
         return TileState::Unavailable;
     }
-    if swaypplet_services::network::wifi_radio_enabled() {
+    if swaypplet_devices::network::wifi_radio_enabled() {
         TileState::Active
     } else {
         TileState::Inactive
@@ -533,7 +533,7 @@ fn read_wifi_state() -> TileState {
 }
 
 fn read_bluetooth_state() -> TileState {
-    let snapshot = swaypplet_services::bluez::snapshot();
+    let snapshot = swaypplet_system::bluez::snapshot();
     if !snapshot.available {
         return TileState::Unavailable;
     }
@@ -547,7 +547,7 @@ fn read_bluetooth_state() -> TileState {
 /// The night light is in this process (`services::gamma`): available when
 /// the compositor gave it the gamma tables, on when the setting says so.
 fn read_night_state() -> TileState {
-    use swaypplet_services::gamma;
+    use swaypplet_ambient::gamma;
     if !gamma::available() {
         TileState::Unavailable
     } else if gamma::enabled() {
@@ -574,7 +574,7 @@ fn inhibitor_status(which: Inhibitor) -> String {
 /// "Sun · 3500 K" or "All day · 3500 K": short enough for a tile. Main
 /// thread.
 fn night_status() -> String {
-    use swaypplet_core::settings::store::{self, NightSchedule};
+    use swaypplet_model::{store, store::NightSchedule};
     let n = store::current().night_light();
     let when = match n.schedule {
         NightSchedule::Sun => "Sun",
@@ -586,7 +586,7 @@ fn night_status() -> String {
 /// Why Do Not Disturb is what it is: the quiet hours' end when they armed
 /// it, their start when they will, and "Until turned off" otherwise.
 pub fn dnd_status(on: bool) -> String {
-    let alerts = swaypplet_core::settings::store::current().alerts();
+    let alerts = swaypplet_model::store::current().alerts();
     let hour = gtk4::glib::DateTime::now_local()
         .map(|t| t.hour() as u8)
         .unwrap_or(12);

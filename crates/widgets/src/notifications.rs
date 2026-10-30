@@ -4,10 +4,10 @@ use std::time::SystemTime;
 
 use gtk4::prelude::*;
 
-use swaypplet_core::ui;
-use swaypplet_core::ui::icons;
-use swaypplet_services::notifications::store::{self, NotificationStore};
-use swaypplet_services::notifications::{CloseReason, group};
+use swaypplet_notifyd::{CloseReason, group};
+use swaypplet_notifyd::{store, store::NotificationStore};
+use swaypplet_ui::ui;
+use swaypplet_ui::ui::icons;
 
 /// What the surface around the list does once a notification has been
 /// clicked through to its sender: the panel gets out of the way.
@@ -150,7 +150,7 @@ fn rebuild_list(
 
     // Clone notification data out of the borrow to avoid holding RefCell
     // across widget creation (which could trigger re-entrant GTK callbacks).
-    let notifications: Vec<swaypplet_services::notifications::Notification> = {
+    let notifications: Vec<swaypplet_notifyd::Notification> = {
         let store_ref = store.borrow();
         store_ref.all().to_vec()
     };
@@ -221,7 +221,7 @@ fn rebuild_list(
 }
 
 fn build_entry(
-    notif: &swaypplet_services::notifications::Notification,
+    notif: &swaypplet_notifyd::Notification,
     store: &Rc<RefCell<NotificationStore>>,
     on_activate: &OnActivate,
 ) -> gtk4::Box {
@@ -339,7 +339,7 @@ fn build_entry(
 /// activation token has been taken by then, and the panel holds the
 /// keyboard exclusively until it is gone.
 fn go_to_source(
-    notif: &swaypplet_services::notifications::Notification,
+    notif: &swaypplet_notifyd::Notification,
     store: &Rc<RefCell<NotificationStore>>,
     on_activate: &OnActivate,
 ) {

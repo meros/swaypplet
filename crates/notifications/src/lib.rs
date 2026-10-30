@@ -2,7 +2,7 @@
 //! card's surface (`card_surface`) and content (`card`) and menu (`menu`), and their auto-dismiss timers
 //! (`timers`). What a notification is, the store that holds them and the
 //! D-Bus server that receives them are services
-//! (`swaypplet_services::notifications`).
+//! (`swaypplet_notifyd`).
 
 pub mod activate;
 pub mod card;

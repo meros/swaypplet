@@ -14,10 +14,10 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use super::popover;
-use swaypplet_core::spawn::spawn_work;
-use swaypplet_core::ui;
-use swaypplet_core::ui::icons;
-use swaypplet_services::mpris::{MediaState, PlaybackStatus};
+use swaypplet_base::spawn::spawn_work;
+use swaypplet_system::mpris::{MediaState, PlaybackStatus};
+use swaypplet_ui::ui;
+use swaypplet_ui::ui::icons;
 
 /// The mark, its popover and the last known player state — cloned into
 /// every handler (GTK objects are refcounted, the state cell is shared).
@@ -48,7 +48,7 @@ fn control_button(face: &gtk4::Label) -> gtk4::Button {
 fn send(cmd: &'static str) {
     spawn_work(
         move || {
-            swaypplet_services::mpris::playerctl(&[cmd]);
+            swaypplet_system::mpris::playerctl(&[cmd]);
         },
         |_| {},
     );
@@ -59,8 +59,8 @@ fn send(cmd: &'static str) {
 const ART_PX: i32 = 18;
 
 pub fn build(
-    mpris: &Rc<swaypplet_services::mpris::MprisService>,
-    audio: &Rc<swaypplet_services::audio::AudioService>,
+    mpris: &Rc<swaypplet_system::mpris::MprisService>,
+    audio: &Rc<swaypplet_audio::AudioService>,
 ) -> gtk4::Box {
     // Art + title/artist open the popover; the transport keys are siblings,
     // not children, because GTK4 gives a Button's clicks to the Button and a
@@ -238,7 +238,7 @@ fn render(ui: &Ui) {
         ui::Text::Body,
         ui::Tone::Fg,
     );
-    swaypplet_core::ui::set_weight(&title, swaypplet_core::ui::Weight::Strong);
+    swaypplet_ui::ui::set_weight(&title, swaypplet_ui::ui::Weight::Strong);
     title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     title.set_max_width_chars(28);
     info.append(&title);

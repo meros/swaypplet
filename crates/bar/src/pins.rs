@@ -20,9 +20,9 @@ use gtk4::glib;
 use gtk4::prelude::*;
 
 use super::popover;
-use swaypplet_core::ui;
-use swaypplet_jump::jump::card::{self, Live};
+use swaypplet_jump::jump::{card, card::Live};
 use swaypplet_jump::jump::{feed, pin};
+use swaypplet_ui::ui;
 
 const PIN: &str = "\u{f0403}";
 const PIN_OUTLINE: &str = "\u{f0931}";
@@ -56,9 +56,9 @@ pub fn build() -> gtk4::Widget {
     let btn = ui::mark(&inner, false);
     btn.add_css_class("bar-pinmark");
     btn.set_tooltip_text(Some("Pinned workspaces"));
-    let revealer = swaypplet_core::ui::revealer(
+    let revealer = swaypplet_ui::ui::revealer(
         gtk4::RevealerTransitionType::SlideLeft,
-        swaypplet_core::tokens::motion::EXPAND,
+        swaypplet_tokens::motion::EXPAND,
     );
     revealer.set_child(Some(&btn));
 
@@ -139,9 +139,9 @@ fn update(ui: &Ui) {
 fn fill(ui: &Rc<Ui>) {
     let names = pin::pinned();
     let ui = ui.clone();
-    swaypplet_core::spawn::spawn_work(
+    swaypplet_base::spawn::spawn_work(
         move || {
-            let tree = swaypplet_core::sway::ipc::connect().ok()?.get_tree().ok()?;
+            let tree = swaypplet_base::sway::ipc::connect().ok()?.get_tree().ok()?;
             Some(
                 names
                     .into_iter()
@@ -181,11 +181,11 @@ fn rows(ui: &Rc<Ui>, scenes: &[(String, Option<swaypplet_jump::jump::scene::Scen
         let side = ui::vbox(3);
         side.set_valign(gtk4::Align::Center);
         let label = ui::text(
-            &swaypplet_core::sway::workspace::label_for_name(name),
+            &swaypplet_base::sway::workspace::label_for_name(name),
             ui::Text::Body,
             ui::Tone::Fg,
         );
-        swaypplet_core::ui::set_weight(&label, swaypplet_core::ui::Weight::Strong);
+        swaypplet_ui::ui::set_weight(&label, swaypplet_ui::ui::Weight::Strong);
         side.append(&label);
         let go = ui::button_with(
             ui::Face::Label("Go there"),

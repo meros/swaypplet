@@ -16,8 +16,8 @@ use std::time::Duration;
 
 use gtk4::prelude::*;
 
-use swaypplet_core::settings::store::{self, Bar};
-use swaypplet_core::ui;
+use swaypplet_model::{store, store::Bar};
+use swaypplet_ui::ui;
 
 // Waybar's clock formats: "󰥔 {:%H:%M}" with alt "󰃮 {:%Y-%m-%d}".
 const ICON_TIME: &str = "󰥔";
@@ -28,7 +28,7 @@ pub fn build() -> gtk4::Button {
     // width as they tick.
     let label = gtk4::Label::new(None);
     ui::set_tone(&label, ui::Tone::Muted);
-    swaypplet_core::ui::set_numeric(&label, true);
+    swaypplet_ui::ui::set_numeric(&label, true);
     let btn = gtk4::Button::builder()
         .child(&label)
         .css_classes(["bar-seg"])

@@ -1,0 +1,18 @@
+[package]
+name = "swaypplet-osd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+swaypplet-base.workspace = true
+swaypplet-model.workspace = true
+swaypplet-ui.workspace = true
+swaypplet-audio.workspace = true
+gtk4.workspace = true
+gtk4-layer-shell.workspace = true
+glib.workspace = true
+log.workspace = true
+
+[lints]
+workspace = true

@@ -5,24 +5,34 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-swaypplet-core.workspace = true
-swaypplet-services.workspace = true
+swaypplet-base.workspace = true
+swaypplet-tokens.workspace = true
+swaypplet-model.workspace = true
+swaypplet-ui.workspace = true
+swaypplet-system.workspace = true
+swaypplet-audio.workspace = true
+swaypplet-devices.workspace = true
+swaypplet-notifyd.workspace = true
+swaypplet-displays.workspace = true
+swaypplet-cast.workspace = true
+swaypplet-ambient.workspace = true
 swaypplet-jump.workspace = true
 swaypplet-screenshot.workspace = true
 swaypplet-lock.workspace = true
+swaypplet-polkit.workspace = true
 swaypplet-notifications.workspace = true
 swaypplet-widgets.workspace = true
-swaypplet-polkit.workspace = true
+swaypplet-launcher.workspace = true
 swaypplet-settings.workspace = true
 swaypplet-bar.workspace = true
+swaypplet-panel.workspace = true
+swaypplet-osd.workspace = true
+swaypplet-dmenu.workspace = true
+swaypplet-label.workspace = true
 gtk4.workspace = true
 gtk4-layer-shell.workspace = true
 glib.workspace = true
 gio.workspace = true
-gdk4.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-async-channel.workspace = true
 log.workspace = true
 
 [lints]

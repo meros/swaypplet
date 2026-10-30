@@ -9,21 +9,49 @@ license = "MIT"
 
 [workspace.lints.clippy]
 # A section's `new()` builds its GTK widgets; a `Default` that did the same
-# would read as a plain value. The lint fires only because these
-# constructors became `pub` when the code was split into crates.
+# would read as a plain value.
 new_without_default = "allow"
 
 [workspace.dependencies]
-swaypplet-core = { path = "crates/core" }
-swaypplet-services = { path = "crates/services" }
+swaypplet-base = { path = "crates/base" }
+swaypplet-tokens = { path = "crates/tokens" }
+swaypplet-model = { path = "crates/model" }
+swaypplet-ui = { path = "crates/ui" }
+swaypplet-system = { path = "crates/system" }
+swaypplet-audio = { path = "crates/audio" }
+swaypplet-devices = { path = "crates/devices" }
+swaypplet-notifyd = { path = "crates/notifyd" }
+swaypplet-displays = { path = "crates/displays" }
+swaypplet-cast = { path = "crates/cast" }
+swaypplet-ambient = { path = "crates/ambient" }
 swaypplet-jump = { path = "crates/jump" }
 swaypplet-screenshot = { path = "crates/screenshot" }
+swaypplet-fp = { path = "crates/fp" }
+swaypplet-switch-user = { path = "crates/switch-user" }
 swaypplet-lock = { path = "crates/lock" }
+swaypplet-greet = { path = "crates/greet" }
+swaypplet-idle = { path = "crates/idle" }
+swaypplet-polkit = { path = "crates/polkit" }
 swaypplet-notifications = { path = "crates/notifications" }
 swaypplet-widgets = { path = "crates/widgets" }
-swaypplet-polkit = { path = "crates/polkit" }
+swaypplet-settings-kit = { path = "crates/settings-kit" }
+swaypplet-launcher = { path = "crates/launcher" }
+swaypplet-settings-alerts = { path = "crates/settings-alerts" }
+swaypplet-settings-bar = { path = "crates/settings-bar" }
+swaypplet-settings-displays = { path = "crates/settings-displays" }
+swaypplet-settings-glass = { path = "crates/settings-glass" }
+swaypplet-settings-idle = { path = "crates/settings-idle" }
+swaypplet-settings-input = { path = "crates/settings-input" }
+swaypplet-settings-launcher = { path = "crates/settings-launcher" }
+swaypplet-settings-look = { path = "crates/settings-look" }
+swaypplet-settings-quality = { path = "crates/settings-quality" }
+swaypplet-settings-system = { path = "crates/settings-system" }
 swaypplet-settings = { path = "crates/settings" }
 swaypplet-bar = { path = "crates/bar" }
+swaypplet-panel = { path = "crates/panel" }
+swaypplet-osd = { path = "crates/osd" }
+swaypplet-dmenu = { path = "crates/dmenu" }
+swaypplet-label = { path = "crates/label" }
 swaypplet-app = { path = "crates/app" }
 
 gtk4 = { version = "0.11", features = ["v4_14"] }
@@ -47,7 +75,7 @@ env_logger = "0.11"
 libc = "0.2"
 greetd_ipc = { version = "0.10.3", features = ["sync-codec"] }
 wayland-client = "0.31"
-# Bindings for the protocols in crates/core/protocols/ that no crate ships.
+# Bindings for the protocols in crates/ui/protocols/ that no crate ships.
 wayland-scanner = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 swayipc = "4"
@@ -82,29 +110,87 @@ incremental = true
 # runs each: late frames 3.3-4.3 % (level 1) against 3.3-5.2 % (level 2),
 # p95 work 0.72-0.78 ms against 0.66-0.98 ms. Level 0 (23 s) had a run at
 # 9.1 % late with a 19.6 ms frame, so it stays off.
-[profile.release.package.swaypplet]
+[profile.release.package.swaypplet-base]
 opt-level = 1
-[profile.release.package.swaypplet-core]
+[profile.release.package.swaypplet-tokens]
 opt-level = 1
-[profile.release.package.swaypplet-services]
+[profile.release.package.swaypplet-model]
+opt-level = 1
+[profile.release.package.swaypplet-ui]
+opt-level = 1
+[profile.release.package.swaypplet-system]
+opt-level = 1
+[profile.release.package.swaypplet-audio]
+opt-level = 1
+[profile.release.package.swaypplet-devices]
+opt-level = 1
+[profile.release.package.swaypplet-notifyd]
+opt-level = 1
+[profile.release.package.swaypplet-displays]
+opt-level = 1
+[profile.release.package.swaypplet-cast]
+opt-level = 1
+[profile.release.package.swaypplet-ambient]
 opt-level = 1
 [profile.release.package.swaypplet-jump]
 opt-level = 1
 [profile.release.package.swaypplet-screenshot]
 opt-level = 1
+[profile.release.package.swaypplet-fp]
+opt-level = 1
+[profile.release.package.swaypplet-switch-user]
+opt-level = 1
 [profile.release.package.swaypplet-lock]
+opt-level = 1
+[profile.release.package.swaypplet-greet]
+opt-level = 1
+[profile.release.package.swaypplet-idle]
+opt-level = 1
+[profile.release.package.swaypplet-polkit]
 opt-level = 1
 [profile.release.package.swaypplet-notifications]
 opt-level = 1
 [profile.release.package.swaypplet-widgets]
 opt-level = 1
-[profile.release.package.swaypplet-polkit]
+[profile.release.package.swaypplet-settings-kit]
+opt-level = 1
+[profile.release.package.swaypplet-launcher]
+opt-level = 1
+[profile.release.package.swaypplet-settings-alerts]
+opt-level = 1
+[profile.release.package.swaypplet-settings-bar]
+opt-level = 1
+[profile.release.package.swaypplet-settings-displays]
+opt-level = 1
+[profile.release.package.swaypplet-settings-glass]
+opt-level = 1
+[profile.release.package.swaypplet-settings-idle]
+opt-level = 1
+[profile.release.package.swaypplet-settings-input]
+opt-level = 1
+[profile.release.package.swaypplet-settings-launcher]
+opt-level = 1
+[profile.release.package.swaypplet-settings-look]
+opt-level = 1
+[profile.release.package.swaypplet-settings-quality]
+opt-level = 1
+[profile.release.package.swaypplet-settings-system]
 opt-level = 1
 [profile.release.package.swaypplet-settings]
 opt-level = 1
 [profile.release.package.swaypplet-bar]
 opt-level = 1
+[profile.release.package.swaypplet-panel]
+opt-level = 1
+[profile.release.package.swaypplet-osd]
+opt-level = 1
+[profile.release.package.swaypplet-dmenu]
+opt-level = 1
+[profile.release.package.swaypplet-label]
+opt-level = 1
 [profile.release.package.swaypplet-app]
+opt-level = 1
+[profile.release.package.swaypplet]
 opt-level = 1
 
 [profile.dev]

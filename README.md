@@ -163,24 +163,21 @@ cargo test --release
 
 ### Code layout
 
-The code is a Cargo workspace. Nix builds each crate as its own derivation (`nix/package.nix`, from the generated `Cargo.nix`), so a rebuild compiles the crate you changed, the crates above it and the binary. Everything else comes from the store.
+The code is a Cargo workspace of 41 crates. Nix builds each crate as its own derivation (`nix/package.nix`, from the generated `Cargo.nix`), so a rebuild compiles the crate you changed, the crates that use it and the binary. Everything else comes from the store.
 
-| Crate | What it holds | Uses |
+| Layer | Crates | What they hold |
 |---|---|---|
-| `core` | the settings model, theme, tokens, UI components, layer shell, sway IPC | — |
-| `services` | audio, network, Bluetooth, displays, cast, MPRIS, tray and the other system services | core |
-| `jump` | Super+Tab, pins, the key sheet | core |
-| `screenshot` | screenshots, recording, reports and crash reports | core, services, jump |
-| `lock` | the lock screen, greeter, fingerprint, idle manager, user switching | core, services |
-| `notifications` | the notification popups | core, services |
-| `widgets` | the control panel's sections | core, services, lock, notifications |
-| `polkit` | the polkit agent | core |
-| `settings` | the Settings window and the launcher | core, services, jump, screenshot, widgets |
-| `bar` | the status bar | core, services, jump, screenshot, widgets |
-| `app` | the panel process: panel, OSD, dmenu, labels, the render harness's previews | all of the above |
-| `swaypplet` | `main.rs`: the subcommands, and the build's commit id | all of the above |
+| Foundation | `base` | spawning work, file watches, the observed-state cell, sway IPC, logind, the faced client, user names, naming rules |
+| | `tokens` | the design tokens: colour scales, contrast, motion, the emitted CSS variables |
+| | `model` | the settings schema and store, keyboard layouts, the wallpaper, `swaypplet settings` |
+| | `ui` | the theme, layer-shell surfaces, motion, the glass material and the UI components |
+| Services | `system` | the small services: power, battery, clipboard, inhibitors, tray, MPRIS, task state, elephant |
+| | `audio`, `devices`, `notifyd`, `displays`, `cast`, `ambient` | sound; network, input and Bluetooth; the notification daemon; output management; casting; night light and the wallpaper on battery |
+| Features | `jump`, `screenshot`, `fp`, `switch-user`, `lock`, `greet`, `idle`, `polkit`, `notifications`, `widgets` | Super+Tab and the key sheet; screenshots and reports; fingerprints; user switching; the lock screen; the greeter; the idle manager; the polkit agent; the popups; the panel's sections |
+| Settings | `settings-kit`, `launcher`, `settings-<pane>` (ten), `settings` | the form helpers and the search index; the launcher, which searches it too; one crate per pane; the window that holds them |
+| Surfaces | `bar`, `panel`, `osd`, `dmenu`, `label`, `app`, `swaypplet` | the status bar, the panel, the OSD, the picker, workspace labels; the panel process; `main.rs` |
 
-A crate uses only the crates listed for it, so a change to `settings` never rebuilds `bar`. After a change to a `Cargo.toml` or `Cargo.lock`, `dev/cargo-nix.sh` regenerates `Cargo.nix`; the pre-commit hook does it for you, and the Nix build stops with a message when it is stale.
+A crate depends only on crates in earlier rows, or earlier in its own row. The services other than `ambient` do not use the UI layer, so a change to the theme rebuilds none of them. After a change to a `Cargo.toml` or `Cargo.lock`, `dev/cargo-nix.sh` regenerates `Cargo.nix`; the pre-commit hook does it for you, and the Nix build stops with a message when it is stale.
 
 [docs/QUALITY.md](docs/QUALITY.md) describes reports, crash reports and the auto-fix runner (`dev/autofix/run.sh`). [docs/README.md](docs/README.md) indexes the rest of the documentation: the roadmap, the motion and settings references, the research notes, and a databank of 332 entries on prior art in desktop shells.
 

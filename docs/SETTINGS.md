@@ -1,6 +1,6 @@
 # Settings
 
-Settings is a surface of its own (`crates/settings/src/settings/window.rs`): a glass card
+Settings is a surface of its own (`crates/settings/src/window.rs`): a glass card
 the height of the screen, a sidebar beside the chosen pane. It opens from
 the Helm, which puts itself away first: the gear in the flight deck, `:set`
 or a pane's prefix and Enter in the omnibox (a bare `:` lists every
@@ -16,7 +16,7 @@ Helm until 2026-09: ten tab chips over a 420 px scroller, between the
 ribbon and the deck.
 
 The sidebar has search over every pane's rows (below), then the panes in two
-groups, `src/settings/`:
+groups, `crates/settings/src/`:
 
 | pane | edits | sections of `~/.config/swaypplet/settings.json` |
 |---|---|---|
@@ -40,7 +40,7 @@ the device, not its port: `net:<permanent MAC>`, `audio:<node.name>`,
 `display:<make|model|serial>`, `input:<sway identifier>`
 (`services/devices.rs`). Bluetooth names are BlueZ's own alias instead.
 Like the wallpaper it has no system layer and is not in
-`crates/core/data/settings-defaults.json`.
+`crates/model/data/settings-defaults.json`.
 
 The Displays pane (`displays_pane.rs`) is the one that does not apply
 live: a layout can turn the only screen dark. Its arithmetic is pure and
@@ -79,7 +79,7 @@ panel; the log goes to `$XDG_RUNTIME_DIR/swaypplet/nx.log`, which a
 restarted panel reads back for the result. Both are off while the screen is
 locked or a switch runs.
 
-`crates/core/data/settings-defaults.json` is every section at the binary's defaults,
+`crates/model/data/settings-defaults.json` is every section at the binary's defaults,
 generated from the structs by a test (`cargo test -- --ignored
 write_settings_defaults`); `the_shipped_defaults_file_matches_the_structs`
 fails when it is stale. The nixos repo's `cross-repo-guard.nix` checks
@@ -175,7 +175,7 @@ and Bar tabs is `nix <section>` into the clipboard.
   animates, which is why `lock::run` and `bar::run` call `store::init` too.
 - **Apps follow** (`look.apps_follow`, on by default): the panel publishes
   the inputs on screen to the GNOME settings the desktop portal serves
-  (`crates/core/src/theme/apps.rs`): the mode as `color-scheme`, the accent as the
+  (`crates/ui/src/theme/apps.rs`): the mode as `color-scheme`, the accent as the
   nearest GNOME `accent-color` (by hue, tint included; slate when grey),
   contrast as `high-contrast`, motion off as `enable-animations` false and
   `reduced-motion` true, and `gtk-theme` between `adw-gtk3` and
@@ -189,12 +189,12 @@ and Bar tabs is `nix <section>` into the clipboard.
 - **Tint** (`look.tint`, off | accents | full) is a token input
   (docs/design-system.md §2.2). The one part of it that is not a setting,
   the wallpaper's hue, is sampled by the panel alone
-  (`crates/core/src/theme/wallpaper.rs`) into
+  (`crates/ui/src/theme/wallpaper.rs`) into
   `$XDG_CACHE_HOME/swaypplet/wallpaper-source`; every process reads that
   one line in `theme::inputs`, and the long-lived ones follow it on
   `theme::watch`'s tick. A bare file read, so the lock screen's startup
   never pays for a 100 ms JPEG decode. The watching process also puts the
-  tokens on sway's `client.*` window borders (`crates/core/src/theme/sway.rs`), so they
+  tokens on sway's `client.*` window borders (`crates/ui/src/theme/sway.rs`), so they
   follow the mode and the tint.
 - **Display profiles** (`displays`: `profiles`, a list; each has a `name`
   and `outputs`, each output a `match` of `name`, `make`, `model`,
@@ -339,7 +339,7 @@ and Bar tabs is `nix <section>` into the clipboard.
    `Default`. Clamp it in the section's `sanitized` if a bad value is worse
    than ugly.
 2. `cargo test -- --ignored write_settings_defaults` to regenerate
-   `crates/core/data/settings-defaults.json`.
+   `crates/model/data/settings-defaults.json`.
 3. Add the same field, with the same default, to
    `users/modules/theme/settings.nix` in the nixos repo.
 4. Add a row to the pane (`*_pane.rs`), using the helpers in `ui.rs` so it

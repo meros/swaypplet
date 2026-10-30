@@ -12,8 +12,8 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use swaypplet_core::ui;
-use swaypplet_core::ui::icons;
+use swaypplet_ui::ui;
+use swaypplet_ui::ui::icons;
 
 pub fn build(toggle_panel: Rc<dyn Fn()>) -> gtk4::Button {
     // A segment of its own, the glyph faint: the resting bar carries no
@@ -50,7 +50,7 @@ pub fn toggle_panel_fallback() {
 /// process (comm check — the pid file can outlive a crashed panel and the
 /// pid can be recycled by an unrelated process).
 fn read_panel_pid() -> Option<i32> {
-    let pid = std::fs::read_to_string(swaypplet_core::pid::file_path())
+    let pid = std::fs::read_to_string(swaypplet_base::pid::file_path())
         .ok()?
         .trim()
         .parse::<i32>()

@@ -1,4 +1,4 @@
-//! The component sheet: every component in `crates/core/src/ui/`, in every variant and
+//! The component sheet: every component in `crates/ui/src/ui/`, in every variant and
 //! every state it has, on one card, so a change to a component is judged
 //! against its siblings rather than on the one surface that happened to be
 //! open.
@@ -12,7 +12,10 @@
 use gtk4::prelude::*;
 use gtk4::{Align, StateFlags};
 
-use swaypplet_core::ui::{self, Face, Kind, Size, Text, Tone};
+use swaypplet_ui::{
+    ui,
+    ui::{Face, Kind, Size, Text, Tone},
+};
 
 /// The pages, each one screen tall at 1440×900.
 pub const PAGES: [&str; 4] = ["controls", "inputs", "lists", "tiles"];
@@ -81,7 +84,7 @@ fn line(name: &str, specimens: impl IntoIterator<Item = gtk4::Box>) -> gtk4::Box
     let label = ui::overline(name, Tone::Muted);
     label.set_size_request(120, -1);
     label.set_valign(Align::Start);
-    label.set_margin_top(swaypplet_core::tokens::space(3));
+    label.set_margin_top(swaypplet_tokens::space(3));
     row.append(&label);
     for s in specimens {
         row.append(&s);

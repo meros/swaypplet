@@ -5,21 +5,25 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-swaypplet-core.workspace = true
-swaypplet-services.workspace = true
-swaypplet-jump.workspace = true
-swaypplet-screenshot.workspace = true
-swaypplet-widgets.workspace = true
+swaypplet-tokens.workspace = true
+swaypplet-model.workspace = true
+swaypplet-ui.workspace = true
+swaypplet-settings-kit.workspace = true
+swaypplet-settings-alerts.workspace = true
+swaypplet-settings-bar.workspace = true
+swaypplet-settings-displays.workspace = true
+swaypplet-settings-glass.workspace = true
+swaypplet-settings-idle.workspace = true
+swaypplet-settings-input.workspace = true
+swaypplet-settings-launcher.workspace = true
+swaypplet-settings-look.workspace = true
+swaypplet-settings-quality.workspace = true
+swaypplet-settings-system.workspace = true
 gtk4.workspace = true
 gtk4-layer-shell.workspace = true
 glib.workspace = true
-gio.workspace = true
-cairo-rs.workspace = true
-serde.workspace = true
 serde_json.workspace = true
-async-channel.workspace = true
 log.workspace = true
-libc.workspace = true
 
 [lints]
 workspace = true

@@ -1,0 +1,29 @@
+/* ── Launcher (src/launcher.rs) and dmenu (crates/dmenu/src/lib.rs) ──
+   The glass card, the search field and the result rows are components
+   (ui::card, ui::search_entry / ui::entry, ui::row); this places them. */
+
+.launcher-container {
+    padding: var(--space-5);
+}
+
+/* ── dmenu — the piped-list picker (`swaypplet dmenu`) ──
+   Same glass card and row rhythm as the launcher, sized for a short list:
+   a titled card with the caller's prompt, the filter entry, then the items.
+   Used by chrome-profile-launcher, jump-to-task and settask. ── */
+
+/* The card hugs its (usually short) item list, as the launcher's does up to
+   its 520px ceiling. */
+.dmenu .launcher-scroller {
+    min-height: 0;
+}
+
+/* Prompt title, indented to the rows' text inset so title and item labels
+   share one left margin. */
+.dmenu .dmenu-title {
+    margin: 0 0 var(--space-3) var(--space-4);
+}
+
+/* Empty result list: the same box as a row. */
+.dmenu .dmenu-empty {
+    padding: var(--space-3) var(--space-4);
+}

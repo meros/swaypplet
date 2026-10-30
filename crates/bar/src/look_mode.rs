@@ -10,8 +10,11 @@
 
 use gtk4::prelude::*;
 
-use swaypplet_core::settings::store::{self, Look, ThemeMode};
-use swaypplet_core::tokens::Mode;
+use swaypplet_model::{
+    store,
+    store::{Look, ThemeMode},
+};
+use swaypplet_tokens::Mode;
 
 // Nerd Font: md-theme_light_dark / md-weather_night / md-white_balance_sunny.
 const ICON_AUTO: &str = "\u{f050e}";
@@ -61,17 +64,14 @@ pub fn build() -> gtk4::Button {
         .css_classes(["bar-seg"])
         .has_tooltip(true)
         .build();
-    swaypplet_core::ui::segment::adopt(&btn, false);
+    swaypplet_ui::ui::segment::adopt(&btn, false);
 
     btn.connect_clicked(|_| {
         let mode = next(setting());
         store::edit::<Look>(|l| l.mode = mode);
     });
     btn.connect_query_tooltip(|_, _, _, _, tip| {
-        tip.set_text(Some(&tooltip(
-            setting(),
-            swaypplet_core::theme::shown().mode,
-        )));
+        tip.set_text(Some(&tooltip(setting(), swaypplet_ui::theme::shown().mode)));
         true
     });
 

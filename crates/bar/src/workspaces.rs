@@ -43,10 +43,13 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use swaypplet_core::sway::ipc::{self, OutputInfo, SwayService, WorkspaceInfo};
-use swaypplet_core::sway::workspace::{generic_label, switch_command, task_label};
-use swaypplet_core::ui;
-use swaypplet_services::task_state::{Activity, TaskSnapshot, TaskStateService, task_of_name};
+use swaypplet_base::sway::workspace::{generic_label, switch_command, task_label};
+use swaypplet_base::sway::{
+    ipc,
+    ipc::{OutputInfo, SwayService, WorkspaceInfo},
+};
+use swaypplet_system::task_state::{Activity, TaskSnapshot, TaskStateService, task_of_name};
+use swaypplet_ui::ui;
 
 /// Marks the pin glyph inside a segment, so `set_pinned` can find it.
 const PIN_MARK_CLASS: &str = "bar-ws-pin-glyph";
@@ -592,11 +595,8 @@ mod tests {
         assert_eq!(ws_state(&ws(9, "9:t3a")), WsState::Idle);
     }
 
-    fn session(
-        activity: Activity,
-        workspace: &str,
-    ) -> swaypplet_services::task_state::SessionState {
-        swaypplet_services::task_state::SessionState {
+    fn session(activity: Activity, workspace: &str) -> swaypplet_system::task_state::SessionState {
+        swaypplet_system::task_state::SessionState {
             pid: 1,
             desc: "d".into(),
             activity,

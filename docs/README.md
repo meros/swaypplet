@@ -56,7 +56,7 @@ browser.
 ## Tools
 
 - `dev/frame-bench.sh`: frame timing for the transitions, per frame, from
-  `SWAYPPLET_FRAME_STATS` (`crates/core/src/frame_stats.rs`). `--gate` fails over the
+  `SWAYPPLET_FRAME_STATS` (`crates/base/src/frame_stats.rs`). `--gate` fails over the
   limits; `.githooks/pre-push` runs it (`git config core.hooksPath .githooks`).
 - `dev/render.sh`, `dev/render-all.sh`: screenshots in a nested sway.
 - `dev/filmstrip.sh`: every frame of one transition, as a contact sheet.

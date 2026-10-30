@@ -6,9 +6,9 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{DropDown, ListBox, ListBoxRow, Switch};
 
-use swaypplet_core::ui;
-use swaypplet_services::network::model::SavedNetwork;
-use swaypplet_services::network::tailscale::Status;
+use swaypplet_devices::network::model::SavedNetwork;
+use swaypplet_devices::network::tailscale::Status;
+use swaypplet_ui::ui;
 
 /// Tailscale: up or down, where it is, and which exit node carries the
 /// traffic. Hidden on a machine without the CLI.

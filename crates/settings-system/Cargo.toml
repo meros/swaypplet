@@ -1,0 +1,18 @@
+[package]
+name = "swaypplet-settings-system"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+swaypplet-base.workspace = true
+swaypplet-ui.workspace = true
+swaypplet-settings-kit.workspace = true
+gtk4.workspace = true
+glib.workspace = true
+serde_json.workspace = true
+log.workspace = true
+libc.workspace = true
+
+[lints]
+workspace = true

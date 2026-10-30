@@ -29,15 +29,15 @@ use std::rc::Rc;
 use gtk4::gdk;
 use gtk4::prelude::*;
 
-use swaypplet_core::shell::{Namespace, PerMonitor, Surface};
-use swaypplet_core::sway::ipc;
-use swaypplet_core::sway::workspace::generic_label;
+use swaypplet_base::sway::ipc;
+use swaypplet_base::sway::workspace::generic_label;
+use swaypplet_ui::shell::{Namespace, PerMonitor, Surface};
 
 // ── The sheet's structure ───────────────────────────────────────────────
 
 /// Where a binding lands on the sheet. Order is print order.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub enum Section {
+pub(crate) enum Section {
     Tasks,
     Workspaces,
     Windows,
@@ -80,11 +80,11 @@ pub struct Binding {
 }
 
 /// The whole sheet: sections in print order, each with its rows.
-pub type Sheet = Vec<(Section, Vec<Row>)>;
+pub(crate) type Sheet = Vec<(Section, Vec<Row>)>;
 
 /// One printed line: the keys on the left, what they do on the right.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Row {
+pub(crate) struct Row {
     pub keys: String,
     pub label: String,
 }
@@ -97,7 +97,7 @@ pub struct Row {
 /// block belong to a keyboard state this sheet does not describe, and
 /// printing them beside the default-mode bindings would claim they are
 /// reachable when they are not.
-pub fn parse(config: &str) -> Vec<Binding> {
+pub(crate) fn parse(config: &str) -> Vec<Binding> {
     let mut depth = 0i32;
     let mut out = Vec::new();
 
@@ -220,7 +220,7 @@ fn pretty_key(key: &str) -> String {
 ///
 /// Store paths are most of the width of a generated sway config and none of
 /// the meaning: `/nix/store/wf53…-task-switch 1:t1a` is `task-switch 1:t1a`.
-pub fn shorten(command: &str) -> String {
+pub(crate) fn shorten(command: &str) -> String {
     command
         .split_whitespace()
         .map(|token| {
@@ -408,7 +408,7 @@ fn task_of(arg: &str) -> (Option<u32>, String) {
 /// (`⌘ ←`, `⌘ ↑`, `⌘ ↓`, `⌘ →` all being `focus`) become one row whose keys
 /// are joined. Ungrouped bindings keep their own row, in config order, which
 /// for the workspace list is alphabetical by key and reads as a table.
-pub fn sheet(bindings: &[Binding]) -> Sheet {
+pub(crate) fn sheet(bindings: &[Binding]) -> Sheet {
     /// A row under construction: its identity, its modifier prefix, and the
     /// keys collected for it so far.
     struct Pending {
@@ -583,10 +583,7 @@ impl Keybinds {
         let app = app.clone();
         let weak = Rc::downgrade(&this);
         // Not on an extra screen unless switched on (`shell::extra`).
-        swaypplet_core::shell::extra::follow(
-            &this.cards,
-            swaypplet_core::shell::extra::Kind::KeySheet,
-        );
+        swaypplet_ui::shell::extra::follow(&this.cards, swaypplet_ui::shell::extra::Kind::KeySheet);
         this.cards.watch(move |monitor| {
             let card = build_card(&app, monitor);
             if let Some(this) = weak.upgrade() {
@@ -631,7 +628,7 @@ impl Keybinds {
         }
 
         let this = self.clone();
-        swaypplet_core::spawn::spawn_work(ipc::config_text, move |config| {
+        swaypplet_base::spawn::spawn_work(ipc::config_text, move |config| {
             this.fetching.set(false);
             match config {
                 Ok(config) => {
@@ -658,7 +655,7 @@ impl Keybinds {
         self.pending_show.set(false);
         self.held.set(false);
         if let Some(id) = self.hold_timer.replace(None) {
-            swaypplet_core::spawn::remove_source(id);
+            swaypplet_base::spawn::remove_source(id);
         }
         self.shown.set(false);
         self.cards.for_each(|card| card.surface.hide());
@@ -692,13 +689,13 @@ fn build_card(app: &gtk4::Application, monitor: &gdk::Monitor) -> Card {
     // held-Super is not a focus gesture, the sheet reads and leaves.
     let surface = Surface::builder(app, Namespace::Keybinds)
         .monitor(Some(monitor))
-        .card(swaypplet_core::ui::Card::Floating)
+        .card(swaypplet_ui::ui::Card::Floating)
         .build();
     surface.root().set_halign(gtk4::Align::Center);
     surface.root().set_valign(gtk4::Align::Center);
     surface.card().add_css_class("keybinds-card");
 
-    let body = swaypplet_core::ui::hbox(7);
+    let body = swaypplet_ui::ui::hbox(7);
     surface.card().append(&body);
     surface.set_content(&body);
 
@@ -738,15 +735,15 @@ fn fill(body: &gtk4::Box, sections: &Sheet) {
 }
 
 fn new_column() -> gtk4::Box {
-    let column = swaypplet_core::ui::vbox(5);
+    let column = swaypplet_ui::ui::vbox(5);
     column.add_css_class("keybinds-column");
     column
 }
 
 fn section_widget(section: Section, rows: &[Row]) -> gtk4::Box {
-    let group = swaypplet_core::ui::vbox(2);
+    let group = swaypplet_ui::ui::vbox(2);
 
-    let heading = swaypplet_core::ui::overline(section.title(), swaypplet_core::ui::Tone::Fg);
+    let heading = swaypplet_ui::ui::overline(section.title(), swaypplet_ui::ui::Tone::Fg);
     group.append(&heading);
 
     // A GtkGrid, not two boxes: the key column has to line up across every
@@ -754,20 +751,20 @@ fn section_widget(section: Section, rows: &[Row]) -> gtk4::Box {
     // The key/label gap is column spacing on the grid, so a long key list
     // pushes its own description instead of widening the whole column.
     let grid = gtk4::Grid::builder()
-        .row_spacing(swaypplet_core::tokens::space(1))
-        .column_spacing(swaypplet_core::tokens::space(4))
+        .row_spacing(swaypplet_tokens::space(1))
+        .column_spacing(swaypplet_tokens::space(4))
         .build();
 
     for (i, row) in rows.iter().enumerate() {
         // The key is the one monospace thing on the sheet: the keys are a
         // table and must align, the descriptions are prose and should not.
-        let keys = swaypplet_core::ui::key(&row.keys);
+        let keys = swaypplet_ui::ui::key(&row.keys);
         keys.set_halign(gtk4::Align::Start);
 
-        let label = swaypplet_core::ui::text(
+        let label = swaypplet_ui::ui::text(
             &row.label,
-            swaypplet_core::ui::Text::Label,
-            swaypplet_core::ui::Tone::Muted,
+            swaypplet_ui::ui::Text::Label,
+            swaypplet_ui::ui::Tone::Muted,
         );
         label.set_hexpand(true);
         label.set_ellipsize(gtk4::pango::EllipsizeMode::End);

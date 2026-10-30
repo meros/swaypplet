@@ -50,10 +50,10 @@ pub fn dry_run() -> bool {
 }
 
 /// The git revision this binary was built from, as a short hash: the
-/// flake passes the full one (`swaypplet_core::build::rev`, which the System
+/// flake passes the full one (`swaypplet_base::build::rev`, which the System
 /// tab reads too); a `cargo build` has none.
 pub fn rev() -> &'static str {
-    short_rev(swaypplet_core::build::rev())
+    short_rev(swaypplet_base::build::rev())
 }
 
 fn short_rev(rev: Option<&'static str>) -> &'static str {

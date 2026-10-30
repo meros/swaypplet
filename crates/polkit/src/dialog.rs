@@ -15,9 +15,9 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use swaypplet_core::auth_field::{AuthField, Caption, Tone};
-use swaypplet_core::shell::{Namespace, Surface};
-use swaypplet_core::ui;
+use swaypplet_ui::auth_field::{AuthField, Caption, Tone};
+use swaypplet_ui::shell::{Namespace, Surface};
+use swaypplet_ui::ui;
 
 use super::agent::ResolvedIdentity;
 
@@ -272,7 +272,7 @@ impl PolkitDialog {
         details_toggle.add_css_class("polkit-details-toggle");
         let details_revealer = ui::revealer(
             gtk4::RevealerTransitionType::SlideDown,
-            swaypplet_core::tokens::motion::EXPAND,
+            swaypplet_tokens::motion::EXPAND,
         );
         let details_label = ui::text("", ui::Text::Caption, ui::Tone::Muted);
         ui::set_mono(&details_label, true);
@@ -319,7 +319,7 @@ impl PolkitDialog {
         // so separating both by 14 px said they were equally related and left
         // the field looking crowded against the sentence that explains it.
         // The lock card has worked this way for a while; this brings the two
-        // onto the same model. See the gap ladder in crates/core/data/css/08-auth.css.
+        // onto the same model. See the gap ladder in crates/ui/data/css/08-auth.css.
         let content = ui::vbox(0);
         content.append(&icon_box);
         content.append(&title_label);

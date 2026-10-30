@@ -23,7 +23,7 @@ use gtk4::gdk;
 use gtk4::prelude::*;
 use gtk4_layer_shell::KeyboardMode;
 
-use swaypplet_core::shell::{Namespace, Surface};
+use swaypplet_ui::shell::{Namespace, Surface};
 
 use super::capture::Image;
 
@@ -118,7 +118,7 @@ pub fn region(app: &gtk4::Application, mode: Mode, done: impl FnOnce(Option<Sele
         let app = app.clone();
         let for_thread = name.clone();
 
-        swaypplet_core::spawn::spawn_work(
+        swaypplet_base::spawn::spawn_work(
             move || super::capture::output(&for_thread),
             move |result| {
                 match result {
@@ -288,13 +288,13 @@ fn wire(session: &Rc<Session>, index: usize, mode: Mode) {
     let image = sheet.image.clone();
     let buffer = (f64::from(sheet.image.width), f64::from(sheet.image.height));
     // The token colours, in the mode the selector opened in.
-    let paint = swaypplet_core::theme::paint();
+    let paint = swaypplet_ui::theme::paint();
     sheet.area.set_draw_func(move |_, cr, w, h| {
         let (w, h) = (f64::from(w), f64::from(h));
         // Dim everything, then clear the selection back to fully transparent
         // so the frozen screen below shows through at full brightness. Black
         // in either mode: this dims a picture, it is not a surface.
-        swaypplet_core::ui::set_source(cr, swaypplet_core::tokens::Rgb::BLACK, 0.42);
+        swaypplet_ui::ui::set_source(cr, swaypplet_tokens::Rgb::BLACK, 0.42);
         let _ = cr.paint();
 
         if mode == Mode::Pick {
@@ -313,7 +313,7 @@ fn wire(session: &Rc<Session>, index: usize, mode: Mode) {
 
         cr.set_operator(cairo::Operator::Over);
         // The shell's accent — "this is the thing you are acting on".
-        swaypplet_core::ui::set_source(cr, paint.accent, 1.0);
+        swaypplet_ui::ui::set_source(cr, paint.accent, 1.0);
         cr.set_line_width(1.0);
         cr.rectangle(x + 0.5, y + 0.5, rw - 1.0, rh - 1.0);
         let _ = cr.stroke();
@@ -386,7 +386,7 @@ fn wire(session: &Rc<Session>, index: usize, mode: Mode) {
 #[allow(clippy::too_many_arguments)]
 fn draw_color_loupe(
     cr: &cairo::Context,
-    paint: &swaypplet_core::theme::Paint,
+    paint: &swaypplet_ui::theme::Paint,
     image: &Image,
     (sx, sy): (f64, f64),
     px: f64,
@@ -442,7 +442,7 @@ fn draw_color_loupe(
     }
 
     // Grid lines inside loupe: a shade of the pixels, whatever they are.
-    swaypplet_core::ui::set_source(cr, swaypplet_core::tokens::Rgb::BLACK, 0.25);
+    swaypplet_ui::ui::set_source(cr, swaypplet_tokens::Rgb::BLACK, 0.25);
     cr.set_line_width(0.5);
     for i in 0..=grid_dim {
         let pos = -radius + (i as f64 * cell_size);
@@ -456,7 +456,7 @@ fn draw_color_loupe(
     // 3. Highlight center targeted pixel
     let center_cell_x = lx - (cell_size / 2.0);
     let center_cell_y = ly - (cell_size / 2.0);
-    swaypplet_core::ui::set_source(cr, swaypplet_core::tokens::Rgb::WHITE, 1.0);
+    swaypplet_ui::ui::set_source(cr, swaypplet_tokens::Rgb::WHITE, 1.0);
     cr.set_line_width(1.5);
     cr.rectangle(center_cell_x, center_cell_y, cell_size, cell_size);
     let _ = cr.stroke();
@@ -464,7 +464,7 @@ fn draw_color_loupe(
     cr.restore().unwrap();
 
     // 4. Outer chrome rim (Liquid glass bevel outline)
-    swaypplet_core::ui::set_source(cr, paint.fg, 0.85);
+    swaypplet_ui::ui::set_source(cr, paint.fg, 0.85);
     cr.set_line_width(2.5);
     cr.arc(lx, ly, radius, 0.0, std::f64::consts::TAU);
     let _ = cr.stroke();
@@ -491,16 +491,16 @@ fn draw_color_loupe(
     let bx_pos = lx - (bw / 2.0);
     let by_pos = ly + radius + 8.0;
 
-    swaypplet_core::ui::set_source(cr, paint.ground, 0.95);
+    swaypplet_ui::ui::set_source(cr, paint.ground, 0.95);
     cr.rectangle(bx_pos, by_pos, bw, bh);
     let _ = cr.fill();
 
-    swaypplet_core::ui::set_source(cr, paint.accent, 1.0);
+    swaypplet_ui::ui::set_source(cr, paint.accent, 1.0);
     cr.set_line_width(1.0);
     cr.rectangle(bx_pos, by_pos, bw, bh);
     let _ = cr.stroke();
 
-    swaypplet_core::ui::set_source(cr, paint.fg, 1.0);
+    swaypplet_ui::ui::set_source(cr, paint.fg, 1.0);
     cr.move_to(bx_pos + 8.0, by_pos + bh - 6.0);
     let _ = cr.show_text(&hex_text);
 }
@@ -521,7 +521,7 @@ fn normalized(rect: &Option<Rect>, max_w: f64, max_h: f64) -> Option<Rect> {
 #[allow(clippy::too_many_arguments)]
 fn draw_size_chip(
     cr: &cairo::Context,
-    paint: &swaypplet_core::theme::Paint,
+    paint: &swaypplet_ui::theme::Paint,
     (sx, sy): (f64, f64),
     x: f64,
     y: f64,
@@ -552,10 +552,10 @@ fn draw_size_chip(
         y + 4.0
     };
 
-    swaypplet_core::ui::set_source(cr, paint.ground, 0.92);
+    swaypplet_ui::ui::set_source(cr, paint.ground, 0.92);
     cr.rectangle(cx, cy, cw, ch);
     let _ = cr.fill();
-    swaypplet_core::ui::set_source(cr, paint.fg, 1.0);
+    swaypplet_ui::ui::set_source(cr, paint.fg, 1.0);
     cr.move_to(cx + pad, cy + ch - 6.0);
     let _ = cr.show_text(&text);
 }

@@ -25,8 +25,8 @@ use gtk4::gdk;
 use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
-use swaypplet_core::anim::{self, SlideBin};
-use swaypplet_core::shell::{Namespace, Surface};
+use swaypplet_ui::shell::{Namespace, Surface};
+use swaypplet_ui::{anim, anim::SlideBin};
 
 /// A card, its surface, and the transitions both need. Cloning shares it;
 /// the surface is destroyed with the last handle, which is why the stack
@@ -68,7 +68,7 @@ impl CardSurface {
             .anchor(anchors)
             .width(width)
             .height(height)
-            .card(swaypplet_core::ui::Card::Floating)
+            .card(swaypplet_ui::ui::Card::Floating)
             // The entrance: the card travels in from the side as it fades.
             .slide(gtk4::Orientation::Horizontal, anim::SLIDE_PX)
             .wrap({

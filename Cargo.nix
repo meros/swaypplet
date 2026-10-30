@@ -53,10 +53,30 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "swaypplet-ambient" = rec {
+      packageId = "swaypplet-ambient";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-ambient";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "swaypplet-app" = rec {
       packageId = "swaypplet-app";
       build = internal.buildRustCrateWithFeatures {
         packageId = "swaypplet-app";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-audio" = rec {
+      packageId = "swaypplet-audio";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-audio";
       };
 
       # Debug support which might change between releases.
@@ -73,10 +93,80 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "swaypplet-core" = rec {
-      packageId = "swaypplet-core";
+    "swaypplet-base" = rec {
+      packageId = "swaypplet-base";
       build = internal.buildRustCrateWithFeatures {
-        packageId = "swaypplet-core";
+        packageId = "swaypplet-base";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-cast" = rec {
+      packageId = "swaypplet-cast";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-cast";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-devices" = rec {
+      packageId = "swaypplet-devices";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-devices";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-displays" = rec {
+      packageId = "swaypplet-displays";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-displays";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-dmenu" = rec {
+      packageId = "swaypplet-dmenu";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-dmenu";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-fp" = rec {
+      packageId = "swaypplet-fp";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-fp";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-greet" = rec {
+      packageId = "swaypplet-greet";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-greet";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-idle" = rec {
+      packageId = "swaypplet-idle";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-idle";
       };
 
       # Debug support which might change between releases.
@@ -93,6 +183,26 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "swaypplet-label" = rec {
+      packageId = "swaypplet-label";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-label";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-launcher" = rec {
+      packageId = "swaypplet-launcher";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-launcher";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "swaypplet-lock" = rec {
       packageId = "swaypplet-lock";
       build = internal.buildRustCrateWithFeatures {
@@ -103,10 +213,50 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "swaypplet-model" = rec {
+      packageId = "swaypplet-model";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-model";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "swaypplet-notifications" = rec {
       packageId = "swaypplet-notifications";
       build = internal.buildRustCrateWithFeatures {
         packageId = "swaypplet-notifications";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-notifyd" = rec {
+      packageId = "swaypplet-notifyd";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-notifyd";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-osd" = rec {
+      packageId = "swaypplet-osd";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-osd";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-panel" = rec {
+      packageId = "swaypplet-panel";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-panel";
       };
 
       # Debug support which might change between releases.
@@ -133,20 +283,160 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "swaypplet-services" = rec {
-      packageId = "swaypplet-services";
+    "swaypplet-settings" = rec {
+      packageId = "swaypplet-settings";
       build = internal.buildRustCrateWithFeatures {
-        packageId = "swaypplet-services";
+        packageId = "swaypplet-settings";
       };
 
       # Debug support which might change between releases.
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "swaypplet-settings" = rec {
-      packageId = "swaypplet-settings";
+    "swaypplet-settings-alerts" = rec {
+      packageId = "swaypplet-settings-alerts";
       build = internal.buildRustCrateWithFeatures {
-        packageId = "swaypplet-settings";
+        packageId = "swaypplet-settings-alerts";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-settings-bar" = rec {
+      packageId = "swaypplet-settings-bar";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-settings-bar";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-settings-displays" = rec {
+      packageId = "swaypplet-settings-displays";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-settings-displays";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-settings-glass" = rec {
+      packageId = "swaypplet-settings-glass";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-settings-glass";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-settings-idle" = rec {
+      packageId = "swaypplet-settings-idle";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-settings-idle";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-settings-input" = rec {
+      packageId = "swaypplet-settings-input";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-settings-input";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-settings-kit" = rec {
+      packageId = "swaypplet-settings-kit";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-settings-kit";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-settings-launcher" = rec {
+      packageId = "swaypplet-settings-launcher";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-settings-launcher";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-settings-look" = rec {
+      packageId = "swaypplet-settings-look";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-settings-look";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-settings-quality" = rec {
+      packageId = "swaypplet-settings-quality";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-settings-quality";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-settings-system" = rec {
+      packageId = "swaypplet-settings-system";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-settings-system";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-switch-user" = rec {
+      packageId = "swaypplet-switch-user";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-switch-user";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-system" = rec {
+      packageId = "swaypplet-system";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-system";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-tokens" = rec {
+      packageId = "swaypplet-tokens";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-tokens";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "swaypplet-ui" = rec {
+      packageId = "swaypplet-ui";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-ui";
       };
 
       # Debug support which might change between releases.
@@ -6441,12 +6731,36 @@ rec {
             packageId = "swaypplet-bar";
           }
           {
-            name = "swaypplet-core";
-            packageId = "swaypplet-core";
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-cast";
+            packageId = "swaypplet-cast";
+          }
+          {
+            name = "swaypplet-dmenu";
+            packageId = "swaypplet-dmenu";
+          }
+          {
+            name = "swaypplet-fp";
+            packageId = "swaypplet-fp";
+          }
+          {
+            name = "swaypplet-greet";
+            packageId = "swaypplet-greet";
+          }
+          {
+            name = "swaypplet-idle";
+            packageId = "swaypplet-idle";
           }
           {
             name = "swaypplet-lock";
             packageId = "swaypplet-lock";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
           }
           {
             name = "swaypplet-polkit";
@@ -6457,12 +6771,72 @@ rec {
             packageId = "swaypplet-screenshot";
           }
           {
-            name = "swaypplet-services";
-            packageId = "swaypplet-services";
+            name = "swaypplet-switch-user";
+            packageId = "swaypplet-switch-user";
+          }
+        ];
+
+      };
+      "swaypplet-ambient" = rec {
+        crateName = "swaypplet-ambient";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/ambient; };
+        libName = "swaypplet_ambient";
+        dependencies = [
+          {
+            name = "async-channel";
+            packageId = "async-channel";
           }
           {
-            name = "swaypplet-settings";
-            packageId = "swaypplet-settings";
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "gtk4-layer-shell";
+            packageId = "gtk4-layer-shell";
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+          {
+            name = "wayland-client";
+            packageId = "wayland-client";
+          }
+          {
+            name = "wayland-protocols-wlr";
+            packageId = "wayland-protocols-wlr";
+            features = [ "client" ];
           }
         ];
 
@@ -6474,14 +6848,6 @@ rec {
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/app; };
         libName = "swaypplet_app";
         dependencies = [
-          {
-            name = "async-channel";
-            packageId = "async-channel";
-          }
-          {
-            name = "gdk4";
-            packageId = "gdk4";
-          }
           {
             name = "gio";
             packageId = "gio";
@@ -6504,33 +6870,72 @@ rec {
             packageId = "log";
           }
           {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" ];
+            name = "swaypplet-ambient";
+            packageId = "swaypplet-ambient";
           }
           {
-            name = "serde_json";
-            packageId = "serde_json";
+            name = "swaypplet-audio";
+            packageId = "swaypplet-audio";
           }
           {
             name = "swaypplet-bar";
             packageId = "swaypplet-bar";
           }
           {
-            name = "swaypplet-core";
-            packageId = "swaypplet-core";
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-cast";
+            packageId = "swaypplet-cast";
+          }
+          {
+            name = "swaypplet-devices";
+            packageId = "swaypplet-devices";
+          }
+          {
+            name = "swaypplet-displays";
+            packageId = "swaypplet-displays";
+          }
+          {
+            name = "swaypplet-dmenu";
+            packageId = "swaypplet-dmenu";
           }
           {
             name = "swaypplet-jump";
             packageId = "swaypplet-jump";
           }
           {
+            name = "swaypplet-label";
+            packageId = "swaypplet-label";
+          }
+          {
+            name = "swaypplet-launcher";
+            packageId = "swaypplet-launcher";
+          }
+          {
             name = "swaypplet-lock";
             packageId = "swaypplet-lock";
           }
           {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
             name = "swaypplet-notifications";
             packageId = "swaypplet-notifications";
+          }
+          {
+            name = "swaypplet-notifyd";
+            packageId = "swaypplet-notifyd";
+          }
+          {
+            name = "swaypplet-osd";
+            packageId = "swaypplet-osd";
+          }
+          {
+            name = "swaypplet-panel";
+            packageId = "swaypplet-panel";
           }
           {
             name = "swaypplet-polkit";
@@ -6541,16 +6946,58 @@ rec {
             packageId = "swaypplet-screenshot";
           }
           {
-            name = "swaypplet-services";
-            packageId = "swaypplet-services";
-          }
-          {
             name = "swaypplet-settings";
             packageId = "swaypplet-settings";
           }
           {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+          {
             name = "swaypplet-widgets";
             packageId = "swaypplet-widgets";
+          }
+        ];
+
+      };
+      "swaypplet-audio" = rec {
+        crateName = "swaypplet-audio";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/audio; };
+        libName = "swaypplet_audio";
+        dependencies = [
+          {
+            name = "async-channel";
+            packageId = "async-channel";
+          }
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "libpulse-binding";
+            packageId = "libpulse-binding";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
           }
         ];
 
@@ -6588,20 +7035,44 @@ rec {
             packageId = "log";
           }
           {
-            name = "swaypplet-core";
-            packageId = "swaypplet-core";
+            name = "swaypplet-audio";
+            packageId = "swaypplet-audio";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-cast";
+            packageId = "swaypplet-cast";
+          }
+          {
+            name = "swaypplet-devices";
+            packageId = "swaypplet-devices";
           }
           {
             name = "swaypplet-jump";
             packageId = "swaypplet-jump";
           }
           {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
             name = "swaypplet-screenshot";
             packageId = "swaypplet-screenshot";
           }
           {
-            name = "swaypplet-services";
-            packageId = "swaypplet-services";
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
           }
           {
             name = "swaypplet-widgets";
@@ -6616,12 +7087,12 @@ rec {
         ];
 
       };
-      "swaypplet-core" = rec {
-        crateName = "swaypplet-core";
+      "swaypplet-base" = rec {
+        crateName = "swaypplet-base";
         version = "0.1.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/core; };
-        libName = "swaypplet_core";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/base; };
+        libName = "swaypplet_base";
         dependencies = [
           {
             name = "async-channel";
@@ -6662,17 +7133,6 @@ rec {
             packageId = "log";
           }
           {
-            name = "material-colors";
-            packageId = "material-colors";
-            usesDefaultFeatures = false;
-            features = [ "std" ];
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-            features = [ "derive" ];
-          }
-          {
             name = "serde_json";
             packageId = "serde_json";
           }
@@ -6695,8 +7155,386 @@ rec {
             features = [ "client" "staging" ];
           }
           {
-            name = "wayland-scanner";
-            packageId = "wayland-scanner";
+            name = "zbus";
+            packageId = "zbus 4.4.0";
+            usesDefaultFeatures = false;
+            features = [ "tokio" ];
+          }
+        ];
+
+      };
+      "swaypplet-cast" = rec {
+        crateName = "swaypplet-cast";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/cast; };
+        libName = "swaypplet_cast";
+        dependencies = [
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "rustls";
+            packageId = "rustls";
+            usesDefaultFeatures = false;
+            features = [ "ring" "std" "tls12" "logging" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "swayipc";
+            packageId = "swayipc";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-displays";
+            packageId = "swaypplet-displays";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt" "net" "time" "macros" "io-util" "sync" ];
+          }
+          {
+            name = "zbus";
+            packageId = "zbus 4.4.0";
+            usesDefaultFeatures = false;
+            features = [ "tokio" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "rcgen";
+            packageId = "rcgen";
+            usesDefaultFeatures = false;
+            features = [ "ring" "pem" ];
+          }
+        ];
+
+      };
+      "swaypplet-devices" = rec {
+        crateName = "swaypplet-devices";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/devices; };
+        libName = "swaypplet_devices";
+        dependencies = [
+          {
+            name = "async-channel";
+            packageId = "async-channel";
+          }
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "swayipc";
+            packageId = "swayipc";
+          }
+          {
+            name = "swaypplet-audio";
+            packageId = "swaypplet-audio";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt" "net" "time" "macros" "io-util" "sync" ];
+          }
+          {
+            name = "zbus";
+            packageId = "zbus 4.4.0";
+            usesDefaultFeatures = false;
+            features = [ "tokio" ];
+          }
+        ];
+
+      };
+      "swaypplet-displays" = rec {
+        crateName = "swaypplet-displays";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/displays; };
+        libName = "swaypplet_displays";
+        dependencies = [
+          {
+            name = "async-channel";
+            packageId = "async-channel";
+          }
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-notifyd";
+            packageId = "swaypplet-notifyd";
+          }
+          {
+            name = "wayland-client";
+            packageId = "wayland-client";
+          }
+          {
+            name = "wayland-protocols-wlr";
+            packageId = "wayland-protocols-wlr";
+            features = [ "client" ];
+          }
+        ];
+
+      };
+      "swaypplet-dmenu" = rec {
+        crateName = "swaypplet-dmenu";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/dmenu; };
+        libName = "swaypplet_dmenu";
+        dependencies = [
+          {
+            name = "async-channel";
+            packageId = "async-channel";
+          }
+          {
+            name = "gdk4";
+            packageId = "gdk4";
+          }
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "gtk4-layer-shell";
+            packageId = "gtk4-layer-shell";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+        ];
+
+      };
+      "swaypplet-fp" = rec {
+        crateName = "swaypplet-fp";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/fp; };
+        libName = "swaypplet_fp";
+        dependencies = [
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt" "net" "time" "macros" "io-util" "sync" ];
+          }
+          {
+            name = "zbus";
+            packageId = "zbus 4.4.0";
+            usesDefaultFeatures = false;
+            features = [ "tokio" ];
+          }
+        ];
+
+      };
+      "swaypplet-greet" = rec {
+        crateName = "swaypplet-greet";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/greet; };
+        libName = "swaypplet_greet";
+        dependencies = [
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "greetd_ipc";
+            packageId = "greetd_ipc";
+            features = [ "sync-codec" ];
+          }
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "gtk4-layer-shell";
+            packageId = "gtk4-layer-shell";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-fp";
+            packageId = "swaypplet-fp";
+          }
+          {
+            name = "swaypplet-lock";
+            packageId = "swaypplet-lock";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-switch-user";
+            packageId = "swaypplet-switch-user";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt" "net" "time" "macros" "io-util" "sync" ];
+          }
+        ];
+
+      };
+      "swaypplet-idle" = rec {
+        crateName = "swaypplet-idle";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/idle; };
+        libName = "swaypplet_idle";
+        dependencies = [
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt" "net" "time" "macros" "io-util" "sync" ];
+          }
+          {
+            name = "wayland-client";
+            packageId = "wayland-client";
+          }
+          {
+            name = "wayland-protocols";
+            packageId = "wayland-protocols";
+            features = [ "client" "staging" ];
           }
           {
             name = "zbus";
@@ -6762,8 +7600,20 @@ rec {
             packageId = "swayipc";
           }
           {
-            name = "swaypplet-core";
-            packageId = "swaypplet-core";
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
           }
           {
             name = "wayland-client";
@@ -6773,6 +7623,109 @@ rec {
             name = "wayland-protocols";
             packageId = "wayland-protocols";
             features = [ "client" "staging" ];
+          }
+        ];
+
+      };
+      "swaypplet-label" = rec {
+        crateName = "swaypplet-label";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/label; };
+        libName = "swaypplet_label";
+        dependencies = [
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "gtk4-layer-shell";
+            packageId = "gtk4-layer-shell";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+        ];
+
+      };
+      "swaypplet-launcher" = rec {
+        crateName = "swaypplet-launcher";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/launcher; };
+        libName = "swaypplet_launcher";
+        dependencies = [
+          {
+            name = "async-channel";
+            packageId = "async-channel";
+          }
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "gtk4-layer-shell";
+            packageId = "gtk4-layer-shell";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-jump";
+            packageId = "swaypplet-jump";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-settings-kit";
+            packageId = "swaypplet-settings-kit";
+          }
+          {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
           }
         ];
 
@@ -6797,11 +7750,6 @@ rec {
             packageId = "glib";
           }
           {
-            name = "greetd_ipc";
-            packageId = "greetd_ipc";
-            features = [ "sync-codec" ];
-          }
-          {
             name = "gtk4";
             packageId = "gtk4";
             features = [ "v4_14" ];
@@ -6816,16 +7764,69 @@ rec {
             features = [ "v1_2" ];
           }
           {
-            name = "libc";
-            packageId = "libc";
-          }
-          {
             name = "log";
             packageId = "log";
           }
           {
             name = "pam";
             packageId = "pam";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-fp";
+            packageId = "swaypplet-fp";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-switch-user";
+            packageId = "swaypplet-switch-user";
+          }
+          {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt" "net" "time" "macros" "io-util" "sync" ];
+          }
+          {
+            name = "zbus";
+            packageId = "zbus 4.4.0";
+            usesDefaultFeatures = false;
+            features = [ "tokio" ];
+          }
+        ];
+
+      };
+      "swaypplet-model" = rec {
+        crateName = "swaypplet-model";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/model; };
+        libName = "swaypplet_model";
+        dependencies = [
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "log";
+            packageId = "log";
           }
           {
             name = "serde";
@@ -6837,32 +7838,12 @@ rec {
             packageId = "serde_json";
           }
           {
-            name = "swaypplet-core";
-            packageId = "swaypplet-core";
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
           }
           {
-            name = "swaypplet-services";
-            packageId = "swaypplet-services";
-          }
-          {
-            name = "tokio";
-            packageId = "tokio";
-            features = [ "rt" "net" "time" "macros" "io-util" "sync" ];
-          }
-          {
-            name = "wayland-client";
-            packageId = "wayland-client";
-          }
-          {
-            name = "wayland-protocols";
-            packageId = "wayland-protocols";
-            features = [ "client" "staging" ];
-          }
-          {
-            name = "zbus";
-            packageId = "zbus 4.4.0";
-            usesDefaultFeatures = false;
-            features = [ "tokio" ];
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
           }
         ];
 
@@ -6900,12 +7881,187 @@ rec {
             packageId = "log";
           }
           {
-            name = "swaypplet-core";
-            packageId = "swaypplet-core";
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
           }
           {
-            name = "swaypplet-services";
-            packageId = "swaypplet-services";
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-notifyd";
+            packageId = "swaypplet-notifyd";
+          }
+          {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+        ];
+
+      };
+      "swaypplet-notifyd" = rec {
+        crateName = "swaypplet-notifyd";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/notifyd; };
+        libName = "swaypplet_notifyd";
+        dependencies = [
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "swaypplet-audio";
+            packageId = "swaypplet-audio";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt" "net" "time" "macros" "io-util" "sync" ];
+          }
+          {
+            name = "zbus";
+            packageId = "zbus 4.4.0";
+            usesDefaultFeatures = false;
+            features = [ "tokio" ];
+          }
+        ];
+
+      };
+      "swaypplet-osd" = rec {
+        crateName = "swaypplet-osd";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/osd; };
+        libName = "swaypplet_osd";
+        dependencies = [
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "gtk4-layer-shell";
+            packageId = "gtk4-layer-shell";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "swaypplet-audio";
+            packageId = "swaypplet-audio";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+        ];
+
+      };
+      "swaypplet-panel" = rec {
+        crateName = "swaypplet-panel";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/panel; };
+        libName = "swaypplet_panel";
+        dependencies = [
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "swaypplet-audio";
+            packageId = "swaypplet-audio";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-devices";
+            packageId = "swaypplet-devices";
+          }
+          {
+            name = "swaypplet-launcher";
+            packageId = "swaypplet-launcher";
+          }
+          {
+            name = "swaypplet-notifyd";
+            packageId = "swaypplet-notifyd";
+          }
+          {
+            name = "swaypplet-screenshot";
+            packageId = "swaypplet-screenshot";
+          }
+          {
+            name = "swaypplet-settings";
+            packageId = "swaypplet-settings";
+          }
+          {
+            name = "swaypplet-settings-kit";
+            packageId = "swaypplet-settings-kit";
+          }
+          {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+          {
+            name = "swaypplet-widgets";
+            packageId = "swaypplet-widgets";
           }
         ];
 
@@ -6955,8 +8111,20 @@ rec {
             packageId = "serde_json";
           }
           {
-            name = "swaypplet-core";
-            packageId = "swaypplet-core";
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
           }
           {
             name = "tokio";
@@ -7022,16 +8190,28 @@ rec {
             packageId = "serde_json";
           }
           {
-            name = "swaypplet-core";
-            packageId = "swaypplet-core";
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
           }
           {
             name = "swaypplet-jump";
             packageId = "swaypplet-jump";
           }
           {
-            name = "swaypplet-services";
-            packageId = "swaypplet-services";
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-notifyd";
+            packageId = "swaypplet-notifyd";
+          }
+          {
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
           }
           {
             name = "wayland-client";
@@ -7045,12 +8225,562 @@ rec {
         ];
 
       };
-      "swaypplet-services" = rec {
-        crateName = "swaypplet-services";
+      "swaypplet-settings" = rec {
+        crateName = "swaypplet-settings";
         version = "0.1.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/services; };
-        libName = "swaypplet_services";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/settings; };
+        libName = "swaypplet_settings";
+        dependencies = [
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "gtk4-layer-shell";
+            packageId = "gtk4-layer-shell";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-settings-alerts";
+            packageId = "swaypplet-settings-alerts";
+          }
+          {
+            name = "swaypplet-settings-bar";
+            packageId = "swaypplet-settings-bar";
+          }
+          {
+            name = "swaypplet-settings-displays";
+            packageId = "swaypplet-settings-displays";
+          }
+          {
+            name = "swaypplet-settings-glass";
+            packageId = "swaypplet-settings-glass";
+          }
+          {
+            name = "swaypplet-settings-idle";
+            packageId = "swaypplet-settings-idle";
+          }
+          {
+            name = "swaypplet-settings-input";
+            packageId = "swaypplet-settings-input";
+          }
+          {
+            name = "swaypplet-settings-kit";
+            packageId = "swaypplet-settings-kit";
+          }
+          {
+            name = "swaypplet-settings-launcher";
+            packageId = "swaypplet-settings-launcher";
+          }
+          {
+            name = "swaypplet-settings-look";
+            packageId = "swaypplet-settings-look";
+          }
+          {
+            name = "swaypplet-settings-quality";
+            packageId = "swaypplet-settings-quality";
+          }
+          {
+            name = "swaypplet-settings-system";
+            packageId = "swaypplet-settings-system";
+          }
+          {
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+        ];
+
+      };
+      "swaypplet-settings-alerts" = rec {
+        crateName = "swaypplet-settings-alerts";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/settings-alerts; };
+        libName = "swaypplet_settings_alerts";
+        dependencies = [
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-settings-kit";
+            packageId = "swaypplet-settings-kit";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+        ];
+
+      };
+      "swaypplet-settings-bar" = rec {
+        crateName = "swaypplet-settings-bar";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/settings-bar; };
+        libName = "swaypplet_settings_bar";
+        dependencies = [
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-settings-kit";
+            packageId = "swaypplet-settings-kit";
+          }
+        ];
+
+      };
+      "swaypplet-settings-displays" = rec {
+        crateName = "swaypplet-settings-displays";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/settings-displays; };
+        libName = "swaypplet_settings_displays";
+        dependencies = [
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-devices";
+            packageId = "swaypplet-devices";
+          }
+          {
+            name = "swaypplet-displays";
+            packageId = "swaypplet-displays";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-settings-kit";
+            packageId = "swaypplet-settings-kit";
+          }
+          {
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+          {
+            name = "swaypplet-widgets";
+            packageId = "swaypplet-widgets";
+          }
+        ];
+
+      };
+      "swaypplet-settings-glass" = rec {
+        crateName = "swaypplet-settings-glass";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/settings-glass; };
+        libName = "swaypplet_settings_glass";
+        dependencies = [
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-settings-kit";
+            packageId = "swaypplet-settings-kit";
+          }
+          {
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+        ];
+
+      };
+      "swaypplet-settings-idle" = rec {
+        crateName = "swaypplet-settings-idle";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/settings-idle; };
+        libName = "swaypplet_settings_idle";
+        dependencies = [
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-settings-kit";
+            packageId = "swaypplet-settings-kit";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+        ];
+
+      };
+      "swaypplet-settings-input" = rec {
+        crateName = "swaypplet-settings-input";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/settings-input; };
+        libName = "swaypplet_settings_input";
+        dependencies = [
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "swaypplet-devices";
+            packageId = "swaypplet-devices";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-settings-kit";
+            packageId = "swaypplet-settings-kit";
+          }
+          {
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+          {
+            name = "swaypplet-widgets";
+            packageId = "swaypplet-widgets";
+          }
+        ];
+
+      };
+      "swaypplet-settings-kit" = rec {
+        crateName = "swaypplet-settings-kit";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/settings-kit; };
+        libName = "swaypplet_settings_kit";
+        dependencies = [
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+        ];
+
+      };
+      "swaypplet-settings-launcher" = rec {
+        crateName = "swaypplet-settings-launcher";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/settings-launcher; };
+        libName = "swaypplet_settings_launcher";
+        dependencies = [
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "swaypplet-launcher";
+            packageId = "swaypplet-launcher";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-settings-kit";
+            packageId = "swaypplet-settings-kit";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+        ];
+
+      };
+      "swaypplet-settings-look" = rec {
+        crateName = "swaypplet-settings-look";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/settings-look; };
+        libName = "swaypplet_settings_look";
+        dependencies = [
+          {
+            name = "gio";
+            packageId = "gio";
+          }
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
+          }
+          {
+            name = "swaypplet-settings-kit";
+            packageId = "swaypplet-settings-kit";
+          }
+          {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+        ];
+
+      };
+      "swaypplet-settings-quality" = rec {
+        crateName = "swaypplet-settings-quality";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/settings-quality; };
+        libName = "swaypplet_settings_quality";
+        dependencies = [
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-screenshot";
+            packageId = "swaypplet-screenshot";
+          }
+          {
+            name = "swaypplet-settings-kit";
+            packageId = "swaypplet-settings-kit";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+        ];
+
+      };
+      "swaypplet-settings-system" = rec {
+        crateName = "swaypplet-settings-system";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/settings-system; };
+        libName = "swaypplet_settings_system";
+        dependencies = [
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-settings-kit";
+            packageId = "swaypplet-settings-kit";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
+          }
+        ];
+
+      };
+      "swaypplet-switch-user" = rec {
+        crateName = "swaypplet-switch-user";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/switch-user; };
+        libName = "swaypplet_switch_user";
+        dependencies = [
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-fp";
+            packageId = "swaypplet-fp";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            features = [ "rt" "net" "time" "macros" "io-util" "sync" ];
+          }
+          {
+            name = "zbus";
+            packageId = "zbus 4.4.0";
+            usesDefaultFeatures = false;
+            features = [ "tokio" ];
+          }
+        ];
+
+      };
+      "swaypplet-system" = rec {
+        crateName = "swaypplet-system";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/system; };
+        libName = "swaypplet_system";
         dependencies = [
           {
             name = "async-channel";
@@ -7070,16 +8800,8 @@ rec {
             features = [ "v4_14" ];
           }
           {
-            name = "gtk4-layer-shell";
-            packageId = "gtk4-layer-shell";
-          }
-          {
             name = "libc";
             packageId = "libc";
-          }
-          {
-            name = "libpulse-binding";
-            packageId = "libpulse-binding";
           }
           {
             name = "log";
@@ -7088,12 +8810,6 @@ rec {
           {
             name = "protobuf";
             packageId = "protobuf";
-          }
-          {
-            name = "rustls";
-            packageId = "rustls";
-            usesDefaultFeatures = false;
-            features = [ "ring" "std" "tls12" "logging" ];
           }
           {
             name = "serde";
@@ -7109,8 +8825,8 @@ rec {
             packageId = "swayipc";
           }
           {
-            name = "swaypplet-core";
-            packageId = "swaypplet-core";
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
           }
           {
             name = "system-tray";
@@ -7133,11 +8849,6 @@ rec {
             features = [ "client" "staging" ];
           }
           {
-            name = "wayland-protocols-wlr";
-            packageId = "wayland-protocols-wlr";
-            features = [ "client" ];
-          }
-          {
             name = "zbus";
             packageId = "zbus 4.4.0";
             usesDefaultFeatures = false;
@@ -7150,30 +8861,42 @@ rec {
             packageId = "protobuf-codegen";
           }
         ];
-        devDependencies = [
+
+      };
+      "swaypplet-tokens" = rec {
+        crateName = "swaypplet-tokens";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/tokens; };
+        libName = "swaypplet_tokens";
+        dependencies = [
           {
-            name = "rcgen";
-            packageId = "rcgen";
-            usesDefaultFeatures = false;
-            features = [ "ring" "pem" ];
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
           }
         ];
 
       };
-      "swaypplet-settings" = rec {
-        crateName = "swaypplet-settings";
+      "swaypplet-ui" = rec {
+        crateName = "swaypplet-ui";
         version = "0.1.0";
         edition = "2024";
-        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/settings; };
-        libName = "swaypplet_settings";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/ui; };
+        libName = "swaypplet_ui";
         dependencies = [
           {
             name = "async-channel";
             packageId = "async-channel";
           }
           {
-            name = "cairo-rs";
-            packageId = "cairo-rs";
+            name = "gdk4";
+            packageId = "gdk4";
+          }
+          {
+            name = "gdk4-wayland";
+            packageId = "gdk4-wayland";
+            features = [ "wayland_crate" ];
           }
           {
             name = "gio";
@@ -7193,12 +8916,14 @@ rec {
             packageId = "gtk4-layer-shell";
           }
           {
-            name = "libc";
-            packageId = "libc";
-          }
-          {
             name = "log";
             packageId = "log";
+          }
+          {
+            name = "material-colors";
+            packageId = "material-colors";
+            usesDefaultFeatures = false;
+            features = [ "std" ];
           }
           {
             name = "serde";
@@ -7210,24 +8935,30 @@ rec {
             packageId = "serde_json";
           }
           {
-            name = "swaypplet-core";
-            packageId = "swaypplet-core";
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
           }
           {
-            name = "swaypplet-jump";
-            packageId = "swaypplet-jump";
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
           }
           {
-            name = "swaypplet-screenshot";
-            packageId = "swaypplet-screenshot";
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
           }
           {
-            name = "swaypplet-services";
-            packageId = "swaypplet-services";
+            name = "wayland-client";
+            packageId = "wayland-client";
           }
           {
-            name = "swaypplet-widgets";
-            packageId = "swaypplet-widgets";
+            name = "wayland-scanner";
+            packageId = "wayland-scanner";
+          }
+          {
+            name = "zbus";
+            packageId = "zbus 4.4.0";
+            usesDefaultFeatures = false;
+            features = [ "tokio" ];
           }
         ];
 
@@ -7257,20 +8988,56 @@ rec {
             packageId = "log";
           }
           {
-            name = "swaypplet-core";
-            packageId = "swaypplet-core";
+            name = "swaypplet-ambient";
+            packageId = "swaypplet-ambient";
           }
           {
-            name = "swaypplet-lock";
-            packageId = "swaypplet-lock";
+            name = "swaypplet-audio";
+            packageId = "swaypplet-audio";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-cast";
+            packageId = "swaypplet-cast";
+          }
+          {
+            name = "swaypplet-devices";
+            packageId = "swaypplet-devices";
+          }
+          {
+            name = "swaypplet-displays";
+            packageId = "swaypplet-displays";
+          }
+          {
+            name = "swaypplet-model";
+            packageId = "swaypplet-model";
           }
           {
             name = "swaypplet-notifications";
             packageId = "swaypplet-notifications";
           }
           {
-            name = "swaypplet-services";
-            packageId = "swaypplet-services";
+            name = "swaypplet-notifyd";
+            packageId = "swaypplet-notifyd";
+          }
+          {
+            name = "swaypplet-switch-user";
+            packageId = "swaypplet-switch-user";
+          }
+          {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
           }
         ];
 

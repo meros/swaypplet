@@ -35,11 +35,11 @@ use gtk4::gdk;
 use gtk4::prelude::*;
 use gtk4_layer_shell::{Edge, Layer};
 
-use swaypplet_core::anim;
-use swaypplet_core::shell::{Namespace, PerMonitor, Surface};
-use swaypplet_core::sway::ipc::SwayService;
-use swaypplet_core::theme;
-use swaypplet_services::task_state::TaskStateService;
+use swaypplet_base::sway::ipc::SwayService;
+use swaypplet_system::task_state::TaskStateService;
+use swaypplet_ui::anim;
+use swaypplet_ui::shell::{Namespace, PerMonitor, Surface};
+use swaypplet_ui::theme;
 
 const APP_ID: &str = "dev.swaypplet.bar";
 
@@ -58,15 +58,15 @@ pub struct BarManager {
     sway: Rc<SwayService>,
     /// One sound-server connection per bar process; the hazard lane's
     /// microphone glyph is its only reader here.
-    audio: Rc<swaypplet_services::audio::AudioService>,
+    audio: Rc<swaypplet_audio::AudioService>,
     tasks: Rc<TaskStateService>,
     /// One status watcher per bar process; every output's backup segment
     /// reads the same snapshot.
-    backup: Rc<swaypplet_services::backup::BackupStatusService>,
+    backup: Rc<swaypplet_system::backup::BackupStatusService>,
     /// One MPRIS connection per bar process; every output's media mark
     /// reads the same snapshot.
-    mpris: Rc<swaypplet_services::mpris::MprisService>,
-    tray: Rc<swaypplet_services::tray::TrayService>,
+    mpris: Rc<swaypplet_system::mpris::MprisService>,
+    tray: Rc<swaypplet_system::tray::TrayService>,
     /// What the start button does. In-process hosting passes a direct
     /// `panel.toggle()`; the standalone bar passes the cross-process
     /// SIGUSR1 fallback (see `start::toggle_panel_fallback`).
@@ -81,7 +81,7 @@ impl BarManager {
     pub fn new(
         app: &gtk4::Application,
         sway: Rc<SwayService>,
-        audio: Rc<swaypplet_services::audio::AudioService>,
+        audio: Rc<swaypplet_audio::AudioService>,
         toggle_panel: Rc<dyn Fn()>,
         open_displays: Option<Rc<dyn Fn()>>,
     ) -> Rc<Self> {
@@ -92,9 +92,9 @@ impl BarManager {
             sway,
             audio,
             tasks,
-            backup: swaypplet_services::backup::BackupStatusService::start(),
-            mpris: swaypplet_services::mpris::MprisService::start(),
-            tray: swaypplet_services::tray::TrayService::start(),
+            backup: swaypplet_system::backup::BackupStatusService::start(),
+            mpris: swaypplet_system::mpris::MprisService::start(),
+            tray: swaypplet_system::tray::TrayService::start(),
             toggle_panel,
             open_displays,
         });
@@ -103,10 +103,7 @@ impl BarManager {
         // the set, and the set's build must not own the manager.
         // None on an extra screen unless switched on (`shell::extra`); the
         // extra-screen hazard lives on the bars of the person's own screens.
-        swaypplet_core::shell::extra::follow(
-            &manager.windows,
-            swaypplet_core::shell::extra::Kind::Bar,
-        );
+        swaypplet_ui::shell::extra::follow(&manager.windows, swaypplet_ui::shell::extra::Kind::Bar);
         let weak = Rc::downgrade(&manager);
         manager.windows.watch(move |monitor| {
             let manager = weak.upgrade().expect("the bar manager outlives its bars");
@@ -158,7 +155,7 @@ fn build_bar_window(bar: &BarManager, monitor: &gdk::Monitor) -> (Surface, decis
         .margin(Edge::Left, 4)
         .height(38)
         .exclusive()
-        .card(swaypplet_core::ui::Card::Thin)
+        .card(swaypplet_ui::ui::Card::Thin)
         // Enter: fade + short settle up from below the surface edge, per bar
         // window (so hotplugged outputs get it too).
         .slide(gtk4::Orientation::Vertical, anim::SLIDE_PX)
@@ -215,7 +212,7 @@ fn build_bar_window(bar: &BarManager, monitor: &gdk::Monitor) -> (Surface, decis
     // Battery + board + clock fuse into one segmented track (waybar's
     // group/right-track); a batteryless machine skips the segment so the
     // board keeps the rounded left end.
-    let track = swaypplet_core::ui::segmented();
+    let track = swaypplet_ui::ui::segmented();
     track.add_css_class("bar-track");
     if let Some(bat) = battery::build({
         // The decision slot's battery occupant rides this segment's 30 s
@@ -283,12 +280,12 @@ fn build_bar_window(bar: &BarManager, monitor: &gdk::Monitor) -> (Surface, decis
 /// segments alive through the observer list.
 fn follow_setting<W: IsA<gtk4::Widget>>(
     widget: W,
-    wanted: fn(&swaypplet_core::settings::store::Bar) -> bool,
+    wanted: fn(&swaypplet_model::store::Bar) -> bool,
 ) -> W {
-    let shown = move || swaypplet_core::settings::store::with(|s| wanted(&s.bar()));
+    let shown = move || swaypplet_model::store::with(|s| wanted(&s.bar()));
     widget.set_visible(shown());
     let weak = widget.downgrade();
-    swaypplet_core::settings::store::observe(move || {
+    swaypplet_model::store::observe(move || {
         if let Some(widget) = weak.upgrade() {
             widget.set_visible(shown());
         }
@@ -315,7 +312,7 @@ pub fn run() {
         // Next to a live panel, which owns the theme and sends the glass:
         // this bar draws the panel's answer and follows it.
         theme::follow();
-        swaypplet_core::settings::store::init();
+        swaypplet_model::store::init();
         // Keeps itself alive through its main-context event loop.
         let sway = SwayService::start();
         // The standalone bar starts its own sound-server connection: the
@@ -324,7 +321,7 @@ pub fn run() {
         *slot = Some(BarManager::new(
             app,
             sway,
-            swaypplet_services::audio::AudioService::start(),
+            swaypplet_audio::AudioService::start(),
             Rc::new(start::toggle_panel_fallback),
             None,
         ));

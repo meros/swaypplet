@@ -26,12 +26,12 @@ use std::time::{Duration, SystemTime};
 use gtk4::prelude::*;
 
 use super::popover::TaskPopover;
-use swaypplet_core::anim::{self, SlideBin};
-use swaypplet_core::sway::ipc::SwayService;
-use swaypplet_core::ui;
-use swaypplet_services::task_state::{
+use swaypplet_base::sway::ipc::SwayService;
+use swaypplet_system::task_state::{
     Activity, SessionState, TaskState, TaskStateService, task_of_name,
 };
+use swaypplet_ui::ui;
+use swaypplet_ui::{anim, anim::SlideBin};
 
 /// Age chip appears once a wait is no longer a blip.
 const CHIP_AFTER: Duration = Duration::from_secs(2 * 60);
@@ -169,14 +169,14 @@ fn bay_view(n: u8, task: &TaskState, local: bool, now: SystemTime) -> BayView {
 
 /// A missing or future mtime (suspend skew) counts as age zero, matching
 /// the service's age-timer rule. Shared with the decision slot.
-pub fn session_age(s: &SessionState, now: SystemTime) -> Duration {
+pub(crate) fn session_age(s: &SessionState, now: SystemTime) -> Duration {
     s.status_mtime
         .and_then(|m| now.duration_since(m).ok())
         .unwrap_or(Duration::ZERO)
 }
 
 /// `None` below the 2 min threshold. Shared with the decision slot.
-pub fn chip_label(age: Duration) -> Option<String> {
+pub(crate) fn chip_label(age: Duration) -> Option<String> {
     let mins = age.as_secs() / 60;
     (age >= CHIP_AFTER).then(|| {
         if mins < 60 {
@@ -313,7 +313,7 @@ impl Bay {
         chip.add_css_class("bar-bay-chip");
         let chip_reveal = ui::revealer(
             gtk4::RevealerTransitionType::Crossfade,
-            swaypplet_core::tokens::motion::EXPAND,
+            swaypplet_tokens::motion::EXPAND,
         );
         chip_reveal.set_child(Some(&chip));
         let content = gtk4::Box::builder()
@@ -581,7 +581,7 @@ mod tests {
         let now = SystemTime::now();
         let with_progress = |acked| {
             let mut s = session(Activity::Working, acked, None, now);
-            s.progress = Some(swaypplet_services::task_state::Progress {
+            s.progress = Some(swaypplet_system::task_state::Progress {
                 raw: "1/5 ETA ~15m".into(),
                 fraction: Some((1, 5)),
             });

@@ -11,11 +11,12 @@
 use gtk4::prelude::*;
 
 use crate::power::hide_panel_for_widget;
-use swaypplet_core::spawn::spawn_work;
-use swaypplet_core::ui;
-use swaypplet_core::ui::avatar;
-use swaypplet_core::ui::icons;
-use swaypplet_lock::switch_user::{self, SwitchUser};
+use swaypplet_base::spawn::spawn_work;
+use swaypplet_switch_user as switch_user;
+use swaypplet_switch_user::SwitchUser;
+use swaypplet_ui::ui;
+use swaypplet_ui::ui::avatar;
+use swaypplet_ui::ui::icons;
 
 /// Avatar diameter for panel rows.
 const AVATAR_SIZE: i32 = 30;

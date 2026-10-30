@@ -36,7 +36,7 @@ use super::status::{Issue, Pr};
 /// it. The panel runs as a systemd user unit, whose `PATH` need not include
 /// the user's profile.
 pub fn which(name: &str) -> Option<PathBuf> {
-    let user = std::env::var("USER").unwrap_or_default();
+    let user = swaypplet_base::user::current().unwrap_or_default();
     let home = super::home();
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect())

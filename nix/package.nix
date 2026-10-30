@@ -72,7 +72,7 @@ let
     ];
     buildInputs = (attrs.buildInputs or [ ]) ++ runtimeDeps;
     # The commit the Settings · System tab says is running and a crash report
-    # names (crates/core/src/build.rs).
+    # names (crates/base/src/build.rs).
     SWAYPPLET_REV = rev;
     # Installed after the fixup phase, so wrapGAppsHook wraps only the
     # binary. The scripts exec it; wrapping each of them too cost 0.8 s
@@ -104,10 +104,10 @@ let
     // (
       if name == "swaypplet" then
         bin merged
-      else if name == "swaypplet-core" then
+      else if name == "swaypplet-model" then
         opts ownOpts
         // {
-          # The xkb layout list the Input tab offers (crates/core/src/settings/xkb.rs).
+          # The xkb layout list the Input tab offers (crates/model/src/xkb.rs).
           SWAYPPLET_XKB_RULES = "${xkeyboard_config}/share/X11/xkb/rules/evdev.lst";
         }
       else if isOwn name then

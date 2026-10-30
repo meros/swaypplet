@@ -18,10 +18,13 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use crate::screenshot::capture::Image;
-use swaypplet_core::shell::{Namespace, Surface};
-use swaypplet_core::ui::{self, Kind, Text, Tone};
-use swaypplet_services::notifications::store::{StoreRef, store_add};
-use swaypplet_services::notifications::{Notification, Urgency};
+use swaypplet_notifyd::store::{StoreRef, store_add};
+use swaypplet_notifyd::{Notification, Urgency};
+use swaypplet_ui::shell::{Namespace, Surface};
+use swaypplet_ui::{
+    ui,
+    ui::{Kind, Text, Tone},
+};
 
 use super::body::{self, Output, Report};
 
@@ -101,9 +104,9 @@ pub fn start(app: &gtk4::Application, store: &StoreRef, area: Area) {
             crate::screenshot::select::Mode::Region,
             move |selection| then(selection.map(|s| s.image)),
         ),
-        Area::Screen => swaypplet_core::spawn::spawn_work(
+        Area::Screen => swaypplet_base::spawn::spawn_work(
             || {
-                let output = swaypplet_core::sway::ipc::focused_output()?;
+                let output = swaypplet_base::sway::ipc::focused_output()?;
                 crate::screenshot::capture::output(&output)
                     .map_err(|e| log::warn!("report: {e}"))
                     .ok()
@@ -321,9 +324,9 @@ pub fn send(store: &StoreRef, draft: Draft) {
     } else {
         Vec::new()
     };
-    let mode = match swaypplet_core::theme::shown().mode {
-        swaypplet_core::tokens::Mode::Dark => "dark",
-        swaypplet_core::tokens::Mode::Light => "light",
+    let mode = match swaypplet_ui::theme::shown().mode {
+        swaypplet_tokens::Mode::Dark => "dark",
+        swaypplet_tokens::Mode::Light => "light",
     }
     .to_string();
     let Draft {
@@ -331,7 +334,7 @@ pub fn send(store: &StoreRef, draft: Draft) {
     } = draft;
 
     let store = store.clone();
-    swaypplet_core::spawn::spawn_work(
+    swaypplet_base::spawn::spawn_work(
         move || file(description, image, log, mode),
         move |result| {
             let (summary, body, actions, url) = match result {
@@ -408,7 +411,7 @@ fn file(
 /// The outputs as sway reports them: fractional scale included, which GDK
 /// 4.12 rounds.
 fn outputs() -> Vec<Output> {
-    let Ok(mut conn) = swaypplet_core::sway::ipc::connect() else {
+    let Ok(mut conn) = swaypplet_base::sway::ipc::connect() else {
         return Vec::new();
     };
     conn.get_outputs()

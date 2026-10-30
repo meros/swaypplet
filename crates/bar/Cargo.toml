@@ -5,8 +5,14 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-swaypplet-core.workspace = true
-swaypplet-services.workspace = true
+swaypplet-base.workspace = true
+swaypplet-tokens.workspace = true
+swaypplet-model.workspace = true
+swaypplet-ui.workspace = true
+swaypplet-system.workspace = true
+swaypplet-audio.workspace = true
+swaypplet-devices.workspace = true
+swaypplet-cast.workspace = true
 swaypplet-jump.workspace = true
 swaypplet-screenshot.workspace = true
 swaypplet-widgets.workspace = true

@@ -1,6 +1,6 @@
 //! Clipboard history section.
 //!
-//! The rows come from [`swaypplet_services::clipboard`], which watches the selection over
+//! The rows come from [`swaypplet_system::clipboard`], which watches the selection over
 //! `ext-data-control-v1` in this process. This used to shell out to
 //! `cliphist list` on every open, against a database no daemon was filling —
 //! see that module's header for what that cost.
@@ -9,9 +9,9 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use swaypplet_core::ui;
-use swaypplet_core::ui::icons;
-use swaypplet_services::clipboard::{ClipboardService, EntryView};
+use swaypplet_system::clipboard::{ClipboardService, EntryView};
+use swaypplet_ui::ui;
+use swaypplet_ui::ui::icons;
 
 // ── ClipboardSection ──────────────────────────────────────────────────────────
 
@@ -48,7 +48,7 @@ impl ClipboardSection {
             clear_btn,
         });
 
-        let service = swaypplet_services::clipboard::service();
+        let service = swaypplet_system::clipboard::service();
 
         if let Some(svc) = &service {
             {
@@ -128,7 +128,7 @@ impl ClipboardSection {
         // nothing to wait for and nothing to spawn.
         let id = entry.id;
         btn.connect_clicked(move |_| {
-            if let Some(svc) = swaypplet_services::clipboard::service() {
+            if let Some(svc) = swaypplet_system::clipboard::service() {
                 svc.restore(id);
             }
             w.section.set_open(false);

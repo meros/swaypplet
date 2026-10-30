@@ -94,7 +94,8 @@ impl Agent {
                 }
                 let uid_value = ident_details.get("uid")?;
                 let uid = u32::try_from(&**uid_value).ok()?;
-                let username = lookup_username(uid).unwrap_or_else(|| format!("uid {uid}"));
+                let username =
+                    swaypplet_base::user::name_of(uid).unwrap_or_else(|| format!("uid {uid}"));
                 Some(ResolvedIdentity { username, uid })
             })
             .collect();
@@ -154,7 +155,7 @@ impl Agent {
 pub fn start() -> async_channel::Receiver<AgentEvent> {
     let (sender, rx) = async_channel::unbounded::<AgentEvent>();
 
-    swaypplet_core::spawn::spawn_tokio_thread("polkit-agent", async move {
+    swaypplet_base::spawn::spawn_tokio_thread("polkit-agent", async move {
         if let Err(e) = run(sender).await {
             log::error!("polkit agent thread exited: {e}");
         }
@@ -250,30 +251,4 @@ async fn register(conn: &zbus::Connection, session_id: &str) -> zbus::Result<()>
 
     log::info!("polkit agent registered at {AGENT_OBJECT_PATH}");
     Ok(())
-}
-
-/// Resolve a uid to a login name via getpwuid_r.
-fn lookup_username(uid: u32) -> Option<String> {
-    use std::ffi::CStr;
-    let mut buf = vec![0u8; 1024];
-    let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
-    let mut result: *mut libc::passwd = std::ptr::null_mut();
-    let rc = unsafe {
-        libc::getpwuid_r(
-            uid as libc::uid_t,
-            &mut pwd,
-            buf.as_mut_ptr() as *mut _,
-            buf.len(),
-            &mut result,
-        )
-    };
-    if rc != 0 || result.is_null() {
-        return None;
-    }
-    unsafe {
-        if pwd.pw_name.is_null() {
-            return None;
-        }
-        Some(CStr::from_ptr(pwd.pw_name).to_string_lossy().into_owned())
-    }
 }

@@ -12,10 +12,11 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use swaypplet_core::ui;
-use swaypplet_services::power::{
-    self, BatteryState, ChargeState, Profile, battery_icon, battery_summary_text,
+use swaypplet_system::{
+    power,
+    power::{BatteryState, ChargeState, Profile, battery_icon, battery_summary_text},
 };
+use swaypplet_ui::ui;
 
 /// The widgets that follow the battery.
 struct BatteryView {
@@ -140,10 +141,10 @@ impl Fixture {
 impl PowerSection {
     pub fn new() -> Self {
         let fixture = Fixture::from_env();
-        let has_battery = fixture.is_some() || swaypplet_services::battery::start();
+        let has_battery = fixture.is_some() || swaypplet_system::battery::start();
         let bat = fixture
             .map(Fixture::battery)
-            .or_else(swaypplet_services::battery::current);
+            .or_else(swaypplet_system::battery::current);
 
         let (icon, summary) = match &bat {
             Some(b) => (
@@ -203,8 +204,8 @@ impl PowerSection {
             let view = battery.clone().expect("checked");
             let icon = section.icon.clone();
             let summary = section.summary.clone();
-            swaypplet_services::battery::observe(move || {
-                if let Some(b) = swaypplet_services::battery::current() {
+            swaypplet_system::battery::observe(move || {
+                if let Some(b) = swaypplet_system::battery::current() {
                     view.apply(&b);
                     icon.set_label(battery_icon(b.capacity, b.charging));
                     summary.set_label(&battery_summary_text(&b));
@@ -243,7 +244,7 @@ impl PowerSection {
 }
 
 fn load_profile(view: Rc<ProfileView>) {
-    swaypplet_core::spawn::spawn_work(power::read_profile, move |p| show_profile(&view, &p, false));
+    swaypplet_base::spawn::spawn_work(power::read_profile, move |p| show_profile(&view, &p, false));
 }
 
 /// Draw `p`. The choice exists only when the daemon owns the profile; a
@@ -296,7 +297,7 @@ fn show_profile(view: &Rc<ProfileView>, p: &Profile, inert: bool) {
                 let view = view.clone();
                 let choice = choice.clone();
                 let asked = choice.clone();
-                swaypplet_core::spawn::spawn_work(
+                swaypplet_base::spawn::spawn_work(
                     move || power::set_profile(&asked),
                     move |ok| {
                         if !ok {
@@ -336,7 +337,7 @@ fn charge_status(bat: &BatteryState) -> Option<ui::Status> {
 
 /// Walk up the widget hierarchy to find the containing `gtk4::Window` and
 /// hide it. Used by Lock and Suspend to close the panel before acting.
-pub fn hide_panel_for_widget(widget: &gtk4::Widget) {
+pub(crate) fn hide_panel_for_widget(widget: &gtk4::Widget) {
     if let Some(root) = widget.root()
         && let Ok(window) = root.downcast::<gtk4::Window>()
     {

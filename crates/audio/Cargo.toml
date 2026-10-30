@@ -1,0 +1,16 @@
+[package]
+name = "swaypplet-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+swaypplet-base.workspace = true
+swaypplet-model.workspace = true
+glib.workspace = true
+async-channel.workspace = true
+log.workspace = true
+libpulse-binding.workspace = true
+
+[lints]
+workspace = true

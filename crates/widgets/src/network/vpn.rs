@@ -8,8 +8,8 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{ListBox, ListBoxRow, Switch};
 
-use swaypplet_core::ui;
-use swaypplet_services::network::{ICON_VPN, VpnConnection};
+use swaypplet_devices::network::{ICON_VPN, VpnConnection};
+use swaypplet_ui::ui;
 
 use super::set_signal_glyph;
 

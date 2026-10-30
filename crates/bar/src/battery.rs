@@ -21,13 +21,16 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 
 use super::popover;
-use swaypplet_core::anim::{self, SlideBin};
-use swaypplet_core::ui;
-use swaypplet_services::power::{self, BatteryState, ChargeState};
+use swaypplet_system::{
+    power,
+    power::{BatteryState, ChargeState},
+};
+use swaypplet_ui::ui;
+use swaypplet_ui::{anim, anim::SlideBin};
 
 const WARNING_PCT: u8 = 30;
 /// Shared with the decision slot's battery occupant (bar/decision.rs).
-pub const CRITICAL_PCT: u8 = 15;
+pub(crate) const CRITICAL_PCT: u8 = 15;
 const ICON_CHARGING: &str = "󰂄";
 /// Plugged in with no current flowing: full, or holding at a charge
 /// threshold. A plug reads as "on mains" without implying a direction,
@@ -78,7 +81,7 @@ struct Ui {
 /// same 30 s poll (it feeds the decision slot's battery occupant, which
 /// adds no poll of its own).
 pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
-    if !swaypplet_services::battery::start() {
+    if !swaypplet_system::battery::start() {
         return None;
     }
 
@@ -88,7 +91,7 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
         .build();
     let pct_reveal = ui::revealer(
         gtk4::RevealerTransitionType::SlideRight,
-        swaypplet_core::tokens::motion::EXPAND,
+        swaypplet_tokens::motion::EXPAND,
     );
     pct_reveal.set_child(Some(&pct));
     // Time estimate beside the glyph (time-to-full charging, time-to-empty
@@ -101,7 +104,7 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
     ui::set_tone(&eta, ui::Tone::Faint);
     let eta_reveal = ui::revealer(
         gtk4::RevealerTransitionType::SlideRight,
-        swaypplet_core::tokens::motion::EXPAND,
+        swaypplet_tokens::motion::EXPAND,
     );
     eta_reveal.set_child(Some(&eta));
     let content = gtk4::Box::builder()
@@ -123,7 +126,7 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
         let (pop, body) = popover::chassis(&root);
         let click = gtk4::GestureClick::new();
         click.connect_released(move |_, _, _, _| {
-            let Some(bat) = swaypplet_services::battery::current() else {
+            let Some(bat) = swaypplet_system::battery::current() else {
                 return;
             };
             while let Some(child) = body.first_child() {
@@ -144,7 +147,7 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
             }
             let profile = ui::text("", ui::Text::Caption, ui::Tone::Muted);
             body.append(&profile);
-            swaypplet_core::spawn::spawn_work(power::read_profile, move |p| {
+            swaypplet_base::spawn::spawn_work(power::read_profile, move |p| {
                 profile.set_label(&format!("{} · {}", p.name(), p.detail()));
             });
             pop.popup();
@@ -162,7 +165,7 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
         slide,
         tier: Cell::new(None),
     });
-    if let Some(bat) = swaypplet_services::battery::current() {
+    if let Some(bat) = swaypplet_system::battery::current() {
         apply(&root, &ui, &bat);
         on_state(&bat);
     }
@@ -170,9 +173,8 @@ pub fn build(on_state: impl Fn(&BatteryState) + 'static) -> Option<gtk4::Box> {
     // UPower's change signals move it (`services::battery`): a plug shows
     // at once, and nothing wakes while the battery holds still.
     let weak = root.downgrade();
-    swaypplet_services::battery::observe(move || {
-        let (Some(root), Some(bat)) = (weak.upgrade(), swaypplet_services::battery::current())
-        else {
+    swaypplet_system::battery::observe(move || {
+        let (Some(root), Some(bat)) = (weak.upgrade(), swaypplet_system::battery::current()) else {
             return;
         };
         apply(&root, &ui, &bat);

@@ -3,7 +3,7 @@
 //! the command that switches to it.
 
 use crate::keybinds::Binding;
-use swaypplet_core::sway::workspace::{label_text, switch_command};
+use swaypplet_base::sway::workspace::{label_text, switch_command};
 
 use super::place::Place;
 
