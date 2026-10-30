@@ -208,6 +208,44 @@ struct State {
     query: String,
 }
 
+impl State {
+    /// Show the items that match `query`, at most [`MAX_ROWS`], the first
+    /// one selected.
+    fn filter(&mut self, query: &str) {
+        self.query = query.to_string();
+        self.visible = self
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| matches(item, query))
+            .map(|(i, _)| i)
+            .take(MAX_ROWS)
+            .collect();
+        self.selected = 0;
+    }
+
+    /// Move the selection `delta` rows, wrapping at both ends. The rows
+    /// it moved from and to, or `None` with nothing shown.
+    fn step(&mut self, delta: i32) -> Option<(usize, usize)> {
+        if self.visible.is_empty() {
+            return None;
+        }
+        let len = self.visible.len() as i32;
+        let old = self.selected;
+        self.selected = (self.selected as i32 + delta).rem_euclid(len) as usize;
+        Some((old, self.selected))
+    }
+
+    /// What Enter answers: the selected item, else what was `typed`, else
+    /// nothing.
+    fn reply(&self, typed: &str) -> Option<String> {
+        match self.visible.get(self.selected) {
+            Some(&idx) => Some(self.items[idx].clone()),
+            None => (!typed.is_empty()).then(|| typed.to_string()),
+        }
+    }
+}
+
 /// What a finished pick hands its answer to, once.
 type Done = Box<dyn FnOnce(Option<String>)>;
 
@@ -387,30 +425,13 @@ impl Picker {
         if stale {
             self.refilter(&self.entry.text());
         }
-        let reply = {
-            let s = self.state.borrow();
-            if let Some(&idx) = s.visible.get(s.selected) {
-                Some(s.items[idx].clone())
-            } else {
-                let query = self.entry.text().to_string();
-                (!query.is_empty()).then_some(query)
-            }
-        };
+        let reply = self.state.borrow().reply(&self.entry.text());
         self.finish(reply);
     }
 
     fn refilter(self: &Rc<Self>, query: &str) {
         let mut s = self.state.borrow_mut();
-        s.query = query.to_string();
-        s.visible = s
-            .items
-            .iter()
-            .enumerate()
-            .filter(|(_, item)| matches(item, query))
-            .map(|(i, _)| i)
-            .take(MAX_ROWS)
-            .collect();
-        s.selected = 0;
+        s.filter(query);
 
         while let Some(child) = self.results_box.first_child() {
             self.results_box.remove(&child);
@@ -445,15 +466,9 @@ impl Picker {
     }
 
     fn move_selection(&self, delta: i32) {
-        let mut s = self.state.borrow_mut();
-        if s.visible.is_empty() {
+        let Some((old, new)) = self.state.borrow_mut().step(delta) else {
             return;
-        }
-        let len = s.visible.len() as i32;
-        let old = s.selected;
-        s.selected = (s.selected as i32 + delta).rem_euclid(len) as usize;
-        let new = s.selected;
-        drop(s);
+        };
 
         let mut child = self.results_box.first_child();
         let mut pos = 0usize;
@@ -486,4 +501,62 @@ fn build_row(text: &str, selected: bool) -> gtk4::Box {
     swaypplet_ui::ui::set_instant(&r.root, true);
     swaypplet_ui::ui::set_selected(&r.root, selected);
     r.root
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state(items: &[&str]) -> State {
+        let mut s = State {
+            items: items.iter().map(|i| i.to_string()).collect(),
+            visible: Vec::new(),
+            selected: 0,
+            query: String::new(),
+        };
+        s.filter("");
+        s
+    }
+
+    #[test]
+    fn every_term_must_appear_in_any_case() {
+        assert!(matches("Firefox Web Browser", "web fire"));
+        assert!(matches("Firefox", "FIRE"));
+        assert!(matches("Åsa Öberg", "åsa öb"));
+        assert!(!matches("Firefox", "fire chrome"));
+        assert!(matches("anything", ""));
+    }
+
+    #[test]
+    fn the_filter_keeps_the_order_selects_the_first_and_caps_the_rows() {
+        let mut s = state(&["alpha", "beta", "alphabet"]);
+        assert_eq!(s.visible, [0, 1, 2]);
+        s.selected = 2;
+        s.filter("alp");
+        assert_eq!((s.visible.as_slice(), s.selected), (&[0, 2][..], 0));
+        assert_eq!(s.query, "alp");
+        let many: Vec<String> = (0..MAX_ROWS + 5).map(|i| format!("row {i}")).collect();
+        let many: Vec<&str> = many.iter().map(String::as_str).collect();
+        assert_eq!(state(&many).visible.len(), MAX_ROWS);
+    }
+
+    #[test]
+    fn the_selection_wraps_at_both_ends() {
+        let mut s = state(&["a", "b", "c"]);
+        assert_eq!(s.step(1), Some((0, 1)));
+        assert_eq!(s.step(2), Some((1, 0)));
+        assert_eq!(s.step(-1), Some((0, 2)));
+        s.filter("nothing");
+        assert_eq!(s.step(1), None);
+    }
+
+    #[test]
+    fn enter_answers_the_selection_else_what_was_typed() {
+        let mut s = state(&["alpha", "beta"]);
+        s.step(1);
+        assert_eq!(s.reply("ignored").as_deref(), Some("beta"));
+        s.filter("gamma");
+        assert_eq!(s.reply("gamma").as_deref(), Some("gamma"));
+        assert_eq!(s.reply(""), None);
+    }
 }
