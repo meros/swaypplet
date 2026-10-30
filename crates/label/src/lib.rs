@@ -203,13 +203,8 @@ impl Pill {
             .monitor(Some(monitor))
             .anchor(&[Edge::Top])
             .card(ui::Card::Thin)
+            .apron(gtk4::Align::Start, "label-wrapper")
             .build();
-
-        // The transparent apron the glass clips inside (see the OSD).
-        let wrapper = surface.root();
-        wrapper.set_halign(gtk4::Align::Center);
-        wrapper.set_valign(gtk4::Align::Start);
-        wrapper.add_css_class("label-wrapper");
 
         let outer = surface.card();
         outer.set_halign(gtk4::Align::Center);
