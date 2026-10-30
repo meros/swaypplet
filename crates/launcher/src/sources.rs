@@ -8,8 +8,8 @@
 //! They cost microseconds and need nothing but the query. The settings
 //! rows are local too: a walk over the static index (`settings::search`).
 
+use crate::elephant::SearchResult;
 use swaypplet_model::store::Launcher;
-use swaypplet_system::elephant::SearchResult;
 
 use super::calc;
 

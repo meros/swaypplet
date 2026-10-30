@@ -4,7 +4,7 @@
 //! Both read sway's tree over IPC, so both run on a worker (`run_search`,
 //! `show_windows_of`), never on a keystroke's frame.
 
-use swaypplet_system::elephant::SearchResult;
+use crate::elephant::SearchResult;
 
 use super::{MAX_WINDOW_ROWS, WINDOW_PROVIDER};
 

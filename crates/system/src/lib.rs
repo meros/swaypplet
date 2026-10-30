@@ -14,7 +14,6 @@ pub mod battery;
 pub mod bluez;
 pub mod capture;
 pub mod clipboard;
-pub mod elephant;
 pub mod inhibit;
 pub mod lid;
 pub mod mpris;

@@ -7699,6 +7699,10 @@ rec {
             packageId = "log";
           }
           {
+            name = "protobuf";
+            packageId = "protobuf";
+          }
+          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
@@ -7730,6 +7734,12 @@ rec {
           {
             name = "swaypplet-ui";
             packageId = "swaypplet-ui";
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "protobuf-codegen";
+            packageId = "protobuf-codegen";
           }
         ];
 
@@ -8824,10 +8834,6 @@ rec {
             packageId = "log";
           }
           {
-            name = "protobuf";
-            packageId = "protobuf";
-          }
-          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
@@ -8873,12 +8879,6 @@ rec {
             packageId = "zbus 4.4.0";
             usesDefaultFeatures = false;
             features = [ "tokio" ];
-          }
-        ];
-        buildDependencies = [
-          {
-            name = "protobuf-codegen";
-            packageId = "protobuf-codegen";
           }
         ];
 
