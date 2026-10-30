@@ -394,7 +394,7 @@ struct Widgets {
     meter_btn: gtk4::Button,
     meter: gtk4::ProgressBar,
     metering: Cell<bool>,
-    meter_timer: RefCell<Option<glib::SourceId>>,
+    meter_timer: swaypplet_base::spawn::Timeout,
 }
 
 pub struct AudioSection {
@@ -505,7 +505,7 @@ impl AudioSection {
             meter_btn,
             meter,
             metering: Cell::new(false),
-            meter_timer: RefCell::new(None),
+            meter_timer: swaypplet_base::spawn::Timeout::new(),
         });
 
         let section = AudioSection {
@@ -761,16 +761,13 @@ fn set_meter(w: &Rc<Widgets>, audio: &Rc<AudioService>, on: bool) {
     w.meter.set_fraction(0.0);
     w.meter_btn
         .set_label(if on { "Stop test" } else { "Test microphone" });
-    if let Some(id) = w.meter_timer.borrow_mut().take() {
-        id.remove();
-    }
+    w.meter_timer.cancel();
     if on {
         let (w2, audio) = (w.clone(), audio.clone());
-        let id = glib::timeout_add_seconds_local_once(METER_SECONDS, move || {
-            w2.meter_timer.borrow_mut().take();
-            set_meter(&w2, &audio, false);
-        });
-        *w.meter_timer.borrow_mut() = Some(id);
+        w.meter_timer.arm(
+            std::time::Duration::from_secs(METER_SECONDS.into()),
+            move || set_meter(&w2, &audio, false),
+        );
     }
 }
 

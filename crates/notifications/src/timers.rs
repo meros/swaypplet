@@ -6,13 +6,16 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use super::stack::{State, alerts};
+use swaypplet_base::spawn::Timeout;
 use swaypplet_notifyd::{CloseReason, Notification, Urgency};
 use swaypplet_notifyd::{store, store::NotificationStore};
 
 pub(super) enum Timer {
     None,
     Running {
-        source: glib::SourceId,
+        /// Held for its drop: a cancel, a pause or the card going calls
+        /// the close off.
+        _close: Timeout,
         deadline: Instant,
     },
     Paused {
@@ -21,9 +24,7 @@ pub(super) enum Timer {
 }
 
 pub(super) fn cancel_timer(timer: &mut Timer) {
-    if let Timer::Running { source, .. } = std::mem::replace(timer, Timer::None) {
-        swaypplet_base::spawn::remove_source(source);
-    }
+    *timer = Timer::None;
 }
 
 fn timeout_for(notif: &Notification) -> Option<u64> {
@@ -63,11 +64,12 @@ pub(super) fn make_timer(
 
 fn schedule_close(store: &Rc<RefCell<NotificationStore>>, id: u32, after: Duration) -> Timer {
     let store = store.clone();
-    let source = glib::timeout_add_local_once(after, move || {
+    let source = Timeout::new();
+    source.arm(after, move || {
         store::store_close(&store, id, CloseReason::Expired);
     });
     Timer::Running {
-        source,
+        _close: source,
         deadline: Instant::now() + after,
     }
 }
@@ -77,11 +79,7 @@ pub(super) fn pause_timers(st: &Rc<RefCell<State>>) {
     s.hovered = true;
     let now = Instant::now();
     for card in &mut s.cards {
-        if matches!(card.timer, Timer::Running { .. })
-            && let Timer::Running { source, deadline } =
-                std::mem::replace(&mut card.timer, Timer::None)
-        {
-            swaypplet_base::spawn::remove_source(source);
+        if let Timer::Running { deadline, .. } = card.timer {
             card.timer = Timer::Paused {
                 remaining: deadline.saturating_duration_since(now),
             };

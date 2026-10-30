@@ -30,7 +30,6 @@
 //! values here have no Nix side and no export. Two files with two meanings
 //! read better than one file with a footnote.
 
-use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -165,7 +164,7 @@ pub fn path() -> PathBuf {
 
 thread_local! {
     static LIVE: Observed<Settings> = Observed::new(Settings::default());
-    static SAVE_TIMER: RefCell<Option<glib::SourceId>> = const { RefCell::new(None) };
+    static SAVE_TIMER: swaypplet_base::spawn::Timeout = swaypplet_base::spawn::Timeout::new();
 }
 
 /// Read the file into the live copy. Once, at panel startup, before anything
@@ -242,17 +241,9 @@ pub fn reset<S: Section>() {
 
 fn schedule_save() {
     SAVE_TIMER.with(|timer| {
-        if let Some(id) = timer.borrow_mut().take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
-        let id = glib::timeout_add_local_once(
-            std::time::Duration::from_millis(SAVE_DEBOUNCE_MS),
-            || {
-                SAVE_TIMER.with(|timer| timer.borrow_mut().take());
-                current().save();
-            },
-        );
-        *timer.borrow_mut() = Some(id);
+        timer.arm(std::time::Duration::from_millis(SAVE_DEBOUNCE_MS), || {
+            current().save()
+        });
     });
 }
 

@@ -185,7 +185,7 @@ thread_local! {
     /// `None` until the file has been read.
     static STORE: RefCell<Option<Store>> = const { RefCell::new(None) };
     static LOADING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static SAVE: RefCell<Option<glib::SourceId>> = const { RefCell::new(None) };
+    static SAVE: swaypplet_base::spawn::Timeout = swaypplet_base::spawn::Timeout::new();
 }
 
 pub fn now() -> f64 {
@@ -262,20 +262,14 @@ pub fn forget() {
 
 fn schedule_save() {
     SAVE.with(|s| {
-        if let Some(id) = s.borrow_mut().take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
-    });
-    let id =
-        glib::timeout_add_local_once(std::time::Duration::from_millis(SAVE_DEBOUNCE_MS), || {
-            SAVE.with(|s| s.borrow_mut().take());
+        s.arm(std::time::Duration::from_millis(SAVE_DEBOUNCE_MS), || {
             let Some(store) = with(|s| s.pruned(now())) else {
                 return;
             };
             let Some(p) = path() else { return };
             swaypplet_base::spawn::spawn_work(move || write(&p, &store), |()| {});
         });
-    SAVE.with(|s| *s.borrow_mut() = Some(id));
+    });
 }
 
 /// Write next to the file and rename over it.

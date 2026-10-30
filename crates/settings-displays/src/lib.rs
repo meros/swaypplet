@@ -162,7 +162,7 @@ struct Pane {
     stale: Cell<bool>,
     drag: Cell<Option<Drag>>,
     keep: RefCell<Keep<Before>>,
-    ticker: RefCell<Option<glib::SourceId>>,
+    ticker: swaypplet_base::spawn::Timeout,
     /// Itself, for the handlers made after it was built.
     me: RefCell<std::rc::Weak<Pane>>,
 }
@@ -410,7 +410,7 @@ impl DisplaysPane {
             stale: Cell::new(true),
             drag: Cell::new(None),
             keep: RefCell::new(Keep::default()),
-            ticker: RefCell::new(None),
+            ticker: swaypplet_base::spawn::Timeout::new(),
             me: RefCell::default(),
         });
         *pane.me.borrow_mut() = Rc::downgrade(&pane);
@@ -915,17 +915,13 @@ impl Pane {
 
     /// Tick once a second while the question is asked.
     fn start_ticker(&self) {
-        if self.ticker.borrow().is_some() {
+        if self.ticker.is_armed() {
             return;
         }
         let q = self.rc();
-        let id = glib::timeout_add_seconds_local(1, move || {
+        self.ticker.every_seconds(1, move || {
             let e = q.keep.borrow_mut().tick();
             let go_on = matches!(e, Effect::Ask(_));
-            if !go_on {
-                // This source ends by returning Break; nobody removes it.
-                q.ticker.borrow_mut().take();
-            }
             q.run(e);
             if go_on {
                 glib::ControlFlow::Continue
@@ -933,13 +929,10 @@ impl Pane {
                 glib::ControlFlow::Break
             }
         });
-        *self.ticker.borrow_mut() = Some(id);
     }
 
     fn stop_ticker(&self) {
-        if let Some(id) = self.ticker.borrow_mut().take() {
-            id.remove();
-        }
+        self.ticker.cancel();
     }
 
     // ── The canvas and the rows ──────────────────────────────────────────

@@ -175,7 +175,7 @@ struct Inner {
     hair_shown: Rc<Cell<f64>>,
     hair_tick: Rc<RefCell<Option<gtk4::TickCallbackId>>>,
     interjecting: Cell<bool>,
-    decay: RefCell<Option<glib::SourceId>>,
+    decay: swaypplet_base::spawn::Timeout,
 }
 
 /// Cheap handle; the TaskStateService observer keeps the widgets updated
@@ -305,7 +305,7 @@ impl DecisionSlot {
                 hair_shown,
                 hair_tick: Rc::new(RefCell::new(None)),
                 interjecting: Cell::new(false),
-                decay: RefCell::new(None),
+                decay: swaypplet_base::spawn::Timeout::new(),
             }),
         };
 
@@ -372,15 +372,12 @@ impl DecisionSlot {
             inner.stack.set_visible_child(&inner.osd_page);
         }
         inner.revealer.set_reveal_child(true);
-        if let Some(id) = inner.decay.borrow_mut().take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
         let slot = self.clone();
-        let id = glib::timeout_add_local_once(Duration::from_millis(OSD_DECAY_MS), move || {
-            slot.inner.decay.borrow_mut().take();
-            slot.yield_back();
-        });
-        *inner.decay.borrow_mut() = Some(id);
+        inner
+            .decay
+            .arm(Duration::from_millis(OSD_DECAY_MS), move || {
+                slot.yield_back()
+            });
     }
 
     /// Decay: hand the slot back to whatever the mux holds. The standing

@@ -24,7 +24,7 @@ use crate::{
     system_job::{Action, Job},
 };
 use swaypplet_base::fmt;
-use swaypplet_base::spawn::{remove_source, spawn_work};
+use swaypplet_base::spawn::{Timeout, spawn_work};
 use swaypplet_settings_kit::{form, form::section_box};
 use swaypplet_ui::{
     ui,
@@ -68,8 +68,8 @@ struct Pane {
     snapshot: RefCell<Option<Snapshot>>,
     job: RefCell<Job>,
     reading: Cell<bool>,
-    poll: RefCell<Option<glib::SourceId>>,
-    job_poll: RefCell<Option<glib::SourceId>>,
+    poll: Timeout,
+    job_poll: Timeout,
     /// The fixture's simulated run: its action and how far it has got.
     fake: Cell<Option<(Action, usize)>>,
 }
@@ -257,8 +257,8 @@ impl SystemPane {
             snapshot: RefCell::new(None),
             job: RefCell::new(Job::Idle),
             reading: Cell::new(false),
-            poll: RefCell::new(None),
-            job_poll: RefCell::new(None),
+            poll: Timeout::new(),
+            job_poll: Timeout::new(),
             fake: Cell::new(None),
         });
 
@@ -305,26 +305,21 @@ impl SystemPane {
 impl Pane {
     fn shown(self: &Rc<Self>) {
         self.read();
-        if self.poll.borrow().is_none() {
+        if !self.poll.is_armed() {
             let p = Rc::downgrade(self);
-            let id = glib::timeout_add_local(POLL, move || {
+            self.poll.every(POLL, move || {
                 let Some(p) = p.upgrade() else {
                     return glib::ControlFlow::Break;
                 };
                 p.read();
                 glib::ControlFlow::Continue
             });
-            self.poll.replace(Some(id));
         }
     }
 
     fn hidden(&self) {
-        if let Some(id) = self.poll.take() {
-            remove_source(id);
-        }
-        if let Some(id) = self.job_poll.take() {
-            remove_source(id);
-        }
+        self.poll.cancel();
+        self.job_poll.cancel();
     }
 
     /// Everything, on a worker thread. A read already out is not doubled.
@@ -411,12 +406,12 @@ impl Pane {
 
     /// Read the log every [`JOB_TICK`] until the run ends or the tab goes.
     fn watch_job(self: &Rc<Self>) {
-        if self.job_poll.borrow().is_some() || !self.root.is_mapped() {
+        if self.job_poll.is_armed() || !self.root.is_mapped() {
             return;
         }
         let p = Rc::downgrade(self);
         let busy = Rc::new(Cell::new(false));
-        let id = glib::timeout_add_local(JOB_TICK, move || {
+        self.job_poll.every(JOB_TICK, move || {
             let Some(p) = p.upgrade() else {
                 return glib::ControlFlow::Break;
             };
@@ -427,7 +422,6 @@ impl Pane {
                 p.set_job(now);
                 if over {
                     p.fake.set(None);
-                    p.job_poll.replace(None);
                     p.show_actions();
                     return glib::ControlFlow::Break;
                 }
@@ -442,16 +436,13 @@ impl Pane {
                 let over = !now.running();
                 q.set_job(now);
                 if over {
-                    if let Some(id) = q.job_poll.take() {
-                        remove_source(id);
-                    }
+                    q.job_poll.cancel();
                     // The switch moved what the rest of the tab says.
                     q.read();
                 }
             });
             glib::ControlFlow::Continue
         });
-        self.job_poll.replace(Some(id));
     }
 
     fn set_job(self: &Rc<Self>, now: Job) {

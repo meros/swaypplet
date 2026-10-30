@@ -6,7 +6,7 @@ use gtk4::gdk;
 use gtk4::prelude::*;
 use gtk4_layer_shell::Edge;
 
-use swaypplet_base::spawn::spawn_work;
+use swaypplet_base::spawn::{Timeout, spawn_work};
 use swaypplet_ui::shell::{Namespace, PerMonitor, Surface};
 
 const OSD_TIMEOUT_MS: u32 = 1500;
@@ -233,7 +233,7 @@ enum Showing {
 #[derive(Default)]
 struct Pending {
     level: Option<f64>,
-    settle: Option<glib::SourceId>,
+    settle: Rc<Timeout>,
 }
 
 /// The card on one output. A layer surface is bound to its `wl_output`, so
@@ -383,7 +383,7 @@ pub struct Osd {
     cards: Rc<PerMonitor<Card>>,
     /// What is on the cards, for a monitor plugged in while they are up.
     current: Rc<RefCell<Option<OsdDisplay>>>,
-    timeout_id: Rc<RefCell<Option<glib::SourceId>>>,
+    hide: Rc<Timeout>,
     bar_route: Rc<RefCell<Option<BarRoute>>>,
     /// [`Osd::set_hold`]'s question.
     hold: Rc<RefCell<Option<Hold>>>,
@@ -403,7 +403,7 @@ impl Osd {
         let osd = Osd {
             cards: PerMonitor::new(),
             current: Rc::new(RefCell::new(None)),
-            timeout_id: Rc::new(RefCell::new(None)),
+            hide: Rc::default(),
             bar_route: Rc::new(RefCell::new(None)),
             hold: Rc::new(RefCell::new(None)),
             audio: Rc::new(RefCell::new(None)),
@@ -494,22 +494,14 @@ impl Osd {
         let target = (pending.level.unwrap_or(from) + delta).clamp(0.0, keys().volume_ceiling());
         pending.level = Some(target);
 
-        if let Some(id) = pending.settle.take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
         let slot = self.pending.clone();
         let osd = self.clone();
-        pending.settle = Some(glib::timeout_add_local_once(
-            std::time::Duration::from_millis(SETTLE_MS),
-            move || {
-                {
-                    let mut pending = slot.borrow_mut();
-                    pending.settle = None;
-                    pending.level = None;
-                }
+        pending
+            .settle
+            .arm(std::time::Duration::from_millis(SETTLE_MS), move || {
+                slot.borrow_mut().level = None;
                 osd.reconcile();
-            },
-        ));
+            });
 
         target
     }
@@ -630,28 +622,20 @@ impl Osd {
         // revealer).
         self.cards.for_each(|card| card.surface.show());
 
-        // Cancel previous timeout
-        if let Some(id) = self.timeout_id.borrow_mut().take() {
-            swaypplet_base::spawn::remove_source(id);
-        }
-
-        // Auto-hide after timeout: fade out, then unmap (Reveal hides the
-        // window when the exit finishes)
+        // Auto-hide after timeout, in place of the previous one: fade out,
+        // then unmap (Reveal hides the window when the exit finishes)
         let cards = self.cards.clone();
         let current = self.current.clone();
-        let timeout_ref = self.timeout_id.clone();
         let showing = self.showing.clone();
         let drawn = self.drawn.clone();
-        let id = glib::timeout_add_local_once(
+        self.hide.arm(
             std::time::Duration::from_millis(OSD_TIMEOUT_MS as u64),
             move || {
-                *timeout_ref.borrow_mut() = None;
                 showing.set(Showing::Other);
                 drawn.set(None);
                 current.replace(None);
                 cards.for_each(|card| card.surface.hide());
             },
         );
-        *self.timeout_id.borrow_mut() = Some(id);
     }
 }

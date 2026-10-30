@@ -407,9 +407,9 @@ struct State {
     deploy_bar: gtk4::ProgressBar,
     last_fetch: Cell<Option<Instant>>,
     fetching: Cell<bool>,
-    poll: RefCell<Option<glib::SourceId>>,
-    tick: RefCell<Option<glib::SourceId>>,
-    follow: RefCell<Option<glib::SourceId>>,
+    poll: swaypplet_base::spawn::Timeout,
+    tick: swaypplet_base::spawn::Timeout,
+    follow: swaypplet_base::spawn::Timeout,
     deploying: Cell<bool>,
     /// Whether every program a job needs was found at the last fetch.
     tools_ok: Cell<bool>,
@@ -468,9 +468,9 @@ impl QualityPane {
             deploy_bar,
             last_fetch: Cell::new(None),
             fetching: Cell::new(false),
-            poll: RefCell::new(None),
-            tick: RefCell::new(None),
-            follow: RefCell::new(None),
+            poll: swaypplet_base::spawn::Timeout::new(),
+            tick: swaypplet_base::spawn::Timeout::new(),
+            follow: swaypplet_base::spawn::Timeout::new(),
             deploying: Cell::new(false),
             tools_ok: Cell::new(true),
         });
@@ -506,21 +506,15 @@ impl QualityPane {
                     fetch_now(&state);
                 }
                 let s = state.clone();
-                let id = glib::timeout_add_local(POLL, move || {
+                state.poll.every(POLL, move || {
                     fetch_now(&s);
                     glib::ControlFlow::Continue
                 });
-                if let Some(old) = state.poll.replace(Some(id)) {
-                    swaypplet_base::spawn::remove_source(old);
-                }
                 let s = state.clone();
-                let id = glib::timeout_add_local(TICK, move || {
+                state.tick.every(TICK, move || {
                     tick(&s);
                     glib::ControlFlow::Continue
                 });
-                if let Some(old) = state.tick.replace(Some(id)) {
-                    swaypplet_base::spawn::remove_source(old);
-                }
                 follow_deploy(&state);
             });
         }
@@ -528,9 +522,7 @@ impl QualityPane {
             let state = state.clone();
             root.connect_unmap(move |_| {
                 for slot in [&state.poll, &state.tick, &state.follow] {
-                    if let Some(id) = slot.take() {
-                        swaypplet_base::spawn::remove_source(id);
-                    }
+                    slot.cancel();
                 }
             });
         }
@@ -1165,7 +1157,6 @@ fn follow_deploy(state: &Rc<State>) {
                     ));
                     ui::set_progress_status(&s.deploy_bar, Some(ui::Status::Danger));
                 }
-                s.follow.replace(None);
                 if s.deploying.get() {
                     set_deploying(&s, false);
                 }
@@ -1176,10 +1167,7 @@ fn follow_deploy(state: &Rc<State>) {
     if tick() == glib::ControlFlow::Break {
         return;
     }
-    let id = glib::timeout_add_local(Duration::from_secs(1), tick);
-    if let Some(old) = state.follow.replace(Some(id)) {
-        swaypplet_base::spawn::remove_source(old);
-    }
+    state.follow.every(Duration::from_secs(1), tick);
 }
 
 /// The tab in the settings search (`search.rs`): its groups, which have no
