@@ -13,6 +13,7 @@
 //! fight.
 
 use std::fs;
+use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
 // Sysfs helpers
@@ -39,35 +40,86 @@ fn read_sysfs(path: &str) -> Option<String> {
     }
 }
 
-/// Scan `/sys/class/power_supply/` for the first entry whose `type` file
-/// contains "Battery" and return its path (e.g.
-/// `/sys/class/power_supply/BAT0`). Returns `None` on desktops without a
-/// battery.
+/// Where the kernel lists the power supplies.
+pub const POWER_SUPPLY: &str = "/sys/class/power_supply";
+
+/// One entry of [`POWER_SUPPLY`]: a battery, the AC adapter, a USB-C
+/// source, a peripheral's battery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Supply {
+    pub path: PathBuf,
+    /// The `type` file, trimmed: "Battery", "Mains", "USB".
+    pub kind: String,
+    /// The `online` file is "1". A battery has no such file.
+    pub online: bool,
+}
+
+impl Supply {
+    pub fn is_battery(&self) -> bool {
+        self.kind.eq_ignore_ascii_case("Battery")
+    }
+}
+
+/// Every power supply, read once, by name (BAT0 before BAT1), so each
+/// question about them is asked of one snapshot instead of a fresh scan.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Supplies(pub Vec<Supply>);
+
+impl Supplies {
+    /// Read `root` ([`POWER_SUPPLY`] outside tests). An entry whose files
+    /// cannot be read counts as an unknown kind, offline.
+    pub fn scan(root: &Path) -> std::io::Result<Supplies> {
+        let mut all: Vec<Supply> = fs::read_dir(root)?
+            .flatten()
+            .map(|e| {
+                let path = e.path();
+                let read = |f: &str| fs::read_to_string(path.join(f)).unwrap_or_default();
+                Supply {
+                    kind: read("type").trim().to_string(),
+                    online: read("online").trim() == "1",
+                    path,
+                }
+            })
+            .collect();
+        all.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(Supplies(all))
+    }
+
+    /// The first battery.
+    pub fn battery(&self) -> Option<&Supply> {
+        self.0.iter().find(|s| s.is_battery())
+    }
+
+    /// Whether any supply that is not a battery is online (the AC adapter,
+    /// a USB-C source); `None` when the machine lists none.
+    pub fn mains_online(&self) -> Option<bool> {
+        let mut mains = self.0.iter().filter(|s| !s.is_battery()).peekable();
+        mains.peek()?;
+        Some(mains.any(|s| s.online))
+    }
+
+    /// A battery exists and no supply is online. Deliberately not
+    /// `!on_ac()`, which reads a machine with no supply at all (a desktop)
+    /// as off AC.
+    pub fn on_battery(&self) -> bool {
+        self.battery().is_some() && !self.on_ac()
+    }
+
+    /// Any supply is online.
+    pub fn on_ac(&self) -> bool {
+        self.0.iter().any(|s| s.online)
+    }
+}
+
+/// The first battery's directory (e.g. `/sys/class/power_supply/BAT0`), or
+/// `None` on a desktop without one.
 pub fn find_battery_path() -> Option<String> {
-    let dir = match fs::read_dir("/sys/class/power_supply") {
-        Ok(d) => d,
-        Err(e) => {
-            log::warn!("Cannot read /sys/class/power_supply: {}", e);
-            return None;
-        }
-    };
-
-    let mut entries: Vec<_> = dir
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            let type_path = e.path().join("type");
-            fs::read_to_string(&type_path)
-                .map(|t| t.trim().eq_ignore_ascii_case("Battery"))
-                .unwrap_or(false)
-        })
-        .collect();
-
-    // Sort for deterministic order (BAT0 before BAT1, etc.).
-    entries.sort_by_key(|e| e.file_name());
-
-    entries
-        .first()
-        .map(|e| e.path().to_string_lossy().into_owned())
+    let supplies = Supplies::scan(Path::new(POWER_SUPPLY))
+        .inspect_err(|e| log::warn!("Cannot read {POWER_SUPPLY}: {e}"))
+        .ok()?;
+    supplies
+        .battery()
+        .map(|b| b.path.to_string_lossy().into_owned())
 }
 
 // ---------------------------------------------------------------------------
@@ -334,22 +386,8 @@ pub(crate) fn read_battery(bat_path: &str) -> Option<BatteryState> {
     })
 }
 
-/// Whether any supply that is not a battery reports online=1 (the AC
-/// adapter, a USB-C source); `None` when the machine lists none.
 fn mains_online() -> Option<bool> {
-    let entries = std::fs::read_dir("/sys/class/power_supply").ok()?;
-    let mut seen = false;
-    for e in entries.flatten() {
-        let read = |f: &str| std::fs::read_to_string(e.path().join(f)).unwrap_or_default();
-        if read("type").trim() == "Battery" {
-            continue;
-        }
-        seen = true;
-        if read("online").trim() == "1" {
-            return Some(true);
-        }
-    }
-    seen.then_some(false)
+    Supplies::scan(Path::new(POWER_SUPPLY)).ok()?.mains_online()
 }
 
 // ---------------------------------------------------------------------------
@@ -607,6 +645,75 @@ pub fn set_profile(profile: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// A power_supply directory: (name, type, online) per entry, `None`
+    /// for a supply without an `online` file.
+    fn supplies(name: &str, entries: &[(&str, &str, Option<&str>)]) -> Supplies {
+        let root =
+            std::env::temp_dir().join(format!("swaypplet-supplies-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        for (dir, kind, online) in entries {
+            let d = root.join(dir);
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("type"), format!("{kind}\n")).unwrap();
+            if let Some(o) = online {
+                fs::write(d.join("online"), format!("{o}\n")).unwrap();
+            }
+        }
+        let s = Supplies::scan(&root).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        s
+    }
+
+    #[test]
+    fn a_laptop_on_its_battery() {
+        let s = supplies(
+            "laptop",
+            &[
+                ("BAT1", "Battery", None),
+                ("AC", "Mains", Some("0")),
+                ("BAT0", "Battery", None),
+                ("ucsi-source-psy-1", "USB", Some("0")),
+            ],
+        );
+        assert!(s.battery().unwrap().path.ends_with("BAT0"));
+        assert_eq!(s.mains_online(), Some(false));
+        assert!(s.on_battery());
+        assert!(!s.on_ac());
+    }
+
+    #[test]
+    fn a_laptop_on_usb_c() {
+        let s = supplies(
+            "usbc",
+            &[
+                ("BAT0", "Battery", None),
+                ("AC", "Mains", Some("0")),
+                ("ucsi-source-psy-1", "USB", Some("1")),
+            ],
+        );
+        assert_eq!(s.mains_online(), Some(true));
+        assert!(!s.on_battery());
+        assert!(s.on_ac());
+    }
+
+    #[test]
+    fn a_desktop_has_no_battery_and_is_not_on_one() {
+        let none = supplies("desktop", &[]);
+        assert_eq!(none.battery(), None);
+        assert_eq!(none.mains_online(), None);
+        assert!(!none.on_battery());
+        assert!(!none.on_ac());
+        // Only a battery: no mains to ask about.
+        let only = supplies("only", &[("BAT0", "Battery", None)]);
+        assert_eq!(only.mains_online(), None);
+        assert!(only.on_battery());
+    }
+
+    #[test]
+    fn a_missing_directory_is_an_error() {
+        assert!(Supplies::scan(Path::new("/nonexistent/power_supply")).is_err());
+    }
     /// A charger that is connected wins over a battery that says
     /// "Discharging" for a moment at its charge threshold; with no charger
     /// listed, the charge state decides.
