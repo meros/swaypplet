@@ -8,10 +8,13 @@
 //!   - logind.rs    PrepareForSleep + sleep delay-inhibitor, session Lock/Unlock
 //!   - locker.rs    supervised `swaypplet lock` child (relaunch-while-locked)
 //!
+//! and one set of rules decides what each event means (policy.rs, a reducer
+//! the run loop below feeds and whose effects it carries out).
+//!
 //! Behavior ported 1:1 from the old swayidle config (users/modules/swayidle.nix
 //! in the nixos repo — see its comments for the incident history behind each
 //! rule). The durations are the defaults; the settings pane's Idle & Lock tab
-//! overrides them (`settings::store::Idle`):
+//! overrides them (`swaypplet_model::store::Idle`):
 //!
 //!   240 s  dim to 10% brightness, restore on resume
 //!   300 s  lock the session (the screen stays LIT; locking does not blank)
@@ -21,7 +24,7 @@
 //!  1200 s  suspend, only on battery
 //!
 //! The pane is another process, so an edit reaches here as a file: an
-//! inotify watch on `~/.config/swaypplet/settings.json` (`crate::watch`)
+//! inotify watch on `~/.config/swaypplet/settings.json` (`swaypplet_base::watch`)
 //! sends `Ev::SettingsChanged`, and the loop reloads and hands the wayland
 //! thread new timeouts to re-arm with. Zero on any tier is "never". The loop
 //! sleeps until the next event or its nearest deadline; nothing ticks.
@@ -72,7 +75,7 @@
 //! set of SWAYPPLET_GLASS_* material numbers as well; the compositor draws the
 //! lock's wallpaper and glass now, and the locker reads neither.
 //!
-//! Inhibitors (panel tiles, `services::inhibit`) are two standing switches, and
+//! Inhibitors (panel tiles, `swaypplet_system::inhibit`) are two standing switches, and
 //! both are read at fire time rather than being cached here. **No Sleep**
 //! holds a logind lid-switch inhibitor, which stops logind suspending on a
 //! lid close; the suspend tier below reads it too, because "don't sleep with
@@ -91,18 +94,17 @@
 mod locker;
 pub(crate) mod logind;
 mod outputs;
+mod policy;
 mod wayland;
 
-use outputs::{Outputs, Power};
+use outputs::Outputs;
+use policy::{Effect, Input, State, World, step};
 
 use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use swaypplet_model::{
-    store,
-    store::{Idle, Settings},
-};
+use swaypplet_model::{store, store::Settings};
 use swaypplet_system::power::{POWER_SUPPLY, Supplies};
 use swaypplet_system::{presence, presence::Event as PresenceEvent};
 
@@ -137,21 +139,9 @@ pub enum Ev {
     /// A presence event is queued; the top of the loop drains it.
     Wake,
     Fatal(String),
-    /// The settings file was written (`crate::watch`, inotify).
+    /// The settings file was written (`swaypplet_base::watch`, inotify).
     SettingsChanged,
 }
-
-/// How long to wait for the locker before releasing the sleep inhibitor
-/// anyway. Suspend must not hang on a locker that fails to start.
-///
-/// 4 s rather than 3: the compositor now defers `locked` until the lock
-/// screen is fully opaque and that frame has been presented, which adds the
-/// entrance to the path this deadline bounds. The sleep path suppresses the
-/// cross-fade entirely (locker.rs), so in practice it pays none of that, but
-/// the deadline has to survive the case where it does. logind's
-/// InhibitDelayMaxSec is 5 s, so this still leaves room for the release round
-/// trip.
-const SLEEP_RELEASE_MAX: Duration = Duration::from_secs(4);
 
 /// The instant the next minute of the day starts, when the night window may
 /// open or close. The settings file itself arrives as an event.
@@ -159,38 +149,27 @@ fn next_minute() -> Instant {
     Instant::now() + swaypplet_base::time::until_next_minute(swaypplet_base::time::now())
 }
 
-/// When the locked, idle session's outputs should go off, counted from now.
-///
-/// The blank deadline is the ONLY thing that blanks the screen. Blanking used
-/// to be tangled into three separate paths: a 600 ms deferred blank after any
-/// idle or presence lock, a 30 s re-blank tier after input while locked, and
-/// the pre-suspend blank. Two of those meant that locking for any reason, or
-/// glancing at the machine and looking away, put the panel out within a
-/// second, and the lock screen was effectively never visible.
-///
-/// Now: lock and blank are unrelated. Locking leaves the screen lit. The
-/// outputs go off only after `blank_after_s` of continuous idle time *while
-/// locked*, and any input resets it. The suspend path still blanks, because
-/// that is the machine powering down rather than an idle policy. `None` is
-/// the setting's "never": the lock screen stays lit until something else
-/// turns it off.
-///
-/// On battery the tier is the shorter of the two settings
-/// (`Idle::blank_after_on`). The power source is read by the caller at arm
-/// time and again on the minute check, so unplugging while locked shortens a
-/// countdown already running.
-fn blank_deadline(cfg: &Idle, on_battery: bool) -> Option<Instant> {
-    let secs = cfg.blank_after_on(on_battery);
-    (secs > 0).then(|| Instant::now() + Duration::from_secs(u64::from(secs)))
-}
+/// The machine as the rules (`policy`) read it.
+struct Machine;
 
-/// The blank tier as the log lines say it: `300s (on battery)`, `900s`, or
-/// the setting's never.
-fn blank_label(cfg: &Idle, on_battery: bool) -> String {
-    match cfg.blank_after_on(on_battery) {
-        0 => "never (setting)".to_string(),
-        secs if on_battery && secs != cfg.blank_after_s => format!("{secs}s (on battery)"),
-        secs => format!("{secs}s"),
+impl World for Machine {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+    fn on_battery(&self) -> bool {
+        on_battery()
+    }
+    fn on_ac(&self) -> bool {
+        on_ac()
+    }
+    fn no_lock(&self) -> bool {
+        swaypplet_system::inhibit::NoLock.armed()
+    }
+    fn no_sleep(&self) -> bool {
+        swaypplet_system::inhibit::NoSleep.armed()
+    }
+    fn idle_inhibited(&self) -> bool {
+        swaypplet_system::inhibit::idle_inhibited()
     }
 }
 
@@ -204,11 +183,9 @@ pub fn run() -> ! {
     // The timers, from the settings file, and the handle to re-arm them.
     // `saved` is the file; `cfg` is what is in force this minute, which is a
     // different set inside the night window (`Idle::resolve`). Everything
-    // below reads `cfg` and never learns that a window exists.
-    let mut saved = Settings::load().idle();
-    let mut cfg = saved.resolve(store::local_minute_of_day());
-    let mut settings_changed = false;
-    let mut next_settings_check = next_minute();
+    // in `policy` reads `cfg` and never learns that a window exists.
+    let saved = Settings::load().idle();
+    let cfg = saved.resolve(store::local_minute_of_day());
     {
         let tx = tx.clone();
         swaypplet_base::watch::files_on_thread(vec![store::path()], move || {
@@ -225,35 +202,14 @@ pub fn run() -> ! {
     // the session is unlocked and nobody is waiting, makes it free.
     locker::prewarm();
 
-    let mut locker_active = false;
-    // True only between the compositor's lock confirmation (LockerUp) and
-    // LockerGone. locker_active alone means "a launch is in flight".
-    let mut locker_confirmed = false;
-    // Deadline for releasing the sleep inhibitor while a locker launch is in
-    // flight. Some(_) means PrepareForSleep(true) arrived and we still hold
-    // the inhibitor.
-    let mut sleep_release: Option<Instant> = None;
-    // When the locked, idle session's outputs should go off. Some(_) only
-    // while locked AND idle; any input clears it. See `blank_deadline`.
-    let mut blank_at: Option<Instant> = None;
-    // The power source as last read, for the blank tier. Read again at every
-    // arm and on the minute check rather than watched: a minute's lag on an
-    // unplug costs at most a minute of lit lock screen.
-    let mut battery = on_battery();
-    // Why the current locker was started ("idle" | "manual" | "sleep" |
-    // "switch"); decides whether LockerUp blanks the outputs.
-    let mut lock_reason: &'static str = "manual";
-    // Mirrors the logind session Active property.
-    let mut session_active = true;
-    // True only while the dim tier's 10% is on the screen, so the resume
-    // restores brightness it actually took away.
-    let mut dimmed = false;
+    let mut state = State::new(saved, cfg, next_minute(), on_battery());
+    let world = Machine;
 
     // This process owns the sensor for the whole session and publishes it on
     // the session bus; the bar and the lock screen's face engine listen there
     // rather than reading the device themselves. Reads cost 250-400 ms each
     // and the hardware serves about three a second, so three independent
-    // readers meant all three queued. See `services::presence`.
+    // readers meant all three queued. See `swaypplet_system::presence`.
     //
     // None on hardware without the sensor, which keeps the timer-only
     // behaviour intact.
@@ -279,13 +235,27 @@ pub fn run() -> ! {
             .expect("spawn presence-wake");
         drained
     });
-    // Mirrors the sensor, for the tiers that ask whether anyone is here.
-    // None until the first reading lands.
-    let mut present: Option<bool> = None;
 
-    let release_inhibitor = |sleep_release: &mut Option<Instant>| {
-        if sleep_release.take().is_some() {
-            logind.release_sleep_inhibitor();
+    let apply = |effects: Vec<Effect>| {
+        for effect in effects {
+            match effect {
+                Effect::Power(scope, power) => outputs.power(scope, power),
+                Effect::PowerBrightness(scope, power, level) => {
+                    outputs.power_brightness(scope, power, level)
+                }
+                Effect::Brightness(scope, level) => outputs.brightness(scope, level),
+                Effect::StartLocker(reason) => locker::start(tx.clone(), reason),
+                Effect::Prewarm => locker::prewarm(),
+                Effect::ReleaseSleepInhibitor => logind.release_sleep_inhibitor(),
+                Effect::SetLockedHint(locked) => logind.set_locked_hint(locked),
+                Effect::Retime(cfg) => {
+                    if timeouts.send(wayland::Timeouts::from(&cfg)).is_err() {
+                        log::error!("idle: wayland thread gone; timers not re-armed");
+                    }
+                }
+                Effect::Suspend => run_cmd("idle.suspend", "systemctl", &["suspend"]),
+                Effect::Exit => std::process::exit(1),
+            }
         }
     };
 
@@ -294,174 +264,33 @@ pub fn run() -> ! {
         // Transitions arrive from the owner thread, which samples on its own
         // cadence; each one also sends `Ev::Wake`, so the loop is here within
         // microseconds of the sensor changing.
-        let mut now_present = None;
         if let Some(events) = &presence {
-            while let Ok(event) = events.try_recv() {
-                match event {
-                    PresenceEvent::Changed(state) => {
-                        // Only a change in the settled state is an edge to act
-                        // on; the owner sends its opening reading too.
-                        if present != Some(state) {
-                            present = Some(state);
-                            now_present = Some(state);
-                        }
-                    }
-                    // Display only; the bar is what reads it.
-                    PresenceEvent::Attention(_) => {}
-                }
+            let batch: Vec<PresenceEvent> = events.try_iter().collect();
+            if !batch.is_empty() {
+                apply(step(&mut state, Input::Presence(batch), &world));
             }
         }
 
-        if let Some(now_present) = now_present {
-            if now_present {
-                log::info!("presence: user back — powering outputs on");
-                // The mirror of the blank invariant. Blanking is dangerous
-                // without a confirmed lock, so it is guarded; powering on
-                // never is, so this is unconditional. Without it, returning to
-                // a blanked session leaves you facing a dark screen until you
-                // touch something — and the locker is by then already
-                // attempting face unlock behind it, so the machine looks dead
-                // at exactly the moment it is working.
-                //
-                // Outputs only, no brightness restore. If the dim tier had
-                // faded the screen it stays faded, which is still legible, and
-                // the existing input-driven Resumed(Dim) path is what should
-                // own brightness — presence is not input, and overriding a
-                // deliberate brightness setting from a walk-past would be
-                // worse than a dim lock screen.
-                //
-                // Presence is not input, so it does not *disarm* the blank
-                // deadline — but it does light the screen, so it must arm
-                // one. Without this, a walk-past after the deadline had
-                // already fired would power the panel on with nothing left
-                // to turn it off again, and the lock screen would sit lit
-                // until someone touched a key.
-                if locker_confirmed {
-                    battery = on_battery();
-                    blank_at = blank_deadline(&cfg, battery);
-                }
-                outputs.power("presence.back", Power::On);
-            } else if !cfg.walk_away_lock {
-                log::info!("presence: user gone — walk-away lock off (setting), not locking");
-            } else if swaypplet_system::inhibit::NoLock.armed() {
-                log::info!("presence: user gone — No Lock armed, not locking");
-            } else if swaypplet_system::inhibit::idle_inhibited() {
-                // Absence is the one tier the compositor cannot suppress for
-                // us. The timeout tiers ride ext-idle-notify, which honours
-                // idle inhibitors on its own (wayland.rs), so a video player
-                // or a hand-set `inhibit_idle` already holds them off; walking away is not
-                // idle, so this path has to ask. One IPC round trip, on an
-                // edge rather than on the tick.
-                log::info!("presence: user gone — idle inhibited, not locking");
-            } else {
-                log::info!("presence: user gone — locking");
-                ensure_locked(
-                    &tx,
-                    &mut locker_active,
-                    &mut locker_confirmed,
-                    &mut lock_reason,
-                    "presence",
-                );
-            }
-        }
-
-        // The settings file (an event) and the clock (each minute boundary).
-        // An edit is reloaded whole, and the night window is resolved on
-        // every check, so one comparison covers both causes: an edit in the
-        // pane, and the window opening or closing. The blank duration and
-        // the dim level are read from `cfg` at fire time, so they need no
-        // re-arm at all.
-        if settings_changed || Instant::now() >= next_settings_check {
-            if Instant::now() >= next_settings_check {
-                next_settings_check = next_minute();
-            }
-            let reloaded = std::mem::take(&mut settings_changed);
-            if reloaded {
-                saved = Settings::load().idle();
-            }
+        let now = Instant::now();
+        if state.settings_due(now) {
+            let next_check = (now >= state.next_settings_check).then(next_minute);
+            let reload = state.settings_changed.then(|| Settings::load().idle());
             let minute = store::local_minute_of_day();
-            let fresh = saved.resolve(minute);
-            let was_battery = std::mem::replace(&mut battery, on_battery());
-            if battery != was_battery {
-                log::info!(
-                    "idle: {} — screen off {}",
-                    if battery { "on battery" } else { "on AC" },
-                    blank_label(&fresh, battery)
-                );
-            }
-            let tier_changed = fresh != cfg || battery != was_battery;
-            if fresh != cfg {
-                log::info!(
-                    "idle: {} — dim {}s to {}%, lock {}s, blank {}s, suspend {}s (0 is never)",
-                    if reloaded {
-                        "settings changed"
-                    } else if saved.in_night(minute) {
-                        "night window open"
-                    } else {
-                        "night window closed"
-                    },
-                    fresh.dim_after_s,
-                    fresh.dim_level,
-                    fresh.lock_after_s,
-                    fresh.blank_after_s,
-                    fresh.suspend_after_s
-                );
-                cfg = fresh;
-                if timeouts.send(wayland::Timeouts::from(&cfg)).is_err() {
-                    log::error!("idle: wayland thread gone; timers not re-armed");
-                }
-            }
-            // A blank already counting down was armed against the old tier,
-            // or the old power source. Shorten it to the new one, never
-            // extend it: the window's job, and the battery tier's, is to put
-            // the screen out sooner, and a locked screen that stays lit past
-            // the new deadline because the window opened one second too late
-            // is the bug this avoids. Plugging in therefore leaves a shorter
-            // countdown alone. `None` from the new tier is "never", which
-            // disarms.
-            if tier_changed && let Some(at) = blank_at {
-                blank_at = blank_deadline(&cfg, battery).map(|fresh_at| at.min(fresh_at));
-            }
+            apply(step(
+                &mut state,
+                Input::Settings {
+                    reload,
+                    minute,
+                    next_check,
+                },
+                &world,
+            ));
         }
 
         // Asleep until the next event or the nearest deadline: no tick.
-        let deadline = [Some(next_settings_check), sleep_release, blank_at]
-            .into_iter()
-            .flatten()
-            .min()
-            .unwrap_or(next_settings_check);
-        let ev = rx.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+        let ev = rx.recv_timeout(state.deadline().saturating_duration_since(Instant::now()));
 
-        // Deadlines fire on every pass, event traffic or not.
-        if sleep_release.is_some_and(|d| Instant::now() >= d) {
-            log::warn!(
-                "before-sleep: locker not up after {SLEEP_RELEASE_MAX:?} — releasing inhibitor anyway"
-            );
-            // Whatever is on the panel is not a locked screen, and with the
-            // cross-fade it may be a half-dissolved one. Blank before
-            // releasing, so the last frame scanned out — the one still on the
-            // panel at resume, before the compositor repaints — is nothing.
-            outputs.power("before-sleep.timeout", Power::Off);
-            release_inhibitor(&mut sleep_release);
-        }
-        if blank_at.is_some_and(|d| Instant::now() >= d) {
-            blank_at = None;
-            // Gates checked at fire time, not at arm time: the lock must
-            // still be confirmed (the security invariant — never blank an
-            // unlocked session; a crash relaunch keeps the compositor lock
-            // held, so confirmed stays true through the gap) and the session
-            // must still be on the seat, since a switch-away lock leaves our
-            // idle timers running on a VT we no longer own.
-            if locker_confirmed && session_active {
-                log::info!(
-                    "lock.blank: {} idle while locked",
-                    blank_label(&cfg, battery)
-                );
-                outputs.power("lock.blank", Power::Off);
-            } else {
-                log::info!("lock.blank: skipped (session inactive or locker gone)");
-            }
-        }
+        apply(step(&mut state, Input::Deadlines, &world));
 
         let ev = match ev {
             Ok(ev) => ev,
@@ -471,259 +300,8 @@ pub fn run() -> ! {
                 std::process::exit(1);
             }
         };
-
-        match ev {
-            Ev::Idled(Timeout::Dim) => {
-                // Dimming is the first step toward the lock, so No Lock owns
-                // it: a screen that fades while you read it is the same
-                // complaint as one that locks while you read it.
-                if swaypplet_system::inhibit::NoLock.armed() {
-                    log::info!("idle.dim: skip (No Lock)");
-                } else {
-                    dimmed = true;
-                    log::info!("idle.dim: {}s idle — {}%", cfg.dim_after_s, cfg.dim_level);
-                    outputs.brightness("idle.dim", cfg.dim_level);
-                }
-            }
-            // Restore only what this tier faded. The resume fires whether or
-            // not the dim did, and an unconditional 100% would undo a
-            // deliberate brightness setting every time input resumed under
-            // No Lock.
-            Ev::Resumed(Timeout::Dim) => {
-                if std::mem::take(&mut dimmed) {
-                    outputs.brightness("idle.dim.resume", 100);
-                }
-            }
-
-            Ev::Idled(Timeout::Lock) => {
-                // Sitting still is not being away. While the sensor sees
-                // someone the 300 s tier is suppressed and the absence path
-                // owns locking instead; nothing re-arms this tier until input
-                // resumes, which is the intent.
-                if swaypplet_system::inhibit::NoLock.armed() {
-                    log::info!("idle.lock: skip (No Lock)");
-                } else if present == Some(true) {
-                    log::info!("idle.lock: skip (present)");
-                } else {
-                    log::info!("idle.lock: {}s idle — fire", cfg.lock_after_s);
-                    ensure_locked(
-                        &tx,
-                        &mut locker_active,
-                        &mut locker_confirmed,
-                        &mut lock_reason,
-                        "idle",
-                    );
-                }
-            }
-            Ev::Resumed(Timeout::Lock) => {}
-
-            // Input stopped while locked: start counting toward the blank.
-            // This no longer blanks anything by itself.
-            Ev::Idled(Timeout::LockIdle) => {
-                if locker_confirmed {
-                    battery = on_battery();
-                    blank_at = blank_deadline(&cfg, battery);
-                    match blank_at {
-                        Some(_) => {
-                            log::info!("lock.blank: armed for {}", blank_label(&cfg, battery))
-                        }
-                        None => log::info!("lock.blank: never (setting)"),
-                    }
-                }
-            }
-            // Input while locked: the user is here, so cancel the pending
-            // blank and light the outputs. Powering on is unconditional
-            // (matches the old config): if the locker died, a gated resume
-            // would leave the panel stuck off on the next keypress.
-            Ev::Resumed(Timeout::LockIdle) => {
-                if blank_at.take().is_some() {
-                    log::info!("lock.blank: disarmed (input)");
-                }
-                outputs.power("idle.lock-idle.resume", Power::On);
-            }
-
-            Ev::Idled(Timeout::Suspend) => {
-                // Never suspend from an inactive session: our idle timers keep
-                // advancing after a VT switch, so an unguarded suspend would
-                // sleep the whole machine out from under the user who is
-                // actively on another VT.
-                if !session_active {
-                    log::info!("idle.suspend: session inactive — skip");
-                } else if on_ac() {
-                    log::info!("idle.suspend: on AC — skip");
-                } else if swaypplet_system::inhibit::NoSleep.armed() {
-                    // No Sleep's inhibitor covers logind's *lid* handling,
-                    // and this tier is not logind's. Without this the second
-                    // path wins anyway: shut the lid on battery, and twenty
-                    // minutes later the machine this switch exists to keep
-                    // awake suspends itself.
-                    log::info!("idle.suspend: No Sleep armed — skip");
-                } else {
-                    log::info!("idle.suspend: {}s idle on battery", cfg.suspend_after_s);
-                    run_cmd("idle.suspend", "systemctl", &["suspend"]);
-                }
-            }
-            Ev::Resumed(Timeout::Suspend) => {}
-
-            Ev::Sleep(true) => {
-                log::info!("before-sleep: fire");
-                if locker_confirmed {
-                    // Already locked — nothing to wait for.
-                    sleep_release = Some(Instant::now());
-                    release_inhibitor(&mut sleep_release);
-                } else {
-                    // No lock, or a launch is in flight but the compositor
-                    // hasn't confirmed it yet: hold the inhibitor until
-                    // LockerUp. Releasing on a mere spawn is how a suspend
-                    // freeze once caught the locker mid-startup and slept
-                    // the machine unlocked.
-                    ensure_locked(
-                        &tx,
-                        &mut locker_active,
-                        &mut locker_confirmed,
-                        &mut lock_reason,
-                        "sleep",
-                    );
-                    sleep_release = Some(Instant::now() + SLEEP_RELEASE_MAX);
-                }
-            }
-            Ev::Sleep(false) => {
-                // logind.rs re-takes the inhibitor itself on resume.
-                outputs.power_brightness("after-resume", Power::On, 100);
-            }
-
-            Ev::LockSignal => {
-                log::info!("lock: signal");
-                ensure_locked(
-                    &tx,
-                    &mut locker_active,
-                    &mut locker_confirmed,
-                    &mut lock_reason,
-                    "manual",
-                );
-            }
-            Ev::UnlockSignal => {
-                log::info!("unlock: signal");
-                blank_at = None;
-                outputs.power_brightness("unlock", Power::On, 100);
-            }
-
-            Ev::RecoverLock => {
-                // Re-power outputs first: the dead locker may have left them
-                // blanked, and the new lock surface needs a lit output to be
-                // seen. Then lock with a reason that keeps the UI visible.
-                outputs.power_brightness("recover", Power::On, 100);
-                ensure_locked(
-                    &tx,
-                    &mut locker_active,
-                    &mut locker_confirmed,
-                    &mut lock_reason,
-                    "recover",
-                );
-            }
-            Ev::LockerUp => {
-                locker_confirmed = true;
-                if sleep_release.is_some() {
-                    // Suspend path: blank now. The machine is about to sleep
-                    // and the inhibitor must not wait on a timer. This is the
-                    // one blank that is not an idle policy.
-                    log::info!("lock: locker up — blanking outputs (sleep)");
-                    blank_at = None;
-                    outputs.power("lock.blank", Power::Off);
-                } else {
-                    // Every other lock reason, without exception, leaves the
-                    // screen lit. The lock screen is meant to be seen: it is
-                    // where face unlock reports what it is doing, and a panel
-                    // that goes dark a second after locking made that
-                    // invisible. Blanking waits for real idle time.
-                    battery = on_battery();
-                    blank_at = blank_deadline(&cfg, battery);
-                    log::info!(
-                        "lock: locker up ({lock_reason}) — screen stays lit, blank in {}",
-                        blank_label(&cfg, battery)
-                    );
-                }
-                // Record the lock in logind so a service restart can recover
-                // it (see Ev::RecoverLock).
-                logind.set_locked_hint(true);
-                release_inhibitor(&mut sleep_release);
-            }
-            Ev::SessionActive(false) => {
-                session_active = false;
-                // Leaving the seat (fast user switch, bare VT change):
-                // lock the abandoned session behind us. Idempotent when the
-                // switcher script already sent Lock.
-                ensure_locked(
-                    &tx,
-                    &mut locker_active,
-                    &mut locker_confirmed,
-                    &mut lock_reason,
-                    "switch",
-                );
-            }
-            Ev::SessionActive(true) => {
-                session_active = true;
-                if locker_active {
-                    // Returning to a locked session: light the outputs so
-                    // the lock screen shows instead of a dead panel.
-                    outputs.power_brightness("switch.return", Power::On, 100);
-                }
-            }
-            Ev::LockerGone { rc } => {
-                locker_active = false;
-                locker_confirmed = false;
-                // The lock episode is over, so the blank deadline goes with
-                // it. The fire-time gate would refuse anyway, but leaving a
-                // live deadline pointing at an unlocked session is the kind
-                // of state that survives one refactor and blanks a desktop
-                // after the next.
-                blank_at = None;
-                // Locked-or-bailed either way: don't hold suspend for this.
-                release_inhibitor(&mut sleep_release);
-                match rc {
-                    0 => {
-                        log::info!("lock: clean unlock");
-                        logind.set_locked_hint(false);
-                        outputs.power_brightness("unlock", Power::On, 100);
-                    }
-                    2 => {
-                        log::warn!("lock: lock unavailable (rc=2) — another locker or no protocol")
-                    }
-                    _ => log::error!("lock: locker never started (rc={rc}) — NOT blanking"),
-                }
-                // Arm the next one straight away, so the warm-up lands now
-                // rather than on whoever locks next. rc=2 included: a lock
-                // that could not be acquired says nothing about the next one.
-                locker::prewarm();
-            }
-
-            Ev::Fatal(msg) => {
-                log::error!("idle: fatal: {msg}");
-                std::process::exit(1);
-            }
-            // Handled at the top of the next pass, with the clock.
-            Ev::SettingsChanged => settings_changed = true,
-            // The presence queue is drained at the top of the next pass.
-            Ev::Wake => {}
-        }
+        apply(step(&mut state, Input::Event(ev), &world));
     }
-}
-
-fn ensure_locked(
-    tx: &mpsc::Sender<Ev>,
-    locker_active: &mut bool,
-    locker_confirmed: &mut bool,
-    lock_reason: &mut &'static str,
-    reason: &'static str,
-) {
-    if *locker_active {
-        log::info!("lock: locker already running — skip ({reason})");
-        return;
-    }
-    *locker_active = true;
-    *locker_confirmed = false;
-    *lock_reason = reason;
-    locker::start(tx.clone(), reason);
 }
 
 /// Run a short external command, journal-logging fire + exit in the same

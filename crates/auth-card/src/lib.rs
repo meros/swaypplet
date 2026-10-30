@@ -1,10 +1,14 @@
-//! Lock screen surfaces — one per monitor, all mirroring the same state.
+//! The auth card's surfaces — one per monitor, all mirroring the same state —
+//! for the lock screen and the greeter alike.
 //!
 //! `SurfaceSet` owns the per-monitor widget handles and broadcasts every
 //! state change (status text, verifying, shake, fingerprint pill) to all of
 //! them, so whichever screen the user looks at tells the same story. Windows
 //! deregister themselves on destroy (the compositor unmaps/destroys lock
 //! surfaces when a monitor is unplugged or the session unlocks).
+//!
+//! Its own crate so the greeter can draw the card without linking the lock's
+//! PAM and session-lock code.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -16,7 +20,7 @@ use swaypplet_switch_user as switch_user;
 use swaypplet_system::status::{Severity, StatusItem};
 use swaypplet_system::{inhibit, inhibit::Inhibitor};
 use swaypplet_ui::anim::animations_enabled;
-use swaypplet_ui::auth_field::{AuthField, Caption, Tone};
+use swaypplet_ui::auth_field::{AuthField, Caption, Tone, caps_lock_on, on_caps_lock_change};
 use swaypplet_ui::ui;
 use swaypplet_ui::ui::icons;
 
@@ -151,15 +155,6 @@ impl WakeCmd {
     }
 }
 
-/// Stored, not just passed through: the message line re-renders whenever
-/// Caps Lock changes, and it has to remember how the last status was meant.
-#[derive(Clone, Copy, Default)]
-pub enum StatusKind {
-    #[default]
-    Info,
-    Error,
-}
-
 struct Surface {
     /// This surface is on the built-in panel, the one with the camera above
     /// it. The face indicator appears here and nowhere else.
@@ -178,7 +173,7 @@ struct Surface {
     user_chips: Vec<(String, gtk4::Button)>,
     entry: gtk4::PasswordEntry,
     /// The password field, chrome and marks included. See
-    /// [`crate::auth_field`] and docs/AUTH_CARD.md: everything the card used
+    /// [`swaypplet_ui::auth_field`] and docs/AUTH_CARD.md: everything the card used
     /// to say in rows under the entry, it now says on or below this one box.
     field: AuthField,
     /// Face unlock indicator. Pinned to the top of the screen rather than
@@ -703,20 +698,33 @@ impl SurfaceSet {
         *self.sessions.borrow_mut() = line;
     }
 
-    /// Tick: clock, date, and caps-lock state on every surface.
+    /// Tick: clock and date on every surface.
     pub fn tick(&self) {
-        let caps_on = caps_lock_state();
-        let caps_changed = self.caps.replace(caps_on) != caps_on;
         for s in self.inner.borrow().iter() {
             self.update_surface_clock(s);
-            // The words mark the edge and then give the line back: a
-            // permanent sentence about a shift key would sit on top of
-            // everything else the caption has to say for as long as the key
-            // is latched. The standing warning is composed onto the rejection
-            // instead, which is the moment it changes what the user does.
-            if caps_changed && caps_on {
-                s.caption.caps_edge();
-            }
+        }
+    }
+
+    /// Follow Caps Lock from here on: its state now, then every change the
+    /// keyboard reports. Call once, when the card should start saying so; a
+    /// key already latched at that moment counts as an edge.
+    pub fn follow_caps_lock(&self) {
+        self.caps_changed(caps_lock_on());
+        let set = self.clone();
+        on_caps_lock_change(move |on| set.caps_changed(on));
+    }
+
+    fn caps_changed(&self, on: bool) {
+        if self.caps.replace(on) == on || !on {
+            return;
+        }
+        // The words mark the edge and then give the line back: a permanent
+        // sentence about a shift key would sit on top of everything else the
+        // caption has to say for as long as the key is latched. The standing
+        // warning is composed onto the rejection instead, which is the moment
+        // it changes what the user does.
+        for s in self.inner.borrow().iter() {
+            s.caption.caps_edge();
         }
     }
 
@@ -792,11 +800,7 @@ impl SurfaceSet {
 
     /// What the card has to say about the last attempt. Empty clears it,
     /// dropping the caption back to its resting sentence.
-    pub fn set_status(&self, text: &str, kind: StatusKind) {
-        let tone = match kind {
-            StatusKind::Info => Tone::Info,
-            StatusKind::Error => Tone::Error,
-        };
+    pub fn set_status(&self, text: &str, tone: Tone) {
         let caps = self.caps.get();
         for s in self.inner.borrow().iter() {
             s.caption.status(text, tone, caps);
@@ -895,7 +899,7 @@ impl SurfaceSet {
             }
             s.entry.set_sensitive(true);
         }
-        self.set_status("", StatusKind::Info);
+        self.set_status("", Tone::Info);
         // Desensitizing dropped the caret; nothing would take typing otherwise.
         self.focus_entry();
     }
@@ -1093,25 +1097,11 @@ fn build_switch_button(set: &SurfaceSet, stand: &dyn Fn(&gtk4::Widget)) -> gtk4:
     btn.set_halign(gtk4::Align::Center);
     let set = set.clone();
     btn.connect_clicked(move |_| {
-        set.set_status("Switching\u{2026}", StatusKind::Info);
+        set.set_status("Switching\u{2026}", Tone::Info);
         let delay = set.begin_handoff(None);
         glib::timeout_add_local_once(delay, switch_user::to_greeter);
     });
     btn
-}
-
-fn caps_lock_state() -> bool {
-    // Dev hook, same family as SWAYPPLET_PREVIEW_AVATAR: the headless render
-    // harness has no keyboard to latch, and the Caps Lock line is one of the
-    // states whose arrival has to be shown not to move the card.
-    if let Ok(v) = std::env::var("SWAYPPLET_PREVIEW_CAPS") {
-        return v == "1";
-    }
-    gdk4::Display::default()
-        .and_then(|d| d.default_seat())
-        .and_then(|seat| seat.keyboard())
-        .map(|kb| kb.is_caps_locked())
-        .unwrap_or(false)
 }
 
 #[cfg(test)]

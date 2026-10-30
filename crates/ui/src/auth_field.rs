@@ -65,9 +65,37 @@ enum Rank {
     Status = 3,
 }
 
-/// How a caption line is coloured. Not the same axis as [`Rank`]: a status can
-/// be an error or an ordinary progress note, and both outrank a hint.
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+/// Caps Lock, as a card should report it.
+///
+/// `SWAYPPLET_PREVIEW_CAPS=1` (or `0`) stands in for the key: the headless
+/// render harness has no keyboard to latch, and the Caps Lock line is one of
+/// the states whose arrival has to be shown not to move the card.
+pub fn caps_lock_on() -> bool {
+    if let Ok(v) = std::env::var("SWAYPPLET_PREVIEW_CAPS") {
+        return v == "1";
+    }
+    keyboard().is_some_and(|kb| kb.is_caps_locked())
+}
+
+/// Call `f` with Caps Lock's new state ([`caps_lock_on`]) each time the
+/// keyboard reports a change. The keyboard says so as it happens, so nothing
+/// polls. A display with no keyboard never calls it.
+pub fn on_caps_lock_change(f: impl Fn(bool) + 'static) {
+    if let Some(kb) = keyboard() {
+        kb.connect_caps_lock_state_notify(move |_| f(caps_lock_on()));
+    }
+}
+
+fn keyboard() -> Option<gdk4::Device> {
+    gdk4::Display::default()
+        .and_then(|d| d.default_seat())
+        .and_then(|seat| seat.keyboard())
+}
+
+/// How a caption line is coloured, and how a card's status is meant. Not the
+/// same axis as [`Rank`]: a status can be an error or an ordinary progress
+/// note, and both outrank a hint.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum Tone {
     #[default]
     Info,

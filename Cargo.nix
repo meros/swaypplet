@@ -83,6 +83,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "swaypplet-auth-card" = rec {
+      packageId = "swaypplet-auth-card";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "swaypplet-auth-card";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "swaypplet-bar" = rec {
       packageId = "swaypplet-bar";
       build = internal.buildRustCrateWithFeatures {
@@ -6882,6 +6892,10 @@ rec {
             packageId = "swaypplet-audio";
           }
           {
+            name = "swaypplet-auth-card";
+            packageId = "swaypplet-auth-card";
+          }
+          {
             name = "swaypplet-bar";
             packageId = "swaypplet-bar";
           }
@@ -6916,10 +6930,6 @@ rec {
           {
             name = "swaypplet-launcher";
             packageId = "swaypplet-launcher";
-          }
-          {
-            name = "swaypplet-lock";
-            packageId = "swaypplet-lock";
           }
           {
             name = "swaypplet-model";
@@ -6998,6 +7008,53 @@ rec {
           {
             name = "swaypplet-model";
             packageId = "swaypplet-model";
+          }
+        ];
+
+      };
+      "swaypplet-auth-card" = rec {
+        crateName = "swaypplet-auth-card";
+        version = "0.1.0";
+        edition = "2024";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/auth-card; };
+        libName = "swaypplet_auth_card";
+        dependencies = [
+          {
+            name = "gdk4";
+            packageId = "gdk4";
+          }
+          {
+            name = "glib";
+            packageId = "glib";
+          }
+          {
+            name = "gtk4";
+            packageId = "gtk4";
+            features = [ "v4_14" ];
+          }
+          {
+            name = "log";
+            packageId = "log";
+          }
+          {
+            name = "swaypplet-base";
+            packageId = "swaypplet-base";
+          }
+          {
+            name = "swaypplet-switch-user";
+            packageId = "swaypplet-switch-user";
+          }
+          {
+            name = "swaypplet-system";
+            packageId = "swaypplet-system";
+          }
+          {
+            name = "swaypplet-tokens";
+            packageId = "swaypplet-tokens";
+          }
+          {
+            name = "swaypplet-ui";
+            packageId = "swaypplet-ui";
           }
         ];
 
@@ -7389,6 +7446,10 @@ rec {
         libName = "swaypplet_fp";
         dependencies = [
           {
+            name = "async-channel";
+            packageId = "async-channel";
+          }
+          {
             name = "libc";
             packageId = "libc";
           }
@@ -7431,6 +7492,10 @@ rec {
         libName = "swaypplet_greet";
         dependencies = [
           {
+            name = "async-channel";
+            packageId = "async-channel";
+          }
+          {
             name = "glib";
             packageId = "glib";
           }
@@ -7453,8 +7518,8 @@ rec {
             packageId = "log";
           }
           {
-            name = "serde_json";
-            packageId = "serde_json";
+            name = "swaypplet-auth-card";
+            packageId = "swaypplet-auth-card";
           }
           {
             name = "swaypplet-base";
@@ -7463,10 +7528,6 @@ rec {
           {
             name = "swaypplet-fp";
             packageId = "swaypplet-fp";
-          }
-          {
-            name = "swaypplet-lock";
-            packageId = "swaypplet-lock";
           }
           {
             name = "swaypplet-model";
@@ -7775,6 +7836,10 @@ rec {
             packageId = "pam";
           }
           {
+            name = "swaypplet-auth-card";
+            packageId = "swaypplet-auth-card";
+          }
+          {
             name = "swaypplet-base";
             packageId = "swaypplet-base";
           }
@@ -7785,10 +7850,6 @@ rec {
           {
             name = "swaypplet-model";
             packageId = "swaypplet-model";
-          }
-          {
-            name = "swaypplet-switch-user";
-            packageId = "swaypplet-switch-user";
           }
           {
             name = "swaypplet-system";
@@ -8895,10 +8956,6 @@ rec {
         libName = "swaypplet_ui";
         dependencies = [
           {
-            name = "async-channel";
-            packageId = "async-channel";
-          }
-          {
             name = "gdk4";
             packageId = "gdk4";
           }
@@ -8962,12 +9019,6 @@ rec {
           {
             name = "wayland-scanner";
             packageId = "wayland-scanner";
-          }
-          {
-            name = "zbus";
-            packageId = "zbus 4.4.0";
-            usesDefaultFeatures = false;
-            features = [ "tokio" ];
           }
         ];
 

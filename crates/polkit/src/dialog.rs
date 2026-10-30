@@ -1,9 +1,9 @@
 //! The elevation card: one GTK4 modal for `pkexec` and `sudo`.
 //!
-//! Visual language matches `osd.rs` and `launcher.rs`: full-screen
+//! Visual language matches `swaypplet_osd` and `swaypplet_launcher`: full-screen
 //! transparent layer-shell window with a centred card. What is on it is
 //! described once, by a [`Card`], and which methods are accepting input at
-//! this instant by a [`Methods`]; the orchestrator (`mod.rs`) computes both
+//! this instant by a [`Methods`]; the orchestrator (`lib.rs`) computes both
 //! and this file only paints them. There is no elevate mode and no polkit
 //! mode, only a card with or without a command well, with or without a
 //! password field, and a caption that names what works right now.
@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 
-use swaypplet_ui::auth_field::{AuthField, Caption, Tone};
+use swaypplet_ui::auth_field::{AuthField, Caption, Tone, caps_lock_on, on_caps_lock_change};
 use swaypplet_ui::shell::{Namespace, Surface};
 use swaypplet_ui::ui;
 
@@ -23,15 +23,6 @@ use super::agent::ResolvedIdentity;
 
 /// Nerd Font check, for the approved state.
 const ICON_OK: &str = "\u{f012c}";
-
-/// Visual treatment of the status line.
-#[derive(Clone, Copy, Default)]
-pub enum StatusKind {
-    #[default]
-    Info,
-    Error,
-    Success,
-}
 
 /// Everything the card says about the request. Decided before the card is
 /// presented and never changed while it is up: a card that resizes under a
@@ -447,10 +438,9 @@ impl PolkitDialog {
 
         // Caps Lock indicator tracks the keyboard device directly; the
         // initial state is applied on each present().
-        if let Some(keyboard) = keyboard_device() {
+        {
             let dialog_caps = dialog.clone();
-            keyboard.connect_caps_lock_state_notify(move |_| {
-                let on = caps_lock_on();
+            on_caps_lock_change(move |on| {
                 dialog_caps.caps.set(on);
                 if on {
                     dialog_caps.caption.caps_edge();
@@ -474,7 +464,7 @@ impl PolkitDialog {
     pub fn present(&self, card: &Card, callbacks: Callbacks) {
         self.password_entry.set_text("");
         self.password_entry.set_placeholder_text(Some("Password"));
-        self.set_status("", StatusKind::Info);
+        self.set_status("", Tone::Info);
         ui::clear_shake(&self.card);
         ui::set_success(&self.card, false);
         self.field.set_busy(false);
@@ -568,12 +558,7 @@ impl PolkitDialog {
     /// exactly the moment they are reaching for a button. A blank line costs
     /// one line of height; a card that resizes under the pointer costs a
     /// misclick.
-    pub fn set_status(&self, text: &str, kind: StatusKind) {
-        let tone = match kind {
-            StatusKind::Info => Tone::Info,
-            StatusKind::Error => Tone::Error,
-            StatusKind::Success => Tone::Success,
-        };
+    pub fn set_status(&self, text: &str, tone: Tone) {
         self.caption.status(text, tone, self.caps.get());
     }
 
@@ -603,7 +588,7 @@ impl PolkitDialog {
     /// Rejected: the words, the shake, and the inputs back.
     pub fn reject(&self, text: &str) {
         self.set_verifying(false);
-        self.set_status(text, StatusKind::Error);
+        self.set_status(text, Tone::Error);
         self.field.flash_reject();
         self.shake();
     }
@@ -681,7 +666,7 @@ impl PolkitDialog {
         self.auth_btn.set_sensitive(password && !verifying);
         self.field.set_busy(verifying);
         if verifying {
-            self.set_status("Checking\u{2026}", StatusKind::Info);
+            self.set_status("Checking\u{2026}", Tone::Info);
         } else {
             self.caption.clear_status();
             if password && self.password_entry.is_visible() {
@@ -708,24 +693,6 @@ impl PolkitDialog {
         self.icon_label.set_visible(true);
         self.icon_label.set_label(glyph_for_action(action_id));
     }
-}
-
-/// Caps Lock, as the card should report it.
-///
-/// The env override is the dev hook the lock screen has too: the headless
-/// render harness has no keyboard to latch, and this is one of the states the
-/// card must be shown not to resize for.
-fn caps_lock_on() -> bool {
-    if let Ok(v) = std::env::var("SWAYPPLET_PREVIEW_CAPS") {
-        return v == "1";
-    }
-    keyboard_device().is_some_and(|kb| kb.is_caps_locked())
-}
-
-fn keyboard_device() -> Option<gdk4::Device> {
-    gdk4::Display::default()
-        .and_then(|d| d.default_seat())
-        .and_then(|seat| seat.keyboard())
 }
 
 fn glyph_for_action(action_id: &str) -> &'static str {

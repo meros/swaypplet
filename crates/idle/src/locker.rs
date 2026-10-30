@@ -22,6 +22,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
+use swaypplet_base::lock_proto::{self, EXIT_UNAVAILABLE, EXIT_UNLOCKED, LockCmd};
+
 use super::Ev;
 
 /// A locker spawned early, warmed, and parked on stdin waiting to be told to
@@ -55,7 +57,7 @@ pub fn prewarm() {
     }
     match Command::new(&exe)
         .arg("lock")
-        .env("SWAYPPLET_LOCK_WAIT", "1")
+        .env(lock_proto::ENV_WAIT, "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -127,13 +129,16 @@ fn supervise(ev: Sender<Ev>, reason: &'static str) {
             Some(mut child) => {
                 // The reason cannot ride on the environment of a process that
                 // was spawned before anybody knew it.
-                let suffix = if fade { "" } else { " nofade" };
+                let cmd = LockCmd {
+                    reason: reason.to_string(),
+                    fade,
+                };
                 let sent = child
                     .stdin
                     .as_mut()
                     .ok_or_else(|| std::io::Error::other("no stdin pipe"))
                     .and_then(|stdin| {
-                        writeln!(stdin, "LOCK {reason}{suffix}").and_then(|()| stdin.flush())
+                        writeln!(stdin, "{}", cmd.format()).and_then(|()| stdin.flush())
                     });
                 match sent {
                     Ok(()) => child,
@@ -147,8 +152,8 @@ fn supervise(ev: Sender<Ev>, reason: &'static str) {
             }
             None => match Command::new(&exe)
                 .arg("lock")
-                .env("SWAYPPLET_LOCK_REASON", reason)
-                .env("SWAYPPLET_LOCK_FADE", if fade { "1" } else { "0" })
+                .env(lock_proto::ENV_REASON, reason)
+                .env(lock_proto::ENV_FADE, if fade { "1" } else { "0" })
                 .stdout(Stdio::piped())
                 .spawn()
             {
@@ -173,7 +178,7 @@ fn supervise(ev: Sender<Ev>, reason: &'static str) {
                 .spawn(move || {
                     for line in std::io::BufReader::new(out).lines() {
                         match line {
-                            Ok(l) if l.trim() == "LOCKED" => {
+                            Ok(l) if lock_proto::is_locked(&l) => {
                                 let _ = ev.send(Ev::LockerUp);
                             }
                             Ok(_) => {}
@@ -192,7 +197,7 @@ fn supervise(ev: Sender<Ev>, reason: &'static str) {
             }
         };
         match rc {
-            0 | 2 => {
+            EXIT_UNLOCKED | EXIT_UNAVAILABLE => {
                 let _ = ev.send(Ev::LockerGone { rc });
                 return;
             }

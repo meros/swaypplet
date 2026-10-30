@@ -25,7 +25,7 @@
 //! previews setting, on the settings' Bar tab. It applies live, down the
 //! same rebuild ([`Pins::follow_setting`]).
 //!
-//! The bar is where pins live when they are not floating (`bar/pins.rs`): a
+//! The bar is where pins live when they are not floating (`swaypplet_bar::pins`): a
 //! mark while any exist, a popover with every pin live, and a tuck that takes
 //! the floating cards away without unpinning anything.
 

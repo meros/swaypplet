@@ -6,35 +6,32 @@
 //! double-claim the device), and typed zbus deserialization rules out the
 //! null-field crashes the old patched swaylock-effects C path guarded against.
 //!
-//! Worker model mirrors `polkit::agent`: a std::thread runs a current-thread
-//! tokio runtime, pushes [`swaypplet_fp::EngineEvent`]s over a std mpsc channel,
-//! and the GTK side drains it from a periodic glib timeout. The engine verifies
+//! Worker model: a std::thread runs a current-thread tokio runtime and pushes
+//! [`swaypplet_fp::EngineEvent`]s over an async channel, which the GTK side
+//! awaits, the way it awaits the face worker's. The engine verifies
 //! the lock's *own* user (empty username = the caller) at a constant target and
 //! unlocks on the first match; the worker never gives up while the session is
 //! locked — fprintd restarts (e.g. across suspend/resume) surface as
 //! claim/verify errors, and the engine's reclaim loop picks the reader back up.
 
-use std::sync::mpsc;
-
-use swaypplet_fp::{
-    EngineEvent, Flow, SessionGate, verify_engine, watch_session_active, watch_sleep,
-};
+use swaypplet_base::logind::{SessionGate, watch_session_active, watch_sleep};
+use swaypplet_fp::{EngineEvent, Flow, verify_engine};
 
 /// Spawn the fingerprint worker. Returns the event channel; the thread is
 /// detached and exits after a match (the engine's sink returns `Stop`) or when
 /// the process dies (fprintd auto-releases the claim when our bus connection
 /// drops).
-pub fn start() -> mpsc::Receiver<EngineEvent> {
-    let (tx, rx) = mpsc::channel();
+pub fn start() -> async_channel::Receiver<EngineEvent> {
+    let (tx, rx) = async_channel::unbounded();
     swaypplet_base::spawn::spawn_tokio_thread("fprint", run(tx));
     rx
 }
 
-async fn run(tx: mpsc::Sender<EngineEvent>) {
+async fn run(tx: async_channel::Sender<EngineEvent>) {
     let conn = match zbus::Connection::system().await {
         Ok(c) => c,
         Err(e) => {
-            let _ = tx.send(EngineEvent::Unavailable(format!("system bus: {e}")));
+            let _ = tx.try_send(EngineEvent::Unavailable(format!("system bus: {e}")));
             return;
         }
     };
@@ -73,10 +70,11 @@ async fn run(tx: mpsc::Sender<EngineEvent>) {
 
     // Forward every engine event to the GTK side; a match unlocks, so the sink
     // returns `Stop` and the engine tears down after releasing the reader. A
-    // dead channel means the process is exiting — also stop.
+    // dead channel means the process is exiting — also stop. Unbounded, so
+    // `try_send` only fails on a closed channel.
     let sink = move |ev: EngineEvent| {
         let unlock = matches!(ev, EngineEvent::Match(_));
-        if tx.send(ev).is_err() || unlock {
+        if tx.try_send(ev).is_err() || unlock {
             Flow::Stop
         } else {
             Flow::Continue

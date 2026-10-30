@@ -115,7 +115,7 @@ pub fn run(component: &str) {
                     .build()
                     .upcast(),
             };
-            let set = swaypplet_lock::ui::SurfaceSet::new();
+            let set = swaypplet_auth_card::SurfaceSet::new();
             // Greeter-mode preview: SWAYPPLET_GREET_USERS=meros,melvin adds
             // the user row under the lock card.
             let users: Vec<String> = std::env::var("SWAYPPLET_GREET_USERS")
@@ -132,10 +132,10 @@ pub fn run(component: &str) {
                 // SWAYPPLET_PREVIEW_AVATAR=<image> gives it a real picture
                 // (the others keep the monogram fallback).
                 let icon = std::env::var("SWAYPPLET_PREVIEW_AVATAR").ok();
-                let chips: Vec<swaypplet_lock::ui::UserChip> = users
+                let chips: Vec<swaypplet_auth_card::UserChip> = users
                     .iter()
                     .enumerate()
-                    .map(|(i, u)| swaypplet_lock::ui::UserChip {
+                    .map(|(i, u)| swaypplet_auth_card::UserChip {
                         user: u.clone(),
                         logged_in: i == 0,
                         icon: if i == 0 { icon.clone() } else { None },
@@ -151,7 +151,7 @@ pub fn run(component: &str) {
                     if password == "ok" {
                         feedback.flash_success();
                     } else {
-                        feedback.set_status("Wrong password", swaypplet_lock::ui::StatusKind::Error);
+                        feedback.set_status("Wrong password", swaypplet_ui::auth_field::Tone::Error);
                         feedback.shake();
                     }
                 }),
@@ -175,8 +175,9 @@ pub fn run(component: &str) {
             // contents of the reserved rows may differ.
             // Caps first: a rejection composes the warning onto its own line,
             // so the card has to know about the key before it hears about the
-            // rejection. The real surfaces tick once a second and always do.
+            // rejection. The real surfaces follow the key from the start.
             set.tick();
+            set.follow_caps_lock();
             for state in std::env::var("SWAYPPLET_PREVIEW_LOCK_STATE")
                 .unwrap_or_default()
                 .split(',')
@@ -195,14 +196,14 @@ pub fn run(component: &str) {
                     }
                     "error" => set.set_status(
                         "Wrong password (3 attempts)",
-                        swaypplet_lock::ui::StatusKind::Error,
+                        swaypplet_ui::auth_field::Tone::Error,
                     ),
-                    "info" => set.set_status("Switching\u{2026}", swaypplet_lock::ui::StatusKind::Info),
+                    "info" => set.set_status("Switching\u{2026}", swaypplet_ui::auth_field::Tone::Info),
                     // The case the reserved second line exists for, and the
                     // one a stray `line-height` in the stylesheet breaks.
                     "long" => set.set_status(
                         "Your account has expired; please contact your system administrator",
-                        swaypplet_lock::ui::StatusKind::Error,
+                        swaypplet_ui::auth_field::Tone::Error,
                     ),
                     _ => {}
                 }
@@ -216,7 +217,8 @@ pub fn run(component: &str) {
         // shown so one screenshot covers fingerprint pill + password entry.
         // Password "ok" flashes success; anything else shakes.
         if component == "polkit" {
-            use swaypplet_polkit::dialog::{Callbacks, Card, Methods, PolkitDialog, StatusKind};
+            use swaypplet_polkit::dialog::{Callbacks, Card, Methods, PolkitDialog};
+            use swaypplet_ui::auth_field::Tone;
             if std::env::var_os("SWAYPPLET_PREVIEW_LAYER").is_some() {
                 swaypplet_ui::glass::apply_saved();
             }
@@ -251,7 +253,7 @@ pub fn run(component: &str) {
                 Callbacks {
                     on_submit: std::rc::Rc::new(move |password: String| {
                         if password == "ok" {
-                            d.set_status("Authenticated", StatusKind::Success);
+                            d.set_status("Authenticated", Tone::Success);
                             d.flash_success();
                         } else {
                             d.reject("Authentication failed");
@@ -277,7 +279,7 @@ pub fn run(component: &str) {
                     "fp" => methods.fp = true,
                     "face" => methods.face = true,
                     "prompt" => dialog.set_password_prompt("Password"),
-                    "error" => dialog.set_status("Authentication failed", StatusKind::Error),
+                    "error" => dialog.set_status("Authentication failed", Tone::Error),
                     _ => {}
                 }
             }

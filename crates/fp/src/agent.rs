@@ -24,8 +24,12 @@
 //! another greeter — can claim it. Several greeters may be connected at once;
 //! the active-session gate ensures at most one holds the device.
 //!
+//! The greeter's end of the socket is [`client`].
+//!
 //! Env (both ends): SWAYPPLET_FP_SOCK, SWAYPPLET_FP_TOKEN override the
 //! socket and token paths (tests / dev boxes).
+
+pub mod client;
 
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
@@ -37,7 +41,9 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Semaphore, mpsc, watch};
 
-use super::{EngineEvent, Flow, SessionGate, verify_engine, watch_session_active, watch_sleep};
+use swaypplet_base::logind::{SessionGate, watch_session_active, watch_sleep};
+
+use super::{EngineEvent, Flow, verify_engine};
 
 const DEFAULT_SOCK: &str = "/run/swaypplet-fp/agent.sock";
 const DEFAULT_TOKEN: &str = "/run/swaypplet-fp/token.json";
@@ -65,7 +71,7 @@ fn token_path() -> String {
 }
 
 /// Client → agent, one JSON object per line.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "kebab-case")]
 pub enum Cmd {
     /// Verify `user`'s fingerprint (replaces any previous target).

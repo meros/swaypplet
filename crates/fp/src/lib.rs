@@ -1,6 +1,7 @@
-//! Fingerprint core: fprintd D-Bus proxies, logind session/sleep gating, and
-//! the shared claim/verify state machine (`verify_engine`) that both the lock
-//! screen and the greeter's `fp-agent` drive.
+//! Fingerprint core: fprintd D-Bus proxies and the shared claim/verify state
+//! machine (`verify_engine`) that both the lock screen and the greeter's
+//! `fp-agent` drive. The logind gates it runs behind (session active, system
+//! awake) are `swaypplet_base::logind`'s.
 //!
 //! Everything fingerprint-shaped that isn't UI lives here so the two consumers
 //! stay in lock-step:
@@ -30,6 +31,8 @@ use std::time::Duration;
 
 use zbus::export::futures_util::{FutureExt, StreamExt};
 use zbus::proxy;
+
+use swaypplet_base::logind::take_sleep_inhibitor;
 
 // --- fprintd proxies -------------------------------------------------------
 
@@ -98,223 +101,6 @@ pub fn parse_verify_status(result: &str, done: bool) -> Verify {
     }
 }
 
-// --- logind session-active + sleep watching --------------------------------
-
-#[proxy(
-    interface = "org.freedesktop.login1.Manager",
-    default_service = "org.freedesktop.login1",
-    default_path = "/org/freedesktop/login1"
-)]
-pub(crate) trait LogindManager {
-    fn get_session_by_pid(&self, pid: u32) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
-    /// `"auto"` resolves the caller's own session; a real id resolves that
-    /// one. Works for user@.service children, where GetSessionByPID fails
-    /// because the PID isn't in any session cgroup.
-    fn get_session(&self, id: &str) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
-    /// Delay inhibitor: sleep waits (bounded by logind's InhibitDelayMaxSec)
-    /// until every holder closes the returned fd.
-    fn inhibit(
-        &self,
-        what: &str,
-        who: &str,
-        why: &str,
-        mode: &str,
-    ) -> zbus::Result<zbus::zvariant::OwnedFd>;
-    #[zbus(signal)]
-    fn prepare_for_sleep(&self, start: bool) -> zbus::Result<()>;
-    /// Current sleep-transition state — `true` between PrepareForSleep(true)
-    /// and the matching resume. Read once after subscribing, because the
-    /// signal alone only covers *future* transitions.
-    #[zbus(property)]
-    fn preparing_for_sleep(&self) -> zbus::Result<bool>;
-}
-
-#[proxy(
-    interface = "org.freedesktop.systemd1.Manager",
-    default_service = "org.freedesktop.systemd1",
-    default_path = "/org/freedesktop/systemd1"
-)]
-pub(crate) trait Systemd {
-    fn restart_unit(&self, name: &str, mode: &str)
-    -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
-}
-
-#[proxy(
-    interface = "org.freedesktop.login1.Session",
-    default_service = "org.freedesktop.login1"
-)]
-pub(crate) trait LogindSession {
-    #[zbus(property)]
-    fn active(&self) -> zbus::Result<bool>;
-}
-
-/// Which logind session a verify loop gates on.
-#[derive(Clone, Copy)]
-pub enum SessionGate {
-    /// The caller's *own* session (GetSession("auto"), then the pid as a
-    /// fallback). Used by the lock, which runs inside the user's session.
-    Own(u32),
-    /// A specific *client's* session by pid — never "auto". Used by the
-    /// fp-agent: it's a root daemon with no session of its own, so it must
-    /// gate each greeter on that greeter's session, not the daemon's.
-    Client(u32),
-}
-
-const RESOLVE_ATTEMPTS: u32 = 5;
-const RESOLVE_BACKOFF: Duration = Duration::from_millis(500);
-
-/// Push `gate`'s logind-session Active state into `tx`, forever. Never
-/// returns: when the session can't be resolved (dev box, session gone) it
-/// settles on `true` and parks, so receivers can rely on the channel staying
-/// open and select on `changed()` without a busy-loop guard.
-pub async fn watch_session_active(
-    conn: zbus::Connection,
-    gate: SessionGate,
-    tx: tokio::sync::watch::Sender<bool>,
-) {
-    // Resolve once, with bounded retry: session registration can race the
-    // locker/agent starting (fast VT handoff, cold boot). Giving up too early
-    // is what left an inactive locker holding the fingerprint reader.
-    let mut session = None;
-    for attempt in 0..RESOLVE_ATTEMPTS {
-        match resolve_session(&conn, gate).await {
-            Ok(s) => {
-                session = Some(s);
-                break;
-            }
-            Err(e) => {
-                let last = attempt + 1 == RESOLVE_ATTEMPTS;
-                log::log!(
-                    if last {
-                        log::Level::Warn
-                    } else {
-                        log::Level::Debug
-                    },
-                    "session resolve attempt {}/{RESOLVE_ATTEMPTS} failed ({e})",
-                    attempt + 1
-                );
-                if !last {
-                    tokio::time::sleep(RESOLVE_BACKOFF).await;
-                }
-            }
-        }
-    }
-    match session {
-        Some(session) => {
-            let mut stream = session.receive_active_changed().await;
-            let _ = tx.send(session.active().await.unwrap_or(true));
-            while let Some(change) = stream.next().await {
-                if let Ok(v) = change.get().await {
-                    let _ = tx.send(v);
-                }
-            }
-            // Session object vanished (logged out) — hold the last value.
-        }
-        None => {
-            log::warn!("no logind session to gate on after retries; treating as active");
-            let _ = tx.send(true);
-        }
-    }
-    std::future::pending::<()>().await;
-}
-
-/// Push logind's PrepareForSleep state into `tx`, forever: `true` from
-/// PrepareForSleep(start) until the matching resume. Claim holders gate on it
-/// and release the reader before sleep — a claim held across suspend leaves
-/// the synaptics device wedged open inside fprintd (every later Claim fails
-/// with "Device ... is already open" until fprintd restarts). Like
-/// `watch_session_active`, never returns: on setup failure it settles on
-/// `false` (awake) and parks, so receivers can select on `changed()` freely.
-pub async fn watch_sleep(conn: zbus::Connection, tx: tokio::sync::watch::Sender<bool>) {
-    let setup = async {
-        let manager = LogindManagerProxy::new(&conn).await?;
-        let stream = manager.receive_prepare_for_sleep().await?;
-        Ok::<_, zbus::Error>((manager, stream))
-    }
-    .await;
-    match setup {
-        Ok((manager, mut stream)) => {
-            // Seed with the transition already in flight: a locker spawned
-            // *by* the sleep transition (the idle daemon locks on
-            // PrepareForSleep) starts after the signal fired and would
-            // otherwise claim the reader on the way into suspend.
-            // Subscribe-then-read is race-free — a transition between the
-            // two lands in the stream and overwrites the seed.
-            if let Ok(now) = manager.preparing_for_sleep().await {
-                let _ = tx.send(now);
-            }
-            while let Some(sig) = stream.next().await {
-                if let Ok(args) = sig.args() {
-                    let _ = tx.send(*args.start());
-                }
-            }
-            // Stream ended (system bus gone) — hold the last value.
-        }
-        Err(e) => {
-            log::warn!("sleep watch unavailable, claims will span suspend: {e}");
-            let _ = tx.send(false);
-        }
-    }
-    std::future::pending::<()>().await;
-}
-
-/// Take a sleep delay-inhibitor; dropping the fd releases it. Held exactly
-/// while a fingerprint claim is held, so the PrepareForSleep handler gets to
-/// VerifyStop+Release before logind lets the machine suspend. `None` (logind
-/// too old, dev container) just means sleep won't wait for us.
-pub async fn take_sleep_inhibitor(
-    conn: &zbus::Connection,
-    who: &str,
-) -> Option<zbus::zvariant::OwnedFd> {
-    let take = async {
-        LogindManagerProxy::new(conn)
-            .await?
-            .inhibit(
-                "sleep",
-                who,
-                "release fingerprint reader before sleep",
-                "delay",
-            )
-            .await
-    };
-    match take.await {
-        Ok(fd) => Some(fd),
-        Err(e) => {
-            log::warn!("sleep delay-inhibitor unavailable: {e}");
-            None
-        }
-    }
-}
-
-/// Resolve the logind session proxy for `gate` (see [`SessionGate`]).
-async fn resolve_session(
-    conn: &zbus::Connection,
-    gate: SessionGate,
-) -> Result<LogindSessionProxy<'static>, String> {
-    let manager = LogindManagerProxy::new(conn)
-        .await
-        .map_err(|e| e.to_string())?;
-    let path = match gate {
-        SessionGate::Own(pid) => match manager.get_session("auto").await {
-            Ok(p) => p,
-            Err(auto_err) => manager
-                .get_session_by_pid(pid)
-                .await
-                .map_err(|e| format!("GetSession(auto): {auto_err}; GetSessionByPID: {e}"))?,
-        },
-        SessionGate::Client(pid) => manager
-            .get_session_by_pid(pid)
-            .await
-            .map_err(|e| e.to_string())?,
-    };
-    LogindSessionProxy::builder(conn)
-        .path(path)
-        .map_err(|e| e.to_string())?
-        .build()
-        .await
-        .map_err(|e| e.to_string())
-}
-
 /// Deadline for any single fprintd D-Bus call. fprintd has documented
 /// multi-second stalls (22 s synaptics SSM spins) — an unbounded await in the
 /// teardown path holds the sleep delay-inhibitor past logind's
@@ -361,7 +147,7 @@ fn is_device_resetting(err: &str) -> bool {
 /// retrying — no worse than before.
 async fn restart_fprintd(conn: &zbus::Connection) {
     let restart = async {
-        SystemdProxy::new(conn)
+        swaypplet_base::systemd::ManagerProxy::new(conn)
             .await?
             .restart_unit("fprintd.service", "replace")
             .await
@@ -666,7 +452,12 @@ pub async fn verify_engine(
                     continue 'outer;
                 }
                 if inhibitor.is_none() {
-                    inhibitor = take_sleep_inhibitor(&conn, "swaypplet-fp").await;
+                    inhibitor = take_sleep_inhibitor(
+                        &conn,
+                        "swaypplet-fp",
+                        "release fingerprint reader before sleep",
+                    )
+                    .await;
                 }
                 match timed("Claim", device.claim(&user)).await {
                     Ok(()) => break,

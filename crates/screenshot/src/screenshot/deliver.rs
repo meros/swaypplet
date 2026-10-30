@@ -8,7 +8,7 @@
 //! The card is a notification, not a bespoke surface. `NotificationStore`
 //! already draws a picture, already lays out action buttons, already handles
 //! dismissal and history, and the popup already treats a wide image as a
-//! screenshot rather than an avatar (`notifications/card.rs`). A second
+//! screenshot rather than an avatar (`swaypplet_notifications::card`). A second
 //! surface doing the same job would be the notification stack with fewer
 //! years on it.
 
@@ -91,7 +91,7 @@ pub fn save(image: &Image) -> Result<PathBuf, String> {
 /// Put the capture on the clipboard as an image.
 ///
 /// GDK's clipboard rather than the shell's own history ring: the ring is
-/// text-only on purpose (`clipboard.rs`), and an image offer needs a live
+/// text-only on purpose (`swaypplet_system::clipboard`), and an image offer needs a live
 /// source to serve `image/png` on demand, which GTK already is. The panel
 /// outliving the shot is what makes that safe.
 pub fn copy(image: &Image) {

@@ -3,13 +3,13 @@
 //! Owns the `$GREETD_SOCK` connection and speaks the strictly synchronous
 //! greetd protocol: one request on the wire, then block until its reply.
 //! The reply to `post_auth_message_response` only arrives when PAM produces
-//! its next event — acking pam_fprintd's "place your finger" message parks
-//! this thread for the whole fingerprint wait, and nothing (not even a
-//! cancel) reaches greetd until it resolves. The controller works around
-//! that by delaying the ack (see `super`).
+//! its next event, and nothing (not even a cancel) reaches greetd until it
+//! does. That is why greetd's stack is password-only and the fingerprint
+//! runs beside it through the fp-agent (see the crate docs): every reply here
+//! is milliseconds away, never a fingerprint wait.
 //!
 //! Requests come in over a std mpsc channel; every reply is translated to
-//! an [`Ev`] the GTK side drains from a periodic timeout.
+//! an [`Ev`] on an async channel the GTK side awaits.
 
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc;
@@ -17,6 +17,7 @@ use std::sync::mpsc;
 use greetd_ipc::codec::SyncCodec;
 use greetd_ipc::{AuthMessageType, ErrorType, Request, Response};
 
+#[derive(PartialEq)]
 pub enum Req {
     Create { username: String },
     Respond(Option<String>),
@@ -40,9 +41,9 @@ pub enum Ev {
     Fatal(String),
 }
 
-pub fn start() -> (mpsc::Sender<Req>, mpsc::Receiver<Ev>) {
+pub fn start() -> (mpsc::Sender<Req>, async_channel::Receiver<Ev>) {
     let (req_tx, req_rx) = mpsc::channel::<Req>();
-    let (ev_tx, ev_rx) = mpsc::channel::<Ev>();
+    let (ev_tx, ev_rx) = async_channel::unbounded::<Ev>();
     std::thread::spawn(move || {
         let mut stream = match std::env::var("GREETD_SOCK")
             .map_err(|e| e.to_string())
@@ -50,7 +51,7 @@ pub fn start() -> (mpsc::Sender<Req>, mpsc::Receiver<Ev>) {
         {
             Ok(stream) => stream,
             Err(e) => {
-                let _ = ev_tx.send(Ev::Fatal(format!("greetd socket: {e}")));
+                let _ = ev_tx.send_blocking(Ev::Fatal(format!("greetd socket: {e}")));
                 return;
             }
         };
@@ -95,7 +96,7 @@ pub fn start() -> (mpsc::Sender<Req>, mpsc::Receiver<Ev>) {
                 Err(e) => Ev::Fatal(format!("greetd ipc: {e}")),
             };
             let done = matches!(ev, Ev::Fatal(_) | Ev::SessionStarted);
-            if ev_tx.send(ev).is_err() || done {
+            if ev_tx.send_blocking(ev).is_err() || done {
                 return;
             }
         }

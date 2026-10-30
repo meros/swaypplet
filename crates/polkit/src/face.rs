@@ -4,7 +4,7 @@
 //! root? — so they get one answer surface. faced opens the camera inside
 //! pam_race's conversation and asks this process, the confirm agent, to
 //! collect the press. This module attaches that check to the session already
-//! on the card (`mod.rs` keys sessions by the pid of the process running
+//! on the card (`lib.rs` keys sessions by the pid of the process running
 //! pam_race, which faced names as the peer), reports the camera through the
 //! cue and the caption, arms the Allow button on a match, and answers faced.
 //!
@@ -39,8 +39,8 @@ use swaypplet_base::{
     face,
     face::{Progress, Request, Stage},
 };
+use swaypplet_ui::auth_field::Tone;
 
-use super::dialog::StatusKind;
 use super::{Backing, PolkitState, Session, elevate_settings, end_session, pop_queue};
 
 /// A face confirm currently on screen.
@@ -250,10 +250,7 @@ fn confirm(state: &Rc<RefCell<PolkitState>>, req: Request) {
         }
     }
     let dialog = state.borrow().dialog.clone();
-    dialog.set_status(
-        "Recognised you — press Allow to authorise",
-        StatusKind::Info,
-    );
+    dialog.set_status("Recognised you — press Allow to authorise", Tone::Info);
     dialog.arm_allow();
     state
         .borrow()

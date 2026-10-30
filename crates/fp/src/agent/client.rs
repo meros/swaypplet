@@ -1,33 +1,36 @@
-//! Greeter-side client for the root `swaypplet fp-agent` daemon.
+//! Greeter-side client for the root `swaypplet fp-agent` daemon, kept next to
+//! the server so the two ends of the protocol live in one file pair.
 //!
 //! Worker model mirrors `lock::fprint`: a std::thread runs a current-thread
-//! tokio runtime, pushes protocol events over a std mpsc channel, and the
-//! GTK side drains it from its periodic timeout. Commands (retarget/stop)
-//! come in over a tokio unbounded channel, which is safe to send to from
-//! the GTK thread.
+//! tokio runtime and pushes protocol events over an async channel, which the
+//! GTK side awaits. Commands (retarget/stop) come in over a tokio unbounded
+//! channel, which is safe to send to from the GTK thread.
 //!
 //! The worker reconnects with backoff while a verify target is desired, and
 //! re-announces the target after every (re)connect, so an fp-agent restart
 //! or a not-yet-up socket degrades to "fingerprint unavailable" and heals
 //! itself — password auth is never affected.
 
-use std::sync::mpsc;
 use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::net::unix::OwnedWriteHalf;
 
-use swaypplet_fp::agent::{Cmd, Ev, sock_path};
+use super::{Cmd, Ev, sock_path};
 
-pub fn start() -> (tokio::sync::mpsc::UnboundedSender<Cmd>, mpsc::Receiver<Ev>) {
+/// Start the client. Send it [`Cmd`]s; await its [`Ev`]s.
+pub fn start() -> (
+    tokio::sync::mpsc::UnboundedSender<Cmd>,
+    async_channel::Receiver<Ev>,
+) {
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
-    let (ev_tx, ev_rx) = mpsc::channel();
+    let (ev_tx, ev_rx) = async_channel::unbounded();
     swaypplet_base::spawn::spawn_tokio_thread("fp-agent-client", run(cmd_rx, ev_tx));
     (cmd_tx, ev_rx)
 }
 
-async fn run(mut cmds: tokio::sync::mpsc::UnboundedReceiver<Cmd>, evs: mpsc::Sender<Ev>) {
+async fn run(mut cmds: tokio::sync::mpsc::UnboundedReceiver<Cmd>, evs: async_channel::Sender<Ev>) {
     let path = sock_path();
     let mut desired: Option<String> = None;
     let mut reported_down = false;
@@ -51,6 +54,7 @@ async fn run(mut cmds: tokio::sync::mpsc::UnboundedReceiver<Cmd>, evs: mpsc::Sen
                         .send(Ev::Unavailable {
                             msg: format!("fp-agent: {e}"),
                         })
+                        .await
                         .is_err()
                     {
                         return;
@@ -84,7 +88,7 @@ async fn run(mut cmds: tokio::sync::mpsc::UnboundedReceiver<Cmd>, evs: mpsc::Sen
                     Ok(Some(l)) if l.trim().is_empty() => {}
                     Ok(Some(l)) => match serde_json::from_str::<Ev>(l.trim()) {
                         Ok(ev) => {
-                            if evs.send(ev).is_err() {
+                            if evs.send(ev).await.is_err() {
                                 return; // GTK side gone — process is exiting
                             }
                         }
@@ -93,7 +97,7 @@ async fn run(mut cmds: tokio::sync::mpsc::UnboundedReceiver<Cmd>, evs: mpsc::Sen
                     Ok(None) | Err(_) => {
                         // Agent went away — report, back off, reconnect.
                         reported_down = true;
-                        if evs.send(Ev::Unavailable { msg: "fp-agent connection lost".into() }).is_err() {
+                        if evs.send(Ev::Unavailable { msg: "fp-agent connection lost".into() }).await.is_err() {
                             return;
                         }
                         tokio::time::sleep(Duration::from_secs(1)).await;

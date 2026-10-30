@@ -5,7 +5,8 @@
 //! even with a sick session bus. The compositor arbitrates concurrent lockers
 //! at the protocol level (second locker gets `::failed`).
 //!
-//! Exit codes (the swayidle supervisor branches on these):
+//! Exit codes (the idle supervisor branches on these; both ends read them
+//! from `swaypplet_base::lock_proto`):
 //!   0 — clean unlock: successful auth, or the compositor ended the lock
 //!   2 — lock unavailable: protocol unsupported, or another client holds it
 //!   1 — anything else (crash-ish). While locked, a dead client keeps the
@@ -13,8 +14,11 @@
 //!       relaunches us.
 //!
 //! Auth: PAM password (worker thread, service `swaypplet-lock`) concurrent
-//! with fprintd fingerprint (see `fprint.rs`). Unlock only ever follows a
-//! PAM success or a fingerprint match.
+//! with fprintd fingerprint (`fprint.rs`) and, when the Idle & Lock tab
+//! allows it, faced face verification (`face.rs`). logind's Unlock for this
+//! session (`follow_unlock`, sent by `switch-user --resume` after the
+//! greeter authenticated) ends the lock too. Unlock only ever follows one of
+//! those four, and the first one wins (`auth::UnlockGate`).
 //!
 //! What this process draws is a transparent surface: the clock's plate and
 //! the card, both glass. The wallpaper under it and the glass behind the card
@@ -30,7 +34,6 @@ pub(crate) mod auth;
 pub(crate) mod face;
 pub(crate) mod fade;
 pub(crate) mod fprint;
-pub mod ui;
 
 use std::cell::RefCell;
 use std::os::fd::AsRawFd;
@@ -40,9 +43,13 @@ use std::time::Duration;
 use gtk4::glib;
 use gtk4::prelude::*;
 
+use swaypplet_auth_card::SurfaceSet;
+use swaypplet_base::lock_proto::{
+    self, EXIT_ERROR, EXIT_UNAVAILABLE, EXIT_UNLOCKED, LockCmd, UNKNOWN_REASON,
+};
 use swaypplet_base::spawn::spawn_work;
 use swaypplet_fp::EngineEvent;
-use ui::{StatusKind, SurfaceSet};
+use swaypplet_ui::auth_field::Tone;
 
 /// How long a matched face stays on screen before the session unlocks.
 ///
@@ -114,15 +121,15 @@ static NO_FADE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 /// telling the same story.
 pub fn fade_suppressed() -> bool {
     NO_FADE.load(std::sync::atomic::Ordering::Relaxed)
-        || std::env::var("SWAYPPLET_LOCK_FADE").as_deref() == Ok("0")
+        || std::env::var(lock_proto::ENV_FADE).as_deref() == Ok("0")
 }
 
 pub fn reason() -> String {
     REASON
         .get()
         .cloned()
-        .or_else(|| std::env::var("SWAYPPLET_LOCK_REASON").ok())
-        .unwrap_or_else(|| "unknown".into())
+        .or_else(|| std::env::var(lock_proto::ENV_REASON).ok())
+        .unwrap_or_else(|| UNKNOWN_REASON.into())
 }
 
 /// Pay the first-window cost now, then wait to be told to lock.
@@ -188,7 +195,7 @@ fn warm_and_wait() {
     {
         use std::io::Write;
         let mut out = std::io::stdout();
-        let _ = writeln!(out, "READY");
+        let _ = writeln!(out, "{}", lock_proto::READY);
         let _ = out.flush();
     }
 
@@ -226,18 +233,11 @@ fn warm_and_wait() {
         );
     }
     waiting.run();
-    let line = line.borrow().clone();
-    let mut words = line.split_whitespace();
-    let _ = words.next(); // "LOCK"
-    let reason = words.next().unwrap_or("").to_string();
-    if words.any(|w| w == "nofade") {
+    let cmd = LockCmd::parse(&line.borrow());
+    if !cmd.fade {
         NO_FADE.store(true, std::sync::atomic::Ordering::Relaxed);
     }
-    let _ = REASON.set(if reason.is_empty() {
-        "unknown".into()
-    } else {
-        reason
-    });
+    let _ = REASON.set(cmd.reason);
     stage("lock commanded");
 }
 
@@ -270,10 +270,6 @@ fn follow_unlock(on_unlock: impl Fn() + 'static) {
         }
     });
 }
-
-const EXIT_UNLOCKED: i32 = 0;
-const EXIT_ERROR: i32 = 1;
-const EXIT_UNAVAILABLE: i32 = 2;
 
 pub fn run() -> ! {
     stage("entry");
@@ -315,7 +311,7 @@ pub fn run() -> ! {
 
     // Pre-warmed mode: absorb the first-window cost and park until told to
     // lock. Spawned the old way (no supervisor), fall straight through.
-    if std::env::var_os("SWAYPPLET_LOCK_WAIT").is_some() {
+    if std::env::var_os(lock_proto::ENV_WAIT).is_some() {
         warm_and_wait();
     }
 
@@ -341,7 +337,7 @@ pub fn run() -> ! {
     // greeter draws, which on this surface asked a question it could not
     // answer — a locked session authenticates one user, so every chip but one
     // had to hand the seat away and the one that didn't was inert. The card
-    // says both of those with one "Switch user" button now (lock/ui.rs), and
+    // says both of those with one "Switch user" button now (`swaypplet_auth_card`), and
     // the warm-up's `switch_user::list()` plus its off-thread refresh went with
     // the row: two D-Bus round trips per lock whose only consumer it was.
 
@@ -379,7 +375,7 @@ pub fn run() -> ! {
             if !gate.borrow_mut().try_begin(&password) {
                 return;
             }
-            surfaces.set_status("", StatusKind::Info);
+            surfaces.set_status("", Tone::Info);
             surfaces.set_verifying(true);
             let user = user.clone();
             let surfaces = surfaces.clone();
@@ -407,7 +403,7 @@ pub fn run() -> ! {
                             } else {
                                 format!("Wrong password ({failures} attempts)")
                             },
-                            StatusKind::Error,
+                            Tone::Error,
                         );
                         surfaces.shake();
                     }
@@ -540,7 +536,7 @@ pub fn run() -> ! {
             {
                 use std::io::Write;
                 let mut out = std::io::stdout();
-                let _ = writeln!(out, "LOCKED");
+                let _ = writeln!(out, "{}", lock_proto::LOCKED);
                 let _ = out.flush();
             }
 
@@ -559,12 +555,13 @@ pub fn run() -> ! {
                 auth::Locked::Arm => {}
             }
 
-            // Once now, then every second. Without the first call the Caps
-            // Lock warning is a second late, which puts it inside the
-            // entrance — the card does not resize for it any more, but a
-            // warning that fades in behind a card still fading in reads as
+            // The clock once now, then every second, and Caps Lock from here
+            // on. A key already latched shows now, after the entrance rather
+            // than inside it — the card does not resize for it any more, but
+            // a warning that fades in behind a card still fading in reads as
             // something having gone wrong.
             surfaces.tick();
+            surfaces.follow_caps_lock();
             // The Claude Code line under the date. The directory watch sees
             // every hook write; the tick sees a session whose process died
             // without one.
@@ -668,8 +665,10 @@ pub fn run() -> ! {
             let surfaces = surfaces.clone();
             let end_lock = end_lock.clone();
             let unlock = unlock.clone();
-            glib::timeout_add_local(Duration::from_millis(40), move || {
-                while let Ok(ev) = rx.try_recv() {
+            // Awaited, like the face channel above: a 40 ms poll stood
+            // between the reader's match and the unlock starting.
+            glib::spawn_future_local(async move {
+                while let Ok(ev) = rx.recv().await {
                     match ev {
                         EngineEvent::Ready => {
                             surfaces.set_fp_armed(true);
@@ -677,11 +676,11 @@ pub fn run() -> ! {
                         EngineEvent::Hint(h) => surfaces.fp_hint(&h),
                         EngineEvent::Match(_) => {
                             if !unlock.borrow_mut().claim() {
-                                return glib::ControlFlow::Break;
+                                return;
                             }
                             surfaces.flash_success();
                             end_lock();
-                            return glib::ControlFlow::Break;
+                            return;
                         }
                         EngineEvent::Unavailable(why) => {
                             log::info!("fingerprint unavailable: {why}");
@@ -692,7 +691,6 @@ pub fn run() -> ! {
                         EngineEvent::Progress(_) => {}
                     }
                 }
-                glib::ControlFlow::Continue
             });
         });
     }

@@ -2046,6 +2046,7 @@ dependencies = [
  "serde_json",
  "swaypplet-ambient",
  "swaypplet-audio",
+ "swaypplet-auth-card",
  "swaypplet-bar",
  "swaypplet-base",
  "swaypplet-cast",
@@ -2055,7 +2056,6 @@ dependencies = [
  "swaypplet-jump",
  "swaypplet-label",
  "swaypplet-launcher",
- "swaypplet-lock",
  "swaypplet-model",
  "swaypplet-notifications",
  "swaypplet-notifyd",
@@ -2079,6 +2079,21 @@ dependencies = [
  "log",
  "swaypplet-base",
  "swaypplet-model",
+]
+
+[[package]]
+name = "swaypplet-auth-card"
+version = "0.1.0"
+dependencies = [
+ "gdk4",
+ "glib",
+ "gtk4",
+ "log",
+ "swaypplet-base",
+ "swaypplet-switch-user",
+ "swaypplet-system",
+ "swaypplet-tokens",
+ "swaypplet-ui",
 ]
 
 [[package]]
@@ -2194,6 +2209,7 @@ dependencies = [
 name = "swaypplet-fp"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
  "libc",
  "log",
  "serde",
@@ -2207,15 +2223,15 @@ dependencies = [
 name = "swaypplet-greet"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
  "glib",
  "greetd_ipc",
  "gtk4",
  "gtk4-layer-shell",
  "log",
- "serde_json",
+ "swaypplet-auth-card",
  "swaypplet-base",
  "swaypplet-fp",
- "swaypplet-lock",
  "swaypplet-model",
  "swaypplet-switch-user",
  "swaypplet-ui",
@@ -2306,10 +2322,10 @@ dependencies = [
  "gtk4-session-lock",
  "log",
  "pam",
+ "swaypplet-auth-card",
  "swaypplet-base",
  "swaypplet-fp",
  "swaypplet-model",
- "swaypplet-switch-user",
  "swaypplet-system",
  "swaypplet-tokens",
  "swaypplet-ui",
@@ -2656,7 +2672,6 @@ dependencies = [
 name = "swaypplet-ui"
 version = "0.1.0"
 dependencies = [
- "async-channel",
  "gdk4",
  "gdk4-wayland",
  "gio",
@@ -2672,7 +2687,6 @@ dependencies = [
  "swaypplet-tokens",
  "wayland-client",
  "wayland-scanner",
- "zbus 4.4.0",
 ]
 
 [[package]]

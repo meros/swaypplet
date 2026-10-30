@@ -7,7 +7,7 @@
 //!
 //! The tiers' durations are not fixed: the main loop hands a new
 //! [`Timeouts`] down the channel `start` returns when the settings file
-//! changes (`idle/mod.rs`), and the thread destroys its notifications and
+//! changes (`lib.rs`), and the thread destroys its notifications and
 //! creates them again at the new lengths. That is why the loop below polls
 //! the socket with a timeout instead of `blocking_dispatch`: a thread parked
 //! in a blocking read has no way to notice the channel.
@@ -38,7 +38,7 @@ pub enum Timeout {
     Lock,
     /// Activity detector while locked. Not a blank tier any more: it only
     /// says "input stopped" / "input resumed", and the blank deadline in
-    /// mod.rs is armed and cleared off it.
+    /// lib.rs is armed and cleared off it.
     LockIdle,
     Suspend,
 }
