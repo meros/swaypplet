@@ -1,13 +1,13 @@
 # Motion
 
 Every animated surface in swaypplet moves on one scale, with one curve family,
-evaluated identically in Rust and in CSS. This is that scale. `src/anim.rs`
-implements it, the `--motion-*` tokens (`src/tokens/`, used by `data/css/`)
+evaluated identically in Rust and in CSS. This is that scale. `crates/core/src/anim.rs`
+implements it, the `--motion-*` tokens (`crates/core/src/tokens/`, used by `crates/core/data/css/`)
 declare it, and both point here.
 
 ## Why this needed doing
 
-`src/anim.rs` has documented a three-duration scale since it was written, and
+`crates/core/src/anim.rs` has documented a three-duration scale since it was written, and
 the Rust-driven surfaces obeyed it. The stylesheet drifted anyway, because
 it then had no variables for anything but colours, so every duration was a
 bare literal and nothing stopped a new one appearing. A census before this
@@ -129,14 +129,14 @@ The handoff's stagger survives. Its delays are the choreography — chips step
 back before the card dissolves — so they are rescaled onto the ladder rather
 than flattened to a single duration.
 
-`face_settle()` in `src/lock/mod.rs` (then `FACE_SETTLE`) moves 350 → 300 with `face-ring-ok`. It was
+`face_settle()` in `crates/lock/src/lock/mod.rs` (then `FACE_SETTLE`) moves 350 → 300 with `face-ring-ok`. It was
 sized to that keyframe deliberately: the ring does its visible work by the
 overshoot at 60%, and 60% of 500 is 300.
 
 ## The lock screen is not an exception
 
 It looks like one, because the compositor cross-fades the whole lock surface
-(`src/lock/fade.rs`, `docs/LOCK_TRANSITION.md`) and the card must not
+(`crates/lock/src/lock/fade.rs`, `docs/LOCK_TRANSITION.md`) and the card must not
 animate itself on top of that — its opacity would become CSS × surface and it
 would visibly lag the wallpaper under it. That is why `.lock-crossfade
 .lock-card { animation: none; }` exists and it stays.

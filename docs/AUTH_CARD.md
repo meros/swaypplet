@@ -68,7 +68,7 @@ rail — but an unarmed reader gets no ink.
 
 ## Structure
 
-One widget tree, three surfaces, built once in `src/auth_field.rs`:
+One widget tree, three surfaces, built once in `crates/core/src/auth_field.rs`:
 
 ```
 GtkBox .auth-field            horizontal, spacing 12, hexpand   ← carries ALL chrome
@@ -89,7 +89,7 @@ named in the field's placeholder ("Password for melvin").
 `src/slot.rs` does not survive. It existed to hold rows open and fade them in
 place, and once the rows were gone it had no callers: the field paints its own
 marks and the caption is never empty, so there is nothing left to reserve. The
-rule it carried moved to `src/auth_field.rs`, which is where it is now
+rule it carried moved to `crates/core/src/auth_field.rs`, which is where it is now
 enforced. What genuinely varies card-to-card — the polkit identity row, the
 elevate face rows, the greeter's user row under the card — is still decided before the
 surface is presented, which is the same rule stated without a helper.
@@ -418,14 +418,14 @@ the polkit card with a password field, and `sudo` had the terminal plus a
 face-only card that vanished the instant the camera gave up, so a `sudo`
 whose face check missed lost its GUI three seconds in. pam_race now reports
 every transaction to the polkit agent over `$XDG_RUNTIME_DIR/pam-race.sock`
-(`src/polkit/race.rs`), and a terminal `sudo` gets the same card: password
+(`crates/polkit/src/race.rs`), and a terminal `sudo` gets the same card: password
 field, reader, camera, all racing, and a password typed on the card goes
 back down the socket to pam_race exactly as one typed at the terminal.
 
 The three sources — polkit, pam_race and faced — are joined on the pid of
 the process running pam_race (`sudo` itself, or the polkit helper we spawn),
 so a `begin` or an `announce` naming a card already on screen attaches to
-it rather than drawing a second one. `src/polkit/mod.rs` holds the session;
+it rather than drawing a second one. `crates/polkit/src/lib.rs` holds the session;
 `face.rs` attaches the camera to it and, when the camera gives up, drops it
 from the caption's resting sentence and says why (`Didn't see you`,
 `Didn't recognise you`, `No infrared light`) without taking the card down.

@@ -19,13 +19,13 @@ Settings → Quality: every open issue
 
 | Part | Where |
 |---|---|
-| The report card and its upload | `src/quality/report.rs` |
-| Issue text, markers, fences | `src/quality/body.rs` |
-| `gh`, the dry run, the picture upload | `src/quality/gh.rs` |
-| Panic hook, crash signature, de-duplication, `crash-report` | `src/quality/crash.rs` |
-| A fix's state from the local job and the PR; who must be asked about | `src/quality/status.rs` |
-| The log tail a report attaches | `src/quality/logring.rs` |
-| The tab, starting and stopping jobs, Merge & apply | `src/settings/quality_pane.rs` |
+| The report card and its upload | `crates/screenshot/src/quality/report.rs` |
+| Issue text, markers, fences | `crates/screenshot/src/quality/body.rs` |
+| `gh`, the dry run, the picture upload | `crates/screenshot/src/quality/gh.rs` |
+| Panic hook, crash signature, de-duplication, `crash-report` | `crates/screenshot/src/quality/crash.rs` |
+| A fix's state from the local job and the PR; who must be asked about | `crates/screenshot/src/quality/status.rs` |
+| The log tail a report attaches | `crates/screenshot/src/quality/logring.rs` |
+| The tab, starting and stopping jobs, Merge & apply | `crates/settings/src/settings/quality_pane.rs` |
 | The runner, its prompt, its checks, its pictures | `dev/autofix/` |
 
 ## Reports

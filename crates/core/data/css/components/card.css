@@ -1,0 +1,95 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Card (crates/core/src/ui/card.rs).
+
+   The glass card (§4) and what sits in it: the group fill, the well, the
+   solid card of a popup, and the card's tints and states.
+
+   owns: ui-card ui-group ui-well
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Card: the glass surface ─────────────────────────────────────────────
+   Paints the key only so the compositor finds the card's shape; the
+   compositor drops it and draws the material (§4). Never a box-shadow: the
+   compositor would frost its translucent pixels into a halo.
+
+   No border either. The material's own anti-aliased outline is the card's
+   edge, and it is exact (crates/core/src/effect_shape.rs sends the card's rounded rect).
+   A hairline painted on that same outline is a second anti-aliased edge over
+   the first: its partly covered pixels composite over a partly covered rim,
+   and the eye reads the pair as a thin grey ring around the glass. The
+   border stays for its width only, in transparent. A state
+   that needs a line draws it inset (the outline rules below), clear of the
+   rim. */
+
+.ui-card {
+    background-color: var(--surface-key);
+    border-radius: var(--radius-card);
+    /* Transparent, not absent: the card keeps the 1px it has always had
+       between its edge and its content, so nothing inside moves, and the
+       key still fills to the edge under it (background-clip: border-box). */
+    border: 1px solid transparent;
+}
+
+.ui-card.thin {
+    border-radius: var(--radius-thin);
+}
+
+.no-glass .ui-card {
+    background-color: var(--surface-raised);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-solid);
+}
+
+/* ── Group: a fill inside a card (never glass on glass) ─────────────── */
+
+.ui-group {
+    background-color: var(--fill-1);
+    border-radius: var(--radius-tile);
+}
+
+.ui-card.solid {
+    background-color: var(--surface-raised);
+    border: 1px solid var(--border-strong);
+}
+
+/* A card that has just said yes: a hairline in the accent, inset clear of
+   the glass rim, and nothing else moves. Approval is stated, not
+   celebrated. */
+.ui-card.success {
+    outline: 1px solid var(--accent-bg);
+    outline-offset: -3px;
+    transition: outline-color var(--motion-state);
+}
+
+/* A well: sunk below the card rather than laid on it, for text that came
+   from outside the card (the command asking to run as root, polkit's raw
+   details). Quoted evidence, not something the card wrote. */
+.ui-well {
+    background-color: var(--scrim);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-tile);
+    color: var(--fg);
+}
+
+/* A deliberate tint on a glass card. The card's background-color stays the
+   key (§4) and the tint is a fill drawn over it, as a background-image: the
+   compositor un-mixes the key and draws the tint over the material, so the
+   glass itself carries the state in either mode. Never a different colour
+   in the key's place: the compositor takes that for the key and draws
+   nothing. The alpha only rises (the key's 0.50 plus the tint), so the card
+   stays clear of the seeding line (glass.nix `maskThreshold`).
+
+   .danger: a critical notification. The glass runs warm, and an inset
+   hairline picks up the same red, clear of the rim like .success's.
+   .recessed: a card further back in a stack, dimmer. A fill, not the bar's
+   `.ui-receded` opacity: each card owns its surface, and that surface's
+   alpha is the material's fade, which an opacity here would fight. */
+.ui-card.danger {
+    background-image: linear-gradient(var(--danger-tint), var(--danger-tint));
+    outline: 1px solid var(--danger-tint);
+    outline-offset: -3px;
+}
+
+.ui-card.recessed {
+    background-image: linear-gradient(var(--scrim), var(--scrim));
+}

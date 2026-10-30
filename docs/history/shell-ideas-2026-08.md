@@ -5,7 +5,7 @@
 > code comments point back to.
 >
 > Research pass 2026-08-10, after the bar vision shipped end to end (BAR_VISION
-> increments 1-8 are in `src/bar/`). BAR_IDEAS (removed 2026-09-26) asked what a *bar* should do.
+> increments 1-8 are in `crates/bar/src/`). BAR_IDEAS (removed 2026-09-26) asked what a *bar* should do.
 > This asks what the *shell* should do, and the answer came mostly from two
 > places: an audit of what the session still runs outside swaypplet, and a dump
 > of the Wayland globals swayfx actually advertises.
@@ -49,7 +49,7 @@ since. The bug and the dependency both go away with `ext-data-control-v1`:
 swaypplet owns the selection watch, keeps its own ring, and sets the selection
 back through its own data source.
 
-Shipped as `src/services/clipboard.rs`. Notes for later: history is in-memory only, so a
+Shipped as `crates/services/src/clipboard.rs`. Notes for later: history is in-memory only, so a
 panel restart clears it (deliberate for a clipboard, revisit only with a reason);
 text mimes only, images are a follow-up; `x-kde-passwordManagerHint: secret`
 offers are skipped, which is the cross-desktop convention password managers
@@ -70,7 +70,7 @@ way, and a few thousand tiny files a year is untidy rather than harmful.
 
 ### 3. Screenshot and annotate (M) — DONE 2026-08-11
 
-`src/screenshot/`, four modules: `capture` (pixels), `select` (region),
+`crates/screenshot/src/screenshot/`, four modules: `capture` (pixels), `select` (region),
 `annotate` (marks), `deliver` (file, clipboard, card).
 
 Capture is `ext-image-copy-capture-v1` rather than wlr-screencopy — the same
@@ -161,7 +161,7 @@ Still backlog: the workspace overview this machinery also enables.
 ### 5b. Live workspace pictures (2026-09-24)
 
 `⌘ Tab` came back as pictures, per workspace this time: a ring of live tiles
-(`src/jump/carousel.rs`), each a workspace composed from per-window captures
+(`crates/jump/src/jump/carousel.rs`), each a workspace composed from per-window captures
 placed where sway has them (`scene.rs`), streamed for as long as the card is
 up (`live.rs`). The same picture opens over a bar button on hover
 (`peek.rs`) and can be pinned to a corner with no frame cap (`pin.rs`,
@@ -178,7 +178,7 @@ background in a picture.
 
 Three migrations, all landed. Thirteen external binaries became ten.
 
-**Audio.** `src/services/audio.rs` holds one connection to the sound server and pushes
+**Audio.** `crates/services/src/audio.rs` holds one connection to the sound server and pushes
 snapshots into an `Observed`, the shape `sway_ipc` and `clipboard` use. Gone
 with it: the `wpctl status` parser (indentation depth, box-drawing characters,
 an asterisk for the default), a second `wpctl` call per device for its volume,
@@ -231,7 +231,7 @@ in. They are the next thing to try after a rebuild.
 
 Was a `foot` terminal running `cat` on a hand-curated text file, shown and
 hidden through a sway window rule and two transient systemd units. Now
-`src/keybinds.rs`: a centered glass layer surface whose rows come from sway's
+`crates/jump/src/keybinds.rs`: a centered glass layer surface whose rows come from sway's
 own `GET_CONFIG`, so the sheet cannot disagree with the bindings.
 
 The curated file had in fact drifted. It advertised four screens per task

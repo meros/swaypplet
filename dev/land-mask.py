@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Rasterize Natural Earth's 110m land polygons (public domain) into
-data/land-mask.txt: one row per 2 degrees of latitude from 75 N to 57 S,
+crates/settings/data/land-mask.txt: one row per 2 degrees of latitude from 75 N to 57 S,
 one column per 2 degrees of longitude from 180 W, '#' where the cell's
 centre is on land. The Day and night group's map draws it as dots
-(src/settings/location_map.rs).
+(crates/settings/src/settings/location_map.rs).
 
     curl -sSfLO https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_land.geojson
-    dev/land-mask.py ne_110m_land.geojson > data/land-mask.txt
+    dev/land-mask.py ne_110m_land.geojson > crates/settings/data/land-mask.txt
 """
 import json
 import sys

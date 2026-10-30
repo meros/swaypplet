@@ -6,20 +6,20 @@
 
 ## How the parts talk today
 
-- **In-process cells.** `service::Observed<T>` (`src/service.rs:11-56`) is already a small store: a value, `connect_change`, and `set_if_changed` that drops no-op writes. It appears in 18 files. Each service wraps it in its own `thread_local!` and its own `observe(cb)` function (`src/services/battery.rs:35-49`, `src/services/inhibit.rs:243-258`, `src/services/displays/mod.rs:54-66`). Sway is the same shape with its own type (`SwayService::connect_change`, `src/sway/ipc.rs:195`).
-- **Settings.** One file, followed by inotify in the panel (`src/settings/store.rs:181-187`) and again in the idle process (`src/idle/mod.rs:194-197`). Nix writes `/etc/swaypplet/{settings,glass,switch-user}.json` as read-only defaults (`store.rs:51`, `settings/glass.rs:43`, `switch_user/host.rs:54`).
-- **Files as a bus.** Claude task state is a directory of files written by hooks and watched with a GFileMonitor (`src/services/task_state.rs:1-12`).
-- **D-Bus.** The idle process owns the presence sensor and publishes `dev.swaypplet.Presence` (`src/services/presence.rs:338-398`). The bar and the lock screen subscribe. This is the cross-process store pattern, already working, for one key.
-- **systemd and subprocesses.** Inhibitors are user units; their state is read by spawning `systemctl` (`src/services/inhibit.rs:134-142`).
+- **In-process cells.** `service::Observed<T>` (`crates/core/src/service.rs:11-56`) is already a small store: a value, `connect_change`, and `set_if_changed` that drops no-op writes. It appears in 18 files. Each service wraps it in its own `thread_local!` and its own `observe(cb)` function (`crates/services/src/battery.rs:35-49`, `crates/services/src/inhibit.rs:243-258`, `crates/services/src/displays/mod.rs:54-66`). Sway is the same shape with its own type (`SwayService::connect_change`, `crates/core/src/sway/ipc.rs:195`).
+- **Settings.** One file, followed by inotify in the panel (`crates/core/src/settings/store.rs:181-187`) and again in the idle process (`crates/lock/src/idle/mod.rs:194-197`). Nix writes `/etc/swaypplet/{settings,glass,switch-user}.json` as read-only defaults (`store.rs:51`, `settings/glass.rs:43`, `switch_user/host.rs:54`).
+- **Files as a bus.** Claude task state is a directory of files written by hooks and watched with a GFileMonitor (`crates/services/src/task_state.rs:1-12`).
+- **D-Bus.** The idle process owns the presence sensor and publishes `dev.swaypplet.Presence` (`crates/services/src/presence.rs:338-398`). The bar and the lock screen subscribe. This is the cross-process store pattern, already working, for one key.
+- **systemd and subprocesses.** Inhibitors are user units; their state is read by spawning `systemctl` (`crates/services/src/inhibit.rs:134-142`).
 - **Across repos.** Eight tables are written twice by hand and checked at eval by nixos `users/modules/cross-repo-guard.nix`.
 
 ## Pain points the idea would address
 
-1. **Same fact, two sources.** The idle process decides "on AC" by reading `/sys/class/power_supply/*/online` at suspend time (`src/idle/mod.rs:700-707`, used at `:490`). The bar follows UPower, falling back to a 60 s sysfs poll (`src/services/battery.rs:57-70`). They can disagree, and only one of them is pushed.
-2. **State nobody pushes.** Inhibitor cells are fed by "whoever establishes a reading": the panel's tiles on toggle and `inhibit::prime` at startup (`src/bar/hazards.rs:14-18`). A timed No Sleep unit that exits on its own is not published, so the bar glyph can stay until something re-reads it. The idle process skips the cache and spawns `systemctl` (`src/idle/mod.rs:493`).
-3. **Coarse change events.** The settings cell notifies on every edit, so each consumer diffs its own slice (`src/services/devices.rs:62-77`). A slider drag is dozens of notifications.
-4. **Thread-local traps.** `settings::store::current()` on a worker thread silently returns defaults (`src/settings/store.rs:189-198`). The comment names a bug it already caused.
-5. **Belt and braces.** The idle loop rechecks settings every minute on top of inotify (`src/idle/mod.rs:191-192, 329-333`).
+1. **Same fact, two sources.** The idle process decides "on AC" by reading `/sys/class/power_supply/*/online` at suspend time (`crates/lock/src/idle/mod.rs:700-707`, used at `:490`). The bar follows UPower, falling back to a 60 s sysfs poll (`crates/services/src/battery.rs:57-70`). They can disagree, and only one of them is pushed.
+2. **State nobody pushes.** Inhibitor cells are fed by "whoever establishes a reading": the panel's tiles on toggle and `inhibit::prime` at startup (`crates/bar/src/hazards.rs:14-18`). A timed No Sleep unit that exits on its own is not published, so the bar glyph can stay until something re-reads it. The idle process skips the cache and spawns `systemctl` (`crates/lock/src/idle/mod.rs:493`).
+3. **Coarse change events.** The settings cell notifies on every edit, so each consumer diffs its own slice (`crates/services/src/devices.rs:62-77`). A slider drag is dozens of notifications.
+4. **Thread-local traps.** `settings::store::current()` on a worker thread silently returns defaults (`crates/core/src/settings/store.rs:189-198`). The comment names a bug it already caused.
+5. **Belt and braces.** The idle loop rechecks settings every minute on top of inotify (`crates/lock/src/idle/mod.rs:191-192, 329-333`).
 
 ## What a store would be
 

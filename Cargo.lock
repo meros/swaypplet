@@ -2000,25 +2000,192 @@ dependencies = [
 name = "swaypplet"
 version = "0.1.0"
 dependencies = [
+ "swaypplet-app",
+ "swaypplet-bar",
+ "swaypplet-core",
+ "swaypplet-lock",
+ "swaypplet-polkit",
+ "swaypplet-screenshot",
+ "swaypplet-services",
+ "swaypplet-settings",
+]
+
+[[package]]
+name = "swaypplet-app"
+version = "0.1.0"
+dependencies = [
  "async-channel",
- "cairo-rs",
- "env_logger",
- "gbm",
+ "gdk4",
+ "gio",
+ "glib",
+ "gtk4",
+ "gtk4-layer-shell",
+ "log",
+ "serde",
+ "serde_json",
+ "swaypplet-bar",
+ "swaypplet-core",
+ "swaypplet-jump",
+ "swaypplet-lock",
+ "swaypplet-notifications",
+ "swaypplet-polkit",
+ "swaypplet-screenshot",
+ "swaypplet-services",
+ "swaypplet-settings",
+ "swaypplet-widgets",
+]
+
+[[package]]
+name = "swaypplet-bar"
+version = "0.1.0"
+dependencies = [
+ "gio",
+ "glib",
+ "gtk4",
+ "gtk4-layer-shell",
+ "libc",
+ "log",
+ "swaypplet-core",
+ "swaypplet-jump",
+ "swaypplet-screenshot",
+ "swaypplet-services",
+ "swaypplet-widgets",
+ "system-tray",
+]
+
+[[package]]
+name = "swaypplet-core"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
  "gdk4",
  "gdk4-wayland",
  "gio",
  "glib",
+ "gtk4",
+ "gtk4-layer-shell",
+ "libc",
+ "log",
+ "material-colors",
+ "serde",
+ "serde_json",
+ "swayipc",
+ "tokio",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-scanner",
+ "zbus 4.4.0",
+]
+
+[[package]]
+name = "swaypplet-jump"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "gbm",
+ "glib",
  "glow",
+ "gtk4",
+ "gtk4-layer-shell",
+ "khronos-egl",
+ "libc",
+ "log",
+ "serde_json",
+ "swayipc",
+ "swaypplet-core",
+ "wayland-client",
+ "wayland-protocols",
+]
+
+[[package]]
+name = "swaypplet-lock"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "gdk4",
+ "glib",
  "greetd_ipc",
  "gtk4",
  "gtk4-layer-shell",
  "gtk4-session-lock",
- "khronos-egl",
+ "libc",
+ "log",
+ "pam",
+ "serde",
+ "serde_json",
+ "swaypplet-core",
+ "swaypplet-services",
+ "tokio",
+ "wayland-client",
+ "wayland-protocols",
+ "zbus 4.4.0",
+]
+
+[[package]]
+name = "swaypplet-notifications"
+version = "0.1.0"
+dependencies = [
+ "cairo-rs",
+ "gio",
+ "glib",
+ "gtk4",
+ "gtk4-layer-shell",
+ "log",
+ "swaypplet-core",
+ "swaypplet-services",
+]
+
+[[package]]
+name = "swaypplet-polkit"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "gdk4",
+ "gio",
+ "glib",
+ "gtk4",
+ "gtk4-layer-shell",
+ "libc",
+ "log",
+ "serde_json",
+ "swaypplet-core",
+ "tokio",
+ "zbus 4.4.0",
+]
+
+[[package]]
+name = "swaypplet-screenshot"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "cairo-rs",
+ "env_logger",
+ "glib",
+ "gtk4",
+ "gtk4-layer-shell",
+ "libc",
+ "log",
+ "serde",
+ "serde_json",
+ "swaypplet-core",
+ "swaypplet-jump",
+ "swaypplet-services",
+ "wayland-client",
+ "wayland-protocols",
+]
+
+[[package]]
+name = "swaypplet-services"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "gio",
+ "glib",
+ "gtk4",
+ "gtk4-layer-shell",
  "libc",
  "libpulse-binding",
  "log",
- "material-colors",
- "pam",
  "protobuf",
  "protobuf-codegen",
  "rcgen",
@@ -2026,13 +2193,48 @@ dependencies = [
  "serde",
  "serde_json",
  "swayipc",
+ "swaypplet-core",
  "system-tray",
  "tokio",
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-wlr",
- "wayland-scanner",
  "zbus 4.4.0",
+]
+
+[[package]]
+name = "swaypplet-settings"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "cairo-rs",
+ "gio",
+ "glib",
+ "gtk4",
+ "gtk4-layer-shell",
+ "libc",
+ "log",
+ "serde",
+ "serde_json",
+ "swaypplet-core",
+ "swaypplet-jump",
+ "swaypplet-screenshot",
+ "swaypplet-services",
+ "swaypplet-widgets",
+]
+
+[[package]]
+name = "swaypplet-widgets"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "glib",
+ "gtk4",
+ "log",
+ "swaypplet-core",
+ "swaypplet-lock",
+ "swaypplet-notifications",
+ "swaypplet-services",
 ]
 
 [[package]]

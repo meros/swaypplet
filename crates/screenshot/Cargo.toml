@@ -1,0 +1,25 @@
+[package]
+name = "swaypplet-screenshot"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+swaypplet-core.workspace = true
+swaypplet-services.workspace = true
+swaypplet-jump.workspace = true
+gtk4.workspace = true
+gtk4-layer-shell.workspace = true
+glib.workspace = true
+cairo-rs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-channel.workspace = true
+log.workspace = true
+env_logger.workspace = true
+libc.workspace = true
+wayland-client.workspace = true
+wayland-protocols.workspace = true
+
+[lints]
+workspace = true

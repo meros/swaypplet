@@ -1,10 +1,30 @@
-[package]
-name = "swaypplet"
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
 
-[dependencies]
+[workspace.lints.clippy]
+# A section's `new()` builds its GTK widgets; a `Default` that did the same
+# would read as a plain value. The lint fires only because these
+# constructors became `pub` when the code was split into crates.
+new_without_default = "allow"
+
+[workspace.dependencies]
+swaypplet-core = { path = "crates/core" }
+swaypplet-services = { path = "crates/services" }
+swaypplet-jump = { path = "crates/jump" }
+swaypplet-screenshot = { path = "crates/screenshot" }
+swaypplet-lock = { path = "crates/lock" }
+swaypplet-notifications = { path = "crates/notifications" }
+swaypplet-widgets = { path = "crates/widgets" }
+swaypplet-polkit = { path = "crates/polkit" }
+swaypplet-settings = { path = "crates/settings" }
+swaypplet-bar = { path = "crates/bar" }
+swaypplet-app = { path = "crates/app" }
 
 gtk4 = { version = "0.11", features = ["v4_14"] }
 gtk4-layer-shell = "0.8"
@@ -27,7 +47,7 @@ env_logger = "0.11"
 libc = "0.2"
 greetd_ipc = { version = "0.10.3", features = ["sync-codec"] }
 wayland-client = "0.31"
-# Bindings for the protocols in protocols/ that no crate ships.
+# Bindings for the protocols in crates/core/protocols/ that no crate ships.
 wayland-scanner = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 swayipc = "4"
@@ -42,12 +62,12 @@ glow = "0.18"
 # The Cast channel to a TV (services::cast::channel). ring, not the default
 # aws-lc-rs, which needs cmake and nasm to build.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
-
-[build-dependencies]
 protobuf-codegen = "3.7"
+# A certificate for the fake Cast receiver the channel is tested against.
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
 
 # Symbols stay in a release build (the default strip removes debug info
-# only), so a crash's frames have function names (src/quality/crash.rs).
+# only), so a crash's frames have function names (crates/screenshot/src/quality/crash.rs).
 # Line tables are left out: they cost 43 MB for swaypplet's own code.
 [profile.release]
 strip = "debuginfo"
@@ -56,13 +76,35 @@ strip = "debuginfo"
 # has no earlier session to reuse.
 incremental = true
 
-# swaypplet's own code at opt-level 1, its dependencies at the profile's
+# swaypplet's own crates at opt-level 1, its dependencies at the profile's
 # level. LLVM spends about 130 of the crate's 155 s at opt-level 2; level 1
 # builds it in 105 s. Measured 2026-10-01 with dev/frame-bench.sh, three
 # runs each: late frames 3.3-4.3 % (level 1) against 3.3-5.2 % (level 2),
 # p95 work 0.72-0.78 ms against 0.66-0.98 ms. Level 0 (23 s) had a run at
 # 9.1 % late with a 19.6 ms frame, so it stays off.
 [profile.release.package.swaypplet]
+opt-level = 1
+[profile.release.package.swaypplet-core]
+opt-level = 1
+[profile.release.package.swaypplet-services]
+opt-level = 1
+[profile.release.package.swaypplet-jump]
+opt-level = 1
+[profile.release.package.swaypplet-screenshot]
+opt-level = 1
+[profile.release.package.swaypplet-lock]
+opt-level = 1
+[profile.release.package.swaypplet-notifications]
+opt-level = 1
+[profile.release.package.swaypplet-widgets]
+opt-level = 1
+[profile.release.package.swaypplet-polkit]
+opt-level = 1
+[profile.release.package.swaypplet-settings]
+opt-level = 1
+[profile.release.package.swaypplet-bar]
+opt-level = 1
+[profile.release.package.swaypplet-app]
 opt-level = 1
 
 [profile.dev]
@@ -74,8 +116,3 @@ incremental = true
 # Optimize dependencies slightly so GTK event dispatch remains fast without slowing crate compilation
 [profile.dev.package."*"]
 opt-level = 1
-
-[dev-dependencies]
-# A certificate for the fake Cast receiver the channel is tested against.
-rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
-

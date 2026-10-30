@@ -1,0 +1,489 @@
+//! `swaypplet dmenu` — dmenu-style picker on the launcher's glass card.
+//!
+//! Reads newline-separated items on stdin, shows a filterable list in a
+//! layer-shell window, prints the chosen item to stdout and exits 0. The
+//! `--prompt` text is the card's title, so it stays readable while typing.
+//! Esc or a backdrop click exits 1 with no output. When the query matches
+//! no item, Enter prints the query itself — so a single piped line plus
+//! `--prompt` doubles as an editable text prompt (used by `settask`).
+//!
+//! Cold-starting a GTK process per keypress costs several hundred ms, so the
+//! CLI is a thin client first: when the panel process is listening on the
+//! dmenu socket (see [`start_server`]) the request is forwarded there and the
+//! warm panel presents the picker. The standalone GTK path stays as the
+//! fallback for sessions without a panel (greeter, lock, first start).
+
+use std::cell::RefCell;
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::PathBuf;
+use std::rc::Rc;
+
+use gtk4::prelude::*;
+use serde::{Deserialize, Serialize};
+
+use swaypplet_core::shell::{Namespace, Surface};
+use swaypplet_core::theme;
+
+/// Cap on rendered rows — stdin can be arbitrarily long, the screen isn't.
+const MAX_ROWS: usize = 30;
+
+/// One JSON line client → server; the reply is a [`Response`] line back.
+#[derive(Serialize, Deserialize)]
+struct Request {
+    prompt: String,
+    items: Vec<String>,
+}
+
+/// `text: Some` is a selection (or raw query), `None` a cancel.
+#[derive(Serialize, Deserialize)]
+struct Response {
+    text: Option<String>,
+}
+
+/// Socket lives in the per-user runtime dir (mode 0700) like the pid file,
+/// so only the owning user can reach the picker.
+///
+/// Keyed by `WAYLAND_DISPLAY`, because the runtime dir is shared across
+/// compositors: a nested session (dev/render.sh, dev/filmstrip.sh) binding
+/// the same path would unlink the live panel's socket and answer its
+/// clients. One panel per compositor, one socket per panel.
+fn socket_path() -> PathBuf {
+    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+    let display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "default".into());
+    // WAYLAND_DISPLAY may be an absolute path; only the leaf names the socket.
+    let display = std::path::Path::new(&display)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "default".into());
+    std::path::Path::new(&dir).join(format!("swaypplet-dmenu-{display}.sock"))
+}
+
+pub fn run(mut args: impl Iterator<Item = String>) {
+    let mut placeholder = String::from("Select");
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--prompt" | "--placeholder" | "-p" => {
+                if let Some(text) = args.next() {
+                    placeholder = text;
+                }
+            }
+            other => {
+                eprintln!("swaypplet dmenu: unknown option: {other}");
+                std::process::exit(2);
+            }
+        }
+    }
+
+    // Drain stdin before GTK starts — both call sites pipe a finite list.
+    let items: Vec<String> = std::io::stdin()
+        .lock()
+        .lines()
+        .map_while(Result::ok)
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+
+    // Warm path: a running panel presents the picker; we just relay.
+    if let Some(reply) = remote_pick(&placeholder, &items) {
+        match reply {
+            Some(text) => {
+                println!("{text}");
+                std::process::exit(0);
+            }
+            None => std::process::exit(1),
+        }
+    }
+
+    // No panel listening — cold-start our own GTK instance.
+    let app = gtk4::Application::builder()
+        .application_id("dev.swaypplet.dmenu")
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+        .build();
+
+    app.connect_activate(move |app| {
+        theme::load_css();
+        present_picker(app, &placeholder, items.clone(), |reply| match reply {
+            Some(text) => {
+                println!("{text}");
+                std::process::exit(0);
+            }
+            None => std::process::exit(1),
+        });
+    });
+    // Don't let GApplication parse our argv (it contains dmenu options).
+    app.run_with_args(&["swaypplet"]);
+
+    // Main loop ended without a selection (window closed externally).
+    std::process::exit(1);
+}
+
+/// Hand the request to the panel's picker server. `None` means no usable
+/// server (fall back to standalone GTK); `Some(reply)` means it was handled.
+fn remote_pick(prompt: &str, items: &[String]) -> Option<Option<String>> {
+    let mut stream = UnixStream::connect(socket_path()).ok()?;
+    let request = serde_json::to_string(&Request {
+        prompt: prompt.to_string(),
+        items: items.to_vec(),
+    })
+    .ok()?;
+    stream.write_all(request.as_bytes()).ok()?;
+    stream.write_all(b"\n").ok()?;
+    // No read timeout: the reply arrives whenever the user picks something.
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line).ok()?;
+    let response: Response = serde_json::from_str(line.trim()).ok()?;
+    Some(response.text)
+}
+
+/// Panel-side picker server: presents dmenu requests from the warm process,
+/// making `swaypplet dmenu` effectively instant. One picker at a time; a
+/// newer request supersedes the current one (the latest hotkey press wins)
+/// and the superseded client gets a cancel reply.
+pub fn start_server(app: &gtk4::Application) {
+    let path = socket_path();
+    // A stale socket file only outlives a crashed panel — GApplication
+    // uniqueness guarantees no live listener exists.
+    let _ = std::fs::remove_file(&path);
+    let listener = match UnixListener::bind(&path) {
+        Ok(listener) => listener,
+        Err(e) => {
+            log::warn!("dmenu server: bind {} failed: {e}", path.display());
+            return;
+        }
+    };
+
+    let (tx, rx) = async_channel::unbounded::<(Request, UnixStream)>();
+    std::thread::spawn(move || {
+        for conn in listener.incoming() {
+            let Ok(stream) = conn else { continue };
+            let tx = tx.clone();
+            // Read + parse off-main so a slow client can't stall the panel.
+            std::thread::spawn(move || {
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                let Ok(reader) = stream.try_clone() else {
+                    return;
+                };
+                let mut line = String::new();
+                if BufReader::new(reader).read_line(&mut line).is_err() {
+                    return;
+                }
+                let Ok(request) = serde_json::from_str::<Request>(line.trim()) else {
+                    return;
+                };
+                let _ = tx.send_blocking((request, stream));
+            });
+        }
+    });
+
+    let app = app.clone();
+    glib::MainContext::default().spawn_local(async move {
+        let active: RefCell<Option<Rc<Picker>>> = RefCell::new(None);
+        while let Ok((request, mut stream)) = rx.recv().await {
+            if let Some(prev) = active.borrow_mut().take() {
+                prev.finish(None);
+            }
+            let picker = present_picker(&app, &request.prompt, request.items, move |reply| {
+                // Tiny write; the timeout only guards against a dead client
+                // with a full socket buffer.
+                let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(1)));
+                if let Ok(json) = serde_json::to_string(&Response { text: reply }) {
+                    let _ = stream.write_all(json.as_bytes());
+                    let _ = stream.write_all(b"\n");
+                }
+            });
+            *active.borrow_mut() = Some(picker);
+        }
+    });
+}
+
+struct State {
+    items: Vec<String>,
+    /// Indices into `items` currently shown, in order.
+    visible: Vec<usize>,
+    /// Index into `visible`.
+    selected: usize,
+    /// The query `visible` was built from. SearchEntry debounces
+    /// search_changed (~150 ms), so on accept the list can lag the entry
+    /// text — a fast type-then-Enter must resync before selecting.
+    query: String,
+}
+
+/// What a finished pick hands its answer to, once.
+type Done = Box<dyn FnOnce(Option<String>)>;
+
+pub struct Picker {
+    /// Dropped by the first `finish`, which destroys the window and with it
+    /// the exclusive keyboard grab.
+    surface: RefCell<Option<Surface>>,
+    entry: gtk4::SearchEntry,
+    results_box: gtk4::Box,
+    state: RefCell<State>,
+    /// Taken on the first `finish`; later calls are no-ops.
+    done: RefCell<Option<Done>>,
+}
+
+/// Build and present a picker window on `app`. `on_done` runs exactly once —
+/// on selection, cancel, or supersession — after the window is destroyed.
+pub fn present_picker(
+    app: &gtk4::Application,
+    placeholder: &str,
+    items: Vec<String>,
+    on_done: impl FnOnce(Option<String>) + 'static,
+) -> Rc<Picker> {
+    // The launcher's namespace, so it wears the launcher's glass.
+    let surface = Surface::builder(app, Namespace::Launcher)
+        .fill()
+        .keyboard(gtk4_layer_shell::KeyboardMode::Exclusive)
+        // Same chassis as the launcher and the polkit dialog: the glass card.
+        .card(swaypplet_core::ui::Card::Floating)
+        .build();
+    let window = surface.window().clone();
+    surface.root().set_hexpand(true);
+    surface.root().set_vexpand(true);
+
+    // Centred on the output: the root gives the card all of its height and
+    // the card takes its natural size in the middle of it.
+    let container = surface.card().clone();
+    container.set_halign(gtk4::Align::Center);
+    container.set_valign(gtk4::Align::Center);
+    container.set_vexpand(true);
+    container.set_width_request(480);
+    container.add_css_class("launcher-container");
+    container.add_css_class("dmenu");
+
+    let view = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .build();
+    view.add_css_class("launcher-view");
+
+    // The prompt is the card's title rather than entry placeholder text: a
+    // placeholder vanishes on the first keystroke, exactly when a caller like
+    // `settask` still needs to say what is being typed.
+    let header = swaypplet_core::ui::text(
+        placeholder.trim().trim_end_matches(':'),
+        swaypplet_core::ui::Text::TitleSm,
+        swaypplet_core::ui::Tone::Fg,
+    );
+    header.set_halign(gtk4::Align::Start);
+    header.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    header.add_css_class("dmenu-title");
+
+    let entry = gtk4::SearchEntry::builder()
+        .hexpand(true)
+        // The default ~150 ms search_changed debounce is for expensive
+        // searches; filtering a local list should track every keystroke.
+        .search_delay(0)
+        .build();
+    // One step down from the launcher's search field: the card is a short
+    // dialog, so the filter sits at row scale.
+    swaypplet_core::ui::entry::adopt(&entry, swaypplet_core::ui::FieldSize::Normal);
+    entry.add_css_class("launcher-entry");
+
+    let results_box = swaypplet_core::ui::vbox(0);
+
+    let scroller = gtk4::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk4::PolicyType::Never)
+        .propagate_natural_height(true)
+        .max_content_height(520)
+        .child(&results_box)
+        .build();
+    scroller.add_css_class("launcher-scroller");
+
+    view.append(&header);
+    view.append(&entry);
+    view.append(&scroller);
+    container.append(&view);
+    surface.set_content(&view);
+
+    let picker = Rc::new(Picker {
+        surface: RefCell::new(Some(surface.clone())),
+        entry: entry.clone(),
+        results_box,
+        state: RefCell::new(State {
+            items,
+            visible: Vec::new(),
+            selected: 0,
+            query: String::new(),
+        }),
+        done: RefCell::new(Some(Box::new(on_done))),
+    });
+
+    // Click on the backdrop (not the card) cancels.
+    {
+        let picker = picker.clone();
+        surface.connect_backdrop_click(move || picker.finish(None));
+    }
+
+    // Live filtering — local list, no debounce needed.
+    {
+        let picker = picker.clone();
+        entry.connect_search_changed(move |entry| picker.refilter(&entry.text()));
+    }
+
+    // Capture-phase keys on the window: Esc cancels, arrows move the
+    // selection, Enter accepts (before the SearchEntry can swallow it).
+    let key = gtk4::EventControllerKey::new();
+    key.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    {
+        let picker = picker.clone();
+        key.connect_key_pressed(move |_, keyval, _, _| match keyval {
+            gdk4::Key::Escape => {
+                picker.finish(None);
+                glib::Propagation::Stop
+            }
+            gdk4::Key::Down | gdk4::Key::Tab => {
+                picker.move_selection(1);
+                glib::Propagation::Stop
+            }
+            gdk4::Key::Up | gdk4::Key::ISO_Left_Tab => {
+                picker.move_selection(-1);
+                glib::Propagation::Stop
+            }
+            gdk4::Key::Return | gdk4::Key::KP_Enter => {
+                picker.accept();
+                glib::Propagation::Stop
+            }
+            _ => glib::Propagation::Proceed,
+        });
+    }
+    window.add_controller(key);
+
+    picker.refilter("");
+    // Enter transition (motion on glass, anim.rs). The exit stays instant by
+    // design: finish() drops the surface, which destroys the window so the
+    // exclusive keyboard grab releases immediately.
+    surface.show();
+    window.present();
+    entry.grab_focus();
+    picker
+}
+
+impl Picker {
+    /// Preview-only: type `text` into the entry, driving the same filter path
+    /// a keystroke would, so `dev/render.sh --mode preview:dmenu` can shoot
+    /// the filtered and no-match states.
+    pub fn set_query(&self, text: &str) {
+        self.entry.set_text(text);
+    }
+
+    /// Resolve once: destroy the window (releasing the exclusive keyboard
+    /// grab immediately) and deliver the reply.
+    fn finish(&self, reply: Option<String>) {
+        let Some(done) = self.done.borrow_mut().take() else {
+            return;
+        };
+        // Taken before it drops: the surface's own handlers hold the picker.
+        let surface = self.surface.borrow_mut().take();
+        drop(surface);
+        done(reply);
+    }
+
+    /// Accept the selection (or, with nothing matching, the raw query).
+    fn accept(self: &Rc<Self>) {
+        // Enter can outrun the SearchEntry's debounced search_changed;
+        // resync so the accept sees the list for what's on screen. A no-op
+        // when the list is current, so arrow-key selection survives.
+        let stale = self.state.borrow().query != self.entry.text().as_str();
+        if stale {
+            self.refilter(&self.entry.text());
+        }
+        let reply = {
+            let s = self.state.borrow();
+            if let Some(&idx) = s.visible.get(s.selected) {
+                Some(s.items[idx].clone())
+            } else {
+                let query = self.entry.text().to_string();
+                (!query.is_empty()).then_some(query)
+            }
+        };
+        self.finish(reply);
+    }
+
+    fn refilter(self: &Rc<Self>, query: &str) {
+        let mut s = self.state.borrow_mut();
+        s.query = query.to_string();
+        s.visible = s
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| matches(item, query))
+            .map(|(i, _)| i)
+            .take(MAX_ROWS)
+            .collect();
+        s.selected = 0;
+
+        while let Some(child) = self.results_box.first_child() {
+            self.results_box.remove(&child);
+        }
+        // Nothing matched: say so, and name what Enter will do — the raw
+        // query is the reply in that case, which the empty list alone hides.
+        if s.visible.is_empty() {
+            // Same box as a row, faint, never selectable.
+            let note = swaypplet_core::ui::text(
+                if query.is_empty() {
+                    "No items"
+                } else {
+                    "No matches · Enter keeps what you typed"
+                },
+                swaypplet_core::ui::Text::Body,
+                swaypplet_core::ui::Tone::Faint,
+            );
+            note.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+            note.add_css_class("dmenu-empty");
+            self.results_box.append(&note);
+        }
+        for (pos, &idx) in s.visible.iter().enumerate() {
+            let row = build_row(&s.items[idx], pos == s.selected);
+            // Click on a row accepts it directly.
+            let click = gtk4::GestureClick::new();
+            let text = s.items[idx].clone();
+            let picker = self.clone();
+            click.connect_released(move |_, _, _, _| picker.finish(Some(text.clone())));
+            row.add_controller(click);
+            self.results_box.append(&row);
+        }
+    }
+
+    fn move_selection(&self, delta: i32) {
+        let mut s = self.state.borrow_mut();
+        if s.visible.is_empty() {
+            return;
+        }
+        let len = s.visible.len() as i32;
+        let old = s.selected;
+        s.selected = (s.selected as i32 + delta).rem_euclid(len) as usize;
+        let new = s.selected;
+        drop(s);
+
+        let mut child = self.results_box.first_child();
+        let mut pos = 0usize;
+        while let Some(widget) = child {
+            if pos == old {
+                swaypplet_core::ui::set_selected(&widget, false);
+            }
+            if pos == new {
+                swaypplet_core::ui::set_selected(&widget, true);
+            }
+            child = widget.next_sibling();
+            pos += 1;
+        }
+    }
+}
+
+/// Case-insensitive word match: every whitespace-separated query term must
+/// appear somewhere in the item.
+fn matches(item: &str, query: &str) -> bool {
+    let item = item.to_lowercase();
+    query
+        .split_whitespace()
+        .all(|term| item.contains(&term.to_lowercase()))
+}
+
+/// The launcher's row: the row component, its selection moving in one frame
+/// for the same keyed-card reason (`ui::set_instant`).
+fn build_row(text: &str, selected: bool) -> gtk4::Box {
+    let r = swaypplet_core::ui::row("", text, "");
+    swaypplet_core::ui::set_instant(&r.root, true);
+    swaypplet_core::ui::set_selected(&r.root, selected);
+    r.root
+}

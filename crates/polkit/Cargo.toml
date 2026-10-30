@@ -1,0 +1,22 @@
+[package]
+name = "swaypplet-polkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+swaypplet-core.workspace = true
+gtk4.workspace = true
+gtk4-layer-shell.workspace = true
+glib.workspace = true
+gio.workspace = true
+gdk4.workspace = true
+zbus.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+async-channel.workspace = true
+log.workspace = true
+libc.workspace = true
+
+[lints]
+workspace = true

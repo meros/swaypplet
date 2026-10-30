@@ -1,7 +1,7 @@
 # Launcher
 
 The search at the top of the Helm card (and the standalone launcher, the
-same `LauncherView`). Code: `src/launcher/`. Settings: the Launcher tab
+same `LauncherView`). Code: `crates/settings/src/launcher/`. Settings: the Launcher tab
 (`launcher` in the settings file, docs/SETTINGS.md).
 
 ## What a query can be

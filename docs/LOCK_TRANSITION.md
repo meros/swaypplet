@@ -22,7 +22,7 @@ defers `locked` until the lock surface is opaque, so `T₀` is exactly how long
 the user stares at an unchanged desktop after pressing Super+L. The design
 budgets 250 ms for it before falling back to today's hard cut.
 
-Measured with `stage()` (`src/lock/mod.rs`), nested sway on the **wayland**
+Measured with `stage()` (`crates/lock/src/lock/mod.rs`), nested sway on the **wayland**
 backend so GTK used the real GPU and the Vulkan renderer:
 
 ```
@@ -75,14 +75,14 @@ currently takes about a second to appear after Super+L.**
 ## Plan
 
 - [x] **Step 1 — Break down the second.** Done, see above. `stage()` in
-      `src/lock/mod.rs` is permanent, debug level. Answer: 881 ms of one-time
+      `crates/lock/src/lock/mod.rs` is permanent, debug level. Answer: 881 ms of one-time
       first-window cost, recovered in full by residency.
 - [x] **Step 2 — Pre-warm the locker.** Done, and smaller than full residency:
       the process is still one-lock-per-process, so nothing had to become
       re-entrant. It is simply spawned early, absorbs the first-window cost
       while nothing waits, and parks on stdin until told `LOCK <reason>`.
       **`T₀` measured at 65 ms**, from 1000 ms.
-- [x] **Step 3 — Client-side fade.** `src/lock/fade.rs`. Multiplier set to 0
+- [x] **Step 3 — Client-side fade.** `crates/lock/src/lock/fade.rs`. Multiplier set to 0
       at `::realize` (before the first buffer, so the first presented frame is
       exactly 0), ramp started on the first `after-paint`, and every value set
       as *pending* state with a `queue_draw` rather than committed, because a
@@ -197,9 +197,9 @@ and crash-relaunch rule is untouched.
 - `swaypplet lock` with `SWAYPPLET_LOCK_WAIT=1` presents a 1×1 transparent
   background-layer window to absorb the first-window cost, destroys it, prints
   `READY`, and blocks reading stdin until it gets `LOCK <reason>`
-  (`src/lock/mod.rs`, `warm_and_wait`).
+  (`crates/lock/src/lock/mod.rs`, `warm_and_wait`).
 - The supervisor keeps one armed child in `ARMED` and hands it the reason on
-  stdin (`src/idle/locker.rs`, `prewarm` / `take_armed`). The idle manager arms
+  stdin (`crates/lock/src/idle/locker.rs`, `prewarm` / `take_armed`). The idle manager arms
   one at startup and another after every `LockerGone`.
 - The reason moved from the spawn environment to the `LOCK` line, since the
   process now exists before anyone knows why the next lock will happen.
@@ -321,7 +321,7 @@ status and Caps Lock rows appeared and vanished under it afterwards. Each
 arrival grew the card downward and re-centred the whole column, so the thing
 the fade was ramping up was also sliding around.
 
-The rule now, stated in `docs/AUTH_CARD.md` and kept by `src/auth_field.rs`:
+The rule now, stated in `docs/AUTH_CARD.md` and kept by `crates/core/src/auth_field.rs`:
 **a card's geometry is decided when it
 is built and never changes again.** Anything that can arrive late is laid out
 from the first frame and only painted or not — a fingerprint pill in a

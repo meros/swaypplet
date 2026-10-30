@@ -1,0 +1,24 @@
+[package]
+name = "swaypplet-jump"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+swaypplet-core.workspace = true
+gtk4.workspace = true
+gtk4-layer-shell.workspace = true
+glib.workspace = true
+serde_json.workspace = true
+async-channel.workspace = true
+log.workspace = true
+libc.workspace = true
+wayland-client.workspace = true
+wayland-protocols.workspace = true
+swayipc.workspace = true
+gbm.workspace = true
+khronos-egl.workspace = true
+glow.workspace = true
+
+[lints]
+workspace = true

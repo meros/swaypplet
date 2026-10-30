@@ -1,0 +1,1344 @@
+//! The Look tab: the wallpaper, the colours it produces, and how much the
+//! shell moves.
+//!
+//! Two sections on one tab, `wallpaper` and `look`, in four groups with one
+//! footer. The wallpaper group is a picker over `wallpaper.rs`, which owns
+//! setting and reading it back; the appearance group is the design system's
+//! first four inputs (mode, accent, neutral, contrast; docs/design-system.md §2),
+//! which `theme::watch` turns into the stylesheet within a second; the theme
+//! colour group is the wallpaper tint (another token input, §2.2), the
+//! wallpaper's colours to take the accent from, and the token scales it
+//! produces drawn below them; the motion group is one dropdown, read per
+//! animation by `anim::duration` and scaled into the motion tokens.
+
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+
+use gtk4::gdk;
+use gtk4::gdk_pixbuf::Pixbuf;
+use gtk4::prelude::*;
+
+use super::form::{self, dropdown_row, section_box};
+use swaypplet_core::settings::schema::{OnBattery, ThemeMode};
+use swaypplet_core::settings::store::{
+    self, Daylight, Look, Motion, NightLight, NightSchedule, Tint, Wallpaper, WallpaperMode,
+};
+use swaypplet_core::settings::wallpaper::{
+    apply, candidates, candidates_dir, system_default, video_for,
+};
+use swaypplet_core::theme::wallpaper::Sample;
+use swaypplet_core::tokens::{Accent, Contrast, Neutral, Palette, Tint as Reach};
+
+/// Thumbnail size, in logical pixels. 16:9, four to a row in the card.
+const THUMB_W: i32 = 132;
+/// Thumbnails shown until "Show all": one row, the picked one among them,
+/// so Mode, Accent and Night light are on screen when the pane opens.
+const THUMBS_SHOWN: usize = 4;
+const THUMB_H: i32 = 74;
+
+// ── Thumbnails ──────────────────────────────────────────────────────────
+
+/// A decoded thumbnail's pixels, which is what crosses the thread boundary.
+struct Thumb {
+    bytes: glib::Bytes,
+    width: i32,
+    height: i32,
+    stride: usize,
+    alpha: bool,
+}
+
+impl Thumb {
+    fn texture(&self) -> gdk::MemoryTexture {
+        let format = if self.alpha {
+            gdk::MemoryFormat::R8g8b8a8
+        } else {
+            gdk::MemoryFormat::R8g8b8
+        };
+        gdk::MemoryTexture::new(self.width, self.height, format, &self.bytes, self.stride)
+    }
+}
+
+/// Decode `path` at twice the thumbnail size (for a 2x output), on whatever
+/// thread this is called from.
+fn decode_thumb(path: &Path) -> Option<Thumb> {
+    let pixbuf = Pixbuf::from_file_at_scale(path, THUMB_W * 2, THUMB_H * 2, true).ok()?;
+    Some(Thumb {
+        bytes: pixbuf.read_pixel_bytes(),
+        width: pixbuf.width(),
+        height: pixbuf.height(),
+        stride: pixbuf.rowstride() as usize,
+        alpha: pixbuf.has_alpha(),
+    })
+}
+
+// ── The scales, as a strip ──────────────────────────────────────────────
+
+/// Chip height; the strip is two rows of chips.
+const STRIP_H: i32 = 22;
+const STRIP_GAP: f64 = swaypplet_core::tokens::space(2) as f64;
+/// `--radius-control`: a chip's corners.
+const STRIP_RADIUS: f64 = swaypplet_core::tokens::RADIUS[0].1 as f64;
+
+/// The two scales the tokens are built from, as the stylesheet on screen
+/// has them (`theme::shown`): neutral 1–12 above, accent 1–12 below. Mode,
+/// accent, neutral and tint all show here, the tint as the hue both rows
+/// turn to. Repainted whenever `theme::observe` says the stylesheet moved.
+fn swatch_strip() -> gtk4::DrawingArea {
+    let area = gtk4::DrawingArea::builder()
+        .content_height(2 * STRIP_H + STRIP_GAP as i32)
+        .hexpand(true)
+        .build();
+    area.set_draw_func(|_, cr, w, _| {
+        let s = swaypplet_core::tokens::scales(swaypplet_core::theme::shown());
+        let count = s.neutral.len() as f64;
+        let width = (f64::from(w) - STRIP_GAP * (count - 1.0)) / count;
+        if width <= 0.0 {
+            return;
+        }
+        let h = f64::from(STRIP_H);
+        for (row, scale) in [s.neutral, s.accent].iter().enumerate() {
+            let y = (h + STRIP_GAP) * row as f64;
+            for (i, color) in scale.iter().enumerate() {
+                let x = (width + STRIP_GAP) * i as f64;
+                rounded_rect(cr, x, y, width, h, STRIP_RADIUS);
+                swaypplet_core::ui::set_source(cr, *color, 1.0);
+                let _ = cr.fill();
+            }
+        }
+    });
+    area
+}
+
+fn rounded_rect(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
+    let r = r.min(w / 2.0).min(h / 2.0);
+    let (right, bottom) = (x + w, y + h);
+    cr.new_sub_path();
+    cr.arc(right - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
+    cr.arc(right - r, bottom - r, r, 0.0, std::f64::consts::FRAC_PI_2);
+    cr.arc(
+        x + r,
+        bottom - r,
+        r,
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::PI,
+    );
+    cr.arc(
+        x + r,
+        y + r,
+        r,
+        std::f64::consts::PI,
+        1.5 * std::f64::consts::PI,
+    );
+    cr.close_path();
+}
+
+// ── Appearance ──────────────────────────────────────────────────────────
+
+/// The night light dropdown: off, or which schedule.
+const NIGHT_CHOICES: [&str; 3] = ["Off", "At night", "Always on"];
+
+fn night_choice(n: NightLight) -> usize {
+    match (n.enabled, n.schedule) {
+        (false, _) => 0,
+        (true, NightSchedule::Sun) => 1,
+        (true, NightSchedule::Always) => 2,
+    }
+}
+
+fn accent_name(a: Accent) -> &'static str {
+    match a {
+        Accent::Aqua => "Aqua",
+        Accent::Yellow => "Yellow",
+        Accent::Blue => "Blue",
+        Accent::Purple => "Purple",
+        Accent::Orange => "Orange",
+        Accent::Red => "Red",
+    }
+}
+
+fn neutral_label(n: Neutral) -> &'static str {
+    match n {
+        Neutral::Gruvbox => "Gruvbox — warm",
+        Neutral::Slate => "Slate — cool",
+        Neutral::Pure => "Pure — grey",
+    }
+}
+
+fn contrast_label(c: Contrast) -> &'static str {
+    match c {
+        Contrast::Standard => "Standard",
+        Contrast::High => "High",
+    }
+}
+
+/// One accent to pick: a dot in `--accent-bg` as the tokens would generate
+/// it with this accent and every other input as it is on screen, so dark
+/// mode shows the bright tone and light mode the deep one (and a hue that
+/// steps down a shade to carry its label shows that shade), as the accent
+/// would actually look.
+fn accent_swatch(accent: Accent) -> (gtk4::ToggleButton, gtk4::DrawingArea) {
+    let dot = gtk4::DrawingArea::builder()
+        .content_width(16)
+        .content_height(16)
+        .build();
+    dot.set_draw_func(move |_, cr, w, h| {
+        let tone = swaypplet_core::tokens::scales(swaypplet_core::tokens::Inputs {
+            accent,
+            ..swaypplet_core::theme::shown()
+        })
+        .accent_bg;
+        let (w, h) = (f64::from(w), f64::from(h));
+        swaypplet_core::ui::set_source(cr, tone, 1.0);
+        cr.arc(w / 2.0, h / 2.0, w.min(h) / 2.0, 0.0, std::f64::consts::TAU);
+        let _ = cr.fill();
+    });
+    let button = swaypplet_core::ui::swatch(&dot);
+    button.set_tooltip_text(Some(accent_name(accent)));
+    (button, dot)
+}
+
+/// One of the wallpaper's colours to take the accent from: a dot in
+/// `--accent-bg` as the tokens would generate it with `palette` (that colour
+/// as the accent's hue) and every other input as it is on screen, as
+/// [`accent_swatch`] draws the presets.
+fn wallpaper_swatch(palette: Palette, rank: usize) -> (gtk4::ToggleButton, gtk4::DrawingArea) {
+    let dot = gtk4::DrawingArea::builder()
+        .content_width(16)
+        .content_height(16)
+        .build();
+    dot.set_draw_func(move |_, cr, w, h| {
+        let shown = swaypplet_core::theme::shown();
+        // The reach on screen, so a `full` tint's dot is the `full` accent;
+        // with the tint off the row is hidden and this is never drawn.
+        let tint = match shown.tint {
+            Reach::Full(_) => Reach::Full(palette),
+            _ => Reach::Accents(palette),
+        };
+        let tone = swaypplet_core::tokens::scales(swaypplet_core::tokens::Inputs { tint, ..shown })
+            .accent_bg;
+        let (w, h) = (f64::from(w), f64::from(h));
+        swaypplet_core::ui::set_source(cr, tone, 1.0);
+        cr.arc(w / 2.0, h / 2.0, w.min(h) / 2.0, 0.0, std::f64::consts::TAU);
+        let _ = cr.fill();
+    });
+    let button = swaypplet_core::ui::swatch(&dot);
+    button.set_tooltip_text(Some(&if rank == 0 {
+        format!("The wallpaper's main colour (hue {}°)", palette.primary)
+    } else {
+        format!(
+            "The wallpaper's colour {} (hue {}°)",
+            rank + 1,
+            palette.primary
+        )
+    }));
+    (button, dot)
+}
+
+// ── The animated wallpaper ──────────────────────────────────────────────
+
+/// The On battery choices the wallpaper on screen gives a meaning to: all
+/// three for a video, and for a still only the two that do something to it
+/// or nothing at all. A still has nothing to slow down.
+fn on_battery_choices(video: bool) -> &'static [OnBattery] {
+    const STILL: [OnBattery; 2] = [OnBattery::Keep, OnBattery::Black];
+    if video { &OnBattery::ALL } else { &STILL }
+}
+
+/// "Keep playing" says nothing over a still; there, it is no change.
+fn on_battery_label(choice: OnBattery, video: bool) -> &'static str {
+    match (choice, video) {
+        (OnBattery::Keep, false) => "No change",
+        _ => choice.label(),
+    }
+}
+
+fn on_battery_hint(video: bool) -> &'static str {
+    if video {
+        "What the animated wallpaper does while the machine runs on battery. Slow to a stop eases the video down to a held frame and starts it up again on mains. Black fades it out, turns the background black and the shell dark until mains is back."
+    } else {
+        "What the wallpaper does while the machine runs on battery. Black turns the background black and the shell dark until mains is back."
+    }
+}
+
+/// Where the saved choice sits among [`on_battery_choices`]. A slow to a
+/// stop saved while a still shows reads as no change, which is what the
+/// battery service makes of it with no video playing; the file keeps it for
+/// the next video.
+fn on_battery_index(saved: OnBattery, video: bool) -> u32 {
+    on_battery_choices(video)
+        .iter()
+        .position(|o| *o == saved)
+        .unwrap_or(0) as u32
+}
+
+/// A rung of `Look::VIDEO_SPEEDS` as the dropdown shows it: `0.25×`, `1×`.
+fn speed_label(speed: f64) -> String {
+    format!("{speed}×")
+}
+
+/// The rung nearest `speed`: a hand-set speed off the ladder shows as the
+/// closest one, and stays as it is until a rung is picked.
+fn speed_index(speed: f64) -> usize {
+    Look::VIDEO_SPEEDS
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| (*a - speed).abs().total_cmp(&(*b - speed).abs()))
+        .map_or(0, |(i, _)| i)
+}
+
+// ── The tab ─────────────────────────────────────────────────────────────
+
+/// A swatch and the dot it draws, to repaint when the tokens move.
+type Swatch = (gtk4::ToggleButton, gtk4::DrawingArea);
+
+/// One thumbnail in the grid: the image it picks, the button, and the
+/// mark that says the image stands for a video.
+struct ThumbEntry {
+    path: PathBuf,
+    button: gtk4::Button,
+    mark: gtk4::Label,
+}
+
+struct State {
+    grid: gtk4::FlowBox,
+    /// One thumbnail per path the grid shows, in grid order.
+    thumbs: RefCell<Vec<ThumbEntry>>,
+    /// Which of the grid's images stand for a video (`video_for`), as the
+    /// last scan off the main thread found them.
+    videos: RefCell<HashMap<PathBuf, bool>>,
+    mode: gtk4::DropDown,
+    theme_mode: gtk4::DropDown,
+    /// One swatch per accent, and the dot it draws, to repaint when the mode
+    /// on screen moves.
+    accents: Vec<(Accent, gtk4::ToggleButton, gtk4::DrawingArea)>,
+    neutral: gtk4::DropDown,
+    contrast: gtk4::DropDown,
+    motion: gtk4::DropDown,
+    launch_zoom: gtk4::Switch,
+    apps_follow: gtk4::Switch,
+    on_battery: gtk4::DropDown,
+    on_battery_row: gtk4::Box,
+    /// Whether the On battery dropdown holds the choices for a video
+    /// (`Some(true)`) or a still; `None` before the first sync.
+    on_battery_video: Cell<Option<bool>>,
+    /// This machine has a battery; the On battery row is hidden until the
+    /// worker that looks says so.
+    has_battery: Cell<bool>,
+    speed: gtk4::DropDown,
+    speed_row: gtk4::Box,
+    tint: gtk4::DropDown,
+    /// The row offering the wallpaper's colours, shown while a tint is on
+    /// and the wallpaper has been sampled.
+    colour_row: gtk4::Box,
+    /// The swatches in it; rebuilt when the sample's hues move.
+    colour_box: gtk4::Box,
+    /// The hues the swatches were built for, and each swatch with its dot.
+    colours: RefCell<(Vec<u16>, Vec<Swatch>)>,
+    night: gtk4::DropDown,
+    /// Night light at night with no place to know when night is.
+    night_warning: gtk4::Label,
+    night_k: gtk4::Scale,
+    night_k_row: gtk4::Box,
+    /// The token scales, for the strip to repaint.
+    strip: gtk4::DrawingArea,
+    status: gtk4::Label,
+    /// Every thumbnail, or the first row of them.
+    show_all: Cell<bool>,
+    show_all_button: gtk4::Button,
+    /// Read once from the compositor; `None` until it answers, and still
+    /// `None` if the config sets no wallpaper.
+    system: RefCell<Option<Wallpaper>>,
+    /// True while the controls are being set from the store, so their
+    /// handlers do not write the same value straight back.
+    updating: Cell<bool>,
+}
+
+impl State {
+    /// What is on the screen: the pick, or the system default.
+    fn shown(&self) -> Option<Wallpaper> {
+        store::current()
+            .wallpaper
+            .or_else(|| self.system.borrow().clone())
+    }
+
+    fn pick(self: &Rc<Self>, path: PathBuf) {
+        // A new image's colours are ranked afresh: its primary first, not
+        // whatever it has at the rank picked on the last one.
+        if store::with(|s| s.look().tint_colour) != 0 {
+            store::edit::<Look>(|l| l.tint_colour = 0);
+        }
+        let mode = self.shown().map(|w| w.mode).unwrap_or_default();
+        self.set(Wallpaper { path, mode });
+    }
+
+    fn set_mode(self: &Rc<Self>, mode: WallpaperMode) {
+        let Some(current) = self.shown() else {
+            return;
+        };
+        self.set(Wallpaper {
+            path: current.path,
+            mode,
+        });
+    }
+
+    fn set(self: &Rc<Self>, w: Wallpaper) {
+        apply(&w);
+        store::update(|s| s.wallpaper = Some(w));
+        self.sync();
+    }
+
+    fn reset(self: &Rc<Self>) {
+        store::update(|s| s.wallpaper = None);
+        store::reset::<Look>();
+        store::reset::<NightLight>();
+        store::reset::<Daylight>();
+        match self.system.borrow().as_ref() {
+            Some(system) => apply(system),
+            // Nothing to put back: the config sets no wallpaper, so what is
+            // on screen stays until the next reload.
+            None => log::warn!("wallpaper: no system default to reset to"),
+        }
+        self.sync();
+    }
+
+    /// Bring the grid and the dropdown in line with the store.
+    fn sync(self: &Rc<Self>) {
+        self.updating.set(true);
+        let shown = self.shown();
+        let settings = store::current();
+        let overridden = settings.wallpaper.is_some()
+            || settings.look.is_some()
+            || settings.night_light.is_some()
+            || settings.daylight.is_some();
+        let look = settings.look();
+        let theme_mode = ThemeMode::ALL.iter().position(|m| *m == look.mode);
+        self.theme_mode.set_selected(theme_mode.unwrap_or(0) as u32);
+        for (accent, button, dot) in &self.accents {
+            button.set_active(*accent == look.accent);
+            dot.queue_draw();
+        }
+        let neutral = Neutral::ALL.iter().position(|n| *n == look.neutral);
+        self.neutral.set_selected(neutral.unwrap_or(0) as u32);
+        let contrast = Contrast::ALL.iter().position(|c| *c == look.contrast);
+        self.contrast.set_selected(contrast.unwrap_or(0) as u32);
+        let motion = Motion::ALL
+            .iter()
+            .position(|m| *m == settings.look().motion);
+        self.motion.set_selected(motion.unwrap_or(0) as u32);
+        self.launch_zoom.set_active(settings.look().launch_zoom);
+        self.apps_follow.set_active(settings.look().apps_follow);
+        self.sync_video_rows();
+        let tint = Tint::ALL.iter().position(|t| *t == settings.look().tint);
+        self.tint.set_selected(tint.unwrap_or(0) as u32);
+        let night = settings.night_light();
+        self.night.set_selected(night_choice(night) as u32);
+        self.night_k.set_value(f64::from(night.night_k));
+        form::set_live(&[&self.night_k_row], night.enabled);
+        self.sync_night_warning();
+        // The stylesheet follows on `theme::watch`'s next tick, and a new
+        // wallpaper's hue after the panel samples it; this paints what is on
+        // screen now and `theme::observe` paints the rest when it lands.
+        self.strip.queue_draw();
+        self.sync_colours();
+        let thumbs = self.thumbs.borrow();
+        let picked = thumbs
+            .iter()
+            .position(|t| shown.as_ref().is_some_and(|w| w.path == t.path));
+        for (i, thumb) in thumbs.iter().enumerate() {
+            let selected = picked == Some(i);
+            swaypplet_core::ui::set_selected(&thumb.button, selected);
+            // The first row, the picked one in its last place when it is
+            // further down, or all of them.
+            let shown_here = self.show_all.get()
+                || selected
+                || i + 1 < THUMBS_SHOWN
+                || (i + 1 == THUMBS_SHOWN && picked.is_none_or(|p| p < THUMBS_SHOWN));
+            if let Some(child) = thumb.button.parent() {
+                child.set_visible(shown_here);
+            }
+        }
+        self.show_all_button
+            .set_visible(thumbs.len() > THUMBS_SHOWN);
+        self.show_all_button.set_label(&if self.show_all.get() {
+            "Show fewer".to_string()
+        } else {
+            format!("Show all {}", thumbs.len())
+        });
+        drop(thumbs);
+        if let Some(w) = &shown {
+            let index = WallpaperMode::ALL.iter().position(|m| *m == w.mode);
+            self.mode.set_selected(index.unwrap_or(0) as u32);
+        }
+        form::set_source(
+            &self.status,
+            overridden,
+            "System default: the system's wallpaper, automatic mode in aqua on warm greys, full motion, day and night by the sun, night light at 3500 K",
+        );
+        self.updating.set(false);
+    }
+
+    /// The night light set to "At night" while nothing says when night is:
+    /// by the sun, with no place picked. Day and night is edited in its own
+    /// group, so this follows the store, not only this pane's edits.
+    fn sync_night_warning(&self) {
+        let (night, daylight) = store::with(|s| (s.night_light(), s.daylight()));
+        self.night_warning.set_visible(
+            night.enabled
+                && night.schedule == NightSchedule::Sun
+                && !daylight.fixed_times
+                && daylight.place().is_none(),
+        );
+    }
+
+    /// The wallpaper on screen stands for a video, as far as the last scan
+    /// knows.
+    fn shows_video(&self) -> bool {
+        self.shown()
+            .is_some_and(|w| self.videos.borrow().get(&w.path).copied().unwrap_or(false))
+    }
+
+    /// The rows that depend on what the wallpaper is: the speed only for a
+    /// video, On battery only on a machine with a battery and with only the
+    /// choices that mean something for the wallpaper on screen. Called
+    /// from [`Self::sync`], when a scan lands and when the settings move.
+    fn sync_video_rows(&self) {
+        let was = self.updating.replace(true);
+        let video = self.shows_video();
+        let look = store::with(|s| s.look());
+        self.speed_row.set_visible(video);
+        self.speed
+            .set_selected(speed_index(look.video_speed) as u32);
+        self.on_battery_row.set_visible(self.has_battery.get());
+        if self.on_battery_video.get() != Some(video) {
+            let labels: Vec<&str> = on_battery_choices(video)
+                .iter()
+                .map(|o| on_battery_label(*o, video))
+                .collect();
+            self.on_battery
+                .set_model(Some(&gtk4::StringList::new(&labels)));
+            self.on_battery_row
+                .set_tooltip_text(Some(on_battery_hint(video)));
+            self.on_battery_video.set(Some(video));
+        }
+        self.on_battery
+            .set_selected(on_battery_index(look.wallpaper_on_battery, video));
+        self.updating.set(was);
+    }
+
+    /// Bring the wallpaper's colours in line with the last sample and the
+    /// store: one swatch per colour the sample offers, the picked one
+    /// selected. Called from [`Self::sync`] and whenever the stylesheet
+    /// moves, which is also when a new sample lands.
+    fn sync_colours(self: &Rc<Self>) {
+        let was = self.updating.replace(true);
+        let look = store::with(|s| s.look());
+        let sample: Option<Sample> = swaypplet_core::theme::wallpaper::read().and_then(|(s, _)| s);
+        let hues = sample.as_ref().map(Sample::hues).unwrap_or_default();
+        self.colour_row
+            .set_visible(look.tint != Tint::Off && !hues.is_empty());
+        let mut colours = self.colours.borrow_mut();
+        if colours.0 != hues {
+            while let Some(child) = self.colour_box.first_child() {
+                self.colour_box.remove(&child);
+            }
+            colours.1.clear();
+            if let Some(sample) = &sample {
+                let mut first: Option<gtk4::ToggleButton> = None;
+                for rank in 0..hues.len() {
+                    let (button, dot) = wallpaper_swatch(sample.palette(rank), rank);
+                    match &first {
+                        Some(group) => button.set_group(Some(group)),
+                        None => first = Some(button.clone()),
+                    }
+                    let state = self.clone();
+                    button.connect_toggled(move |b| {
+                        if state.updating.get() || !b.is_active() {
+                            return;
+                        }
+                        store::edit::<Look>(|l| l.tint_colour = rank as u8);
+                        state.sync();
+                    });
+                    self.colour_box.append(&button);
+                    colours.1.push((button, dot));
+                }
+            }
+            colours.0 = hues;
+        }
+        // A rank this wallpaper does not have is its primary (`Sample::palette`).
+        let picked = usize::from(look.tint_colour);
+        let picked = if picked < colours.1.len() { picked } else { 0 };
+        for (rank, (button, dot)) in colours.1.iter().enumerate() {
+            button.set_active(rank == picked);
+            dot.queue_draw();
+        }
+        self.updating.set(was);
+    }
+
+    /// Put the candidates, the pick and the system default in the grid,
+    /// decoding thumbnails for any path not already there.
+    fn rescan(self: &Rc<Self>) {
+        let mut wanted = candidates();
+        for extra in [
+            store::current().wallpaper.map(|w| w.path),
+            self.system.borrow().as_ref().map(|w| w.path.clone()),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if !wanted.contains(&extra) && extra.is_file() {
+                wanted.push(extra);
+            }
+        }
+
+        let known: Vec<PathBuf> = self
+            .thumbs
+            .borrow()
+            .iter()
+            .map(|t| t.path.clone())
+            .collect();
+        for path in &wanted {
+            if known.contains(path) {
+                continue;
+            }
+            self.add_thumb(path.clone());
+        }
+        self.sync();
+
+        // Which of them stand for a video: a few file lookups each, so off
+        // the main thread, and on every rescan so a video put beside a
+        // still since is found.
+        let state = self.clone();
+        swaypplet_core::spawn::spawn_work(
+            move || {
+                wanted
+                    .into_iter()
+                    .map(|p| {
+                        let video = video_for(&p).is_some();
+                        (p, video)
+                    })
+                    .collect::<Vec<_>>()
+            },
+            move |found| {
+                *state.videos.borrow_mut() = found.into_iter().collect();
+                state.sync_marks();
+                state.sync_video_rows();
+            },
+        );
+    }
+
+    /// Show the video mark on each thumbnail whose image stands for one.
+    fn sync_marks(&self) {
+        let videos = self.videos.borrow();
+        for thumb in self.thumbs.borrow().iter() {
+            let video = videos.get(&thumb.path).copied().unwrap_or(false);
+            thumb.mark.set_visible(video);
+            let name = thumb
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            thumb.button.set_tooltip_text(Some(&if video {
+                format!("{name} — video wallpaper")
+            } else {
+                name
+            }));
+        }
+    }
+
+    fn add_thumb(self: &Rc<Self>, path: PathBuf) {
+        let picture = gtk4::Picture::builder()
+            .content_fit(gtk4::ContentFit::Cover)
+            .width_request(THUMB_W)
+            .height_request(THUMB_H)
+            .hexpand(true)
+            .halign(gtk4::Align::Fill)
+            .build();
+        let face = gtk4::Overlay::new();
+        face.set_child(Some(&picture));
+        let mark = swaypplet_core::ui::thumb_mark(
+            swaypplet_core::ui::icons::MEDIA_PLAY,
+            "Video wallpaper",
+        );
+        mark.set_visible(false);
+        face.add_overlay(&mark);
+        let button = swaypplet_core::ui::pick_thumb(&face);
+        button.set_tooltip_text(
+            path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .as_deref(),
+        );
+        {
+            let this = self.clone();
+            let path = path.clone();
+            button.connect_clicked(move |_| {
+                if this.updating.get() {
+                    return;
+                }
+                this.pick(path.clone());
+            });
+        }
+        self.grid.append(&button);
+        self.thumbs.borrow_mut().push(ThumbEntry {
+            path: path.clone(),
+            button,
+            mark,
+        });
+
+        // Decoded at thumbnail size on a worker: a 4K JPEG is 33 MB as a
+        // texture and a hundred milliseconds to decode, and there are
+        // several of them. `from_file_at_scale` lets the loader downsample
+        // as it decodes. A `Pixbuf` is not `Send`, so the worker hands back
+        // its pixels and the texture is built here.
+        swaypplet_core::spawn::spawn_work(
+            move || decode_thumb(&path),
+            move |thumb| {
+                if let Some(thumb) = thumb {
+                    picture.set_paintable(Some(&thumb.texture()));
+                }
+            },
+        );
+    }
+}
+
+pub struct LookPane {
+    root: gtk4::Box,
+    state: Rc<State>,
+}
+
+impl LookPane {
+    pub fn new() -> Self {
+        let root = form::pane();
+
+        let group = section_box(
+            "Wallpaper",
+            "Applied to every output at once. The lock screen shows the same image; the greeter has its own.",
+        );
+
+        let grid = gtk4::FlowBox::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .selection_mode(gtk4::SelectionMode::None)
+            // Three or four thumbnails per row: the pictures shrink to the
+            // column (the pixbuf is decoded at 2x for HiDPI, so its natural
+            // width would otherwise wrap the third onto a line of its own).
+            .min_children_per_line(4)
+            .max_children_per_line(4)
+            .row_spacing(swaypplet_core::tokens::space(2) as u32)
+            .column_spacing(swaypplet_core::tokens::space(2) as u32)
+            .homogeneous(true)
+            .build();
+        grid.add_css_class("settings-presets");
+        group.append(&grid);
+
+        let mode_labels: Vec<&str> = WallpaperMode::ALL.iter().map(|m| m.label()).collect();
+        let (mode_row, mode) = dropdown_row(
+            "Scaling",
+            "How the image meets the output's aspect ratio.",
+            &mode_labels,
+        );
+        group.append(&mode_row);
+        let speed_labels: Vec<String> =
+            Look::VIDEO_SPEEDS.iter().map(|s| speed_label(*s)).collect();
+        let speed_labels: Vec<&str> = speed_labels.iter().map(String::as_str).collect();
+        let (speed_row, speed) = dropdown_row(
+            "Video speed",
+            "How fast the animated wallpaper plays, as a multiple of the video's own speed. Changes the playing video at once.",
+            &speed_labels,
+        );
+        speed_row.set_visible(false);
+        group.append(&speed_row);
+        // Filled for the wallpaper on screen by `sync_video_rows`.
+        let (on_battery_row, on_battery) = dropdown_row("On battery", on_battery_hint(true), &[]);
+        on_battery_row.set_visible(false);
+        group.append(&on_battery_row);
+
+        let appearance = section_box(
+            "Appearance",
+            "The shell's colours and its dark or light. Everything follows within a second.",
+        );
+        let mode_labels: Vec<&str> = ThemeMode::ALL.iter().map(|m| m.label()).collect();
+        let (theme_mode_row, theme_mode) = dropdown_row(
+            "Mode",
+            "Dark, light, or automatic: light by day and dark by night, as the Day and night group below sets them.",
+            &mode_labels,
+        );
+        appearance.append(&theme_mode_row);
+        let swatches = swaypplet_core::ui::hbox(2);
+        swatches.set_halign(gtk4::Align::Start);
+        let mut accents = Vec::new();
+        let mut first: Option<gtk4::ToggleButton> = None;
+        for accent in Accent::ALL {
+            let (button, dot) = accent_swatch(accent);
+            match &first {
+                Some(group) => button.set_group(Some(group)),
+                None => first = Some(button.clone()),
+            }
+            swatches.append(&button);
+            accents.push((accent, button, dot));
+        }
+        let accent_row = form::kind_row("Accent", &swatches);
+        accent_row.set_tooltip_text(Some(
+            "The one colour that means on, selected, or the primary action.",
+        ));
+        appearance.append(&accent_row);
+        let neutral_labels: Vec<&str> = Neutral::ALL.iter().map(|n| neutral_label(*n)).collect();
+        let (neutral_row, neutral) = dropdown_row(
+            "Neutral",
+            "The greys the glass, the text and the lines are drawn from.",
+            &neutral_labels,
+        );
+        form::subtitle(&neutral_row, "The greys of glass, text and lines");
+        appearance.append(&neutral_row);
+        let contrast_labels: Vec<&str> = Contrast::ALL.iter().map(|c| contrast_label(*c)).collect();
+        let (contrast_row, contrast) = dropdown_row(
+            "Contrast",
+            "High lifts the quieter text levels and the lines, and gives the glass more body.",
+            &contrast_labels,
+        );
+        appearance.append(&contrast_row);
+        let (apps_row, apps_follow) = form::switch_row(
+            "Apps follow the shell's appearance",
+            "Apps switch between dark and light with the shell, and take the nearest GNOME accent, high contrast and reduced motion from it. Off leaves the apps' own settings alone.",
+            true,
+        );
+        form::subtitle(&apps_row, "Apps go dark and light too");
+        appearance.append(&apps_row);
+
+        let theme = section_box(
+            "Theme colour",
+            "Take the shell's colours from the wallpaper. Only the hue moves, so \
+             text stays as easy to read whatever the image is. Below: the \
+             greys and the accent shades the shell is drawn from.",
+        );
+        let tint_labels: Vec<&str> = Tint::ALL.iter().map(|t| t.label()).collect();
+        let (tint_row, tint) = dropdown_row(
+            "Tint",
+            "Off keeps the shipped colours. Accents gives the accent one of \
+             the wallpaper's colours, picked below, and turns the app colours \
+             toward the others. Full tints the greys and the glass too. Red \
+             stays red either way.",
+            &tint_labels,
+        );
+        form::subtitle(&tint_row, "Colours from the wallpaper");
+        theme.append(&tint_row);
+        let colour_box = swaypplet_core::ui::hbox(2);
+        colour_box.set_halign(gtk4::Align::Start);
+        let colour_row = form::kind_row("Accent from", &colour_box);
+        colour_row.set_tooltip_text(Some(
+            "The wallpaper's distinct colours, the main one first. The one \
+             picked is the accent; the others turn the app colours with it. \
+             The accent above still sets how bright it is.",
+        ));
+        colour_row.set_visible(false);
+        theme.append(&colour_row);
+        let strip = swatch_strip();
+        theme.append(&strip);
+
+        let look = section_box(
+            "Motion",
+            "How much the shell animates. GTK's own reduced-motion switch still wins when it is set.",
+        );
+        let motion_labels: Vec<&str> = Motion::ALL.iter().map(|m| m.label()).collect();
+        let (motion_row, motion) = dropdown_row(
+            "Motion",
+            "Full, half as long, or one frame. Read per animation, so it lands on the next one.",
+            &motion_labels,
+        );
+        look.append(&motion_row);
+        let (zoom_row, launch_zoom) = form::switch_row(
+            "Launch zoom",
+            "An app you start from the launcher grows out of its row.",
+            false,
+        );
+        form::subtitle(&zoom_row, "Apps grow out of the launcher");
+        look.append(&zoom_row);
+
+        let night_box = section_box(
+            "Night light",
+            "Warms every screen at night, by the same day and night the automatic mode follows. The Helm's Displays page has the same switch.",
+        );
+        let (night_row, night) = dropdown_row(
+            "Night light",
+            "At night warms across the dusk and cools across the dawn the Day and night group sets.",
+            &NIGHT_CHOICES,
+        );
+        night_box.append(&night_row);
+        let night_warning = form::status_label();
+        night_warning.set_text(
+            "No place is set in Day and night below, so night never comes and the night light stays off. Pick your place on the map, or use fixed times.",
+        );
+        night_warning.set_xalign(0.0);
+        swaypplet_core::ui::set_tone(&night_warning, swaypplet_core::ui::Tone::Warning);
+        night_warning.set_visible(false);
+        night_box.append(&night_warning);
+        let (night_k_row, night_k) = form::scale_row(
+            "Night warmth",
+            "The night's colour temperature. Lower is warmer; 6500 K is no change.",
+            (
+                f64::from(NightLight::MIN_K),
+                f64::from(NightLight::DAY_K),
+                100.0,
+            ),
+            |k| format!("{k:.0} K"),
+        );
+        night_box.append(&night_k_row);
+        form::dependent(&[&night_k_row]);
+
+        let browse = form::action_button(
+            "Browse…",
+            &format!(
+                "Pick an image from anywhere. The grid shows {}.",
+                candidates_dir()
+                    .map(|d| form::pretty_path(&d))
+                    .unwrap_or_else(|| "~/Pictures/wallpapers".into())
+            ),
+        );
+        // Beside the grid it adds to, not in the footer five groups away.
+        let show_all_button = form::action_button(
+            "Show all",
+            "Every picture in the folder, not only the first row.",
+        );
+        let more = swaypplet_core::ui::hbox(2);
+        more.append(&show_all_button);
+        more.append(&browse);
+        let browse_row = form::kind_row("More pictures", &more);
+        group.insert_child_after(&browse_row, Some(&grid));
+        let reset = form::ResetButtons::new(
+            "Put the system's wallpaper back, and the system's colours, motion, day and night, and night light.",
+        );
+        let (footer, status) = form::footer(&[&reset.button, &reset.undo]);
+        let copy = form::copy_nix_button(
+            &status,
+            "The look, day and night, and night light sections as theme/settings.nix holds them.",
+            || {
+                let s = store::current();
+                Some(format!(
+                    "{}{}{}",
+                    s.section_as_nix("look")?,
+                    s.section_as_nix("daylight")?,
+                    s.section_as_nix("night_light")?
+                ))
+            },
+        );
+        if let Some(row) = reset.button.parent().and_downcast::<gtk4::Box>() {
+            row.append(&copy);
+        }
+
+        let state = Rc::new(State {
+            grid: grid.clone(),
+            thumbs: RefCell::new(Vec::new()),
+            videos: RefCell::new(HashMap::new()),
+            mode: mode.clone(),
+            theme_mode: theme_mode.clone(),
+            accents,
+            neutral: neutral.clone(),
+            contrast: contrast.clone(),
+            motion: motion.clone(),
+            launch_zoom: launch_zoom.clone(),
+            apps_follow: apps_follow.clone(),
+            on_battery: on_battery.clone(),
+            on_battery_row: on_battery_row.clone(),
+            on_battery_video: Cell::new(None),
+            has_battery: Cell::new(false),
+            speed: speed.clone(),
+            speed_row: speed_row.clone(),
+            tint: tint.clone(),
+            colour_row: colour_row.clone(),
+            colour_box: colour_box.clone(),
+            colours: RefCell::new((Vec::new(), Vec::new())),
+            night: night.clone(),
+            night_warning,
+            night_k: night_k.clone(),
+            night_k_row: night_k_row.clone(),
+            strip: strip.clone(),
+            status: status.clone(),
+            show_all: Cell::new(false),
+            show_all_button: show_all_button.clone(),
+            system: RefCell::new(None),
+            updating: Cell::new(false),
+        });
+
+        {
+            let state = state.clone();
+            mode.connect_selected_notify(move |d| {
+                if state.updating.get() {
+                    return;
+                }
+                if let Some(mode) = WallpaperMode::ALL.get(d.selected() as usize).copied() {
+                    state.set_mode(mode);
+                }
+            });
+        }
+
+        {
+            let state = state.clone();
+            show_all_button.connect_clicked(move |_| {
+                state.show_all.set(!state.show_all.get());
+                state.sync();
+            });
+        }
+        {
+            let state = state.clone();
+            browse.connect_clicked(move |button| {
+                // The panel is a keyboard-exclusive overlay: a dialog opened
+                // under it could not be typed into or clicked. Hide the panel
+                // first, as the screenshot actions do; `Panel::toggle` heals
+                // the reveal state when it is next opened.
+                if let Some(window) = button.root().and_downcast::<gtk4::Window>() {
+                    window.set_visible(false);
+                }
+                let filter = gtk4::FileFilter::new();
+                filter.set_name(Some("Images"));
+                filter.add_mime_type("image/*");
+                let filters = gio::ListStore::new::<gtk4::FileFilter>();
+                filters.append(&filter);
+                let dialog = gtk4::FileDialog::builder()
+                    .title("Choose a wallpaper")
+                    .modal(false)
+                    .filters(&filters)
+                    .build();
+                if let Some(dir) = candidates_dir() {
+                    dialog.set_initial_folder(Some(&gio::File::for_path(dir)));
+                }
+                let state = state.clone();
+                dialog.open(
+                    None::<&gtk4::Window>,
+                    None::<&gio::Cancellable>,
+                    move |result| match result {
+                        Ok(file) => {
+                            if let Some(path) = file.path() {
+                                state.pick(path);
+                                state.rescan();
+                            }
+                        }
+                        // Cancelled is the usual outcome and not worth a
+                        // line; anything else is.
+                        Err(e) if e.matches(gtk4::DialogError::Dismissed) => {}
+                        Err(e) => log::warn!("wallpaper: file dialog: {e}"),
+                    },
+                );
+            });
+        }
+
+        {
+            let state = state.clone();
+            let undone = state.clone();
+            reset.connect(
+                move || state.reset(),
+                move || {
+                    // The store has the wallpaper back; the screen has not.
+                    if let Some(w) = undone.shown() {
+                        apply(&w);
+                    }
+                    undone.sync();
+                },
+            );
+        }
+        {
+            let state = state.clone();
+            theme_mode.connect_selected_notify(move |d| {
+                if state.updating.get() {
+                    return;
+                }
+                let Some(mode) = ThemeMode::ALL.get(d.selected() as usize).copied() else {
+                    return;
+                };
+                store::edit::<Look>(|l| l.mode = mode);
+                state.sync();
+                // The stylesheet follows on `theme::watch`'s next tick; the
+                // dots show the accents in whichever mode that lands on.
+                let state = state.clone();
+                glib::timeout_add_local_once(std::time::Duration::from_millis(1200), move || {
+                    for (_, _, dot) in &state.accents {
+                        dot.queue_draw();
+                    }
+                });
+            });
+        }
+        for (accent, button, _) in &state.accents {
+            let state = state.clone();
+            let accent = *accent;
+            button.connect_toggled(move |b| {
+                if state.updating.get() || !b.is_active() {
+                    return;
+                }
+                store::edit::<Look>(|l| l.accent = accent);
+                state.sync();
+            });
+        }
+        {
+            let state = state.clone();
+            neutral.connect_selected_notify(move |d| {
+                if state.updating.get() {
+                    return;
+                }
+                let Some(neutral) = Neutral::ALL.get(d.selected() as usize).copied() else {
+                    return;
+                };
+                store::edit::<Look>(|l| l.neutral = neutral);
+                state.sync();
+            });
+        }
+        {
+            let state = state.clone();
+            contrast.connect_selected_notify(move |d| {
+                if state.updating.get() {
+                    return;
+                }
+                let Some(contrast) = Contrast::ALL.get(d.selected() as usize).copied() else {
+                    return;
+                };
+                store::edit::<Look>(|l| l.contrast = contrast);
+                state.sync();
+            });
+        }
+        {
+            let state = state.clone();
+            night.connect_selected_notify(move |d| {
+                if state.updating.get() {
+                    return;
+                }
+                let choice = d.selected() as usize;
+                store::edit::<NightLight>(|n| {
+                    n.enabled = choice != 0;
+                    if choice != 0 {
+                        n.schedule = if choice == 2 {
+                            NightSchedule::Always
+                        } else {
+                            NightSchedule::Sun
+                        };
+                    }
+                });
+                state.sync();
+            });
+        }
+        {
+            let state = state.clone();
+            night_k.connect_value_changed(move |s| {
+                if state.updating.get() {
+                    return;
+                }
+                let k = ((s.value() / 100.0).round() * 100.0) as u32;
+                store::edit::<NightLight>(|n| n.night_k = k);
+            });
+        }
+        {
+            let state = state.clone();
+            motion.connect_selected_notify(move |d| {
+                if state.updating.get() {
+                    return;
+                }
+                let Some(motion) = Motion::ALL.get(d.selected() as usize).copied() else {
+                    return;
+                };
+                store::edit::<Look>(|l| l.motion = motion);
+                state.sync();
+            });
+        }
+        {
+            let state = state.clone();
+            launch_zoom.connect_active_notify(move |s| {
+                if state.updating.get() {
+                    return;
+                }
+                let on = s.is_active();
+                store::edit::<Look>(|l| l.launch_zoom = on);
+                state.sync();
+            });
+        }
+        {
+            let state = state.clone();
+            apps_follow.connect_active_notify(move |s| {
+                if state.updating.get() {
+                    return;
+                }
+                let on = s.is_active();
+                store::edit::<Look>(|l| l.apps_follow = on);
+                state.sync();
+            });
+        }
+        {
+            let state = state.clone();
+            on_battery.connect_selected_notify(move |d| {
+                if state.updating.get() {
+                    return;
+                }
+                let video = state.on_battery_video.get().unwrap_or(true);
+                let Some(choice) = on_battery_choices(video)
+                    .get(d.selected() as usize)
+                    .copied()
+                else {
+                    return;
+                };
+                store::edit::<Look>(|l| l.wallpaper_on_battery = choice);
+                state.sync();
+            });
+        }
+        {
+            let state = state.clone();
+            speed.connect_selected_notify(move |d| {
+                if state.updating.get() {
+                    return;
+                }
+                let Some(speed) = Look::VIDEO_SPEEDS.get(d.selected() as usize).copied() else {
+                    return;
+                };
+                // The panel's battery service gives the playing video the
+                // new speed (`services::wallpaper_battery`).
+                store::edit::<Look>(|l| l.video_speed = speed);
+                state.sync();
+            });
+        }
+        {
+            // A pick or a speed changed elsewhere (the CLI, a keybind)
+            // reaches the rows that depend on it while the pane is open.
+            let weak = Rc::downgrade(&state);
+            store::observe(move || {
+                if let Some(state) = weak.upgrade() {
+                    state.sync_video_rows();
+                    state.sync_night_warning();
+                }
+            });
+        }
+        {
+            let state = state.clone();
+            tint.connect_selected_notify(move |d| {
+                if state.updating.get() {
+                    return;
+                }
+                let Some(tint) = Tint::ALL.get(d.selected() as usize).copied() else {
+                    return;
+                };
+                // The panel is watching the store and samples the wallpaper
+                // (`theme::wallpaper::follow_settings`); this only records
+                // the choice. In `swaypplet settings`, which has no panel,
+                // the strip stays on the scales the pane started with and
+                // the running panel repaints its own.
+                store::edit::<Look>(|l| l.tint = tint);
+                state.sync();
+            });
+        }
+        {
+            let state = state.clone();
+            swaypplet_core::theme::observe(move || {
+                state.strip.queue_draw();
+                state.sync_colours();
+            });
+        }
+
+        // What is changed most first: the picture, the mode and accent, the
+        // night light; then the finer colour, the motion, and the day and
+        // night everything at night follows.
+        root.append(&group);
+        root.append(&appearance);
+        root.append(&night_box);
+        root.append(&theme);
+        root.append(&look);
+        root.append(&super::daylight_group::build());
+        root.append(&footer);
+
+        // Ask the compositor what the config shipped, then build the grid
+        // once the answer is in so the system image gets a thumbnail too;
+        // and whether there is a battery for On battery to be about.
+        {
+            let state = state.clone();
+            swaypplet_core::spawn::spawn_work(
+                || {
+                    let battery = swaypplet_services::power::find_battery_path().is_some();
+                    (system_default(), battery)
+                },
+                move |(system, battery)| {
+                    *state.system.borrow_mut() = system;
+                    state.has_battery.set(battery);
+                    state.rescan();
+                },
+            );
+        }
+
+        LookPane { root, state }
+    }
+
+    pub fn widget(&self) -> &gtk4::Box {
+        &self.root
+    }
+
+    /// Pick up files added to the candidates directory since the pane was
+    /// built, and re-mark the selection.
+    pub fn refresh(&self) {
+        self.state.rescan();
+    }
+}
+
+// ── Search ──────────────────────────────────────────────────────────────
+
+use super::search::{Entry, row};
+
+/// This tab's rows as the launcher finds them (`search.rs`). A row added
+/// to the tab gets a line here; the test there fails until it does.
+#[rustfmt::skip]
+pub(super) const SEARCH: &[Entry] = &[
+    row("Wallpaper", "", "The image behind every output", &["wallpaper", "background", "background image", "desktop background", "bg", "picture", "photo"]),
+    row("Wallpaper", "More pictures", "Every picture in the folder, or any image", &["browse", "choose image", "custom wallpaper", "file", "my picture", "show all"]),
+    row("Wallpaper", "Scaling", "How the image meets the screen", &["fill", "fit", "stretch", "crop", "center", "centre", "tile"]),
+    row("Wallpaper", "Video speed", "How fast the video wallpaper plays", &["video speed", "playback speed", "slow motion", "faster", "slower", "video wallpaper", "live wallpaper", "animated", "mpvpaper", "speed"]).keys(&["look.video_speed"]),
+    row("Wallpaper", "On battery", "Keep the video wallpaper playing, slow it to a stop, or go black and dark", &["battery", "video wallpaper", "live wallpaper", "animated", "animation", "mpvpaper", "power saving", "pause", "black", "black background", "dark mode on battery", "stop"]).keys(&["look.wallpaper_on_battery"]),
+    row("Appearance", "Mode", "Dark, light, or by the sun", &["dark", "light", "dark mode", "light mode", "dark theme", "light theme", "theme", "night mode", "auto", "sunset"]).keys(&["look.mode"]),
+    row("Appearance", "Accent", "The colour of on, selected and primary", &["accent colour", "accent color", "colour", "color", "highlight colour", "highlight color"]).keys(&["look.accent"]),
+    row("Appearance", "Neutral", "The greys of the glass, the text and the lines", &["grey", "gray", "neutral colour", "palette"]).keys(&["look.neutral"]),
+    row("Appearance", "Contrast", "Stronger text, lines and glass", &["high contrast", "accessibility", "a11y", "readability", "legibility"]).keys(&["look.contrast"]),
+    row("Theme colour", "Tint", "The shell's colours from the wallpaper", &["tint", "material you", "dynamic colour", "dynamic color", "wallpaper colour", "wallpaper color", "hue", "colour", "color"]).keys(&["look.tint"]),
+    row("Theme colour", "Accent from", "Which of the wallpaper's colours is the accent", &["wallpaper accent", "palette", "second colour", "second color", "wallpaper colours", "wallpaper colors"]).keys(&["look.tint_colour"]),
+    row("Motion", "Motion", "Full, half or no animation", &["animation", "animations", "reduced motion", "reduce motion", "speed", "effects", "transitions"]).keys(&["look.motion"]),
+    row("Motion", "Launch zoom", "Apps grow out of their launcher row", &["open animation", "handoff"]).keys(&["look.launch_zoom"]),
+    row("Day and night", "Fixed times", "Day and night at set clock times instead of by the sun", &["schedule", "clock times", "time", "manual", "set time"]).keys(&["daylight.fixed_times"]),
+    row("Day and night", "Day from", "When the day starts", &["morning", "sunrise time", "light from", "start"]).keys(&["daylight.day_from_h", "daylight.day_from_m"]),
+    row("Day and night", "Night from", "When the night starts", &["evening", "sunset time", "dark from", "bedtime"]).keys(&["daylight.night_from_h", "daylight.night_from_m"]),
+    row("Day and night", "Place", "Where you are, picked on a map, for sunrise and sunset", &["location", "map", "city", "coordinates", "latitude", "longitude", "where", "gps"]).keys(&["daylight.latitude", "daylight.longitude"]),
+    row("Day and night", "Sunrise", "Move the morning switch earlier or later", &["sunrise offset", "dawn", "morning", "offset", "earlier", "later"]).keys(&["daylight.sunrise_offset_m"]),
+    row("Day and night", "Sunset", "Move the evening switch earlier or later", &["sunset offset", "dusk", "evening", "offset", "earlier", "later"]).keys(&["daylight.sunset_offset_m"]),
+    row("Day and night", "Today", "When the mode switches today", &["sunrise", "sunset", "when dark", "when light"]),
+    row("Night light", "Night light", "A warmer screen after dark", &["night", "night light", "nightlight", "night shift", "blue light", "warm", "gamma", "redshift", "gammastep", "evening"]).keys(&["night_light.enabled", "night_light.schedule"]),
+    row("Night light", "Night warmth", "How warm the night gets, in kelvin", &["colour temperature", "color temperature", "temperature", "kelvin", "warmth", "warm"]).keys(&["night_light.night_k"]),
+    row("Appearance", "Apps follow the shell's appearance", "Apps switch dark and light with the shell", &["dark mode apps", "light mode apps", "gtk theme", "color scheme", "portal", "libadwaita", "prefer dark"]).keys(&["look.apps_follow"]),
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A still offers only what does something to it: no change, or black;
+    /// a video all three.
+    #[test]
+    fn on_battery_offers_what_the_wallpaper_gives_a_meaning_to() {
+        assert_eq!(on_battery_choices(true), &OnBattery::ALL);
+        assert_eq!(
+            on_battery_choices(false),
+            &[OnBattery::Keep, OnBattery::Black]
+        );
+        assert_eq!(on_battery_label(OnBattery::Keep, true), "Keep playing");
+        assert_eq!(on_battery_label(OnBattery::Keep, false), "No change");
+        assert_eq!(
+            on_battery_label(OnBattery::Black, false),
+            OnBattery::Black.label()
+        );
+        // Slow to a stop saved, a still shown: it reads as no change.
+        assert_eq!(on_battery_index(OnBattery::Pause, false), 0);
+        assert_eq!(on_battery_index(OnBattery::Black, false), 1);
+        assert_eq!(on_battery_index(OnBattery::Pause, true), 1);
+        assert_eq!(on_battery_index(OnBattery::Black, true), 2);
+        assert!(!on_battery_hint(false).contains("Slow to a stop"));
+    }
+
+    #[test]
+    fn the_speed_ladder_reads_as_multiples_and_finds_the_nearest_rung() {
+        let labels: Vec<String> = Look::VIDEO_SPEEDS.iter().map(|s| speed_label(*s)).collect();
+        assert_eq!(labels, ["0.25×", "0.5×", "0.75×", "1×", "1.5×", "2×"]);
+        assert_eq!(speed_index(1.0), 3);
+        assert_eq!(speed_index(0.25), 0);
+        assert_eq!(speed_index(0.1), 0);
+        assert_eq!(speed_index(4.0), 5);
+        assert_eq!(speed_index(1.2), 3);
+        assert_eq!(speed_index(1.3), 4);
+    }
+}

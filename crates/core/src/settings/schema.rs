@@ -1,0 +1,2503 @@
+//! The settings file's shape: every section, its defaults, and what can be
+//! done to a `Settings` without touching a file. `store.rs` owns the files
+//! and the panel's live copy; this owns the types they move around.
+//!
+//! Every section is a struct with a `Default` that is the binary's own
+//! fallback, `#[serde(default …)]` on each field so an older file still
+//! loads, and a `sanitized` where a bad value is worse than ugly. The
+//! [`Section`] trait is what lets the panes and the CLI edit a section by
+//! type rather than by a copy of the same six lines.
+
+use std::fmt::Write as _;
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use super::store::system;
+
+/// Maximum output volume with the volume boost on, as a fraction of nominal.
+/// Above 1.0 is software amplification (`services::audio` clamps to it).
+pub const VOLUME_CEILING: f64 = 1.5;
+
+// ── Sections ────────────────────────────────────────────────────────────
+
+/// How sway scales the image onto the output. Spelled as `output … bg`
+/// takes it, so [`Mode::as_str`] is the wire format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WallpaperMode {
+    #[default]
+    Fill,
+    Fit,
+    Stretch,
+    Center,
+    Tile,
+}
+
+impl WallpaperMode {
+    pub const ALL: [WallpaperMode; 5] = [
+        WallpaperMode::Fill,
+        WallpaperMode::Fit,
+        WallpaperMode::Stretch,
+        WallpaperMode::Center,
+        WallpaperMode::Tile,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WallpaperMode::Fill => "fill",
+            WallpaperMode::Fit => "fit",
+            WallpaperMode::Stretch => "stretch",
+            WallpaperMode::Center => "center",
+            WallpaperMode::Tile => "tile",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            WallpaperMode::Fill => "Fill — crop to cover",
+            WallpaperMode::Fit => "Fit — letterbox",
+            WallpaperMode::Stretch => "Stretch",
+            WallpaperMode::Center => "Center — no scaling",
+            WallpaperMode::Tile => "Tile",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<WallpaperMode> {
+        WallpaperMode::ALL.into_iter().find(|m| m.as_str() == s)
+    }
+}
+
+/// Names the user gave devices, by a key that follows the device rather
+/// than the port it is on (`services::devices::DeviceKey`): `net:<mac>`,
+/// `audio:<node.name>`, `display:<make|model|serial>`, `input:<sway
+/// identifier>`. No system layer: the names are this person's. A name here
+/// overrides the automatic one; removing it restores that. Bluetooth names
+/// are not here: they are BlueZ's own `Alias`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Devices {
+    #[serde(default)]
+    pub names: std::collections::BTreeMap<String, String>,
+}
+
+impl Devices {
+    /// Trim the names and drop the empty ones, which mean "automatic", and
+    /// keys without a `kind:` prefix, which nothing looks up.
+    fn sanitized(self) -> Devices {
+        Devices {
+            names: self
+                .names
+                .into_iter()
+                .map(|(key, name)| (key.trim().to_string(), name.trim().to_string()))
+                .filter(|(key, name)| {
+                    key.split_once(':')
+                        .is_some_and(|(k, v)| !k.is_empty() && !v.is_empty())
+                        && !name.is_empty()
+                })
+                .collect(),
+        }
+    }
+}
+
+/// The wallpaper the user picked. No default: the default is whatever the
+/// sway config says, which `wallpaper::system_default` reads back from the
+/// compositor rather than guessing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Wallpaper {
+    pub path: PathBuf,
+    #[serde(default)]
+    pub mode: WallpaperMode,
+}
+
+/// The idle manager's timers, in seconds. Zero is "never" for every tier.
+///
+/// The defaults are the numbers the old swayidle config carried and
+/// `idle/mod.rs` documents the incident history behind; a field missing
+/// from a hand-edited file lands on them too.
+///
+/// The `night_*` fields are a second, shorter set of three tiers for a
+/// time window. They are inert until `night` is on, and [`Idle::resolve`]
+/// is the only thing that reads them: it hands back the tiers in force at
+/// a given minute, so nothing downstream knows the window exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Idle {
+    /// Fade the backlight after this much idle time.
+    #[serde(default = "Idle::default_dim_after")]
+    pub dim_after_s: u32,
+    /// What the fade goes to, as a backlight percentage.
+    #[serde(default = "Idle::default_dim_level")]
+    pub dim_level: u8,
+    /// Lock the session after this much idle time. Locking leaves the
+    /// screen lit; see `blank_after_s`.
+    #[serde(default = "Idle::default_lock_after")]
+    pub lock_after_s: u32,
+    /// Power the outputs off after this much idle time *while locked*.
+    #[serde(default = "Idle::default_blank_after")]
+    pub blank_after_s: u32,
+    /// A shorter screen-off while running on battery. It can only shorten:
+    /// the effective tier is the smaller of this and the one in force
+    /// (night window included), see [`Idle::blank_after_on`]. Zero is no
+    /// battery override, not "never".
+    #[serde(default = "Idle::default_battery_blank_after")]
+    pub battery_blank_after_s: u32,
+    /// Suspend after this much idle time, on battery only.
+    #[serde(default = "Idle::default_suspend_after")]
+    pub suspend_after_s: u32,
+    /// Lock when the presence sensor sees you leave. Off, walking away is
+    /// no different from sitting still, and the idle tiers do the locking.
+    #[serde(default = "yes")]
+    pub walk_away_lock: bool,
+    /// Try the camera while the lock screen is up. Off, the password and
+    /// the fingerprint remain; nothing here can make unlocking easier.
+    #[serde(default = "yes")]
+    pub face_unlock: bool,
+    /// Run the night window below. Off, the timers above hold all day and
+    /// every `night_*` field is inert.
+    #[serde(default)]
+    pub night: bool,
+    /// When the window opens, local time. The window is half-open,
+    /// `[from, to)`, and wraps past midnight when the end is at or before
+    /// the start.
+    #[serde(default = "Idle::default_night_from_h")]
+    pub night_from_h: u8,
+    #[serde(default)]
+    pub night_from_m: u8,
+    /// When the window closes.
+    #[serde(default = "Idle::default_night_to_h")]
+    pub night_to_h: u8,
+    #[serde(default)]
+    pub night_to_m: u8,
+    /// What `dim_after_s` becomes inside the window.
+    #[serde(default = "Idle::default_night_dim_after")]
+    pub night_dim_after_s: u32,
+    /// What `lock_after_s` becomes inside the window.
+    #[serde(default = "Idle::default_night_lock_after")]
+    pub night_lock_after_s: u32,
+    /// What `blank_after_s` becomes inside the window.
+    #[serde(default = "Idle::default_night_blank_after")]
+    pub night_blank_after_s: u32,
+}
+
+/// Minutes since local midnight, 0–1439. Noon on a clock the platform
+/// cannot read, which is outside the shipped window and so is the tier set
+/// a user is least surprised by.
+pub fn local_minute_of_day() -> u16 {
+    glib::DateTime::now_local()
+        .map(|t| (t.hour() as u16) * 60 + t.minute() as u16)
+        .unwrap_or(12 * 60)
+}
+
+impl Idle {
+    fn default_dim_after() -> u32 {
+        240
+    }
+    fn default_dim_level() -> u8 {
+        10
+    }
+    fn default_lock_after() -> u32 {
+        300
+    }
+    fn default_blank_after() -> u32 {
+        15 * 60
+    }
+    fn default_battery_blank_after() -> u32 {
+        300
+    }
+    fn default_suspend_after() -> u32 {
+        1200
+    }
+    fn default_night_from_h() -> u8 {
+        21
+    }
+    fn default_night_to_h() -> u8 {
+        7
+    }
+    fn default_night_dim_after() -> u32 {
+        60
+    }
+    fn default_night_lock_after() -> u32 {
+        300
+    }
+    fn default_night_blank_after() -> u32 {
+        120
+    }
+}
+
+impl Idle {
+    /// The file is hand-editable, and a dim level of 0 is a screen that
+    /// goes black on the first idle tick and stays that way for anyone who
+    /// does not know why. Bound it; `blank_after_s` and the timers already
+    /// mean "never" at zero, which is a valid ask.
+    ///
+    /// The window bounds are clamped rather than rejected, for the same
+    /// reason `Alerts` clamps its quiet hours: an hour of 40 is a typo, and
+    /// a typo should cost the user a wrong window, not the whole section.
+    fn sanitized(self) -> Idle {
+        Idle {
+            dim_level: self.dim_level.clamp(1, 100),
+            night_from_h: self.night_from_h.min(23),
+            night_from_m: self.night_from_m.min(59),
+            night_to_h: self.night_to_h.min(23),
+            night_to_m: self.night_to_m.min(59),
+            ..self
+        }
+    }
+
+    /// The window's bounds as minutes since midnight.
+    fn night_bounds(&self) -> (u16, u16) {
+        (
+            u16::from(self.night_from_h) * 60 + u16::from(self.night_from_m),
+            u16::from(self.night_to_h) * 60 + u16::from(self.night_to_m),
+        )
+    }
+
+    /// Whether `minute_of_day` (0–1439, local) is inside the night window.
+    /// False whenever the window is off, so no caller has to check both.
+    ///
+    /// Half-open, `[from, to)`, wrapping past midnight when `to <= from`.
+    /// `from == to` is the whole day, which follows `in_quiet_hours`: a
+    /// switch that is on and does nothing is worse than one that does what
+    /// it says.
+    pub fn in_night(&self, minute_of_day: u16) -> bool {
+        if !self.night {
+            return false;
+        }
+        let (from, to) = self.night_bounds();
+        if from < to {
+            (from..to).contains(&minute_of_day)
+        } else {
+            minute_of_day >= from || minute_of_day < to
+        }
+    }
+
+    /// The timers in force at `minute_of_day`: this set outside the window,
+    /// and this set with the three night tiers substituted inside it.
+    ///
+    /// Returning an `Idle` rather than three numbers is what keeps the
+    /// night window out of every consumer — `wayland::Timeouts::from`, the
+    /// blank deadline and the log line all take the resolved struct and
+    /// never learn that a window exists. Suspend is deliberately not
+    /// substituted: it is battery-only, and a shorter night suspend would
+    /// stop an overnight job on a machine the user left running on purpose.
+    ///
+    /// Idempotent, so a resolved struct may be resolved again.
+    pub fn resolve(&self, minute_of_day: u16) -> Idle {
+        if !self.in_night(minute_of_day) {
+            return *self;
+        }
+        Idle {
+            dim_after_s: self.night_dim_after_s,
+            lock_after_s: self.night_lock_after_s,
+            blank_after_s: self.night_blank_after_s,
+            ..*self
+        }
+    }
+
+    /// The screen-off tier in seconds for a resolved struct, given the power
+    /// source; zero is "never", as for `blank_after_s`.
+    ///
+    /// On battery the battery tier wins only when it is the shorter of the
+    /// two, and a zero on either side drops out rather than winning the
+    /// comparison: a "never" blank on battery still goes off after the
+    /// battery tier, since a lit lock screen draining the battery is what
+    /// the setting exists to stop, and a zero battery tier is the user
+    /// turning the override off. On AC nothing changes.
+    pub fn blank_after_on(&self, on_battery: bool) -> u32 {
+        let battery = self.battery_blank_after_s;
+        if !on_battery || battery == 0 {
+            return self.blank_after_s;
+        }
+        match self.blank_after_s {
+            0 => battery,
+            tier => tier.min(battery),
+        }
+    }
+}
+
+impl Default for Idle {
+    fn default() -> Self {
+        Idle {
+            dim_after_s: Self::default_dim_after(),
+            dim_level: Self::default_dim_level(),
+            lock_after_s: Self::default_lock_after(),
+            blank_after_s: Self::default_blank_after(),
+            battery_blank_after_s: Self::default_battery_blank_after(),
+            suspend_after_s: Self::default_suspend_after(),
+            walk_away_lock: true,
+            face_unlock: true,
+            night: false,
+            night_from_h: Self::default_night_from_h(),
+            night_from_m: 0,
+            night_to_h: Self::default_night_to_h(),
+            night_to_m: 0,
+            night_dim_after_s: Self::default_night_dim_after(),
+            night_lock_after_s: Self::default_night_lock_after(),
+            night_blank_after_s: Self::default_night_blank_after(),
+        }
+    }
+}
+
+/// What the bar does that is a matter of taste rather than of state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Bar {
+    /// `14:05` rather than `2:05 PM`.
+    #[serde(default = "yes")]
+    pub clock_24h: bool,
+    /// Put the date beside the time. Clicking the clock still flips to the
+    /// ISO date on its own.
+    #[serde(default)]
+    pub clock_date: bool,
+    /// Volume and brightness render in the bar's decision slot instead of
+    /// as the center-screen card. Which one reads better depends on the
+    /// material, which is why this is a setting and not a build flag.
+    #[serde(default)]
+    pub osd_in_bar: bool,
+    /// The four-bay task board in the bar's right track (`bar/board.rs`).
+    #[serde(default)]
+    pub board: bool,
+    /// The other segments of the right cluster. Hidden, not removed: the
+    /// widget is still built and its service still runs.
+    #[serde(default = "yes")]
+    pub media: bool,
+    #[serde(default = "yes")]
+    pub tray: bool,
+    #[serde(default = "yes")]
+    pub battery: bool,
+    #[serde(default = "yes")]
+    pub presence: bool,
+    /// The nightly backup's one-glyph verdict, beside the clock.
+    #[serde(default = "yes")]
+    pub backup: bool,
+    /// The Look mode's glyph beside the clock: Auto, Dark or Light, and a
+    /// click moves to the next (`bar/look_mode.rs`).
+    #[serde(default = "yes")]
+    pub look_mode: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for Bar {
+    fn default() -> Self {
+        Bar {
+            clock_24h: true,
+            clock_date: false,
+            osd_in_bar: false,
+            board: false,
+            media: true,
+            tray: true,
+            battery: true,
+            presence: true,
+            backup: true,
+            look_mode: true,
+        }
+    }
+}
+
+/// How much the shell moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Motion {
+    #[default]
+    Full,
+    /// Half the duration: still a direction, half the wait.
+    Reduced,
+    /// One frame. The state flow still runs (`anim::duration`).
+    Off,
+}
+
+impl Motion {
+    pub const ALL: [Motion; 3] = [Motion::Full, Motion::Reduced, Motion::Off];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Motion::Full => "Full",
+            Motion::Reduced => "Reduced — half as long",
+            Motion::Off => "Off — jump to the end",
+        }
+    }
+
+    /// What a duration is multiplied by. Zero means "one frame" to
+    /// `anim::duration`, which is why it is not literally zero here.
+    pub fn scale(self) -> f64 {
+        match self {
+            Motion::Full => 1.0,
+            Motion::Reduced => 0.5,
+            Motion::Off => 0.0,
+        }
+    }
+}
+
+/// How much of the theme the wallpaper colours.
+///
+/// A token input (docs/design-system.md §2.2): each colour keeps its
+/// lightness and only its hue moves, so the contrast the tokens are tested
+/// at survives whatever is on the desktop. `crates/core/src/tokens/tint.rs` has the
+/// rule, and the contrast tests in `crates/core/src/tokens/apca.rs` the proof.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Tint {
+    /// The shipped tokens. The default: a theme that follows the wallpaper
+    /// is a taste, and a taste is opted into.
+    #[default]
+    Off,
+    /// The accents follow the wallpaper; the greys stay gruvbox.
+    Accents,
+    /// The greys pick up a cast of the wallpaper's hue as well.
+    Full,
+}
+
+impl Tint {
+    pub const ALL: [Tint; 3] = [Tint::Off, Tint::Accents, Tint::Full];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Tint::Off => "Off — the shipped colours",
+            Tint::Accents => "Accents — hues from the wallpaper",
+            Tint::Full => "Full — surfaces tinted too",
+        }
+    }
+}
+
+/// Light, dark, or whichever the sun says (docs/design-system.md §2.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemeMode {
+    /// Dark by night and light by day, as [`Daylight`] draws them. Dark
+    /// when no location is known.
+    #[default]
+    Auto,
+    Dark,
+    Light,
+}
+
+impl ThemeMode {
+    pub const ALL: [ThemeMode; 3] = [ThemeMode::Auto, ThemeMode::Dark, ThemeMode::Light];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ThemeMode::Auto => "Auto — by day and night",
+            ThemeMode::Dark => "Dark",
+            ThemeMode::Light => "Light",
+        }
+    }
+}
+
+/// What the animated wallpaper does while the machine runs on battery
+/// (`services::wallpaper_battery`). A still image is unaffected by all but
+/// `Black`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum OnBattery {
+    /// Nothing changes.
+    #[default]
+    Keep,
+    /// The video slows to a stop and holds its frame.
+    Pause,
+    /// The video fades to black and stops, the background goes black and
+    /// the shell goes dark.
+    Black,
+}
+
+impl OnBattery {
+    pub const ALL: [OnBattery; 3] = [OnBattery::Keep, OnBattery::Pause, OnBattery::Black];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            OnBattery::Keep => "Keep playing",
+            OnBattery::Pause => "Slow to a stop",
+            OnBattery::Black => "Black, dark mode",
+        }
+    }
+}
+
+/// The Look tab's second group. The wallpaper is the first and has its own
+/// section, since it has no system layer in this file.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Look {
+    /// The theme inputs (docs/design-system.md §2).
+    #[serde(default)]
+    pub mode: ThemeMode,
+    #[serde(default)]
+    pub accent: crate::tokens::Accent,
+    #[serde(default)]
+    pub neutral: crate::tokens::Neutral,
+    #[serde(default)]
+    pub contrast: crate::tokens::Contrast,
+    #[serde(default)]
+    pub motion: Motion,
+    #[serde(default)]
+    pub tint: Tint,
+    /// Which of the wallpaper's colours the accent takes under a tint, by
+    /// rank: 0 is the primary, the one the image is about. The Look pane
+    /// offers the ones the last sample found (`theme::wallpaper::CHOICES`
+    /// at most) and puts this back to 0 when a new wallpaper is picked; a
+    /// rank the current wallpaper does not have means the primary.
+    #[serde(default)]
+    pub tint_colour: u8,
+    /// A launched app grows out of its launcher row (sway's `handoff open`).
+    /// Off by default: on a real desktop the window's first frames rarely
+    /// match the icon it grows from, and it read as a glitch more than as a
+    /// transition.
+    #[serde(default)]
+    pub launch_zoom: bool,
+    /// Apps follow the shell's appearance: the panel publishes the mode, the
+    /// accent, contrast and motion to the GNOME settings that the desktop
+    /// portal serves (`theme::apps`). Off, it leaves them as they are.
+    #[serde(default = "yes")]
+    pub apps_follow: bool,
+    /// What the animated wallpaper does while on battery
+    /// (`services::wallpaper_battery`). Here rather than in `wallpaper`,
+    /// which is the pick and drops whole on a reset of that section.
+    #[serde(default)]
+    pub wallpaper_on_battery: OnBattery,
+    /// How fast the animated wallpaper plays, as a multiple of the video's
+    /// own speed: mpv's `speed`. The unit starts at it (`SPEED=` in its
+    /// environment file, `settings::wallpaper`) and a change reaches a
+    /// playing video over IPC (`services::wallpaper_battery`).
+    #[serde(default = "Look::default_video_speed")]
+    pub video_speed: f64,
+}
+
+impl Look {
+    /// The speeds the Look pane offers.
+    pub const VIDEO_SPEEDS: [f64; 6] = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
+    /// What a hand-edited speed is clamped to: slower than a tenth reads as
+    /// a still, faster than four as a glitch.
+    pub const VIDEO_SPEED_RANGE: (f64, f64) = (0.1, 4.0);
+
+    fn default_video_speed() -> f64 {
+        1.0
+    }
+
+    /// A speed mpv can take and a person would mean; anything that is not
+    /// a number is the video's own speed.
+    pub fn sanitize_video_speed(speed: f64) -> f64 {
+        let (min, max) = Self::VIDEO_SPEED_RANGE;
+        if speed.is_finite() {
+            speed.clamp(min, max)
+        } else {
+            Self::default_video_speed()
+        }
+    }
+
+    fn sanitized(self) -> Look {
+        Look {
+            video_speed: Self::sanitize_video_speed(self.video_speed),
+            ..self
+        }
+    }
+}
+
+impl Default for Look {
+    fn default() -> Self {
+        Look {
+            mode: ThemeMode::default(),
+            accent: crate::tokens::Accent::default(),
+            neutral: crate::tokens::Neutral::default(),
+            contrast: crate::tokens::Contrast::default(),
+            motion: Motion::default(),
+            tint: Tint::default(),
+            tint_colour: 0,
+            launch_zoom: false,
+            apps_follow: true,
+            wallpaper_on_battery: OnBattery::default(),
+            video_speed: Look::default_video_speed(),
+        }
+    }
+}
+
+/// The volume and brightness keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Keys {
+    /// Percent per press.
+    #[serde(default = "Keys::default_step")]
+    pub volume_step: u8,
+    #[serde(default = "Keys::default_step")]
+    pub brightness_step: u8,
+    /// Let the volume keys go past 100 %, to the 150 % the sound server
+    /// allows. Off, both the keys and the panel's slider stop at 100.
+    #[serde(default = "yes")]
+    pub volume_boost: bool,
+}
+
+impl Keys {
+    fn default_step() -> u8 {
+        5
+    }
+
+    /// The ceiling as a fraction, which is what the audio path speaks.
+    pub fn volume_ceiling(&self) -> f64 {
+        if self.volume_boost {
+            VOLUME_CEILING
+        } else {
+            1.0
+        }
+    }
+
+    fn sanitized(self) -> Keys {
+        Keys {
+            volume_step: self.volume_step.clamp(1, 25),
+            brightness_step: self.brightness_step.clamp(1, 25),
+            ..self
+        }
+    }
+}
+
+impl Default for Keys {
+    fn default() -> Self {
+        Keys {
+            volume_step: 5,
+            brightness_step: 5,
+            volume_boost: true,
+        }
+    }
+}
+
+/// How long a popup with no timeout of its own stays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Linger {
+    Short,
+    #[default]
+    Normal,
+    Long,
+}
+
+impl Linger {
+    pub const ALL: [Linger; 3] = [Linger::Short, Linger::Normal, Linger::Long];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Linger::Short => "Short — 3 s",
+            Linger::Normal => "Normal — 5 s",
+            Linger::Long => "Long — 9 s",
+        }
+    }
+
+    /// Base milliseconds, and milliseconds per character of text on top.
+    pub fn ms(self) -> (u64, u64) {
+        match self {
+            Linger::Short => (3000, 25),
+            Linger::Normal => (5000, 40),
+            Linger::Long => (9000, 60),
+        }
+    }
+}
+
+/// Which corner the popup stack grows from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Corner {
+    #[default]
+    TopRight,
+    TopLeft,
+    BottomRight,
+    BottomLeft,
+}
+
+impl Corner {
+    pub const ALL: [Corner; 4] = [
+        Corner::TopRight,
+        Corner::TopLeft,
+        Corner::BottomRight,
+        Corner::BottomLeft,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Corner::TopRight => "Top right",
+            Corner::TopLeft => "Top left",
+            Corner::BottomRight => "Bottom right",
+            Corner::BottomLeft => "Bottom left",
+        }
+    }
+
+    pub fn is_bottom(self) -> bool {
+        matches!(self, Corner::BottomRight | Corner::BottomLeft)
+    }
+
+    pub fn is_left(self) -> bool {
+        matches!(self, Corner::TopLeft | Corner::BottomLeft)
+    }
+}
+
+/// How big a pin's picture is, and the bar's peek's with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PinSize {
+    Small,
+    /// 400 by 250, the size pins had before this was a setting.
+    #[default]
+    Medium,
+    Large,
+}
+
+impl PinSize {
+    pub const ALL: [PinSize; 3] = [PinSize::Small, PinSize::Medium, PinSize::Large];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            PinSize::Small => "Small — 320 × 200",
+            PinSize::Medium => "Medium — 400 × 250",
+            PinSize::Large => "Large — 520 × 325",
+        }
+    }
+
+    /// The picture's box, in GTK's pixels. 16:10 at every size, so a
+    /// workspace is fitted into the same shape and only the scale moves.
+    pub fn picture(self) -> (i32, i32) {
+        match self {
+            PinSize::Small => (320, 200),
+            PinSize::Medium => (400, 250),
+            PinSize::Large => (520, 325),
+        }
+    }
+}
+
+/// Pins and previews: the floating pins (`jump/pin.rs`) and the bar's peek
+/// (`bar/peek.rs`), which are one view (`jump/view.rs`).
+///
+/// One frame rate for both, not one each: a pin and a peek of the same
+/// workspace share one capture stream (`jump/feed.rs`), and two rates would
+/// have the faster one restart it for the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pins {
+    #[serde(default)]
+    pub size: PinSize,
+    /// Frames a second per captured window, one of [`Pins::FRAME_RATES`].
+    /// `jump/view.rs` has why 30 is the default.
+    #[serde(default = "Pins::default_fps")]
+    pub fps: u32,
+    /// Where the pins stand. The bottom corners keep clear of the bar, which
+    /// is at the bottom edge.
+    #[serde(default = "Pins::default_corner")]
+    pub corner: Corner,
+}
+
+impl Pins {
+    /// What the pane offers. A capture is a readback in the compositor per
+    /// frame, so the choice is a short list rather than a rail.
+    pub const FRAME_RATES: [u32; 3] = [15, 30, 60];
+
+    fn default_fps() -> u32 {
+        30
+    }
+    fn default_corner() -> Corner {
+        Corner::BottomRight
+    }
+
+    /// A hand-edited rate lands on the nearest one offered: 0 would be
+    /// every frame, which is the uncapped readback the cap exists to stop,
+    /// and 1000 is the same thing spelled differently.
+    fn sanitized(self) -> Pins {
+        let fps = Self::FRAME_RATES
+            .into_iter()
+            .min_by_key(|r| r.abs_diff(self.fps))
+            .unwrap_or_else(Self::default_fps);
+        Pins { fps, ..self }
+    }
+}
+
+impl Default for Pins {
+    fn default() -> Self {
+        Pins {
+            size: PinSize::default(),
+            fps: Self::default_fps(),
+            corner: Self::default_corner(),
+        }
+    }
+}
+
+/// Notifications: the popup stack, and the hours and contexts it keeps
+/// quiet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Alerts {
+    #[serde(default)]
+    pub linger: Linger,
+    #[serde(default)]
+    pub corner: Corner,
+    /// Cards shown at full size before older ones collapse behind them.
+    #[serde(default = "Alerts::default_stack")]
+    pub stack: u8,
+    /// Arm Do Not Disturb between `quiet_from_h` and `quiet_to_h`, and
+    /// disarm it after. A manual toggle inside the window is left alone.
+    #[serde(default)]
+    pub quiet: bool,
+    /// Whole hours, 0–23. A window that ends before it starts crosses
+    /// midnight.
+    #[serde(default = "Alerts::default_quiet_from")]
+    pub quiet_from_h: u8,
+    #[serde(default = "Alerts::default_quiet_to")]
+    pub quiet_to_h: u8,
+    /// Hold popups while the context says so: the master switch over the
+    /// four triggers below (`services/notifications/context.rs`).
+    #[serde(default = "yes")]
+    pub context_quiet: bool,
+    /// A screen is being shared: a screen-cast stream exists in PipeWire.
+    #[serde(default = "yes")]
+    pub quiet_when_sharing: bool,
+    /// Two outputs show the same part of the layout.
+    #[serde(default = "yes")]
+    pub quiet_when_mirrored: bool,
+    /// A window is fullscreen on the focused output.
+    #[serde(default = "yes")]
+    pub quiet_when_fullscreen: bool,
+    /// The camera runs, or a call app records the microphone. Off by
+    /// default: a guess from the stream's name, where the others are facts.
+    #[serde(default)]
+    pub quiet_in_calls: bool,
+}
+
+impl Alerts {
+    fn default_stack() -> u8 {
+        3
+    }
+    fn default_quiet_from() -> u8 {
+        22
+    }
+    fn default_quiet_to() -> u8 {
+        7
+    }
+
+    fn sanitized(self) -> Alerts {
+        Alerts {
+            stack: self.stack.clamp(1, 5),
+            quiet_from_h: self.quiet_from_h.min(23),
+            quiet_to_h: self.quiet_to_h.min(23),
+            ..self
+        }
+    }
+
+    /// Whether `hour` (0–23) is inside the quiet window. The window is
+    /// half-open, `[from, to)`, and wraps past midnight when `to <= from`;
+    /// `from == to` is the whole day, since a switch that is on and does
+    /// nothing is worse than one that does what it says.
+    pub fn in_quiet_hours(&self, hour: u8) -> bool {
+        let (from, to) = (self.quiet_from_h, self.quiet_to_h);
+        if from < to {
+            (from..to).contains(&hour)
+        } else {
+            hour >= from || hour < to
+        }
+    }
+}
+
+impl Default for Alerts {
+    fn default() -> Self {
+        Alerts {
+            linger: Linger::Normal,
+            corner: Corner::TopRight,
+            stack: 3,
+            quiet: false,
+            quiet_from_h: 22,
+            quiet_to_h: 7,
+            context_quiet: true,
+            quiet_when_sharing: true,
+            quiet_when_mirrored: true,
+            quiet_when_fullscreen: true,
+            quiet_in_calls: false,
+        }
+    }
+}
+
+/// What a screenshot becomes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum After {
+    #[default]
+    Both,
+    Save,
+    Copy,
+}
+
+impl After {
+    pub const ALL: [After; 3] = [After::Both, After::Save, After::Copy];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            After::Both => "Save and copy",
+            After::Save => "Save only",
+            After::Copy => "Copy only",
+        }
+    }
+
+    pub fn saves(self) -> bool {
+        !matches!(self, After::Copy)
+    }
+
+    pub fn copies(self) -> bool {
+        !matches!(self, After::Save)
+    }
+}
+
+/// Screenshots and recordings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Capture {
+    /// Where shots land. Empty is `~/Pictures/Screenshots`.
+    #[serde(default)]
+    pub folder: String,
+    #[serde(default)]
+    pub after: After,
+    /// Open the annotation editor on every shot, instead of from the card.
+    #[serde(default)]
+    pub annotate: bool,
+}
+
+/// Administrator access: what `sudo` and `pkexec` may ask for besides the
+/// password, and where they may ask it.
+///
+/// Read by the polkit agent, which is the process that draws the card for
+/// both and answers pam_race's `begin` (`polkit/race.rs`). Every switch here
+/// removes a way in or a surface; none can make elevation easier than the
+/// password alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Elevate {
+    /// Ask the camera. Off, `sudo` and `pkexec` never open the shutter; the
+    /// reader and the password remain.
+    #[serde(default = "yes")]
+    pub face: bool,
+    /// Draw the card for a `sudo` typed in a terminal. Off, the terminal
+    /// keeps the prompt to itself, and the camera is not asked for it: the
+    /// Allow press lives on the card.
+    #[serde(default = "yes")]
+    pub terminal_card: bool,
+    /// The pill under the lens while the camera runs. Off, the card's
+    /// caption reports the check instead.
+    #[serde(default = "yes")]
+    pub cue: bool,
+    /// The first keystroke in the password field ends a face check that is
+    /// still looking. Off, the camera runs out its window alongside the
+    /// typing.
+    #[serde(default = "yes")]
+    pub typing_abandons_face: bool,
+}
+
+impl Default for Elevate {
+    fn default() -> Self {
+        Elevate {
+            face: true,
+            terminal_card: true,
+            cue: true,
+            typing_abandons_face: true,
+        }
+    }
+}
+
+/// What the launcher's results include, and whether it learns.
+///
+/// One switch per kind of result rather than per elephant provider: the
+/// windows switch covers both the running-window rows the launcher finds
+/// itself and elephant's `windows`, the calculator switch both the `=` rows
+/// and elephant's `calc`. `launcher::sources` maps these to providers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Launcher {
+    /// Installed applications.
+    #[serde(default = "yes")]
+    pub apps: bool,
+    /// Open windows: "Go to" rows above an app's result, and Tab on one.
+    #[serde(default = "yes")]
+    pub windows: bool,
+    /// `=` and arithmetic typed bare.
+    #[serde(default = "yes")]
+    pub calculator: bool,
+    /// `>` runs a command in your shell; commands on `PATH` as results.
+    #[serde(default = "yes")]
+    pub commands: bool,
+    /// The clipboard history.
+    #[serde(default = "yes")]
+    pub clipboard: bool,
+    /// The panel's pages and the settings tabs, by name.
+    #[serde(default = "yes")]
+    pub settings: bool,
+    /// Desktop actions and menus that apps publish.
+    #[serde(default = "yes")]
+    pub menus: bool,
+    /// A web search for what was typed.
+    #[serde(default = "yes")]
+    pub web_search: bool,
+    /// Files, by name, as elephant indexes them.
+    #[serde(default)]
+    pub files: bool,
+    /// Browser bookmarks.
+    #[serde(default)]
+    pub bookmarks: bool,
+    /// Emoji and symbols by name.
+    #[serde(default)]
+    pub symbols: bool,
+    /// Rank by what you launch, and show it first with the query empty.
+    #[serde(default = "yes")]
+    pub frecency: bool,
+}
+
+impl Default for Launcher {
+    fn default() -> Self {
+        Launcher {
+            apps: true,
+            windows: true,
+            calculator: true,
+            commands: true,
+            clipboard: true,
+            settings: true,
+            menus: true,
+            web_search: true,
+            files: false,
+            bookmarks: false,
+            symbols: false,
+            frecency: true,
+        }
+    }
+}
+
+/// When the night light is on (`services::gamma`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NightSchedule {
+    /// Warm at night, across the dusk and the dawn [`Daylight`] draws: the
+    /// sun at its location with its offsets, or its fixed times. The same
+    /// day and night the automatic mode follows.
+    #[default]
+    Sun,
+    /// Warm all day.
+    Always,
+}
+
+/// The night light: a colour temperature the compositor applies to every
+/// output, in place of gammastep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NightLight {
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub schedule: NightSchedule,
+    /// The night's colour temperature in kelvin, 1700–6500. The day is
+    /// 6500 K, which is no change at all.
+    #[serde(default = "NightLight::default_night_k")]
+    pub night_k: u32,
+}
+
+impl NightLight {
+    pub const MIN_K: u32 = 1700;
+    pub const DAY_K: u32 = 6500;
+
+    fn default_night_k() -> u32 {
+        3500
+    }
+
+    fn sanitized(self) -> NightLight {
+        NightLight {
+            night_k: self.night_k.clamp(Self::MIN_K, Self::DAY_K),
+            ..self
+        }
+    }
+}
+
+impl Default for NightLight {
+    fn default() -> Self {
+        NightLight {
+            enabled: true,
+            schedule: NightSchedule::Sun,
+            night_k: Self::default_night_k(),
+        }
+    }
+}
+
+/// When day and night are, for the two things that follow them: the
+/// automatic mode and the night light (`theme::sun`). One section, so the
+/// theme darkens and the screen warms at the same moment.
+///
+/// The sun decides, at the place picked on the Look pane's map: sunrise and
+/// sunset are instants in UTC that follow from a latitude and a longitude,
+/// whatever the local clock's time zone says. Until a place is picked there
+/// is no sun to follow. The switches move that: a location of your own,
+/// sunrise and sunset shifted earlier or later, or fixed clock times instead
+/// of the sun.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Daylight {
+    /// Day and night at the clock times below instead of by the sun. Off,
+    /// every `day_*`/`night_*` field is inert.
+    #[serde(default)]
+    pub fixed_times: bool,
+    /// When the day starts, local time: the mode turns light and the night
+    /// light has cooled back to day.
+    #[serde(default = "Daylight::default_day_from_h")]
+    pub day_from_h: u8,
+    #[serde(default)]
+    pub day_from_m: u8,
+    /// When the night starts: the mode turns dark and the night light is
+    /// most of the way warm.
+    #[serde(default = "Daylight::default_night_from_h")]
+    pub night_from_h: u8,
+    #[serde(default)]
+    pub night_from_m: u8,
+    /// Where the sun is computed for, picked on the map: degrees, north
+    /// positive, −90–90. `null` until a place is picked.
+    #[serde(default)]
+    pub latitude: Option<f64>,
+    /// Degrees, east positive, −180–180.
+    #[serde(default)]
+    pub longitude: Option<f64>,
+    /// Minutes to move sunrise by: negative is earlier, positive later.
+    /// −180–180; 0 is the sun as it is.
+    #[serde(default)]
+    pub sunrise_offset_m: i16,
+    /// Minutes to move sunset by, the same way.
+    #[serde(default)]
+    pub sunset_offset_m: i16,
+}
+
+impl Daylight {
+    pub const MAX_OFFSET_M: i16 = 180;
+
+    fn default_day_from_h() -> u8 {
+        7
+    }
+    fn default_night_from_h() -> u8 {
+        21
+    }
+
+    /// Clamped rather than rejected, like `Idle`'s window: a typo in the
+    /// file costs a wrong time, never the section.
+    fn sanitized(self) -> Daylight {
+        let finite =
+            |v: Option<f64>, max: f64| v.filter(|v| v.is_finite()).map(|v| v.clamp(-max, max));
+        Daylight {
+            day_from_h: self.day_from_h.min(23),
+            day_from_m: self.day_from_m.min(59),
+            night_from_h: self.night_from_h.min(23),
+            night_from_m: self.night_from_m.min(59),
+            latitude: finite(self.latitude, 90.0),
+            longitude: finite(self.longitude, 180.0),
+            sunrise_offset_m: self
+                .sunrise_offset_m
+                .clamp(-Self::MAX_OFFSET_M, Self::MAX_OFFSET_M),
+            sunset_offset_m: self
+                .sunset_offset_m
+                .clamp(-Self::MAX_OFFSET_M, Self::MAX_OFFSET_M),
+            ..self
+        }
+    }
+
+    /// The day's start as minutes since midnight.
+    pub fn day_from(&self) -> u16 {
+        u16::from(self.day_from_h) * 60 + u16::from(self.day_from_m)
+    }
+
+    /// The picked place, when both halves of it are there.
+    pub fn place(&self) -> Option<(f64, f64)> {
+        Some((self.latitude?, self.longitude?))
+    }
+
+    /// The night's start as minutes since midnight.
+    pub fn night_from(&self) -> u16 {
+        u16::from(self.night_from_h) * 60 + u16::from(self.night_from_m)
+    }
+}
+
+impl Default for Daylight {
+    fn default() -> Self {
+        Daylight {
+            fixed_times: false,
+            day_from_h: Self::default_day_from_h(),
+            day_from_m: 0,
+            night_from_h: Self::default_night_from_h(),
+            night_from_m: 0,
+            latitude: None,
+            longitude: None,
+            sunrise_offset_m: 0,
+            sunset_offset_m: 0,
+        }
+    }
+}
+
+/// Which connected output a profile output claims (`services::displays`).
+/// Every field given must match, as a glob (`*`, `?`); a field left out
+/// matches anything. An output that does not report a make, model or
+/// serial matches it as `Unknown`, as kanshi does.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct OutputMatch {
+    /// The connector, `eDP-1`, `DP-3`: stable for a built-in panel, not
+    /// for a monitor that moves between ports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub make: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serial: Option<String>,
+}
+
+/// An output's rotation and flip, spelled as sway's `output … transform`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum OutputTransform {
+    #[default]
+    #[serde(rename = "normal")]
+    Normal,
+    #[serde(rename = "90")]
+    R90,
+    #[serde(rename = "180")]
+    R180,
+    #[serde(rename = "270")]
+    R270,
+    #[serde(rename = "flipped")]
+    Flipped,
+    #[serde(rename = "flipped-90")]
+    Flipped90,
+    #[serde(rename = "flipped-180")]
+    Flipped180,
+    #[serde(rename = "flipped-270")]
+    Flipped270,
+}
+
+impl OutputTransform {
+    /// The word `output … transform` takes, the same as the serde name.
+    pub fn sway(self) -> &'static str {
+        match self {
+            OutputTransform::Normal => "normal",
+            OutputTransform::R90 => "90",
+            OutputTransform::R180 => "180",
+            OutputTransform::R270 => "270",
+            OutputTransform::Flipped => "flipped",
+            OutputTransform::Flipped90 => "flipped-90",
+            OutputTransform::Flipped180 => "flipped-180",
+            OutputTransform::Flipped270 => "flipped-270",
+        }
+    }
+}
+
+/// One output of a display profile. A field left out keeps what the output
+/// has, so a profile can say only where a screen goes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DisplayOutput {
+    #[serde(rename = "match")]
+    pub criteria: OutputMatch,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Width, height and refresh in mHz: `[3840, 2160, 60000]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<[u32; 3]>,
+    /// The top-left corner in the layout, logical pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[i32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform: Option<OutputTransform>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adaptive_sync: Option<bool>,
+}
+
+/// How the extra screen (`services::cast::output`) stands while a profile
+/// is on screen. It has no `match`: there is one extra screen at a time,
+/// and sway gives it a new name each time. A field left out keeps what the
+/// extra screen gets by default: 1920×1080 at 60 Hz, scale 1, to the right
+/// of the screens.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ExtraScreenLayout {
+    /// Width, height and refresh in mHz: `[1920, 1080, 60000]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<[u32; 3]>,
+    /// The top-left corner in the layout, logical pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[i32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform: Option<OutputTransform>,
+}
+
+/// A named layout for one set of connected outputs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DisplayProfile {
+    pub name: String,
+    #[serde(default)]
+    pub outputs: Vec<DisplayOutput>,
+    /// The extra screen's layout under this profile. Matching ignores it:
+    /// a cast that starts or stops never changes which profile fits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_screen: Option<ExtraScreenLayout>,
+}
+
+/// Display profiles, kanshi's job in the panel (`services::displays`): the
+/// first profile, in this order, whose outputs claim every connected output
+/// is applied when the outputs change, and the one applied stays while it
+/// still matches. No profile matching leaves the outputs as they are.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct Displays {
+    #[serde(default)]
+    pub profiles: Vec<DisplayProfile>,
+}
+
+impl Displays {
+    /// Drop what cannot be applied: a scale outside what sway accepts, an
+    /// empty name, a profile with no outputs.
+    fn sanitized(self) -> Displays {
+        Displays {
+            profiles: self
+                .profiles
+                .into_iter()
+                .filter(|p| !p.name.trim().is_empty() && !p.outputs.is_empty())
+                .map(|mut p| {
+                    let fix =
+                        |s: Option<f64>| s.filter(|s| s.is_finite()).map(|s| s.clamp(0.25, 8.0));
+                    for o in &mut p.outputs {
+                        o.scale = fix(o.scale);
+                    }
+                    if let Some(e) = &mut p.extra_screen {
+                        e.scale = fix(e.scale);
+                        e.mode = e.mode.filter(|[w, h, _]| *w > 0 && *h > 0);
+                    }
+                    p
+                })
+                .collect(),
+        }
+    }
+}
+
+// ── Input ───────────────────────────────────────────────────────────────
+
+/// libinput's acceleration curve, spelled as sway's `accel_profile` takes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccelProfile {
+    Adaptive,
+    Flat,
+}
+
+/// How a touchpad without buttons makes a right or middle click, spelled as
+/// sway's `click_method` takes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClickMethod {
+    None,
+    ButtonAreas,
+    Clickfinger,
+}
+
+/// How a touchpad scrolls, spelled as sway's `scroll_method` takes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScrollMethod {
+    None,
+    TwoFinger,
+    Edge,
+    OnButtonDown,
+}
+
+/// Keyboard, touchpad and mouse, sent to sway by device type
+/// (`services::input`). Every field is optional, and `None` leaves the sway
+/// config's own `input` block in force for that one knob: the section holds
+/// only what was changed here, so it never fights the config over the rest.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct Input {
+    /// Keyboard layouts in switch order, in xkb's spelling: `se`,
+    /// `us(dvorak)` for a variant.
+    #[serde(default)]
+    pub layouts: Option<Vec<String>>,
+    /// The `grp:` xkb option that switches layout, `grp:win_space_toggle`;
+    /// empty for none.
+    #[serde(default)]
+    pub layout_switch: Option<String>,
+    /// The xkb option for Caps Lock, `caps:escape`, `ctrl:nocaps`; empty for
+    /// Caps Lock as itself.
+    #[serde(default)]
+    pub caps: Option<String>,
+    /// Milliseconds a key is held before it repeats.
+    #[serde(default)]
+    pub repeat_delay_ms: Option<u32>,
+    /// Repeats per second.
+    #[serde(default)]
+    pub repeat_rate: Option<u32>,
+    #[serde(default)]
+    pub touchpad_tap: Option<bool>,
+    #[serde(default)]
+    pub touchpad_natural_scroll: Option<bool>,
+    /// libinput's pointer speed, −1 to 1.
+    #[serde(default)]
+    pub touchpad_speed: Option<f64>,
+    #[serde(default)]
+    pub touchpad_accel_profile: Option<AccelProfile>,
+    /// Disable while typing.
+    #[serde(default)]
+    pub touchpad_dwt: Option<bool>,
+    #[serde(default)]
+    pub touchpad_click_method: Option<ClickMethod>,
+    #[serde(default)]
+    pub touchpad_scroll_method: Option<ScrollMethod>,
+    #[serde(default)]
+    pub mouse_speed: Option<f64>,
+    #[serde(default)]
+    pub mouse_accel_profile: Option<AccelProfile>,
+    #[serde(default)]
+    pub mouse_natural_scroll: Option<bool>,
+}
+
+impl Input {
+    pub const REPEAT_DELAY_MS: (u32, u32) = (100, 1000);
+    pub const REPEAT_RATE: (u32, u32) = (1, 100);
+
+    /// An xkb name as sway will be handed it inside double quotes: letters,
+    /// digits and the punctuation xkb names use, nothing that could end the
+    /// quote or the command.
+    pub fn is_xkb_name(s: &str) -> bool {
+        s.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '(' | ')' | ':' | '+' | '.')
+        })
+    }
+
+    fn sanitized(self) -> Input {
+        let speed = |s: Option<f64>| s.filter(|v| v.is_finite()).map(|v| v.clamp(-1.0, 1.0));
+        let name = |s: Option<String>| s.filter(|v| Self::is_xkb_name(v));
+        Input {
+            layouts: self
+                .layouts
+                .map(|l| {
+                    l.into_iter()
+                        .filter(|n| !n.is_empty() && Self::is_xkb_name(n))
+                        .collect::<Vec<_>>()
+                })
+                .filter(|l| !l.is_empty()),
+            layout_switch: name(self.layout_switch),
+            caps: name(self.caps),
+            repeat_delay_ms: self
+                .repeat_delay_ms
+                .map(|v| v.clamp(Self::REPEAT_DELAY_MS.0, Self::REPEAT_DELAY_MS.1)),
+            repeat_rate: self
+                .repeat_rate
+                .map(|v| v.clamp(Self::REPEAT_RATE.0, Self::REPEAT_RATE.1)),
+            touchpad_speed: speed(self.touchpad_speed),
+            mouse_speed: speed(self.mouse_speed),
+            ..self
+        }
+    }
+}
+
+/// What of the shell shows on an extra screen: a virtual output made for a
+/// TV or a VNC viewer (`services::cast`). Off, the surface is not built
+/// there (one per output) or goes to one of the person's own screens
+/// (placed on the focused output); `shell::extra` holds the rules. All off
+/// by default: an extra screen is often a TV other people see.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ExtraScreens {
+    /// The bar (and its peek, which lives in it).
+    #[serde(default)]
+    pub bar: bool,
+    /// The workspace-name pill and its hover strip (`label`).
+    #[serde(default)]
+    pub workspace_names: bool,
+    /// The volume and brightness card.
+    #[serde(default)]
+    pub osd: bool,
+    /// The key binding sheet.
+    #[serde(default)]
+    pub key_sheet: bool,
+    /// Pins: a pin follows the focused output, or a screen instead.
+    #[serde(default)]
+    pub pins: bool,
+    /// Notification popups. Was `alerts.on_extra_screens` (see [`migrate`]).
+    #[serde(default)]
+    pub notifications: bool,
+}
+
+/// Bring a settings file written by an older build up to date, before its
+/// keys are checked. `alerts.on_extra_screens` became
+/// `extra_screens.notifications` when every surface got a switch; a value
+/// already in the new place wins. An `alerts` section left empty is
+/// removed, or it would hold every alert setting at its default over the
+/// system's.
+pub fn migrate(value: &mut Value) {
+    let Some(old) = value
+        .get_mut("alerts")
+        .and_then(Value::as_object_mut)
+        .and_then(|a| a.remove("on_extra_screens"))
+    else {
+        return;
+    };
+    if value["alerts"].as_object().is_some_and(|a| a.is_empty())
+        && let Some(root) = value.as_object_mut()
+    {
+        root.remove("alerts");
+    }
+    let Some(root) = value.as_object_mut() else {
+        return;
+    };
+    let extra = root
+        .entry("extra_screens")
+        .or_insert_with(|| Value::Object(Default::default()));
+    if let Some(extra) = extra.as_object_mut() {
+        extra.entry("notifications").or_insert(old);
+    }
+}
+
+// ── The file ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct Settings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wallpaper: Option<Wallpaper>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look: Option<Look>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle: Option<Idle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bar: Option<Bar>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pins: Option<Pins>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keys: Option<Keys>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alerts: Option<Alerts>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<Capture>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elevate: Option<Elevate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launcher: Option<Launcher>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub night_light: Option<NightLight>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daylight: Option<Daylight>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub displays: Option<Displays>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_screens: Option<ExtraScreens>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<Input>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub devices: Option<Devices>,
+}
+
+impl Settings {
+    /// The section names, in the order the file and the pane list them.
+    pub const SECTIONS: [&'static str; 16] = [
+        "wallpaper",
+        "look",
+        "idle",
+        "bar",
+        "pins",
+        "keys",
+        "alerts",
+        "capture",
+        "elevate",
+        "launcher",
+        "night_light",
+        "daylight",
+        "displays",
+        "extra_screens",
+        "input",
+        "devices",
+    ];
+
+    /// The sections with a system layer, which is every one but the
+    /// wallpaper (its system default is the sway config's `bg` line) and the
+    /// device names (a person's own).
+    pub const NIX_SECTIONS: [&'static str; 14] = [
+        "look",
+        "idle",
+        "bar",
+        "pins",
+        "keys",
+        "alerts",
+        "capture",
+        "elevate",
+        "launcher",
+        "night_light",
+        "daylight",
+        "displays",
+        "extra_screens",
+        "input",
+    ];
+
+    /// The section in force: the user's, else the system's, else the
+    /// binary's. One per section, so a reader names what it wants.
+    pub fn look(&self) -> Look {
+        self.look.or(system().look).unwrap_or_default()
+    }
+    pub fn idle(&self) -> Idle {
+        self.idle.or(system().idle).unwrap_or_default()
+    }
+    pub fn bar(&self) -> Bar {
+        self.bar.or(system().bar).unwrap_or_default()
+    }
+    pub fn pins(&self) -> Pins {
+        self.pins.or(system().pins).unwrap_or_default()
+    }
+    pub fn keys(&self) -> Keys {
+        self.keys.or(system().keys).unwrap_or_default()
+    }
+    pub fn alerts(&self) -> Alerts {
+        self.alerts.or(system().alerts).unwrap_or_default()
+    }
+    pub fn extra_screens(&self) -> ExtraScreens {
+        self.extra_screens
+            .or(system().extra_screens)
+            .unwrap_or_default()
+    }
+    pub fn capture(&self) -> Capture {
+        self.capture
+            .clone()
+            .or_else(|| system().capture.clone())
+            .unwrap_or_default()
+    }
+    pub fn elevate(&self) -> Elevate {
+        self.elevate.or(system().elevate).unwrap_or_default()
+    }
+    pub fn launcher(&self) -> Launcher {
+        self.launcher.or(system().launcher).unwrap_or_default()
+    }
+    pub fn night_light(&self) -> NightLight {
+        self.night_light
+            .or(system().night_light)
+            .unwrap_or_default()
+    }
+    pub fn daylight(&self) -> Daylight {
+        self.daylight.or(system().daylight).unwrap_or_default()
+    }
+    pub fn displays(&self) -> Displays {
+        self.displays
+            .clone()
+            .or_else(|| system().displays.clone())
+            .unwrap_or_default()
+    }
+    pub fn input(&self) -> Input {
+        self.input
+            .clone()
+            .or_else(|| system().input.clone())
+            .unwrap_or_default()
+    }
+    /// User layer only, like the wallpaper.
+    pub fn devices(&self) -> Devices {
+        self.devices.clone().unwrap_or_default()
+    }
+
+    /// True when nothing is overridden, which is when the file should not
+    /// exist.
+    pub fn is_default(&self) -> bool {
+        *self == Settings::default()
+    }
+
+    /// What is in force, every section filled in.
+    pub fn effective(&self) -> Settings {
+        Settings {
+            wallpaper: self.wallpaper.clone(),
+            look: Some(self.look()),
+            idle: Some(self.idle()),
+            bar: Some(self.bar()),
+            pins: Some(self.pins()),
+            keys: Some(self.keys()),
+            alerts: Some(self.alerts()),
+            capture: Some(self.capture()),
+            elevate: Some(self.elevate()),
+            launcher: Some(self.launcher()),
+            night_light: Some(self.night_light()),
+            daylight: Some(self.daylight()),
+            displays: Some(self.displays()),
+            extra_screens: Some(self.extra_screens()),
+            input: Some(self.input()),
+            devices: self.devices.clone(),
+        }
+    }
+
+    /// Every section at the binary's defaults, the wallpaper included with
+    /// an empty path: the shape of the file, for checking keys against.
+    ///
+    /// Built from the `Default`s directly, never through the accessors:
+    /// this runs inside `system()`'s own initialisation (`read` checks the
+    /// system file's keys against it), and an accessor would call
+    /// `system()` again from within its `OnceLock`, which hangs the
+    /// process on the first read of a system file with any section in it.
+    fn probe() -> Settings {
+        Settings {
+            wallpaper: Some(Wallpaper {
+                path: PathBuf::new(),
+                mode: WallpaperMode::default(),
+            }),
+            look: Some(Look::default()),
+            idle: Some(Idle::default()),
+            bar: Some(Bar::default()),
+            pins: Some(Pins::default()),
+            keys: Some(Keys::default()),
+            alerts: Some(Alerts::default()),
+            capture: Some(Capture::default()),
+            elevate: Some(Elevate::default()),
+            launcher: Some(Launcher::default()),
+            night_light: Some(NightLight::default()),
+            daylight: Some(Daylight::default()),
+            displays: Some(Displays::default()),
+            extra_screens: Some(ExtraScreens::default()),
+            input: Some(Input::default()),
+            devices: Some(Devices::default()),
+        }
+    }
+
+    /// Clamp what a hand-edited file may have put out of range. Zero on a
+    /// timer is a valid "never" and is left alone.
+    pub fn sanitized(self) -> Settings {
+        Settings {
+            idle: self.idle.map(Idle::sanitized),
+            look: self.look.map(Look::sanitized),
+            pins: self.pins.map(Pins::sanitized),
+            keys: self.keys.map(Keys::sanitized),
+            alerts: self.alerts.map(Alerts::sanitized),
+            night_light: self.night_light.map(NightLight::sanitized),
+            daylight: self.daylight.map(Daylight::sanitized),
+            displays: self.displays.map(Displays::sanitized),
+            input: self.input.map(Input::sanitized),
+            devices: self.devices.map(Devices::sanitized),
+            ..self
+        }
+    }
+
+    /// The section names and field names a file may carry.
+    fn known(section: &str) -> Option<Vec<String>> {
+        let probe = serde_json::to_value(Self::probe()).ok()?;
+        Some(probe.get(section)?.as_object()?.keys().cloned().collect())
+    }
+
+    /// One value by dotted key, `idle.lock_after_s`, out of the effective
+    /// settings. `None` for a key that is not a field.
+    pub fn get(&self, key: &str) -> Option<Value> {
+        let (section, field) = key.split_once('.')?;
+        let all = serde_json::to_value(self.effective()).ok()?;
+        all.get(section)?.get(field).cloned()
+    }
+
+    /// Set one field by dotted key. The section is taken from what is in
+    /// force, so setting `idle.lock_after_s` on a fresh account produces an
+    /// idle section with every other timer at the system default rather than
+    /// at zero. A wrong key or a value of the wrong type is an error, and
+    /// nothing changes.
+    pub fn set(&mut self, key: &str, value: Value) -> Result<(), String> {
+        let (section, field) = key
+            .split_once('.')
+            .ok_or_else(|| format!("`{key}` is not <section>.<field>"))?;
+        let known = Self::known(section).ok_or_else(|| {
+            format!(
+                "no section `{section}`; one of {}",
+                Self::SECTIONS.join(", ")
+            )
+        })?;
+        // A field the struct does not have would be dropped silently by
+        // serde, which reads as success. Check by name first.
+        if !known.iter().any(|k| k == field) {
+            return Err(format!(
+                "no field `{field}` in `{section}`; one of {}",
+                known.join(", ")
+            ));
+        }
+        let all = serde_json::to_value(self.effective()).map_err(|e| e.to_string())?;
+        let with = |value: Value| {
+            let mut all = all.clone();
+            let mut obj = all[section].as_object().cloned().unwrap_or_default();
+            obj.insert(field.to_string(), value);
+            all[section] = Value::Object(obj);
+            serde_json::from_value::<Settings>(all)
+        };
+        // The command line hands every value over as a string unless it is a
+        // number or a boolean. A field that takes a list or an object
+        // (`displays.profiles`) gets the string read as JSON, and only then:
+        // a path that happens to be valid JSON stays a path.
+        let next = match with(value.clone()) {
+            Ok(next) => next,
+            Err(e) => match value
+                .as_str()
+                .and_then(|s| serde_json::from_str::<Value>(s).ok())
+                .filter(|v| v.is_array() || v.is_object())
+            {
+                Some(parsed) => with(parsed).map_err(|e| format!("`{key}`: {e}"))?,
+                None => return Err(format!("`{key}`: {e}")),
+            },
+        };
+        let next = next.sanitized();
+        // Only the section named moves; the rest of `next` is the effective
+        // copy, which must not become an override.
+        let mut mine = serde_json::to_value(&*self).map_err(|e| e.to_string())?;
+        let mut moved = serde_json::to_value(&next).map_err(|e| e.to_string())?;
+        mine[section] = moved[section].take();
+        *self = serde_json::from_value(mine).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Drop one section, or every section, from the override.
+    pub fn reset(&mut self, section: Option<&str>) -> Result<(), String> {
+        let Some(section) = section else {
+            *self = Settings::default();
+            return Ok(());
+        };
+        if !Self::SECTIONS.contains(&section) {
+            return Err(format!(
+                "no section `{section}`; one of {}",
+                Self::SECTIONS.join(", ")
+            ));
+        }
+        let mut mine = serde_json::to_value(&*self).map_err(|e| e.to_string())?;
+        mine[section] = Value::Null;
+        *self = serde_json::from_value(mine).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// One section as the `theme/settings.nix` attrset it would be, for
+    /// promoting a keeper into the Nix side by hand. `None` for the
+    /// wallpaper, which the sway config owns, and for a name that is not a
+    /// section.
+    pub fn section_as_nix(&self, section: &str) -> Option<String> {
+        if !Self::NIX_SECTIONS.contains(&section) {
+            return None;
+        }
+        let all = serde_json::to_value(self.effective()).ok()?;
+        let obj = all.get(section)?.as_object()?;
+        let mut out = format!(
+            "# swaypplet settings pane, live values. Into theme/settings.nix:\n{section} = {{\n"
+        );
+        for (key, value) in obj {
+            let _ = writeln!(out, "  {key} = {};", nix_literal(value));
+        }
+        out.push_str("};\n");
+        Some(out)
+    }
+}
+
+/// A JSON value as Nix would have it written: a scalar, `null`, or a list
+/// of them (`input.layouts`).
+fn nix_literal(value: &Value) -> String {
+    match value {
+        Value::String(s) => format!("\"{}\"", s.replace('"', "\\\"")),
+        Value::Array(items) => {
+            let items: Vec<String> = items.iter().map(nix_literal).collect();
+            format!("[ {} ]", items.join(" "))
+        }
+        other => other.to_string(),
+    }
+}
+
+/// One section of [`Settings`], as a type: the accessor that resolves it
+/// through the layers, and the slot in the user's override it lives in.
+/// `store::edit` and `store::reset` are generic over this, which is what
+/// keeps six panes from carrying the same edit-and-normalise dance.
+pub trait Section: Clone + PartialEq + Default {
+    /// The section in force: the user's, else the system's, else the
+    /// binary's.
+    fn in_force(settings: &Settings) -> Self;
+    /// The user's override for it.
+    fn slot(settings: &mut Settings) -> &mut Option<Self>;
+}
+
+macro_rules! section {
+    ($ty:ident, $field:ident, $accessor:ident) => {
+        impl Section for $ty {
+            fn in_force(settings: &Settings) -> Self {
+                settings.$accessor()
+            }
+            fn slot(settings: &mut Settings) -> &mut Option<Self> {
+                &mut settings.$field
+            }
+        }
+    };
+}
+
+section!(Look, look, look);
+section!(Idle, idle, idle);
+section!(Bar, bar, bar);
+section!(Pins, pins, pins);
+section!(Keys, keys, keys);
+section!(Alerts, alerts, alerts);
+section!(Capture, capture, capture);
+section!(Elevate, elevate, elevate);
+section!(Launcher, launcher, launcher);
+section!(NightLight, night_light, night_light);
+section!(Daylight, daylight, daylight);
+section!(Displays, displays, displays);
+section!(ExtraScreens, extra_screens, extra_screens);
+section!(Input, input, input);
+section!(Devices, devices, devices);
+
+/// Every `section` or `section.field` in `value` that the structs do not
+/// have.
+pub fn unknown_keys(value: &Value) -> Vec<String> {
+    let Some(sections) = value.as_object() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (section, body) in sections {
+        let Some(known) = Settings::known(section) else {
+            out.push(section.clone());
+            continue;
+        };
+        if let Some(fields) = body.as_object() {
+            for field in fields.keys() {
+                if !known.contains(field) {
+                    out.push(format!("{section}.{field}"));
+                }
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn device_names_are_trimmed_and_empty_or_unkeyed_ones_dropped() {
+        let raw = serde_json::json!({"devices": {"names": {
+            "net:f4:a8:0d:5b:70:33": "  Desk dock ",
+            "audio:alsa_output.x": "",
+            "no-kind": "Lost",
+            "input:": "Lost too",
+        }}});
+        let s = serde_json::from_value::<Settings>(raw).unwrap().sanitized();
+        let names = s.devices.unwrap().names;
+        assert_eq!(names.len(), 1);
+        assert_eq!(names["net:f4:a8:0d:5b:70:33"], "Desk dock");
+    }
+
+    #[test]
+    fn the_launcher_section_round_trips_and_an_old_file_loads() {
+        let mut s = Settings::default();
+        s.set("launcher.files", Value::Bool(true)).unwrap();
+        s.set("launcher.frecency", Value::Bool(false)).unwrap();
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back, s);
+        let l = back.launcher();
+        assert!(l.files && !l.frecency && l.apps && l.calculator);
+        // A section written before a switch existed takes that switch's
+        // default rather than failing to load.
+        let old: Settings = serde_json::from_str(r#"{"launcher":{"apps":false}}"#).unwrap();
+        let l = old.launcher();
+        assert!(!l.apps && l.windows && !l.files && l.frecency);
+        assert!(s.set("launcher.nope", Value::Bool(true)).is_err());
+    }
+
+    #[test]
+    fn an_empty_file_is_the_defaults() {
+        let s: Settings = serde_json::from_str("{}").unwrap();
+        assert!(s.is_default());
+        // The test process has no system file (SYSTEM_CONFIG is not on a
+        // build sandbox), so the section in force is the binary's.
+        assert_eq!(s.idle(), Idle::default());
+        assert_eq!(s.bar(), Bar::default());
+        assert_eq!(s.pins(), Pins::default());
+        assert_eq!(s.keys(), Keys::default());
+        assert_eq!(s.alerts(), Alerts::default());
+        assert_eq!(s.capture(), Capture::default());
+        assert_eq!(s.look(), Look::default());
+        assert_eq!(s.elevate(), Elevate::default());
+        assert_eq!(s.night_light(), NightLight::default());
+    }
+
+    #[test]
+    fn a_list_from_the_command_line_sets_the_profiles() {
+        let mut s = Settings::default();
+        let raw = r#"[{"name": "desk", "outputs": [{"match": {"name": "eDP-1"}}]}]"#;
+        s.set("displays.profiles", Value::String(raw.into()))
+            .unwrap();
+        assert_eq!(s.displays().profiles[0].name, "desk");
+        // A string field keeps a JSON-looking string as the string it is.
+        s.set("wallpaper.path", Value::String("[1]".into())).ok();
+        assert!(
+            s.set("displays.profiles", Value::String("desk".into()))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn the_displays_section_round_trips_in_kanshis_terms() {
+        let text = r#"{"displays": {"profiles": [
+            {"name": "desk", "outputs": [
+                {"match": {"name": "eDP-1"}, "mode": [2880, 1800, 60000],
+                 "position": [2560, 149], "scale": 2.0},
+                {"match": {"make": "NON", "model": "28H2U"}, "scale": 1.5,
+                 "transform": "90"}]},
+            {"name": "", "outputs": [{"match": {}}]},
+            {"name": "empty"}]}}"#;
+        let s: Settings = serde_json::from_str(text).unwrap();
+        let s = s.sanitized();
+        let d = s.displays();
+        // The nameless and the outputless profiles cannot be applied.
+        assert_eq!(d.profiles.len(), 1);
+        let p = &d.profiles[0];
+        assert_eq!(p.outputs[0].criteria.name.as_deref(), Some("eDP-1"));
+        assert!(p.outputs[0].enabled);
+        assert_eq!(p.outputs[1].transform, Some(OutputTransform::R90));
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back, s);
+        // An unset field is left out of the file, not written as null.
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("null"), "{json}");
+    }
+
+    #[test]
+    fn the_input_sanitizer_keeps_anything_that_could_end_the_quote_out() {
+        let s: Settings = serde_json::from_str(
+            r#"{"input": {"layouts": ["se", "us\"; exec rm", ""], "caps": "caps:escape\"",
+                          "touchpad_speed": 4.0, "repeat_rate": 0}}"#,
+        )
+        .unwrap();
+        let input = s.sanitized().input.unwrap();
+        assert_eq!(input.layouts, Some(vec!["se".to_string()]));
+        assert_eq!(input.caps, None);
+        assert_eq!(input.touchpad_speed, Some(1.0));
+        assert_eq!(input.repeat_rate, Some(1));
+        assert_eq!(input.touchpad_tap, None);
+    }
+
+    #[test]
+    fn the_input_section_sets_by_key_and_exports_a_nix_list() {
+        let mut s = Settings::default();
+        s.set(
+            "input.layouts",
+            Value::String(r#"["se", "us(dvorak)"]"#.into()),
+        )
+        .unwrap();
+        s.set("input.touchpad_tap", Value::Bool(true)).unwrap();
+        assert_eq!(s.input().touchpad_tap, Some(true));
+        let nix = s.section_as_nix("input").unwrap();
+        assert!(
+            nix.contains(r#"  layouts = [ "se" "us(dvorak)" ];"#),
+            "{nix}"
+        );
+        assert!(nix.contains("  mouse_speed = null;"), "{nix}");
+        assert!(
+            s.set(
+                "input.touchpad_click_method",
+                Value::String("sideways".into())
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a_night_temperature_out_of_range_is_clamped() {
+        let s: Settings = serde_json::from_str(r#"{"night_light": {"night_k": 900}}"#).unwrap();
+        let s = s.sanitized();
+        assert_eq!(s.night_light().night_k, NightLight::MIN_K);
+        assert!(s.night_light().enabled);
+    }
+
+    #[test]
+    fn a_partial_section_lands_on_the_defaults_for_the_rest() {
+        // A hand-edited file that names one timer must not zero the others:
+        // zero is "never", and a lock that silently became "never" is the
+        // failure mode the idle manager exists to prevent.
+        let s: Settings = serde_json::from_str(r#"{"idle": {"lock_after_s": 600}}"#).unwrap();
+        let idle = s.idle();
+        assert_eq!(idle.lock_after_s, 600);
+        assert_eq!(idle.dim_after_s, 240);
+        assert_eq!(idle.blank_after_s, 900);
+        assert_eq!(idle.suspend_after_s, 1200);
+        assert_eq!(idle.dim_level, 10);
+        assert!(idle.walk_away_lock && idle.face_unlock);
+    }
+
+    #[test]
+    fn the_pins_section_sets_by_key_and_lands_on_an_offered_rate() {
+        let mut s = Settings::default();
+        s.set("pins.size", serde_json::json!("large")).unwrap();
+        s.set("pins.corner", serde_json::json!("top_left")).unwrap();
+        let p = s.pins();
+        assert_eq!(p.size.picture(), (520, 325));
+        assert_eq!(p.corner, Corner::TopLeft);
+        // The field nobody named is still the default.
+        assert_eq!(p.fps, 30);
+        // A rate the pane does not offer lands on the nearest it does.
+        s.set("pins.fps", serde_json::json!(0)).unwrap();
+        assert_eq!(s.pins().fps, 15);
+        s.set("pins.fps", serde_json::json!(1000)).unwrap();
+        assert_eq!(s.pins().fps, 60);
+        s.set("pins.fps", serde_json::json!(40)).unwrap();
+        assert_eq!(s.pins().fps, 30);
+        assert!(s.set("pins.size", serde_json::json!("huge")).is_err());
+        // The default corner is the pins' own, not the notifications'.
+        assert_eq!(Pins::default().corner, Corner::BottomRight);
+        // Every size is 16:10, so a workspace fits each the same way.
+        for size in PinSize::ALL {
+            let (w, h) = size.picture();
+            assert_eq!(w * 10, h * 16, "{size:?}");
+        }
+    }
+
+    #[test]
+    fn only_overridden_sections_are_written() {
+        let s = Settings {
+            bar: Some(Bar {
+                clock_24h: false,
+                ..Bar::default()
+            }),
+            ..Settings::default()
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("\"bar\""));
+        assert!(!json.contains("\"idle\""));
+        assert!(!json.contains("\"wallpaper\""));
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, s);
+    }
+
+    #[test]
+    fn set_by_key_fills_the_rest_of_the_section_from_what_is_in_force() {
+        let mut s = Settings::default();
+        s.set("idle.lock_after_s", serde_json::json!(600)).unwrap();
+        let idle = s.idle.unwrap();
+        assert_eq!(idle.lock_after_s, 600);
+        assert_eq!(idle.dim_after_s, Idle::default().dim_after_s);
+        assert_eq!(s.get("idle.lock_after_s"), Some(serde_json::json!(600)));
+        // The other sections are untouched and still read as the default.
+        assert!(s.bar.is_none() && s.keys.is_none() && s.alerts.is_none());
+        assert_eq!(s.get("bar.clock_24h"), Some(serde_json::json!(true)));
+        s.set("look.motion", serde_json::json!("off")).unwrap();
+        assert_eq!(s.look().motion, Motion::Off);
+        s.set("capture.after", serde_json::json!("copy")).unwrap();
+        assert_eq!(s.capture().after, After::Copy);
+    }
+
+    /// The wallpaper's battery choice by its lowercase word; the old switch
+    /// shipped only at its default and is gone, so a file still carrying it
+    /// reads as the default rather than failing.
+    #[test]
+    fn the_battery_choice_is_a_word() {
+        let mut s = Settings::default();
+        assert_eq!(s.look().wallpaper_on_battery, OnBattery::Keep);
+        s.set("look.wallpaper_on_battery", serde_json::json!("black"))
+            .unwrap();
+        assert_eq!(s.look().wallpaper_on_battery, OnBattery::Black);
+        assert_eq!(
+            s.get("look.wallpaper_on_battery"),
+            Some(serde_json::json!("black"))
+        );
+        assert!(
+            s.set("look.wallpaper_on_battery", serde_json::json!("dim"))
+                .is_err()
+        );
+        let old: Look = serde_json::from_str(r#"{"pause_wallpaper_on_battery": false}"#).unwrap();
+        assert_eq!(old.wallpaper_on_battery, OnBattery::Keep);
+    }
+
+    /// The video speed: 1 when the file has none, clamped to what mpv and a
+    /// person can use when a hand edit put it out of range.
+    #[test]
+    fn the_video_speed_is_sanitized() {
+        let old: Look = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.video_speed, 1.0);
+        assert_eq!(Look::sanitize_video_speed(0.5), 0.5);
+        assert_eq!(Look::sanitize_video_speed(0.0), 0.1);
+        assert_eq!(Look::sanitize_video_speed(-2.0), 0.1);
+        assert_eq!(Look::sanitize_video_speed(10.0), 4.0);
+        assert_eq!(Look::sanitize_video_speed(f64::NAN), 1.0);
+        assert_eq!(Look::sanitize_video_speed(f64::INFINITY), 1.0);
+        for speed in Look::VIDEO_SPEEDS {
+            assert_eq!(
+                Look::sanitize_video_speed(speed),
+                speed,
+                "a rung is in range"
+            );
+        }
+        let mut s = Settings::default();
+        s.set("look.video_speed", serde_json::json!(9)).unwrap();
+        assert_eq!(s.look().video_speed, 4.0);
+    }
+
+    #[test]
+    fn set_refuses_what_the_struct_would_silently_drop() {
+        let mut s = Settings::default();
+        assert!(s.set("idle.lock_after", serde_json::json!(1)).is_err());
+        assert!(s.set("lock_after_s", serde_json::json!(1)).is_err());
+        assert!(s.set("night.temp", serde_json::json!(1)).is_err());
+        // The wrong type is an error too, and nothing changed.
+        assert!(s.set("bar.clock_24h", serde_json::json!("yes")).is_err());
+        assert!(s.set("idle.dim_level", serde_json::json!(-4)).is_err());
+        assert!(s.set("look.motion", serde_json::json!("fast")).is_err());
+        assert!(s.is_default());
+        // A wallpaper needs a path before a mode means anything.
+        assert!(s.set("wallpaper.mode", serde_json::json!("fit")).is_err());
+        s.set("wallpaper.path", serde_json::json!("/tmp/a.png"))
+            .unwrap();
+        s.set("wallpaper.mode", serde_json::json!("fit")).unwrap();
+        assert_eq!(s.wallpaper.as_ref().unwrap().mode, WallpaperMode::Fit);
+        assert!(s.set("wallpaper.mode", serde_json::json!("cover")).is_err());
+    }
+
+    #[test]
+    fn reset_drops_one_section_or_all() {
+        let mut s = Settings::default();
+        s.set("idle.dim_level", serde_json::json!(40)).unwrap();
+        s.set("bar.board", serde_json::json!(true)).unwrap();
+        s.reset(Some("idle")).unwrap();
+        assert!(s.idle.is_none() && s.bar.is_some());
+        assert!(s.reset(Some("glass")).is_err());
+        s.reset(None).unwrap();
+        assert!(s.is_default());
+    }
+
+    #[test]
+    fn the_nix_export_is_the_section_as_settings_nix_holds_it() {
+        let mut s = Settings::default();
+        s.set("bar.clock_date", serde_json::json!(true)).unwrap();
+        let nix = s.section_as_nix("bar").unwrap();
+        assert!(nix.contains("bar = {\n"), "{nix}");
+        assert!(nix.contains("  clock_24h = true;\n"), "{nix}");
+        assert!(nix.contains("  clock_date = true;\n"), "{nix}");
+        assert!(nix.ends_with("};\n"));
+        let nix = s.section_as_nix("idle").unwrap();
+        assert!(nix.contains("  dim_after_s = 240;\n"), "{nix}");
+        assert!(s.section_as_nix("wallpaper").is_none());
+        assert_eq!(nix_literal(&serde_json::json!("a\"b")), "\"a\\\"b\"");
+    }
+
+    /// 21:30–07:00, the shape the window is for: it wraps midnight, it is
+    /// half-open at both ends, and the minute is part of the bound.
+    #[test]
+    fn the_night_window_wraps_past_midnight_and_is_half_open() {
+        let at = |h: u16, m: u16| h * 60 + m;
+        let night = Idle {
+            night: true,
+            night_from_h: 21,
+            night_from_m: 30,
+            night_to_h: 7,
+            night_to_m: 0,
+            ..Idle::default()
+        };
+        assert!(night.in_night(at(21, 30)) && night.in_night(at(23, 59)));
+        assert!(night.in_night(at(0, 0)) && night.in_night(at(6, 59)));
+        assert!(!night.in_night(at(21, 29)) && !night.in_night(at(7, 0)));
+        assert!(!night.in_night(at(12, 0)));
+
+        // A window inside one day, and the whole-day case.
+        let day = Idle {
+            night_from_h: 9,
+            night_from_m: 0,
+            night_to_h: 17,
+            night_to_m: 15,
+            ..night
+        };
+        assert!(day.in_night(at(9, 0)) && day.in_night(at(17, 14)));
+        assert!(!day.in_night(at(17, 15)) && !day.in_night(at(2, 0)));
+        let whole = Idle {
+            night_from_h: 5,
+            night_from_m: 0,
+            night_to_h: 5,
+            night_to_m: 0,
+            ..night
+        };
+        assert!(whole.in_night(at(4, 59)) && whole.in_night(at(5, 0)));
+
+        // The switch is the gate: the same bounds with `night` off are never
+        // inside, so no caller has to test both.
+        let off = Idle {
+            night: false,
+            ..night
+        };
+        assert!(!off.in_night(at(22, 0)));
+    }
+
+    /// The night window is the Idle pane's own: Day and night's times
+    /// (`daylight`) do not move it, and loading a file with both moves
+    /// nothing between them.
+    #[test]
+    fn the_idle_night_window_ignores_daylight() {
+        let file = r#"{
+            "idle": {"night": true, "night_from_h": 21, "night_from_m": 30, "night_to_h": 6, "night_to_m": 0},
+            "daylight": {"fixed_times": true, "night_from_h": 19, "night_from_m": 0, "day_from_h": 8, "day_from_m": 0}
+        }"#;
+        let mut v: Value = serde_json::from_str(file).unwrap();
+        let before = v.clone();
+        migrate(&mut v);
+        assert_eq!(v, before);
+        let s: Settings = serde_json::from_value(v).unwrap();
+        let idle = s.idle();
+        let at = |h: u16, m: u16| h * 60 + m;
+        // Daylight's night starts at 19:00; the window still at 21:30.
+        assert!(!idle.in_night(at(19, 0)) && !idle.in_night(at(21, 29)));
+        assert!(idle.in_night(at(21, 30)) && idle.in_night(at(5, 59)));
+        assert!(!idle.in_night(at(6, 0)) && !idle.in_night(at(7, 30)));
+    }
+
+    #[test]
+    fn resolve_swaps_three_tiers_inside_the_window_and_none_outside() {
+        let cfg = Idle {
+            night: true,
+            night_from_h: 21,
+            night_from_m: 0,
+            night_to_h: 7,
+            night_to_m: 0,
+            night_dim_after_s: 60,
+            night_lock_after_s: 300,
+            night_blank_after_s: 120,
+            dim_after_s: 240,
+            lock_after_s: 1800,
+            blank_after_s: 900,
+            suspend_after_s: 1200,
+            ..Idle::default()
+        };
+        assert_eq!(cfg.resolve(12 * 60), cfg);
+
+        let night = cfg.resolve(22 * 60);
+        assert_eq!(
+            (night.dim_after_s, night.lock_after_s, night.blank_after_s),
+            (60, 300, 120)
+        );
+        // Suspend is battery-only and never substituted; an overnight job on
+        // a machine left running must not be cut short by the window.
+        assert_eq!(night.suspend_after_s, cfg.suspend_after_s);
+        // The window's own fields survive, so resolving again is a no-op.
+        assert_eq!(night.resolve(22 * 60), night);
+    }
+
+    #[test]
+    fn the_battery_tier_only_ever_shortens_the_screen_off() {
+        let cfg = |blank, battery| Idle {
+            blank_after_s: blank,
+            battery_blank_after_s: battery,
+            ..Idle::default()
+        };
+        // On AC the battery tier is inert, whatever it says.
+        assert_eq!(cfg(900, 300).blank_after_on(false), 900);
+        assert_eq!(cfg(0, 300).blank_after_on(false), 0);
+        // On battery the shorter wins, in either direction.
+        assert_eq!(cfg(900, 300).blank_after_on(true), 300);
+        assert_eq!(cfg(120, 300).blank_after_on(true), 120);
+        // "Never" on AC is not "never" on battery, and a zero battery tier
+        // is no override rather than a "never" that beats everything.
+        assert_eq!(cfg(0, 300).blank_after_on(true), 300);
+        assert_eq!(cfg(900, 0).blank_after_on(true), 900);
+        assert_eq!(cfg(0, 0).blank_after_on(true), 0);
+        // It applies to the resolved struct, so the night tier competes too.
+        let night = Idle {
+            night: true,
+            night_blank_after_s: 120,
+            ..cfg(900, 300)
+        };
+        assert_eq!(night.resolve(23 * 60).blank_after_on(true), 120);
+    }
+
+    #[test]
+    fn a_typed_window_bound_is_clamped_not_rejected() {
+        let bad = Idle {
+            night_from_h: 40,
+            night_from_m: 99,
+            night_to_h: 25,
+            night_to_m: 60,
+            ..Idle::default()
+        }
+        .sanitized();
+        assert_eq!(
+            (
+                bad.night_from_h,
+                bad.night_from_m,
+                bad.night_to_h,
+                bad.night_to_m
+            ),
+            (23, 59, 23, 59)
+        );
+    }
+
+    #[test]
+    fn quiet_hours_wrap_past_midnight() {
+        let a = Alerts {
+            quiet_from_h: 22,
+            quiet_to_h: 7,
+            ..Alerts::default()
+        };
+        assert!(a.in_quiet_hours(22) && a.in_quiet_hours(23) && a.in_quiet_hours(3));
+        assert!(!a.in_quiet_hours(7) && !a.in_quiet_hours(12) && !a.in_quiet_hours(21));
+        let day = Alerts {
+            quiet_from_h: 9,
+            quiet_to_h: 17,
+            ..Alerts::default()
+        };
+        assert!(day.in_quiet_hours(9) && day.in_quiet_hours(16));
+        assert!(!day.in_quiet_hours(17) && !day.in_quiet_hours(2));
+        let whole = Alerts {
+            quiet_from_h: 5,
+            quiet_to_h: 5,
+            ..Alerts::default()
+        };
+        assert!(whole.in_quiet_hours(4) && whole.in_quiet_hours(5) && whole.in_quiet_hours(6));
+    }
+
+    #[test]
+    fn wallpaper_modes_spell_themselves_the_way_sway_reads_them() {
+        for mode in WallpaperMode::ALL {
+            assert_eq!(WallpaperMode::parse(mode.as_str()), Some(mode));
+            let json = serde_json::to_string(&mode).unwrap();
+            assert_eq!(json, format!("\"{}\"", mode.as_str()));
+        }
+        assert_eq!(WallpaperMode::parse("cover"), None);
+    }
+
+    /// `crates/core/data/settings-defaults.json` is what `cross-repo-guard.nix` checks
+    /// `theme/settings.nix` against, so it has to be exactly the shape and
+    /// the defaults this build carries. Regenerate it with
+    /// `cargo test -- --ignored write_settings_defaults` when a field is
+    /// added.
+    fn defaults_json() -> String {
+        let mut probe = Settings::probe();
+        probe.wallpaper = None;
+        // User layer only: Nix never writes it, so the guard has nothing to
+        // check it against.
+        probe.devices = None;
+        let mut json = serde_json::to_string_pretty(&probe).unwrap();
+        json.push('\n');
+        json
+    }
+
+    #[test]
+    fn the_old_notification_switch_moves_to_extra_screens() {
+        use serde_json::json;
+        // Switched on in the Alerts tab by the build before.
+        let mut v = json!({"alerts": {"stack": 4, "on_extra_screens": true}});
+        migrate(&mut v);
+        assert_eq!(
+            v,
+            json!({"alerts": {"stack": 4}, "extra_screens": {"notifications": true}})
+        );
+        assert!(unknown_keys(&v).is_empty());
+        let s: Settings = serde_json::from_value(v).unwrap();
+        assert!(s.extra_screens().notifications);
+        assert_eq!(s.alerts().stack, 4);
+        // A value already in the new place wins; an emptied alerts goes.
+        let mut v = json!({
+            "alerts": {"on_extra_screens": true},
+            "extra_screens": {"notifications": false, "bar": true}
+        });
+        migrate(&mut v);
+        assert_eq!(
+            v,
+            json!({"extra_screens": {"notifications": false, "bar": true}})
+        );
+        // Nothing to move: untouched.
+        let mut v = json!({"alerts": {"stack": 2}});
+        migrate(&mut v);
+        assert_eq!(v, json!({"alerts": {"stack": 2}}));
+    }
+
+    #[test]
+    fn nothing_shows_on_an_extra_screen_by_default() {
+        let d = Settings::default().extra_screens();
+        assert_eq!(d, ExtraScreens::default());
+        assert!(!(d.bar || d.workspace_names || d.osd || d.key_sheet || d.pins || d.notifications));
+        // A file that names one switch leaves the others off.
+        let s: Settings = serde_json::from_str(r#"{"extra_screens": {"pins": true}}"#).unwrap();
+        assert!(s.extra_screens().pins && !s.extra_screens().bar);
+    }
+
+    #[test]
+    fn the_shipped_defaults_file_matches_the_structs() {
+        let shipped = include_str!("../../data/settings-defaults.json");
+        assert_eq!(
+            shipped,
+            defaults_json(),
+            "crates/core/data/settings-defaults.json is stale: cargo test -- --ignored write_settings_defaults"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn write_settings_defaults() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/data/settings-defaults.json");
+        std::fs::write(path, defaults_json()).unwrap();
+    }
+}

@@ -29,7 +29,7 @@ Title: {{TITLE}}
 
 1. Read `CLAUDE.md` if the repository has one, `docs/README.md`, and
    `docs/design-system.md` §6 and §7 before touching anything on screen.
-   Every UI change goes through the components in `src/ui/`; the design
+   Every UI change goes through the components in `crates/core/src/ui/`; the design
    lint (`cargo test`) refuses anything else.
 2. Reproduce. If the problem shows on screen, find the surface and render
    it from the base build, which is already built at `{{BASE_BIN}}`:

@@ -1,0 +1,674 @@
+//! Jump: `Super+Tab` walks back through the workspaces you came from.
+//!
+//! Tap and release goes back one. Keep Super held and tap again to walk
+//! further, through at most eight places on this output.
+//!
+//! The workspaces themselves are the pictures, on a strip. While Super is
+//! held the one you are on shrinks to [`row::SCALE`] and the strip moves a
+//! place left: the one you came from slides in to the middle, opaque, and
+//! the next one peeks in from the right edge. Tab moves the strip a place
+//! left, Shift+Tab a place right, as far back as the one you started on.
+//! Releasing Super grows the middle one to full size and switches to it;
+//! with the one you started on in the middle, or on Escape, that one grows
+//! back and nothing switches. sway draws and animates all of it
+//! (`workspace_transform`, nixos patches/swayfx-ws-transform.patch), so the
+//! windows are the real ones, not captured frames, and this process sends
+//! one short command per workspace per step.
+//!
+//! The surface here is a transparent layer over the output. It holds the
+//! keyboard (the release edge only reaches whoever does), catches the
+//! pointer so a click cannot land on a window that is only a picture, and
+//! draws one thing: the caption under the middle workspace.
+//!
+//! The parts that can go wrong live in [`gesture`] and [`row`], with no GTK
+//! in them. This file translates GTK events into [`gesture::Ev`], and
+//! [`gesture::Action`]s into sway commands and widgets. It decides nothing.
+//!
+//! An earlier version (removed 2026-09-26) drew a strip of tiles with live
+//! captures of every window, and a card before it one still thumbnail per
+//! window. Both were pictures of the workspace; this is the workspace.
+
+pub mod card;
+pub mod feed;
+pub mod gesture;
+pub mod gpu;
+pub mod live;
+pub mod pin;
+pub mod place;
+pub mod row;
+pub mod rows;
+pub mod scene;
+pub mod view;
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use gtk4::glib;
+use gtk4::prelude::*;
+
+use gesture::{Action, Ev, Gesture};
+use rows::Row;
+use swaypplet_core::shell::{Namespace, Surface};
+
+/// How long a gesture may sit with no event before the surface assumes the
+/// release was lost and lets go. A grab that outlives its keypress holds the
+/// keyboard against every other window on the machine.
+///
+/// Counted from the last step, not from the open: someone who holds Super
+/// to look at a workspace should not be moved away from under it. Six
+/// seconds is longer than anyone looks at a switcher without pressing
+/// anything, and short enough that a lost release does not strand the grab.
+const WATCHDOG_MS: u64 = 6_000;
+
+/// The sway binding mode that is active while the switcher is up. The keys
+/// you press here are pressed with Super still held, and sway runs its own
+/// bindings before any client sees a key: `Super+Escape` closed the focused
+/// window and `Super+p` went to workspace p. The mode (users/modules/sway.nix
+/// in the nixos repo) binds both to `swaypplet-jump cancel` and
+/// `swaypplet-jump pin`, and `Escape` in it always goes back to the default
+/// mode, so a panel that dies with the switcher up cannot strand the
+/// keyboard. On a sway config without the mode, sway rejects the command and
+/// nothing changes.
+const MODE: &str = "swaypplet-jump";
+
+struct State {
+    gesture: Gesture,
+    /// The switch command per selectable workspace, captured at the start.
+    commands: Vec<String>,
+    /// The workspaces in the row: `[0]` the one you were on, then one per
+    /// entry in `commands`.
+    names: Vec<String>,
+    /// Their captions, one per entry in `names`.
+    rows: Vec<Row>,
+    /// The output's geometry, read when the gesture starts.
+    row: Option<row::Row>,
+    /// Where the output sits in the layout: the surface's origin.
+    origin_xy: (f64, f64),
+    /// The selected position in `names`.
+    selected: usize,
+    watchdog: Option<glib::SourceId>,
+}
+
+/// What `p` does with the selected workspace's name: pin or unpin it, and
+/// say which.
+type PinFn = Box<dyn Fn(String) -> bool>;
+
+pub struct Jump {
+    surface: Surface,
+    stage: gtk4::Fixed,
+    caption: gtk4::Box,
+    chord: gtk4::Label,
+    label: gtk4::Label,
+    detail: gtk4::Label,
+    /// Shown while the middle workspace is pinned.
+    pinned: gtk4::Label,
+    pin: RefCell<Option<PinFn>>,
+    state: RefCell<State>,
+}
+
+impl Jump {
+    pub fn new(app: &gtk4::Application) -> Rc<Self> {
+        let surface = Surface::builder(app, Namespace::Jump)
+            // The whole output: the row is drawn across all of it, and the
+            // pointer must not reach the windows in it. Over the bar too:
+            // the row's geometry is the output's, and the caption is placed
+            // in output coordinates.
+            .fill()
+            .over_exclusive_zones()
+            // Exclusive: this surface has to see the modifier come up, and
+            // that only arrives at whoever holds the keyboard. sway still
+            // evaluates its own bindings first, which is why the switcher
+            // puts sway in [`MODE`] while it is up.
+            .keyboard(gtk4_layer_shell::KeyboardMode::Exclusive)
+            // A stage, not a card: what is on it is placed in output
+            // coordinates and shown and hidden outright.
+            .no_card()
+            .build();
+        let window = surface.window().clone();
+        window.add_css_class("jump-surface");
+
+        let stage = gtk4::Fixed::new();
+        // The whole root, so the stage is the output.
+        stage.set_vexpand(true);
+        // The key that reaches this place without this surface: the part of
+        // the caption worth learning.
+        let chord = swaypplet_core::ui::key("");
+        // Straight on the wallpaper, so the words carry their own contrast.
+        let label = swaypplet_core::ui::text(
+            "",
+            swaypplet_core::ui::Text::TitleSm,
+            swaypplet_core::ui::Tone::Fg,
+        );
+        swaypplet_core::ui::on_wallpaper::adopt(&label);
+        let detail = swaypplet_core::ui::text(
+            "",
+            swaypplet_core::ui::Text::Label,
+            swaypplet_core::ui::Tone::Fg,
+        );
+        swaypplet_core::ui::on_wallpaper::adopt(&detail);
+        detail.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        // The bar's pin glyph (bar/workspaces.rs), so a pin reads the same in
+        // both places.
+        let pinned = gtk4::Label::new(Some("\u{f0403}"));
+        swaypplet_core::ui::glyph::adopt(
+            &pinned,
+            swaypplet_core::ui::Text::Label,
+            swaypplet_core::ui::Tone::Fg,
+        );
+        swaypplet_core::ui::on_wallpaper::adopt(&pinned);
+        pinned.set_visible(false);
+        // Centred under the middle workspace: the outer box is as wide as
+        // the workspace (`place_caption`), the line itself only as wide as it is.
+        let line = swaypplet_core::ui::hbox(3);
+        line.set_halign(gtk4::Align::Center);
+        line.add_css_class("jump-caption");
+        line.append(&chord);
+        line.append(&label);
+        line.append(&detail);
+        line.append(&pinned);
+        let caption = swaypplet_core::ui::hbox(0);
+        caption.append(&line);
+        line.set_hexpand(true);
+        caption.set_can_target(false);
+        stage.put(&caption, 0.0, 0.0);
+        surface.root().append(&stage);
+
+        let this = Rc::new(Jump {
+            surface,
+            stage,
+            caption,
+            chord,
+            label,
+            detail,
+            pinned,
+            pin: RefCell::new(None),
+            state: RefCell::new(State {
+                gesture: Gesture::new(),
+                commands: Vec::new(),
+                names: Vec::new(),
+                rows: Vec::new(),
+                row: None,
+                origin_xy: (0.0, 0.0),
+                selected: 0,
+                watchdog: None,
+            }),
+        });
+        this.wire();
+        // Presented once here, then shown and hidden with `set_visible`.
+        // That is the pattern every other surface in this process follows
+        // (panel.rs, and anim::Reveal for the rest), and it is not a style
+        // choice: gtk4-layer-shell configures the surface as it is realized,
+        // so a window first presented later comes up without ever having been
+        // laid out - it maps, the compositor gives it a surface, and nothing
+        // is drawn on it. That failure is silent and looks exactly like the
+        // gesture not firing.
+        this.surface.window().present();
+        this.surface.window().set_visible(false);
+        this
+    }
+
+    /// Escape cancels, `p` pins, the modifier coming up commits. A click
+    /// left or right of the middle steps that way; on it, commits.
+    fn wire(self: &Rc<Self>) {
+        let keys = gtk4::EventControllerKey::new();
+        {
+            let this = self.clone();
+            keys.connect_key_pressed(move |_, key, _, _| {
+                if key == gtk4::gdk::Key::Escape {
+                    this.feed(Ev::Escape);
+                    return glib::Propagation::Stop;
+                }
+                if key == gtk4::gdk::Key::p {
+                    this.pin();
+                    return glib::Propagation::Stop;
+                }
+                glib::Propagation::Proceed
+            });
+        }
+        {
+            let this = self.clone();
+            keys.connect_key_released(move |_, key, _, _| {
+                if matches!(key, gtk4::gdk::Key::Super_L | gtk4::gdk::Key::Super_R) {
+                    this.feed(Ev::SuperReleased);
+                }
+            });
+        }
+        self.surface.window().add_controller(keys);
+
+        // The keyboard arriving: see `Ev::Focused`. Read on the next idle,
+        // once GDK has taken in the modifiers that follow the enter.
+        {
+            let this = self.clone();
+            self.surface.window().connect_is_active_notify(move |w| {
+                if w.is_active() {
+                    this.check_modifiers();
+                }
+            });
+        }
+        {
+            let focus = gtk4::EventControllerFocus::new();
+            let this = self.clone();
+            focus.connect_enter(move |_| this.check_modifiers());
+            self.surface.window().add_controller(focus);
+        }
+
+        let click = gtk4::GestureClick::new();
+        {
+            let this = self.clone();
+            click.connect_released(move |_, _, x, _| {
+                let (row, (ox, _)) = {
+                    let st = this.state.borrow();
+                    (st.row, st.origin_xy)
+                };
+                let Some(row) = row else { return };
+                let (mx, _, mw, _) = row.middle();
+                let x = x + ox;
+                let ev = if x < mx {
+                    Ev::StepBack
+                } else if x > mx + mw {
+                    Ev::Step
+                } else {
+                    Ev::SuperReleased
+                };
+                this.feed(ev);
+            });
+        }
+        self.surface.window().add_controller(click);
+    }
+
+    /// Whether Super is still down, now that the surface has the keyboard;
+    /// a release that went elsewhere commits here.
+    fn check_modifiers(self: &Rc<Self>) {
+        let this = self.clone();
+        glib::idle_add_local_once(move || {
+            if !this.state.borrow().gesture.is_live() {
+                return;
+            }
+            let Some(keyboard) = gtk4::gdk::Display::default()
+                .and_then(|d| d.default_seat())
+                .and_then(|s| s.keyboard())
+            else {
+                return;
+            };
+            let held = keyboard.modifier_state().intersects(
+                gtk4::gdk::ModifierType::SUPER_MASK | gtk4::gdk::ModifierType::META_MASK,
+            );
+            log::debug!("jump: keyboard here, Super held: {held}");
+            this.feed(Ev::Focused { super_held: held });
+        });
+    }
+
+    /// `Super+Tab`.
+    pub fn step(self: &Rc<Self>) {
+        if !self.state.borrow().gesture.is_live() {
+            self.begin();
+        }
+        self.feed(Ev::Step);
+    }
+
+    /// `Escape` or `Super+Escape` while the switcher is up.
+    pub fn cancel(self: &Rc<Self>) {
+        self.feed(Ev::Escape);
+    }
+
+    /// `p` or `Super+p` while the switcher is up.
+    pub fn pin(self: &Rc<Self>) {
+        if self.state.borrow().gesture.is_live() {
+            self.pin_selected();
+        }
+    }
+
+    /// `Super+Shift+Tab`.
+    pub fn step_back(self: &Rc<Self>) {
+        self.feed(Ev::StepBack);
+    }
+
+    /// Read the session and build the row, before the first event.
+    ///
+    /// Synchronous on the GTK thread on purpose. It is a few round trips over
+    /// a unix socket, single-digit milliseconds, and the alternative is a
+    /// worker thread whose result arrives after the user has already
+    /// released the key.
+    fn begin(self: &Rc<Self>) {
+        let Some(session) = read_session() else {
+            log::warn!("jump: could not read the session; nothing to show");
+            return;
+        };
+        let Session {
+            places,
+            bindings,
+            output,
+            geometry,
+            tree,
+        } = session;
+        // This output's workspaces only: the row is drawn on it, and a
+        // workspace shown on another output cannot be drawn here too.
+        let places: Vec<_> = places.into_iter().filter(|p| p.output == output).collect();
+        let apps = |ws: &str| apps_on(&tree, ws);
+        let built = rows::rows(&places, &bindings, &apps, &output);
+
+        log::info!(
+            "jump: {} places, {} in the row, output {output:?}",
+            places.len(),
+            built.len()
+        );
+        let mut st = self.state.borrow_mut();
+        st.commands = built.iter().map(|r| r.command.clone()).collect();
+        st.names = places
+            .iter()
+            .take(built.len() + 1)
+            .map(|p| p.name.clone())
+            .collect();
+        st.rows = places
+            .first()
+            .map(|p| rows::row(p, &bindings, &apps, &output))
+            .into_iter()
+            .chain(built)
+            .collect();
+        st.row = geometry.map(|(o, a)| row::Row::new(o, a));
+        st.origin_xy = geometry.map(|(o, _)| (o.0, o.1)).unwrap_or_default();
+        st.selected = 0;
+    }
+
+    fn feed(self: &Rc<Self>, ev: Ev) {
+        log::debug!("jump: {ev:?}");
+        let actions = {
+            let mut st = self.state.borrow_mut();
+            let commands = st.commands.clone();
+            st.gesture.on(ev, &commands)
+        };
+        // An unmap with no switch after it is a cancel. Known only once every
+        // action is in.
+        let committed = actions.iter().any(|a| matches!(a, Action::Run(_)));
+        let unmapped = actions.iter().any(|a| matches!(a, Action::Unmap));
+        // The pins come back as the switcher unmaps, before the switch it
+        // commits has landed: tell them where it is going first, so the pin
+        // of that workspace does not flash up on the way.
+        if committed {
+            let target = {
+                let st = self.state.borrow();
+                st.names.get(st.selected).cloned()
+            };
+            if let (Some(target), Some(pins)) = (target, pin::handle()) {
+                pins.expect_arrival(&target);
+            }
+        }
+        for action in actions {
+            self.apply(action);
+        }
+        if unmapped && !committed {
+            let st = self.state.borrow();
+            if let Some(r) = &st.row {
+                send(row::cancel(r, &st.names));
+            }
+        }
+    }
+
+    fn apply(self: &Rc<Self>, action: Action) {
+        match action {
+            Action::Map => {
+                self.place_caption();
+                self.surface.window().set_visible(true);
+                set_mode(MODE);
+                if let Some(pins) = pin::handle() {
+                    pins.set_held(true);
+                }
+                self.arm_watchdog();
+                {
+                    let st = self.state.borrow();
+                    if let Some(r) = &st.row {
+                        send(row::open(r, &st.names));
+                    }
+                }
+                // Harness hook: the nested session has no keyboard to let go
+                // of, so `SWAYPPLET_JUMP_RELEASE_MS=<ms>` releases Super that
+                // long after the switcher maps, down the same path.
+                if let Some(ms) = std::env::var("SWAYPPLET_JUMP_RELEASE_MS")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok())
+                {
+                    let this = self.clone();
+                    glib::timeout_add_local_once(std::time::Duration::from_millis(ms), move || {
+                        this.feed(Ev::SuperReleased)
+                    });
+                }
+            }
+            Action::Select(i) => {
+                let moved = {
+                    let mut st = self.state.borrow_mut();
+                    let moved = st.selected != i;
+                    st.selected = i;
+                    moved
+                };
+                self.show_caption(i);
+                if moved {
+                    let st = self.state.borrow();
+                    if let Some(r) = &st.row {
+                        send(row::layout(r, &st.names, i));
+                    }
+                }
+                self.arm_watchdog();
+            }
+            Action::Unmap => {
+                self.disarm_watchdog();
+                self.surface.window().set_visible(false);
+                set_mode("default");
+                if let Some(pins) = pin::handle() {
+                    pins.set_held(false);
+                }
+            }
+            Action::Run(command) => {
+                let (names, selected, r) = {
+                    let st = self.state.borrow();
+                    (st.names.clone(), st.selected, st.row)
+                };
+                let origin = names.first().cloned().unwrap_or_default();
+                // One connection, in order: the others fade where they are,
+                // the switch, then the selected one grows to full size. sway
+                // keeps a workspace that is already on screen where it is when
+                // it is switched to, so nothing blinks between the two.
+                let mut cmds = Vec::new();
+                let mut after = None;
+                if let Some(r) = &r {
+                    let (before, grow) = row::commit(r, &names, selected);
+                    cmds.extend(before.iter().map(|(n, l)| l.command(n)));
+                    after = grow.map(|(n, l)| l.command(&n));
+                }
+                cmds.push(command);
+                cmds.extend(after);
+                // Refuse to move if something already did (a click on the
+                // bar, a script): committing on top of that would move you
+                // twice. Put the row away instead. The question is a round
+                // trip, so it is asked on a worker, and the commands follow
+                // its answer from there.
+                swaypplet_core::spawn::spawn_work(focused_workspace, move |now| {
+                    if now.is_some_and(|now| now != origin) {
+                        log::debug!("jump: cancelled, something else moved us from {origin:?}");
+                        if let Some(r) = &r {
+                            send(row::cancel(r, &names));
+                        }
+                        return;
+                    }
+                    swaypplet_core::sway::ipc::run_commands(cmds);
+                });
+            }
+        }
+    }
+
+    /// The caption under the middle workspace, in the surface's coordinates.
+    fn place_caption(&self) {
+        let (r, (ox, oy)) = {
+            let st = self.state.borrow();
+            (st.row, st.origin_xy)
+        };
+        let Some(r) = r else {
+            self.caption.set_visible(false);
+            return;
+        };
+        let (x, y, w, h) = r.middle();
+        let (x, y) = (x - ox, y - oy);
+        self.caption.set_size_request(w as i32, -1);
+        self.stage.move_(
+            &self.caption,
+            x,
+            y + h + f64::from(swaypplet_core::tokens::space(4)),
+        );
+        self.caption.set_visible(true);
+    }
+
+    fn show_caption(&self, i: usize) {
+        let st = self.state.borrow();
+        let Some(row) = st.rows.get(i) else { return };
+        self.chord.set_label(row.chord.as_deref().unwrap_or(""));
+        self.chord.set_visible(row.chord.is_some());
+        self.label.set_label(rows::caption_label(row));
+        self.detail.set_label(&row.detail);
+        let pinned = st.names.get(i).is_some_and(|n| pin::is_pinned(n));
+        self.pinned.set_visible(pinned);
+    }
+
+    fn arm_watchdog(self: &Rc<Self>) {
+        self.disarm_watchdog();
+        let this = self.clone();
+        let id = glib::timeout_add_local_once(
+            std::time::Duration::from_millis(WATCHDOG_MS),
+            move || {
+                this.state.borrow_mut().watchdog = None;
+                this.feed(Ev::Watchdog);
+            },
+        );
+        self.state.borrow_mut().watchdog = Some(id);
+    }
+
+    fn disarm_watchdog(&self) {
+        if let Some(id) = self.state.borrow_mut().watchdog.take() {
+            swaypplet_core::spawn::remove_source(id);
+        }
+    }
+
+    /// What `p` does: set by the app, which owns the pins.
+    pub fn set_pin(&self, pin: impl Fn(String) -> bool + 'static) {
+        self.pin.replace(Some(Box::new(pin)));
+    }
+
+    fn pin_selected(&self) {
+        let (name, selected) = {
+            let st = self.state.borrow();
+            (st.names.get(st.selected).cloned(), st.selected)
+        };
+        if let (Some(name), Some(pin)) = (name, &*self.pin.borrow()) {
+            pin(name);
+        }
+        self.show_caption(selected);
+    }
+}
+
+/// Every look as a command, on one connection, in order.
+fn send(looks: Vec<(String, row::Look)>) {
+    if looks.is_empty() {
+        return;
+    }
+    swaypplet_core::sway::ipc::run_commands(looks.iter().map(|(n, l)| l.command(n)).collect());
+}
+
+/// Everything the row needs.
+struct Session {
+    places: Vec<place::Place>,
+    bindings: Vec<crate::keybinds::Binding>,
+    /// The focused output's name.
+    output: String,
+    /// That output's rect and its workspace rect, in layout coordinates.
+    geometry: Option<(row::Rect, row::Rect)>,
+    tree: swayipc::Node,
+}
+
+fn read_session() -> Option<Session> {
+    let mut conn = swaypplet_core::sway::ipc::connect().ok()?;
+    let tree = conn.get_tree().ok()?;
+    let config = conn.get_config().ok().map(|c| c.config).unwrap_or_default();
+    let places = place::mru(&tree);
+    let output = places.first().map(|p| p.output.clone()).unwrap_or_default();
+    let rect = |r: swayipc::Rect| {
+        (
+            f64::from(r.x),
+            f64::from(r.y),
+            f64::from(r.width),
+            f64::from(r.height),
+        )
+    };
+    let out = conn
+        .get_outputs()
+        .ok()
+        .and_then(|os| os.into_iter().find(|o| o.name == output))
+        .map(|o| rect(o.rect));
+    let area = conn
+        .get_workspaces()
+        .ok()
+        .and_then(|ws| ws.into_iter().find(|w| w.output == output && w.visible))
+        .map(|w| rect(w.rect));
+    Some(Session {
+        places,
+        bindings: crate::keybinds::parse(&config),
+        output,
+        geometry: out.zip(area),
+        tree,
+    })
+}
+
+/// Synchronous, unlike the other commands here. Each asynchronous command
+/// runs on its own thread, so a tap that maps and unmaps within a few
+/// milliseconds could reach sway as `default` first and leave the keyboard
+/// in the switcher's mode. One round trip on a unix socket is well under a
+/// millisecond.
+fn set_mode(mode: &str) {
+    let done = swaypplet_core::sway::ipc::connect()
+        .map_err(|e| e.to_string())
+        .and_then(|mut c| {
+            c.run_command(format!("mode {mode}"))
+                .map_err(|e| e.to_string())
+        });
+    if let Err(e) = done {
+        log::debug!("jump: mode {mode}: {e}");
+    }
+}
+
+fn focused_workspace() -> Option<String> {
+    let mut conn = swaypplet_core::sway::ipc::connect().ok()?;
+    conn.get_workspaces()
+        .ok()?
+        .into_iter()
+        .find(|w| w.focused)
+        .map(|w| w.name)
+}
+
+/// The app ids of every window on a workspace, in tree order.
+pub fn apps_on(tree: &swayipc::Node, workspace: &str) -> Vec<String> {
+    fn collect(node: &swayipc::Node, out: &mut Vec<String>) {
+        if let Some(app) = node.app_id.as_deref() {
+            out.push(app.to_string());
+        } else if let Some(class) = node
+            .window_properties
+            .as_ref()
+            .and_then(|p| p.class.as_deref())
+        {
+            out.push(class.to_string());
+        }
+        for child in node.nodes.iter().chain(node.floating_nodes.iter()) {
+            collect(child, out);
+        }
+    }
+    fn find<'a>(node: &'a swayipc::Node, name: &str) -> Option<&'a swayipc::Node> {
+        if node.node_type == swayipc::NodeType::Workspace && node.name.as_deref() == Some(name) {
+            return Some(node);
+        }
+        node.nodes
+            .iter()
+            .chain(node.floating_nodes.iter())
+            .find_map(|c| find(c, name))
+    }
+    let mut out = Vec::new();
+    if let Some(ws) = find(tree, workspace) {
+        collect(ws, &mut out);
+    }
+    out
+}

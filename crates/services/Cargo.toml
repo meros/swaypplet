@@ -1,0 +1,37 @@
+[package]
+name = "swaypplet-services"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+swaypplet-core.workspace = true
+gtk4.workspace = true
+gtk4-layer-shell.workspace = true
+glib.workspace = true
+gio.workspace = true
+zbus.workspace = true
+tokio.workspace = true
+protobuf.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-channel.workspace = true
+log.workspace = true
+libc.workspace = true
+wayland-client.workspace = true
+wayland-protocols.workspace = true
+swayipc.workspace = true
+system-tray.workspace = true
+libpulse-binding.workspace = true
+wayland-protocols-wlr.workspace = true
+rustls.workspace = true
+
+[build-dependencies]
+protobuf-codegen.workspace = true
+
+[dev-dependencies]
+rcgen.workspace = true
+
+[lints]
+workspace = true

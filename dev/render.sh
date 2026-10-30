@@ -88,7 +88,7 @@ SOCK="$RUNTIME/sway-render-$$.sock"
   fi
   # A wallpaper, for a shot that is about one: the glass frosts what is
   # behind it, and `look.tint` takes its hue from whatever sway's `bg` line
-  # names (swaypplet src/theme/wallpaper.rs). Without this the desktop is black,
+  # names (swaypplet crates/core/src/theme/wallpaper.rs). Without this the desktop is black,
   # which is the best case for contrast and the wrong one for colour.
   #   SWPP_WALLPAPER=~/Pictures/wallpapers/x.jpg dev/render.sh --mode panel
   [ -n "${SWPP_WALLPAPER:-}" ] && printf 'output HEADLESS-1 bg "%s" fill\n' "$SWPP_WALLPAPER"
@@ -135,7 +135,7 @@ trap cleanup EXIT
 
 export SWAYSOCK="$SOCK"
 # The nested socket, not the live session's. `sway::ipc::connect` tries
-# I3SOCK before SWAYSOCK (src/sway/ipc.rs), so a harness client that inherits
+# I3SOCK before SWAYSOCK (crates/core/src/sway/ipc.rs), so a harness client that inherits
 # the live session's I3SOCK sends its glass replays and IPC there — to the
 # desktop on the user's screen, not to this one.
 unset I3SOCK
@@ -217,7 +217,7 @@ case "$MODE" in
     # Somewhere to have been, with something on it. A workspace sway leaves
     # empty is destroyed on the way out, so visiting bare workspace numbers
     # leaves a recency stack one entry long — which the jump list correctly
-    # refuses to draw anything for (src/jump/gesture.rs). Each stop gets a
+    # refuses to draw anything for (crates/jump/src/jump/gesture.rs). Each stop gets a
     # window so the workspace survives being left, which is also what makes
     # the detail column show something.
     #
@@ -338,7 +338,7 @@ case "$MODE" in
     sleep 1.2
     ;;
   quiet)
-    # Quiet by context (src/services/notifications/context.rs): a window
+    # Quiet by context (crates/services/src/notifications/context.rs): a window
     # fullscreen on the focused output, or with SWPP_QUIET_SHARE=1 a
     # screen-cast stream from dev/fake-screencast.sh, holds the normal
     # notifications sent next; the critical one still pops. Stage `during`
@@ -406,7 +406,7 @@ case "$MODE" in
     sleep 3
     ;;
   report)
-    # The report card over a whole-screen capture (src/quality/report.rs):
+    # The report card over a whole-screen capture (crates/screenshot/src/quality/report.rs):
     # `swaypplet report screen` needs no pointer. SWPP_REPORT_TEXT types a
     # description; SWPP_REPORT_SEND=1 presses Send, which files an issue, so
     # it refuses to without SWAYPPLET_DRY_RUN=1. SWPP_REPORT_AREA=none: the
@@ -465,7 +465,7 @@ case "$MODE" in
     ;;
   preview:*)
     # Previews on a layer surface with the real glass behind them, as the
-    # session shows them (src/preview.rs); SWPP_PREVIEW_LAYER=0 for the old
+    # session shows them (crates/app/src/preview.rs); SWPP_PREVIEW_LAYER=0 for the old
     # plain toplevel.
     [ "${SWPP_PREVIEW_LAYER:-1}" = 1 ] && export SWAYPPLET_PREVIEW_LAYER=1
     "$BIN" --preview "${MODE#preview:}" >/tmp/swpp-app.log 2>&1 &

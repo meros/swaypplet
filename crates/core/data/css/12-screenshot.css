@@ -1,0 +1,7 @@
+/* ── Annotation editor (crates/screenshot/src/screenshot/annotate.rs) ──
+   A normal window, not glass: it is an editor you sit in, and a frosted
+   canvas would fight the picture on it. The window, the toolbar and the
+   canvas's well are components; this file places them. */
+.annotate-toolbar {
+    padding: var(--space-3) var(--space-4);
+}

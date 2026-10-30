@@ -5,9 +5,9 @@ motion from one set of tokens, and its widgets from one set of components.**
 The tokens are generated from five inputs (mode, accent, neutral, contrast,
 and the wallpaper tint); nothing else in the stylesheet or the code picks a
 colour or a size. This
-file is the source of truth: the generator (`src/tokens/`), the runtime that
-resolves its inputs and loads the stylesheet (`src/theme/`), the components
-(`src/ui/`) and the lint tests implement it, and a change to any of them starts here.
+file is the source of truth: the generator (`crates/core/src/tokens/`), the runtime that
+resolves its inputs and loads the stylesheet (`crates/core/src/theme/`), the components
+(`crates/core/src/ui/`) and the lint tests implement it, and a change to any of them starts here.
 
 The research behind it (Material 3, Apple HIG and Liquid Glass, Fluent 2,
 libadwaita, Radix, Carbon, Primer, Linear) and the audit of the stylesheet
@@ -41,9 +41,9 @@ before it are summarised in the zoo, `docs/design-system-zoo.html`.
 | tint | `off`, `accents`, `full`, with the wallpaper's hue | `off` | settings: Look → Theme colour (§2.2) |
 
 Nix ships the defaults in `theme/settings.nix`; the settings pane changes
-them per user. `src/theme/inputs.rs` resolves them (the sun for `auto`, the
+them per user. `crates/core/src/theme/inputs.rs` resolves them (the sun for `auto`, the
 wallpaper's hue for the tint) into one `tokens::Inputs`, and `tokens::css`
-(`src/tokens/emit.rs`) turns that into `tokens.css` on every change.
+(`crates/core/src/tokens/emit.rs`) turns that into `tokens.css` on every change.
 
 ### 2.1 Auto mode follows the sun
 
@@ -56,7 +56,7 @@ time zone only formats them as clock times.
   below, with the state held in between. The 6° band stops a switch from
   flickering at dawn and keeps light mode out of the dimmest civil twilight.
 - The elevation comes from the NOAA solar position formulas, in
-  `src/theme/sun.rs`, with no network and no new daemon: the long-lived
+  `crates/core/src/theme/sun.rs`, with no network and no new daemon: the long-lived
   panel process checks once a minute and at wake from suspend.
 - **A switch never happens in front of you.** When the sun crosses, the
   switch waits for the first of: idle (the same idle hint the lock uses),
@@ -104,11 +104,11 @@ it had in it.
 The image gives hue only. Taking its lightness is what breaks the contrast
 of palette generators that do (pywal); Material and KDE take hue and keep
 tone per role, and so does this. The panel samples the palette
-(`src/theme/wallpaper.rs`) into `$XDG_CACHE_HOME/swaypplet/wallpaper-source`
+(`crates/core/src/theme/wallpaper.rs`) into `$XDG_CACHE_HOME/swaypplet/wallpaper-source`
 once per wallpaper, off the main thread, and every process reads that one
 line. A wallpaper with no usable colour, or one not sampled yet, leaves the
 tint off; one with a single colour gives a palette of three equal hues.
-`src/tokens/tint.rs` holds the rules.
+`crates/core/src/tokens/tint.rs` holds the rules.
 
 Every rule keeps each colour's **lightness**, because lightness is what the
 contrast is made of; only hue moves, and chroma gives way (never lightness)
@@ -135,7 +135,7 @@ the Motion setting; instant with Motion off or GTK's reduced motion). The
 first stylesheet a process loads never fades, and nothing fades while no
 window of the process is on screen.
 
-- **The stylesheet** (`src/theme/fade.rs`). The main provider takes the new
+- **The stylesheet** (`crates/core/src/theme/fade.rs`). The main provider takes the new
   document at once, so every rule and every token that is not a colour is
   final from the first frame. A second provider above it holds only the
   colour tokens that changed (54 of them for a mode switch), starts at the
@@ -147,7 +147,7 @@ window of the process is on screen.
   all): below a millisecond with the bar alone, enough with the panel's
   launcher list open that a step slower than 25 ms is followed by a frame
   with no step, which keeps every other frame free for input.
-- **The glass** (`src/settings/glass_fade.rs`). The material walks from what
+- **The glass** (`crates/core/src/settings/glass_fade.rs`). The material walks from what
   the compositor has to the new mode's over the same duration and curve, a
   push every 50 ms, on a thread of its own against the wall clock: it costs
   the main thread nothing and does not stutter when a GTK frame is slow.
@@ -168,7 +168,7 @@ colours: it does not fade.
 
 ## 3. Tokens
 
-Three tiers. **Rules in `data/css/` may use only the semantic tier.**
+Three tiers. **Rules in `crates/core/data/css/` may use only the semantic tier.**
 Primitives are private to `tokens.css`. Component tokens exist only where a
 component needs a value no semantic token gives (listed in §3.8).
 
@@ -176,12 +176,12 @@ All tokens are CSS custom properties on `:root` (GTK ≥ 4.16). Rust never
 reads them back: values the code needs (`crate::tokens`) come from the same
 generator that writes the file.
 
-`src/tokens/` is pure: inputs in, values out, no I/O and no GTK. One file
+`crates/core/src/tokens/` is pure: inputs in, values out, no I/O and no GTK. One file
 per concern: `color.rs` (sRGB, OKLCH), `inputs.rs`, `tint.rs`, `scales.rs`
 (§3.1), `semantic.rs` (status, categorical, text levels), `material.rs`
 (§4), `apca.rs` (§5), `fixed.rs` (space, type, radius, durations, the fill
 key, component sizes), `motion.rs` (§3.8) and `emit.rs` (`tokens.css`).
-`src/theme/` is the runtime around it: `inputs.rs` (the one place an
+`crates/core/src/theme/` is the runtime around it: `inputs.rs` (the one place an
 `Inputs` is built), `sun.rs` (§2.1), `wallpaper.rs` (§2.2), `locked.rs`,
 `paint.rs` (the token colours for Cairo), `sway.rs` (window borders) and
 `mod.rs` (the stylesheet, its reload, and `watch`).
@@ -424,9 +424,9 @@ Two tokens for the rest:
 
 Motion is named by what it means on screen; the duration and curve follow
 from the meaning, so two things that mean the same move the same way on
-every surface. `src/tokens/motion.rs` decides them, the stylesheet gets
+every surface. `crates/core/src/tokens/motion.rs` decides them, the stylesheet gets
 them as `--motion-*` (duration and curve in one token, for `transition`
-and `animation`), and `src/anim.rs` reads the same values.
+and `animation`), and `crates/core/src/anim.rs` reads the same values.
 
 | Token | Duration | Curve | Means |
 |---|---|---|---|
@@ -487,7 +487,7 @@ the image's relative luminance on a 4 × 4 grid, once per wallpaper and off
 the main thread, and writes it into the same one-line cache as the tint's
 hues. Every process reads it; the lock screen never decodes the image. The
 middle 2 × 2 cells, where all such text sits, are pooled into a mean and a
-deviation, and `src/tokens/backdrop.rs` picks the ink and the halo:
+deviation, and `crates/core/src/tokens/backdrop.rs` picks the ink and the halo:
 
 - light ink on a black halo, or dark ink on a white one: whichever reaches
   Lc 75 at the glyph edge with the lighter halo, light first at a tie (the
@@ -601,19 +601,19 @@ nixos glass-bench zoo), and these are what it reaches. High contrast keeps
 the full targets in both modes. `tokens::material::targets` holds the
 table.
 
-`src/tokens/apca.rs` tests all of them for all 72 untinted input
+`crates/core/src/tokens/apca.rs` tests all of them for all 72 untinted input
 combinations (2 modes, 6 accents, 3 neutrals, 2 contrasts), and each of
 those again under `accents` and `full` at every 5° of wallpaper hue: 10,440
 token sets. A token set that fails does not ship.
 
 ## 6. Components
 
-One module per component in `src/ui/`, one stylesheet per component in
-`data/css/components/` (the same split), and one class family each. A
+One module per component in `crates/core/src/ui/`, one stylesheet per component in
+`crates/core/data/css/components/` (the same split), and one class family each. A
 surface is assembled from these; a surface-specific class is allowed only
 for layout (where things go), never for colour, type or shape.
 
-The API has three shapes (the module docs of `src/ui/mod.rs`):
+The API has three shapes (the module docs of `crates/core/src/ui/mod.rs`):
 
 1. **A noun constructs and returns**: `ui::button(label, kind)`,
    `ui::row(..)`, `ui::badge(text, tone)`.
@@ -623,7 +623,7 @@ The API has three shapes (the module docs of `src/ui/mod.rs`):
    becomes a card).
 3. **`ui::set_<state>(&w, TypedEnum | bool)` changes state at runtime.** A
    state is a typed value, never a class name: no `"ui-…"` string appears in
-   Rust outside `src/ui/` (§7, `rust-ui-class`).
+   Rust outside `crates/core/src/ui/` (§7, `rust-ui-class`).
 
 | Component (module, stylesheet) | Build | Adopt | State | Classes |
 |---|---|---|---|---|
@@ -650,14 +650,14 @@ The API has three shapes (the module docs of `src/ui/mod.rs`):
 
 `ui::icons` holds the icon-font glyphs; `theme::paint()` the token colours
 for code that draws with Cairo (it reads the inputs on screen, so it lives
-with the theme), and `ui::set_source` puts one on a Cairo context. `data/css/components/gtk.css` styles what
+with the theme), and `ui::set_source` puts one on a Cairo context. `crates/core/data/css/components/gtk.css` styles what
 GTK builds itself (windows, a popover menu's buttons and separators,
 scrollbars) and comes last in the cascade.
 
 ### 6.1 Surfaces
 
 The components go on a surface, and a surface is `shell::Surface`
-(`src/shell/`): a layer-shell window, its root (`ui::surface`, on the
+(`crates/core/src/shell/`): a layer-shell window, its root (`ui::surface`, on the
 window's child and never the window), the glass card on the root
 (`ui::card`) and the `anim::Reveal` that fades them in and out.
 
@@ -759,35 +759,35 @@ down in its file.
 
 ## 7. Enforcement
 
-`src/design_lint.rs`, run by `cargo test`. The CSS rules read every file in
+`crates/core/src/design_lint.rs`, run by `cargo test`. The CSS rules read every file in
 `theme::RULES` with comments removed; the Rust rules read `src/**/*.rs`
-minus `src/tokens/`, `src/ui/` and `#[cfg(test)]` code.
+minus `crates/core/src/tokens/`, `crates/core/src/ui/` and `#[cfg(test)]` code.
 
 | Rule | Refuses | Where |
 |---|---|---|
 | `colour-literal` | hex, `rgb()`/`hsl()`…, named colours | all CSS |
 | `colour-function` | `alpha()`, `shade()`, `mix()`, `lighter()`, `darker()`, `color-mix()` | all CSS |
 | `at-name` | `@name` colours and `@define-color` | all CSS |
-| `token` | a `var(--x)` the generator does not emit; a custom property defined outside the generator and `data/css/components/` | all CSS |
+| `token` | a `var(--x)` the generator does not emit; a custom property defined outside the generator and `crates/core/data/css/components/` | all CSS |
 | `primitive` | `--neutral-n`, `--accent-n` | all CSS |
 | `font-size`, `font-weight`, `radius`, `space`, `motion` | a value off its scale (§3.4–3.8); a looping animation names its own period | all CSS |
 | `surface-look` | colour, type, shape or state motion in a surface's file | CSS outside `components/` |
-| `component-scope` | a selector in `components/X.css` whose last compound targets no class X's `owns:` line names (a GTK node under one is fine); a class owned twice or by nobody; a component class in `gtk.css`. Justified reaches are listed with their reasons in `COMPONENT_SCOPE_EXCEPTIONS` | `data/css/components/` |
+| `component-scope` | a selector in `components/X.css` whose last compound targets no class X's `owns:` line names (a GTK node under one is fine); a class owned twice or by nobody; a component class in `gtk.css`. Justified reaches are listed with their reasons in `COMPONENT_SCOPE_EXCEPTIONS` | `crates/core/data/css/components/` |
 | `rust-space` | a non-zero literal box spacing or margin (use `ui::vbox(n)`, `ui::pad`, `tokens::space(n)`) | Rust |
 | `rust-colour` | a Cairo or `gdk::RGBA` colour from numbers | Rust |
 | `rust-class` | a class added that no stylesheet styles | Rust |
 | `rust-ui-class` | a `"ui-…"` string literal: a component's class named outside the component | Rust |
-| `motion-bypass` | a `transition_duration` set, or a motion token's `.ms` read, outside `ui::revealer`/`ui::page_stack` and `anim::ms`/`anim::span`, so Look → Motion and reduced motion reach every animation | Rust except `src/anim.rs` |
+| `motion-bypass` | a `transition_duration` set, or a motion token's `.ms` read, outside `ui::revealer`/`ui::page_stack` and `anim::ms`/`anim::span`, so Look → Motion and reduced motion reach every animation | Rust except `crates/core/src/anim.rs` |
 | `surface-on-window` | `ui::surface::adopt` or `ui::window::adopt` given a window (GTK's `window.background` outranks the class there; it goes on the root child) | Rust |
-| `layer-window` | a layer-shell window made outside `src/shell/` (`create_layer_window*`, `init_layer_shell`, and `make_layer_window` outside the greeter): build a `shell::Surface` (§6.1) | Rust |
-| `layer-namespace` | a namespace spelled as a string (`namespace: "…"`, `set_namespace` with a literal) outside `src/shell/namespace.rs` | Rust |
+| `layer-window` | a layer-shell window made outside `crates/core/src/shell/` (`create_layer_window*`, `init_layer_shell`, and `make_layer_window` outside the greeter): build a `shell::Surface` (§6.1) | Rust |
+| `layer-namespace` | a namespace spelled as a string (`namespace: "…"`, `set_namespace` with a literal) outside `crates/core/src/shell/namespace.rs` | Rust |
 
 The lint also carries a ledger of files not yet migrated, which can only
 shrink (empty today). Contrast (§5) is checked by the tests in
-`src/tokens/`.
+`crates/core/src/tokens/`.
 
 `swaypplet --preview components.<page>` (controls, inputs, lists, tiles;
-`src/preview/components.rs`) draws every component in every variant and
+`crates/app/src/preview/components.rs`) draws every component in every variant and
 state on one card, the pointer and keyboard states forced through GTK's
 state flags, so a change to a component is judged against its siblings;
 `docs/component-zoo.html` holds the decisions made on it.
@@ -804,7 +804,7 @@ surface from `dev/render.sh`.
 1. `tokens.css` generated and loaded; the rules move from `@name`,
    `alpha()` and `shade()` to the semantic tokens.
 2. Type, radius, space and motion onto the scales.
-3. The components in `src/ui/`, and every surface rebuilt on them, one at a
+3. The components in `crates/core/src/ui/`, and every surface rebuilt on them, one at a
    time: bar, panel and its sections, launcher and dmenu, OSD,
    notifications, polkit, keybinds, lock and greeter, settings, switcher and
    pins, screenshot and annotate.
@@ -814,12 +814,12 @@ surface from `dev/render.sh`.
 
 ## 9. Migrating a surface
 
-A surface is migrated when its file in `data/css/` and its Rust code
+A surface is migrated when its file in `crates/core/data/css/` and its Rust code
 satisfy §7, and a render from `dev/render.sh` has been compared with the
 one before. The steps:
 
 1. **Build with the components** (§6). Replace hand-built widgets with
-   `src/ui/`: `ui::card::adopt` for the glass card, `ui::row` and
+   `crates/core/src/ui/`: `ui::card::adopt` for the glass card, `ui::row` and
    `ui::row_button` for rows, `ui::section` for collapsible groups,
    `ui::button` for buttons, `ui::slider_row`, `ui::switch`, `ui::chip`,
    `ui::badge`, `ui::key`, `ui::status`, `ui::field`, `ui::menu`,
@@ -830,7 +830,7 @@ one before. The steps:
    things: padding, margins, min sizes, alignment, the apron around a
    card. Colour, font size and weight, radius and state belong to the
    components. Where a surface needs a look no component gives, add it to
-   `data/css/components/` and `src/ui/` as a component, not to the surface.
+   `crates/core/data/css/components/` and `crates/core/src/ui/` as a component, not to the surface.
 3. **Map what is left** with this table:
 
 | Legacy | Token |
