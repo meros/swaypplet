@@ -74,9 +74,12 @@ running swaypplet is `SWAYPPLET_REV`, which the flake sets at build time
 (`system_info.rs`, pure and tested). It reads when shown, every 30 s while
 it stays on screen and on Refresh, and holds no timer when hidden. Apply
 now and Update run `nx apply` and `nx` in a transient user unit
-(`systemd-run --user`, `system_job.rs`), because the switch restarts the
-panel; the log goes to `$XDG_RUNTIME_DIR/swaypplet/nx.log`, which a
-restarted panel reads back for the result. Both are off while the screen is
+(`systemd-run --user` as `swaypplet-nx`, `swaypplet_system::nx`), because
+the switch restarts the panel; the log goes to
+`$XDG_RUNTIME_DIR/swaypplet/nx.log`, which a restarted panel reads back for
+the result. The Quality tab's Merge & apply runs its nx through the same
+unit and log, so either tab shows the other's run and neither starts a
+second one. Both are off while the screen is
 locked or a switch runs.
 
 `crates/model/data/settings-defaults.json` is every section at the binary's defaults,

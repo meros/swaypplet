@@ -16,10 +16,10 @@
 //! An issue someone else filed asks before it runs: its text is the
 //! agent's input, and anyone can write one on a public repository.
 //!
-//! Merge & apply squash-merges the PR and runs `nx` as its own unit
-//! (`swaypplet-deploy`), because nx switches home-manager, which restarts
-//! this process; its log is followed here, and a reopened tab shows how it
-//! ended. "Try locally" is not offered: `nx dev` rebuilds the system with
+//! Merge & apply squash-merges the PR and runs `nx` as its own unit, the
+//! one the System tab's actions run in too (`swaypplet_system::nx`),
+//! because nx switches home-manager, which restarts this process; its log
+//! is followed here, and a reopened tab shows how it ended. "Try locally" is not offered: `nx dev` rebuilds the system with
 //! sudo, which prompts for a password that nothing here can answer.
 //!
 //! `SWAYPPLET_QUALITY_FIXTURE=<dir>` reads `issues.json`, `prs.json`, the
@@ -38,6 +38,7 @@ use swaypplet_screenshot::quality::{
     status::{Fix, Issue, Job, Pr},
 };
 use swaypplet_settings_kit::{form, form::section_box};
+use swaypplet_system::nx;
 use swaypplet_ui::{
     ui,
     ui::{Text, Tone},
@@ -51,9 +52,6 @@ const TICK: Duration = Duration::from_secs(2);
 
 /// How many open issues the tab lists.
 const LIMIT: u32 = 30;
-
-/// The systemd unit a deploy runs in.
-const DEPLOY_UNIT: &str = "swaypplet-deploy";
 
 /// A thumbnail's size, in logical pixels.
 const THUMB_W: i32 = 240;
@@ -95,19 +93,11 @@ pub fn checks_line(text: &str) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(" \u{00b7} "))
 }
 
-/// The deploy log's last line, and the exit code once the wrapper wrote it.
+/// The deploy log's last line, and the exit code once the runner wrote it.
 pub fn deploy_state(log: &str) -> (String, Option<i32>) {
-    let mut last = String::new();
-    let mut code = None;
-    for line in log.lines().map(strip_ansi) {
-        let line = line.trim().to_string();
-        if let Some(c) = line.strip_prefix("deploy-exit: ") {
-            code = c.trim().parse().ok();
-        } else if !line.is_empty() {
-            last = line;
-        }
-    }
-    (last, code)
+    let log = nx::parse_log(log);
+    let last = log.tail.last().map(|l| l.trim().to_string());
+    (last.unwrap_or_default(), log.exit)
 }
 
 /// The last `n` non-empty lines of a log, without colour codes.
@@ -970,10 +960,6 @@ fn show_thumb(pic: &gtk4::Picture, file: &Path) {
 
 // ── Merge & apply ───────────────────────────────────────────────────────
 
-fn deploy_log() -> PathBuf {
-    swaypplet_screenshot::quality::state_dir("deploy.log")
-}
-
 fn set_deploying(state: &Rc<State>, on: bool) {
     state.deploying.set(on);
     // The ready entries rebuild with Merge & apply enabled or not.
@@ -1021,7 +1007,7 @@ fn apply_fix(state: &Rc<State>, pr: u64) {
                 ));
             }
             swaypplet_screenshot::quality::gh::merge(pr)?;
-            start_deploy(&deploy_log())
+            start_deploy()
         },
         move |result| match result {
             Ok(()) => follow_deploy(&state),
@@ -1068,80 +1054,36 @@ pub fn dirty(porcelain: &str) -> Option<String> {
     Some(out)
 }
 
-/// The deploy command: `SWAYPPLET_DEPLOY` (a shell command line), or `nx`.
-fn deploy_command() -> Result<String, String> {
-    if let Ok(cmd) = std::env::var("SWAYPPLET_DEPLOY")
-        && !cmd.trim().is_empty()
-    {
-        return Ok(cmd);
+/// Start nx in the one nx unit. A dry run plays a canned run into the same
+/// log instead, in the runner's own markers.
+fn start_deploy() -> Result<(), String> {
+    if !swaypplet_screenshot::quality::dry_run() {
+        return nx::start(nx::Action::Update);
     }
-    swaypplet_screenshot::quality::gh::which("nx")
-        .map(|p| shell_quote(&p.to_string_lossy()))
-        .ok_or_else(|| "nx is not on PATH or in the user profile".to_string())
-}
-
-fn shell_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', r"'\''"))
-}
-
-/// Start the deploy, its output into `log`, ending with `deploy-exit: N`.
-fn start_deploy(log: &Path) -> Result<(), String> {
+    let log = nx::log_path();
     if let Some(dir) = log.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    std::fs::write(log, "").map_err(|e| e.to_string())?;
-    let cmd = deploy_command()?;
-    let script = format!("{cmd}; echo \"deploy-exit: $?\"");
-    if swaypplet_screenshot::quality::dry_run() {
-        // Not a unit: a dry run leaves the user's systemd alone, and says
-        // what it would have started.
-        let shown = "echo 'DRY RUN: nx would run now'; sleep 2; echo '── personal repos: push, fast-forward'; sleep 3; echo '── build every host'; sleep 3; echo 'deploy-exit: 0'";
-        let out = std::fs::OpenOptions::new()
-            .append(true)
-            .open(log)
-            .map_err(|e| e.to_string())?;
-        std::process::Command::new("sh")
-            .args(["-c", shown])
-            .stdout(out.try_clone().map_err(|e| e.to_string())?)
-            .stderr(out)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-        eprintln!("DRY RUN: would start {DEPLOY_UNIT}: sh -c {script}");
-        return Ok(());
-    }
-    let log = log.to_string_lossy();
-    let mut command = std::process::Command::new("systemd-run");
-    command.args([
-        "--user",
-        "--collect",
-        "--quiet",
-        &format!("--unit={DEPLOY_UNIT}"),
-        &format!("--property=StandardOutput=append:{log}"),
-        &format!("--property=StandardError=append:{log}"),
-    ]);
-    // What nx needs from this session: the profile's PATH (git, nix, gh),
-    // the SSH agent for pushing the personal repos, and the home.
-    for var in ["PATH", "HOME", "SSH_AUTH_SOCK", "USER", "NIX_PATH"] {
-        if let Ok(value) = std::env::var(var) {
-            command.arg(format!("--setenv={var}={value}"));
-        }
-    }
-    let status = command
-        .args(["--", "sh", "-c", &script])
-        .status()
-        .map_err(|e| format!("systemd-run: {e}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "systemd-run: {status} (is a deploy already running?)"
-        ))
-    }
+    let out = std::fs::File::create(&log).map_err(|e| e.to_string())?;
+    let shown = format!(
+        "echo '{}{}'; echo 'DRY RUN: nx would run now'; sleep 2; echo '── personal repos: push, fast-forward'; sleep 3; echo '── build every host'; sleep 3; echo '{}0'",
+        nx::START,
+        nx::Action::Update.arg(),
+        nx::EXIT
+    );
+    std::process::Command::new("sh")
+        .args(["-c", &shown])
+        .stdout(out.try_clone().map_err(|e| e.to_string())?)
+        .stderr(out)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    eprintln!("DRY RUN: would start {}: nx", nx::UNIT);
+    Ok(())
 }
 
 /// Follow the deploy log once a second while the tab is open.
 fn follow_deploy(state: &Rc<State>) {
-    let log = deploy_log();
+    let log = nx::log_path();
     // A log from over an hour ago is history, not a deploy to show.
     let recent = std::fs::metadata(&log)
         .and_then(|m| m.modified())
@@ -1265,11 +1207,12 @@ mod tests {
 
     #[test]
     fn the_deploy_log_ends_with_its_exit() {
-        let (last, code) = deploy_state("\u{1b}[1m── build\u{1b}[0m\nbuilding x\n");
+        let (last, code) =
+            deploy_state("swaypplet-nx: start sync\n\u{1b}[1m── build\u{1b}[0m\nbuilding x\n");
         assert_eq!((last.as_str(), code), ("building x", None));
-        let (last, code) = deploy_state("── switch\nswitched\ndeploy-exit: 0\n");
+        let (last, code) = deploy_state("── switch\nswitched\nswaypplet-nx: exit 0\n");
         assert_eq!((last.as_str(), code), ("switched", Some(0)));
-        assert_eq!(deploy_state("deploy-exit: 1").1, Some(1));
+        assert_eq!(deploy_state("swaypplet-nx: exit 1").1, Some(1));
     }
 }
 

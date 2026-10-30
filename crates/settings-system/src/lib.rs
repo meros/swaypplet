@@ -2,13 +2,13 @@
 //! new, the two nx actions with their progress, and the machine's facts.
 //!
 //! The facts come from `system_info.rs` and the actions from
-//! `system_job.rs`, both on worker threads. The tab reads only while it is
+//! `swaypplet_system::nx`, both on worker threads. The tab reads only while it is
 //! on screen: once when it is shown, every [`POLL`] after that, and on
 //! Refresh; a running action's log is read every second. Hidden, it holds
 //! no timer and does no work. Neither action ever starts on its own.
 
+pub mod fixture;
 pub mod system_info;
-pub mod system_job;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
@@ -19,12 +19,12 @@ use crate::{
     system_info as info,
     system_info::{OriginSource, Snapshot, Verdict},
 };
-use crate::{
-    system_job as job,
-    system_job::{Action, Job},
-};
 use swaypplet_base::spawn::{remove_source, spawn_work};
 use swaypplet_settings_kit::{form, form::section_box};
+use swaypplet_system::{
+    nx as job,
+    nx::{Action, Job},
+};
 use swaypplet_ui::{
     ui,
     ui::{Kind, Status, Text, Tone},
@@ -361,11 +361,14 @@ impl Pane {
     /// half way.
     fn fixture_job(&self) -> Job {
         if let Some((action, ticks)) = self.fake.get() {
-            let log = job::parse_log(&job::fixture_log(action, ticks));
+            let log = job::parse_log(&crate::fixture::fixture_log(action, ticks));
             return job::job(Some(log), true);
         }
         if self.fixture.as_deref() == Some("applying") {
-            return Job::Running(job::parse_log(&job::fixture_log(Action::Apply, 6)));
+            return Job::Running(job::parse_log(&crate::fixture::fixture_log(
+                Action::Apply,
+                6,
+            )));
         }
         Job::Idle
     }
