@@ -88,3 +88,25 @@ pub const PAGE: Motion = Motion {
 };
 
 pub const ALL: [Motion; 7] = [STATE, EXPAND, ENTER, EXIT, MOVE, TRAVEL, PAGE];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_curve_is_written_as_css_reads_it() {
+        assert_eq!(STANDARD.css(), "cubic-bezier(0.2, 0, 0, 1)");
+        assert_eq!(ACCELERATE.css(), "cubic-bezier(0.3, 0, 1, 1)");
+    }
+
+    #[test]
+    fn the_scale_is_seven_distinct_motions() {
+        let mut names: Vec<_> = ALL.iter().map(|m| m.name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), ALL.len());
+        // Leaving is shorter than arriving (EXIT's doc).
+        const { assert!(EXIT.ms < ENTER.ms) };
+        assert!(ALL.iter().all(|m| m.ms > 0.0));
+    }
+}

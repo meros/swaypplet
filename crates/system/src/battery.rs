@@ -83,6 +83,12 @@ pub fn start() -> bool {
     true
 }
 
+/// A UPower time estimate in seconds: zero (or less) is UPower's "not
+/// known", which must not read as "empty now".
+fn estimate(secs: Option<i64>) -> Option<u64> {
+    secs.filter(|s| *s > 0).map(|s| s as u64)
+}
+
 /// One read per UPower change on the DisplayDevice, sysfs for the numbers
 /// and UPower for the estimates.
 async fn follow(path: &str, tx: &async_channel::Sender<Option<BatteryState>>) -> zbus::Result<()> {
@@ -97,7 +103,7 @@ async fn follow(path: &str, tx: &async_channel::Sender<Option<BatteryState>>) ->
         .await?;
     let mut changes = props.receive_properties_changed().await?;
     loop {
-        let secs = |v: zbus::Result<i64>| v.ok().filter(|s| *s > 0).map(|s| s as u64);
+        let secs = |v: zbus::Result<i64>| estimate(v.ok());
         let reading = match power::read_battery(path) {
             Some(mut b) => {
                 b.upower_to_empty_s = secs(device.time_to_empty().await);
@@ -112,5 +118,18 @@ async fn follow(path: &str, tx: &async_channel::Sender<Option<BatteryState>>) ->
         if changes.next().await.is_none() {
             return Err(zbus::Error::Failure("UPower's signal stream ended".into()));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unknown_estimate_is_none() {
+        assert_eq!(estimate(Some(5400)), Some(5400));
+        assert_eq!(estimate(Some(0)), None);
+        assert_eq!(estimate(Some(-1)), None);
+        assert_eq!(estimate(None), None);
     }
 }
