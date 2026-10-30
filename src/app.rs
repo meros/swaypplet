@@ -25,15 +25,6 @@ const APP_ID: &str = "dev.swaypplet.panel";
 /// The unit that owns the panel process. Nothing else may start one.
 const PANEL_UNIT: &str = "swaypplet.service";
 
-/// Pid file lives in the per-user runtime dir (mode 0700), so no other user
-/// can forge or clobber it. The /tmp fallback matches the wrapper scripts'
-/// `$XDG_RUNTIME_DIR/swaypplet.pid` with the same /tmp fallback. Shared with
-/// the standalone bar's start button (`bar::start`), which signals this pid.
-pub(crate) fn pid_file_path() -> std::path::PathBuf {
-    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    std::path::Path::new(&dir).join("swaypplet.pid")
-}
-
 /// The panel's layer surface: Pilot's Helm popup, a floating card at the
 /// optical sweet spot (~25-28% down, placed by `shell::fit`) over a
 /// full-screen transparent backdrop that dismisses it. Exclusive keyboard,
@@ -246,7 +237,7 @@ pub fn run() {
         // Written only after both signal handlers are installed, so a
         // `kill -USR1/-USR2` that lands as soon as the pid file exists can't
         // hit the default (terminating) disposition.
-        let _ = fs::write(pid_file_path(), std::process::id().to_string());
+        let _ = fs::write(crate::pid::file_path(), std::process::id().to_string());
     });
 
     let state_clone = state.clone();
@@ -713,7 +704,7 @@ pub fn run() {
     });
 
     app.connect_shutdown(|_| {
-        let _ = fs::remove_file(pid_file_path());
+        let _ = fs::remove_file(crate::pid::file_path());
     });
 
     app.run();

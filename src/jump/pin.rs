@@ -395,7 +395,7 @@ impl Pins {
         );
         if let Some(o) = output
             .as_deref()
-            .filter(|o| !crate::services::displays::naming::is_virtual(o))
+            .filter(|o| !crate::naming::display::is_virtual(o))
         {
             self.inner.borrow_mut().last_screen = Some(o.to_string());
         }

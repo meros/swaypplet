@@ -42,8 +42,8 @@ pub(super) fn follow() {
 async fn run(tx: &async_channel::Sender<bool>) -> zbus::Result<()> {
     use zbus::export::futures_util::StreamExt;
     let conn = zbus::Connection::system().await?;
-    let manager = crate::idle::logind::ManagerProxy::new(&conn).await?;
-    let session = crate::idle::logind::session(&conn, &manager).await?;
+    let manager = crate::logind::ManagerProxy::new(&conn).await?;
+    let session = crate::logind::session(&conn, &manager).await?;
     let mut changes = session.receive_locked_hint_changed().await;
     if let Ok(v) = session.locked_hint().await {
         let _ = tx.send(v).await;

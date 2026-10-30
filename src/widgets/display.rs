@@ -32,7 +32,7 @@ struct OutputInfo {
     /// "Make Model", when sway knows them.
     product: Option<String>,
     /// The automatic name and the key a given one is stored under
-    /// (`displays::naming`).
+    /// (`naming::display`).
     label: String,
     key: String,
 }
@@ -59,8 +59,8 @@ fn get_outputs() -> Vec<OutputInfo> {
     outputs
         .into_iter()
         .map(|o| OutputInfo {
-            label: displays::naming::auto_name(&o.name, &o.make, &o.model),
-            key: displays::naming::key(&o.name, &o.make, &o.model, &o.serial),
+            label: crate::naming::display::auto_name(&o.name, &o.make, &o.model),
+            key: crate::naming::display::key(&o.name, &o.make, &o.model, &o.serial),
             product: Some(format!("{} {}", o.make, o.model))
                 .filter(|p| !p.trim().is_empty() && !p.contains("Unknown")),
             mode: o.current_mode.map(|m| (m.width, m.height, m.refresh)),

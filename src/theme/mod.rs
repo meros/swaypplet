@@ -482,11 +482,11 @@ mod tests {
         );
 
         // The categorical classes the notification card hands out by number
-        // (`notifications::card::accent_for`, through `ui::rail` and
+        // (`notifications::card::accent_for`, 1 to `ui::CATEGORIES`, through `ui::rail` and
         // `ui::set_category`) have to exist, or a sender silently falls back to
         // plain ink and the hue channel is dead.
         let css = super::joined_rules();
-        for n in 1..=crate::notifications::card::ACCENTS {
+        for n in 1..=crate::ui::CATEGORIES as u64 {
             for rule in [format!(".ui-rail.cat-{n}"), format!(".ui-cat-{n}")] {
                 assert!(css.contains(&rule), "data/css/ has no `{rule}`");
             }

@@ -21,7 +21,7 @@
 //! `dev/render.sh`) has no screen to prefer, and treats its outputs as
 //! screens; the same rule `displays::matcher::split` uses for profiles.
 
-use crate::services::displays::naming::{is_builtin, is_virtual};
+use crate::naming::display::{is_builtin, is_virtual};
 use crate::settings::store::{self, ExtraScreens};
 
 /// A surface with an extra-screen switch.

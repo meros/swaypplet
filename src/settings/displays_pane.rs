@@ -489,7 +489,7 @@ impl Pane {
     fn connect(p: &Rc<Pane>, keep_btn: &gtk4::Button, revert_btn: &gtk4::Button) {
         {
             // Rename the selected screen: the name follows the screen, not
-            // the connector (`displays::naming::key`).
+            // the connector (`naming::display::key`).
             let selected = |p: &Pane| p.drafts.borrow().get(p.selected.get()).cloned();
             let (q, r) = (Rc::downgrade(p), Rc::downgrade(p));
             let rename = crate::widgets::rename::button(

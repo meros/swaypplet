@@ -50,7 +50,7 @@ pub fn toggle_panel_fallback() {
 /// process (comm check — the pid file can outlive a crashed panel and the
 /// pid can be recycled by an unrelated process).
 fn read_panel_pid() -> Option<i32> {
-    let pid = std::fs::read_to_string(crate::app::pid_file_path())
+    let pid = std::fs::read_to_string(crate::pid::file_path())
         .ok()?
         .trim()
         .parse::<i32>()

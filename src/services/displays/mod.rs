@@ -33,7 +33,7 @@
 //! once.
 
 mod matcher;
-pub mod naming;
+
 mod wayland;
 
 use std::cell::{Cell, RefCell};

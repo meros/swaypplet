@@ -41,7 +41,7 @@ use super::card::{age_label, populate_card, set_critical_class};
 use super::card_surface::CardSurface;
 use super::timers::{Timer, cancel_timer, make_timer, pause_timers, resume_timers};
 use crate::anim;
-use crate::services::displays::naming::is_virtual;
+use crate::naming::display::is_virtual;
 use crate::services::notifications::group;
 use crate::services::notifications::store::{self, NotificationStore};
 use crate::services::notifications::{CloseReason, Notification};

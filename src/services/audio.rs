@@ -204,9 +204,9 @@ impl AudioState {
 }
 
 /// Maximum output volume, as a fraction of nominal. Above 1.0 is software
-/// amplification. Defined here rather than in the OSD because this module
-/// clamps to it when applying a relative change.
-pub const VOLUME_CEILING: f64 = 1.5;
+/// amplification. The setting that allows it owns the number
+/// (`settings::schema::VOLUME_CEILING`); this module clamps to it.
+pub use crate::settings::schema::VOLUME_CEILING;
 
 /// What the GTK side can ask the server to do.
 #[derive(Clone, Debug)]

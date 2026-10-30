@@ -6,7 +6,7 @@
 //! name is what the screen says about itself, and the connector moves to
 //! the subtitle.
 
-use crate::services::devices::short_vendor;
+use super::short_vendor;
 
 /// A panel wired inside the machine: eDP, LVDS or DSI.
 pub fn is_builtin(connector: &str) -> bool {

@@ -173,7 +173,7 @@ pub fn choose(
 /// The second list is the extra screens left out, for the Displays tab and
 /// a profile's `extra_screen`.
 pub fn split(heads: Vec<HeadState>) -> (Vec<HeadState>, Vec<HeadState>) {
-    let virtual_ = |h: &HeadState| super::naming::is_virtual(&h.name);
+    let virtual_ = |h: &HeadState| crate::naming::display::is_virtual(&h.name);
     if heads.iter().all(virtual_) {
         return (heads, Vec::new());
     }

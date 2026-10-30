@@ -16,6 +16,10 @@ use serde_json::Value;
 
 use super::store::system;
 
+/// Maximum output volume with the volume boost on, as a fraction of nominal.
+/// Above 1.0 is software amplification (`services::audio` clamps to it).
+pub const VOLUME_CEILING: f64 = 1.5;
+
 // ── Sections ────────────────────────────────────────────────────────────
 
 /// How sway scales the image onto the output. Spelled as `output … bg`
@@ -627,7 +631,7 @@ impl Keys {
     /// The ceiling as a fraction, which is what the audio path speaks.
     pub fn volume_ceiling(&self) -> f64 {
         if self.volume_boost {
-            crate::services::audio::VOLUME_CEILING
+            VOLUME_CEILING
         } else {
             1.0
         }

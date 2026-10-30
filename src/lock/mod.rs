@@ -249,8 +249,8 @@ fn follow_unlock(on_unlock: impl Fn() + 'static) {
     crate::spawn::spawn_tokio_thread("lock-unlock-signal", async move {
         let run = async {
             let conn = zbus::Connection::system().await?;
-            let manager = crate::idle::logind::ManagerProxy::new(&conn).await?;
-            let session = crate::idle::logind::session(&conn, &manager).await?;
+            let manager = crate::logind::ManagerProxy::new(&conn).await?;
+            let session = crate::logind::session(&conn, &manager).await?;
             let mut unlocks = session.receive_unlock().await?;
             while unlocks.next().await.is_some() {
                 if tx.send(()).await.is_err() {

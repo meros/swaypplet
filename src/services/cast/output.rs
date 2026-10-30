@@ -28,7 +28,7 @@ use std::path::PathBuf;
 
 use swayipc::Connection;
 
-use crate::services::displays::naming::is_virtual;
+use crate::naming::display::is_virtual;
 use crate::settings::store::{ExtraScreenLayout, OutputTransform};
 
 /// Width, height and refresh in Hz: 1080p, the size every Cast screen and

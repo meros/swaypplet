@@ -28,7 +28,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::services::devices::short_vendor;
+use crate::naming::short_vendor;
 
 /// `NM_DEVICE_TYPE_ETHERNET` and `NM_DEVICE_TYPE_WIFI`.
 const ETHERNET: u32 = 1;

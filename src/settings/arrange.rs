@@ -11,7 +11,8 @@
 //! drag keeps it that way as it goes (`settle`), so Apply meets a gap or an
 //! overlap only when the outputs came from the compositor like that.
 
-use crate::services::displays::{HeadPlan, HeadState, Mode, ModeChoice, naming};
+use crate::naming::display as naming;
+use crate::services::displays::{HeadPlan, HeadState, Mode, ModeChoice};
 use crate::settings::store::OutputTransform;
 
 /// One output as the tab edits it.
@@ -20,10 +21,10 @@ pub struct Draft {
     pub name: String,
     /// "Make Model", empty when the output does not say.
     pub product: String,
-    /// The automatic name (`displays::naming::auto_name`).
+    /// The automatic name (`naming::display::auto_name`).
     pub label: String,
     /// What a name the person gave it is stored under
-    /// (`displays::naming::key`).
+    /// (`naming::display::key`).
     pub key: String,
     pub enabled: bool,
     pub mode: Option<Mode>,
@@ -35,7 +36,7 @@ pub struct Draft {
     pub adaptive_sync: Option<bool>,
     /// The scale its pixel density asks for (`displays::dpi_scale`).
     pub suggested: Option<f64>,
-    /// The extra screen made for a cast (`displays::naming::is_virtual`):
+    /// The extra screen made for a cast (`naming::display::is_virtual`):
     /// arranged like a screen, but never switched off here.
     pub extra: bool,
 }
