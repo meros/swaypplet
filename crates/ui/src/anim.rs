@@ -8,9 +8,9 @@
 //!
 //! Three curves, from Material 3's standard set: [`standard`] between two
 //! on-screen states, [`decelerate`] for anything arriving, [`accelerate`] for
-//! anything leaving. Durations: [`EXIT_MS`] and [`ENTER_MS`] (= [`MOVE_MS`]);
-//! the micro, emphasis and dwell tiers are CSS-only and live in the
-//! stylesheet.
+//! anything leaving. Durations: the motion tokens' exit, enter and move,
+//! always through [`ms`]; the micro, emphasis and dwell tiers are CSS-only
+//! and live in the stylesheet.
 //!
 //! # Motion on glass: split the pane from the content
 //!
@@ -29,7 +29,7 @@
 //! fade what sits on it): the *pane* — the widget whose CSS carries the
 //! frosted card background — steps straight to full tint so tint and frost
 //! land in the same frame, while the *content* on it fades over the full
-//! [`ENTER_MS`]/[`EXIT_MS`]. Exits mirror it: content fades first, and the
+//! enter or exit token. Exits mirror it: content fades first, and the
 //! pane drops from full tint to exactly 0.0 (the stencil threshold) in one
 //! frame at the end. Ramping the pane across that boundary is what produced
 //! a darkened square, because every intermediate alpha is fully frosted and
@@ -46,11 +46,11 @@ use std::rc::Rc;
 use gtk4::{glib, graphene, prelude::*, subclass::prelude::*};
 use gtk4_layer_shell::LayerShell;
 
-/// The motion tokens (docs/design-system.md §3.8), as the stylesheet gets
-/// them: `swaypplet_tokens::motion` is the one place these are decided.
-pub const EXIT_MS: f64 = swaypplet_tokens::motion::EXIT.ms;
+/// The enter token's length (docs/design-system.md §3.8), for the two
+/// waits that are timed to outlast an enter (the panel's and settings'
+/// refresh after they open). Anything that moves plays the tokens of
+/// `swaypplet_tokens::motion` through [`ms`].
 pub const ENTER_MS: f64 = swaypplet_tokens::motion::ENTER.ms;
-pub const MOVE_MS: f64 = swaypplet_tokens::motion::MOVE.ms;
 // The scale's other three tiers — micro (150ms), emphasis (400ms) and dwell
 // (500ms) — have no Rust consumer. Micro is below the threshold where a
 // hand-driven tick is worth its wakeups, and the other two are only ever
@@ -513,6 +513,68 @@ impl Frames {
     }
 }
 
+// ── Tween: one number eased toward a target ─────────────────────────────
+
+/// A drawn number (a fill, a hairline's length) eased from where it is to
+/// a new target over a motion token, on [`Frames`]. A new target mid-way
+/// starts from the value on screen, so repeated changes read as one
+/// continuous sweep; reduced motion, or no window drawing, jumps.
+#[derive(Clone, Default)]
+pub struct Tween {
+    shown: Rc<Cell<f64>>,
+    run: Rc<RefCell<Option<Frames>>>,
+}
+
+impl Tween {
+    /// The value to draw now.
+    pub fn value(&self) -> f64 {
+        self.shown.get()
+    }
+
+    /// Ease toward `target` over `m`, calling `draw` on every frame of the
+    /// way and once at the end.
+    pub fn to(&self, target: f64, m: swaypplet_tokens::motion::Motion, draw: impl Fn() + 'static) {
+        if let Some(run) = self.run.borrow_mut().take() {
+            run.cancel();
+        }
+        let from = self.shown.get();
+        if !animations_enabled() || from == target {
+            self.shown.set(target);
+            draw();
+            return;
+        }
+        let draw = Rc::new(draw);
+        let frame = {
+            let (shown, draw) = (self.shown.clone(), draw.clone());
+            move |t: f64| {
+                shown.set(tween_at(from, target, t));
+                draw();
+            }
+        };
+        let done = {
+            let (shown, draw, run) = (self.shown.clone(), draw.clone(), self.run.clone());
+            move || {
+                run.borrow_mut().take();
+                shown.set(target);
+                draw();
+            }
+        };
+        match Frames::start(ms(m), frame, done) {
+            Some(run) => *self.run.borrow_mut() = Some(run),
+            None => {
+                self.shown.set(target);
+                draw();
+            }
+        }
+    }
+}
+
+/// Where a [`Tween`] from `from` to `to` is at progress `t`, on the
+/// [`standard`] curve: it moves between two on-screen states.
+fn tween_at(from: f64, to: f64, t: f64) -> f64 {
+    from + (to - from) * standard(t)
+}
+
 // ── Reveal: the shared show/hide transition ────────────────────────────
 
 struct RevealInner {
@@ -849,7 +911,11 @@ impl Reveal {
                 (from != to).then(|| (bin.clone(), from, to))
             });
         let target = if entering { 1.0 } else { 0.0 };
-        let total = duration(if entering { ENTER_MS } else { EXIT_MS });
+        let total = ms(if entering {
+            swaypplet_tokens::motion::ENTER
+        } else {
+            swaypplet_tokens::motion::EXIT
+        });
         // Arriving decelerates into place; leaving gathers speed and goes.
         // One curve for both directions made every surface hesitate on its
         // way out. See docs/MOTION.md.
@@ -1100,6 +1166,77 @@ pub fn nudge(slide: &SlideBin) {
     slide.slide_to(NUDGE_PX, onset);
     let slide = slide.clone();
     glib::timeout_add_local_once(std::time::Duration::from_millis(onset as u64), move || {
-        slide.slide_to(0.0, duration(EXIT_MS));
+        slide.slide_to(0.0, ms(swaypplet_tokens::motion::EXIT));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-4
+    }
+
+    #[test]
+    fn a_bezier_runs_from_zero_to_one_and_clamps_outside() {
+        for (x1, y1, x2, y2) in [
+            (0.2, 0.0, 0.0, 1.0),
+            (0.3, 0.0, 1.0, 1.0),
+            (0.0, 0.0, 0.0, 1.0),
+        ] {
+            assert_eq!(cubic_bezier(x1, y1, x2, y2, 0.0), 0.0);
+            assert_eq!(cubic_bezier(x1, y1, x2, y2, 1.0), 1.0);
+            assert_eq!(cubic_bezier(x1, y1, x2, y2, -0.5), 0.0);
+            assert_eq!(cubic_bezier(x1, y1, x2, y2, 1.5), 1.0);
+            // Monotonic for these control points.
+            let mut last = 0.0;
+            for i in 1..=20 {
+                let y = cubic_bezier(x1, y1, x2, y2, f64::from(i) / 20.0);
+                assert!(y >= last - 1e-9, "({x1}, {y1}, {x2}, {y2}) at {i}");
+                last = y;
+            }
+        }
+    }
+
+    #[test]
+    fn a_bezier_matches_known_values() {
+        // The straight line is the identity.
+        assert!(close(cubic_bezier(0.0, 0.0, 1.0, 1.0, 0.3), 0.3));
+        // CSS ease-in-out is symmetric about the middle.
+        assert!(close(cubic_bezier(0.42, 0.0, 0.58, 1.0, 0.5), 0.5));
+        let a = cubic_bezier(0.42, 0.0, 0.58, 1.0, 0.2);
+        let b = cubic_bezier(0.42, 0.0, 0.58, 1.0, 0.8);
+        assert!(close(a + b, 1.0));
+        // A curve whose x slope is zero at the start, where Newton stalls,
+        // still lands on the curve by bisection.
+        let y = cubic_bezier(0.0, 0.0, 0.0, 1.0, 0.01);
+        assert!(y > 0.0 && y < 1.0);
+        // Decelerating arrives early; accelerating leaves late.
+        assert!(decelerate(0.5) > 0.5);
+        assert!(accelerate(0.5) < 0.5);
+    }
+
+    #[test]
+    fn glass_steps_across_zero_and_eases_between_frosted_states() {
+        // Arriving from nothing: the full tint on the first frame.
+        assert_eq!(glass_channel(0.0, 0.8, 0.0), 0.0);
+        assert_eq!(glass_channel(0.0, 0.8, 0.01), 0.8);
+        // Leaving to nothing: the tint holds until the last frame.
+        assert_eq!(glass_channel(0.8, 0.0, 0.99), 0.8);
+        assert_eq!(glass_channel(0.8, 0.0, 1.0), 0.0);
+        // Between two frosted states: the standard curve.
+        assert!(close(
+            glass_channel(0.4, 0.8, 0.5),
+            0.4 + 0.4 * standard(0.5)
+        ));
+        assert_eq!(glass_channel(0.4, 0.8, 1.0), 0.8);
+    }
+
+    #[test]
+    fn a_tween_runs_from_where_it_is_to_the_target() {
+        assert_eq!(tween_at(0.2, 0.6, 0.0), 0.2);
+        assert_eq!(tween_at(0.2, 0.6, 1.0), 0.6);
+        assert!(close(tween_at(1.0, 0.0, 0.5), 1.0 - standard(0.5)));
+    }
 }

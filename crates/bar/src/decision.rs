@@ -20,7 +20,7 @@
 //! interjections. `interject` overlays the standing occupant on a
 //! crossfaded Stack page — never destroying it — with icon + eased
 //! hairline + value, the hairline filling left-to-right off a full-width
-//! track exactly like the standalone OSD's ProgressBar (osd.rs);
+//! track exactly like the standalone OSD's ProgressBar (`swaypplet_osd`);
 //! repeated keypresses retarget the ease so they read as one continuous
 //! sweep, and 1.5 s after the last press the slot yields back to
 //! whatever the mux holds.
@@ -172,8 +172,7 @@ struct Inner {
     osd_text: gtk4::Label,
     hairline: gtk4::DrawingArea,
     /// Fraction the draw func paints; eased toward the latest keypress.
-    hair_shown: Rc<Cell<f64>>,
-    hair_tick: Rc<RefCell<Option<gtk4::TickCallbackId>>>,
+    hair_shown: anim::Tween,
     interjecting: Cell<bool>,
     decay: RefCell<Option<glib::SourceId>>,
 }
@@ -216,7 +215,7 @@ impl DecisionSlot {
             .build();
         ui::set_text_style(&osd_text, ui::Text::Label, ui::Tone::Muted);
         swaypplet_ui::ui::set_numeric(&osd_text, true);
-        let hair_shown: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+        let hair_shown = anim::Tween::default();
         let hairline = gtk4::DrawingArea::builder()
             .content_width(HAIRLINE_WIDTH)
             .content_height(2)
@@ -239,14 +238,14 @@ impl DecisionSlot {
                 );
                 cr.rectangle(0.0, 0.0, w, h);
                 let _ = cr.fill();
-                let f = shown.get().clamp(0.0, 1.0);
+                let f = shown.value().clamp(0.0, 1.0);
                 if f <= 0.0 {
                     return;
                 }
                 // Left-anchored, like every other progress readout in the
                 // codebase: the fill is a value on a track, and a value
                 // that grows out of the middle reads as a meter, not a
-                // level (osd.rs uses a plain GtkProgressBar for this).
+                // level (the OSD uses a plain GtkProgressBar for this).
                 cr.set_source_rgba(
                     c.red().into(),
                     c.green().into(),
@@ -303,7 +302,6 @@ impl DecisionSlot {
                 osd_text,
                 hairline,
                 hair_shown,
-                hair_tick: Rc::new(RefCell::new(None)),
                 interjecting: Cell::new(false),
                 decay: RefCell::new(None),
             }),
@@ -322,7 +320,7 @@ impl DecisionSlot {
     }
 
     /// Battery input, fed from the battery segment's existing 30 s poll
-    /// (bar/battery.rs) — the slot adds no poll of its own.
+    /// (`battery.rs`) — the slot adds no poll of its own.
     pub fn set_battery(&self, bat: &BatteryState) {
         *self.inner.battery.borrow_mut() = Some(BatteryView::read(bat));
         self.refresh();
@@ -405,33 +403,12 @@ impl DecisionSlot {
     /// Ease the hairline toward `target` over 150 ms so repeated
     /// keypresses read as one continuous sweep; reduced motion jumps.
     fn animate_hairline(&self, target: f64) {
-        let inner = &self.inner;
-        if let Some(id) = inner.hair_tick.borrow_mut().take() {
-            id.remove();
-        }
-        let from = inner.hair_shown.get();
-        if !anim::animations_enabled() || from == target {
-            inner.hair_shown.set(target);
-            inner.hairline.queue_draw();
-            return;
-        }
-        let start = glib::monotonic_time();
-        let shown = inner.hair_shown.clone();
-        let tick = inner.hair_tick.clone();
-        let id = inner.hairline.add_tick_callback(move |area, _| {
-            let t = (((glib::monotonic_time() - start) as f64 / 1000.0)
-                / anim::ms(swaypplet_tokens::motion::STATE))
-            .clamp(0.0, 1.0);
-            shown.set(from + (target - from) * anim::standard(t));
-            area.queue_draw();
-            if t >= 1.0 {
-                tick.borrow_mut().take();
-                glib::ControlFlow::Break
-            } else {
-                glib::ControlFlow::Continue
-            }
-        });
-        *inner.hair_tick.borrow_mut() = Some(id);
+        let hairline = self.inner.hairline.clone();
+        self.inner
+            .hair_shown
+            .to(target, swaypplet_tokens::motion::STATE, move || {
+                hairline.queue_draw()
+            });
     }
 
     /// Handover: collapse the outgoing occupant over the structural

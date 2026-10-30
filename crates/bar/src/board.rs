@@ -10,16 +10,17 @@
 //! onset-only (P2): one SlideBin nudge when a bay turns unacked-waiting,
 //! then static rest; escalation at 10 min is a static luminance step.
 //!
-//! Hidden since 2026-08-12 (see bar/mod.rs): the bays were not earning
-//! their width. The widget is still built, so nothing else in the bar had
-//! to change; flip `SHOW_BOARD` back to display it. The accent ripple it
+//! Hidden by default since 2026-08-12: the bays were not earning their
+//! width. The widget is still built, so nothing else in the bar had to
+//! change; the Bar tab's Task board switch (`bar.board`, followed in
+//! `lib.rs`) shows it. The accent ripple it
 //! used to stamp is gone with the bar's task hue.
 //!
-//! Bay click opens the read-layer task popover (bar/popover.rs, vision
+//! Bay click opens the read-layer task popover (`popover.rs`, vision
 //! increment 8); the old direct task-find/task-rename click bindings live
 //! there as footer actions.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
@@ -293,8 +294,7 @@ struct Bay {
     chip: gtk4::Label,
     fill: gtk4::DrawingArea,
     /// Fraction the draw func paints; eased toward the model's value.
-    fill_shown: Rc<Cell<f64>>,
-    fill_tick: Rc<RefCell<Option<gtk4::TickCallbackId>>>,
+    fill_shown: anim::Tween,
     /// `None` until the first apply, so startup styling never reads as an
     /// onset (no nudge for a wait that predates the bar).
     cache: RefCell<Option<BayView>>,
@@ -324,7 +324,7 @@ impl Bay {
         content.append(&numeral);
         content.append(&chip_reveal);
 
-        let fill_shown: Rc<Cell<f64>> = Rc::new(Cell::new(0.0));
+        let fill_shown = anim::Tween::default();
         // Bottom 2 px N/M fill, painted in the bay's faint tone.
         let fill = gtk4::DrawingArea::builder()
             .content_height(2)
@@ -336,7 +336,7 @@ impl Bay {
         {
             let shown = fill_shown.clone();
             fill.set_draw_func(move |area, cr, w, h| {
-                let f = shown.get().clamp(0.0, 1.0);
+                let f = shown.value().clamp(0.0, 1.0);
                 if f <= 0.0 {
                     return;
                 }
@@ -370,7 +370,6 @@ impl Bay {
             chip,
             fill,
             fill_shown,
-            fill_tick: Rc::new(RefCell::new(None)),
             cache: RefCell::new(None),
         }
     }
@@ -406,35 +405,14 @@ impl Bay {
         *cache = Some(view);
     }
 
-    /// Ease the drawn fraction toward `target` over MOVE_MS; reduced
+    /// Ease the drawn fraction toward `target` over the move token; reduced
     /// motion jumps (all states are statically distinct).
     fn animate_fill(&self, target: f64) {
-        if let Some(id) = self.fill_tick.borrow_mut().take() {
-            id.remove();
-        }
-        let from = self.fill_shown.get();
-        if !anim::animations_enabled() || from == target {
-            self.fill_shown.set(target);
-            self.fill.queue_draw();
-            return;
-        }
-        let start = glib::monotonic_time();
-        let shown = self.fill_shown.clone();
-        let tick = self.fill_tick.clone();
-        let id = self.fill.add_tick_callback(move |area, _| {
-            let t = (((glib::monotonic_time() - start) as f64 / 1000.0)
-                / anim::duration(anim::MOVE_MS))
-            .clamp(0.0, 1.0);
-            shown.set(from + (target - from) * anim::standard(t));
-            area.queue_draw();
-            if t >= 1.0 {
-                tick.borrow_mut().take();
-                glib::ControlFlow::Break
-            } else {
-                glib::ControlFlow::Continue
-            }
-        });
-        *self.fill_tick.borrow_mut() = Some(id);
+        let fill = self.fill.clone();
+        self.fill_shown
+            .to(target, swaypplet_tokens::motion::MOVE, move || {
+                fill.queue_draw()
+            });
     }
 }
 
