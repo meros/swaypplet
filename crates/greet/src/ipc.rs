@@ -17,6 +17,7 @@ use std::sync::mpsc;
 use greetd_ipc::codec::SyncCodec;
 use greetd_ipc::{AuthMessageType, ErrorType, Request, Response};
 
+#[derive(PartialEq)]
 pub enum Req {
     Create { username: String },
     Respond(Option<String>),

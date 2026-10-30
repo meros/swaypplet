@@ -71,7 +71,7 @@ fn token_path() -> String {
 }
 
 /// Client → agent, one JSON object per line.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "kebab-case")]
 pub enum Cmd {
     /// Verify `user`'s fingerprint (replaces any previous target).
