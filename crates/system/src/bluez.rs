@@ -15,7 +15,7 @@
 //! Blocking, like `network::nm`, and for the same reason: the callers are
 //! already on worker threads. The quick-settings tile reads and powers the
 //! adapter here; the section follows BlueZ's signals through
-//! `services::bluetooth`, which shares [`parse`].
+//! `swaypplet_devices::bluetooth`, which shares [`parse`].
 
 use std::collections::HashMap;
 
@@ -102,7 +102,7 @@ pub fn snapshot() -> Snapshot {
 
 /// The snapshot out of one `GetManagedObjects` answer. Shared by the
 /// blocking read above and the event-driven service
-/// (`services::bluetooth`).
+/// (`swaypplet_devices::bluetooth`).
 pub fn parse(objects: &Managed) -> Snapshot {
     let mut snapshot = Snapshot::default();
 

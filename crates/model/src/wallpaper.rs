@@ -1,5 +1,5 @@
 //! The wallpaper as something the panel can set and put back. The tab that
-//! shows it is `look_pane.rs`; this is what the tab, the CLI and the panel's
+//! shows it is `swaypplet_settings_look`; this is what the tab, the CLI and the panel's
 //! startup share.
 //!
 //! sway owns the wallpaper: `output * bg <path> <mode>` from the config,
@@ -23,7 +23,7 @@
 //! other stops it, so the still shows. The still stays sway's `bg` either
 //! way: it is what the lock screen and the greeter fall back to. The same
 //! file carries `look.video_speed` for the unit's start; a change of speed
-//! reaches a playing video over IPC instead (`services::wallpaper_battery`).
+//! reaches a playing video over IPC instead (`swaypplet_ambient::wallpaper_battery`).
 
 use std::path::{Path, PathBuf};
 
@@ -148,7 +148,7 @@ fn env_video(text: &str) -> Option<&str> {
 /// What following `video` at `speed` does to a unit whose environment file
 /// reads `old`: the text to write, if it changed, and the `systemctl` verb.
 /// Only another video restarts the unit. A speed alone does not: the player
-/// takes a new one over IPC (`services::wallpaper_battery`), and the file
+/// takes a new one over IPC (`swaypplet_ambient::wallpaper_battery`), and the file
 /// is for its next start.
 fn env_change(old: Option<&str>, video: &Path, speed: f64) -> (Option<String>, &'static str) {
     let text = env_text(video, speed);

@@ -40,7 +40,7 @@
 //! This module provides the ACTIONS ([`Inhibitor::arm`]) and the readings
 //! ([`Inhibitor::read`], [`Inhibitor::armed`], [`idle_inhibited`]). It holds
 //! no policy: what to do when one is armed is the idle manager's business
-//! (idle/mod.rs), and how to draw an armed inhibitor is the widgets'
+//! (crates/idle/src/lib.rs), and how to draw an armed inhibitor is the widgets'
 //! (widgets/tiles.rs, bar/hazards.rs). The in-process [`Observed`] cells
 //! below are a cache of established readings for the GTK side, never a second
 //! source of truth.

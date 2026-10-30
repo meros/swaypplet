@@ -1,5 +1,5 @@
 //! Names a person reads for a display, and the key a name they gave it is
-//! stored under (`services::devices::DeviceKey::Display`).
+//! stored under (`swaypplet_devices::DeviceKey::Display`).
 //!
 //! The connector ("eDP-1", "DP-3") names a port, not a screen: the same
 //! monitor is DP-3 on one dock port and DP-5 on the next. The automatic
@@ -16,7 +16,7 @@ pub fn is_builtin(connector: &str) -> bool {
 }
 
 /// An output sway made with `create_output`: no screen of its own, only
-/// pixels for a capture to send somewhere (`services::cast`). sway names
+/// pixels for a capture to send somewhere (`swaypplet_cast`). sway names
 /// every one of them HEADLESS-N, counting up, and does not reuse a number
 /// within a session.
 pub fn is_virtual(connector: &str) -> bool {

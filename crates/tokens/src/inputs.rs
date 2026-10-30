@@ -2,7 +2,7 @@
 //! §2): mode, accent, neutral, contrast, the Motion setting and the tint.
 //!
 //! Plain values. Resolving them at runtime (the Look settings, the sun, the
-//! wallpaper's hue) is `theme::inputs`, which is the one place an
+//! wallpaper's hue) is `swaypplet_ui::theme::inputs`, which is the one place an
 //! [`Inputs`] is built outside tests.
 
 use super::{Backdrop, Rgb, Tint};
@@ -105,7 +105,7 @@ impl Neutral {
 }
 
 /// Serialisable because the panel publishes the inputs it resolved and every
-/// other process draws those (`theme::inputs`).
+/// other process draws those (`swaypplet_ui::theme::inputs`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Inputs {
     pub mode: Mode,

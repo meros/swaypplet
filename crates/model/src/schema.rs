@@ -17,7 +17,7 @@ use serde_json::Value;
 use super::store::system;
 
 /// Maximum output volume with the volume boost on, as a fraction of nominal.
-/// Above 1.0 is software amplification (`services::audio` clamps to it).
+/// Above 1.0 is software amplification (`swaypplet_audio` clamps to it).
 pub const VOLUME_CEILING: f64 = 1.5;
 
 // ── Sections ────────────────────────────────────────────────────────────
@@ -70,7 +70,7 @@ impl WallpaperMode {
 }
 
 /// Names the user gave devices, by a key that follows the device rather
-/// than the port it is on (`services::devices::DeviceKey`): `net:<mac>`,
+/// than the port it is on (`swaypplet_devices::DeviceKey`): `net:<mac>`,
 /// `audio:<node.name>`, `display:<make|model|serial>`, `input:<sway
 /// identifier>`. No system layer: the names are this person's. A name here
 /// overrides the automatic one; removing it restores that. Bluetooth names
@@ -113,7 +113,7 @@ pub struct Wallpaper {
 /// The idle manager's timers, in seconds. Zero is "never" for every tier.
 ///
 /// The defaults are the numbers the old swayidle config carried and
-/// `idle/mod.rs` documents the incident history behind; a field missing
+/// `crates/idle/src/lib.rs` documents the incident history behind; a field missing
 /// from a hand-edited file lands on them too.
 ///
 /// The `night_*` fields are a second, shorter set of three tiers for a
@@ -486,7 +486,7 @@ impl ThemeMode {
 }
 
 /// What the animated wallpaper does while the machine runs on battery
-/// (`services::wallpaper_battery`). A still image is unaffected by all but
+/// (`swaypplet_ambient::wallpaper_battery`). A still image is unaffected by all but
 /// `Black`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -532,7 +532,7 @@ pub struct Look {
     pub tint: Tint,
     /// Which of the wallpaper's colours the accent takes under a tint, by
     /// rank: 0 is the primary, the one the image is about. The Look pane
-    /// offers the ones the last sample found (`theme::wallpaper::CHOICES`
+    /// offers the ones the last sample found (`swaypplet_ui::theme::wallpaper::CHOICES`
     /// at most) and puts this back to 0 when a new wallpaper is picked; a
     /// rank the current wallpaper does not have means the primary.
     #[serde(default)]
@@ -545,18 +545,18 @@ pub struct Look {
     pub launch_zoom: bool,
     /// Apps follow the shell's appearance: the panel publishes the mode, the
     /// accent, contrast and motion to the GNOME settings that the desktop
-    /// portal serves (`theme::apps`). Off, it leaves them as they are.
+    /// portal serves (`swaypplet_ui::theme::apps`). Off, it leaves them as they are.
     #[serde(default = "yes")]
     pub apps_follow: bool,
     /// What the animated wallpaper does while on battery
-    /// (`services::wallpaper_battery`). Here rather than in `wallpaper`,
+    /// (`swaypplet_ambient::wallpaper_battery`). Here rather than in `wallpaper`,
     /// which is the pick and drops whole on a reset of that section.
     #[serde(default)]
     pub wallpaper_on_battery: OnBattery,
     /// How fast the animated wallpaper plays, as a multiple of the video's
     /// own speed: mpv's `speed`. The unit starts at it (`SPEED=` in its
     /// environment file, `settings::wallpaper`) and a change reaches a
-    /// playing video over IPC (`services::wallpaper_battery`).
+    /// playing video over IPC (`swaypplet_ambient::wallpaper_battery`).
     #[serde(default = "Look::default_video_speed")]
     pub video_speed: f64,
 }
@@ -1051,7 +1051,7 @@ impl Default for Launcher {
     }
 }
 
-/// When the night light is on (`services::gamma`).
+/// When the night light is on (`swaypplet_ambient::gamma`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum NightSchedule {
@@ -1105,7 +1105,7 @@ impl Default for NightLight {
 }
 
 /// When day and night are, for the two things that follow them: the
-/// automatic mode and the night light (`theme::sun`). One section, so the
+/// automatic mode and the night light (`swaypplet_ui::theme::sun`). One section, so the
 /// theme darkens and the screen warms at the same moment.
 ///
 /// The sun decides, at the place picked on the Look pane's map: sunrise and
@@ -1212,7 +1212,7 @@ impl Default for Daylight {
     }
 }
 
-/// Which connected output a profile output claims (`services::displays`).
+/// Which connected output a profile output claims (`swaypplet_displays`).
 /// Every field given must match, as a glob (`*`, `?`); a field left out
 /// matches anything. An output that does not report a make, model or
 /// serial matches it as `Unknown`, as kanshi does.
@@ -1290,7 +1290,7 @@ pub struct DisplayOutput {
     pub adaptive_sync: Option<bool>,
 }
 
-/// How the extra screen (`services::cast::output`) stands while a profile
+/// How the extra screen (`swaypplet_cast::output`) stands while a profile
 /// is on screen. It has no `match`: there is one extra screen at a time,
 /// and sway gives it a new name each time. A field left out keeps what the
 /// extra screen gets by default: 1920×1080 at 60 Hz, scale 1, to the right
@@ -1321,7 +1321,7 @@ pub struct DisplayProfile {
     pub extra_screen: Option<ExtraScreenLayout>,
 }
 
-/// Display profiles, kanshi's job in the panel (`services::displays`): the
+/// Display profiles, kanshi's job in the panel (`swaypplet_displays`): the
 /// first profile, in this order, whose outputs claim every connected output
 /// is applied when the outputs change, and the one applied stays while it
 /// still matches. No profile matching leaves the outputs as they are.
@@ -1388,7 +1388,7 @@ pub enum ScrollMethod {
 }
 
 /// Keyboard, touchpad and mouse, sent to sway by device type
-/// (`services::input`). Every field is optional, and `None` leaves the sway
+/// (`swaypplet_devices::input`). Every field is optional, and `None` leaves the sway
 /// config's own `input` block in force for that one knob: the section holds
 /// only what was changed here, so it never fights the config over the rest.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -1476,7 +1476,7 @@ impl Input {
 }
 
 /// What of the shell shows on an extra screen: a virtual output made for a
-/// TV or a VNC viewer (`services::cast`). Off, the surface is not built
+/// TV or a VNC viewer (`swaypplet_cast`). Off, the surface is not built
 /// there (one per output) or goes to one of the person's own screens
 /// (placed on the focused output); `shell::extra` holds the rules. All off
 /// by default: an extra screen is often a TV other people see.

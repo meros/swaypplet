@@ -9,7 +9,8 @@
 //! re-runs the config's own `bg` line, and this puts the saved pick back on
 //! top of it.
 //!
-//! Standalone process, no GTK, and routed in `main.rs` before `app::run`,
+//! Standalone process, no GTK, and routed in `crates/swaypplet/src/main.rs`
+//! before `swaypplet_app::run`,
 //! which would otherwise treat the word as a request to the running panel.
 
 use serde_json::Value;

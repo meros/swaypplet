@@ -11,7 +11,7 @@
 //! ends. The camera is a `Video/Source` node from a device API (`libcamera`,
 //! `v4l2`) whose state is `running`.
 //!
-//! libpipewire itself cannot be linked here (`services::audio` explains the
+//! libpipewire itself cannot be linked here (`swaypplet_audio` explains the
 //! bindgen collision), and the PulseAudio protocol that the audio service
 //! uses carries no video. `pw-dump --monitor` is PipeWire's own client
 //! printing the graph as JSON and then each change as it happens, so this is

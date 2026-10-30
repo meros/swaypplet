@@ -6,8 +6,8 @@
 //! `notifications`) depend on these; nothing here depends on a surface.
 //!
 //! Sway is the exception to living here: its IPC, workspace naming and tree
-//! searches are their own module (`crate::sway`), because the services read
-//! it too.
+//! searches are in `swaypplet_base::sway`, because crates below this one
+//! read it too.
 
 pub mod backup;
 pub mod battery;

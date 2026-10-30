@@ -2,7 +2,7 @@
 //! section and the bar's battery pill and decision slot, and the words both
 //! of them say about it. No widgets here.
 //!
-//! The battery is read from sysfs, and `services::battery` decides *when*:
+//! The battery is read from sysfs, and `crate::battery` decides *when*:
 //! on UPower's change signals, never on a timer. UPower's own time
 //! estimates, which it smooths over minutes, replace the instantaneous
 //! `energy / power_now` division when it has them.

@@ -7,7 +7,7 @@
 //! a dark halo reads on a dark image and turns into white on white on a
 //! bright one, in either mode: the mode does not change the wallpaper. So
 //! the tone follows the wallpaper instead. The panel measures the region
-//! the text sits over once per wallpaper (`theme::wallpaper`), and this
+//! the text sits over once per wallpaper (`swaypplet_ui::theme::wallpaper`), and this
 //! picks, from the region's luminance and how busy it is:
 //!
 //! - **the ink**: light (`--on-status`, white) or dark ([`INK_DARK`]);
@@ -196,7 +196,7 @@ pub fn on_wallpaper(backdrop: Option<Backdrop>, mode: Mode) -> OnWallpaper {
 // The lock's clock and date stand on the wallpaper with no card. A halo of
 // tight stacked shadows (above) outlines each glyph and reads as a sticker;
 // the clock gets a shade instead: a soft black oval behind it, fading out
-// with no edge (`lock::ui`, drawn in Cairo), and one wide, faint text shadow
+// with no edge (`swaypplet_lock::ui`, drawn in Cairo), and one wide, faint text shadow
 // that gives the digits a little depth. Light ink in either mode.
 //
 // Every pixel of the lock surface that is not a card must stay under the

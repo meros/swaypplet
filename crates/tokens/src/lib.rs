@@ -7,7 +7,7 @@
 //! glass material values), so nothing reads a colour back out of the CSS.
 //!
 //! Pure: values in, values out. No I/O and no GTK; resolving the inputs at
-//! runtime and loading the stylesheet is `crate::theme`.
+//! runtime and loading the stylesheet is `swaypplet_ui::theme`.
 //!
 //! | file | holds |
 //! |---|---|
