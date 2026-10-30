@@ -33,10 +33,10 @@
           gsettings-desktop-schemas
           polkit
           pam
-          # Audio: src/services/audio.rs speaks the PulseAudio protocol to
+          # Audio: crates/services/src/audio.rs speaks the PulseAudio protocol to
           # PipeWire's pulse server instead of parsing `wpctl status`.
           libpulseaudio
-          # Live frames on the GPU (src/jump/gpu.rs): EGL through libglvnd,
+          # Live frames on the GPU (crates/jump/src/jump/gpu.rs): EGL through libglvnd,
           # buffers through GBM.
           libglvnd
           libgbm
@@ -51,143 +51,12 @@
         system:
         let
           pkgs = pkgsFor system;
-          craneLib = crane.mkLib pkgs;
-          runtimeDeps = runtimeDepsFor pkgs;
-
-          # Filter source files, ensuring proto and data directories are included
-          protoOrCargo = path: type:
-            (builtins.match ".*proto$" path != null) ||
-            (builtins.match ".*css$" path != null) ||
-            # protocols/*.xml: read at compile time by wayland-scanner's macros.
-            (builtins.match ".*/protocols/[^/]*\\.xml$" path != null) ||
-            # data/swaypplet-{toggle,launcher}.sh: installed verbatim by the
-            # postInstall below. Matched by name rather than by extension so a
-            # dev/*.sh edit does not churn this derivation's source hash.
-            (builtins.match ".*/data/swaypplet-(toggle|launcher).sh$" path != null) ||
-            # data/land-mask.txt: the Day and night map's land, read by
-            # include_str! in src/settings/location_map.rs.
-            (builtins.match ".*/data/land-mask\\.txt$" path != null) ||
-            # The page a TV plays the live cast with, read by include_str!
-            # in src/services/cast/http.rs.
-            (builtins.match ".*/src/services/cast/player\\.html$" path != null) ||
-            (craneLib.filterCargoSources path type);
-
-          src = pkgs.lib.cleanSourceWith {
-            src = ./.;
-            filter = protoOrCargo;
+          # One derivation per crate (nix/package.nix): a rebuild compiles
+          # only what changed.
+          swayppletPkg = pkgs.callPackage ./nix/package.nix {
+            runtimeDeps = runtimeDepsFor pkgs;
+            rev = self.rev or self.dirtyRev or "";
           };
-
-          commonArgs = {
-            inherit src;
-            strictDeps = true;
-            nativeBuildInputs = with pkgs; [
-              pkg-config
-              wrapGAppsHook4
-              rustPlatform.bindgenHook
-              mold
-              clang
-            ];
-            buildInputs = runtimeDeps;
-            CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "16";
-            CARGO_PROFILE_RELEASE_DEBUG = "0";
-            CARGO_PROFILE_RELEASE_LTO = "false";
-            # The dependencies' level; swaypplet's own code is at 1 through
-            # Cargo.toml's package override, which this does not replace.
-            CARGO_PROFILE_RELEASE_OPT_LEVEL = "2";
-            # Cargo.toml turns it on for the pre-push hook; a sandboxed build
-            # has nothing to reuse and would only write the cache.
-            CARGO_PROFILE_RELEASE_INCREMENTAL = "false";
-            # --build-id: mold writes none by default, and without one
-            # systemd-coredump and debuginfod cannot tie a core to its binary.
-            RUSTFLAGS = "-C linker=clang -C link-arg=-fuse-ld=mold -C link-arg=-Wl,--build-id";
-          };
-
-          # 1. Build & cache ALL third-party dependencies independently into /nix/store
-          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-
-          # 2. Build swaypplet itself in seconds by reusing cargoArtifacts (tests run in checks output)
-          swayppletPkg = craneLib.buildPackage (commonArgs // {
-            inherit cargoArtifacts;
-            doCheck = false;
-            # The xkb layout list the Input tab offers (src/settings/xkb.rs).
-            # Only here, not in commonArgs, so the dependency cache keeps its
-            # hash.
-            SWAYPPLET_XKB_RULES = "${pkgs.xkeyboard_config}/share/X11/xkb/rules/evdev.lst";
-            # The commit the Settings · System tab says is running
-            # (src/settings/system_info.rs). Here and not in commonArgs, so a
-            # new commit does not rebuild the dependencies.
-            SWAYPPLET_REV = self.rev or self.dirtyRev or "";
-            postInstall = ''
-              # Installed from data/, not written here. This postInstall and
-              # package.nix's used to carry a copy each, only this one ships
-              # (overlays.default resolves to this package; package.nix feeds
-              # `checks.build`), and the copies drifted: a fix to the comm test
-              # went into the one nobody installs and the bug stayed live.
-              install -Dm755 data/swaypplet-toggle.sh $out/bin/swaypplet-toggle
-              install -Dm755 data/swaypplet-launcher.sh $out/bin/swaypplet-launcher
-
-              # OSD client — drop-in replacement for swayosd-client
-              cat > $out/bin/swaypplet-osd <<SCRIPT
-              #!/bin/sh
-              exec $out/bin/swaypplet osd "\$@"
-              SCRIPT
-              chmod +x $out/bin/swaypplet-osd
-
-              # Polkit authentication agent — runs as its own process
-              cat > $out/bin/swaypplet-polkit-agent <<SCRIPT
-              #!/bin/sh
-              exec $out/bin/swaypplet polkit-agent "\$@"
-              SCRIPT
-              chmod +x $out/bin/swaypplet-polkit-agent
-
-              # Screenshots — region / screen / pick, all through the running panel
-              cat > $out/bin/swaypplet-screenshot <<SCRIPT
-              #!/bin/sh
-              exec $out/bin/swaypplet screenshot "\$@"
-              SCRIPT
-              chmod +x $out/bin/swaypplet-screenshot
-
-              # Jump — Super+Tab, back through the workspaces you came from.
-              # Two verbs on one binary because sway binds them separately;
-              # each press is its own short-lived client (src/jump/).
-              cat > $out/bin/swaypplet-jump <<SCRIPT
-              #!/bin/sh
-              exec $out/bin/swaypplet jump "\$@"
-              SCRIPT
-              chmod +x $out/bin/swaypplet-jump
-
-              # Label — name the workspace you are on (src/label/)
-              cat > $out/bin/swaypplet-label <<SCRIPT
-              #!/bin/sh
-              exec $out/bin/swaypplet label "\$@"
-              SCRIPT
-              chmod +x $out/bin/swaypplet-label
-
-              # Pin — keep the focused workspace in sight, live (src/jump/pin.rs)
-              cat > $out/bin/swaypplet-pin <<SCRIPT
-              #!/bin/sh
-              exec $out/bin/swaypplet pin "\$@"
-              SCRIPT
-              chmod +x $out/bin/swaypplet-pin
-
-              # Keybinding sheet — show / hide edges from the Super-hold watcher
-              cat > $out/bin/swaypplet-keybinds <<SCRIPT
-              #!/bin/sh
-              exec $out/bin/swaypplet keybinds "\$@"
-              SCRIPT
-              chmod +x $out/bin/swaypplet-keybinds
-
-              # Session locker — swaylock replacement (ext-session-lock-v1 + PAM)
-              cat > $out/bin/swaypplet-lock <<SCRIPT
-              #!/bin/sh
-              exec $out/bin/swaypplet lock "\$@"
-              SCRIPT
-              chmod +x $out/bin/swaypplet-lock
-
-              mkdir -p $out/share/swaypplet
-              cp -r data/* $out/share/swaypplet/
-            '';
-          });
         in
         {
           default = swayppletPkg;
@@ -214,6 +83,8 @@
               mold
               clang
               sccache
+              # Cargo.nix, the per-crate Nix build (dev/cargo-nix.sh)
+              crate2nix
               # pam-sys generates its libpam bindings at build time
               rustPlatform.bindgenHook
 
@@ -248,27 +119,52 @@
         system:
         let
           pkgs = pkgsFor system;
+          craneLib = crane.mkLib pkgs;
+          root = ./.;
+          # The workspace as `cargo test` sees it: every crate with its data,
+          # and the design spec the design lint reads.
+          src = pkgs.lib.cleanSourceWith {
+            src = root;
+            filter =
+              path: type:
+              let
+                rel = pkgs.lib.removePrefix (toString root + "/") (toString path);
+              in
+              rel == "Cargo.toml"
+              || rel == "Cargo.lock"
+              || rel == "crates"
+              || (pkgs.lib.hasPrefix "crates/" rel && builtins.baseNameOf rel != "target")
+              || rel == "docs"
+              || rel == "docs/design-system.md";
+          };
+          commonArgs = {
+            inherit src;
+            pname = "swaypplet";
+            version = "0.1.0";
+            strictDeps = true;
+            nativeBuildInputs = with pkgs; [
+              pkg-config
+              rustPlatform.bindgenHook
+            ];
+            buildInputs = runtimeDepsFor pkgs;
+          };
         in
         {
-          build = pkgs.callPackage ./package.nix { };
+          build = self.packages.${system}.swaypplet;
 
-          # The gate. Until this existed every `#[test]` in the tree ran only
-          # when somebody typed `cargo test` by hand: `package.nix` and the
-          # crane build above both set `doCheck = false`, and the comment on
-          # the crane one claiming "tests run in checks output" was describing
-          # `checks.build`, which is `package.nix`, which does not run them
-          # either. Two places said the tests were covered and neither ran one.
+          # Every `#[test]` in the workspace, the way `cargo test` runs them.
+          # The crates.io dependencies build once into their own derivation
+          # (crane's buildDepsOnly) and stay cached across edits.
           #
-          # An override of `checks.build` rather than a second crane pipeline:
-          # it reuses the same derivation and the same vendored deps, so the
-          # gate costs a check phase rather than a second dependency tree.
-          #
-          # The ten `#[ignore]`d tests stay ignored — they want a live sway
-          # socket or a sound server, which a build sandbox has neither of.
-          tests = (pkgs.callPackage ./package.nix { }).overrideAttrs (old: {
-            pname = "${old.pname or "swaypplet"}-tests";
-            doCheck = true;
-          });
+          # The `#[ignore]`d tests stay ignored: they want a live sway socket
+          # or a sound server, which a build sandbox has neither of.
+          tests = craneLib.cargoTest (
+            commonArgs
+            // {
+              cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+              cargoTestExtraArgs = "--workspace";
+            }
+          );
         }
       );
     };

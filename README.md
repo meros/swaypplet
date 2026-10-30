@@ -161,6 +161,27 @@ cargo test --release
 - `dev/frame-bench.sh` measures frame timing; `--gate` is what `.githooks/pre-push` runs (`git config core.hooksPath .githooks`).
 - The harness never touches the running session: it starts its own compositor, its own cache and its own D-Bus session.
 
+### Code layout
+
+The code is a Cargo workspace. Nix builds each crate as its own derivation (`nix/package.nix`, from the generated `Cargo.nix`), so a rebuild compiles the crate you changed, the crates above it and the binary. Everything else comes from the store.
+
+| Crate | What it holds | Uses |
+|---|---|---|
+| `core` | the settings model, theme, tokens, UI components, layer shell, sway IPC | — |
+| `services` | audio, network, Bluetooth, displays, cast, MPRIS, tray and the other system services | core |
+| `jump` | Super+Tab, pins, the key sheet | core |
+| `screenshot` | screenshots, recording, reports and crash reports | core, services, jump |
+| `lock` | the lock screen, greeter, fingerprint, idle manager, user switching | core, services |
+| `notifications` | the notification popups | core, services |
+| `widgets` | the control panel's sections | core, services, lock, notifications |
+| `polkit` | the polkit agent | core |
+| `settings` | the Settings window and the launcher | core, services, jump, screenshot, widgets |
+| `bar` | the status bar | core, services, jump, screenshot, widgets |
+| `app` | the panel process: panel, OSD, dmenu, labels, the render harness's previews | all of the above |
+| `swaypplet` | `main.rs`: the subcommands, and the build's commit id | all of the above |
+
+A crate uses only the crates listed for it, so a change to `settings` never rebuilds `bar`. After a change to a `Cargo.toml` or `Cargo.lock`, `dev/cargo-nix.sh` regenerates `Cargo.nix`; the pre-commit hook does it for you, and the Nix build stops with a message when it is stale.
+
 [docs/QUALITY.md](docs/QUALITY.md) describes reports, crash reports and the auto-fix runner (`dev/autofix/run.sh`). [docs/README.md](docs/README.md) indexes the rest of the documentation: the roadmap, the motion and settings references, the research notes, and a databank of 332 entries on prior art in desktop shells.
 
 ## License

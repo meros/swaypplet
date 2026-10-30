@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Keep Cargo.nix in step with the manifests: when a commit touches a
+# Cargo.toml or Cargo.lock, regenerate it and add it to the commit. The Nix
+# build refuses a stale one (nix/package.nix).
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+if git diff --cached --name-only | grep -qE '(^|/)Cargo\.(toml|lock)$'; then
+  dev/cargo-nix.sh
+  git add Cargo.nix nix/cargo-nix.stamp
+fi
