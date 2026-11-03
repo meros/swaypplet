@@ -34,7 +34,7 @@ pub fn material(inputs: Inputs) -> Material {
             // 0.89 lands a white page at OKLab L 0.47, about what the old
             // veil and ceiling reached, and leaves the darks alone.
             photochromic: if high { 0.25 } else { 0.89 },
-            frost: if high { 0.45 } else { 0.33 },
+            frost: if high { 0.5 } else { 0.4 },
         },
         Mode::Light => Material {
             fill_color: Rgb::WHITE,
@@ -44,7 +44,7 @@ pub fn material(inputs: Inputs) -> Material {
             // -1.27 (L 0.56) left a black backdrop a muddy mid grey, the one
             // lightness where mid-tone colours on the glass vanish.
             photochromic: if high { -3.0 } else { -2.0 },
-            frost: if high { 0.45 } else { 0.33 },
+            frost: if high { 0.5 } else { 0.4 },
         },
     }
 }
@@ -219,24 +219,25 @@ pub fn glass_body(backdrop: Rgb, m: &Material) -> Rgb {
     Rgb::from_linear([0, 1, 2].map(|i| t[i] * (1.0 - a) + fill[i] * a))
 }
 
-/// The shader's `CHROMA_CAP` and `GAMUT_KNEE` (nixos
-/// patches/scenefx-liquid-glass.patch).
-const CHROMA_CAP: f64 = 0.13;
+/// The shader's tone constants (nixos tools/glass-bench/shaders/liquid_glass.frag).
+const CHROMA_CAP: f64 = 0.22;
 const GAMUT_KNEE: f64 = 0.8;
+/// How far light glass lets chroma follow its lift, and the glass's own
+/// richness, both applied only to colour that is there (`rich`).
+const LIFT_CHROMA_MAX: f64 = 1.5;
+const VIBRANCY: f64 = 1.6;
+/// Light glass lifts a colour only as far as it keeps this share of its
+/// chroma, and never less than `LIFT_MIN` of the way.
+const RETAIN: f64 = 0.85;
+const LIFT_MIN: f64 = 0.3;
 
-/// The shader's `photochromic_tone`, in linear sRGB: lightness along the
-/// mode's curve, hue kept, chroma softly capped and then compressed into
-/// the gamut at the new lightness.
-fn photochromic_tone(t: [f64; 3], p: f64) -> [f64; 3] {
-    let Oklch(l, c, h) = Oklch::from(Rgb::from_linear(t));
-    let l = l.max(0.0);
-    let l = if p > 0.0 {
-        l / (1.0 + l / p)
-    } else {
-        let x = (1.0 - l).max(0.0);
-        1.0 - x / (1.0 - p * x)
-    };
-    let mut c = CHROMA_CAP * (c / CHROMA_CAP).tanh();
+fn smoothstep(e0: f64, e1: f64, x: f64) -> f64 {
+    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// The most chroma sRGB holds at lightness `l` and hue `h`, by bisection.
+fn gamut_chroma(l: f64, h: f64) -> f64 {
     let inside = |c: f64| {
         oklch_linear(Oklch(l, c, h))
             .iter()
@@ -251,6 +252,43 @@ fn photochromic_tone(t: [f64; 3], p: f64) -> [f64; 3] {
             hi = mid;
         }
     }
+    lo
+}
+
+/// The shader's `photochromic_tone`, in linear sRGB: lightness along the
+/// mode's curve, hue kept. Colour that is there is handed back richer
+/// (`VIBRANCY`, and in light glass the lift's own `LIFT_CHROMA_MAX`), colour
+/// that is barely there is left alone, and light glass stops lifting a
+/// saturated colour where sRGB can no longer hold it. Chroma is then softly
+/// capped and compressed into the gamut at the new lightness.
+///
+/// A neutral (no chroma) takes the whole lightness curve and nothing else,
+/// which is what `glass_body` and the contrast tests rely on.
+fn photochromic_tone(t: [f64; 3], p: f64) -> [f64; 3] {
+    let Oklch(l0, c0, h) = Oklch::from(Rgb::from_linear(t));
+    let l0 = l0.max(0.0);
+    let mut l = if p > 0.0 {
+        l0 / (1.0 + l0 / p)
+    } else {
+        let x = (1.0 - l0).max(0.0);
+        1.0 - x / (1.0 - p * x)
+    };
+    if c0 < 1.0e-5 {
+        return oklch_linear(Oklch(l, 0.0, h)).map(|v| v.clamp(0.0, 1.0));
+    }
+    let rich = smoothstep(0.02, 0.10, c0);
+    let mut c = c0;
+    if p < 0.0 {
+        c *= 1.0 + (LIFT_CHROMA_MAX.min((l / l0.max(0.05)).sqrt()) - 1.0) * rich;
+    }
+    c *= 1.0 + (VIBRANCY - 1.0) * rich;
+    c = CHROMA_CAP * (c / CHROMA_CAP).tanh();
+    if p < 0.0 {
+        let retained = gamut_chroma(l, h) / c.max(1.0e-5);
+        let t = LIFT_MIN + (1.0 - LIFT_MIN) * smoothstep(0.45, RETAIN, retained);
+        l = l0 + (l - l0) * t;
+    }
+    let lo = gamut_chroma(l, h);
     let knee = GAMUT_KNEE * lo;
     if c > knee {
         let room = (lo - knee).max(1e-5);
@@ -292,8 +330,11 @@ mod tests {
             ] {
                 let c = Rgb::hex(c);
                 let (i, o) = (Oklch::from(c), Oklch::from(glass_body(c, &m)));
+                // The glass hands colour back richer, within the cap: never
+                // more than the vibrancy and the lift's own gain allow, and
+                // never past CHROMA_CAP (no neon).
                 assert!(
-                    o.1 <= i.1 + 1e-6,
+                    o.1 <= (i.1 * VIBRANCY * LIFT_CHROMA_MAX).min(CHROMA_CAP) + 1e-6,
                     "{mode:?} {c:?}: chroma {:.3} -> {:.3}",
                     i.1,
                     o.1

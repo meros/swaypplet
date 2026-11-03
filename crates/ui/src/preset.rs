@@ -81,18 +81,18 @@ fn base() -> Material {
         refraction: 1.35,
         dispersion: 0.003,
         samples: 4.0,
-        reflection: 0.4,
+        reflection: 0.05,
         lensing: 0.15,
-        frost_radius: 12.0,
+        frost_radius: 24.0,
         absorb: 0.0,
         photochromic: 0.89,
         specular: 0.0,
-        frost: 0.33,
+        frost: 0.4,
         shine: 4096.0,
         reflect_blur: 0.06,
-        contact_angle: 89.5,
+        contact_angle: 60.0,
         tail: 0.5,
-        tail_length: 0.1,
+        tail_length: 0.08,
         // The same in every preset: a preset that set its own fill would be
         // changing swaypplet's colours under the guise of picking a
         // material. Clear (`fill_alpha` 0), as glass.nix ships it since

@@ -154,7 +154,7 @@ fn unset_color() -> String {
 }
 
 fn shipped_contact_angle() -> f64 {
-    89.5
+    60.0
 }
 
 fn shipped_tail() -> f64 {
@@ -162,7 +162,7 @@ fn shipped_tail() -> f64 {
 }
 
 fn shipped_tail_length() -> f64 {
-    0.1
+    0.08
 }
 
 /// The longest tail the length's new meaning allows; anything past it in a
