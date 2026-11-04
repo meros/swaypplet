@@ -369,6 +369,10 @@ pub struct Bar {
     /// The nightly backup's one-glyph verdict, beside the clock.
     #[serde(default = "yes")]
     pub backup: bool,
+    /// The host's T3 Code server as a start/stop glyph beside the backup
+    /// mark (`bar/t3code.rs`). Hidden on a host that has no such unit.
+    #[serde(default = "yes")]
+    pub t3code: bool,
     /// The Look mode's glyph beside the clock: Auto, Dark or Light, and a
     /// click moves to the next (`bar/look_mode.rs`).
     #[serde(default = "yes")]
@@ -391,6 +395,7 @@ impl Default for Bar {
             battery: true,
             presence: true,
             backup: true,
+            t3code: true,
             look_mode: true,
         }
     }

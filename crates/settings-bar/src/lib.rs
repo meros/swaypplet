@@ -41,7 +41,7 @@ struct Segment {
     set: fn(&mut Bar, bool),
 }
 
-const SEGMENTS: [Segment; 7] = [
+const SEGMENTS: [Segment; 8] = [
     Segment {
         label: "Media mark",
         hint: "What is playing, at the left of the right cluster.",
@@ -71,6 +71,12 @@ const SEGMENTS: [Segment; 7] = [
         hint: "One mark for the nightly backup: quiet when it ran, amber when it failed or is two nights old.",
         get: |b| b.backup,
         set: |b, v| b.backup = v,
+    },
+    Segment {
+        label: "T3 Code",
+        hint: "One mark for the T3 Code server on this machine. A click starts or stops it. A machine without the server shows nothing here anyway.",
+        get: |b| b.t3code,
+        set: |b, v| b.t3code = v,
     },
     Segment {
         label: "Light or dark",
@@ -132,6 +138,7 @@ fn subtitle_for(label: &str) -> Option<&'static str> {
         "Media mark" => "What is playing",
         "Presence" => "Whether the sensor sees you",
         "Backup" => "Whether last night's backup ran",
+        "T3 Code" => "Start or stop the server",
         "Light or dark" => "Switch the mode from the bar",
         "Task board" => "Tasks 1 to 4",
         _ => return None,
@@ -392,6 +399,7 @@ pub const SEARCH: &[Entry] = &[
     row("Segments", "Battery", "The battery segment of the bar", &["power", "charge", "percentage"]).keys(&["bar.battery"]),
     row("Segments", "Presence", "The presence sensor's mark", &["sensor", "proximity"]).keys(&["bar.presence"]),
     row("Segments", "Backup", "The nightly backup's glyph", &["restic", "borg", "backup status"]).keys(&["bar.backup"]),
+    row("Segments", "T3 Code", "Start or stop the T3 Code server from the bar", &["t3", "agents", "server", "service"]).keys(&["bar.t3code"]),
     row("Segments", "Light or dark", "Switch the mode from the bar", &["dark mode", "light mode", "theme", "mode toggle", "night mode", "auto"]).keys(&["bar.look_mode"]),
     row("Segments", "Task board", "Tasks 1–4 on the bar", &["tasks", "todo", "board"]).keys(&["bar.board"]),
     row("Volume & brightness", "Shown as", "Where a volume or brightness key shows", &["osd", "on screen display", "popup", "volume popup", "overlay"]).keys(&["bar.osd_in_bar"]),
@@ -440,6 +448,7 @@ mod tests {
                 "look_mode",
                 "media",
                 "presence",
+                "t3code",
                 "tray"
             ]
         );
