@@ -190,6 +190,8 @@ pub fn run(component: &str) {
                         set.fp_hint("Remove and try again");
                     }
                     "face" => set.show_face(Some(swaypplet_ui::ui::FaceState::Looking), "Looking for you"),
+                    "face-found" => set.show_face(Some(swaypplet_ui::ui::FaceState::Found), "Hold still"),
+                    "face-dark" => set.show_face(Some(swaypplet_ui::ui::FaceState::Dark), "Too dark to see you"),
                     "face-ok" => set.show_face(Some(swaypplet_ui::ui::FaceState::Ok), "Recognised you"),
                     "face-fail" => {
                         set.show_face(Some(swaypplet_ui::ui::FaceState::Fail), "Didn't recognise you")

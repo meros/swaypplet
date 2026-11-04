@@ -41,7 +41,9 @@
    column, and this pill's padding (2 x --space-4) and border (2 x 1) come
    off that. */
 .face-pill {
-    padding: var(--space-3) var(--space-4);
+    /* More on the left than the right: the glyph is the heavy end, and it
+       sits at the left edge of the pill's fixed width. */
+    padding: var(--space-3) var(--space-6) var(--space-3) var(--space-5);
     min-width: 284px;
     /* Under the camera: the offset the eye learns. */
     margin-top: calc(var(--space-7) + var(--space-6));

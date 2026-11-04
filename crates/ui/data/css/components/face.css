@@ -3,43 +3,76 @@
 
    The face in a ring, in a thin glass pill.
 
-   owns: ui-face-ring ui-face-eye ui-face-mouth ui-face-pill ui-face-enter
+   owns: ui-face-ring ui-face-eye ui-face-mouth ui-face-pill ui-face-enter ui-face-corner ui-face-frame ui-face-scan ui-face-words
    ══════════════════════════════════════════════════════════════════════ */
 
 /* ── The face indicator (ui::face_pill, ui::face_ring) ──
-   A ring with a face in it: it glances while the camera looks, stills and
-   meets your eye when it has found you, smiles on a match, frowns on a miss,
-   and closes its eyes when no usable frame arrives. Every state is paint on
-   a fixed box; nothing changes an allocation. The pill is thin glass.
+   A face in a viewfinder: four corner brackets frame it, a scan line sweeps
+   it while the camera looks, and the eyes and mouth carry the verdict. The
+   brackets are neutral while it looks and the scan line is the one coloured
+   thing; they close in and take the accent when it has found you, turn green
+   on a match, red on a miss, and amber when it is too dark to see. Every state is paint on a
+   fixed box; nothing changes an allocation. The pill is thin glass.
 
-   Colours say the state and nothing else: accent while looking and found
-   (the one thing to look at), success on a match, danger on a miss, warning
-   when it is too dark to see. */
+   Colours say the state and nothing else: accent once found (the one thing
+   to look at; while looking, only the scan line has it, so "looking" and
+   "found" are two different pictures), success on a match, danger on a
+   miss, warning when it is too dark to see. */
 
 .ui-face-ring {
-    border: 2px solid var(--border-strong);
-    border-radius: var(--radius-pill);
-    min-width: 18px;
-    min-height: 18px;
+    border-radius: var(--radius-tile);
+    transition: background-color var(--motion-state);
 }
 
 .ui-face-eye {
     background-color: var(--fg);
     border-radius: var(--radius-pill);
-    opacity: 0.85;
+    opacity: 0.9;
+    transition: background-color var(--motion-state), opacity var(--motion-state);
 }
 
 .ui-face-mouth {
     border-bottom: 2px solid var(--fg);
     border-radius: 0 0 var(--radius-control) var(--radius-control);
-    opacity: 0.85;
+    opacity: 0.9;
+    transition: border-color var(--motion-state);
 }
 
-/* Looking: the eyes glance left and right and the mouth is a flat line.
+/* The four brackets. One border pair and one rounded corner each. */
+.ui-face-corner {
+    border: 0 solid var(--border-strong);
+    transition: border-color var(--motion-state);
+}
+
+.ui-face-corner.tl { border-width: 2px 0 0 2px; border-top-left-radius: var(--radius-control); }
+.ui-face-corner.tr { border-width: 2px 2px 0 0; border-top-right-radius: var(--radius-control); }
+.ui-face-corner.bl { border-width: 0 0 2px 2px; border-bottom-left-radius: var(--radius-control); }
+.ui-face-corner.br { border-width: 0 2px 2px 0; border-bottom-right-radius: var(--radius-control); }
+
+.ui-face-frame {
+    transition: transform var(--motion-state);
+}
+
+/* The scan line: a soft bar that sweeps down the face and fades at both
+   ends. Only while looking. */
+.ui-face-scan {
+    background-image: linear-gradient(90deg, transparent, var(--accent), transparent);
+    border-radius: var(--radius-pill);
+    opacity: 0;
+}
+
+/* Looking: the brackets breathe, the scan line sweeps, the eyes glance.
    Searching, not progress: nobody knows how long finding a face takes. */
-.ui-face-ring.looking {
-    border-color: var(--border-strong);
-    border-top-color: var(--accent);
+.ui-face-ring.looking { background-color: var(--fill-1); }
+
+.ui-face-ring.looking .ui-face-corner { border-color: var(--fg); opacity: 0.75; }
+
+.ui-face-ring.looking .ui-face-frame {
+    animation: ui-face-frame-breathe 1.8s ease-in-out infinite alternate;
+}
+
+.ui-face-ring.looking .ui-face-scan {
+    animation: ui-face-scan 1.9s ease-in-out infinite;
 }
 
 .ui-face-ring.looking .ui-face-eye {
@@ -47,27 +80,32 @@
 }
 
 .ui-face-ring.looking .ui-face-mouth {
-    /* Full thickness: at 22 px a half-height line is a smudge, not a mouth. */
+    /* Full thickness: at this size a half-height line is a smudge, not a mouth. */
     border-radius: 0;
 }
 
 /* Dark: no motion at all, because nothing is being searched. The eyes close:
    it cannot see. */
-.ui-face-ring.dark {
-    border-color: var(--border-subtle);
-    border-top-color: var(--warning);
-}
+.ui-face-ring.dark { background-color: var(--warning-tint); }
+
+.ui-face-ring.dark .ui-face-corner { border-color: var(--warning); opacity: 0.7; }
 
 .ui-face-ring.dark .ui-face-eye { transform: scaleY(0.25); opacity: 0.6; }
 
 .ui-face-ring.dark .ui-face-mouth { border-radius: 0; opacity: 0.6; }
 
-/* Found: the glance stops and the eyes meet yours. The stop is the signal to
-   hold still. */
+/* Found: the brackets close in on the face and the glance stops. The stop is
+   the signal to hold still. */
+.ui-face-ring.found .ui-face-corner { border-color: var(--accent); }
+
 .ui-face-ring.found {
-    border-color: var(--accent);
-    animation: ui-face-ring-pulse 0.9s ease-in-out infinite;
+    /* A tint behind the face, so "found" is a different shape from
+       "looking" and not only a different gap: the one still frame of the
+       two that has to be told apart from across a room. */
+    background-color: var(--accent-tint);
 }
+
+.ui-face-ring.found .ui-face-frame { transform: scale(0.82); }
 
 .ui-face-ring.found .ui-face-eye {
     background-color: var(--accent);
@@ -75,15 +113,22 @@
     animation: ui-face-blink 3.2s ease-in-out infinite;
 }
 
-.ui-face-ring.found .ui-face-mouth { border-color: var(--accent); }
+.ui-face-ring.found .ui-face-mouth {
+    border-color: var(--accent);
+    /* Flat: a curve here reads as the smile of a match. */
+    border-radius: 0;
+}
 
 /* Recognised: it smiles. A tint behind, not a fill: the smile is drawn in
    the same colour and needs the dark behind it to read. */
 .ui-face-ring.ok {
-    border-color: var(--success);
     background-color: var(--success-tint);
     animation: ui-face-ring-ok var(--motion-enter);
 }
+
+.ui-face-ring.ok .ui-face-corner { border-color: var(--success); }
+
+.ui-face-ring.ok .ui-face-frame { transform: scale(0.82); }
 
 .ui-face-ring.ok .ui-face-eye {
     background-color: var(--success);
@@ -102,11 +147,14 @@
 /* Not recognised: a frown and a shake, not a cross. It retries on its own,
    so it reads as "that didn't work", not as a verdict. */
 .ui-face-ring.fail {
-    border-color: var(--danger);
     /* A one-shot shake: attention, which no motion token names, so the
        scale's length and curve rather than a meaning. */
     animation: ui-face-ring-fail var(--dur-emphasis) var(--ease-standard);
 }
+
+.ui-face-ring.fail { background-color: var(--danger-tint); }
+
+.ui-face-ring.fail .ui-face-corner { border-color: var(--danger); }
 
 .ui-face-ring.fail .ui-face-eye { background-color: var(--danger); opacity: 1; }
 
@@ -114,7 +162,7 @@
     border-color: var(--danger);
     /* The same arc turned over and dropped under the eyes. Translate first:
        after the rotation it would move the mouth up instead. */
-    transform: translateY(3px) rotate(180deg);
+    transform: translateY(4px) rotate(180deg);
 }
 
 /* Motion. The verdicts arrive (the smile, the punch, the pill's glow are one
@@ -128,6 +176,19 @@
     30%, 45%  { transform: translateX(-2px); }
     58%, 73%  { transform: translateX(2px); }
     85%, 100% { transform: translateX(0); }
+}
+
+@keyframes ui-face-frame-breathe {
+    from { transform: scale(1); }
+    to   { transform: scale(0.86); }
+}
+
+/* The sweep: in, down the face, out. */
+@keyframes ui-face-scan {
+    0%        { transform: translateY(0);    opacity: 0; }
+    15%       { opacity: 0.95; }
+    85%       { opacity: 0.95; }
+    100%      { transform: translateY(17px); opacity: 0; }
 }
 
 @keyframes ui-face-blink {

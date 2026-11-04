@@ -558,7 +558,7 @@ impl SurfaceSet {
             pill: face_pill,
             ring: face_ring,
             label: face_label,
-        } = ui::face_pill(22);
+        } = ui::face_pill(46);
         ui::card::adopt(&face_pill, ui::Card::Floating);
         face_pill.add_css_class("face-pill");
         face_pill.set_visible(false);

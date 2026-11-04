@@ -78,7 +78,7 @@ impl Cue {
             pill,
             ring,
             label,
-        } = swaypplet_ui::ui::face_pill(18);
+        } = swaypplet_ui::ui::face_pill(38);
         pill.add_css_class("face-pill");
 
         // The wrapper is a fixed strip. Height is the pill's offset plus its

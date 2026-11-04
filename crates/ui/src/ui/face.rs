@@ -1,4 +1,4 @@
-//! The face indicator: a face in a ring, in a thin glass pill.
+//! The face indicator: a face in a viewfinder, in a thin glass pill.
 //!
 //! `ui::face_ring(size)`, `ui::face_pill(size)`; `ui::set_face_state`,
 //! `ui::set_face_enter` at runtime.
@@ -44,10 +44,14 @@ impl FaceState {
     }
 }
 
-/// The face in a ring. It is a face, not a spinner: a ring said "something is
-/// happening", a face says what. Three boxes placed by hand in a `Fixed` so
-/// the eyes and mouth move as paint (transforms), never as allocation.
-/// `size` is the ring's outer size in px; the face scales with it.
+/// The face in a viewfinder. It is a face, not a spinner: a spinner says
+/// "something is happening", a face says what. Four corner brackets frame it
+/// (the sign for "a camera is reading a face"), a scan line sweeps it while
+/// the camera looks, and the eyes and mouth carry the verdict.
+///
+/// Every part is a box placed by hand in a `Fixed`, so the states move as
+/// paint (transforms), never as allocation. `size` is the outer size in px;
+/// the face is drawn on a 36 px grid and scaled from it.
 pub fn face_ring(size: i32) -> gtk4::Box {
     let ring = gtk4::Box::builder()
         .width_request(size)
@@ -61,10 +65,35 @@ pub fn face_ring(size: i32) -> gtk4::Box {
         .height_request(size)
         .build();
 
-    // Drawn on a 22 px grid and scaled from it.
-    let unit = f64::from(size) / 22.0;
+    let unit = f64::from(size) / 36.0;
     let px = |v: f64| (v * unit).round();
-    let eye_size = px(4.0) as i32;
+    let corner = px(11.0) as i32;
+    let far = size - corner;
+
+    // The frame: its own node, so the breathing scales the four corners
+    // together and the face inside does not move.
+    let frame = gtk4::Fixed::builder()
+        .width_request(size)
+        .height_request(size)
+        .build();
+    frame.add_css_class("ui-face-frame");
+    for (class, x, y) in [
+        ("tl", 0, 0),
+        ("tr", far, 0),
+        ("bl", 0, far),
+        ("br", far, far),
+    ] {
+        let c = gtk4::Box::builder()
+            .width_request(corner)
+            .height_request(corner)
+            .build();
+        c.add_css_class("ui-face-corner");
+        c.add_css_class(class);
+        frame.put(&c, f64::from(x), f64::from(y));
+    }
+    inner.put(&frame, 0.0, 0.0);
+
+    let eye_size = px(5.0) as i32;
     let eye = || {
         let e = gtk4::Box::builder()
             .width_request(eye_size)
@@ -74,14 +103,21 @@ pub fn face_ring(size: i32) -> gtk4::Box {
         e
     };
     let mouth = gtk4::Box::builder()
-        .width_request(px(8.0) as i32)
-        .height_request(px(4.0) as i32)
+        .width_request(px(12.0) as i32)
+        .height_request(px(5.0) as i32)
         .build();
     mouth.add_css_class("ui-face-mouth");
 
-    inner.put(&eye(), px(6.0), px(7.0));
-    inner.put(&eye(), px(12.0), px(7.0));
-    inner.put(&mouth, px(7.0), px(12.0));
+    let scan = gtk4::Box::builder()
+        .width_request(size - 2 * px(8.0) as i32)
+        .height_request(2)
+        .build();
+    scan.add_css_class("ui-face-scan");
+
+    inner.put(&eye(), px(10.0), px(11.0));
+    inner.put(&eye(), px(21.0), px(11.0));
+    inner.put(&mouth, px(12.0), px(21.0));
+    inner.put(&scan, px(8.0), px(9.0));
     ring.append(&inner);
     ring
 }
@@ -98,17 +134,26 @@ pub struct FacePill {
 }
 
 pub fn face_pill(ring_size: i32) -> FacePill {
-    let pill = hbox(4);
+    let pill = hbox(0);
     pill.set_halign(Align::Center);
     pill.set_valign(Align::Start);
     card::adopt(&pill, Card::Thin);
     pill.add_css_class("ui-face-pill");
     let ring = face_ring(ring_size);
-    let label = text("", Text::Body, Tone::Fg);
+    let label = text("", Text::Title, Tone::Fg);
+    label.add_css_class("ui-face-words");
     label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    label.set_hexpand(true);
-    pill.append(&ring);
-    pill.append(&label);
+    // The pill is wider than its words (one fixed width for every wording,
+    // see 14-elevation-face.css). The glyph stays where it is whatever the
+    // words say, and the words start at a fixed gap from it: centring the
+    // pair would move the glyph every time the wording changed length.
+    ring.set_margin_end(14);
+    let row = hbox(0);
+    row.set_halign(Align::Start);
+    row.set_hexpand(true);
+    row.append(&ring);
+    row.append(&label);
+    pill.append(&row);
     let wrap = vbox(0);
     wrap.set_halign(Align::Center);
     wrap.set_valign(Align::Start);
