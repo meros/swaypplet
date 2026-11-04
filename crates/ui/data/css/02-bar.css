@@ -153,3 +153,31 @@
     min-width: 48px;
     min-height: 48px;
 }
+
+/* The workspace's saved name, after its mark, while a screen is on it
+   (crates/bar/src/workspaces.rs). */
+.bar-ws-name {
+    margin-left: var(--space-2);
+}
+
+/* The editor card's rows (crates/bar/src/name_editor.rs). */
+.bar-name-editor {
+    min-width: 280px;
+}
+
+.bar-name-actions {
+    margin-top: var(--space-1);
+}
+
+/* The pop-up switch's row: flush to the card's own gutter, like the field
+   and the title above it. */
+.bar-name-switch {
+    padding-left: 0;
+    padding-right: 0;
+}
+
+/* The flat Remove button's label lines up with the field's edge, not its own
+   padding. */
+.bar-name-actions > button:first-child {
+    margin-left: calc(-1 * var(--space-4));
+}

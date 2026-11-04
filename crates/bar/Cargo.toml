@@ -14,6 +14,7 @@ swaypplet-audio.workspace = true
 swaypplet-devices.workspace = true
 swaypplet-cast.workspace = true
 swaypplet-jump.workspace = true
+swaypplet-label.workspace = true
 swaypplet-screenshot.workspace = true
 swaypplet-widgets.workspace = true
 gtk4.workspace = true

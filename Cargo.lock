@@ -2111,6 +2111,7 @@ dependencies = [
  "swaypplet-cast",
  "swaypplet-devices",
  "swaypplet-jump",
+ "swaypplet-label",
  "swaypplet-model",
  "swaypplet-screenshot",
  "swaypplet-system",
@@ -2280,6 +2281,7 @@ dependencies = [
 name = "swaypplet-label"
 version = "0.1.0"
 dependencies = [
+ "gio",
  "glib",
  "gtk4",
  "gtk4-layer-shell",

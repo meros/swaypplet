@@ -7112,6 +7112,10 @@ rec {
             packageId = "swaypplet-jump";
           }
           {
+            name = "swaypplet-label";
+            packageId = "swaypplet-label";
+          }
+          {
             name = "swaypplet-model";
             packageId = "swaypplet-model";
           }
@@ -7688,6 +7692,10 @@ rec {
         src = lib.cleanSourceWith { filter = sourceFilter;  src = ./crates/label; };
         libName = "swaypplet_label";
         dependencies = [
+          {
+            name = "gio";
+            packageId = "gio";
+          }
           {
             name = "glib";
             packageId = "glib";

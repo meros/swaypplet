@@ -1,192 +1,62 @@
-//! Workspace labels: a name for the workspace you are on, in a glass pill at
-//! the top middle of the screen.
+//! Workspace names. The bar shows and edits them; this crate keeps them
+//! (`store`) and draws the toast that says one when you arrive.
 //!
-//! The label is free text, kept per workspace name. Three modes say when the
-//! pill shows without being asked:
+//! **In the bar.** A workspace with a name shows it in its segment while a
+//! screen is on it, and a right-click on any segment opens the editor
+//! (`swaypplet-bar`, `name_editor.rs`). Nothing here opens by itself under
+//! the pointer.
 //!
-//! | mode     | the pill                                                        |
-//! |----------|-----------------------------------------------------------------|
-//! | `hidden` | never on its own; the name is only seen when you summon it      |
-//! | `auto`   | for a moment after you switch to a workspace that has a name    |
-//! | `always` | stays up on every output whose workspace has a name             |
+//! **The toast.** When you settle on a workspace that has a name, a card at
+//! the top middle of that output says the workspace's mark and its name,
+//! large, for [`TOAST_MS`]. It is a confirmation of where the keys landed,
+//! so it is built never to be in the way:
 //!
-//! A workspace with no name never shows on its own, in any mode: an empty
-//! pill on every switch would be noise, and the name is what the pill is for.
+//! - It waits [`SETTLE_MS`] after the switch. Stepping through five
+//!   workspaces with the keys shows the last one once, not five cards.
+//! - It takes no input at all. The pointer and the keyboard go through it to
+//!   the window behind, so it cannot catch a click or hold a key.
+//! - It never shows over a fullscreen window, and the mode `hidden` turns it
+//!   off for good (`swaypplet label mode hidden`, or the toggle in the
+//!   editor).
 //!
-//! Two doors summon it. `swaypplet label` (a keybind) opens the pill on the
-//! focused output with the text field focused, and a second press saves and
-//! closes it. The mouse rests in a thin strip at the top middle of the output
-//! (`Edge`) for [`DWELL_MS`] and the pill appears; a click on it starts the
-//! edit. The mode and a remove button live in the pill while it is hovered or
-//! edited, so the pill alone is enough to change everything it does.
-//!
-//! One pill per output, each showing the workspace visible on that output
-//! (a layer surface is bound to its output, `shell::PerMonitor`). The edit
-//! belongs to one workspace, fixed when it starts: if sway moves that output
-//! to another workspace mid-edit, the text is saved to the first one and the
-//! edit ends.
-//!
-//! The text field takes the keyboard exclusively while it edits, which steals
-//! every key, so an edit that sees no typing for [`EDIT_IDLE_MS`] saves and
-//! closes itself. Enter saves, Escape drops the change.
-//!
-//! The strip is hidden while a window is fullscreen on the focused output:
-//! a four-pixel band over a video's top edge would still catch the pointer.
-//!
-//! State lives in `$XDG_STATE_HOME/swaypplet/workspace-labels.json`, written
-//! only by this process (the CLI is a request to it, as `jump` is). It is
-//! state and not a setting: a person fills it in all day, and nothing in it
-//! has a Nix default.
+//! The CLI is a request to this process: `swaypplet label` opens the editor
+//! for the focused workspace, `swaypplet label mode <hidden|auto|next>`,
+//! `swaypplet label clear`.
 
-use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+mod store;
+
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use gtk4::gdk;
 use gtk4::prelude::*;
-use gtk4_layer_shell::{Edge, KeyboardMode, LayerShell as _};
-use serde_json::{Value, json};
+use gtk4_layer_shell::Edge;
 
 use swaypplet_base::spawn::Timeout;
 use swaypplet_base::sway::ipc::SwayService;
+use swaypplet_base::sway::workspace::label_for_name;
 use swaypplet_ui::shell::{Namespace, PerMonitor, Surface};
 use swaypplet_ui::ui;
 
-/// How long the pill stays after a workspace switch in `auto`.
-const AUTO_MS: u64 = 2500;
-/// How long it stays after the pointer leaves it.
-const LEAVE_MS: u64 = 1200;
-/// How long it stays after the strip summons it or a mode changes, if the
-/// pointer never reaches it.
-const PEEK_MS: u64 = 3000;
-/// How long the pointer rests in the strip before the pill comes.
-const DWELL_MS: u64 = 120;
-/// An edit with no typing for this long saves and closes (module docs).
-const EDIT_IDLE_MS: u64 = 20_000;
-/// The strip the pointer rests in: wide enough to find, thin enough that a
-/// window's top edge underneath it stays reachable.
-const EDGE_WIDTH: i32 = 480;
-const EDGE_HEIGHT: i32 = 8;
-const PLACEHOLDER: &str = "Name this workspace";
+pub use store::{Mode, connect_changed, connect_edit, mode, name_of, set_mode, set_name};
 
-// ── The saved state ─────────────────────────────────────────────────────
+/// How long the toast stays.
+const TOAST_MS: u64 = 1800;
+/// How long a workspace must stay put before the toast is shown for it.
+const SETTLE_MS: u64 = 160;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum Mode {
-    Hidden,
-    #[default]
-    Auto,
-    Always,
-}
-
-impl Mode {
-    const ALL: [Mode; 3] = [Mode::Hidden, Mode::Auto, Mode::Always];
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Mode::Hidden => "hidden",
-            Mode::Auto => "auto",
-            Mode::Always => "always",
-        }
-    }
-
-    fn title(self) -> &'static str {
-        match self {
-            Mode::Hidden => "Hidden",
-            Mode::Auto => "Auto",
-            Mode::Always => "Always",
-        }
-    }
-
-    fn parse(s: &str) -> Option<Mode> {
-        Mode::ALL.into_iter().find(|m| m.as_str() == s)
-    }
-
-    /// The mode a key that cycles lands on.
-    fn next(self) -> Mode {
-        match self {
-            Mode::Hidden => Mode::Auto,
-            Mode::Auto => Mode::Always,
-            Mode::Always => Mode::Hidden,
-        }
-    }
-}
-
-#[derive(Default, Debug, PartialEq, Eq)]
-struct Data {
-    mode: Mode,
-    /// Workspace name → label. Never holds an empty label.
-    labels: BTreeMap<String, String>,
-}
-
-impl Data {
-    fn parse(raw: &[u8]) -> Data {
-        let Ok(value) = serde_json::from_slice::<Value>(raw) else {
-            return Data::default();
-        };
-        Data {
-            mode: value["mode"]
-                .as_str()
-                .and_then(Mode::parse)
-                .unwrap_or_default(),
-            labels: value["labels"]
-                .as_object()
-                .into_iter()
-                .flatten()
-                .filter_map(|(ws, text)| {
-                    let text = text.as_str()?.trim();
-                    (!text.is_empty()).then(|| (ws.clone(), text.to_string()))
-                })
-                .collect(),
-        }
-    }
-
-    fn to_json(&self) -> String {
-        let text = json!({ "mode": self.mode.as_str(), "labels": self.labels });
-        serde_json::to_string_pretty(&text).unwrap_or_default()
-    }
-
-    fn path() -> PathBuf {
-        swaypplet_base::paths::state_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("swaypplet")
-            .join("workspace-labels.json")
-    }
-
-    fn load() -> Data {
-        std::fs::read(Self::path())
-            .map(|raw| Data::parse(&raw))
-            .unwrap_or_default()
-    }
-
-    /// Written whole through a rename, so a crash mid-write leaves the old
-    /// file and never half of the new one.
-    fn save(&self) {
-        let path = Self::path();
-        if let Err(e) = swaypplet_base::fs::write_atomic(&path, self.to_json()) {
-            log::warn!("label: could not save {}: {e}", path.display());
-        }
-    }
-}
-
-// ── One pill ────────────────────────────────────────────────────────────
-
-/// The pill on one output.
-struct Pill {
+/// The toast on one output.
+struct Toast {
     connector: String,
     surface: Surface,
-    stack: gtk4::Stack,
-    shown: gtk4::Label,
-    entry: gtk4::Entry,
-    controls: gtk4::Box,
-    modes: Vec<(Mode, gtk4::Button)>,
-    clear: gtk4::Button,
+    mark: gtk4::Label,
+    name: gtk4::Label,
 }
 
-impl Pill {
-    fn new(app: &gtk4::Application, monitor: &gdk::Monitor, owner: Weak<Inner>) -> Pill {
+impl Toast {
+    fn new(app: &gtk4::Application, monitor: &gdk::Monitor) -> Toast {
         let connector = monitor
             .connector()
             .map(|c| c.to_string())
@@ -200,255 +70,60 @@ impl Pill {
 
         let outer = surface.card();
         outer.set_halign(gtk4::Align::Center);
-        outer.add_css_class("label-pill");
+        outer.add_css_class("label-toast");
 
-        let shown = gtk4::Label::builder()
-            .xalign(0.5)
-            .hexpand(true)
+        // The workspace's own mark, as the bar draws it, in a chip: it says
+        // where, and the name says what.
+        let mark = gtk4::Label::new(None);
+        ui::set_text_style(&mark, ui::Text::DisplaySm, ui::Tone::Accent);
+        mark.set_hexpand(true);
+        mark.set_vexpand(true);
+        mark.set_halign(gtk4::Align::Center);
+        mark.set_valign(gtk4::Align::Center);
+        let tile = ui::card::well();
+        tile.add_css_class("label-toast-mark");
+        tile.set_valign(gtk4::Align::Center);
+        tile.append(&mark);
+
+        let name = gtk4::Label::builder()
+            .xalign(0.0)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
-            .max_width_chars(40)
+            .max_width_chars(32)
             .build();
-        ui::set_text_style(&shown, ui::Text::Title, ui::Tone::Fg);
-
-        let entry = gtk4::Entry::builder()
-            .placeholder_text(PLACEHOLDER)
-            .max_length(80)
-            .width_chars(28)
-            .hexpand(true)
-            .build();
-        ui::entry::adopt(&entry, ui::FieldSize::Normal);
-
-        let stack = gtk4::Stack::new();
-        stack.add_named(&shown, Some("read"));
-        stack.add_named(&entry, Some("edit"));
-        stack.set_visible_child_name("read");
-        stack.set_hexpand(true);
-
-        // Mode and remove: in the pill, so the pill alone changes everything
-        // it does. Shown while the pill is hovered or edited.
-        let track = ui::segmented();
-        let mut modes = Vec::new();
-        for mode in Mode::ALL {
-            let button = gtk4::Button::with_label(mode.title());
-            ui::segment::adopt(&button, true);
-            track.append(&button);
-            let owner = owner.clone();
-            button.connect_clicked(move |_| {
-                if let Some(owner) = owner.upgrade() {
-                    Labels { inner: owner }.set_mode(mode);
-                }
-            });
-            modes.push((mode, button));
-        }
-        let clear = ui::button_with(
-            ui::Face::Glyph {
-                glyph: ui::icons::CLOSE,
-                tooltip: "Remove the name",
-            },
-            ui::Kind::Flat,
-            ui::Size::Normal,
-        );
-        let controls = ui::hbox(3);
-        controls.append(&track);
-        controls.append(&clear);
-        controls.set_visible(false);
+        ui::set_text_style(&name, ui::Text::DisplaySm, ui::Tone::Fg);
+        name.set_valign(gtk4::Align::Center);
 
         let content = ui::hbox(4);
-        content.append(&stack);
-        content.append(&controls);
+        content.append(&tile);
+        content.append(&name);
         outer.append(&content);
         surface.set_content(&content);
 
-        // Click on the name: edit it.
-        let click = gtk4::GestureClick::new();
-        {
-            let owner = owner.clone();
-            let connector = connector.clone();
-            click.connect_released(move |_, _, _, _| {
-                if let Some(owner) = owner.upgrade() {
-                    Labels { inner: owner }.begin_edit(&connector);
-                }
-            });
-        }
-        shown.add_controller(click);
+        // Nothing on it takes input: the region is empty, set on every map
+        // because it lives on the surface the compositor re-creates.
+        surface.window().connect_map(|window| {
+            if let Some(surface) = window.surface() {
+                surface.set_input_region(Some(&gdk::cairo::Region::create()));
+            }
+        });
 
-        // The pointer on the pill keeps it up; leaving starts the countdown.
-        let motion = gtk4::EventControllerMotion::new();
-        {
-            let owner = owner.clone();
-            let connector = connector.clone();
-            motion.connect_enter(move |_, _, _| {
-                if let Some(owner) = owner.upgrade() {
-                    Labels { inner: owner }.pointer(&connector, true);
-                }
-            });
-        }
-        {
-            let owner = owner.clone();
-            let connector = connector.clone();
-            motion.connect_leave(move |_| {
-                if let Some(owner) = owner.upgrade() {
-                    Labels { inner: owner }.pointer(&connector, false);
-                }
-            });
-        }
-        outer.add_controller(motion);
-
-        // Enter saves (the entry's own signal), Escape drops.
-        let keys = gtk4::EventControllerKey::new();
-        {
-            let owner = owner.clone();
-            keys.connect_key_pressed(move |_, key, _, _| {
-                if key != gdk::Key::Escape {
-                    return glib::Propagation::Proceed;
-                }
-                if let Some(owner) = owner.upgrade() {
-                    Labels { inner: owner }.finish_edit(false);
-                }
-                glib::Propagation::Stop
-            });
-        }
-        entry.add_controller(keys);
-        {
-            let owner = owner.clone();
-            entry.connect_activate(move |_| {
-                if let Some(owner) = owner.upgrade() {
-                    Labels { inner: owner }.finish_edit(true);
-                }
-            });
-        }
-        {
-            let owner = owner.clone();
-            entry.connect_changed(move |_| {
-                if let Some(owner) = owner.upgrade() {
-                    Labels { inner: owner }.arm_edit_idle();
-                }
-            });
-        }
-        {
-            let connector = connector.clone();
-            clear.connect_clicked(move |_| {
-                if let Some(owner) = owner.upgrade() {
-                    Labels { inner: owner }.clear(&connector);
-                }
-            });
-        }
-
-        Pill {
+        Toast {
             connector,
             surface,
-            stack,
-            shown,
-            entry,
-            controls,
-            modes,
-            clear,
-        }
-    }
-
-    /// Draw `text` (empty: the prompt), `mode`, and whether the controls show.
-    fn draw(&self, text: &str, mode: Mode, controls: bool) {
-        if text.is_empty() {
-            self.shown.set_label(PLACEHOLDER);
-            ui::set_text_style(&self.shown, ui::Text::Title, ui::Tone::Faint);
-        } else {
-            self.shown.set_label(text);
-            ui::set_text_style(&self.shown, ui::Text::Title, ui::Tone::Fg);
-        }
-        self.controls.set_visible(controls);
-        self.clear.set_visible(!text.is_empty());
-        for (m, button) in &self.modes {
-            let state = if *m == mode {
-                ui::Selection::Current
-            } else {
-                ui::Selection::Idle
-            };
-            ui::set_selection(button, state);
+            mark,
+            name,
         }
     }
 }
-
-/// The strip at the top middle of an output that summons the pill.
-struct EdgeZone {
-    surface: Surface,
-}
-
-impl EdgeZone {
-    fn new(app: &gtk4::Application, monitor: &gdk::Monitor, owner: Weak<Inner>) -> EdgeZone {
-        let connector = monitor
-            .connector()
-            .map(|c| c.to_string())
-            .unwrap_or_default();
-        // As small as its content: a layer surface with no default size is
-        // 200 by 200, which would catch the pointer over a stretch of every
-        // window's title bar. A default of 1 by 1 is gtk4-layer-shell's
-        // documented way to shrink to the content, which is the strip.
-        let surface = Surface::builder(app, Namespace::LabelEdge)
-            .monitor(Some(monitor))
-            .anchor(&[Edge::Top])
-            .width(1)
-            .height(1)
-            .resizable(false)
-            .no_card()
-            .build();
-        // Painted, if barely: a surface with nothing to draw never got its
-        // second size request, and stayed at gtk4-layer-shell's initial
-        // 200 by 200. A component's hairline at 1% does it.
-        let strip = ui::separator(gtk4::Orientation::Horizontal);
-        strip.set_opacity(0.01);
-        strip.set_size_request(EDGE_WIDTH, EDGE_HEIGHT);
-        surface.root().append(&strip);
-
-        // Rest here for DWELL_MS and the pill comes; passing through does not.
-        let dwell = Rc::new(swaypplet_base::spawn::Timeout::new());
-        let motion = gtk4::EventControllerMotion::new();
-        {
-            let dwell = dwell.clone();
-            motion.connect_enter(move |_, _, _| {
-                log::debug!("label: pointer in the strip");
-                let owner = owner.clone();
-                let connector = connector.clone();
-                dwell.arm(Duration::from_millis(DWELL_MS), move || {
-                    log::debug!("label: dwell over");
-                    if let Some(owner) = owner.upgrade() {
-                        Labels { inner: owner }.peek(&connector, true, PEEK_MS);
-                    }
-                });
-            });
-        }
-        motion.connect_leave(move |_| {
-            log::debug!("label: pointer left the strip");
-            dwell.cancel();
-        });
-        // On the window, not the root: the controller then sees the pointer
-        // wherever it is on the surface, with or without a child under it.
-        surface.window().add_controller(motion);
-        surface.show();
-
-        EdgeZone { surface }
-    }
-}
-
-// ── The service ─────────────────────────────────────────────────────────
 
 struct Inner {
     sway: Rc<SwayService>,
-    pills: Rc<PerMonitor<Pill>>,
-    edges: Rc<PerMonitor<EdgeZone>>,
-    data: RefCell<Data>,
+    toasts: Rc<PerMonitor<Toast>>,
     /// Output → the workspace visible on it at the last sway event.
     visible: RefCell<HashMap<String, String>>,
-    /// The output being edited and the workspace the edit belongs to.
-    editing: RefCell<Option<(String, String)>>,
-    /// Outputs whose pill has the pointer on it.
-    hover: RefCell<Vec<String>>,
-    /// Outputs showing for a moment, and whether with the controls.
-    peeking: RefCell<HashMap<String, bool>>,
-    /// Ends every peek.
-    peek_timer: Timeout,
-    edit_timer: Timeout,
-    /// Set while a change is being drawn, so a draw never starts another.
-    drawing: Cell<bool>,
+    /// Output → the countdown before its toast shows, and the one that ends it.
+    settle: RefCell<HashMap<String, Rc<Timeout>>>,
+    hide: RefCell<HashMap<String, Rc<Timeout>>>,
 }
 
 /// Cloning shares the service.
@@ -461,50 +136,23 @@ impl Labels {
     pub fn new(app: &gtk4::Application, sway: Rc<SwayService>) -> Labels {
         let inner = Rc::new(Inner {
             sway: sway.clone(),
-            pills: PerMonitor::new(),
-            edges: PerMonitor::new(),
-            data: RefCell::new(Data::load()),
+            toasts: PerMonitor::new(),
             visible: RefCell::new(HashMap::new()),
-            editing: RefCell::new(None),
-            hover: RefCell::new(Vec::new()),
-            peeking: RefCell::new(HashMap::new()),
-            peek_timer: Timeout::new(),
-            edit_timer: Timeout::new(),
-            drawing: Cell::new(false),
+            settle: RefCell::new(HashMap::new()),
+            hide: RefCell::new(HashMap::new()),
         });
         let labels = Labels { inner };
+        // Not on an extra screen unless switched on (`shell::extra`).
+        swaypplet_ui::shell::extra::follow(
+            &labels.inner.toasts,
+            swaypplet_ui::shell::extra::Kind::WorkspaceNames,
+        );
         {
             let app = app.clone();
-            let weak = Rc::downgrade(&labels.inner);
-            labels.inner.pills.after_change({
-                let weak = weak.clone();
-                move || {
-                    if let Some(inner) = weak.upgrade() {
-                        Labels { inner }.apply();
-                    }
-                }
-            });
-            // Not on an extra screen unless switched on (`shell::extra`).
-            swaypplet_ui::shell::extra::follow(
-                &labels.inner.pills,
-                swaypplet_ui::shell::extra::Kind::WorkspaceNames,
-            );
             labels
                 .inner
-                .pills
-                .watch(move |monitor| Pill::new(&app, monitor, weak.clone()));
-        }
-        {
-            let app = app.clone();
-            let weak = Rc::downgrade(&labels.inner);
-            swaypplet_ui::shell::extra::follow(
-                &labels.inner.edges,
-                swaypplet_ui::shell::extra::Kind::WorkspaceNames,
-            );
-            labels
-                .inner
-                .edges
-                .watch(move |monitor| EdgeZone::new(&app, monitor, weak.clone()));
+                .toasts
+                .watch(move |monitor| Toast::new(&app, monitor));
         }
         {
             let weak = Rc::downgrade(&labels.inner);
@@ -518,123 +166,52 @@ impl Labels {
         labels
     }
 
-    /// What the CLI asks for: `edit` (the default, also `toggle`), `mode
-    /// <hidden|auto|always|next>`, `clear`.
+    /// What the CLI asks for: `edit` (the default), `mode <hidden|auto|next>`,
+    /// `clear`.
     pub fn command(&self, args: &[&str]) {
         match args {
-            [] | ["edit"] | ["toggle"] => self.summon(),
+            [] | ["edit"] | ["toggle"] => {
+                if let Some(output) = self.inner.sway.focused_output()
+                    && let Some(ws) = self.workspace_on(&output)
+                {
+                    store::request_edit(&output, &ws);
+                }
+            }
             ["mode", name] => {
                 let mode = if *name == "next" {
-                    Some(self.inner.data.borrow().mode.next())
+                    Some(store::mode().next())
                 } else {
                     Mode::parse(name)
                 };
                 match mode {
-                    Some(mode) => self.set_mode(mode),
+                    Some(mode) => set_mode(mode),
                     None => log::warn!("label: unknown mode `{name}`"),
                 }
             }
             ["clear"] => {
-                if let Some(output) = self.inner.sway.focused_output() {
-                    self.clear(&output);
+                if let Some(ws) = self
+                    .inner
+                    .sway
+                    .focused_output()
+                    .and_then(|output| self.workspace_on(&output))
+                {
+                    set_name(&ws, "");
                 }
             }
             other => log::warn!("label: unknown command {other:?}"),
         }
     }
 
-    // ── What is shown ───────────────────────────────────────────────────
-
     fn workspace_on(&self, output: &str) -> Option<String> {
         self.inner.visible.borrow().get(output).cloned()
     }
 
-    fn text_on(&self, output: &str) -> String {
-        self.workspace_on(output)
-            .and_then(|ws| self.inner.data.borrow().labels.get(&ws).cloned())
-            .unwrap_or_default()
+    fn timer(map: &RefCell<HashMap<String, Rc<Timeout>>>, output: &str) -> Rc<Timeout> {
+        map.borrow_mut()
+            .entry(output.to_string())
+            .or_insert_with(|| Rc::new(Timeout::new()))
+            .clone()
     }
-
-    /// In `always`, a named workspace keeps its pill up.
-    fn resting(&self, output: &str) -> bool {
-        self.inner.data.borrow().mode == Mode::Always && !self.text_on(output).is_empty()
-    }
-
-    /// Bring every pill to what the state says: shown or hidden, and drawn.
-    fn apply(&self) {
-        if self.inner.drawing.replace(true) {
-            return;
-        }
-        let mode = self.inner.data.borrow().mode;
-        let editing = self.inner.editing.borrow().as_ref().map(|(o, _)| o.clone());
-        self.inner.pills.for_each(|pill| {
-            let out = pill.connector.as_str();
-            let editing_here = editing.as_deref() == Some(out);
-            let hovered = self.inner.hover.iter_has(out);
-            let peek = self.inner.peeking.borrow().get(out).copied();
-            let wanted = editing_here || hovered || peek.is_some() || self.resting(out);
-            if wanted {
-                pill.draw(
-                    &self.text_on(out),
-                    mode,
-                    editing_here || hovered || peek == Some(true),
-                );
-                pill.surface.show();
-            } else {
-                pill.surface.hide();
-            }
-        });
-        self.inner.drawing.set(false);
-    }
-
-    /// Show `output`'s pill, then let it go after `ms` unless something holds
-    /// it. Replaces a countdown already running.
-    fn peek(&self, output: &str, controls: bool, ms: u64) {
-        log::debug!(
-            "label: peek {output} (workspace {:?})",
-            self.workspace_on(output)
-        );
-        if self.workspace_on(output).is_none() {
-            return;
-        }
-        {
-            let mut peeking = self.inner.peeking.borrow_mut();
-            let held = peeking.get(output).copied().unwrap_or(false);
-            peeking.insert(output.to_string(), controls || held);
-        }
-        self.arm_peek(ms);
-        self.apply();
-    }
-
-    fn arm_peek(&self, ms: u64) {
-        let weak = Rc::downgrade(&self.inner);
-        self.inner
-            .peek_timer
-            .arm(Duration::from_millis(ms), move || {
-                let Some(inner) = weak.upgrade() else { return };
-                inner.peeking.borrow_mut().clear();
-                Labels { inner }.apply();
-            });
-    }
-
-    /// The pointer came onto or left the pill on `output`.
-    fn pointer(&self, output: &str, inside: bool) {
-        {
-            let mut hover = self.inner.hover.borrow_mut();
-            hover.retain(|o| o != output);
-            if inside {
-                hover.push(output.to_string());
-            }
-        }
-        if !inside {
-            // Keep it up for a beat, so a slip off the edge is not a hide.
-            self.peek(output, false, LEAVE_MS);
-            return;
-        }
-        self.apply();
-    }
-
-    // ── Sway ────────────────────────────────────────────────────────────
 
     fn on_sway(&self) {
         let snapshot = self.inner.sway.snapshot();
@@ -656,208 +233,60 @@ impl Labels {
             *visible = now;
         }
 
-        // An edit belongs to the workspace it started on.
-        let moved = self
-            .inner
-            .editing
-            .borrow()
-            .as_ref()
-            .is_some_and(|(output, ws)| self.workspace_on(output).as_ref() != Some(ws));
-        if moved {
-            self.finish_edit(true);
-        }
-
-        // A band over a fullscreen window's top edge would catch the pointer.
-        let fullscreen = snapshot.fullscreen_on_focused_output;
-        self.inner
-            .edges
-            .for_each(|edge| edge.surface.window().set_visible(!fullscreen));
-
-        // A pill showing for the workspace you left goes at once; it is not
-        // given a countdown for one that has no name.
+        // A toast for the workspace you left goes at once.
         for output in &switched {
-            self.inner.peeking.borrow_mut().remove(output);
+            Self::timer(&self.inner.settle, output).cancel();
+            self.hide_toast(output);
         }
 
-        if self.inner.data.borrow().mode == Mode::Auto && !fullscreen {
-            for output in switched {
-                if !self.text_on(&output).is_empty() {
-                    self.peek(&output, false, AUTO_MS);
-                }
-            }
-        }
-        self.apply();
-    }
-
-    // ── Editing ─────────────────────────────────────────────────────────
-
-    /// The keybind: edit on the focused output, or save and close.
-    fn summon(&self) {
-        if self.inner.editing.borrow().is_some() {
-            self.finish_edit(true);
+        let fullscreen = snapshot.fullscreen_on_focused_output;
+        if store::mode() != Mode::Auto || fullscreen {
             return;
         }
-        if let Some(output) = self.inner.sway.focused_output() {
-            self.begin_edit(&output);
+        for output in switched {
+            let weak: Weak<Inner> = Rc::downgrade(&self.inner);
+            let out = output.clone();
+            Self::timer(&self.inner.settle, &output).arm(
+                Duration::from_millis(SETTLE_MS),
+                move || {
+                    if let Some(inner) = weak.upgrade() {
+                        Labels { inner }.show_toast(&out);
+                    }
+                },
+            );
         }
     }
 
-    fn begin_edit(&self, output: &str) {
-        if self.inner.editing.borrow().is_some() {
-            return;
-        }
+    fn show_toast(&self, output: &str) {
         let Some(ws) = self.workspace_on(output) else {
             return;
         };
-        let text = self.text_on(output);
-        *self.inner.editing.borrow_mut() = Some((output.to_string(), ws));
-        let mut entry = None;
-        self.inner.pills.for_each(|pill| {
-            if pill.connector == output {
-                pill.entry.set_text(&text);
-                pill.stack.set_visible_child_name("edit");
-                pill.surface
-                    .window()
-                    .set_keyboard_mode(KeyboardMode::Exclusive);
-                entry = Some(pill.entry.clone());
-            }
-        });
-        self.apply();
-        if let Some(entry) = entry {
-            // After the map: a widget in an unmapped window takes no focus.
-            glib::idle_add_local_once(move || {
-                entry.grab_focus();
-                entry.select_region(0, -1);
-            });
-        }
-        self.arm_edit_idle();
-    }
-
-    /// End the edit, saving the field when `save`.
-    fn finish_edit(&self, save: bool) {
-        let Some((output, ws)) = self.inner.editing.borrow_mut().take() else {
-            return;
-        };
-        self.inner.edit_timer.cancel();
-        let mut typed = None;
-        self.inner.pills.for_each(|pill| {
-            if pill.connector == output {
-                typed = Some(pill.entry.text().to_string());
-                pill.stack.set_visible_child_name("read");
-                pill.surface.window().set_keyboard_mode(KeyboardMode::None);
-            }
-        });
-        if let (true, Some(text)) = (save, typed) {
-            self.set_label(&ws, &text);
-        }
-        // Whatever the mode, the result is seen once.
-        if self.text_on(&output).is_empty() {
-            self.apply();
-        } else {
-            self.peek(&output, false, AUTO_MS);
-        }
-    }
-
-    fn arm_edit_idle(&self) {
-        if self.inner.editing.borrow().is_none() {
+        let Some(text) = name_of(&ws) else { return };
+        if store::mode() != Mode::Auto || self.inner.sway.snapshot().fullscreen_on_focused_output {
             return;
         }
+        self.inner.toasts.for_each(|toast| {
+            if toast.connector == output {
+                toast.mark.set_label(&label_for_name(&ws));
+                toast.name.set_label(&text);
+                toast.surface.show();
+            }
+        });
         let weak = Rc::downgrade(&self.inner);
-        self.inner
-            .edit_timer
-            .arm(Duration::from_millis(EDIT_IDLE_MS), move || {
-                let Some(inner) = weak.upgrade() else { return };
-                Labels { inner }.finish_edit(true);
-            });
-    }
-
-    fn set_label(&self, ws: &str, text: &str) {
-        let text = text.trim();
-        {
-            let mut data = self.inner.data.borrow_mut();
-            if text.is_empty() {
-                data.labels.remove(ws);
-            } else {
-                data.labels.insert(ws.to_string(), text.to_string());
+        let out = output.to_string();
+        Self::timer(&self.inner.hide, output).arm(Duration::from_millis(TOAST_MS), move || {
+            if let Some(inner) = weak.upgrade() {
+                Labels { inner }.hide_toast(&out);
             }
-            data.save();
-        }
+        });
     }
 
-    /// Remove the name of the workspace on `output`.
-    fn clear(&self, output: &str) {
-        if self.inner.editing.borrow().is_some() {
-            self.finish_edit(false);
-        }
-        if let Some(ws) = self.workspace_on(output) {
-            self.set_label(&ws, "");
-        }
-        self.apply();
-    }
-
-    fn set_mode(&self, mode: Mode) {
-        {
-            let mut data = self.inner.data.borrow_mut();
-            if data.mode == mode {
-                return;
+    fn hide_toast(&self, output: &str) {
+        Self::timer(&self.inner.hide, output).cancel();
+        self.inner.toasts.for_each(|toast| {
+            if toast.connector == output {
+                toast.surface.hide();
             }
-            data.mode = mode;
-            data.save();
-        }
-        // The change is seen where it was made, with the controls up, even
-        // when the new mode is `hidden`.
-        match self.inner.sway.focused_output() {
-            Some(output) => self.peek(&output, true, PEEK_MS),
-            None => self.apply(),
-        }
-    }
-}
-
-trait HasOutput {
-    fn iter_has(&self, output: &str) -> bool;
-}
-
-impl HasOutput for RefCell<Vec<String>> {
-    fn iter_has(&self, output: &str) -> bool {
-        self.borrow().iter().any(|o| o == output)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_file_round_trips_and_keeps_swedish_letters() {
-        let mut data = Data {
-            mode: Mode::Always,
-            ..Data::default()
-        };
-        data.labels.insert("3".into(), "Fakturering åäö".into());
-        assert_eq!(Data::parse(data.to_json().as_bytes()), data);
-    }
-
-    #[test]
-    fn a_bad_file_reads_as_the_default() {
-        assert_eq!(Data::parse(b"not json"), Data::default());
-        assert_eq!(Data::default().mode, Mode::Auto);
-    }
-
-    #[test]
-    fn empty_and_wrong_typed_labels_are_dropped_and_an_unknown_mode_is_auto() {
-        let data = Data::parse(br#"{"mode":"loud","labels":{"1":"  ","2":5,"3":" ok "}}"#);
-        assert_eq!(data.mode, Mode::Auto);
-        assert_eq!(data.labels.len(), 1);
-        assert_eq!(data.labels["3"], "ok");
-    }
-
-    #[test]
-    fn next_cycles_through_all_three_modes() {
-        assert_eq!(Mode::Hidden.next(), Mode::Auto);
-        assert_eq!(Mode::Auto.next(), Mode::Always);
-        assert_eq!(Mode::Always.next(), Mode::Hidden);
-        for mode in Mode::ALL {
-            assert_eq!(Mode::parse(mode.as_str()), Some(mode));
-        }
+        });
     }
 }

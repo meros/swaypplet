@@ -19,6 +19,7 @@ mod decision;
 mod hazards;
 mod look_mode;
 mod media;
+mod name_editor;
 mod peek;
 mod pins;
 mod popover;

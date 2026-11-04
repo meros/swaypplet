@@ -37,11 +37,8 @@ pub enum Namespace {
     FaceCue,
     /// The held-Super keybinding sheet, one per output.
     Keybinds,
-    /// The workspace label pill, one per output (`label/`).
+    /// The toast that names a workspace when you arrive, one per output (`label/`).
     Label,
-    /// The thin strip at the top middle of an output that summons the label
-    /// pill. Invisible, so without glass.
-    LabelEdge,
     /// The Super+Tab stage.
     Jump,
     /// The frozen screen the region selector draws on. Deliberately without
@@ -66,7 +63,7 @@ pub enum Namespace {
 }
 
 impl Namespace {
-    pub const ALL: [Namespace; 20] = [
+    pub const ALL: [Namespace; 19] = [
         Namespace::Panel,
         Namespace::Bar,
         Namespace::Launcher,
@@ -79,7 +76,6 @@ impl Namespace {
         Namespace::FaceCue,
         Namespace::Keybinds,
         Namespace::Label,
-        Namespace::LabelEdge,
         Namespace::Jump,
         Namespace::Screenshot,
         Namespace::Greeter,
@@ -104,7 +100,6 @@ impl Namespace {
             Namespace::FaceCue => "swaypplet-face-cue",
             Namespace::Keybinds => "swaypplet-keybinds",
             Namespace::Label => "swaypplet-label",
-            Namespace::LabelEdge => "swaypplet-label-edge",
             Namespace::Jump => "swaypplet-jump",
             Namespace::Screenshot => "swaypplet-screenshot",
             Namespace::Greeter => "swaypplet-greeter",
@@ -146,7 +141,6 @@ impl Namespace {
             | Namespace::Keybinds => Some("panel"),
             Namespace::SessionLock => Some("lock"),
             Namespace::Jump
-            | Namespace::LabelEdge
             | Namespace::Screenshot
             | Namespace::Greeter
             | Namespace::LockWarm

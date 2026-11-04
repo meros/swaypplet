@@ -11,6 +11,7 @@ gtk4.workspace = true
 gtk4-layer-shell.workspace = true
 glib.workspace = true
 serde_json.workspace = true
+gio.workspace = true
 log.workspace = true
 
 [lints]

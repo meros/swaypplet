@@ -105,6 +105,18 @@ pub fn build(sway: &Rc<SwayService>, tasks: &Rc<TaskStateService>) -> gtk4::Box 
     sway.connect_change(move || sync_cb());
     let sync_cb = sync.clone();
     tasks.connect_change(move || sync_cb());
+    // A name is saved or removed, here or by another process.
+    let weak_names = Rc::downgrade(&pills);
+    swaypplet_label::connect_changed(move || {
+        let Some(pills) = weak_names.upgrade() else {
+            return;
+        };
+        for pill in pills.borrow().iter() {
+            for seg in &pill.segments {
+                seg.set_name();
+            }
+        }
+    });
     // A pin mark appears or goes: the buttons are rebuilt only on a change of
     // shape, so the mark is set here on the live ones.
     // Weak: the registry outlives a bar unplugged with its output.
@@ -137,10 +149,26 @@ struct Segment {
     /// Task strip membership, fixed for the workspace's lifetime.
     task: Option<usize>,
     button: gtk4::Button,
+    /// The workspace's saved name (`swaypplet-label`), drawn after the mark
+    /// while a screen is on it.
+    name: gtk4::Label,
     view: Cell<SegView>,
 }
 
 impl Segment {
+    /// Show the saved name while a screen is on this workspace, and keep it
+    /// out of the way of every other segment: the strip stays as narrow as
+    /// it was, and only the one you are on says what it is for.
+    fn set_name(&self) {
+        let text = swaypplet_label::name_of(&self.workspace).unwrap_or_default();
+        let on_screen = matches!(
+            self.view.get().state,
+            WsState::Current | WsState::Focused
+        );
+        self.name.set_label(&text);
+        self.name.set_visible(on_screen && !text.is_empty());
+    }
+
     /// Show or hide the pin glyph after the label.
     fn set_pinned(&self, pinned: bool) {
         if let Some(mark) = self
@@ -207,6 +235,14 @@ fn raise(
                     // is pinned (jump/pin.rs).
                     let content = ui::hbox(2);
                     content.append(&label_widget(ws.num, &ws.name));
+                    let name = gtk4::Label::builder()
+                        .ellipsize(gtk4::pango::EllipsizeMode::End)
+                        .max_width_chars(24)
+                        .visible(false)
+                        .build();
+                    ui::set_text_style(&name, ui::Text::Label, ui::Tone::Fg);
+                    name.add_css_class("bar-ws-name");
+                    content.append(&name);
                     let pin_mark = gtk4::Label::new(Some("\u{f0403}"));
                     ui::glyph::adopt(&pin_mark, ui::Text::Caption, ui::Tone::Faint);
                     pin_mark.add_css_class(PIN_MARK_CLASS);
@@ -223,11 +259,13 @@ fn raise(
                     let cmd = switch_command(ws.num, &ws.name);
                     button.connect_clicked(move |_| ipc::run_command(&cmd));
                     super::peek::attach(&button, ws.name.clone(), on_screen.clone());
+                    super::name_editor::attach(&button, &ws.name, ws.num);
                     widget.append(&button);
                     Segment {
                         workspace: ws.name.clone(),
                         task: task_label(ws.num).map(|(task, _)| task),
                         button,
+                        name,
                         view: Cell::new(SegView::UNWRITTEN),
                     }
                 })
@@ -259,6 +297,7 @@ fn apply(pills: &[Pill], groups: &[Group], plans: &[TaskRibbon; 4]) {
             };
             if seg.view.replace(view) != view {
                 write_seg(&seg.button, seg.task, view);
+                seg.set_name();
             }
         }
     }

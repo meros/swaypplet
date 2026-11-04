@@ -1,13 +1,33 @@
-/* ── Workspace label (crates/label/src/) ──
-   A thin card holding a name, and under the pointer its mode and a remove
-   button. Colour, type and shape come from the components; this places them. */
+/* ── Workspace toast (crates/label/src/) ──
+   A card that says where you landed: the workspace's mark in a chip, and its
+   name, large. It is on screen for under two seconds and takes no input, so
+   it is built to be read at a glance from across the room. Colour, type and
+   shape come from the components; this places them and says how it arrives. */
 .label-wrapper {
     /* The transparent apron around the card; it must stay alpha 0 so the
        compositor's glass clips to the card. */
     padding: var(--space-6);
 }
 
-.label-pill {
-    padding: var(--space-3) var(--space-5);
-    min-width: 240px;
+.label-toast {
+    padding: var(--space-4) var(--space-6) var(--space-4) var(--space-4);
+    min-width: 280px;
+    /* Falls in from above and settles: the toast is part of the screen's top
+       edge, and arriving from it keeps the motion where the eye already is.
+       A transform, so it costs no layout. */
+    animation: label-toast-in var(--motion-enter);
+}
+
+/* The mark: where you are, as the bar says it, on a fill (`ui::card::group`).
+   A fixed square, so a one-character mark and a glyph mark are the same
+   size. */
+.label-toast-mark {
+    min-width: 44px;
+    min-height: 44px;
+    margin-right: var(--space-4);
+}
+
+@keyframes label-toast-in {
+    from { opacity: 0; transform: translateY(-14px) scale(0.96); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
 }
