@@ -647,7 +647,7 @@ pub mod fake {
         ) -> Fake {
             let ck = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
             let key = rustls::pki_types::PrivateKeyDer::Pkcs8(
-                rustls::pki_types::PrivatePkcs8KeyDer::from(ck.key_pair.serialize_der()),
+                rustls::pki_types::PrivatePkcs8KeyDer::from(ck.signing_key.serialize_der()),
             );
             let config = rustls::ServerConfig::builder_with_provider(Arc::new(
                 rustls::crypto::ring::default_provider(),

@@ -23,7 +23,7 @@
 
 use std::path::{Path, PathBuf};
 
-use material_colors::color::Argb;
+use material_colors::color::Rgb as MaterialRgb;
 use material_colors::quantize::{Quantizer, QuantizerCelebi};
 use material_colors::score::Score;
 
@@ -191,8 +191,8 @@ impl Sample {
 /// What `Score` answers when nothing in the image is usable. Only compared
 /// against, never used: a monochrome wallpaper has no hue to give, and then
 /// the tint stays off rather than inventing one.
-fn no_colour() -> Argb {
-    Argb::new(255, 0x68, 0x9d, 0x6a)
+fn no_colour() -> MaterialRgb {
+    MaterialRgb::new(0x68, 0x9d, 0x6a)
 }
 
 // ── The colours ─────────────────────────────────────────────────────────
@@ -211,11 +211,11 @@ pub fn sample_image(path: &Path) -> Option<Cached> {
     let quantized = QuantizerCelebi::quantize(&pixels, MAX_COLORS);
     let ranked = Score::score(
         &quantized.color_to_count,
-        Some(2 * CHOICES as i32),
+        Some(2 * CHOICES),
         Some(no_colour()),
         Some(true),
     );
-    let rgb = |c: &Argb| {
+    let rgb = |c: &MaterialRgb| {
         Rgb(
             f64::from(c.red) / 255.0,
             f64::from(c.green) / 255.0,
@@ -288,7 +288,7 @@ fn pick(counts: &[(Rgb, u32)], ranked: &[Rgb]) -> Option<Sample> {
 }
 
 /// The image, decoded small, as opaque pixels, and its luminance grid.
-fn sample(path: &Path) -> Option<(Vec<Argb>, Grid)> {
+fn sample(path: &Path) -> Option<(Vec<MaterialRgb>, Grid)> {
     let pixbuf = gtk4::gdk_pixbuf::Pixbuf::from_file_at_scale(path, SAMPLE, SAMPLE, true)
         .map_err(|e| log::warn!("wallpaper: cannot read {}: {e}", path.display()))
         .ok()?;
@@ -308,7 +308,7 @@ fn sample(path: &Path) -> Option<(Vec<Argb>, Grid)> {
             if channels == 4 && bytes.get(i + 3).is_some_and(|a| *a < 128) {
                 continue;
             }
-            pixels.push(Argb::new(255, r, g, b));
+            pixels.push(MaterialRgb::new(r, g, b));
             cells.add(x, y, [r, g, b]);
         }
     }
