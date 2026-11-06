@@ -1,6 +1,7 @@
-//! Messages cluster: Slack, Teams, Discord and Telegram as small marks that
+//! Messages cluster: Slack, Teams, Discord, Telegram and Messenger as small marks that
 //! show while the client runs or has messages waiting, with the unread count
-//! beside the icon. A click brings the client's window back.
+//! beside the icon. A click brings the client's window back, and a click on
+//! the window that is in front puts it away in the scratchpad.
 //!
 //! Chat clients hide to the tray when their window closes, and a hidden
 //! Slack was invisible here: the tray shows `NeedsAttention` items only and
@@ -28,7 +29,7 @@ use swaypplet_base::clients::{
 };
 use swaypplet_base::service::Observed;
 use swaypplet_base::sway::ipc::SwayService;
-use swaypplet_base::sway::tree::show_window;
+use swaypplet_base::sway::tree::{hide_window, show_window};
 use swaypplet_notifyd::store::StoreRef;
 use swaypplet_system::tray::TrayService;
 use swaypplet_ui::ui;
@@ -137,7 +138,14 @@ impl Messages {
             return;
         };
         match chip.presence {
-            Presence::Open { focused: true, .. } => {}
+            // The window in front is the one the click is about, so a second
+            // click puts it away: the mark toggles. A scratchpad view that is
+            // up has left `__i3_scratch`, so it lands here as well.
+            Presence::Open {
+                con_id,
+                focused: true,
+                ..
+            } => hide_window(con_id),
             Presence::Open {
                 con_id,
                 workspace,
@@ -187,12 +195,13 @@ fn app_info(client: &Client) -> Option<gio::AppInfo> {
 /// The words on a mark's tooltip.
 fn tooltip(chip: &Chip) -> String {
     let place = match &chip.presence {
+        Presence::Open { focused: true, .. } => "in front. Click to hide it".to_string(),
         Presence::Open {
             workspace: Some(ws),
             scratchpad: false,
             ..
         } => format!("workspace {ws}"),
-        Presence::Open { .. } => "window open".to_string(),
+        Presence::Open { .. } => "hidden. Click to show it".to_string(),
         Presence::Background { .. } => "in the tray, no window. Click to open it".to_string(),
         Presence::Gone => "not running. Click to start it".to_string(),
     };
@@ -364,6 +373,28 @@ mod tests {
             Unread::Count(3),
         );
         assert_eq!(tooltip(&open), "Slack · workspace 38 · 3 unread");
+        let front = chip(
+            "slack",
+            Presence::Open {
+                con_id: 1,
+                workspace: Some("38".into()),
+                focused: true,
+                scratchpad: false,
+            },
+            Unread::None,
+        );
+        assert_eq!(tooltip(&front), "Slack · in front. Click to hide it");
+        let hidden = chip(
+            "slack",
+            Presence::Open {
+                con_id: 1,
+                workspace: None,
+                focused: false,
+                scratchpad: true,
+            },
+            Unread::None,
+        );
+        assert_eq!(tooltip(&hidden), "Slack · hidden. Click to show it");
         let tray = chip(
             "slack",
             Presence::Background {

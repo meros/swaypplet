@@ -135,6 +135,15 @@ pub fn show_window(con_id: i64, workspace: Option<&str>, scratchpad: bool) {
     super::ipc::run_command(&cmd);
 }
 
+/// Put a window out of sight without closing it. The scratchpad keeps the
+/// client running with its state, and [`show_window`] with `scratchpad` set
+/// brings it back.
+pub fn hide_window(con_id: i64) {
+    let cmd = format!("[con_id={con_id}] move scratchpad");
+    log::debug!("messages click: {cmd}");
+    super::ipc::run_command(&cmd);
+}
+
 /// The command that brings a view to the front.
 ///
 /// The workspace switch comes first: `[con_id=N] focus` alone moves focus

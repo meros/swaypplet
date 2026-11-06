@@ -77,6 +77,17 @@ pub const CLIENTS: &[Client] = &[
         notify_names: &["telegram"],
         desktop_id: "org.telegram.desktop",
     },
+    Client {
+        id: "messenger",
+        name: "Messenger",
+        // A Chrome app window on messenger.com. Chrome names its `app_id`
+        // after the address, `chrome-www.messenger.com__-Profile_1`; the
+        // desktop file is in the nixos repo (chrome-profiles.nix).
+        window_ids: &["chrome-www.messenger.com__-"],
+        sni_prefixes: &[],
+        notify_names: &["messenger"],
+        desktop_id: "messenger-pwa",
+    },
 ];
 
 fn lower(s: &str) -> String {
@@ -422,6 +433,20 @@ mod tests {
         );
         assert!(client_for_window(Some("slackware-docs"), None, None).is_none());
         assert!(client_for_window(Some("firefox"), None, None).is_none());
+    }
+
+    #[test]
+    fn messenger_is_the_chrome_app_window_on_messenger_dot_com() {
+        // The `app_id` Chrome gives `--app=https://www.messenger.com/`.
+        let id = |app_id| client_for_window(Some(app_id), None, None).map(|c| c.id);
+        assert_eq!(
+            id("chrome-www.messenger.com__-Profile_1"),
+            Some("messenger")
+        );
+        assert_eq!(id("chrome-www.messenger.com__-Default"), Some("messenger"));
+        // A tab of the same site in a normal browser window is not the app.
+        assert_eq!(id("google-chrome"), None);
+        assert_eq!(id("chrome-www.facebook.com__-Profile_1"), None);
     }
 
     #[test]
