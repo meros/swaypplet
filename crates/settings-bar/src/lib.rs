@@ -41,7 +41,7 @@ struct Segment {
     set: fn(&mut Bar, bool),
 }
 
-const SEGMENTS: [Segment; 8] = [
+const SEGMENTS: [Segment; 9] = [
     Segment {
         label: "Media mark",
         hint: "What is playing, at the left of the right cluster.",
@@ -53,6 +53,12 @@ const SEGMENTS: [Segment; 8] = [
         hint: "Status-notifier icons from applications.",
         get: |b| b.tray,
         set: |b, v| b.tray = v,
+    },
+    Segment {
+        label: "Messages",
+        hint: "Slack, Teams, Discord and Telegram while they run or have messages waiting, with the unread count. A click brings the window back.",
+        get: |b| b.messages,
+        set: |b, v| b.messages = v,
     },
     Segment {
         label: "Battery",
@@ -396,6 +402,7 @@ pub const SEARCH: &[Entry] = &[
     row("Segments", "", "What the bar shows at its right end", &["bar", "status bar", "taskbar", "panel"]),
     row("Segments", "Media mark", "What is playing, on the bar", &["music", "now playing", "player", "mpris", "song"]).keys(&["bar.media"]),
     row("Segments", "Tray", "Status icons from applications", &["system tray", "systray", "status icons", "appindicator", "tray icons"]).keys(&["bar.tray"]),
+    row("Segments", "Messages", "Slack, Teams, Discord and Telegram on the bar, with unread counts", &["slack", "teams", "discord", "telegram", "chat", "unread", "messages", "messenger"]).keys(&["bar.messages"]),
     row("Segments", "Battery", "The battery segment of the bar", &["power", "charge", "percentage"]).keys(&["bar.battery"]),
     row("Segments", "Presence", "The presence sensor's mark", &["sensor", "proximity"]).keys(&["bar.presence"]),
     row("Segments", "Backup", "The nightly backup's glyph", &["restic", "borg", "backup status"]).keys(&["bar.backup"]),
@@ -447,6 +454,7 @@ mod tests {
                 "board",
                 "look_mode",
                 "media",
+                "messages",
                 "presence",
                 "t3code",
                 "tray"

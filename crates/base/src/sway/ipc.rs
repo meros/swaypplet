@@ -23,6 +23,7 @@ use std::time::SystemTime;
 
 use swayipc::{Connection, EventType, Node, NodeType};
 
+use crate::clients::{ClientWindow, client_for_window};
 use crate::service::{Observed, reconnect};
 
 // ── Model ───────────────────────────────────────────────────────────────
@@ -153,6 +154,10 @@ fn order_candidates(env: Vec<PathBuf>, mut found: Vec<(SystemTime, PathBuf)>) ->
 /// Sway model service; [`Observed`] documents the `Rc` lifetime story.
 pub struct SwayService {
     state: Rc<Observed<SwayState>>,
+    /// Windows of the messaging clients only, with their titles. A separate
+    /// model, so a title that changes does not wake the observers of
+    /// [`SwayState`], which deliberately ignore titles.
+    clients: Rc<Observed<Vec<ClientWindow>>>,
     /// [`windows_signature`] of the last snapshot.
     windows: Cell<u64>,
     on_windows: RefCell<Vec<Rc<dyn Fn()>>>,
@@ -162,17 +167,19 @@ impl SwayService {
     pub fn start() -> Rc<Self> {
         let service = Rc::new(Self {
             state: Rc::new(Observed::new(SwayState::default())),
+            clients: Rc::new(Observed::new(Vec::new())),
             windows: Cell::new(0),
             on_windows: RefCell::default(),
         });
 
-        let (tx, rx) = async_channel::unbounded::<(SwayState, u64)>();
+        let (tx, rx) = async_channel::unbounded::<Snapshot>();
         crate::spawn::spawn_thread("sway-ipc", move || run(tx));
 
         let for_events = service.clone();
         service
             .state
-            .follow_with(rx, move |state, (snapshot, windows)| {
+            .follow_with(rx, move |state, (snapshot, windows, clients)| {
+                for_events.clients.set_if_changed(clients);
                 // Window events fire per keystroke in some terminals (title
                 // changes) without altering this model; dropping no-op
                 // snapshots keeps observers from re-rendering.
@@ -190,6 +197,17 @@ impl SwayService {
 
     pub fn connect_change(&self, cb: impl Fn() + 'static) {
         self.state.connect_change(cb);
+    }
+
+    /// Call `cb` when a messaging client's window opens, closes, moves,
+    /// gains or loses focus, or changes its title.
+    pub fn connect_client_windows(&self, cb: impl Fn() + 'static) {
+        self.clients.connect_change(cb);
+    }
+
+    /// The messaging clients' windows, from the last snapshot.
+    pub fn client_windows(&self) -> Vec<ClientWindow> {
+        self.clients.with(Clone::clone)
     }
 
     /// Call `cb` on every change [`Self::connect_change`] reports, and also
@@ -395,13 +413,17 @@ pub fn config_text() -> Result<String, String> {
 
 // ── Worker thread ───────────────────────────────────────────────────────
 
-fn run(tx: async_channel::Sender<(SwayState, u64)>) {
+/// One model per sway event: the state, the windows signature, and the
+/// messaging clients' windows.
+type Snapshot = (SwayState, u64, Vec<ClientWindow>);
+
+fn run(tx: async_channel::Sender<Snapshot>) {
     reconnect("sway ipc", || session(&tx), |_| true);
 }
 
 /// One connection lifetime. `Ok(())` means the GTK side hung up; `Err`
 /// means the socket dropped and the caller should reconnect.
-fn session(tx: &async_channel::Sender<(SwayState, u64)>) -> Result<(), swayipc::Error> {
+fn session(tx: &async_channel::Sender<Snapshot>) -> Result<(), swayipc::Error> {
     let mut query = connect()?;
     if tx.send_blocking(snapshot(&mut query)?).is_err() {
         return Ok(());
@@ -423,16 +445,16 @@ fn session(tx: &async_channel::Sender<(SwayState, u64)>) -> Result<(), swayipc::
         {
             reloads += 1;
         }
-        let (mut state, windows) = snapshot(&mut query)?;
+        let (mut state, windows, clients) = snapshot(&mut query)?;
         state.reloads = reloads;
-        if tx.send_blocking((state, windows)).is_err() {
+        if tx.send_blocking((state, windows, clients)).is_err() {
             return Ok(());
         }
     }
     Ok(()) // unreachable: the stream only ends by erroring
 }
 
-fn snapshot(query: &mut Connection) -> Result<(SwayState, u64), swayipc::Error> {
+fn snapshot(query: &mut Connection) -> Result<Snapshot, swayipc::Error> {
     let tree = query.get_tree()?;
     let windows = windows_signature(&tree);
     let workspaces = workspace_infos(query.get_workspaces()?);
@@ -448,7 +470,39 @@ fn snapshot(query: &mut Connection) -> Result<(SwayState, u64), swayipc::Error> 
         binding_mode: query.get_binding_state()?,
         reloads: 0,
     };
-    Ok((state, windows))
+    Ok((state, windows, client_windows(&tree)))
+}
+
+/// Every window that belongs to a messaging client, in tree order.
+fn client_windows(root: &Node) -> Vec<ClientWindow> {
+    let mut found = Vec::new();
+    super::tree::for_each(root, |node, workspace| {
+        if !matches!(node.node_type, NodeType::Con | NodeType::FloatingCon)
+            || !node.nodes.is_empty()
+        {
+            return;
+        }
+        let props = node.window_properties.as_ref();
+        let Some(client) = client_for_window(
+            node.app_id.as_deref(),
+            props.and_then(|p| p.class.as_deref()),
+            props.and_then(|p| p.instance.as_deref()),
+        ) else {
+            return;
+        };
+        let scratchpad = workspace == Some("__i3_scratch");
+        found.push(ClientWindow {
+            client: client.id,
+            con_id: node.id,
+            title: node.name.clone().unwrap_or_default(),
+            workspace: workspace
+                .filter(|name| !name.starts_with("__"))
+                .map(str::to_string),
+            focused: node.focused,
+            scratchpad,
+        });
+    });
+    found
 }
 
 /// A hash of every window's workspace, identity and place: what a live

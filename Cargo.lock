@@ -2113,6 +2113,7 @@ dependencies = [
  "swaypplet-jump",
  "swaypplet-label",
  "swaypplet-model",
+ "swaypplet-notifyd",
  "swaypplet-screenshot",
  "swaypplet-system",
  "swaypplet-tokens",

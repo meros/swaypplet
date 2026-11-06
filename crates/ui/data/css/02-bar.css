@@ -70,6 +70,17 @@
     padding: 0 var(--space-3);
 }
 
+/* Messages (crates/bar/src/messages.rs): a mark per chat client that runs or
+   has messages waiting; zero width when none does. */
+.bar-messages {
+    margin: var(--space-2) var(--space-1);
+    padding: var(--space-1) var(--space-2);
+}
+
+.bar-messages-item {
+    padding: var(--space-1) var(--space-2);
+}
+
 /* Tray (crates/bar/src/tray/): NeedsAttention items only; zero width at rest. */
 .bar-tray {
     margin: var(--space-2);

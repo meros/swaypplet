@@ -1,5 +1,6 @@
 pub mod alpha;
 pub mod build;
+pub mod clients;
 pub mod dbus;
 pub mod face;
 pub mod fmt;

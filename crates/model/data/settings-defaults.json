@@ -37,6 +37,7 @@
     "board": false,
     "media": true,
     "tray": true,
+    "messages": true,
     "battery": true,
     "presence": true,
     "backup": true,

@@ -118,6 +118,23 @@ pub fn focus_source(
     );
 }
 
+/// Bring one known window to the front: by its container id, on the
+/// workspace it lives on. A scratchpad view has no workspace to switch to, so
+/// it is shown by id alone, which also toggles it away if it is already up;
+/// the caller asks only for a window that is not in front.
+pub fn show_window(con_id: i64, workspace: Option<&str>, scratchpad: bool) {
+    let cmd = if scratchpad {
+        format!("[con_id={con_id}] scratchpad show")
+    } else {
+        focus_command(&Target {
+            con_id,
+            workspace: workspace.map(str::to_string),
+        })
+    };
+    log::debug!("messages click: {cmd}");
+    super::ipc::run_command(&cmd);
+}
+
 /// The command that brings a view to the front.
 ///
 /// The workspace switch comes first: `[con_id=N] focus` alone moves focus

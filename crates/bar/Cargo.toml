@@ -10,6 +10,7 @@ swaypplet-tokens.workspace = true
 swaypplet-model.workspace = true
 swaypplet-ui.workspace = true
 swaypplet-system.workspace = true
+swaypplet-notifyd.workspace = true
 swaypplet-audio.workspace = true
 swaypplet-devices.workspace = true
 swaypplet-cast.workspace = true

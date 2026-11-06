@@ -7120,6 +7120,10 @@ rec {
             packageId = "swaypplet-model";
           }
           {
+            name = "swaypplet-notifyd";
+            packageId = "swaypplet-notifyd";
+          }
+          {
             name = "swaypplet-screenshot";
             packageId = "swaypplet-screenshot";
           }

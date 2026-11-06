@@ -362,6 +362,10 @@ pub struct Bar {
     pub media: bool,
     #[serde(default = "yes")]
     pub tray: bool,
+    /// Slack, Teams, Discord and Telegram while they run or have messages
+    /// waiting, with the unread count (`bar/messages.rs`).
+    #[serde(default = "yes")]
+    pub messages: bool,
     #[serde(default = "yes")]
     pub battery: bool,
     #[serde(default = "yes")]
@@ -392,6 +396,7 @@ impl Default for Bar {
             board: false,
             media: true,
             tray: true,
+            messages: true,
             battery: true,
             presence: true,
             backup: true,

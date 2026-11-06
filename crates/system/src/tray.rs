@@ -18,6 +18,7 @@ use system_tray::item::{Status, StatusNotifierItem};
 use system_tray::menu::TrayMenu;
 use tokio::sync::broadcast::error::RecvError;
 
+use swaypplet_base::clients::{SniPresence, SniStatus, client_for_sni};
 use swaypplet_base::service::{Observed, reconnect_async};
 
 /// One SNI item as the bar renders it.
@@ -38,6 +39,9 @@ enum Cmd {
 /// SNI item service; [`Observed`] documents the `Rc` lifetime story.
 pub struct TrayService {
     items: Rc<Observed<Vec<TrayItem>>>,
+    /// Items of the messaging clients, whatever their status: the Messages
+    /// cluster draws Slack from its Active item, which `items` never holds.
+    presence: Rc<Observed<Vec<SniPresence>>>,
     cmd: async_channel::Sender<Cmd>,
 }
 
@@ -46,18 +50,34 @@ impl TrayService {
         let (cmd_tx, cmd_rx) = async_channel::unbounded();
         let service = Rc::new(Self {
             items: Rc::new(Observed::new(Vec::new())),
+            presence: Rc::new(Observed::new(Vec::new())),
             cmd: cmd_tx,
         });
 
-        let (tx, rx) = async_channel::unbounded::<Vec<TrayItem>>();
+        let (tx, rx) = async_channel::unbounded::<Snap>();
         swaypplet_base::spawn::spawn_tokio_thread("tray", run(tx, cmd_rx));
         // The worker already drops repeats (`send_changed`).
-        service.items.follow_with(rx, Observed::set);
+        let presence = service.presence.clone();
+        service.items.follow_with(rx, move |items, (shown, seen)| {
+            presence.set_if_changed(seen);
+            items.set(shown);
+        });
         service
     }
 
     pub fn connect_change(&self, cb: impl Fn() + 'static) {
         self.items.connect_change(cb);
+    }
+
+    /// Call `cb` when a messaging client's tray item appears, goes, or
+    /// changes its status or tool tip.
+    pub fn connect_presence_change(&self, cb: impl Fn() + 'static) {
+        self.presence.connect_change(cb);
+    }
+
+    /// The messaging clients' tray items, any status.
+    pub fn presence(&self) -> Vec<SniPresence> {
+        self.presence.with(Clone::clone)
     }
 
     /// Current items, sorted for a stable bar order.
@@ -111,14 +131,18 @@ impl TrayService {
 
 // ── Worker (tokio thread) ───────────────────────────────────────────────
 
-async fn run(tx: async_channel::Sender<Vec<TrayItem>>, cmd: async_channel::Receiver<Cmd>) {
+/// What the worker ships: the attention list the bar tray draws, and the
+/// messaging clients' items.
+type Snap = (Vec<TrayItem>, Vec<SniPresence>);
+
+async fn run(tx: async_channel::Sender<Snap>, cmd: async_channel::Receiver<Cmd>) {
     reconnect_async("tray", || session(&tx, &cmd), |_| true).await;
 }
 
 /// One client lifetime. `Ok(())` means the GTK side hung up; `Err` means
 /// the bus/stream dropped and the caller should reconnect.
 async fn session(
-    tx: &async_channel::Sender<Vec<TrayItem>>,
+    tx: &async_channel::Sender<Snap>,
     cmd: &async_channel::Receiver<Cmd>,
 ) -> Result<(), system_tray::error::Error> {
     let client = Client::new().await?;
@@ -173,23 +197,28 @@ async fn session(
     }
 }
 
-/// Send `items` unless they equal the last snapshot sent. The crate's types
-/// have no `PartialEq`, but all of them serialize, and the snapshot holds
-/// only NeedsAttention items, so it is almost always empty.
+/// Send `snap` unless it equals the last one sent. The crate's types have no
+/// `PartialEq`, but all of them serialize, and the attention list holds only
+/// NeedsAttention items, so it is almost always empty.
 async fn send_changed(
-    tx: &async_channel::Sender<Vec<TrayItem>>,
-    items: Vec<TrayItem>,
+    tx: &async_channel::Sender<Snap>,
+    snap: Snap,
     last: &mut Option<Vec<u8>>,
-) -> Result<(), async_channel::SendError<Vec<TrayItem>>> {
-    let key = serde_json::to_vec(&items).ok();
+) -> Result<(), async_channel::SendError<Snap>> {
+    // The messaging items are few and small (no pixmaps), so their Debug
+    // text is a fine key.
+    let key = serde_json::to_vec(&snap.0).ok().map(|mut k| {
+        k.extend_from_slice(format!("{:?}", snap.1).as_bytes());
+        k
+    });
     if key.is_some() && key == *last {
         return Ok(());
     }
     *last = key;
-    tx.send(items).await
+    tx.send(snap).await
 }
 
-fn snapshot(client: &Client) -> Vec<TrayItem> {
+fn snapshot(client: &Client) -> Snap {
     let map = client.items();
     let map = map.lock().expect("tray item mutex");
     // NeedsAttention only (vision "Right cluster"): Active/Passive items
@@ -210,5 +239,26 @@ fn snapshot(client: &Client) -> Vec<TrayItem> {
     items.sort_by(|a, b| {
         (a.sni.id.as_str(), a.address.as_str()).cmp(&(b.sni.id.as_str(), b.address.as_str()))
     });
-    items
+    let mut presence: Vec<SniPresence> = map
+        .iter()
+        .filter_map(|(address, (sni, _))| {
+            let client = client_for_sni(&sni.id)?;
+            Some(SniPresence {
+                client: client.id,
+                address: address.clone(),
+                status: match sni.status {
+                    Status::NeedsAttention => SniStatus::NeedsAttention,
+                    Status::Active => SniStatus::Active,
+                    _ => SniStatus::Passive,
+                },
+                tooltip: sni
+                    .tool_tip
+                    .as_ref()
+                    .map(|t| t.title.clone())
+                    .unwrap_or_default(),
+            })
+        })
+        .collect();
+    presence.sort_by(|a, b| (a.client, &a.address).cmp(&(b.client, &b.address)));
+    (items, presence)
 }

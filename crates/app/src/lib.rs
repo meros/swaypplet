@@ -493,6 +493,7 @@ pub fn run() {
                 app,
                 sway.clone(),
                 audio.clone(),
+                Some(store_activate.clone()),
                 toggle,
                 Some(open_displays),
             );

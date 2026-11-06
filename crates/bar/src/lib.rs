@@ -19,6 +19,7 @@ mod decision;
 mod hazards;
 mod look_mode;
 mod media;
+mod messages;
 mod name_editor;
 mod peek;
 mod pins;
@@ -69,6 +70,9 @@ pub struct BarManager {
     /// reads the same snapshot.
     mpris: Rc<swaypplet_system::mpris::MprisService>,
     tray: Rc<swaypplet_system::tray::TrayService>,
+    /// What the Messages cluster shows, one model for every output's bar: a
+    /// per-window subscription would count each notification once per screen.
+    messages: Rc<messages::Messages>,
     /// What the start button does. In-process hosting passes a direct
     /// `panel.toggle()`; the standalone bar passes the cross-process
     /// SIGUSR1 fallback (see `start::toggle_panel_fallback`).
@@ -84,10 +88,13 @@ impl BarManager {
         app: &gtk4::Application,
         sway: Rc<SwayService>,
         audio: Rc<swaypplet_audio::AudioService>,
+        notifications: Option<swaypplet_notifyd::store::StoreRef>,
         toggle_panel: Rc<dyn Fn()>,
         open_displays: Option<Rc<dyn Fn()>>,
     ) -> Rc<Self> {
         let tasks = TaskStateService::start(&sway);
+        let tray = swaypplet_system::tray::TrayService::start();
+        let messages = messages::Messages::start(&sway, &tray, notifications.as_ref());
         let manager = Rc::new(Self {
             app: app.clone(),
             windows: PerMonitor::new(),
@@ -96,7 +103,8 @@ impl BarManager {
             tasks,
             backup: swaypplet_system::backup::BackupStatusService::start(),
             mpris: swaypplet_system::mpris::MprisService::start(),
-            tray: swaypplet_system::tray::TrayService::start(),
+            tray,
+            messages,
             toggle_panel,
             open_displays,
         });
@@ -137,6 +145,7 @@ fn build_bar_window(bar: &BarManager, monitor: &gdk::Monitor) -> (Surface, decis
         backup,
         mpris,
         tray,
+        messages,
         toggle_panel,
         open_displays,
         ..
@@ -207,8 +216,11 @@ fn build_bar_window(bar: &BarManager, monitor: &gdk::Monitor) -> (Surface, decis
     right.append(&follow_setting(media::build(mpris, audio), |bar| bar.media));
     // Where pinned workspaces live when they are not floating (jump/pin.rs).
     right.append(&pins::build());
-    // The tray follows the Bar tab's switch itself: it also hides while no
-    // item is registered, which `follow_setting` would override.
+    // Messages and the tray follow the Bar tab's switch themselves: each also
+    // hides while nothing is there to show, which `follow_setting` would
+    // override. Messages come first: Slack hides to the tray with an
+    // `Active` item that the tray below never shows.
+    right.append(&messages::build(messages, tray));
     right.append(&tray::build(tray));
     right.append(&hazards::build(sway, audio, open_displays.clone()));
     // Battery + board + clock fuse into one segmented track (waybar's
@@ -326,6 +338,8 @@ pub fn run() {
             app,
             sway,
             swaypplet_audio::AudioService::start(),
+            // The standalone bar has no notification daemon of its own.
+            None,
             Rc::new(start::toggle_panel_fallback),
             None,
         ));
