@@ -19,6 +19,7 @@ pub mod inhibit;
 pub mod lid;
 pub mod mpris;
 pub mod nx;
+pub mod nx_prebuilt;
 pub mod power;
 pub mod presence;
 pub mod session;
