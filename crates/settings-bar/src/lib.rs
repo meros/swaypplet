@@ -41,7 +41,7 @@ struct Segment {
     set: fn(&mut Bar, bool),
 }
 
-const SEGMENTS: [Segment; 9] = [
+const SEGMENTS: [Segment; 10] = [
     Segment {
         label: "Media mark",
         hint: "What is playing, at the left of the right cluster.",
@@ -83,6 +83,12 @@ const SEGMENTS: [Segment; 9] = [
         hint: "One mark for the T3 Code server on this machine. A click starts or stops it. A machine without the server shows nothing here anyway.",
         get: |b| b.t3code,
         set: |b, v| b.t3code = v,
+    },
+    Segment {
+        label: "System update",
+        hint: "A mark while a pre-built NixOS update is waiting, building or failed. A click on a waiting update switches to it. Nothing shows while the system is up to date.",
+        get: |b| b.nx_update,
+        set: |b, v| b.nx_update = v,
     },
     Segment {
         label: "Light or dark",
@@ -145,6 +151,7 @@ fn subtitle_for(label: &str) -> Option<&'static str> {
         "Presence" => "Whether the sensor sees you",
         "Backup" => "Whether last night's backup ran",
         "T3 Code" => "Start or stop the server",
+        "System update" => "Switch to a pre-built update",
         "Light or dark" => "Switch the mode from the bar",
         "Task board" => "Tasks 1 to 4",
         _ => return None,
@@ -407,6 +414,7 @@ pub const SEARCH: &[Entry] = &[
     row("Segments", "Presence", "The presence sensor's mark", &["sensor", "proximity"]).keys(&["bar.presence"]),
     row("Segments", "Backup", "The nightly backup's glyph", &["restic", "borg", "backup status"]).keys(&["bar.backup"]),
     row("Segments", "T3 Code", "Start or stop the T3 Code server from the bar", &["t3", "agents", "server", "service"]).keys(&["bar.t3code"]),
+    row("Segments", "System update", "A waiting NixOS update on the bar; a click switches to it", &["nixos", "nx", "upgrade", "update", "rebuild", "switch", "download"]).keys(&["bar.nx_update"]),
     row("Segments", "Light or dark", "Switch the mode from the bar", &["dark mode", "light mode", "theme", "mode toggle", "night mode", "auto"]).keys(&["bar.look_mode"]),
     row("Segments", "Task board", "Tasks 1–4 on the bar", &["tasks", "todo", "board"]).keys(&["bar.board"]),
     row("Volume & brightness", "Shown as", "Where a volume or brightness key shows", &["osd", "on screen display", "popup", "volume popup", "overlay"]).keys(&["bar.osd_in_bar"]),
@@ -455,6 +463,7 @@ mod tests {
                 "look_mode",
                 "media",
                 "messages",
+                "nx_update",
                 "presence",
                 "t3code",
                 "tray"

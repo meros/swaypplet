@@ -377,6 +377,11 @@ pub struct Bar {
     /// mark (`bar/t3code.rs`). Hidden on a host that has no such unit.
     #[serde(default = "yes")]
     pub t3code: bool,
+    /// A pre-built NixOS update waiting, building or failed, as a glyph
+    /// beside the T3 Code mark; a click switches to it (`bar/nx_update.rs`).
+    /// Hidden while nothing is waiting.
+    #[serde(default = "yes")]
+    pub nx_update: bool,
     /// The Look mode's glyph beside the clock: Auto, Dark or Light, and a
     /// click moves to the next (`bar/look_mode.rs`).
     #[serde(default = "yes")]
@@ -401,6 +406,7 @@ impl Default for Bar {
             presence: true,
             backup: true,
             t3code: true,
+            nx_update: true,
             look_mode: true,
         }
     }

@@ -42,6 +42,7 @@
     "presence": true,
     "backup": true,
     "t3code": true,
+    "nx_update": true,
     "look_mode": true
   },
   "pins": {
