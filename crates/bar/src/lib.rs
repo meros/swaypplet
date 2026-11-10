@@ -21,6 +21,7 @@ mod look_mode;
 mod media;
 mod messages;
 mod name_editor;
+mod nx_update;
 mod peek;
 mod pins;
 mod popover;
@@ -70,6 +71,12 @@ pub struct BarManager {
     /// reads the same snapshot.
     mpris: Rc<swaypplet_system::mpris::MprisService>,
     tray: Rc<swaypplet_system::tray::TrayService>,
+    /// One watcher on `/run/nx` per bar process; every output's update
+    /// segment reads the same snapshot.
+    prebuilt: Rc<swaypplet_system::nx_prebuilt::PrebuiltService>,
+    /// Where the update segment says a refused switch. `None` in the
+    /// standalone bar, which has no notification daemon: it only logs.
+    notifications: Option<swaypplet_notifyd::store::StoreRef>,
     /// What the Messages cluster shows, one model for every output's bar: a
     /// per-window subscription would count each notification once per screen.
     messages: Rc<messages::Messages>,
@@ -104,6 +111,8 @@ impl BarManager {
             backup: swaypplet_system::backup::BackupStatusService::start(),
             mpris: swaypplet_system::mpris::MprisService::start(),
             tray,
+            prebuilt: swaypplet_system::nx_prebuilt::PrebuiltService::start(),
+            notifications,
             messages,
             toggle_panel,
             open_displays,
@@ -145,6 +154,8 @@ fn build_bar_window(bar: &BarManager, monitor: &gdk::Monitor) -> (Surface, decis
         backup,
         mpris,
         tray,
+        prebuilt,
+        notifications,
         messages,
         toggle_panel,
         open_displays,
@@ -251,6 +262,8 @@ fn build_bar_window(bar: &BarManager, monitor: &gdk::Monitor) -> (Surface, decis
     if let Some(presence) = presence::build() {
         track.append(&follow_setting(presence, |bar| bar.presence));
     }
+    // Follows its switch itself: it also hides while no update is waiting.
+    track.append(&nx_update::build(prebuilt, notifications.clone()));
     // Follows its switch itself: it also hides on a host without the unit.
     track.append(&t3code::build());
     track.append(&follow_setting(backup::build(backup), |bar| bar.backup));
