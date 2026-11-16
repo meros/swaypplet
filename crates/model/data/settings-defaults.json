@@ -41,7 +41,7 @@
     "battery": true,
     "presence": true,
     "backup": true,
-    "t3code": true,
+    "fyr": true,
     "nx_update": true,
     "look_mode": true
   },

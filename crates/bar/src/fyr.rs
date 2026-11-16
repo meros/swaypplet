@@ -1,9 +1,9 @@
-//! T3 Code segment: the host's `t3code.service` as one glyph on the
-//! instrument track. A click starts the server when it is down and stops it
-//! when it is up.
+//! Fyr segment: the host's `fyr.service` (the fyrd agent daemon) as one
+//! glyph on the instrument track. A click starts the daemon when it is down
+//! and stops it when it is up. A stop ends every running agent turn.
 //!
 //! The unit is the host's (the system manager), so starting and stopping it
-//! needs the polkit grant in `modules/nixos/services/t3code.nix` (nixos
+//! needs the polkit grant in `hosts/nixos/meros-laptop/default.nix` (nixos
 //! repo). A host that has no such unit shows nothing: the segment is hidden
 //! while systemd answers `LoadState=not-found`, which is the answer on every
 //! machine that does not run the server.
@@ -26,7 +26,7 @@ use swaypplet_model::store;
 use swaypplet_system::systemd::{Unit, Verb};
 use swaypplet_ui::ui;
 
-const UNIT: &str = "t3code.service";
+const UNIT: &str = "fyr.service";
 const POLL_SECONDS: u32 = 10;
 
 // Nerd Font: md-server / md-server-off.
@@ -90,10 +90,10 @@ impl State {
 
     fn tooltip(&self) -> &'static str {
         match self {
-            State::Up => "T3 Code server runs. Click to stop it.",
-            State::Down => "T3 Code server is stopped. Click to start it.",
-            State::Failed => "T3 Code server failed. Click to start it again.",
-            State::Unknown => "T3 Code server: systemctl did not answer.",
+            State::Up => "Fyr runs. Click to stop it and every agent turn.",
+            State::Down => "Fyr is stopped. Click to start it.",
+            State::Failed => "Fyr failed. Click to start it again.",
+            State::Unknown => "Fyr: systemctl did not answer.",
             State::Absent => "",
         }
     }
@@ -101,14 +101,14 @@ impl State {
 
 /// The Bar tab's switch for this segment.
 fn wanted() -> bool {
-    store::with(|s| s.bar().t3code)
+    store::with(|s| s.bar().fyr)
 }
 
 fn read() -> State {
     match Unit::system(UNIT).show(&["LoadState", "ActiveState"]) {
         Ok(p) => State::read(p.get("LoadState"), p.get("ActiveState")),
         Err(e) => {
-            log::warn!("t3code: {e}");
+            log::warn!("fyr: {e}");
             State::Unknown
         }
     }

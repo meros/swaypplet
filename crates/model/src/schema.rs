@@ -373,12 +373,13 @@ pub struct Bar {
     /// The nightly backup's one-glyph verdict, beside the clock.
     #[serde(default = "yes")]
     pub backup: bool,
-    /// The host's T3 Code server as a start/stop glyph beside the backup
-    /// mark (`bar/t3code.rs`). Hidden on a host that has no such unit.
-    #[serde(default = "yes")]
-    pub t3code: bool,
+    /// The host's Fyr daemon (`fyr.service`) as a start/stop glyph beside
+    /// the backup mark (`bar/fyr.rs`). Hidden on a host that has no such
+    /// unit. `t3code` is the key the T3 Code mark had before it.
+    #[serde(default = "yes", alias = "t3code")]
+    pub fyr: bool,
     /// A pre-built NixOS update waiting, building or failed, as a glyph
-    /// beside the T3 Code mark; a click switches to it (`bar/nx_update.rs`).
+    /// beside the Fyr mark; a click switches to it (`bar/nx_update.rs`).
     /// Hidden while nothing is waiting.
     #[serde(default = "yes")]
     pub nx_update: bool,
@@ -405,7 +406,7 @@ impl Default for Bar {
             battery: true,
             presence: true,
             backup: true,
-            t3code: true,
+            fyr: true,
             nx_update: true,
             look_mode: true,
         }

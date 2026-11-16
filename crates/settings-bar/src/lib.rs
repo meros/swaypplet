@@ -79,10 +79,10 @@ const SEGMENTS: [Segment; 10] = [
         set: |b, v| b.backup = v,
     },
     Segment {
-        label: "T3 Code",
-        hint: "One mark for the T3 Code server on this machine. A click starts or stops it. A machine without the server shows nothing here anyway.",
-        get: |b| b.t3code,
-        set: |b, v| b.t3code = v,
+        label: "Fyr",
+        hint: "One mark for the Fyr daemon on this machine. A click starts or stops it; a stop ends every running agent turn. A machine without Fyr shows nothing here anyway.",
+        get: |b| b.fyr,
+        set: |b, v| b.fyr = v,
     },
     Segment {
         label: "System update",
@@ -150,7 +150,7 @@ fn subtitle_for(label: &str) -> Option<&'static str> {
         "Media mark" => "What is playing",
         "Presence" => "Whether the sensor sees you",
         "Backup" => "Whether last night's backup ran",
-        "T3 Code" => "Start or stop the server",
+        "Fyr" => "Start or stop the agent daemon",
         "System update" => "Switch to a pre-built update",
         "Light or dark" => "Switch the mode from the bar",
         "Task board" => "Tasks 1 to 4",
@@ -413,7 +413,7 @@ pub const SEARCH: &[Entry] = &[
     row("Segments", "Battery", "The battery segment of the bar", &["power", "charge", "percentage"]).keys(&["bar.battery"]),
     row("Segments", "Presence", "The presence sensor's mark", &["sensor", "proximity"]).keys(&["bar.presence"]),
     row("Segments", "Backup", "The nightly backup's glyph", &["restic", "borg", "backup status"]).keys(&["bar.backup"]),
-    row("Segments", "T3 Code", "Start or stop the T3 Code server from the bar", &["t3", "agents", "server", "service"]).keys(&["bar.t3code"]),
+    row("Segments", "Fyr", "Start or stop the Fyr agent daemon from the bar", &["fyrd", "agents", "server", "service", "t3"]).keys(&["bar.fyr"]),
     row("Segments", "System update", "A waiting NixOS update on the bar; a click switches to it", &["nixos", "nx", "upgrade", "update", "rebuild", "switch", "download"]).keys(&["bar.nx_update"]),
     row("Segments", "Light or dark", "Switch the mode from the bar", &["dark mode", "light mode", "theme", "mode toggle", "night mode", "auto"]).keys(&["bar.look_mode"]),
     row("Segments", "Task board", "Tasks 1–4 on the bar", &["tasks", "todo", "board"]).keys(&["bar.board"]),
@@ -460,12 +460,12 @@ mod tests {
                 "backup",
                 "battery",
                 "board",
+                "fyr",
                 "look_mode",
                 "media",
                 "messages",
                 "nx_update",
                 "presence",
-                "t3code",
                 "tray"
             ]
         );

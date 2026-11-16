@@ -27,7 +27,7 @@ mod pins;
 mod popover;
 mod presence;
 mod start;
-mod t3code;
+mod fyr;
 mod tray;
 mod workspaces;
 
@@ -265,7 +265,7 @@ fn build_bar_window(bar: &BarManager, monitor: &gdk::Monitor) -> (Surface, decis
     // Follows its switch itself: it also hides while no update is waiting.
     track.append(&nx_update::build(prebuilt, notifications.clone()));
     // Follows its switch itself: it also hides on a host without the unit.
-    track.append(&t3code::build());
+    track.append(&fyr::build());
     track.append(&follow_setting(backup::build(backup), |bar| bar.backup));
     track.append(&follow_setting(look_mode::build(), |bar| bar.look_mode));
     track.append(&clock::build());
