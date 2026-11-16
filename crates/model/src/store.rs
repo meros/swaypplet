@@ -143,9 +143,16 @@ impl Settings {
 pub fn system() -> &'static Settings {
     static SYSTEM: OnceLock<Settings> = OnceLock::new();
     SYSTEM.get_or_init(|| {
-        let path = std::env::var("SWAYPPLET_SETTINGS_CONFIG")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(SYSTEM_CONFIG));
+        // This crate's tests read no system file: the host's
+        // /etc/swaypplet/settings.json is whatever the last switch wrote, and
+        // a default changed here before that switch would fail the tests
+        // that compare against the defaults, which blocks the push that the
+        // switch waits for.
+        let path = match std::env::var("SWAYPPLET_SETTINGS_CONFIG") {
+            Ok(p) => PathBuf::from(p),
+            Err(_) if cfg!(test) => return Settings::default(),
+            Err(_) => PathBuf::from(SYSTEM_CONFIG),
+        };
         read(&path, Layer::System)
     })
 }
