@@ -8,7 +8,9 @@
 //! last unpin is its stand-down).
 //!
 //! A click opens the read-layer popover (`popover.rs`): every pin, live,
-//! with a button to go there and one to unpin, and a tuck that takes the
+//! with a button to go there, one to move it to a place of its own
+//! (`jump/spot.rs`), one to let a moved pin follow focus again, one to
+//! unpin, and a tuck that takes the
 //! floating pins away without unpinning anything. Everything is a button,
 //! so nothing needs a pointer to dwell (P8). The pictures stream only while
 //! the popover is open.
@@ -190,26 +192,50 @@ fn rows(ui: &Rc<Ui>, scenes: &[(String, Option<swaypplet_jump::jump::scene::Scen
             ui::Kind::Secondary,
             ui::Size::Small,
         );
+        let shift = ui::button_with(
+            ui::Face::Label("Move"),
+            ui::Kind::Secondary,
+            ui::Size::Small,
+        );
+        let fixed = pin::handle().is_some_and(|p| p.is_fixed(name));
+        let follow = fixed.then(|| {
+            ui::button_with(
+                ui::Face::Label("Follow focus"),
+                ui::Kind::Secondary,
+                ui::Size::Small,
+            )
+        });
         let unpin = ui::button_with(
             ui::Face::Label("Unpin"),
             ui::Kind::Secondary,
             ui::Size::Small,
         );
-        for (b, action) in [(&go, "go"), (&unpin, "unpin")] {
+        let mut actions = vec![(&go, "go"), (&shift, "move")];
+        if let Some(follow) = &follow {
+            actions.push((follow, "follow"));
+        }
+        actions.push((&unpin, "unpin"));
+        for (b, action) in actions {
             let name = name.clone();
             let pop = ui.pop.clone();
             b.connect_clicked(move |_| {
                 let Some(pins) = pin::handle() else { return };
-                if action == "go" {
-                    pop.popdown();
-                    pins.go(&name);
-                } else {
-                    pins.unpin(&name);
+                match action {
+                    "go" => {
+                        pop.popdown();
+                        pins.go(&name);
+                    }
+                    // The sheet covers every screen: the popover goes first.
+                    "move" => {
+                        pop.popdown();
+                        pins.move_pin(&name);
+                    }
+                    "follow" => pins.follow_focus(&name),
+                    _ => pins.unpin(&name),
                 }
             });
+            side.append(b);
         }
-        side.append(&go);
-        side.append(&unpin);
         row.append(&side);
         ui.body.append(&row);
     }

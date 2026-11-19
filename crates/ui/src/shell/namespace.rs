@@ -26,6 +26,10 @@ pub enum Namespace {
     Notification,
     /// A pinned workspace or region, `jump/pin.rs`.
     Pin,
+    /// The sheet a pin is moved on, one per output (`jump/spot.rs`).
+    /// Deliberately without glass, like the region selector's: it dims the
+    /// screen and must not frost it.
+    PinSpot,
     /// Screenshot → window: the grid of live windows.
     WindowPicker,
     /// The polkit / sudo card.
@@ -63,13 +67,14 @@ pub enum Namespace {
 }
 
 impl Namespace {
-    pub const ALL: [Namespace; 19] = [
+    pub const ALL: [Namespace; 20] = [
         Namespace::Panel,
         Namespace::Bar,
         Namespace::Launcher,
         Namespace::Osd,
         Namespace::Notification,
         Namespace::Pin,
+        Namespace::PinSpot,
         Namespace::WindowPicker,
         Namespace::Polkit,
         Namespace::Report,
@@ -94,6 +99,7 @@ impl Namespace {
             Namespace::Osd => "swaypplet-osd",
             Namespace::Notification => "swaypplet-notification",
             Namespace::Pin => "swaypplet-pin",
+            Namespace::PinSpot => "swaypplet-pin-spot",
             Namespace::WindowPicker => "swaypplet-window-picker",
             Namespace::Polkit => "swaypplet-polkit",
             Namespace::Report => "swaypplet-report",
@@ -141,6 +147,7 @@ impl Namespace {
             | Namespace::Keybinds => Some("panel"),
             Namespace::SessionLock => Some("lock"),
             Namespace::Jump
+            | Namespace::PinSpot
             | Namespace::Screenshot
             | Namespace::Greeter
             | Namespace::LockWarm

@@ -38,6 +38,7 @@ pub mod place;
 pub mod row;
 pub mod rows;
 pub mod scene;
+pub mod spot;
 pub mod view;
 
 use std::cell::RefCell;

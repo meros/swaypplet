@@ -21,6 +21,13 @@
 //! when you move. A layer surface belongs to one output, so moving is
 //! rebuilding the surface there.
 //!
+//! A pin can be moved, too (the move button on its footer, or Move in the
+//! bar's popover): a sheet on every screen shows where it will stand, and a
+//! click there fixes it (`spot.rs`). A fixed pin stays on that screen, at
+//! that place, whatever has the focus, and the others stack without it.
+//! "Follow focus" lets it go back to following. A fixed pin whose screen is
+//! unplugged follows focus until the screen comes back.
+//!
 //! Which corner, how big, and how many frames a second is the Pins &
 //! previews setting, on the settings' Bar tab. It applies live, down the
 //! same rebuild ([`Pins::follow_setting`]).
@@ -39,6 +46,7 @@ use gtk4_layer_shell::{Edge, LayerShell as _};
 
 use super::live;
 use super::scene::{self, Scene};
+use super::spot::{self, Spot};
 use super::view::{self, PIN_GLYPH, UNPIN_GLYPH, View};
 use swaypplet_base::sway::ipc::SwayService;
 use swaypplet_model::{store, store::Corner};
@@ -51,6 +59,8 @@ const MARGIN_BOTTOM: i32 = 2 * swaypplet_tokens::space(7);
 /// From the top edge. Nothing of the shell's is up there, so the same gap as
 /// from the side.
 const MARGIN_TOP: i32 = MARGIN_SIDE;
+/// The pin's move button: arrows four ways.
+const MOVE_GLYPH: &str = "\u{f01be}";
 /// Between stacked pins.
 const GAP: i32 = swaypplet_tokens::space(4);
 /// How long a new pin shows itself before its workspace's own screen hides
@@ -80,6 +90,26 @@ struct Placement {
     /// The slide, signed the way `anim::SlideBin` takes it: positive is
     /// toward the right edge.
     slide: f64,
+    /// The surface's own margin from `side`. The card keeps [`MARGIN_SIDE`]
+    /// inside it besides (see `build_window`).
+    side_margin: i32,
+    /// Measured from the screen's edges, over the bar's reserved strip: a
+    /// fixed pin stands where its sheet showed it, and the sheet covers the
+    /// whole screen.
+    over_bar: bool,
+}
+
+/// Where a pin stands: fixed at its spot, or in the setting's corner.
+fn placement_for(corner: Corner, fixed: Option<&Spot>) -> Placement {
+    match fixed {
+        None => placement(corner),
+        Some(spot) => Placement {
+            margin: spot.y,
+            side_margin: (spot.x - MARGIN_SIDE).max(0),
+            over_bar: true,
+            ..placement(spot.corner)
+        },
+    }
 }
 
 fn placement(corner: Corner) -> Placement {
@@ -98,6 +128,8 @@ fn placement(corner: Corner) -> Placement {
         margin,
         side,
         slide,
+        side_margin: 0,
+        over_bar: false,
     }
 }
 
@@ -193,6 +225,9 @@ struct Pin {
     introduce_until: Option<Instant>,
     /// The output its surface is on.
     output: Option<String>,
+    /// Where it was put by hand, if it was: then it stays there rather than
+    /// following focus (`spot.rs`).
+    fixed: Option<Spot>,
 }
 
 impl Drop for Pin {
@@ -442,8 +477,8 @@ impl Pins {
         };
         let monitor = output.as_deref().and_then(layer::monitor_by_connector);
         let label = swaypplet_base::sway::workspace::label_for_name(&workspace);
-        let corner = self.inner.borrow().setting.corner;
-        let parts = build_window(&app, monitor.as_ref(), &label, corner);
+        let at = placement(self.inner.borrow().setting.corner);
+        let parts = build_window(&app, monitor.as_ref(), &label, &at);
 
         self.wire(&parts, &workspace);
 
@@ -456,6 +491,7 @@ impl Pins {
             view: parts.view,
             introduce_until: Some(Instant::now() + INTRODUCE),
             output: output.clone(),
+            fixed: None,
         });
         // A new pin is meant to be seen, and only the new one: see introduce.
         self.introduce();
@@ -477,8 +513,8 @@ impl Pins {
         };
         let monitor = output.as_deref().and_then(layer::monitor_by_connector);
         let label = region_label(&region.window.app, &region.workspace);
-        let corner = self.inner.borrow().setting.corner;
-        let parts = build_window(&app, monitor.as_ref(), &label, corner);
+        let at = placement(self.inner.borrow().setting.corner);
+        let parts = build_window(&app, monitor.as_ref(), &label, &at);
         self.wire(&parts, &key);
         self.inner.borrow_mut().pins.push(Pin {
             key,
@@ -493,6 +529,7 @@ impl Pins {
             view: parts.view,
             introduce_until: Some(Instant::now() + INTRODUCE),
             output,
+            fixed: None,
         });
         self.introduce();
         self.announce(PIN_GLYPH, "PINNED", &label);
@@ -563,6 +600,9 @@ impl Pins {
     /// A click on the picture goes there; right or middle click, or the ×,
     /// unpins.
     fn wire(&self, parts: &Parts, workspace: &str) {
+        let shift = parts
+            .view
+            .action(MOVE_GLYPH, "Move this pin to a place of its own");
         let close = parts.view.action("\u{00d7}", "Unpin");
         let workspace = workspace.to_string();
         let click = gtk4::GestureClick::new();
@@ -580,8 +620,74 @@ impl Pins {
         {
             let this = self.clone();
             let workspace = workspace.clone();
+            shift.connect_clicked(move |_| this.move_pin(&workspace));
+        }
+        {
+            let this = self.clone();
+            let workspace = workspace.clone();
             close.connect_clicked(move |_| this.unpin(&workspace));
         }
+    }
+
+    /// Whether the pin `key` was put somewhere by hand.
+    pub fn is_fixed(&self, key: &str) -> bool {
+        self.inner
+            .borrow()
+            .pins
+            .iter()
+            .any(|p| p.key == key && p.fixed.is_some())
+    }
+
+    /// Open the sheet that moves pin `key` (`spot.rs`), and fix it where
+    /// the click lands, or let it follow focus again.
+    pub fn move_pin(&self, key: &str) {
+        let (app, label, size, fixed) = {
+            let inner = self.inner.borrow();
+            let Some(app) = inner.app.clone() else { return };
+            let Some(pin) = inner.pins.iter().find(|p| p.key == key) else {
+                return;
+            };
+            (
+                app,
+                pin.label.clone(),
+                card_size(pin, inner.setting.size.picture()),
+                pin.fixed.is_some(),
+            )
+        };
+        let this = self.clone();
+        let key = key.to_string();
+        spot::choose(&app, &label, size, fixed, move |choice| match choice {
+            spot::Choice::Here(spot) => this.set_fixed(&key, Some(spot)),
+            spot::Choice::Follow => this.set_fixed(&key, None),
+            spot::Choice::Cancel => {}
+        });
+    }
+
+    /// Let pin `key` follow focus again.
+    pub fn follow_focus(&self, key: &str) {
+        self.set_fixed(key, None);
+    }
+
+    /// Fix pin `key` at `spot`, or with `None` let it follow focus; rebuild
+    /// its surface where that puts it.
+    fn set_fixed(&self, key: &str, spot: Option<Spot>) {
+        let Some(i) = self.inner.borrow().pins.iter().position(|p| p.key == key) else {
+            return;
+        };
+        let output = match &spot {
+            Some(spot) => Some(spot.output.clone()),
+            None => {
+                let sway = self.inner.borrow().sway.clone();
+                self.placed(swaypplet_base::sway::ipc::focused_output_from(
+                    sway.as_deref(),
+                ))
+            }
+        };
+        self.inner.borrow_mut().pins[i].fixed = spot;
+        self.rebuild(i, output);
+        self.stack();
+        notify();
+        self.refresh();
     }
 
     /// Move every pin to `output`, the one with focus: rebuild its surface
@@ -591,20 +697,23 @@ impl Pins {
         let Some(output) = output.as_deref() else {
             return;
         };
-        let moving: Vec<usize> = self
+        let connected = layer::connectors();
+        let moving: Vec<(usize, String)> = self
             .inner
             .borrow()
             .pins
             .iter()
             .enumerate()
-            .filter(|(_, p)| p.output.as_deref() != Some(output))
-            .map(|(i, _)| i)
+            .filter_map(|(i, p)| {
+                let target = home(p.fixed.as_ref(), &connected).unwrap_or(output);
+                (p.output.as_deref() != Some(target)).then(|| (i, target.to_string()))
+            })
             .collect();
         if moving.is_empty() {
             return;
         }
-        for i in moving {
-            self.rebuild(i, Some(output.to_string()));
+        for (i, target) in moving {
+            self.rebuild(i, Some(target));
         }
         self.stack();
     }
@@ -617,16 +726,16 @@ impl Pins {
         let Some(app) = self.inner.borrow().app.clone() else {
             return;
         };
-        let (key, label, corner) = {
+        let (key, label, at) = {
             let inner = self.inner.borrow();
             (
                 inner.pins[i].key.clone(),
                 inner.pins[i].label.clone(),
-                inner.setting.corner,
+                placement_for(inner.setting.corner, inner.pins[i].fixed.as_ref()),
             )
         };
         let monitor = output.as_deref().and_then(layer::monitor_by_connector);
-        let parts = build_window(&app, monitor.as_ref(), &label, corner);
+        let parts = build_window(&app, monitor.as_ref(), &label, &at);
         self.wire(&parts, &key);
         let mut inner = self.inner.borrow_mut();
         let pin = &mut inner.pins[i];
@@ -637,15 +746,23 @@ impl Pins {
         pin.output = output;
     }
 
-    /// Stack the pins away from their corner, oldest nearest it.
+    /// Stack the pins away from their corner, oldest nearest it. A fixed
+    /// pin keeps its own place and takes no room in the stack.
     fn stack(&self) {
         let inner = self.inner.borrow();
         let at = placement(inner.setting.corner);
         let step = pin_step(inner.setting.size.picture().1);
-        for (i, pin) in inner.pins.iter().enumerate() {
+        let mut n = 0;
+        for pin in &inner.pins {
+            if let Some(spot) = &pin.fixed {
+                let own = placement_for(inner.setting.corner, Some(spot));
+                pin.surface.window().set_margin(own.stack, own.margin);
+                continue;
+            }
             pin.surface
                 .window()
-                .set_margin(at.stack, at.margin + i as i32 * step);
+                .set_margin(at.stack, at.margin + n * step);
+            n += 1;
         }
     }
 
@@ -794,6 +911,27 @@ impl Reads {
     }
 }
 
+/// The screen a fixed pin stays on, while it is connected.
+fn home<'a>(fixed: Option<&'a Spot>, connected: &[String]) -> Option<&'a str> {
+    fixed
+        .map(|s| s.output.as_str())
+        .filter(|o| connected.iter().any(|c| c == o))
+}
+
+/// The pin's card size, for the move sheet's outline: as drawn when it is
+/// on screen, else what the picture box makes it.
+fn card_size(pin: &Pin, picture: (i32, i32)) -> (i32, i32) {
+    let card = pin.surface.card();
+    let (w, h) = (card.width(), card.height());
+    if w > 0 && h > 0 {
+        return (w, h);
+    }
+    (
+        picture.0 + 2 * swaypplet_tokens::space(3),
+        pin_step(picture.1) - GAP,
+    )
+}
+
 /// What a refresh found for a pin.
 #[derive(Clone)]
 enum Found {
@@ -860,10 +998,9 @@ fn build_window(
     app: &gtk4::Application,
     monitor: Option<&gdk::Monitor>,
     label: &str,
-    corner: Corner,
+    at: &Placement,
 ) -> Parts {
-    let at = placement(corner);
-    let surface = Surface::builder(app, Namespace::Pin)
+    let builder = Surface::builder(app, Namespace::Pin)
         .monitor(monitor)
         // Top, not Overlay: a fullscreen window covers a pin, the way it
         // covers the bar.
@@ -877,11 +1014,17 @@ fn build_window(
         // notifications' does); a surface that ended at the card clipped it
         // instead, and its glass stood still.
         .margin(at.stack, at.margin)
+        .margin(at.side, at.side_margin)
         .card(swaypplet_ui::ui::Card::Floating)
         // Slides in from the side's edge and fades up, and leaves the same
         // way (anim::Reveal, the shell's one entrance).
-        .slide(gtk4::Orientation::Horizontal, at.slide)
-        .build();
+        .slide(gtk4::Orientation::Horizontal, at.slide);
+    let surface = if at.over_bar {
+        builder.over_exclusive_zones()
+    } else {
+        builder
+    }
+    .build();
     let frame = surface.card();
     frame.add_css_class("jump-pin");
     if let Some(slide) = surface.slide() {
@@ -927,6 +1070,27 @@ mod tests {
             } else {
                 assert!(at.side == Edge::Right && at.slide == SLIDE_PX);
             }
+        }
+    }
+
+    #[test]
+    fn a_fixed_pin_stands_at_its_spot_whatever_the_setting_says() {
+        let spot = super::Spot {
+            output: "DP-1".into(),
+            corner: Corner::BottomLeft,
+            x: 80,
+            y: 60,
+        };
+        for corner in Corner::ALL {
+            let at = super::placement_for(corner, Some(&spot));
+            assert!(at.stack == Edge::Bottom && at.margin == 60);
+            assert!(at.side == Edge::Left && at.slide == -SLIDE_PX);
+            // The card keeps its own side gap inside the surface.
+            assert_eq!(at.side_margin + super::MARGIN_SIDE, 80);
+            assert!(at.over_bar);
+            // Not fixed: the setting's corner, from the bar's edge as before.
+            let free = super::placement_for(corner, None);
+            assert!(free.side_margin == 0 && !free.over_bar);
         }
     }
 
