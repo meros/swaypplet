@@ -583,6 +583,21 @@ fn event(s: &mut State, ev: Ev, w: &impl World, out: &mut Vec<Effect>) {
             log::error!("idle: fatal: {msg}");
             out.push(Effect::Exit);
         }
+        // A cable is a visible event: the user is at the machine, or just
+        // came to it. While locked, light the outputs and count the blank
+        // again from now (`Resumed(LockIdle)` only fires on input, so
+        // nothing else would re-arm it). The lock itself is untouched.
+        Ev::PowerSource => {
+            s.battery = w.on_battery();
+            if s.locker_confirmed && s.session_active {
+                log::info!(
+                    "lock.blank: power source changed ({}) — lighting outputs",
+                    if s.battery { "battery" } else { "AC" }
+                );
+                out.push(Effect::Power("power-source", Power::On));
+                s.blank_at = blank_deadline(&s.cfg, s.battery, w.now());
+            }
+        }
         // Handled at the top of the next pass, with the clock.
         Ev::SettingsChanged => s.settings_changed = true,
         // The presence queue is drained at the top of the next pass.

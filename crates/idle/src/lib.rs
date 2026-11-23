@@ -141,6 +141,9 @@ pub enum Ev {
     Fatal(String),
     /// The settings file was written (`swaypplet_base::watch`, inotify).
     SettingsChanged,
+    /// The charger was plugged in or pulled (`/sys/class/power_supply`
+    /// sampled by a thread; nothing here is pushed by the kernel).
+    PowerSource,
 }
 
 /// The instant the next minute of the day starts, when the night window may
@@ -191,6 +194,29 @@ pub fn run() -> ! {
         swaypplet_base::watch::files_on_thread(vec![store::path()], move || {
             let _ = tx.send(Ev::SettingsChanged);
         });
+    }
+    {
+        // Plugging in is not input, so nothing else lights a blanked lock
+        // screen when the cable goes in. Sampled, not watched: sysfs raises
+        // no inotify event for a supply, and 2 s is well inside "the
+        // charger clicked in and the screen came up".
+        let tx = tx.clone();
+        std::thread::Builder::new()
+            .name("power-source".into())
+            .spawn(move || {
+                let mut last = on_ac();
+                loop {
+                    std::thread::sleep(Duration::from_secs(2));
+                    let now = on_ac();
+                    if now != last {
+                        last = now;
+                        if tx.send(Ev::PowerSource).is_err() {
+                            return;
+                        }
+                    }
+                }
+            })
+            .expect("spawn power-source");
     }
     let timeouts = wayland::start(tx.clone(), wayland::Timeouts::from(&cfg));
     let logind = logind::start(tx.clone());
